@@ -1,0 +1,37 @@
+[
+  {
+    "id": "36c0710a-6185-4e3b-9317-c1d53df2bbe1",
+    "projectId": "26364d26-442b-4b0a-a32a-6808dd4a2076",
+    "name": "Test",
+    "type": "area",
+    "unit": "SF",
+    "wasteFactor": 0,
+    "color": "#ff6b6b",
+    "description": "",
+    "createdAt": "2025-09-03T17:56:43.554Z"
+  },
+  {
+    "id": "4c77962d-949f-4780-b1c7-d904e7859c5f",
+    "projectId": "26364d26-442b-4b0a-a32a-6808dd4a2076",
+    "name": "Test",
+    "type": "linear",
+    "unit": "LF",
+    "wasteFactor": 0,
+    "color": "#ff6b6b",
+    "description": "",
+    "createdAt": "2025-09-03T19:35:06.478Z"
+  },
+  {
+    "id": "9ed97cc4-426e-4d45-b00a-de9161f2ef71",
+    "projectId": "26364d26-442b-4b0a-a32a-6808dd4a2076",
+    "name": "test elevator",
+    "type": "area",
+    "unit": "SF",
+    "wasteFactor": 2.9,
+    "color": "#ff40ff",
+    "description": "",
+    "laborCost": 40,
+    "materialCost": 20,
+    "createdAt": "2025-09-08T15:00:19.234Z"
+  }
+]
