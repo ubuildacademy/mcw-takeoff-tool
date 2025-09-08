@@ -1,0 +1,428 @@
+import { useEffect, useState } from 'react';
+
+import { useParams, useNavigate } from 'react-router-dom';
+import CanvasPDFViewer from './CanvasPDFViewer';
+import { TakeoffSidebar } from './TakeoffSidebar';
+import { SheetSidebar } from './SheetSidebar';
+
+import { useTakeoffStore } from '../store/useTakeoffStore';
+import { Button } from "./ui/button";
+import { Badge } from "./ui/badge";
+import { Separator } from "./ui/separator";
+import { 
+  ArrowLeft, 
+  Save, 
+  Download, 
+  Settings, 
+  FileText, 
+  Calculator,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+  Upload
+} from "lucide-react";
+import { fileService } from '../services/apiService';
+
+interface TakeoffCondition {
+  id: string;
+  name: string;
+  type: 'area' | 'volume' | 'linear' | 'count';
+  unit: string;
+  wasteFactor: number;
+  color: string;
+  description: string;
+}
+
+interface Sheet {
+  id: string;
+  name: string;
+  pageNumber: number;
+  thumbnail?: string;
+  isVisible: boolean;
+  hasTakeoffs: boolean;
+  takeoffCount: number;
+}
+
+interface Project {
+  id: string;
+  name: string;
+  client: string;
+  location: string;
+  status: string;
+  description?: string;
+  projectType?: string;
+  startDate?: string;
+  estimatedValue?: number;
+  contactPerson?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  createdAt: string;
+  lastModified: string;
+}
+
+interface ProjectFile {
+  id: string;
+  projectId: string;
+  originalName: string;
+  filename: string;
+  path: string;
+  size: number;
+  mimetype: string;
+  uploadedAt: string;
+}
+
+export function TakeoffWorkspace() {
+  const { jobId } = useParams<{ jobId: string }>();
+  const navigate = useNavigate();
+  
+  const [selectedSheet, setSelectedSheet] = useState<Sheet | null>(null);
+  
+  // Store integration
+  const { 
+    setCurrentProject, 
+    setSelectedCondition, 
+    getSelectedCondition,
+    getCurrentProject,
+    getProjectTakeoffSummary,
+    loadProjectConditions
+  } = useTakeoffStore();
+  
+  const selectedCondition = getSelectedCondition();
+
+  const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
+  const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
+  const [searchResults, setSearchResults] = useState<string[]>([]);
+  const [currentPdfFile, setCurrentPdfFile] = useState<ProjectFile | null>(null);
+  const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
+  const [uploading, setUploading] = useState<boolean>(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadFiles() {
+      if (!jobId) return;
+      try {
+        console.log('Loading files for project:', jobId);
+        const res = await fileService.getProjectFiles(jobId);
+        const files = res.files || [];
+        console.log('Files response:', res);
+        console.log('Files array:', files);
+        setProjectFiles(files);
+        
+        // Set the first PDF file as current if no current file is set
+        if (files.length > 0 && !currentPdfFile) {
+          const firstPdfFile = files.find((file: any) => file.mimetype === 'application/pdf');
+          if (firstPdfFile) {
+            console.log('Setting current PDF file:', firstPdfFile);
+            setCurrentPdfFile(firstPdfFile);
+          } else {
+            console.log('No PDF files found in project');
+          }
+        }
+        
+        console.log('Project files loaded:', files);
+        console.log('Current PDF file:', currentPdfFile);
+      } catch (e) {
+        console.error('Error loading project files:', e);
+      }
+    }
+    loadFiles();
+  }, [jobId]); // Removed currentPdfFile from dependencies to prevent infinite loop
+
+  // Set current project in store and load its conditions
+  useEffect(() => {
+    if (jobId) {
+      setCurrentProject(jobId);
+      // Load conditions for this project
+      loadProjectConditions(jobId);
+    }
+  }, [jobId, setCurrentProject, loadProjectConditions]);
+
+  const handleConditionSelect = (condition: TakeoffCondition | null) => {
+    if (condition === null) {
+      console.log('Condition deselected in workspace');
+      setSelectedCondition(null);
+      // Also clear in the store
+      useTakeoffStore.getState().setSelectedCondition(null);
+    } else {
+      console.log('Condition selected in workspace:', condition);
+      setSelectedCondition(condition.id);
+      // Also set in the store
+      useTakeoffStore.getState().setSelectedCondition(condition.id);
+    }
+  };
+
+  const handleToolSelect = (tool: string) => {
+    console.log('Tool selected:', tool);
+  };
+
+  const handleSheetSelect = (sheet: Sheet) => {
+    console.log('Sheet selected:', sheet);
+    setSelectedSheet(sheet);
+    
+    // Find the corresponding PDF file and set it as current
+    const selectedFile = projectFiles.find(file => file.id === sheet.id);
+    if (selectedFile) {
+      console.log('Setting current PDF file to:', selectedFile);
+      setCurrentPdfFile(selectedFile);
+    } else {
+      console.error('Could not find PDF file for sheet:', sheet);
+    }
+  };
+
+  const handleSearchInDocument = (query: string) => {
+    const mockResults = [
+      `Found "${query}" in note at coordinates (150, 200)`,
+      `Found "${query}" in dimension at coordinates (300, 350)`,
+      `Found "${query}" in title block at coordinates (600, 50)`
+    ];
+    setSearchResults(mockResults);
+  };
+
+  const handlePdfUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    console.log('=== FRONTEND FILE UPLOAD ===');
+    console.log('File selected:', file);
+    console.log('File name:', file?.name);
+    console.log('File type:', file?.type);
+    console.log('File size:', file?.size);
+    console.log('Job ID:', jobId);
+    
+    if (!file || !jobId) {
+      console.log('ERROR: Missing file or jobId');
+      return;
+    }
+    
+    try {
+      console.log('Starting upload...');
+      setUploading(true);
+      
+      const uploadRes = await fileService.uploadPDF(file, jobId);
+      console.log('Upload response:', uploadRes);
+      
+      // Refresh project files
+      console.log('Refreshing project files...');
+      const filesRes = await fileService.getProjectFiles(jobId);
+      console.log('Files response:', filesRes);
+      
+      const files = filesRes.files || [];
+      setProjectFiles(files);
+      
+      // Set the newly uploaded file as current
+      if (uploadRes.file) {
+        console.log('Setting current PDF file:', uploadRes.file);
+        setCurrentPdfFile(uploadRes.file);
+      }
+      
+      console.log('Upload completed successfully');
+      
+    } catch (error: any) {
+      console.error('Upload failed:', error);
+      console.error('Error details:', error.response?.data);
+      console.error('Error status:', error.response?.status);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleBackToProjects = () => {
+    navigate('/');
+  };
+
+  const storeCurrentProject = getCurrentProject();
+  const currentProject = storeCurrentProject || {
+    name: 'Tru Hilton', // Use actual project name instead of generic format
+    client: 'ABC', // Use actual client name
+    lastSaved: new Date().toLocaleString()
+  };
+
+  return (
+    <div className="h-screen flex flex-col bg-background">
+      {/* Top Navigation Bar */}
+      <div className="flex items-center justify-between p-4 border-b bg-muted/30">
+        {/* Left side - Navigation and Project Info */}
+        <div className="flex items-center gap-6">
+          <Button variant="ghost" onClick={handleBackToProjects} className="flex items-center gap-2">
+            <ArrowLeft className="w-4 h-4" />
+            Back to Projects
+          </Button>
+          
+          <Separator orientation="vertical" className="h-8" />
+          
+          <div className="flex items-center gap-4">
+            <div>
+              <h1 className="text-xl font-semibold text-gray-900">{currentProject.name}</h1>
+              <p className="text-sm text-gray-600">{currentProject.client}</p>
+            </div>
+            
+
+          </div>
+        </div>
+
+        {/* Right side - File Info and Actions */}
+        <div className="flex items-center gap-4">
+          {/* File Status */}
+          <div className="flex items-center gap-2 text-sm text-gray-600">
+            <FileText className="w-4 h-4" />
+            <span>Files: {projectFiles.length}</span>
+            <span>•</span>
+            <span>Last saved: {'lastSaved' in currentProject ? currentProject.lastSaved : 'Unknown'}</span>
+          </div>
+          
+          <Separator orientation="vertical" className="h-8" />
+          
+          {/* Action Buttons */}
+          <div className="flex items-center gap-2">
+            <label htmlFor="pdf-upload" className="cursor-pointer">
+              <Button variant="outline" size="sm" asChild>
+                <span className="flex items-center gap-2">
+                  <Upload className="w-4 h-4" />
+                  {uploading ? 'Uploading…' : 'Upload PDF'}
+                </span>
+              </Button>
+            </label>
+            
+            <input
+              type="file"
+              accept=".pdf,application/pdf"
+              onChange={handlePdfUpload}
+              className="hidden"
+              id="pdf-upload"
+            />
+            
+            <Button variant="outline" size="sm" className="flex items-center gap-2">
+              <Download className="w-4 h-4" />
+              Export
+            </Button>
+            
+            <Button size="sm" className="flex items-center gap-2">
+              <Save className="w-4 h-4" />
+              Save
+            </Button>
+            
+            <Button variant="ghost" size="sm">
+              <Settings className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content Area */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Left Sidebar Toggle */}
+        <div className="flex">
+          {leftSidebarOpen && (
+                        <TakeoffSidebar
+              projectId={jobId!}
+              onConditionSelect={handleConditionSelect}
+              onToolSelect={handleToolSelect}
+            />
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-full w-8 rounded-none border-r"
+            onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
+          >
+            {leftSidebarOpen ? 
+              <PanelLeftClose className="w-4 h-4" /> : 
+              <PanelLeftOpen className="w-4 h-4" />
+            }
+          </Button>
+        </div>
+
+        {/* PDF Viewer */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {currentPdfFile ? (
+            <CanvasPDFViewer 
+              file={currentPdfFile}
+              onCalibrationRequest={() => {
+                // This is now handled internally by the CanvasPDFViewer
+                console.log('Calibration is now handled internally');
+              }}
+              onMeasurementRequest={() => console.log('Measurement requested')}
+              className="w-full h-full"
+            />
+          ) : (
+            <div className="flex items-center justify-center h-full bg-gray-100">
+              <div className="text-gray-500">No PDF file selected</div>
+            </div>
+          )}
+          {searchResults.length > 0 && (
+            <div className="border-t bg-muted/30 p-3">
+              <h3 className="font-medium mb-2">Search Results ({searchResults.length})</h3>
+              <div className="space-y-1">
+                {searchResults.map((result, index) => (
+                  <div key={index} className="text-sm p-2 bg-background rounded border cursor-pointer hover:bg-accent">
+                    {result}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Right Sidebar Toggle */}
+        <div className="flex">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-full w-8 rounded-none border-l"
+            onClick={() => setRightSidebarOpen(!rightSidebarOpen)}
+          >
+            {rightSidebarOpen ? 
+              <PanelRightClose className="w-4 h-4" /> : 
+              <PanelRightOpen className="w-4 h-4" />
+            }
+          </Button>
+          {rightSidebarOpen && (
+            <div className="w-80 bg-white border-l flex flex-col">
+              <SheetSidebar 
+                projectId={jobId!}
+                onSheetSelect={handleSheetSelect}
+                selectedSheet={selectedSheet}
+              />
+
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Bottom Status Bar */}
+      <div className="flex items-center justify-between px-4 py-2 border-t bg-muted/30 text-sm">
+        <div className="flex items-center gap-4">
+          {selectedSheet && (
+            <>
+              <div className="flex items-center gap-2">
+                <FileText className="w-4 h-4" />
+                <span>{selectedSheet.name}</span>
+                <Badge variant="outline" className="text-xs">
+                  Page {selectedSheet.pageNumber}
+                </Badge>
+              </div>
+              <Separator orientation="vertical" className="h-4" />
+            </>
+          )}
+          <span>Project: {currentProject.name}</span>
+        </div>
+        
+        {/* Center - Minimal Status */}
+        <div className="flex-1 flex justify-center">
+          {selectedCondition ? (
+            <div className="text-center text-sm text-gray-600">
+              {selectedCondition.name} - {selectedCondition.type} takeoff
+            </div>
+          ) : (
+            <div className="text-center text-sm text-gray-600">
+              Select a condition to start drawing
+            </div>
+          )}
+        </div>
+        
+        <div className="flex items-center gap-4">
+          <span className="text-sm text-gray-600">{uploading ? 'Uploading…' : 'Ready'}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
