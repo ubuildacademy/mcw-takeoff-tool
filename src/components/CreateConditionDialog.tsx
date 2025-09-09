@@ -33,7 +33,8 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated }
     color: generateRandomColor(),
     description: '',
     laborCost: '',
-    materialCost: ''
+    materialCost: '',
+    includePerimeter: false
   });
   const [loading, setLoading] = useState(false);
 
@@ -54,6 +55,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated }
         description: formData.description,
         laborCost: formData.laborCost ? parseFloat(formData.laborCost) : undefined,
         materialCost: formData.materialCost ? parseFloat(formData.materialCost) : undefined,
+        includePerimeter: formData.includePerimeter,
       };
       
       // Use the store method which will save to both local store and backend
@@ -129,15 +131,58 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated }
 
             <div>
               <Label htmlFor="unit">Unit *</Label>
-              <Input
-                id="unit"
-                value={formData.unit}
-                onChange={(e) => handleInputChange('unit', e.target.value)}
-                placeholder={getDefaultUnit(formData.type)}
-                required
-              />
+              <Select value={formData.unit} onValueChange={(value) => handleInputChange('unit', value)}>
+                <SelectTrigger>
+                  <SelectValue placeholder={getDefaultUnit(formData.type)} />
+                </SelectTrigger>
+                <SelectContent>
+                  {formData.type === 'area' && (
+                    <>
+                      <SelectItem value="SF">SF (Square Feet)</SelectItem>
+                      <SelectItem value="SY">SY (Square Yards)</SelectItem>
+                      <SelectItem value="SM">SM (Square Meters)</SelectItem>
+                    </>
+                  )}
+                  {formData.type === 'linear' && (
+                    <>
+                      <SelectItem value="LF">LF (Linear Feet)</SelectItem>
+                      <SelectItem value="LY">LY (Linear Yards)</SelectItem>
+                      <SelectItem value="LM">LM (Linear Meters)</SelectItem>
+                    </>
+                  )}
+                  {formData.type === 'volume' && (
+                    <>
+                      <SelectItem value="CY">CY (Cubic Yards)</SelectItem>
+                      <SelectItem value="CF">CF (Cubic Feet)</SelectItem>
+                      <SelectItem value="CM">CM (Cubic Meters)</SelectItem>
+                    </>
+                  )}
+                  {formData.type === 'count' && (
+                    <>
+                      <SelectItem value="EA">EA (Each)</SelectItem>
+                      <SelectItem value="PC">PC (Piece)</SelectItem>
+                      <SelectItem value="LS">LS (Lump Sum)</SelectItem>
+                    </>
+                  )}
+                </SelectContent>
+              </Select>
             </div>
           </div>
+
+          {formData.type === 'area' && (
+            <div>
+              <Label htmlFor="includePerimeter" className="flex items-center space-x-2">
+                <input
+                  id="includePerimeter"
+                  type="checkbox"
+                  checked={formData.includePerimeter}
+                  onChange={(e) => handleInputChange('includePerimeter', e.target.checked)}
+                  className="rounded"
+                />
+                <span>Include perimeter measurement (LF)</span>
+              </Label>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <div>

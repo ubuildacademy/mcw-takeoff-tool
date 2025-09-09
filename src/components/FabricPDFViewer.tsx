@@ -170,6 +170,364 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
     }
   }, [file]);
 
+  // Function to reload measurements when viewport changes
+  const reloadMeasurements = useCallback(() => {
+    if (!pdfjsDocument || !currentPage || !fabricCanvasRef.current) return;
+    
+    const identifiers = getFileIdentifiers();
+    if (!identifiers) return;
+    
+    const existingMeasurements = getSheetTakeoffMeasurements(identifiers.projectId, identifiers.sheetId);
+    console.log('Reloading measurements for viewport change:', existingMeasurements);
+    
+    // Clear existing measurement objects from canvas
+    const fabricCanvas = fabricCanvasRef.current;
+    const measurementObjects = fabricCanvas.getObjects().filter(obj => (obj as any).data?.measurementId);
+    measurementObjects.forEach(obj => fabricCanvas.remove(obj));
+    
+    // Re-render all measurements with current viewport
+    existingMeasurements.forEach(takeoffMeasurement => {
+      if (takeoffMeasurement.pdfPage === currentPage) {
+        const condition = conditions.find(c => c.id === takeoffMeasurement.conditionId);
+        if (condition) {
+          const conditionColor = condition.color || '#0000ff';
+          
+          // Convert PDF-relative coordinates back to canvas coordinates
+          const pdfImage = fabricCanvas.getObjects().find(obj => (obj as any).isPDF);
+          let points = takeoffMeasurement.points;
+          
+          if (pdfImage && takeoffMeasurement.pdfCoordinates) {
+            // Get PDF dimensions and viewport transform
+            const pdfWidth = pdfImage.width!;
+            const pdfHeight = pdfImage.height!;
+            const vpt = fabricCanvas.viewportTransform;
+            
+            if (vpt && vpt.length >= 6) {
+              // Convert PDF-relative coordinates back to canvas coordinates
+              const scaleX = vpt[0];
+              const scaleY = vpt[3];
+              const translateX = vpt[4];
+              const translateY = vpt[5];
+              
+              points = takeoffMeasurement.pdfCoordinates.map(pdfPoint => {
+                const canvasX = pdfPoint.x * scaleX * pdfWidth + translateX;
+                const canvasY = pdfPoint.y * scaleY * pdfHeight + translateY;
+                return { x: canvasX, y: canvasY };
+              });
+            }
+          }
+          
+          // Re-render the measurement (same logic as in the existing measurements loading)
+          if (takeoffMeasurement.type === 'count' && points.length >= 1) {
+            const point = points[0];
+            
+            const circle = new Circle({
+              left: point.x - 8,
+              top: point.y - 8,
+              radius: 8,
+              fill: conditionColor,
+              stroke: conditionColor,
+              strokeWidth: 2,
+              selectable: false,
+              evented: false,
+              excludeFromExport: true
+            });
+            (circle as any).data = { measurementId: takeoffMeasurement.id, type: 'count' };
+            
+            const text = new Text('1', {
+              left: point.x - 3,
+              top: point.y - 3,
+              fontSize: 12,
+              fill: 'white',
+              selectable: false,
+              evented: false,
+              excludeFromExport: true
+            });
+            (text as any).data = { measurementId: takeoffMeasurement.id, type: 'count' };
+            
+            fabricCanvas.add(circle, text);
+            
+          } else if (takeoffMeasurement.type === 'linear' && points.length >= 2) {
+            const lineSegments: any[] = [];
+            for (let i = 0; i < points.length - 1; i++) {
+              const line = new Line([points[i].x, points[i].y, points[i + 1].x, points[i + 1].y], {
+                stroke: conditionColor,
+                strokeWidth: 4,
+                selectable: true,  // Allow selection for deletion
+                evented: true,     // Allow events for selection
+                excludeFromExport: true,
+                // Lock transformations to prevent accidental modification
+                lockMovementX: true,
+                lockMovementY: true,
+                lockRotation: true,
+                lockScalingX: true,
+                lockScalingY: true
+              });
+              (line as any).data = { measurementId: takeoffMeasurement.id, type: 'linear', segmentIndex: i };
+              lineSegments.push(line);
+            }
+            
+            const lastPoint = points[points.length - 1];
+            const label = new Text(`${takeoffMeasurement.calculatedValue?.toFixed(2) || '0.00'} ${takeoffMeasurement.unit || 'ft'}`, {
+              left: lastPoint.x + 10,
+              top: lastPoint.y - 10,
+              fontSize: 12,
+              fill: '#000000',
+              selectable: true,
+              evented: true,
+              excludeFromExport: true,
+              lockMovementX: true,
+              lockMovementY: true,
+              lockRotation: true,
+              lockScalingX: true,
+              lockScalingY: true
+            });
+            (label as any).data = { measurementId: takeoffMeasurement.id, type: 'linear' };
+            
+            fabricCanvas.add(...lineSegments, label);
+            
+          } else if (takeoffMeasurement.type === 'area' && points.length >= 3) {
+            const polygonPoints = points.map(p => ({ x: p.x, y: p.y }));
+            
+            const polygon = new Polygon(polygonPoints, {
+              fill: `${conditionColor}40`, // Increased transparency for better visibility
+              stroke: conditionColor,
+              strokeWidth: 3,  // Increased stroke width for better visibility
+              selectable: true,
+              evented: true,
+              excludeFromExport: true,
+              lockMovementX: true,
+              lockMovementY: true,
+              lockRotation: true,
+              lockScalingX: true,
+              lockScalingY: true,
+              // Ensure polygon is filled properly
+              fillRule: 'nonzero'
+            });
+            (polygon as any).data = { measurementId: takeoffMeasurement.id, type: 'area' };
+            
+            const centerX = points.reduce((sum, p) => sum + p.x, 0) / points.length;
+            const centerY = points.reduce((sum, p) => sum + p.y, 0) / points.length;
+            
+            let labelText = `${takeoffMeasurement.calculatedValue?.toFixed(2) || '0.00'} ${takeoffMeasurement.unit || 'sq ft'}`;
+            if (takeoffMeasurement.perimeterValue && takeoffMeasurement.perimeterValue > 0) {
+              labelText += `\n${takeoffMeasurement.perimeterValue.toFixed(2)} LF`;
+            }
+            
+            const label = new Text(labelText, {
+              left: centerX,
+              top: centerY,
+              fontSize: 12,
+              fill: '#000000',
+              selectable: false,
+              evented: false,
+              excludeFromExport: true
+            });
+            (label as any).data = { measurementId: takeoffMeasurement.id, type: 'area' };
+            
+            fabricCanvas.add(polygon, label);
+          }
+        }
+      }
+    });
+    
+    fabricCanvas.renderAll();
+  }, [pdfjsDocument, currentPage, getFileIdentifiers, getSheetTakeoffMeasurements, conditions]);
+
+  // Wheel handler for zoom and pan
+  const handleWheel = useCallback((e: WheelEvent) => {
+    console.log('Wheel event:', { 
+      deltaY: e.deltaY, 
+      deltaX: e.deltaX, 
+      shiftKey: e.shiftKey, 
+      ctrlKey: e.ctrlKey, 
+      metaKey: e.metaKey 
+    });
+    
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (!fabricCanvasRef.current) return;
+    
+    const fabricCanvas = fabricCanvasRef.current;
+    
+    if (e.ctrlKey || e.metaKey) {
+      // Ctrl/Cmd + Wheel: Zoom
+      console.log('Zooming with Ctrl/Cmd + wheel');
+      const delta = e.deltaY > 0 ? 0.9 : 1.1;
+      const currentZoom = fabricCanvas.getZoom();
+      const newZoom = Math.max(0.1, Math.min(5, currentZoom * delta));
+      
+      // Get mouse position relative to canvas
+      const rect = fabricCanvas.getElement().getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      
+      // Zoom towards mouse position
+      const zoomPoint = new fabric.Point(mouseX, mouseY);
+      fabricCanvas.zoomToPoint(zoomPoint, newZoom);
+      
+      setZoom(newZoom);
+      fabricCanvas.renderAll();
+      
+      // Reload measurements to update their positions
+      setTimeout(() => reloadMeasurements(), 50);
+      
+    } else if (e.shiftKey) {
+      // Shift + Wheel: Pan horizontally
+      console.log('Horizontal panning with Shift + wheel');
+      const panDelta = e.deltaY * 0.5;
+      const vpt = fabricCanvas.viewportTransform;
+      if (vpt && vpt.length >= 6) {
+        const newVpt: [number, number, number, number, number, number] = [
+          vpt[0], vpt[1], vpt[2], vpt[3], vpt[4] - panDelta, vpt[5]
+        ];
+        fabricCanvas.setViewportTransform(newVpt);
+        fabricCanvas.renderAll();
+        
+        // Reload measurements to update their positions
+        setTimeout(() => reloadMeasurements(), 50);
+      }
+    } else {
+      // Regular Wheel: Pan vertically (up/down)
+      console.log('Vertical panning with regular wheel');
+      const panDelta = e.deltaY * 0.5;
+      const vpt = fabricCanvas.viewportTransform;
+      if (vpt && vpt.length >= 6) {
+        const newVpt: [number, number, number, number, number, number] = [
+          vpt[0], vpt[1], vpt[2], vpt[3], vpt[4], vpt[5] - panDelta
+        ];
+        fabricCanvas.setViewportTransform(newVpt);
+        fabricCanvas.renderAll();
+        
+        // Reload measurements to update their positions
+        setTimeout(() => reloadMeasurements(), 50);
+      }
+    }
+  }, [reloadMeasurements]);
+
+  // Global wheel event listener for debugging
+  useEffect(() => {
+    const handleGlobalWheel = (e: WheelEvent) => {
+      console.log('=== GLOBAL WHEEL EVENT ===');
+      console.log('Global wheel event:', { 
+        deltaY: e.deltaY, 
+        deltaX: e.deltaX, 
+        shiftKey: e.shiftKey, 
+        ctrlKey: e.ctrlKey, 
+        metaKey: e.metaKey,
+        target: e.target,
+        currentTarget: e.currentTarget
+      });
+    };
+
+    // Add global wheel event listener
+    document.addEventListener('wheel', handleGlobalWheel, { passive: false });
+
+    return () => {
+      document.removeEventListener('wheel', handleGlobalWheel);
+    };
+  }, []);
+
+  // Container wheel event listener
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleContainerWheel = (e: WheelEvent) => {
+      console.log('=== CONTAINER WHEEL EVENT ===');
+      console.log('Container wheel event:', { 
+        deltaY: e.deltaY, 
+        deltaX: e.deltaX, 
+        shiftKey: e.shiftKey, 
+        ctrlKey: e.ctrlKey, 
+        metaKey: e.metaKey,
+        target: e.target
+      });
+
+      // Only handle if not measuring or calibrating
+      if (!isMeasuring && !isCalibrating) {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        if (!fabricCanvasRef.current) return;
+        
+        const fabricCanvas = fabricCanvasRef.current;
+        
+        if (e.ctrlKey || e.metaKey) {
+          // Ctrl/Cmd + Wheel: Zoom
+          console.log('Container: Zooming with Ctrl/Cmd + wheel');
+          const delta = e.deltaY > 0 ? 0.9 : 1.1;
+          const currentZoom = fabricCanvas.getZoom();
+          const newZoom = Math.max(0.1, Math.min(5, currentZoom * delta));
+          
+          // Get mouse position relative to canvas
+          const rect = fabricCanvas.getElement().getBoundingClientRect();
+          const mouseX = e.clientX - rect.left;
+          const mouseY = e.clientY - rect.top;
+          
+          // Zoom towards mouse position
+          const zoomPoint = new fabric.Point(mouseX, mouseY);
+          fabricCanvas.zoomToPoint(zoomPoint, newZoom);
+          
+          setZoom(newZoom);
+          fabricCanvas.renderAll();
+          
+          // Reload measurements to update their positions
+          setTimeout(() => reloadMeasurements(), 50);
+          
+        } else if (e.shiftKey) {
+          // Shift + Wheel: Pan horizontally
+          console.log('Container: Horizontal panning with Shift + wheel, deltaY:', e.deltaY);
+          const panDelta = e.deltaY * 0.5;
+          console.log('Container: Calculated panDelta:', panDelta);
+          
+          const vpt = fabricCanvas.viewportTransform;
+          console.log('Container: Current viewport transform:', vpt);
+          
+          if (vpt && vpt.length >= 6) {
+            const newVpt: [number, number, number, number, number, number] = [
+              vpt[0], vpt[1], vpt[2], vpt[3], vpt[4] - panDelta, vpt[5]
+            ];
+            console.log('Container: New viewport transform:', newVpt);
+            
+            fabricCanvas.setViewportTransform(newVpt);
+            fabricCanvas.renderAll();
+            
+            // Reload measurements to update their positions
+            setTimeout(() => reloadMeasurements(), 50);
+            
+            console.log('Container: Horizontal pan applied successfully');
+          } else {
+            console.log('Container: Invalid viewport transform');
+          }
+        } else {
+          // Regular Wheel: Pan vertically (up/down)
+          console.log('Container: Vertical panning with regular wheel');
+          const panDelta = e.deltaY * 0.5;
+          const vpt = fabricCanvas.viewportTransform;
+          if (vpt && vpt.length >= 6) {
+            const newVpt: [number, number, number, number, number, number] = [
+              vpt[0], vpt[1], vpt[2], vpt[3], vpt[4], vpt[5] - panDelta
+            ];
+            fabricCanvas.setViewportTransform(newVpt);
+            fabricCanvas.renderAll();
+            
+            // Reload measurements to update their positions
+            setTimeout(() => reloadMeasurements(), 50);
+          }
+        }
+      }
+    };
+
+    // Add container wheel event listener
+    container.addEventListener('wheel', handleContainerWheel, { passive: false });
+
+    return () => {
+      container.removeEventListener('wheel', handleContainerWheel);
+    };
+  }, [isMeasuring, isCalibrating, reloadMeasurements]);
+
   // Initialize Fabric.js canvas
   useEffect(() => {
     const initializeCanvas = () => {
@@ -195,7 +553,7 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
         const fabricCanvas = new Canvas(canvas, {
           width: container.clientWidth,
           height: container.clientHeight, // Use full container height
-          selection: true,
+          selection: false, // Disable selection by default
           preserveObjectStacking: true,
           allowTouchScrolling: false,
           fireRightClick: true,
@@ -206,8 +564,8 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
           centeredRotation: false,
           backgroundColor: 'white', // Clean white background
           // Enable proper event handling
-          enablePointerEvents: true,
-          skipTargetFind: false,
+          enablePointerEvents: false, // Disable pointer events by default
+          skipTargetFind: true, // Skip target finding by default
         });
         
         console.log('Fabric.js canvas created:', fabricCanvas);
@@ -219,14 +577,44 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
         console.log('=== CANVAS INITIALIZATION SUCCESS ===');
         console.log('fabricCanvasRef.current set to:', !!fabricCanvasRef.current);
       
-        // Set up event handlers
-        fabricCanvas.on('mouse:down', handleFabricMouseDown);
-        fabricCanvas.on('mouse:move', handleFabricMouseMove);
-        fabricCanvas.on('mouse:up', handleFabricMouseUp);
+        // Set up event handlers - only for measurement objects, not for panning
         fabricCanvas.on('mouse:dblclick', handleFabricDoubleClick);
         fabricCanvas.on('selection:created', handleObjectSelection);
         fabricCanvas.on('selection:updated', handleObjectSelection);
         fabricCanvas.on('selection:cleared', handleObjectDeselection);
+        
+        // Only add mouse events for measuring/calibration mode
+        const handleFabricMouseDownWrapper = (options: any) => {
+          const currentIsCalibrating = isCalibratingRef.current;
+          const currentIsMeasuring = isMeasuringRef.current;
+          
+          // Only handle Fabric.js mouse events when in measuring or calibration mode
+          if (currentIsCalibrating || currentIsMeasuring) {
+            handleFabricMouseDown(options);
+          } else {
+            // Prevent Fabric.js from handling mouse events when not measuring
+            options.e.preventDefault();
+            options.e.stopPropagation();
+          }
+        };
+        
+        const handleFabricMouseMoveWrapper = (options: any) => {
+          const currentIsCalibrating = isCalibratingRef.current;
+          const currentIsMeasuring = isMeasuringRef.current;
+          
+          // Only handle Fabric.js mouse events when in measuring or calibration mode
+          if (currentIsCalibrating || currentIsMeasuring) {
+            handleFabricMouseMove(options);
+          } else {
+            // Prevent Fabric.js from handling mouse events when not measuring
+            options.e.preventDefault();
+            options.e.stopPropagation();
+          }
+        };
+        
+        fabricCanvas.on('mouse:down', handleFabricMouseDownWrapper);
+        fabricCanvas.on('mouse:move', handleFabricMouseMoveWrapper);
+        fabricCanvas.on('mouse:up', handleFabricMouseUp);
         
         // Add wheel event for zoom and pan
         const canvasElement = fabricCanvas.getElement();
@@ -234,12 +622,37 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
         
         // Also add wheel event to the container for better coverage
         container.addEventListener('wheel', handleWheel, { passive: false });
+        
+        // Simple mouse event handlers for middle mouse button
+        const handleMiddleMouseDown = (e: MouseEvent) => {
+          if (e.button === 1) { // Middle mouse button
+            e.preventDefault();
+            setIsDragging(true);
+            setDragStart({ x: e.clientX, y: e.clientY });
+          }
+        };
+        
+        const handleMiddleMouseUp = (e: MouseEvent) => {
+          if (e.button === 1) { // Middle mouse button
+            e.preventDefault();
+            setIsDragging(false);
+          }
+        };
+        
+        canvasElement.addEventListener('mousedown', handleMiddleMouseDown);
+        canvasElement.addEventListener('mouseup', handleMiddleMouseUp);
+        container.addEventListener('mousedown', handleMiddleMouseDown);
+        container.addEventListener('mouseup', handleMiddleMouseUp);
       
         return () => {
-          // Remove wheel event listeners
+          // Remove event listeners
           const canvasElement = fabricCanvas.getElement();
           canvasElement.removeEventListener('wheel', handleWheel);
           container.removeEventListener('wheel', handleWheel);
+          canvasElement.removeEventListener('mousedown', handleMiddleMouseDown);
+          canvasElement.removeEventListener('mouseup', handleMiddleMouseUp);
+          container.removeEventListener('mousedown', handleMiddleMouseDown);
+          container.removeEventListener('mouseup', handleMiddleMouseUp);
           fabricCanvas.dispose();
         };
       } catch (error) {
@@ -258,7 +671,7 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
     return () => {
       clearTimeout(timeoutId);
     };
-  }, []);
+  }, [handleWheel]);
 
 
   // Separate effect to handle PDF rendering when canvas becomes ready
@@ -318,16 +731,16 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
             console.log('Clearing existing PDF images:', existingImages.length);
             existingImages.forEach(img => fabricCanvas.remove(img));
             
-            // Create fabric image object as PDF background (movable but not scalable)
+            // Create fabric image object as PDF background (fixed position)
             const fabricImage = new Image(htmlImage, {
               left: 0,
               top: 0,
-              selectable: true,   // Allow selection for dragging
-              evented: true,     // Allow events for dragging
+              selectable: false,   // Disable selection to allow canvas panning
+              evented: false,      // Disable events to allow canvas panning
               excludeFromExport: false,
-              // Allow movement but lock scaling and rotation to maintain accuracy
-              lockMovementX: false,
-              lockMovementY: false,
+              // Lock movement - PDF should not move, canvas viewport should move instead
+              lockMovementX: true,
+              lockMovementY: true,
               lockRotation: true,
               lockScalingX: true,
               lockScalingY: true,
@@ -335,7 +748,9 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
               opacity: 1,
               visible: true,
               // Add a custom property to identify this as the PDF
-              isPDF: true
+              isPDF: true,
+              // Ensure PDF is behind all other objects
+              moveTo: 0
             });
             
             console.log('Fabric image created:', fabricImage);
@@ -463,8 +878,33 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
         if (condition) {
           const conditionColor = condition.color || '#0000ff';
           
-          if (takeoffMeasurement.type === 'count' && takeoffMeasurement.points.length >= 1) {
-            const point = takeoffMeasurement.points[0];
+          // Convert PDF-relative coordinates back to canvas coordinates
+          const pdfImage = fabricCanvas.getObjects().find(obj => (obj as any).isPDF);
+          let points = takeoffMeasurement.points;
+          
+          if (pdfImage && takeoffMeasurement.pdfCoordinates) {
+            // Get PDF dimensions and viewport transform
+            const pdfWidth = pdfImage.width!;
+            const pdfHeight = pdfImage.height!;
+            const vpt = fabricCanvas.viewportTransform;
+            
+            if (vpt && vpt.length >= 6) {
+              // Convert PDF-relative coordinates back to canvas coordinates
+              const scaleX = vpt[0];
+              const scaleY = vpt[3];
+              const translateX = vpt[4];
+              const translateY = vpt[5];
+              
+              points = takeoffMeasurement.pdfCoordinates.map(pdfPoint => {
+                const canvasX = pdfPoint.x * scaleX * pdfWidth + translateX;
+                const canvasY = pdfPoint.y * scaleY * pdfHeight + translateY;
+                return { x: canvasX, y: canvasY };
+              });
+            }
+          }
+          
+          if (takeoffMeasurement.type === 'count' && points.length >= 1) {
+            const point = points[0];
             
             // Add circle for count measurement
             const circle = new Circle({
@@ -474,8 +914,8 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
               fill: conditionColor,
               stroke: conditionColor,
               strokeWidth: 2,
-              selectable: true,
-              evented: true,
+              selectable: false,
+              evented: false,
               excludeFromExport: true
             });
             (circle as any).data = { measurementId: takeoffMeasurement.id, type: 'count' };
@@ -494,8 +934,7 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
             
             fabricCanvas.add(circle, text);
             
-          } else if (takeoffMeasurement.type === 'linear' && takeoffMeasurement.points.length >= 2) {
-            const points = takeoffMeasurement.points;
+          } else if (takeoffMeasurement.type === 'linear' && points.length >= 2) {
             
             // Create individual line segments for each pair of consecutive points (same as addMeasurementToFabric)
             const lineSegments: any[] = [];
@@ -503,8 +942,8 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
               const line = new Line([points[i].x, points[i].y, points[i + 1].x, points[i + 1].y], {
                 stroke: conditionColor,
                 strokeWidth: 4,
-                selectable: true,
-                evented: true,
+                selectable: false,
+                evented: false,
                 excludeFromExport: true
               });
               (line as any).data = { measurementId: takeoffMeasurement.id, type: 'linear', segmentIndex: i };
@@ -527,25 +966,38 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
             // Add all line segments and label to canvas
             fabricCanvas.add(...lineSegments, label);
             
-          } else if (takeoffMeasurement.type === 'area' && takeoffMeasurement.points.length >= 3) {
-            const points = takeoffMeasurement.points;
+          } else if (takeoffMeasurement.type === 'area' && points.length >= 3) {
             const polygonPoints = points.map(p => ({ x: p.x, y: p.y }));
             
             // Add polygon for area measurement
             const polygon = new Polygon(polygonPoints, {
-              fill: `${conditionColor}30`, // Add transparency
+              fill: `${conditionColor}40`, // Increased transparency for better visibility
               stroke: conditionColor,
-              strokeWidth: 2,
+              strokeWidth: 3,  // Increased stroke width for better visibility
               selectable: true,
               evented: true,
-              excludeFromExport: true
+              excludeFromExport: true,
+              lockMovementX: true,
+              lockMovementY: true,
+              lockRotation: true,
+              lockScalingX: true,
+              lockScalingY: true,
+              // Ensure polygon is filled properly
+              fillRule: 'nonzero'
             });
             (polygon as any).data = { measurementId: takeoffMeasurement.id, type: 'area' };
             
             // Add measurement label
             const centerX = points.reduce((sum, p) => sum + p.x, 0) / points.length;
             const centerY = points.reduce((sum, p) => sum + p.y, 0) / points.length;
-            const label = new Text(`${takeoffMeasurement.calculatedValue?.toFixed(2) || '0.00'} ${takeoffMeasurement.unit || 'sq ft'}`, {
+            
+            // Create label text with area and perimeter if available
+            let labelText = `${takeoffMeasurement.calculatedValue?.toFixed(2) || '0.00'} ${takeoffMeasurement.unit || 'sq ft'}`;
+            if (takeoffMeasurement.perimeterValue && takeoffMeasurement.perimeterValue > 0) {
+              labelText += `\n${takeoffMeasurement.perimeterValue.toFixed(2)} LF`;
+            }
+            
+            const label = new Text(labelText, {
               left: centerX,
               top: centerY,
               fontSize: 12,
@@ -579,19 +1031,7 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
         isMeasuringRef.current = true;
         console.log('Condition selected, entering measuring mode:', selectedCondition);
         
-        // Disable PDF object interaction during measuring
-        if (fabricCanvasRef.current) {
-          const fabricCanvas = fabricCanvasRef.current;
-          const pdfImage = fabricCanvas.getObjects().find(obj => (obj as any).isPDF);
-          if (pdfImage) {
-            console.log('Disabling PDF object interaction for measuring');
-            pdfImage.set({
-              selectable: false,
-              evented: false
-            });
-            fabricCanvas.renderAll();
-          }
-        }
+        // PDF is now fixed position, no need to disable interaction
       }
     } else {
       setIsMeasuring(false);
@@ -599,18 +1039,7 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
       console.log('No condition selected, exiting measuring mode');
       
       // Re-enable PDF object interaction
-      if (fabricCanvasRef.current) {
-        const fabricCanvas = fabricCanvasRef.current;
-        const pdfImage = fabricCanvas.getObjects().find(obj => (obj as any).isPDF);
-        if (pdfImage) {
-          console.log('Re-enabling PDF object interaction');
-          pdfImage.set({
-            selectable: true,
-            evented: true
-          });
-          fabricCanvas.renderAll();
-        }
-      }
+      // PDF is now fixed position, no need to re-enable interaction
     }
   }, [selectedConditionId, conditions]);
   
@@ -622,7 +1051,23 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
   // Update measuring ref when state changes
   useEffect(() => {
     isMeasuringRef.current = isMeasuring;
-  }, [isMeasuring]);
+    
+    // Enable/disable Fabric.js interaction based on measuring state
+    if (fabricCanvasRef.current) {
+      const fabricCanvas = fabricCanvasRef.current;
+      if (isMeasuring || isCalibrating) {
+        // Enable Fabric.js interaction for measuring
+        fabricCanvas.selection = true;
+        fabricCanvas.enablePointerEvents = true;
+        fabricCanvas.skipTargetFind = false;
+      } else {
+        // Disable Fabric.js interaction for panning
+        fabricCanvas.selection = false;
+        fabricCanvas.enablePointerEvents = false;
+        fabricCanvas.skipTargetFind = true;
+      }
+    }
+  }, [isMeasuring, isCalibrating]);
   
   // Update calibration points ref when state changes
   useEffect(() => {
@@ -704,11 +1149,14 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
       setZoom(scale);
       fabricCanvas.renderAll();
       
+      // Reload measurements to update their positions
+      setTimeout(() => reloadMeasurements(), 50);
+      
       console.log('fitToScreen: PDF repositioned and scaled using viewport transform');
     } else {
       console.log('fitToScreen: No PDF image found on canvas');
     }
-  }, []);
+  }, [reloadMeasurements]);
 
   // Helper function to update zoom state from canvas
   const updateZoomState = useCallback(() => {
@@ -719,57 +1167,7 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
   }, []);
 
 
-  // Wheel handler for zoom and pan
-  const handleWheel = useCallback((e: WheelEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    if (!fabricCanvasRef.current) return;
-    
-    const fabricCanvas = fabricCanvasRef.current;
-    
-    if (e.ctrlKey || e.metaKey) {
-      // Ctrl/Cmd + Wheel: Zoom
-      const delta = e.deltaY > 0 ? 0.9 : 1.1;
-      const currentZoom = fabricCanvas.getZoom();
-      const newZoom = Math.max(0.1, Math.min(5, currentZoom * delta));
-      
-      // Get mouse position relative to canvas
-      const rect = fabricCanvas.getElement().getBoundingClientRect();
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
-      
-      // Zoom towards mouse position
-      const zoomPoint = new fabric.Point(mouseX, mouseY);
-      fabricCanvas.zoomToPoint(zoomPoint, newZoom);
-      
-      setZoom(newZoom);
-      fabricCanvas.renderAll();
-      
-    } else if (e.shiftKey) {
-      // Shift + Wheel: Pan horizontally
-      const panDelta = e.deltaY * 0.5;
-      const vpt = fabricCanvas.viewportTransform;
-      if (vpt && vpt.length >= 6) {
-        const newVpt: [number, number, number, number, number, number] = [
-          vpt[0], vpt[1], vpt[2], vpt[3], vpt[4] - panDelta, vpt[5]
-        ];
-        fabricCanvas.setViewportTransform(newVpt);
-        fabricCanvas.renderAll();
-      }
-    } else {
-      // Regular Wheel: Pan vertically (up/down)
-      const panDelta = e.deltaY * 0.5;
-      const vpt = fabricCanvas.viewportTransform;
-      if (vpt && vpt.length >= 6) {
-        const newVpt: [number, number, number, number, number, number] = [
-          vpt[0], vpt[1], vpt[2], vpt[3], vpt[4], vpt[5] - panDelta
-        ];
-        fabricCanvas.setViewportTransform(newVpt);
-        fabricCanvas.renderAll();
-      }
-    }
-  }, []);
+
 
   // Measurement handlers
   const handleMeasurementClick = useCallback((x: number, y: number) => {
@@ -1044,21 +1442,28 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
       return;
     }
 
-    const selectedCondition = conditions.find(c => c.id === currentSelectedConditionId);
+    // Get current conditions from store to avoid stale closure
+    const currentConditions = useTakeoffStore.getState().conditions;
+    const selectedCondition = currentConditions.find(c => c.id === currentSelectedConditionId);
     console.log('Selected condition:', selectedCondition);
+    console.log('Current conditions from store:', currentConditions);
     
     if (!selectedCondition) {
       console.warn('Cannot add measurement: selected condition not found');
+      console.warn('Available condition IDs:', currentConditions.map(c => c.id));
+      console.warn('Looking for condition ID:', currentSelectedConditionId);
       return;
     }
 
     // Calculate measurement value
     let calculatedValue = 0;
+    let perimeterValue = 0;
     
     console.log('Calculating measurement value:', { type, points, internalScaleFactor });
     
     if (type === 'linear' && points.length >= 2) {
-      // Calculate total length of multi-segment line
+      // Calculate total length of multi-segment line in PDF-relative coordinates
+      // This ensures the measurement is accurate regardless of zoom level
       let totalLength = 0;
       for (let i = 0; i < points.length - 1; i++) {
         const dx = points[i + 1].x - points[i].x;
@@ -1067,8 +1472,17 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
         totalLength += segmentLength;
         console.log(`Segment ${i}: dx=${dx}, dy=${dy}, length=${segmentLength}`);
       }
+      
+      // Convert to real-world units using the scale factor
+      // The scale factor converts pixels to real-world units (e.g., feet)
       calculatedValue = totalLength * internalScaleFactor;
-      console.log('Linear measurement calculation:', { totalLength, internalScaleFactor, calculatedValue });
+      console.log('Linear measurement calculation:', { 
+        totalLength, 
+        internalScaleFactor, 
+        calculatedValue,
+        points: points.length,
+        pointsData: points
+      });
     } else if (type === 'area' && points.length >= 3) {
       let area = 0;
       for (let i = 0; i < points.length; i++) {
@@ -1077,6 +1491,19 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
         area -= points[j].x * points[i].y;
       }
       calculatedValue = Math.abs(area) * 0.5 * internalScaleFactor * internalScaleFactor;
+      
+      // Calculate perimeter if condition includes it
+      if (selectedCondition.includePerimeter) {
+        let totalPerimeter = 0;
+        for (let i = 0; i < points.length; i++) {
+          const j = (i + 1) % points.length;
+          const dx = points[j].x - points[i].x;
+          const dy = points[j].y - points[i].y;
+          const segmentLength = Math.sqrt(dx * dx + dy * dy);
+          totalPerimeter += segmentLength;
+        }
+        perimeterValue = totalPerimeter * internalScaleFactor;
+      }
     } else if (type === 'volume' && points.length >= 3) {
       let area = 0;
       for (let i = 0; i < points.length; i++) {
@@ -1089,28 +1516,56 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
       calculatedValue = 1; // Each count marker represents 1 unit
     }
 
-    // Convert screen coordinates to PDF-relative coordinates (0-1 scale)
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    // Store measurements in PDF-relative coordinates (0-1 scale) for persistence
+    // This ensures measurements stay in the correct position relative to the PDF content
+    const pdfImage = fabricCanvas.getObjects().find(obj => (obj as any).isPDF);
+    let pdfCoordinates = points.map(point => ({ x: point.x, y: point.y }));
     
-    const pdfCoordinates = points.map(point => ({
-      x: point.x / canvas.width,
-      y: point.y / canvas.height
-    }));
+    if (pdfImage) {
+      // Get PDF dimensions and viewport transform
+      const pdfWidth = pdfImage.width!;
+      const pdfHeight = pdfImage.height!;
+      const vpt = fabricCanvas.viewportTransform;
+      
+      if (vpt && vpt.length >= 6) {
+        // Convert canvas coordinates to PDF-relative coordinates (0-1 scale)
+        pdfCoordinates = points.map(point => {
+          const scaleX = vpt[0];
+          const scaleY = vpt[3];
+          const translateX = vpt[4];
+          const translateY = vpt[5];
+          
+          // Convert to PDF-relative coordinates (0-1 scale)
+          const pdfX = (point.x - translateX) / (scaleX * pdfWidth);
+          const pdfY = (point.y - translateY) / (scaleY * pdfHeight);
+          
+          return { x: pdfX, y: pdfY };
+        });
+        
+        console.log('Converting canvas to PDF coordinates:', {
+          canvasPoints: points,
+          pdfCoordinates: pdfCoordinates,
+          viewportTransform: vpt,
+          pdfDimensions: { width: pdfWidth, height: pdfHeight }
+        });
+      }
+    }
 
     // Create takeoff measurement for the store
+    // Store both canvas coordinates (for immediate rendering) and PDF-relative coordinates (for persistence)
     const takeoffMeasurement = {
       projectId: identifiers.projectId,
       sheetId: identifiers.sheetId,
       conditionId: currentSelectedConditionId,
       type: type,
-      points: points,
+      points: points, // Canvas coordinates for immediate rendering
       calculatedValue: calculatedValue,
       unit: selectedCondition.unit,
       pdfPage: currentPage,
-      pdfCoordinates: pdfCoordinates,
+      pdfCoordinates: pdfCoordinates, // PDF-relative coordinates for persistence
       conditionColor: selectedCondition.color,
-      conditionName: selectedCondition.name
+      conditionName: selectedCondition.name,
+      perimeterValue: perimeterValue > 0 ? perimeterValue : undefined
     };
 
     console.log('Saving takeoff measurement:', takeoffMeasurement);
@@ -1131,7 +1586,12 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
         strokeWidth: 2,
         selectable: true,
         evented: true,
-        excludeFromExport: true // Mark as measurement object
+        excludeFromExport: true,
+        lockMovementX: true,
+        lockMovementY: true,
+        lockRotation: true,
+        lockScalingX: true,
+        lockScalingY: true
       });
       (circle as any).data = { measurementId, type: 'count' };
       
@@ -1141,9 +1601,14 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
         top: points[0].y - 3,
         fontSize: 12,
         fill: 'white',
-        selectable: false,
-        evented: false,
-        excludeFromExport: true // Mark as measurement object
+        selectable: true,
+        evented: true,
+        excludeFromExport: true,
+        lockMovementX: true,
+        lockMovementY: true,
+        lockRotation: true,
+        lockScalingX: true,
+        lockScalingY: true
       });
       (text as any).data = { measurementId, type: 'count' };
       
@@ -1159,9 +1624,15 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
         const line = new Line([points[i].x, points[i].y, points[i + 1].x, points[i + 1].y], {
           stroke: conditionColor,
           strokeWidth: 4,
-          selectable: true,
-          evented: true,
-          excludeFromExport: true // Mark as measurement object
+          selectable: true,  // Allow selection for deletion
+          evented: true,     // Allow events for selection
+          excludeFromExport: true,
+          // Lock transformations to prevent accidental modification
+          lockMovementX: true,
+          lockMovementY: true,
+          lockRotation: true,
+          lockScalingX: true,
+          lockScalingY: true
         });
         (line as any).data = { measurementId, type: 'linear', segmentIndex: i };
         lineSegments.push(line);
@@ -1175,9 +1646,14 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
         top: lastPoint.y - 10,
         fontSize: 12,
         fill: '#000000',
-        selectable: false,
-        evented: false,
-        excludeFromExport: true
+        selectable: true,
+        evented: true,
+        excludeFromExport: true,
+        lockMovementX: true,
+        lockMovementY: true,
+        lockRotation: true,
+        lockScalingX: true,
+        lockScalingY: true
       });
       (label as any).data = { measurementId, type: 'linear' };
       
@@ -1191,29 +1667,49 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
       })));
       
     } else if (type === 'area' && points.length >= 3) {
-      // Add polygon for area measurement
+      // Add polygon for area measurement - Fabric.js automatically closes polygons
       const polygonPoints = points.map(p => ({ x: p.x, y: p.y }));
+      
       const polygon = new Polygon(polygonPoints, {
-        fill: `${conditionColor}30`, // Add transparency
+        fill: `${conditionColor}40`, // Increased transparency for better visibility
         stroke: conditionColor,
-        strokeWidth: 2,
+        strokeWidth: 3,  // Increased stroke width for better visibility
         selectable: true,
         evented: true,
-        excludeFromExport: true // Mark as measurement object
+        excludeFromExport: true,
+        lockMovementX: true,
+        lockMovementY: true,
+        lockRotation: true,
+        lockScalingX: true,
+        lockScalingY: true,
+        // Ensure polygon is filled properly
+        fillRule: 'nonzero'
       });
       (polygon as any).data = { measurementId, type: 'area' };
       
       // Add measurement label
       const centerX = points.reduce((sum, p) => sum + p.x, 0) / points.length;
       const centerY = points.reduce((sum, p) => sum + p.y, 0) / points.length;
-      const label = new Text(`${calculatedValue.toFixed(2)} ${selectedCondition.unit}`, {
+      
+      // Create label text with area and perimeter if available
+      let labelText = `${calculatedValue.toFixed(2)} ${selectedCondition.unit}`;
+      if (perimeterValue > 0) {
+        labelText += `\n${perimeterValue.toFixed(2)} LF`;
+      }
+      
+      const label = new Text(labelText, {
         left: centerX,
         top: centerY,
         fontSize: 12,
         fill: '#000000',
-        selectable: false,
-        evented: false,
-        excludeFromExport: true
+        selectable: true,
+        evented: true,
+        excludeFromExport: true,
+        lockMovementX: true,
+        lockMovementY: true,
+        lockRotation: true,
+        lockScalingX: true,
+        lockScalingY: true
       });
       (label as any).data = { measurementId, type: 'area' };
       
@@ -1240,9 +1736,14 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
         top: centerY,
         fontSize: 12,
         fill: '#000000',
-        selectable: false,
-        evented: false,
-        excludeFromExport: true
+        selectable: true,
+        evented: true,
+        excludeFromExport: true,
+        lockMovementX: true,
+        lockMovementY: true,
+        lockRotation: true,
+        lockScalingX: true,
+        lockScalingY: true
       });
       (label as any).data = { measurementId, type: 'volume' };
       
@@ -1253,6 +1754,8 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
     console.log('Measurement objects on canvas:', fabricCanvas.getObjects().filter(obj => (obj as any).data?.measurementId));
     fabricCanvas.renderAll();
     console.log('Canvas rendered after adding measurement');
+    
+    return measurementId;
   }, [selectedConditionId, conditions, internalScaleFactor, currentPage, getFileIdentifiers, addTakeoffMeasurement]);
 
   // Double-click handler for completing measurements
@@ -1314,17 +1817,7 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
           fabricCanvas.remove(tempLine);
         }
         
-        // Only re-enable PDF object interaction if we're exiting measuring mode
-        if (!isMeasuringRef.current) {
-          const pdfImage = fabricCanvas.getObjects().find(obj => (obj as any).isPDF);
-          if (pdfImage) {
-            console.log('Re-enabling PDF object interaction after measurement completion');
-            pdfImage.set({
-              selectable: true,
-              evented: true
-            });
-          }
-        }
+        // PDF is now fixed position, no need to re-enable interaction
         
         fabricCanvas.renderAll();
       }
@@ -1364,44 +1857,36 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
       return;
     }
     
-    // Check if we clicked on the PDF image (only when not calibrating/measuring)
-    if (activeObject && (activeObject as any).isPDF) {
-      // If we're in measuring mode, don't allow PDF manipulation
-      if (currentIsMeasuring || currentIsCalibrating) {
-        console.log('Clicked on PDF while measuring/calibrating, handling as measurement click');
-        const pointer = fabricCanvas.getPointer(options.e);
-        // getPointer() already returns coordinates relative to the canvas, no need to transform
-        handleMeasurementClick(pointer.x, pointer.y);
-        return;
-      } else {
-        // Clicked on PDF - let Fabric.js handle manipulation
-        console.log('Clicked on PDF, allowing Fabric.js to handle manipulation');
-        return;
-      }
-    }
-    
-    // Start panning the canvas viewport
+    // Always start panning when clicking on empty space or PDF (since PDF is non-interactive)
     console.log('Starting canvas panning');
     setIsDragging(true);
     setDragStart({ 
       x: options.e.clientX, 
       y: options.e.clientY 
     });
+    
+    // Prevent default behavior to ensure panning works
+    options.e.preventDefault();
   }, [handleMeasurementClick]);
 
   const handleFabricMouseMove = useCallback((options: any) => {
     if (isDragging) {
-      // Handle canvas viewport panning
+      // Handle canvas viewport panning with smooth movement
       const deltaX = options.e.clientX - dragStart.x;
       const deltaY = options.e.clientY - dragStart.y;
       
       const fabricCanvas = fabricCanvasRef.current!;
       const vpt = fabricCanvas.viewportTransform;
-      if (vpt) {
-        vpt[4] += deltaX;
-        vpt[5] += deltaY;
-        fabricCanvas.setViewportTransform(vpt);
+      if (vpt && vpt.length >= 6) {
+        // Apply smooth panning with proper viewport transform
+        const newVpt: [number, number, number, number, number, number] = [
+          vpt[0], vpt[1], vpt[2], vpt[3], vpt[4] + deltaX, vpt[5] + deltaY
+        ];
+        fabricCanvas.setViewportTransform(newVpt);
         fabricCanvas.renderAll();
+        
+        // Reload measurements to update their positions
+        setTimeout(() => reloadMeasurements(), 50);
       }
       
       setDragStart({ x: options.e.clientX, y: options.e.clientY });
@@ -1671,6 +2156,9 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
         
         setZoom(newZoom);
         fabricCanvas.renderAll();
+        
+        // Reload measurements to update their positions
+        setTimeout(() => reloadMeasurements(), 50);
       }
     } else if (e.key === '-') {
       // Zoom out using viewport transform
@@ -1687,12 +2175,15 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
         
         setZoom(newZoom);
         fabricCanvas.renderAll();
+        
+        // Reload measurements to update their positions
+        setTimeout(() => reloadMeasurements(), 50);
       }
     } else if (e.key === '0') {
       // Reset zoom to fit screen
       fitToScreen();
     }
-  }, [fitToScreen, zoom, selectedMeasurementId, deleteSelectedMeasurement]);
+  }, [fitToScreen, zoom, selectedMeasurementId, deleteSelectedMeasurement, reloadMeasurements]);
 
   if (isLoading) {
     return (
@@ -1749,6 +2240,9 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
                   fabricCanvas.zoomToPoint(zoomPoint, newZoom);
                   setZoom(newZoom);
                   fabricCanvas.renderAll();
+                  
+                  // Reload measurements to update their positions
+                  setTimeout(() => reloadMeasurements(), 50);
                 }
               }}
               className="px-2 py-1 rounded text-sm bg-gray-200 text-gray-700 hover:bg-gray-300"
@@ -1768,6 +2262,9 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
                   fabricCanvas.zoomToPoint(zoomPoint, newZoom);
                   setZoom(newZoom);
                   fabricCanvas.renderAll();
+                  
+                  // Reload measurements to update their positions
+                  setTimeout(() => reloadMeasurements(), 50);
                 }
               }}
               className="px-2 py-1 rounded text-sm bg-gray-200 text-gray-700 hover:bg-gray-300"
@@ -1842,6 +2339,150 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
             maxHeight: 'none'
           }}
         />
+        
+        {/* Transparent overlay for panning when not measuring */}
+        {!isMeasuring && !isCalibrating && (
+          <div
+            className="absolute inset-0 z-10"
+            onMouseDown={(e) => {
+              console.log('Overlay mouse down:', e.button, e.clientX, e.clientY);
+              if (e.button === 0) {
+                console.log('Overlay: Starting pan');
+                setIsDragging(true);
+                setDragStart({ x: e.clientX, y: e.clientY });
+                e.preventDefault();
+                e.stopPropagation();
+              }
+            }}
+            onMouseUp={(e) => {
+              console.log('Overlay mouse up:', e.button);
+              if (e.button === 0) {
+                console.log('Overlay: Stopping pan');
+                setIsDragging(false);
+                e.preventDefault();
+                e.stopPropagation();
+              }
+            }}
+            onMouseMove={(e) => {
+              if (isDragging) {
+                console.log('Overlay mouse move - panning');
+                const deltaX = e.clientX - dragStart.x;
+                const deltaY = e.clientY - dragStart.y;
+                
+                if (fabricCanvasRef.current) {
+                  const fabricCanvas = fabricCanvasRef.current;
+                  const vpt = fabricCanvas.viewportTransform;
+                  if (vpt && vpt.length >= 6) {
+                    const newVpt: [number, number, number, number, number, number] = [
+                      vpt[0], vpt[1], vpt[2], vpt[3], vpt[4] + deltaX, vpt[5] + deltaY
+                    ];
+                    fabricCanvas.setViewportTransform(newVpt);
+                    fabricCanvas.renderAll();
+                    
+                    // Reload measurements to update their positions
+                    setTimeout(() => reloadMeasurements(), 50);
+                  }
+                }
+                
+                setDragStart({ x: e.clientX, y: e.clientY });
+                e.preventDefault();
+                e.stopPropagation();
+              }
+            }}
+            onWheel={(e) => {
+              console.log('=== OVERLAY WHEEL EVENT ===');
+              console.log('Event details:', { 
+                deltaY: e.deltaY, 
+                deltaX: e.deltaX, 
+                shiftKey: e.shiftKey, 
+                ctrlKey: e.ctrlKey, 
+                metaKey: e.metaKey,
+                type: e.type,
+                target: e.target
+              });
+              
+              e.preventDefault();
+              e.stopPropagation();
+              
+              if (!fabricCanvasRef.current) {
+                console.log('No fabric canvas ref available');
+                return;
+              }
+              
+              const fabricCanvas = fabricCanvasRef.current;
+              console.log('Fabric canvas available, current zoom:', fabricCanvas.getZoom());
+              
+              if (e.ctrlKey || e.metaKey) {
+                // Ctrl/Cmd + Wheel: Zoom
+                console.log('Overlay: Zooming with Ctrl/Cmd + wheel');
+                const delta = e.deltaY > 0 ? 0.9 : 1.1;
+                const currentZoom = fabricCanvas.getZoom();
+                const newZoom = Math.max(0.1, Math.min(5, currentZoom * delta));
+                
+                // Get mouse position relative to canvas
+                const rect = fabricCanvas.getElement().getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+                
+                // Zoom towards mouse position
+                const zoomPoint = new fabric.Point(mouseX, mouseY);
+                fabricCanvas.zoomToPoint(zoomPoint, newZoom);
+                
+                setZoom(newZoom);
+                fabricCanvas.renderAll();
+                
+                // Reload measurements to update their positions
+                setTimeout(() => reloadMeasurements(), 50);
+                
+              } else if (e.shiftKey) {
+                // Shift + Wheel: Pan horizontally
+                console.log('Overlay: Horizontal panning with Shift + wheel, deltaY:', e.deltaY);
+                const panDelta = e.deltaY * 0.5;
+                console.log('Calculated panDelta:', panDelta);
+                
+                const vpt = fabricCanvas.viewportTransform;
+                console.log('Current viewport transform:', vpt);
+                
+                if (vpt && vpt.length >= 6) {
+                  const newVpt: [number, number, number, number, number, number] = [
+                    vpt[0], vpt[1], vpt[2], vpt[3], vpt[4] - panDelta, vpt[5]
+                  ];
+                  console.log('New viewport transform:', newVpt);
+                  
+                  fabricCanvas.setViewportTransform(newVpt);
+                  fabricCanvas.renderAll();
+                  
+                  // Reload measurements to update their positions
+                  setTimeout(() => reloadMeasurements(), 50);
+                  
+                  console.log('Horizontal pan applied successfully');
+                } else {
+                  console.log('Invalid viewport transform');
+                }
+              } else {
+                // Regular Wheel: Pan vertically (up/down)
+                console.log('Overlay: Vertical panning with regular wheel');
+                const panDelta = e.deltaY * 0.5;
+                const vpt = fabricCanvas.viewportTransform;
+                if (vpt && vpt.length >= 6) {
+                  const newVpt: [number, number, number, number, number, number] = [
+                    vpt[0], vpt[1], vpt[2], vpt[3], vpt[4], vpt[5] - panDelta
+                  ];
+                  fabricCanvas.setViewportTransform(newVpt);
+                  fabricCanvas.renderAll();
+                  
+                  // Reload measurements to update their positions
+                  setTimeout(() => reloadMeasurements(), 50);
+                }
+              }
+            }}
+            style={{
+              cursor: isDragging ? 'grabbing' : 'grab',
+              pointerEvents: 'auto',
+              backgroundColor: 'transparent'
+            }}
+          />
+        )}
       </div>
       
       {/* Status messages */}
@@ -1860,6 +2501,7 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
            'Click to place measurement points'}
         </div>
       )}
+      
       
       {isCalibrating && (
         <div className="absolute bottom-4 left-4 bg-green-100 text-green-800 px-3 py-2 rounded text-sm">
@@ -1911,14 +2553,7 @@ const FabricPDFViewer: React.FC<FabricPDFViewerProps> = ({
               fabricCanvas.remove(tempLine);
             }
             
-            // Re-enable PDF object interaction
-            const pdfImage = fabricCanvas.getObjects().find(obj => (obj as any).isPDF);
-            if (pdfImage) {
-              pdfImage.set({
-                selectable: true,
-                evented: true
-              });
-            }
+            // PDF is now fixed position, no need to re-enable interaction
             
             fabricCanvas.renderAll();
           }
