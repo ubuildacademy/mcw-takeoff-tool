@@ -83,11 +83,21 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect }: T
 
   const handleDuplicateCondition = (condition: TakeoffCondition) => {
     const { id, ...conditionWithoutId } = condition;
+    
+    // Generate a random color from a curated palette
+    const colors = [
+      '#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4', '#feca57',
+      '#ff9ff3', '#54a0ff', '#5f27cd', '#00d2d3', '#ff9f43',
+      '#10ac84', '#ee5a24', '#0984e3', '#6c5ce7', '#a29bfe',
+      '#fd79a8', '#fdcb6e', '#e17055', '#74b9ff', '#00b894'
+    ];
+    const randomColor = colors[Math.floor(Math.random() * colors.length)];
+    
     const newCondition = {
       ...conditionWithoutId,
       projectId,
       name: `${condition.name} (Copy)`,
-      color: `#${Math.floor(Math.random()*16777215).toString(16)}` // Random color
+      color: randomColor
     };
     addCondition(newCondition);
   };

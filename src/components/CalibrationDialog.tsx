@@ -121,7 +121,13 @@ const CalibrationDialog: React.FC<CalibrationDialogProps> = ({
                 Calibration Mode Active
               </p>
               <p className="text-xs text-yellow-600 mt-1">
-                Click two points on the PDF to draw a line of {parseDistance(knownDistance).toFixed(3)} {unit}
+                Click two points on the PDF to draw a line representing {parseDistance(knownDistance).toFixed(3)} {unit}
+              </p>
+              <p className="text-xs text-yellow-600 mt-1">
+                • First click: Place point 1<br/>
+                • Second click: Place point 2<br/>
+                • A red line will appear showing the measured distance<br/>
+                • Press Escape to cancel
               </p>
             </div>
           )}
