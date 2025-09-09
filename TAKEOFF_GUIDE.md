@@ -17,9 +17,10 @@ The takeoff functionality allows you to measure and calculate quantities from PD
 ### 2. Drawing Takeoffs
 
 #### Linear Measurements
-- Click two points on the PDF
-- The measurement automatically completes
-- Hold Shift while clicking the second point for straight horizontal/vertical lines
+- Click to place points along the line you want to measure
+- Continue clicking to add more points to create line segments
+- Double-click to end the current line segment and complete the measurement
+- The total length of all segments is calculated and displayed
 - Results show in the selected unit (e.g., feet, meters)
 
 #### Area Measurements

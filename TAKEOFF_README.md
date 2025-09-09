@@ -38,9 +38,10 @@ The Meridian Takeoff application now includes comprehensive takeoff functionalit
 ### 2. **Drawing Takeoffs**
 
 #### Linear Measurements
-- Click once to place the first point
-- Click again to place the second point
-- The measurement automatically completes and displays the calculated value
+- Click to place points along the line you want to measure
+- Continue clicking to add more points to create line segments
+- Double-click to end the current line segment and complete the measurement
+- The total length of all segments is calculated and displayed
 
 #### Area Measurements
 - Click multiple points to define the area boundary
