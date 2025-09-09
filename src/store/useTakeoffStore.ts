@@ -27,6 +27,7 @@ interface TakeoffCondition {
   wasteFactor: number;
   color: string;
   description: string;
+  includePerimeter?: boolean; // For area measurements, include perimeter calculation
 }
 
 interface Measurement {
@@ -63,6 +64,8 @@ interface TakeoffMeasurement {
   pdfCoordinates: Array<{ x: number; y: number }>; // PDF-relative coordinates (0-1 scale)
   conditionColor: string;
   conditionName: string;
+  // Perimeter data for area measurements
+  perimeterValue?: number; // Perimeter in linear feet
 }
 
 interface TakeoffStore {

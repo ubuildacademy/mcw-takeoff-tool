@@ -26,12 +26,16 @@ import { fileService } from '../services/apiService';
 
 interface TakeoffCondition {
   id: string;
+  projectId: string;
   name: string;
   type: 'area' | 'volume' | 'linear' | 'count';
   unit: string;
   wasteFactor: number;
   color: string;
   description: string;
+  laborCost?: number;
+  materialCost?: number;
+  tools?: string[];
 }
 
 interface Sheet {

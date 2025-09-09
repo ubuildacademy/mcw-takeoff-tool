@@ -19,6 +19,7 @@ import { CreateConditionDialog } from './CreateConditionDialog';
 
 interface TakeoffCondition {
   id: string;
+  projectId: string;
   name: string;
   type: 'area' | 'volume' | 'linear' | 'count';
   unit: string;
@@ -42,16 +43,21 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect }: T
   const [loading, setLoading] = useState(true);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
 
-  const { addCondition, conditions, setSelectedCondition, selectedConditionId, getConditionTakeoffMeasurements } = useTakeoffStore();
+  const { addCondition, conditions, setSelectedCondition, selectedConditionId, getConditionTakeoffMeasurements, loadProjectConditions } = useTakeoffStore();
 
   useEffect(() => {
-    // Conditions are now loaded from the store
+    // Load conditions for this project when projectId changes
+    if (projectId) {
+      loadProjectConditions(projectId);
+    }
     setLoading(false);
-  }, []);
+  }, [projectId, loadProjectConditions]);
 
   const filteredConditions = conditions.filter(condition =>
-    condition.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    condition.description.toLowerCase().includes(searchQuery.toLowerCase())
+    condition.projectId === projectId && (
+      condition.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      condition.description.toLowerCase().includes(searchQuery.toLowerCase())
+    )
   );
 
   const handleConditionClick = (condition: TakeoffCondition) => {
