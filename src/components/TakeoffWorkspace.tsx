@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { useParams, useNavigate } from 'react-router-dom';
 import PDFViewerWithAnnotations from './PDFViewerWithAnnotations';
+import SimplePDFViewer from './SimplePDFViewer';
 import { TakeoffSidebar } from './TakeoffSidebar';
 import { SheetSidebar } from './SheetSidebar';
 
@@ -241,7 +242,7 @@ export function TakeoffWorkspace() {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-background">
+    <div className="app-shell h-screen flex flex-col bg-background">
       {/* Top Navigation Bar */}
       <div className="flex items-center justify-between p-4 border-b bg-muted/30">
         {/* Left side - Navigation and Project Info */}
@@ -356,18 +357,17 @@ export function TakeoffWorkspace() {
         </div>
 
         {/* PDF Viewer */}
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex-1 flex flex-col min-h-0">
           {currentPdfFile ? (
-            <PDFViewerWithAnnotations 
+            <SimplePDFViewer 
               file={currentPdfFile}
               onCalibrationRequest={() => {
-                // Calibration is now handled internally by the PDFViewerWithAnnotations
-                console.log('Calibration is now handled internally');
+                console.log('Calibration requested');
               }}
-              className="w-full h-full"
+              className="flex-1 min-h-0"
             />
           ) : (
-            <div className="flex items-center justify-center h-full bg-gray-100">
+            <div className="flex items-center justify-center flex-1 bg-gray-100">
               <div className="text-gray-500">No PDF file selected</div>
             </div>
           )}

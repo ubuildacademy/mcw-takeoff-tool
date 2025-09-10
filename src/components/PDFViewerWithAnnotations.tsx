@@ -180,7 +180,8 @@ const PDFViewerWithAnnotations: React.FC<PDFViewerWithAnnotationsProps> = ({
         shiftKey: event.shiftKey, 
         deltaY: event.deltaY, 
         deltaX: event.deltaX,
-        passive: event.defaultPrevented
+        target: event.target,
+        currentTarget: event.currentTarget
       });
       
       // Zoom with Ctrl/Cmd + wheel
@@ -189,21 +190,20 @@ const PDFViewerWithAnnotations: React.FC<PDFViewerWithAnnotationsProps> = ({
         console.log('Handling zoom wheel event');
         
         const rect = container.getBoundingClientRect();
-        const mouseX = event.clientX - rect.left + container.scrollLeft;
-        const mouseY = event.clientY - rect.top + container.scrollTop;
+        const anchorX = event.clientX - rect.left + container.scrollLeft;
+        const anchorY = event.clientY - rect.top + container.scrollTop;
         
         const ZOOM_STEP = 1.1;
         const MIN_SCALE = 0.25;
         const MAX_SCALE = 8;
-        const dir = event.deltaY < 0 ? 1 : -1;
-        const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, viewState.scale * (dir > 0 ? ZOOM_STEP : 1/ZOOM_STEP)));
+        const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, viewState.scale * (event.deltaY < 0 ? ZOOM_STEP : 1/ZOOM_STEP)));
         
         if (next === viewState.scale) return;
         
         const k = next / viewState.scale;
         // Keep cursor point anchored by adjusting scroll offsets
-        container.scrollLeft = (container.scrollLeft + mouseX) * k - mouseX;
-        container.scrollTop = (container.scrollTop + mouseY) * k - mouseY;
+        container.scrollLeft = (container.scrollLeft + anchorX) * k - anchorX;
+        container.scrollTop = (container.scrollTop + anchorY) * k - anchorY;
         
         console.log('Zoom update:', { from: viewState.scale, to: next, k, scrollLeft: container.scrollLeft, scrollTop: container.scrollTop });
         setViewState(prev => ({ ...prev, scale: next }));
@@ -221,8 +221,8 @@ const PDFViewerWithAnnotations: React.FC<PDFViewerWithAnnotationsProps> = ({
         return;
       }
       
-      // Default: vertical scroll (do not preventDefault - let browser handle it)
-      console.log('Allowing native vertical scroll');
+      // Default: vertical scroll - DO NOT preventDefault, let browser handle it natively
+      console.log('Allowing native vertical scroll - no preventDefault');
     };
 
     container.addEventListener('wheel', handleWheelNonPassive, { passive: false });
@@ -269,73 +269,126 @@ const PDFViewerWithAnnotations: React.FC<PDFViewerWithAnnotationsProps> = ({
       const containerWidth = container.clientWidth;
       const containerHeight = container.clientHeight;
       
+      console.log('=== CONTAINER DEBUG ===');
       console.log('Container client dimensions:', { containerWidth, containerHeight });
+      console.log('Container offset dimensions:', { offsetWidth: container.offsetWidth, offsetHeight: container.offsetHeight });
+      console.log('Container scroll dimensions:', { scrollWidth: container.scrollWidth, scrollHeight: container.scrollHeight });
+      console.log('Container computed styles:', {
+        height: getComputedStyle(container).height,
+        minHeight: getComputedStyle(container).minHeight,
+        maxHeight: getComputedStyle(container).maxHeight,
+        overflow: getComputedStyle(container).overflow
+      });
       
       // Get the base viewport at scale 1
       const baseViewport = page.getViewport({ scale: 1 });
       console.log('Base viewport:', { width: baseViewport.width, height: baseViewport.height });
       
-      // Calculate scale to fit the container (fit-to-page mode)
+      // Calculate scale to fit the container width (allow height to overflow for scrolling)
       const scaleX = containerWidth / baseViewport.width;
       const scaleY = containerHeight / baseViewport.height;
-      const fitScale = Math.min(scaleX, scaleY); // Use full container size
+      // Use width-based scaling to allow vertical scrolling
+      const fitScale = scaleX;
       
       // Apply user zoom on top of the fit scale
       const finalScale = fitScale * viewState.scale;
       
-      console.log('Scale calculations:', { scaleX, scaleY, fitScale, finalScale });
+      console.log('Scale calculation (width-based for scrolling):', { 
+        baseViewport: { width: baseViewport.width, height: baseViewport.height },
+        container: { width: containerWidth, height: containerHeight },
+        scaleX, scaleY, fitScale, finalScale,
+        note: 'Using width-based scaling to allow vertical scrolling'
+      });
       
-      // Calculate viewport with the final scale
+      // Calculate viewport with the final scale - this determines the actual PDF content size
       const viewport = page.getViewport({ 
         scale: finalScale
+      });
+      
+      console.log('Viewport after scale:', { 
+        width: viewport.width, 
+        height: viewport.height,
+        originalBase: { width: baseViewport.width, height: baseViewport.height }
       });
       
       console.log('Final viewport:', { width: viewport.width, height: viewport.height });
       
       viewportRef.current = viewport;
       
-      // Set canvas to match PDF content size
+      // Set canvas to match PDF content size exactly - this is the key fix
       const cssWidth = Math.floor(viewport.width);
       const cssHeight = Math.floor(viewport.height);
       
-      // Ensure canvas is at least as large as container for proper viewport filling
-      // but allow it to be larger for scrolling when zoomed
-      const finalWidth = Math.max(cssWidth, containerWidth);
-      const finalHeight = Math.max(cssHeight, containerHeight);
+      console.log('Canvas sizing:', { 
+        viewport: { width: viewport.width, height: viewport.height },
+        css: { width: cssWidth, height: cssHeight },
+        container: { width: containerWidth, height: containerHeight },
+        shouldScroll: cssWidth > containerWidth || cssHeight > containerHeight
+      });
+      
+      // CRITICAL: Ensure we're using the scaled viewport dimensions
+      console.log('Using scaled viewport for canvas:', { 
+        scaledWidth: viewport.width, 
+        scaledHeight: viewport.height,
+        baseWidth: baseViewport.width,
+        baseHeight: baseViewport.height
+      });
       
       // Set canvas pixel dimensions (for HiDPI)
-      const pixelWidth = finalWidth * devicePixelRatio;
-      const pixelHeight = finalHeight * devicePixelRatio;
+      const pixelWidth = cssWidth * devicePixelRatio;
+      const pixelHeight = cssHeight * devicePixelRatio;
       
       // Check for maximum canvas size (GPU texture limits)
       const maxCanvasSize = 16384; // Conservative limit
       if (pixelWidth > maxCanvasSize || pixelHeight > maxCanvasSize) {
         console.warn('Canvas size exceeds GPU limits, capping zoom');
-        const scaleLimit = Math.min(maxCanvasSize / finalWidth, maxCanvasSize / finalHeight);
-        const limitedCssWidth = finalWidth * scaleLimit;
-        const limitedCssHeight = finalHeight * scaleLimit;
+        const scaleLimit = Math.min(maxCanvasSize / cssWidth, maxCanvasSize / cssHeight);
+        const limitedCssWidth = cssWidth * scaleLimit;
+        const limitedCssHeight = cssHeight * scaleLimit;
         
         canvas.style.width = `${limitedCssWidth}px`;
         canvas.style.height = `${limitedCssHeight}px`;
-        canvas.style.transform = 'none'; // Ensure idle transform is identity
+        canvas.style.transform = 'none'; // CRITICAL: Ensure idle transform is identity
         canvas.width = limitedCssWidth * devicePixelRatio;
         canvas.height = limitedCssHeight * devicePixelRatio;
       } else {
-        // Set CSS dimensions to match PDF content
-        canvas.style.width = `${finalWidth}px`;
-        canvas.style.height = `${finalHeight}px`;
-        canvas.style.transform = 'none'; // Ensure idle transform is identity
+        // Set CSS dimensions to match PDF content exactly
+        canvas.style.width = `${cssWidth}px`;
+        canvas.style.height = `${cssHeight}px`;
+        canvas.style.transform = 'none'; // CRITICAL: Ensure idle transform is identity
         
         // Then set pixel dimensions for HiDPI
         canvas.width = pixelWidth;
         canvas.height = pixelHeight;
+        
+        console.log('Canvas set to:', { 
+          cssWidth, cssHeight, pixelWidth, pixelHeight,
+          actualCanvasWidth: canvas.style.width,
+          actualCanvasHeight: canvas.style.height
+        });
+        
+        // CRITICAL: Force the canvas to the correct size if it was overridden
+        if (parseFloat(canvas.style.height) !== cssHeight) {
+          console.warn('Canvas height was overridden, forcing correct size');
+          canvas.style.height = `${cssHeight}px`;
+        }
       }
+      
+      // CRITICAL: Reset any leftover transforms - scroll container owns pan at idle
+      canvas.style.transform = 'none';
+      
+      // Verify canvas dimensions after setting
+      console.log('Canvas dimensions after setting:', {
+        styleWidth: canvas.style.width,
+        styleHeight: canvas.style.height,
+        offsetWidth: canvas.offsetWidth,
+        offsetHeight: canvas.offsetHeight
+      });
       
       console.log('Canvas dimensions:', { 
         container: `${containerWidth}x${containerHeight}`,
         viewport: `${cssWidth}x${cssHeight}`,
-        final: `${finalWidth}x${finalHeight}`,
-        shouldScroll: finalWidth > containerWidth || finalHeight > containerHeight
+        shouldScroll: cssWidth > containerWidth || cssHeight > containerHeight
       });
       
       // Set annotation canvas size to match
@@ -371,8 +424,9 @@ const PDFViewerWithAnnotations: React.FC<PDFViewerWithAnnotationsProps> = ({
       if (containerRef.current) {
         const pageWrap = containerRef.current.querySelector('.pdf-page-wrap') as HTMLElement;
         if (pageWrap) {
-          pageWrap.style.width = `${finalWidth}px`;
-          pageWrap.style.height = `${finalHeight}px`;
+          pageWrap.style.width = `${cssWidth}px`;
+          pageWrap.style.height = `${cssHeight}px`;
+          console.log('Page wrap set to:', { width: pageWrap.style.width, height: pageWrap.style.height });
         }
       }
       
@@ -380,15 +434,27 @@ const PDFViewerWithAnnotations: React.FC<PDFViewerWithAnnotationsProps> = ({
       renderAnnotations();
       
       // Diagnostic: Check canvas transform at idle
-      console.log('Canvas transform at idle:', getComputedStyle(canvas).transform);
+      const computedTransform = getComputedStyle(canvas).transform;
+      console.log('Canvas transform at idle:', computedTransform);
+      if (computedTransform !== 'none' && computedTransform !== 'matrix(1, 0, 0, 1, 0, 0)') {
+        console.error('WARNING: Canvas transform is not identity at idle!', computedTransform);
+        // Force reset
+        canvas.style.transform = 'none';
+      }
       console.log('Container scroll state:', { 
         scrollLeft: container.scrollLeft, 
         scrollTop: container.scrollTop,
         scrollWidth: container.scrollWidth,
         scrollHeight: container.scrollHeight,
         clientWidth: container.clientWidth,
-        clientHeight: container.clientHeight
+        clientHeight: container.clientHeight,
+        canScroll: container.scrollWidth > container.clientWidth || container.scrollHeight > container.clientHeight
       });
+      
+      // Check if scrollbars should be visible
+      const hasVerticalScroll = container.scrollHeight > container.clientHeight;
+      const hasHorizontalScroll = container.scrollWidth > container.clientWidth;
+      console.log('Scrollbar status:', { hasVerticalScroll, hasHorizontalScroll });
       
     } catch (error: any) {
       if (error.name !== 'RenderingCancelledException') {
@@ -990,15 +1056,16 @@ const PDFViewerWithAnnotations: React.FC<PDFViewerWithAnnotationsProps> = ({
     }
   }, [measurements, renderAnnotations]);
 
-  // Handle mouse events for panning
-  const handleMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (isMeasuring || isCalibrating) return;
+  // Handle pointer events for panning - simplified to use scroll directly
+  const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (isMeasuring || isCalibrating || event.button !== 0) return;
     
     setIsDragging(true);
     setDragStart({ x: event.clientX, y: event.clientY });
     
     const container = containerRef.current;
     if (container) {
+      container.setPointerCapture(event.pointerId);
       setDragOriginScroll({ 
         left: container.scrollLeft, 
         top: container.scrollTop 
@@ -1006,7 +1073,7 @@ const PDFViewerWithAnnotations: React.FC<PDFViewerWithAnnotationsProps> = ({
     }
   };
 
-  const handleMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
+  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!isDragging || isMeasuring || isCalibrating) return;
     
     const container = containerRef.current;
@@ -1015,13 +1082,19 @@ const PDFViewerWithAnnotations: React.FC<PDFViewerWithAnnotationsProps> = ({
     const dx = event.clientX - dragStart.x;
     const dy = event.clientY - dragStart.y;
     
-    // Update scroll position directly
+    // Update scroll position directly - scroll container owns pan
     container.scrollLeft = dragOriginScroll.left - dx;
     container.scrollTop = dragOriginScroll.top - dy;
   };
 
-  const handleMouseUp = () => {
+  const handlePointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDragging) return;
+    
     setIsDragging(false);
+    const container = containerRef.current;
+    if (container) {
+      container.releasePointerCapture(event.pointerId);
+    }
   };
 
 
@@ -1092,7 +1165,7 @@ const PDFViewerWithAnnotations: React.FC<PDFViewerWithAnnotationsProps> = ({
   }
 
   return (
-    <div className={`relative h-full ${className}`}>
+    <div className={`viewer-pane flex flex-col h-full ${className}`} style={{ overflow: 'hidden', height: '100%' }}>
       {/* Navigation Controls */}
       <div className="absolute top-4 left-4 z-10 bg-white rounded-lg shadow-lg p-2 flex items-center gap-2">
         <button
@@ -1150,25 +1223,67 @@ const PDFViewerWithAnnotations: React.FC<PDFViewerWithAnnotationsProps> = ({
             const canvas = canvasRef.current;
             if (container && canvas) {
               // Force canvas to be much larger to test scrolling
-              canvas.style.width = `${container.clientWidth * 1.5}px`;
-              canvas.style.height = `${container.clientHeight * 3}px`; // Make it much taller
+              const newWidth = container.clientWidth * 1.5;
+              const newHeight = container.clientHeight * 2;
+              canvas.style.width = `${newWidth}px`;
+              canvas.style.height = `${newHeight}px`;
               const pageWrap = container.querySelector('.pdf-page-wrap') as HTMLElement;
               if (pageWrap) {
-                pageWrap.style.width = `${container.clientWidth * 1.5}px`;
-                pageWrap.style.height = `${container.clientHeight * 3}px`;
+                pageWrap.style.width = `${newWidth}px`;
+                pageWrap.style.height = `${newHeight}px`;
               }
-              console.log('Forced canvas to be 1.5x wide and 3x tall for testing');
+              console.log('Forced canvas to be larger for testing:', { newWidth, newHeight });
               console.log('Container scroll state after force:', {
                 scrollWidth: container.scrollWidth,
                 scrollHeight: container.scrollHeight,
                 clientWidth: container.clientWidth,
-                clientHeight: container.clientHeight
+                clientHeight: container.clientHeight,
+                canScroll: container.scrollWidth > container.clientWidth || container.scrollHeight > container.clientHeight
               });
             }
           }}
           className="px-2 py-1 bg-red-600 text-white rounded text-xs"
         >
           Force Scroll
+        </button>
+        <button
+          onClick={() => {
+            const container = containerRef.current;
+            if (container) {
+              console.log('=== SCROLL TEST ===');
+              console.log('Container element:', container);
+              console.log('Container classes:', container.className);
+              console.log('Container computed styles:', {
+                overflow: getComputedStyle(container).overflow,
+                height: getComputedStyle(container).height,
+                position: getComputedStyle(container).position,
+                width: getComputedStyle(container).width
+              });
+              console.log('Container dimensions:', {
+                scrollWidth: container.scrollWidth,
+                scrollHeight: container.scrollHeight,
+                clientWidth: container.clientWidth,
+                clientHeight: container.clientHeight,
+                canScroll: container.scrollWidth > container.clientWidth || container.scrollHeight > container.clientHeight
+              });
+              
+              // Test scrolling
+              console.log('Testing scroll...');
+              console.log('Before scroll:', { scrollTop: container.scrollTop, scrollHeight: container.scrollHeight, clientHeight: container.clientHeight });
+              container.scrollTop = 100;
+              setTimeout(() => {
+                console.log('After scroll test:', { scrollTop: container.scrollTop });
+                // Test if we can scroll to bottom
+                container.scrollTop = container.scrollHeight - container.clientHeight;
+                setTimeout(() => {
+                  console.log('After scroll to bottom:', { scrollTop: container.scrollTop, maxScroll: container.scrollHeight - container.clientHeight });
+                }, 100);
+              }, 100);
+            }
+          }}
+          className="px-2 py-1 bg-green-600 text-white rounded text-xs"
+        >
+          Test Scroll
         </button>
         <button
           onClick={() => {
@@ -1245,29 +1360,34 @@ const PDFViewerWithAnnotations: React.FC<PDFViewerWithAnnotationsProps> = ({
       {/* Canvas Container */}
       <div 
         ref={containerRef}
-        className="relative w-full h-full"
+        className="pdf-viewer-container"
         style={{ 
           cursor: isDragging ? 'grabbing' : (isMeasuring ? 'crosshair' : (isCalibrating ? 'crosshair' : 'grab')),
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minWidth: 0,
+          minHeight: 0,
+          scrollSnapType: 'none',
+          overflow: 'auto', // CRITICAL: Force overflow auto
           width: '100%',
           height: '100%',
-          position: 'relative',
-          overflow: 'auto',
-          display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'flex-start'
+          maxHeight: '100%', // CRITICAL: Constrain height to prevent expansion
+          flex: '1 1 0' // CRITICAL: Take available space but don't grow beyond it
         }}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
       >
         {/* PDF Page Wrap */}
-        <div className="pdf-page-wrap" style={{ position: 'relative', display: 'block' }}>
+        <div className="pdf-page-wrap" style={{ position: 'relative', display: 'inline-block' }}>
           {/* PDF Canvas */}
           <canvas
             ref={canvasRef}
             className="pdf-canvas"
             style={{
-              display: 'block'
+              display: 'block',
+              willChange: 'transform'
             }}
           />
           
