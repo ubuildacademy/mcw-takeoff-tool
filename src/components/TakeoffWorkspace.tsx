@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { useParams, useNavigate } from 'react-router-dom';
-import FabricPDFViewer from './FabricPDFViewer';
+import PDFViewerWithAnnotations from './PDFViewerWithAnnotations';
 import { TakeoffSidebar } from './TakeoffSidebar';
 import { SheetSidebar } from './SheetSidebar';
 
@@ -332,7 +332,7 @@ export function TakeoffWorkspace() {
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex">
         {/* Left Sidebar Toggle */}
         <div className="flex">
           {leftSidebarOpen && (
@@ -358,10 +358,10 @@ export function TakeoffWorkspace() {
         {/* PDF Viewer */}
         <div className="flex-1 flex flex-col min-w-0">
           {currentPdfFile ? (
-            <FabricPDFViewer 
+            <PDFViewerWithAnnotations 
               file={currentPdfFile}
               onCalibrationRequest={() => {
-                // This is now handled internally by the FabricPDFViewer
+                // Calibration is now handled internally by the PDFViewerWithAnnotations
                 console.log('Calibration is now handled internally');
               }}
               className="w-full h-full"
