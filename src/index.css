@@ -53,6 +53,9 @@
   * {
     @apply border-border;
   }
+  html, body, #root {
+    height: 100%;
+  }
   body {
     @apply bg-background text-foreground;
   }
@@ -75,6 +78,27 @@
 
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--foreground));
+}
+
+/* PDF Viewer Layout Fixes */
+.app-shell {
+  display: flex;
+  height: 100%;
+}
+
+.viewer-pane {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden; /* Prevent page-level scrolling */
+  position: relative;
+}
+
+.pdf-viewer-container {
+  width: 100%;
+  height: 100%;
+  overflow: auto; /* PDF content scrolls here */
+  position: relative;
 }
 
 
