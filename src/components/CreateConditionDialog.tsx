@@ -74,7 +74,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated }
     }
   };
 
-  const handleInputChange = (field: string, value: string | number) => {
+  const handleInputChange = (field: string, value: string | number | boolean) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 

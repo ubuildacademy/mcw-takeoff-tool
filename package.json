@@ -19,9 +19,9 @@
     "axios": "^1.6.2",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.0.0",
-    "fabric": "^6.7.1",
     "framer-motion": "^10.16.16",
     "lucide-react": "^0.294.0",
+    "pdf-annotate.js": "^1.0.0",
     "pdfjs-dist": "^5.4.149",
     "postcss": "^8.4.32",
     "react": "^18.2.0",
@@ -34,7 +34,6 @@
     "zustand": "^4.4.7"
   },
   "devDependencies": {
-    "@types/fabric": "^5.3.10",
     "@types/pdfjs-dist": "^2.10.377",
     "@typescript-eslint/eslint-plugin": "^6.13.0",
     "@typescript-eslint/parser": "^6.13.0",

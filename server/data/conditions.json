@@ -1,13 +1,1 @@
-[
-  {
-    "id": "834be16f-8bc1-4eba-b336-8fa4d6c13928",
-    "projectId": "demo-project-1",
-    "name": "Test Linear ",
-    "type": "linear",
-    "unit": "LF",
-    "wasteFactor": 2,
-    "color": "#e17055",
-    "description": "",
-    "createdAt": "2025-09-09T01:17:17.793Z"
-  }
-]
+[]
