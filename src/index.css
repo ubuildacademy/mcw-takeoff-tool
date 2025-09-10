@@ -55,6 +55,7 @@
   }
   html, body, #root {
     height: 100%;
+    overflow: hidden; /* Prevent page-level scrolling */
   }
   body {
     @apply bg-background text-foreground;
@@ -97,7 +98,14 @@
 .pdf-viewer-container {
   width: 100%;
   height: 100%;
-  overflow: auto; /* PDF content scrolls here */
+  overflow: hidden; /* Container doesn't scroll */
+  position: relative;
+}
+
+.pdf-viewer-container .canvas-container {
+  width: 100%;
+  height: 100%;
+  overflow: auto; /* Only this inner container scrolls */
   position: relative;
 }
 

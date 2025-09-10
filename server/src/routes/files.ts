@@ -131,6 +131,12 @@ router.post('/upload', upload.single('file'), async (req, res) => {
   }
 });
 
+// Get all files
+router.get('/', (req, res) => {
+  const files = storage.getFiles();
+  return res.json({ files });
+});
+
 router.get('/:fileId', (req, res) => {
   const { fileId } = req.params;
   const files = storage.getFiles();

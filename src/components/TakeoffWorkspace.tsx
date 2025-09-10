@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { useParams, useNavigate } from 'react-router-dom';
-import PDFViewerWithAnnotations from './PDFViewerWithAnnotations';
-import SimplePDFViewer from './SimplePDFViewer';
+import CleanPDFViewer from './CleanPDFViewer';
 import { TakeoffSidebar } from './TakeoffSidebar';
 import { SheetSidebar } from './SheetSidebar';
 
@@ -332,8 +331,8 @@ export function TakeoffWorkspace() {
         </div>
       </div>
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex">
+      {/* Main Content Area - Fixed height container */}
+      <div className="flex-1 flex min-h-0">
         {/* Left Sidebar Toggle */}
         <div className="flex">
           {leftSidebarOpen && (
@@ -356,15 +355,15 @@ export function TakeoffWorkspace() {
           </Button>
         </div>
 
-        {/* PDF Viewer */}
-        <div className="flex-1 flex flex-col min-h-0">
+        {/* PDF Viewer - Fixed height container */}
+        <div className="flex-1 flex flex-col h-full overflow-hidden">
           {currentPdfFile ? (
-            <SimplePDFViewer 
+            <CleanPDFViewer 
               file={currentPdfFile}
               onCalibrationRequest={() => {
                 console.log('Calibration requested');
               }}
-              className="flex-1 min-h-0"
+              className="h-full"
             />
           ) : (
             <div className="flex items-center justify-center flex-1 bg-gray-100">
