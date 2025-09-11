@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { useTakeoffStore } from '../store/useTakeoffStore';
 import CalibrationDialog from './CalibrationDialog';
@@ -7,9 +7,38 @@ import ScaleApplicationDialog from './ScaleApplicationDialog';
 // Configure PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
+interface SearchResult {
+  documentId: string;
+  pageNumber: number;
+  matches: Array<{
+    text: string;
+    context: string;
+    confidence: number;
+  }>;
+}
+
 interface CleanPDFViewerProps {
   file: File | string | any;
   className?: string;
+  // Control props
+  currentPage?: number;
+  totalPages?: number;
+  onPageChange?: (page: number) => void;
+  scale?: number;
+  onScaleChange?: (scale: number) => void;
+  onCalibrateScale?: () => void;
+  onClearAll?: () => void;
+  isPageCalibrated?: boolean;
+  scaleFactor?: number;
+  unit?: string;
+  onPDFLoaded?: (totalPages: number) => void;
+  // Expose calibration trigger
+  onCalibrationRequest?: () => void;
+  // Callback for calibration completion
+  onCalibrationComplete?: (isCalibrated: boolean, scaleFactor: number, unit: string) => void;
+  // Search results for highlighting
+  searchResults?: SearchResult[];
+  currentSearchQuery?: string;
 }
 
 interface Measurement {
@@ -25,20 +54,47 @@ interface Measurement {
 
 const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({ 
   file, 
-  className = '' 
+  className = '',
+  currentPage: externalCurrentPage,
+  totalPages: externalTotalPages,
+  onPageChange,
+  scale: externalScale,
+  onScaleChange,
+  onCalibrateScale,
+  onClearAll,
+  isPageCalibrated: externalIsPageCalibrated,
+  scaleFactor: externalScaleFactor,
+  unit: externalUnit,
+  onPDFLoaded,
+  onCalibrationRequest,
+  onCalibrationComplete,
+  searchResults = [],
+  currentSearchQuery = ''
 }) => {
   // Core PDF state
   const [pdfDocument, setPdfDocument] = useState<any>(null);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(0);
+  const [internalCurrentPage, setInternalCurrentPage] = useState(1);
+  const [internalTotalPages, setInternalTotalPages] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
   // View state - single source of truth
-  const [viewState, setViewState] = useState({ 
+  const [internalViewState, setInternalViewState] = useState({ 
     scale: 1, 
     rotation: 0
   });
+
+  // Use external props when available, fall back to internal state
+  const currentPage = externalCurrentPage ?? internalCurrentPage;
+  const totalPages = externalTotalPages ?? internalTotalPages;
+  
+  // Memoize viewState to prevent unnecessary re-renders
+  const viewState = useMemo(() => ({ 
+    scale: externalScale ?? internalViewState.scale, 
+    rotation: internalViewState.rotation 
+  }), [externalScale, internalViewState.scale, internalViewState.rotation]);
+
+  // No need to sync internal state with external props - just use them directly
   
   // Measurement state
   const [isMeasuring, setIsMeasuring] = useState(false);
@@ -78,6 +134,10 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
 
   // Load existing takeoff measurements for the current sheet
   const [localTakeoffMeasurements, setLocalTakeoffMeasurements] = useState<any[]>([]);
+  
+  // OCR data for search highlighting
+  const [ocrData, setOcrData] = useState<{[pageNumber: number]: any}>({});
+  const [searchHighlights, setSearchHighlights] = useState<{[pageNumber: number]: any[]}>({});
 
   // Convert PDF coordinates to canvas coordinates
   const pdfToCanvasCoords = useCallback((pdfCoords: { x: number; y: number }[]) => {
@@ -258,8 +318,19 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
         
         const pdf = await pdfjsLib.getDocument(pdfUrl).promise;
         setPdfDocument(pdf);
-        setTotalPages(pdf.numPages);
-        setCurrentPage(1);
+        
+        // Only update internal state if external props are not provided
+        if (externalTotalPages === undefined) {
+          setInternalTotalPages(pdf.numPages);
+        }
+        if (externalCurrentPage === undefined) {
+          setInternalCurrentPage(1);
+        }
+        
+        // Notify parent component of PDF loaded
+        if (onPDFLoaded) {
+          onPDFLoaded(pdf.numPages);
+        }
         
       } catch (error) {
         console.error('Error loading PDF:', error);
@@ -276,6 +347,42 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
   useEffect(() => {
     loadTakeoffMeasurements();
   }, [loadTakeoffMeasurements]);
+
+  // Process search results and create highlights
+  const processSearchResults = useCallback(() => {
+    if (!searchResults.length || !currentSearchQuery) {
+      setSearchHighlights({});
+      return;
+    }
+
+    console.log('🎯 Processing search results for highlighting:', searchResults);
+    
+    const highlights: {[pageNumber: number]: any[]} = {};
+    
+    searchResults.forEach(result => {
+      if (result.pageNumber === currentPage && result.matches.length > 0) {
+        // For now, we'll create simple highlight rectangles
+        // In a full implementation, you'd use the OCR word bounding boxes
+        highlights[result.pageNumber] = result.matches.map((match, index) => ({
+          id: `highlight-${index}`,
+          text: match.text,
+          context: match.context,
+          // Placeholder coordinates - in real implementation, use OCR word bboxes
+          x: 0.1 + (index * 0.1), // Spread highlights across page
+          y: 0.1 + (index * 0.05),
+          width: 0.3,
+          height: 0.02
+        }));
+      }
+    });
+    
+    setSearchHighlights(highlights);
+  }, [searchResults, currentSearchQuery, currentPage]);
+
+  // Update highlights when search results change
+  useEffect(() => {
+    processSearchResults();
+  }, [processSearchResults]);
 
   // Clean render function - no complex coordinate transformations
   const renderPage = useCallback(async (pageNum: number) => {
@@ -461,6 +568,14 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
             count: calibrationPoints.length
           });
           renderCalibrationPoints(context);
+        }
+        
+        // Draw search highlights
+        if (searchHighlights[currentPage] && searchHighlights[currentPage].length > 0) {
+          console.log('🎯 RENDER_ANNOTATIONS: Drawing search highlights', {
+            count: searchHighlights[currentPage].length
+          });
+          renderSearchHighlights(context);
         }
         
         console.log('✅ RENDER_ANNOTATIONS: All annotations drawn');
@@ -760,6 +875,40 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
     context.restore();
   };
 
+  // Render search highlights
+  const renderSearchHighlights = (context: CanvasRenderingContext2D) => {
+    if (!viewportRef.current || !searchHighlights[currentPage]) return;
+    
+    const viewport = viewportRef.current;
+    const highlights = searchHighlights[currentPage];
+    
+    context.save();
+    context.fillStyle = 'rgba(255, 255, 0, 0.3)'; // Semi-transparent yellow
+    context.strokeStyle = '#ffd700'; // Gold border
+    context.lineWidth = 2;
+    
+    highlights.forEach((highlight, index) => {
+      // Convert PDF-relative coordinates to canvas coordinates
+      const x = highlight.x * viewport.width;
+      const y = highlight.y * viewport.height;
+      const width = highlight.width * viewport.width;
+      const height = highlight.height * viewport.height;
+      
+      // Draw highlight rectangle
+      context.fillRect(x, y, width, height);
+      context.strokeRect(x, y, width, height);
+      
+      // Draw highlight number
+      context.fillStyle = '#ffd700';
+      context.font = 'bold 12px Arial';
+      context.textAlign = 'center';
+      context.fillText((index + 1).toString(), x + width/2, y + height/2 + 4);
+      context.fillStyle = 'rgba(255, 255, 0, 0.3)';
+    });
+    
+    context.restore();
+  };
+
   // Handle mouse move for preview rendering
   const handleCanvasMouseMove = useCallback((event: React.MouseEvent<HTMLCanvasElement>) => {
     console.log('🖱️ MOUSE_MOVE: Mouse move on canvas', { 
@@ -1008,11 +1157,16 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
     setPendingScaleData({ scaleFactor: newScaleFactor, unit });
     setShowScaleApplicationDialog(true);
     
+    // Notify parent component of calibration completion
+    if (onCalibrationComplete) {
+      onCalibrationComplete(true, newScaleFactor, unit);
+    }
+    
     // Clear calibration state
     setCalibrationPoints([]);
     setIsCalibrating(false);
     setCalibrationData(null);
-  }, [calibrationData]);
+  }, [calibrationData, onCalibrationComplete]);
 
   // Start calibration
   const startCalibration = useCallback((knownDistance: number, unit: string) => {
@@ -1057,11 +1211,16 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
       ));
       
       if (newScale !== viewState.scale) {
-        setViewState(prev => ({ ...prev, scale: newScale }));
+        // Use external scale change handler if available, otherwise update internal state
+        if (onScaleChange) {
+          onScaleChange(newScale);
+        } else {
+          setInternalViewState(prev => ({ ...prev, scale: newScale }));
+        }
       }
     }
     // If not Ctrl/Cmd, let the container handle normal scrolling
-  }, [viewState.scale]);
+  }, [viewState.scale, onScaleChange]);
 
   // Add wheel event listener
   useEffect(() => {
@@ -1186,6 +1345,40 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
     }
   }, [pdfDocument, currentPage]);
 
+  // Listen for calibration requests from parent component
+  useEffect(() => {
+    if (onCalibrationRequest) {
+      // Set up a way for the parent to trigger calibration
+      // We'll use a custom event or callback mechanism
+      const handleCalibrationRequest = () => {
+        console.log('Calibration requested from parent component');
+        setShowCalibrationDialog(true);
+      };
+      
+      // Store the handler so parent can call it
+      (window as any).triggerCalibration = handleCalibrationRequest;
+      
+      return () => {
+        delete (window as any).triggerCalibration;
+      };
+    }
+  }, [onCalibrationRequest]);
+
+  // Set up Clear All trigger for parent component
+  useEffect(() => {
+    const handleClearAllRequest = () => {
+      console.log('Clear all requested from parent component');
+      clearAllTakeoffMeasurements();
+    };
+    
+    // Store the handler so parent can call it
+    (window as any).triggerClearAll = handleClearAllRequest;
+    
+    return () => {
+      delete (window as any).triggerClearAll;
+    };
+  }, [clearAllTakeoffMeasurements]);
+
   // Calculate distance between two points
   const calculateDistance = (point1: { x: number; y: number }, point2: { x: number; y: number }) => {
     const dx = point2.x - point1.x;
@@ -1193,16 +1386,72 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
     return Math.sqrt(dx * dx + dy * dy);
   };
 
+  // Calculate scale to fit PDF in container
+  const calculateFitToWindowScale = useCallback(() => {
+    if (!pdfDocument || !containerRef.current) return 1;
+    
+    const container = containerRef.current;
+    const containerWidth = container.clientWidth - 32; // Account for padding
+    const containerHeight = container.clientHeight - 32; // Account for padding
+    
+    // Get the current page to calculate its dimensions
+    pdfDocument.getPage(currentPage).then((page: any) => {
+      const viewport = page.getViewport({ scale: 1 });
+      const pageWidth = viewport.width;
+      const pageHeight = viewport.height;
+      
+      // Calculate scale to fit both width and height
+      const scaleX = containerWidth / pageWidth;
+      const scaleY = containerHeight / pageHeight;
+      const fitScale = Math.min(scaleX, scaleY);
+      
+      // Apply the fit scale, but keep it within reasonable bounds
+      const finalScale = Math.max(0.1, Math.min(5, fitScale));
+      
+      // Use external scale change handler if available, otherwise update internal state
+      if (onScaleChange) {
+        onScaleChange(finalScale);
+      } else {
+        setInternalViewState(prev => ({ ...prev, scale: finalScale }));
+      }
+    }).catch((error: any) => {
+      console.error('Error calculating fit scale:', error);
+    });
+  }, [pdfDocument, currentPage, onScaleChange]);
+
+  // Set up Fit to Window trigger for parent component
+  useEffect(() => {
+    const handleFitToWindowRequest = () => {
+      console.log('Fit to window requested from parent component');
+      calculateFitToWindowScale();
+    };
+    
+    // Store the handler so parent can call it
+    (window as any).triggerFitToWindow = handleFitToWindowRequest;
+    
+    return () => {
+      delete (window as any).triggerFitToWindow;
+    };
+  }, [calculateFitToWindowScale]);
+
   // Navigation functions
   const goToPreviousPage = () => {
     if (currentPage > 1) {
-      setCurrentPage(prev => prev - 1);
+      if (onPageChange) {
+        onPageChange(currentPage - 1);
+      } else {
+        setInternalCurrentPage(prev => prev - 1);
+      }
     }
   };
 
   const goToNextPage = () => {
     if (currentPage < totalPages) {
-      setCurrentPage(prev => prev + 1);
+      if (onPageChange) {
+        onPageChange(currentPage + 1);
+      } else {
+        setInternalCurrentPage(prev => prev + 1);
+      }
     }
   };
 
@@ -1238,91 +1487,6 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
 
   return (
     <div className={`pdf-viewer-container h-full flex flex-col relative ${className}`}>
-      {/* Navigation Controls */}
-      <div className="absolute top-4 left-4 z-10 bg-white rounded-lg shadow-lg p-2 flex items-center gap-2">
-        <button
-          onClick={goToPreviousPage}
-          disabled={currentPage <= 1}
-          className="px-3 py-1 bg-blue-600 text-white rounded disabled:bg-gray-300 disabled:cursor-not-allowed"
-        >
-          Previous
-        </button>
-        <span className="px-3 py-1 bg-gray-100 rounded">
-          {currentPage} / {totalPages}
-        </span>
-        <button
-          onClick={goToNextPage}
-          disabled={currentPage >= totalPages}
-          className="px-3 py-1 bg-blue-600 text-white rounded disabled:bg-gray-300 disabled:cursor-not-allowed"
-        >
-          Next
-        </button>
-      </div>
-
-      {/* Zoom Controls */}
-      <div className="absolute top-4 right-4 z-10 bg-white rounded-lg shadow-lg p-2 flex items-center gap-2">
-        <button
-          onClick={() => {
-            setViewState(prev => ({
-              ...prev,
-              scale: Math.max(0.5, prev.scale - 0.1)
-            }));
-          }}
-          className="px-3 py-1 bg-blue-600 text-white rounded"
-        >
-          -
-        </button>
-        <span className="px-3 py-1 bg-gray-100 rounded min-w-[60px] text-center">
-          {Math.round(viewState.scale * 150)}%
-        </span>
-        <button
-          onClick={() => {
-            setViewState(prev => ({
-              ...prev,
-              scale: Math.min(5, prev.scale + 0.1)
-            }));
-          }}
-          className="px-3 py-1 bg-blue-600 text-white rounded"
-        >
-          +
-        </button>
-        <button
-          onClick={() => {
-            setViewState(prev => ({
-              ...prev,
-              scale: 1
-            }));
-          }}
-          className="px-2 py-1 bg-gray-600 text-white rounded text-xs"
-        >
-          Reset
-        </button>
-      </div>
-
-      {/* Calibration Controls */}
-      <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-10 bg-white rounded-lg shadow-lg p-2 flex items-center gap-2">
-        <button
-          onClick={() => setShowCalibrationDialog(true)}
-          className={`px-3 py-1 rounded text-sm ${
-            isPageCalibrated 
-              ? 'bg-green-600 text-white' 
-              : 'bg-yellow-600 text-white'
-          }`}
-        >
-          {isPageCalibrated ? 'Recalibrate' : 'Calibrate Scale'}
-        </button>
-        {isPageCalibrated && (
-          <span className="text-xs text-gray-600">
-            1px = {(scaleFactor * 0.0833).toFixed(4)} {unit}
-          </span>
-        )}
-        <button
-          onClick={clearAllTakeoffMeasurements}
-          className="px-3 py-1 rounded text-sm bg-red-600 text-white hover:bg-red-700"
-        >
-          Clear All
-        </button>
-      </div>
 
       {/* Interaction Status */}
       {(isMeasuring || isCalibrating) && (

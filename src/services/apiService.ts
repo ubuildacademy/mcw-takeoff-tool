@@ -48,6 +48,22 @@ export const fileService = {
       },
     });
 
+    // Automatically start OCR processing after successful upload
+    if (response.data.success && response.data.file) {
+      const { ocrService } = await import('./ocrService');
+      const pdfUrl = `http://localhost:4000/api/files/${response.data.file.id}`;
+      
+      // Start OCR processing in background (don't await)
+      ocrService.processDocument(response.data.file.id, pdfUrl)
+        .then(() => {
+          console.log(`✅ OCR processing completed for ${response.data.file.originalName}`);
+        })
+        .catch((error) => {
+          console.error(`❌ OCR processing failed for ${response.data.file.originalName}:`, error);
+          // Don't throw the error, just log it since OCR is optional
+        });
+    }
+
     return response.data;
   },
 
@@ -154,6 +170,51 @@ export const authService = {
 
   async getCurrentUser() {
     const response = await apiClient.get('/auth/me');
+    return response.data;
+  },
+};
+
+// Sheets service
+export const sheetService = {
+  async getProjectSheets(projectId: string) {
+    const response = await apiClient.get(`/sheets/project/${projectId}`);
+    return response.data;
+  },
+
+  async getSheet(sheetId: string) {
+    const response = await apiClient.get(`/sheets/${sheetId}`);
+    return response.data;
+  },
+
+  async updateSheet(sheetId: string, updates: any) {
+    const response = await apiClient.put(`/sheets/${sheetId}`, updates);
+    return response.data;
+  },
+
+  async processOCR(sheetId: string, pageNumbers: number[]) {
+    const response = await apiClient.post(`/sheets/${sheetId}/ocr`, { pageNumbers });
+    return response.data;
+  },
+
+  async configureTitleblock(documentId: string, titleblockConfig: any) {
+    const response = await apiClient.post(`/sheets/${documentId}/titleblock-config`, { titleblockConfig });
+    return response.data;
+  },
+
+  async extractSheetInfo(documentId: string, titleblockConfig: any) {
+    const response = await apiClient.post(`/sheets/${documentId}/extract-sheet-info`, { titleblockConfig });
+    return response.data;
+  },
+
+  async generateThumbnail(documentId: string, pageNumber: number) {
+    const response = await apiClient.post(`/sheets/${documentId}/thumbnail/${pageNumber}`);
+    return response.data;
+  },
+
+  async getThumbnail(documentId: string, pageNumber: number) {
+    const response = await apiClient.get(`/sheets/${documentId}/thumbnail/${pageNumber}`, {
+      responseType: 'blob'
+    });
     return response.data;
   },
 };
