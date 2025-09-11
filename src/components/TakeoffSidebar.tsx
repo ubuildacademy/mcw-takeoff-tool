@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { useTakeoffStore } from '../store/useTakeoffStore';
 import { CreateConditionDialog } from './CreateConditionDialog';
+import { formatFeetAndInches } from '../lib/utils';
 
 interface TakeoffCondition {
   id: string;
@@ -255,15 +256,38 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect }: T
                     <span>Color</span>
                   </div>
                   <span>Waste: {condition.wasteFactor}%</span>
-                  <span className="font-medium text-blue-600">
+                  <div className="font-medium text-blue-600">
                     {(() => {
                       console.log('Getting measurements for condition:', { projectId, conditionId: condition.id });
                       const measurements = getConditionTakeoffMeasurements(projectId, condition.id);
                       const totalValue = measurements.reduce((sum, m) => sum + m.calculatedValue, 0);
-                      console.log('Condition measurements:', { conditionId: condition.id, measurements, totalValue });
-                      return totalValue > 0 ? `${totalValue.toFixed(2)} ${condition.unit}` : '0';
+                      const totalPerimeter = measurements.reduce((sum, m) => sum + (m.perimeterValue || 0), 0);
+                      console.log('Condition measurements:', { conditionId: condition.id, measurements, totalValue, totalPerimeter });
+                      
+                      if (totalValue > 0) {
+                        // For linear measurements (feet), use feet and inches format
+                        if (condition.unit === 'ft' || condition.unit === 'feet') {
+                          return formatFeetAndInches(totalValue);
+                        }
+                        // For area measurements, show area and perimeter separately if perimeter exists
+                        if (condition.unit === 'SF' || condition.unit === 'sq ft') {
+                          return (
+                            <div className="space-y-1">
+                              <div>{totalValue.toFixed(0)} SF</div>
+                              {totalPerimeter > 0 && (
+                                <div className="text-xs text-gray-500">
+                                  {formatFeetAndInches(totalPerimeter)} LF
+                                </div>
+                              )}
+                            </div>
+                          );
+                        }
+                        // For other units, keep the original format
+                        return `${totalValue.toFixed(2)} ${condition.unit}`;
+                      }
+                      return '0';
                     })()}
-                  </span>
+                  </div>
                 </div>
               </div>
             ))

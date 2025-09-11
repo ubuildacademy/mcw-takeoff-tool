@@ -3,6 +3,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import { useTakeoffStore } from '../store/useTakeoffStore';
 import CalibrationDialog from './CalibrationDialog';
 import ScaleApplicationDialog from './ScaleApplicationDialog';
+import { formatFeetAndInches } from '../lib/utils';
 
 // Configure PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
@@ -50,6 +51,7 @@ interface Measurement {
   conditionId?: string;
   color: string;
   conditionName: string;
+  perimeterValue?: number; // Perimeter in linear feet for area measurements
 }
 
 const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({ 
@@ -83,6 +85,13 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
     scale: 1, 
     rotation: 0
   });
+  
+  // Track viewport dimensions for coordinate conversion dependencies
+  const [viewportDimensions, setViewportDimensions] = useState<{width: number, height: number} | null>(null);
+  
+  // Page-specific canvas system - each page gets its own canvas for takeoffs
+  const [pageCanvases, setPageCanvases] = useState<Map<number, HTMLCanvasElement>>(new Map());
+  const [currentPageCanvas, setCurrentPageCanvas] = useState<HTMLCanvasElement | null>(null);
 
   // Use external props when available, fall back to internal state
   const currentPage = externalCurrentPage ?? internalCurrentPage;
@@ -103,10 +112,15 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [mousePosition, setMousePosition] = useState<{ x: number; y: number } | null>(null);
   
-  // Scale calibration
-  const [scaleFactor, setScaleFactor] = useState(1);
-  const [isPageCalibrated, setIsPageCalibrated] = useState(false);
-  const [unit, setUnit] = useState('ft');
+  // Scale calibration - use external props when available, fall back to internal state
+  const [internalScaleFactor, setInternalScaleFactor] = useState(1);
+  const [internalIsPageCalibrated, setInternalIsPageCalibrated] = useState(false);
+  const [internalUnit, setInternalUnit] = useState('ft');
+  
+  // Use external calibration data when available
+  const scaleFactor = externalScaleFactor ?? internalScaleFactor;
+  const isPageCalibrated = externalIsPageCalibrated ?? internalIsPageCalibrated;
+  const unit = externalUnit ?? internalUnit;
   const [isCalibrating, setIsCalibrating] = useState(false);
   const [calibrationPoints, setCalibrationPoints] = useState<{ x: number; y: number }[]>([]);
   const [showCalibrationDialog, setShowCalibrationDialog] = useState(false);
@@ -129,7 +143,8 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
     addTakeoffMeasurement,
     getSelectedCondition,
     getSheetTakeoffMeasurements,
-    deleteTakeoffMeasurement
+    deleteTakeoffMeasurement,
+    loadProjectConditions
   } = useTakeoffStore();
 
   // Load existing takeoff measurements for the current sheet
@@ -141,7 +156,7 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
 
   // Convert PDF coordinates to canvas coordinates
   const pdfToCanvasCoords = useCallback((pdfCoords: { x: number; y: number }[]) => {
-    if (!viewportRef.current) {
+    if (!viewportRef.current || !viewportDimensions) {
       console.log('No viewport available for coordinate conversion');
       return pdfCoords;
     }
@@ -156,15 +171,16 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
       pdfCoords,
       viewport: { width: viewport.width, height: viewport.height },
       canvasCoords,
+      currentPage,
       timestamp: new Date().toISOString()
     });
     
     return canvasCoords;
-  }, []);
+  }, [currentPage, viewportDimensions?.width, viewportDimensions?.height]);
 
   // Convert canvas coordinates to PDF coordinates (0-1 scale)
   const canvasToPdfCoords = useCallback((canvasCoords: { x: number; y: number }[]) => {
-    if (!viewportRef.current) {
+    if (!viewportRef.current || !viewportDimensions) {
       console.log('No viewport available for coordinate conversion');
       return canvasCoords;
     }
@@ -182,7 +198,26 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
     });
     
     return pdfCoords;
-  }, []);
+  }, [viewportDimensions?.width, viewportDimensions?.height]);
+
+  // Debug function to show all measurements
+  const debugAllMeasurements = useCallback(() => {
+    if (!currentProjectId || !file?.id) return;
+    
+    const allMeasurements = getSheetTakeoffMeasurements(currentProjectId, file.id);
+    console.log('🐛 DEBUG_ALL_MEASUREMENTS:', {
+      currentPage,
+      fileId: file.id,
+      projectId: currentProjectId,
+      allMeasurements: allMeasurements.map(m => ({
+        id: m.id,
+        pdfPage: m.pdfPage,
+        conditionName: m.conditionName,
+        type: m.type,
+        points: m.points?.length || 0
+      }))
+    });
+  }, [currentProjectId, file?.id, currentPage, getSheetTakeoffMeasurements]);
 
   // Load takeoff measurements for current sheet and page
   const loadTakeoffMeasurements = useCallback(() => {
@@ -193,6 +228,9 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
       viewportAvailable: !!viewportRef.current,
       viewport: viewportRef.current ? { width: viewportRef.current.width, height: viewportRef.current.height } : null
     });
+    
+    // Debug all measurements first
+    debugAllMeasurements();
     
     if (!currentProjectId || !file?.id) {
       console.log('❌ LOAD_TAKEOFF_MEASUREMENTS: Missing required data', { currentProjectId, fileId: file?.id });
@@ -214,13 +252,31 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
     });
     
     // Filter measurements for current page
-    const pageMeasurements = sheetMeasurements.filter(m => m.pdfPage === currentPage);
+    const pageMeasurements = sheetMeasurements.filter(m => {
+      const matches = m.pdfPage === currentPage;
+      console.log('🔍 PAGE_FILTER: Checking measurement', {
+        measurementId: m.id,
+        measurementPage: m.pdfPage,
+        currentPage,
+        matches,
+        conditionName: m.conditionName
+      });
+      return matches;
+    });
     console.log('📄 LOAD_TAKEOFF_MEASUREMENTS: Page measurements', { 
       currentPage,
+      totalSheetMeasurements: sheetMeasurements.length,
       pageMeasurements: pageMeasurements.length,
-      measurements: pageMeasurements.map(m => ({
+      allMeasurementsWithPages: sheetMeasurements.map(m => ({
         id: m.id,
         type: m.type,
+        pdfPage: m.pdfPage,
+        conditionName: m.conditionName
+      })),
+      filteredMeasurements: pageMeasurements.map(m => ({
+        id: m.id,
+        type: m.type,
+        pdfPage: m.pdfPage,
         pdfCoords: m.pdfCoordinates,
         points: m.points
       }))
@@ -270,6 +326,7 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
     
     setLocalTakeoffMeasurements(renderableMeasurements);
   }, [currentProjectId, file?.id, currentPage, getSheetTakeoffMeasurements, pdfToCanvasCoords]);
+
 
   // Clear all takeoff measurements for current project
   const clearAllTakeoffMeasurements = useCallback(() => {
@@ -343,6 +400,14 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
     loadPDF();
   }, [file]);
 
+  // Load project conditions when project changes
+  useEffect(() => {
+    if (currentProjectId) {
+      console.log('🔄 LOADING_PROJECT_CONDITIONS: Loading conditions for project', { currentProjectId });
+      loadProjectConditions(currentProjectId);
+    }
+  }, [currentProjectId, loadProjectConditions]);
+
   // Load takeoff measurements when component mounts or dependencies change
   useEffect(() => {
     loadTakeoffMeasurements();
@@ -384,6 +449,28 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
     processSearchResults();
   }, [processSearchResults]);
 
+  // Load calibration data when external props change
+  useEffect(() => {
+    console.log('🔄 CALIBRATION_LOAD: External calibration props changed', {
+      externalScaleFactor,
+      externalIsPageCalibrated,
+      externalUnit,
+      currentPage,
+      fileId: file?.id
+    });
+    
+    // If external calibration data is provided, use it
+    if (externalScaleFactor !== undefined && externalIsPageCalibrated !== undefined && externalUnit !== undefined) {
+      console.log('✅ CALIBRATION_LOAD: Using external calibration data', {
+        scaleFactor: externalScaleFactor,
+        isPageCalibrated: externalIsPageCalibrated,
+        unit: externalUnit
+      });
+    } else {
+      console.log('⚠️ CALIBRATION_LOAD: No external calibration data, using internal state');
+    }
+  }, [externalScaleFactor, externalIsPageCalibrated, externalUnit, currentPage, file?.id]);
+
   // Clean render function - no complex coordinate transformations
   const renderPage = useCallback(async (pageNum: number) => {
     if (!pdfDocument || !canvasRef.current || !containerRef.current) return;
@@ -421,7 +508,27 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
         rotation: viewState.rotation
       });
       
+      console.log('🔄 VIEWPORT_CHANGE: Viewport updated', {
+        currentPage,
+        oldViewport: viewportRef.current ? {
+          width: viewportRef.current.width,
+          height: viewportRef.current.height
+        } : null,
+        newViewport: {
+          width: viewport.width,
+          height: viewport.height
+        },
+        finalScale,
+        viewState
+      });
+      
       viewportRef.current = viewport;
+      
+      // Update viewport dimensions state to trigger coordinate conversion function updates
+      setViewportDimensions({
+        width: viewport.width,
+        height: viewport.height
+      });
       
       // Set canvas size to match viewport
       const cssWidth = Math.floor(viewport.width);
@@ -452,9 +559,7 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
       // Re-render annotations
       renderAnnotations();
       
-      // Reload takeoff measurements with updated viewport
-      console.log('🔄 RENDER_PAGE: PDF render complete, reloading takeoff measurements');
-      loadTakeoffMeasurements();
+      // Note: takeoff measurements are now loaded in the page change effect with proper timing
       
     } catch (error: any) {
       if (error.name !== 'RenderingCancelledException') {
@@ -465,41 +570,51 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
     }
   }, [pdfDocument, viewState]);
 
-  // Clean annotation rendering
-  const renderAnnotations = useCallback(() => {
-    console.log('🎨 RENDER_ANNOTATIONS: Starting render...', {
-      canvasAvailable: !!canvasRef.current,
-      viewportAvailable: !!viewportRef.current,
-      pdfPageAvailable: !!pdfPageRef.current,
-      localTakeoffCount: localTakeoffMeasurements.length,
-      localMeasurementsCount: measurements.length,
-      currentMeasurementLength: currentMeasurement.length,
-      mousePosition,
-      isCalibrating,
-      calibrationPointsCount: calibrationPoints.length
-    });
+  // Get or create a canvas for a specific page
+  const getOrCreatePageCanvas = useCallback((pageNumber: number, width: number, height: number): HTMLCanvasElement => {
+    const existingCanvas = pageCanvases.get(pageNumber);
+    if (existingCanvas) {
+      // Update dimensions if they've changed
+      if (existingCanvas.width !== width || existingCanvas.height !== height) {
+        existingCanvas.width = width;
+        existingCanvas.height = height;
+      }
+      return existingCanvas;
+    }
+
+    // Create new canvas for this page
+    const newCanvas = document.createElement('canvas');
+    newCanvas.width = width;
+    newCanvas.height = height;
+    newCanvas.style.position = 'absolute';
+    newCanvas.style.top = '0';
+    newCanvas.style.left = '0';
+    newCanvas.style.pointerEvents = 'auto';
+    newCanvas.style.zIndex = '10';
     
+    // Store the canvas
+    setPageCanvases(prev => new Map(prev).set(pageNumber, newCanvas));
+    
+    console.log(`🎨 PAGE_CANVAS_CREATED: Created canvas for page ${pageNumber}`, { width, height });
+    return newCanvas;
+  }, [pageCanvases]);
+
+  // Clean annotation rendering - original logic but with page-specific takeoff canvas
+  const renderAnnotations = useCallback(() => {
     if (!canvasRef.current || !viewportRef.current) {
-      console.log('❌ RENDER_ANNOTATIONS: Missing canvas or viewport');
       return;
     }
     
     const canvas = canvasRef.current;
     const context = canvas.getContext('2d');
     if (!context) {
-      console.log('❌ RENDER_ANNOTATIONS: No canvas context found!');
       return;
     }
     
-    console.log('✅ RENDER_ANNOTATIONS: Canvas context found', { 
-      canvasWidth: canvas.width, 
-      canvasHeight: canvas.height,
-      styleWidth: canvas.style.width,
-      styleHeight: canvas.style.height,
-      viewport: {
-        width: viewportRef.current.width,
-        height: viewportRef.current.height
-      }
+    console.log('🎨 RENDER_ANNOTATIONS: Starting render', {
+      currentPage,
+      localTakeoffCount: localTakeoffMeasurements.length,
+      measurementsCount: measurements.length
     });
     
     // Clear previous annotations by re-rendering PDF
@@ -521,64 +636,30 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
       
       // Wait for PDF render to complete, then draw annotations
       renderTask.promise.then(() => {
-        console.log('📄 RENDER_ANNOTATIONS: PDF render complete, drawing annotations...');
-        
         // Draw takeoff measurements (persisted)
-        console.log('🎯 RENDER_ANNOTATIONS: Drawing persisted takeoff measurements', {
-          count: localTakeoffMeasurements.length,
-          measurements: localTakeoffMeasurements.map(m => ({
-            id: m.id,
-            type: m.type,
-            points: m.points,
-            color: m.color
-          }))
-        });
-        
-        localTakeoffMeasurements.forEach((measurement, index) => {
-          console.log(`📏 RENDER_ANNOTATIONS: Drawing measurement ${index + 1}/${localTakeoffMeasurements.length}`, {
-            id: measurement.id,
-            type: measurement.type,
-            points: measurement.points,
-            color: measurement.color
-          });
+        localTakeoffMeasurements.forEach((measurement) => {
           renderMeasurement(context, measurement);
         });
         
         // Draw local measurements (temporary)
-        console.log('🎯 RENDER_ANNOTATIONS: Drawing local measurements', {
-          count: measurements.length
-        });
         measurements.forEach(measurement => {
           renderMeasurement(context, measurement);
         });
         
         // Draw current measurement
         if (currentMeasurement.length > 0) {
-          console.log('🎯 RENDER_ANNOTATIONS: Drawing current measurement', {
-            length: currentMeasurement.length,
-            points: currentMeasurement,
-            mousePosition
-          });
           renderCurrentMeasurement(context);
         }
         
         // Draw calibration points
         if (isCalibrating && calibrationPoints.length > 0) {
-          console.log('🎯 RENDER_ANNOTATIONS: Drawing calibration points', {
-            count: calibrationPoints.length
-          });
           renderCalibrationPoints(context);
         }
         
         // Draw search highlights
         if (searchHighlights[currentPage] && searchHighlights[currentPage].length > 0) {
-          console.log('🎯 RENDER_ANNOTATIONS: Drawing search highlights', {
-            count: searchHighlights[currentPage].length
-          });
           renderSearchHighlights(context);
         }
-        
-        console.log('✅ RENDER_ANNOTATIONS: All annotations drawn');
       }).catch((error: any) => {
         if (error.name !== 'RenderingCancelledException') {
           console.error('❌ RENDER_ANNOTATIONS: Error in PDF render promise:', error);
@@ -587,27 +668,17 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
       
       context.restore();
     }
-  }, [localTakeoffMeasurements, measurements, currentMeasurement, measurementType, isCalibrating, calibrationPoints, mousePosition]);
+  }, [localTakeoffMeasurements, measurements, currentMeasurement, measurementType, isCalibrating, calibrationPoints, mousePosition, currentPage]);
+
 
   // Clean measurement rendering
   const renderMeasurement = (context: CanvasRenderingContext2D, measurement: Measurement) => {
-    console.log('🎨 RENDER_MEASUREMENT: Drawing measurement', {
-      id: measurement.id,
-      type: measurement.type,
-      points: measurement.points,
-      color: measurement.color,
-      calculatedValue: measurement.calculatedValue,
-      unit: measurement.unit
-    });
-    
     const points = measurement.points;
     if (points.length < 2) {
-      console.log('❌ RENDER_MEASUREMENT: Not enough points', { pointsLength: points.length });
       return;
     }
     
     if (!viewportRef.current) {
-      console.log('❌ RENDER_MEASUREMENT: No viewport available');
       return;
     }
     
@@ -617,13 +688,6 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
     context.strokeStyle = measurement.color;
     context.fillStyle = measurement.color + '40';
     context.lineWidth = 2;
-    
-    console.log('🎨 RENDER_MEASUREMENT: Canvas context set', {
-      strokeStyle: measurement.color,
-      fillStyle: measurement.color + '40',
-      lineWidth: 2,
-      viewport: { width: viewport.width, height: viewport.height }
-    });
     
     switch (measurement.type) {
       case 'linear':
@@ -641,10 +705,6 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
         }
         context.stroke();
         
-        console.log('🎨 RENDER_MEASUREMENT: Linear line drawn', {
-          points: points.map(p => ({ pdf: p, canvas: { x: p.x * viewport.width, y: p.y * viewport.height } }))
-        });
-        
         // Draw measurement text
         const midPoint = {
           x: (points[0].x + points[points.length - 1].x) / 2 * viewport.width,
@@ -652,7 +712,10 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
         };
         context.fillStyle = measurement.color;
         context.font = '12px Arial';
-        context.fillText(`${measurement.calculatedValue.toFixed(2)} ${measurement.unit}`, midPoint.x, midPoint.y - 5);
+        const displayValue = measurement.unit === 'ft' || measurement.unit === 'feet' 
+          ? formatFeetAndInches(measurement.calculatedValue)
+          : `${measurement.calculatedValue.toFixed(2)} ${measurement.unit}`;
+        context.fillText(displayValue, midPoint.x, midPoint.y - 5);
         break;
         
       case 'area':
@@ -668,15 +731,61 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
             context.lineTo(canvasX, canvasY);
           }
           context.closePath();
+          
+          // Fill with semi-transparent color
+          context.fillStyle = measurement.color + '40'; // Add 40 for 25% opacity
           context.fill();
+          
+          // Stroke with full opacity
+          context.strokeStyle = measurement.color;
+          context.lineWidth = 2;
           context.stroke();
           
-          // Draw area text
+          // Draw area text in center
           const centerX = points.reduce((sum, p) => sum + p.x, 0) / points.length * viewport.width;
           const centerY = points.reduce((sum, p) => sum + p.y, 0) / points.length * viewport.height;
+          
+          // Set text style
           context.fillStyle = measurement.color;
-          context.font = '12px Arial';
-          context.fillText(`${measurement.calculatedValue.toFixed(2)} ${measurement.unit}`, centerX, centerY);
+          context.font = 'bold 12px Arial';
+          context.textAlign = 'center';
+          context.textBaseline = 'middle';
+          
+          // For area measurements, show area first, then perimeter if available
+          let displayValue: string;
+          if (measurement.type === 'area') {
+            const areaValue = `${measurement.calculatedValue.toFixed(0)} SF`;
+            if (measurement.perimeterValue) {
+              const perimeterValue = formatFeetAndInches(measurement.perimeterValue);
+              displayValue = `${areaValue} / ${perimeterValue}`;
+            } else {
+              displayValue = areaValue;
+            }
+          } else {
+            // For other measurement types, use the original logic
+            displayValue = measurement.unit === 'ft' || measurement.unit === 'feet' 
+              ? formatFeetAndInches(measurement.calculatedValue)
+              : `${measurement.calculatedValue.toFixed(2)} ${measurement.unit}`;
+          }
+          
+          // Draw text with background for better visibility
+          const textMetrics = context.measureText(displayValue);
+          const textWidth = textMetrics.width;
+          const textHeight = 16;
+          const padding = 4;
+          
+          // Draw background rectangle
+          context.fillStyle = 'rgba(255, 255, 255, 0.9)';
+          context.fillRect(
+            centerX - textWidth/2 - padding,
+            centerY - textHeight/2 - padding,
+            textWidth + padding * 2,
+            textHeight + padding * 2
+          );
+          
+          // Draw text
+          context.fillStyle = measurement.color;
+          context.fillText(displayValue, centerX, centerY);
         }
         break;
         
@@ -700,16 +809,9 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
 
   // Render current measurement being drawn
   const renderCurrentMeasurement = (context: CanvasRenderingContext2D) => {
-    console.log('renderCurrentMeasurement called:', { 
-      currentMeasurementLength: currentMeasurement.length, 
-      mousePosition, 
-      measurementType 
-    });
-    
     if (currentMeasurement.length === 0) return;
     
     if (!viewportRef.current) {
-      console.log('No viewport available for rendering');
       return;
     }
     
@@ -719,14 +821,8 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
     
     switch (measurementType) {
       case 'linear':
-        console.log('Drawing linear measurement:', { 
-          currentMeasurement, 
-          length: currentMeasurement.length 
-        });
-        
         // Draw existing line segments with bright magenta color
         if (currentMeasurement.length >= 2) {
-          console.log('Drawing line between points:', currentMeasurement[0], currentMeasurement[1]);
           context.strokeStyle = 'magenta';
           context.lineWidth = 4;
           context.setLineDash([]); // Solid lines for existing segments
@@ -743,7 +839,6 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
             context.lineTo(canvasX, canvasY);
           }
           context.stroke();
-          console.log('Line drawn');
         }
         
         // Draw preview line from last point to mouse position
@@ -756,11 +851,6 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
           const mouseCanvasX = mousePosition.x * viewport.width;
           const mouseCanvasY = mousePosition.y * viewport.height;
           
-          console.log('Drawing preview line:', { 
-            lastPoint: { x: lastCanvasX, y: lastCanvasY }, 
-            mousePosition: { x: mouseCanvasX, y: mouseCanvasY } 
-          });
-          
           context.strokeStyle = 'lime';
           context.lineWidth = 3;
           context.setLineDash([8, 4]); // Dashed line for preview
@@ -768,12 +858,6 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
           context.moveTo(lastCanvasX, lastCanvasY);
           context.lineTo(mouseCanvasX, mouseCanvasY);
           context.stroke();
-          console.log('Preview line drawn');
-        } else {
-          console.log('Not drawing preview line:', { 
-            currentMeasurementLength: currentMeasurement.length, 
-            mousePosition 
-          });
         }
         
         // Draw crosshair at mouse position for better visual feedback
@@ -911,21 +995,12 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
 
   // Handle mouse move for preview rendering
   const handleCanvasMouseMove = useCallback((event: React.MouseEvent<HTMLCanvasElement>) => {
-    console.log('🖱️ MOUSE_MOVE: Mouse move on canvas', { 
-      isMeasuring, 
-      currentMeasurementLength: currentMeasurement.length,
-      selectedConditionId,
-      measurementType
-    });
-    
     if (!isMeasuring) {
-      console.log('🖱️ MOUSE_MOVE: Not measuring, ignoring');
       return;
     }
     
     const canvas = canvasRef.current;
     if (!canvas || !viewportRef.current) {
-      console.log('❌ MOUSE_MOVE: Missing canvas or viewport');
       return;
     }
     
@@ -937,12 +1012,6 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
     const viewport = viewportRef.current;
     const pdfX = canvasX / viewport.width;
     const pdfY = canvasY / viewport.height;
-    
-    console.log('🖱️ MOUSE_MOVE: Setting mouse position', { 
-      canvasCoords: { x: canvasX, y: canvasY }, 
-      pdfCoords: { x: pdfX, y: pdfY },
-      viewport: { width: viewport.width, height: viewport.height }
-    });
     
     setMousePosition({ x: pdfX, y: pdfY });
   }, [isMeasuring, currentMeasurement.length, selectedConditionId, measurementType]);
@@ -1035,7 +1104,10 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
       selectedConditionId,
       pointsLength: points.length,
       points,
-      measurementType
+      measurementType,
+      currentPage,
+      fileId: file?.id,
+      projectId: currentProjectId
     });
     
     if (!selectedConditionId || points.length === 0) {
@@ -1100,6 +1172,19 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
         break;
     }
     
+    // Calculate perimeter for area measurements if needed
+    let perimeterValue: number | undefined;
+    if (measurementType === 'area' && selectedCondition.includePerimeter && canvasPoints.length >= 3) {
+      let perimeter = 0;
+      for (let i = 0; i < canvasPoints.length; i++) {
+        const j = (i + 1) % canvasPoints.length;
+        const dx = canvasPoints[j].x - canvasPoints[i].x;
+        const dy = canvasPoints[j].y - canvasPoints[i].y;
+        perimeter += Math.sqrt(dx * dx + dy * dy);
+      }
+      perimeterValue = perimeter / scaleFactor;
+    }
+
     // Create measurement object for local state (use PDF-relative coordinates for consistency)
     const measurement: Measurement = {
       id: Date.now().toString(),
@@ -1109,7 +1194,8 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
       unit,
       conditionId: selectedConditionId,
       color: selectedCondition.color,
-      conditionName: selectedCondition.name
+      conditionName: selectedCondition.name,
+      perimeterValue
     };
     
     // Add to local state
@@ -1117,7 +1203,7 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
     
     // Add to store
     if (currentProjectId) {
-      addTakeoffMeasurement({
+      const measurementData = {
         projectId: currentProjectId,
         sheetId: file.id || 'default',
         conditionId: selectedConditionId,
@@ -1128,8 +1214,29 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
         pdfPage: currentPage,
         pdfCoordinates: points, // Store PDF-relative coordinates (already in 0-1 scale)
         conditionColor: selectedCondition.color,
-        conditionName: selectedCondition.name
+        conditionName: selectedCondition.name,
+        perimeterValue
+      };
+      
+      console.log('💾 COMPLETE_MEASUREMENT: Adding to store with page number', {
+        measurementData,
+        currentPage,
+        fileId: file?.id,
+        projectId: currentProjectId,
+        pdfPageInData: measurementData.pdfPage,
+        currentPageMatch: measurementData.pdfPage === currentPage
       });
+      
+      // Double-check that the page number is correct
+      if (measurementData.pdfPage !== currentPage) {
+        console.error('🚨 PAGE_MISMATCH: Measurement page does not match current page!', {
+          measurementPage: measurementData.pdfPage,
+          currentPage,
+          fileId: file?.id
+        });
+      }
+      
+      addTakeoffMeasurement(measurementData);
     }
     
     // Clear current measurement and mouse position
@@ -1151,9 +1258,16 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
     // Calculate scale factor (pixels per unit)
     const newScaleFactor = pixelDistance / knownDistance;
     
-    setScaleFactor(newScaleFactor);
-    setUnit(unit);
-    setIsPageCalibrated(true);
+    // Update internal state if external props are not being used
+    if (externalScaleFactor === undefined) {
+      setInternalScaleFactor(newScaleFactor);
+    }
+    if (externalUnit === undefined) {
+      setInternalUnit(unit);
+    }
+    if (externalIsPageCalibrated === undefined) {
+      setInternalIsPageCalibrated(true);
+    }
     setPendingScaleData({ scaleFactor: newScaleFactor, unit });
     setShowScaleApplicationDialog(true);
     
@@ -1180,13 +1294,20 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
   const applyScale = useCallback((scope: 'page' | 'document') => {
     if (!pendingScaleData) return;
     
-    setScaleFactor(pendingScaleData.scaleFactor);
-    setUnit(pendingScaleData.unit);
-    setIsPageCalibrated(true);
+    // Update internal state if external props are not being used
+    if (externalScaleFactor === undefined) {
+      setInternalScaleFactor(pendingScaleData.scaleFactor);
+    }
+    if (externalUnit === undefined) {
+      setInternalUnit(pendingScaleData.unit);
+    }
+    if (externalIsPageCalibrated === undefined) {
+      setInternalIsPageCalibrated(true);
+    }
     
     setPendingScaleData(null);
     setShowScaleApplicationDialog(false);
-  }, [pendingScaleData]);
+  }, [pendingScaleData, externalScaleFactor, externalUnit, externalIsPageCalibrated]);
 
   // Handle double-click to complete measurement
   const handleCanvasDoubleClick = useCallback((event: React.MouseEvent<HTMLCanvasElement>) => {
@@ -1249,12 +1370,45 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
 
   // Re-render when page changes
   useEffect(() => {
+    console.log('🔄 PAGE_CHANGE_EFFECT: Page changed', {
+      currentPage,
+      pdfDocumentAvailable: !!pdfDocument,
+      fileId: file?.id,
+      projectId: currentProjectId
+    });
+    
     if (pdfDocument) {
+      // Clear measurements immediately to prevent showing takeoffs from previous page
+      setLocalTakeoffMeasurements([]);
       renderPage(currentPage);
-      // Load takeoff measurements for the new page
-      loadTakeoffMeasurements();
+      // Load takeoff measurements for the new page with a small delay to ensure page state is updated
+      setTimeout(() => {
+        console.log('🔄 PAGE_CHANGE_EFFECT: Loading measurements after page change delay', { currentPage });
+        loadTakeoffMeasurements();
+      }, 100);
     }
   }, [pdfDocument, currentPage, renderPage, loadTakeoffMeasurements]);
+
+  // Clear current measurement state when page changes
+  useEffect(() => {
+    console.log('🧹 CLEAR_MEASUREMENT_STATE: Clearing measurement state for page change', {
+      currentPage,
+      currentMeasurementLength: currentMeasurement.length,
+      measurementsLength: measurements.length,
+      isMeasuring
+    });
+    
+    setCurrentMeasurement([]);
+    setMousePosition(null);
+    setIsMeasuring(false);
+    
+    // Load takeoff measurements for this page
+    if (pdfDocument && currentPage) {
+      setTimeout(() => {
+        loadTakeoffMeasurements();
+      }, 100);
+    }
+  }, [currentPage, measurements, pdfDocument, loadTakeoffMeasurements]);
 
   // Re-render when view state changes
   useEffect(() => {
@@ -1379,6 +1533,29 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
     };
   }, [clearAllTakeoffMeasurements]);
 
+  // Set up debug function for browser console
+  useEffect(() => {
+    (window as any).debugTakeoffs = () => {
+      console.log('🐛 DEBUG_TAKEOFFS: Manual debug triggered');
+      debugAllMeasurements();
+      
+      // Also show current state
+      console.log('🐛 CURRENT_STATE:', {
+        currentPage,
+        currentProjectId,
+        fileId: file?.id,
+        viewport: viewportRef.current ? {
+          width: viewportRef.current.width,
+          height: viewportRef.current.height
+        } : null
+      });
+    };
+    
+    return () => {
+      delete (window as any).debugTakeoffs;
+    };
+  }, [debugAllMeasurements, currentPage, currentProjectId, file?.id]);
+
   // Calculate distance between two points
   const calculateDistance = (point1: { x: number; y: number }, point2: { x: number; y: number }) => {
     const dx = point2.x - point1.x;
@@ -1499,6 +1676,7 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
         </div>
       )}
 
+
       {/* Canvas Container - Scrollable PDF viewing area */}
       <div 
         ref={containerRef}
@@ -1507,7 +1685,7 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
           cursor: isMeasuring ? 'crosshair' : (isCalibrating ? 'crosshair' : 'default')
         }}
       >
-        <div className="flex items-start justify-start min-h-full p-4">
+        <div className="flex items-start justify-start min-h-full p-4 relative">
           <canvas
             ref={canvasRef}
             className="shadow-lg"
@@ -1523,6 +1701,7 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
               pointerEvents: 'auto'
             }}
           />
+          
         </div>
       </div>
 

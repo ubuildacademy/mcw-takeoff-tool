@@ -342,10 +342,13 @@ export const useTakeoffStore = create<TakeoffStore>()(
       },
       
              setCalibration: (projectId, sheetId, scaleFactor, unit) => {
+         console.log('💾 SET_CALIBRATION: Setting calibration', { projectId, sheetId, scaleFactor, unit });
          set(state => {
            const existingIndex = state.calibrations.findIndex(
              c => c.projectId === projectId && c.sheetId === sheetId
            );
+           
+           console.log('💾 SET_CALIBRATION: Existing calibration index', { existingIndex, totalCalibrations: state.calibrations.length });
            
            if (existingIndex >= 0) {
              // Update existing calibration
@@ -357,17 +360,20 @@ export const useTakeoffStore = create<TakeoffStore>()(
                unit, 
                calibratedAt: new Date() 
              };
+             console.log('💾 SET_CALIBRATION: Updated existing calibration', updatedCalibrations[existingIndex]);
              return { calibrations: updatedCalibrations };
            } else {
              // Add new calibration
+             const newCalibration = { 
+               projectId, 
+               sheetId, 
+               scaleFactor, 
+               unit, 
+               calibratedAt: new Date() 
+             };
+             console.log('💾 SET_CALIBRATION: Added new calibration', newCalibration);
              return {
-               calibrations: [...state.calibrations, { 
-                 projectId, 
-                 sheetId, 
-                 scaleFactor, 
-                 unit, 
-                 calibratedAt: new Date() 
-               }]
+               calibrations: [...state.calibrations, newCalibration]
              };
            }
          });
@@ -375,7 +381,10 @@ export const useTakeoffStore = create<TakeoffStore>()(
        
        getCalibration: (projectId, sheetId) => {
          const { calibrations } = get();
-         return calibrations.find(c => c.projectId === projectId && c.sheetId === sheetId) || null;
+         console.log('🔍 GET_CALIBRATION_STORE: Looking for calibration', { projectId, sheetId, totalCalibrations: calibrations.length });
+         const calibration = calibrations.find(c => c.projectId === projectId && c.sheetId === sheetId) || null;
+         console.log('🔍 GET_CALIBRATION_STORE: Found calibration', calibration);
+         return calibration;
        },
       
       addTakeoffMeasurement: (measurementData) => {
@@ -389,7 +398,17 @@ export const useTakeoffStore = create<TakeoffStore>()(
           conditionName: condition?.name || 'Unknown'
         };
         
-        console.log('Adding takeoff measurement to store:', measurement);
+        console.log('💾 STORE_ADD_TAKEOFF: Adding takeoff measurement to store', {
+          measurementData,
+          measurement,
+          pdfPage: measurement.pdfPage,
+          projectId: measurement.projectId,
+          sheetId: measurement.sheetId
+        });
+        
+        // Also log to localStorage for debugging
+        console.log('💾 STORAGE_DEBUG: Current localStorage takeoffMeasurements:', 
+          JSON.parse(localStorage.getItem('takeoff-store') || '{}').state?.takeoffMeasurements || []);
         
         set(state => {
           const newState = {
@@ -419,10 +438,20 @@ export const useTakeoffStore = create<TakeoffStore>()(
       // New methods for takeoff functionality
       getSheetTakeoffMeasurements: (projectId, sheetId) => {
         const { takeoffMeasurements } = get();
-        console.log('getSheetTakeoffMeasurements called with:', { projectId, sheetId });
-        console.log('All takeoff measurements:', takeoffMeasurements);
+        console.log('🔍 STORE_GET_SHEET_TAKEOFFS: Called with', { projectId, sheetId });
+        console.log('🔍 STORE_GET_SHEET_TAKEOFFS: All takeoff measurements:', takeoffMeasurements.map(m => ({
+          id: m.id,
+          projectId: m.projectId,
+          sheetId: m.sheetId,
+          pdfPage: m.pdfPage,
+          conditionName: m.conditionName
+        })));
         const filtered = takeoffMeasurements.filter(m => m.projectId === projectId && m.sheetId === sheetId);
-        console.log('Filtered measurements:', filtered);
+        console.log('🔍 STORE_GET_SHEET_TAKEOFFS: Filtered measurements:', filtered.map(m => ({
+          id: m.id,
+          pdfPage: m.pdfPage,
+          conditionName: m.conditionName
+        })));
         return filtered;
       },
       

@@ -97,7 +97,9 @@ export function TakeoffWorkspace() {
     getSelectedCondition,
     getCurrentProject,
     getProjectTakeoffSummary,
-    loadProjectConditions
+    loadProjectConditions,
+    setCalibration,
+    getCalibration
   } = useTakeoffStore();
   
   const selectedCondition = getSelectedCondition();
@@ -117,25 +119,24 @@ export function TakeoffWorkspace() {
   const [totalPages, setTotalPages] = useState(0);
   const [scale, setScale] = useState(1);
   
-  // Calibration state management - store per document/page combination
-  const [calibrationState, setCalibrationState] = useState<{
-    [key: string]: {
-      isCalibrated: boolean;
-      scaleFactor: number;
-      unit: string;
-    }
-  }>({});
-  
   // Current calibration state for the active document/page
-  const getCurrentCalibrationKey = () => {
-    if (!currentPdfFile) return null;
-    return `${currentPdfFile.id}-${currentPage}`;
+  const getCurrentCalibration = () => {
+    if (!currentPdfFile || !jobId) {
+      console.log('🔍 GET_CALIBRATION: Missing data', { currentPdfFile: !!currentPdfFile, jobId });
+      return null;
+    }
+    const calibration = getCalibration(jobId, currentPdfFile.id);
+    console.log('🔍 GET_CALIBRATION: Retrieved calibration', { 
+      projectId: jobId, 
+      sheetId: currentPdfFile.id, 
+      calibration,
+      hasCalibration: !!calibration
+    });
+    return calibration;
   };
   
-  const currentCalibrationKey = getCurrentCalibrationKey();
-  const currentCalibration = currentCalibrationKey ? calibrationState[currentCalibrationKey] : null;
-  
-  const isPageCalibrated = currentCalibration?.isCalibrated || false;
+  const currentCalibration = getCurrentCalibration();
+  const isPageCalibrated = !!currentCalibration;
   const scaleFactor = currentCalibration?.scaleFactor || 1;
   const unit = currentCalibration?.unit || 'ft';
 
@@ -272,15 +273,8 @@ export function TakeoffWorkspace() {
     console.log('Calibrate scale requested');
     
     // If already calibrated, clear the current calibration first
-    if (isPageCalibrated && currentCalibrationKey) {
-      setCalibrationState(prev => ({
-        ...prev,
-        [currentCalibrationKey]: {
-          isCalibrated: false,
-          scaleFactor: 1,
-          unit: 'ft'
-        }
-      }));
+    if (isPageCalibrated && currentPdfFile && jobId) {
+      setCalibration(jobId, currentPdfFile.id, 1, 'ft');
     }
     
     // Use the global trigger function set up by the PDF viewer
@@ -293,17 +287,8 @@ export function TakeoffWorkspace() {
     // Trigger the PDF viewer's clear all function
     console.log('Clear all requested');
     
-    // Clear calibration state for current page
-    if (currentCalibrationKey) {
-      setCalibrationState(prev => ({
-        ...prev,
-        [currentCalibrationKey]: {
-          isCalibrated: false,
-          scaleFactor: 1,
-          unit: 'ft'
-        }
-      }));
-    }
+    // Note: We should NOT reset calibration when clearing takeoffs
+    // Calibration should remain intact, only takeoff measurements should be cleared
     
     // Use the global trigger function set up by the PDF viewer
     if ((window as any).triggerClearAll) {
@@ -332,15 +317,8 @@ export function TakeoffWorkspace() {
   const handleCalibrationComplete = (isCalibrated: boolean, scaleFactor: number, unit: string) => {
     console.log('Calibration completed:', { isCalibrated, scaleFactor, unit });
     
-    if (currentCalibrationKey) {
-      setCalibrationState(prev => ({
-        ...prev,
-        [currentCalibrationKey]: {
-          isCalibrated,
-          scaleFactor,
-          unit
-        }
-      }));
+    if (currentPdfFile && jobId) {
+      setCalibration(jobId, currentPdfFile.id, scaleFactor, unit);
     }
   };
 

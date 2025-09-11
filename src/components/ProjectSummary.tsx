@@ -2,6 +2,7 @@ import React from 'react';
 import { useTakeoffStore } from '../store/useTakeoffStore';
 import { Badge } from './ui/badge';
 import { Calculator, FileText, TrendingUp } from 'lucide-react';
+import { formatFeetAndInches } from '../lib/utils';
 
 interface ProjectSummaryProps {
   projectId: string;
@@ -30,7 +31,7 @@ export function ProjectSummary({ projectId }: ProjectSummaryProps) {
         
         <div className="text-center p-3 bg-green-50 rounded-lg">
           <div className="text-2xl font-bold text-green-600">
-            {summary.totalValue.toFixed(2)}
+            {formatFeetAndInches(summary.totalValue)}
           </div>
           <div className="text-sm text-green-700">Total Value</div>
         </div>
@@ -49,7 +50,12 @@ export function ProjectSummary({ projectId }: ProjectSummaryProps) {
             </span>
             <div className="flex items-center gap-2">
               <span className="text-sm text-gray-600">
-                {data.value.toFixed(2)} {data.unit}
+                {data.unit === 'ft' || data.unit === 'feet' 
+                  ? formatFeetAndInches(data.value)
+                  : data.unit === 'SF' || data.unit === 'sq ft'
+                  ? `${data.value.toFixed(0)} SF`
+                  : `${data.value.toFixed(2)} ${data.unit}`
+                }
               </span>
               <Badge variant="outline" className="text-xs">
                 {data.unit}
