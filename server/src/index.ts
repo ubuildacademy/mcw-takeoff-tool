@@ -7,6 +7,7 @@ import fs from 'fs-extra';
 import { projectRoutes } from './routes/projects';
 import { fileRoutes } from './routes/files';
 import { conditionRoutes } from './routes/conditions';
+import { sheetRoutes } from './routes/sheets';
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '4000', 10);
@@ -34,6 +35,7 @@ app.get('/api/health', (req, res) => {
 app.use('/api/projects', projectRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/conditions', conditionRoutes);
+app.use('/api/sheets', sheetRoutes);
 
 // Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));

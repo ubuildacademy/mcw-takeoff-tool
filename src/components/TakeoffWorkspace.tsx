@@ -3,7 +3,9 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import CleanPDFViewer from './CleanPDFViewer';
 import { TakeoffSidebar } from './TakeoffSidebar';
-import { SheetSidebar } from './SheetSidebar';
+import { EnhancedSheetSidebar } from './EnhancedSheetSidebar';
+import { TitleblockConfigDialog } from './TitleblockConfigDialog';
+import { OCRProcessingDialog } from './OCRProcessingDialog';
 
 import { useTakeoffStore } from '../store/useTakeoffStore';
 import { Button } from "./ui/button";
@@ -22,7 +24,7 @@ import {
   PanelRightOpen,
   Upload
 } from "lucide-react";
-import { fileService } from '../services/apiService';
+import { fileService, sheetService } from '../services/apiService';
 
 interface TakeoffCondition {
   id: string;
@@ -81,6 +83,12 @@ export function TakeoffWorkspace() {
   const navigate = useNavigate();
   
   const [selectedSheet, setSelectedSheet] = useState<Sheet | null>(null);
+  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
+  const [selectedPageNumber, setSelectedPageNumber] = useState<number | null>(null);
+  
+  // Dialog states
+  const [showTitleblockConfig, setShowTitleblockConfig] = useState(false);
+  const [titleblockConfigDocumentId, setTitleblockConfigDocumentId] = useState<string | null>(null);
   
   // Store integration
   const { 
@@ -97,10 +105,39 @@ export function TakeoffWorkspace() {
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
   const [searchResults, setSearchResults] = useState<string[]>([]);
+  const [ocrSearchResults, setOcrSearchResults] = useState<any[]>([]);
+  const [currentSearchQuery, setCurrentSearchQuery] = useState<string>('');
   const [currentPdfFile, setCurrentPdfFile] = useState<ProjectFile | null>(null);
   const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
   const [uploading, setUploading] = useState<boolean>(false);
   const [loading, setLoading] = useState(true);
+  
+  // PDF viewer controls state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(0);
+  const [scale, setScale] = useState(1);
+  
+  // Calibration state management - store per document/page combination
+  const [calibrationState, setCalibrationState] = useState<{
+    [key: string]: {
+      isCalibrated: boolean;
+      scaleFactor: number;
+      unit: string;
+    }
+  }>({});
+  
+  // Current calibration state for the active document/page
+  const getCurrentCalibrationKey = () => {
+    if (!currentPdfFile) return null;
+    return `${currentPdfFile.id}-${currentPage}`;
+  };
+  
+  const currentCalibrationKey = getCurrentCalibrationKey();
+  const currentCalibration = currentCalibrationKey ? calibrationState[currentCalibrationKey] : null;
+  
+  const isPageCalibrated = currentCalibration?.isCalibrated || false;
+  const scaleFactor = currentCalibration?.scaleFactor || 1;
+  const unit = currentCalibration?.unit || 'ft';
 
   useEffect(() => {
     async function loadFiles() {
@@ -169,9 +206,40 @@ export function TakeoffWorkspace() {
     if (selectedFile) {
       console.log('Setting current PDF file to:', selectedFile);
       setCurrentPdfFile(selectedFile);
+      // Calibration state is now managed per document/page, no need to reset
     } else {
       console.error('Could not find PDF file for sheet:', sheet);
     }
+  };
+
+  // Enhanced page selection handler
+  const handlePageSelect = (documentId: string, pageNumber: number) => {
+    console.log('Page selected:', { documentId, pageNumber });
+    setSelectedDocumentId(documentId);
+    setSelectedPageNumber(pageNumber);
+    
+    // Find the corresponding PDF file and set it as current
+    const selectedFile = projectFiles.find(file => file.id === documentId);
+    if (selectedFile) {
+      console.log('Setting current PDF file to:', selectedFile);
+      setCurrentPdfFile(selectedFile);
+      setCurrentPage(pageNumber);
+      // Calibration state is now managed per document/page, no need to reset
+    } else {
+      console.error('Could not find PDF file for document:', documentId);
+    }
+  };
+
+  // Titleblock configuration handler
+  const handleTitleblockConfig = (documentId: string) => {
+    setTitleblockConfigDocumentId(documentId);
+    setShowTitleblockConfig(true);
+  };
+
+  // OCR processing handler (now handled automatically in background)
+  const handleOCRRequest = (documentId: string, pageNumbers: number[]) => {
+    console.log('OCR processing is now handled automatically in the background');
+    // OCR processing is now automatic during upload
   };
 
   const handleSearchInDocument = (query: string) => {
@@ -181,6 +249,99 @@ export function TakeoffWorkspace() {
       `Found "${query}" in title block at coordinates (600, 50)`
     ];
     setSearchResults(mockResults);
+  };
+
+  const handleOcrSearchResults = (results: any[], query: string) => {
+    console.log('📊 Received OCR search results:', results);
+    setOcrSearchResults(results);
+    setCurrentSearchQuery(query);
+  };
+
+  // PDF viewer control handlers
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+    // Calibration state is now managed per page, no need to reset
+  };
+
+  const handleScaleChange = (newScale: number) => {
+    setScale(newScale);
+  };
+
+  const handleCalibrateScale = () => {
+    // Trigger the PDF viewer's calibration dialog
+    console.log('Calibrate scale requested');
+    
+    // If already calibrated, clear the current calibration first
+    if (isPageCalibrated && currentCalibrationKey) {
+      setCalibrationState(prev => ({
+        ...prev,
+        [currentCalibrationKey]: {
+          isCalibrated: false,
+          scaleFactor: 1,
+          unit: 'ft'
+        }
+      }));
+    }
+    
+    // Use the global trigger function set up by the PDF viewer
+    if ((window as any).triggerCalibration) {
+      (window as any).triggerCalibration();
+    }
+  };
+
+  const handleClearAll = () => {
+    // Trigger the PDF viewer's clear all function
+    console.log('Clear all requested');
+    
+    // Clear calibration state for current page
+    if (currentCalibrationKey) {
+      setCalibrationState(prev => ({
+        ...prev,
+        [currentCalibrationKey]: {
+          isCalibrated: false,
+          scaleFactor: 1,
+          unit: 'ft'
+        }
+      }));
+    }
+    
+    // Use the global trigger function set up by the PDF viewer
+    if ((window as any).triggerClearAll) {
+      (window as any).triggerClearAll();
+    }
+  };
+
+  const handleResetView = () => {
+    // Trigger the PDF viewer's fit to window function
+    console.log('Reset view requested - fitting PDF to window');
+    
+    // Use the global trigger function set up by the PDF viewer
+    if ((window as any).triggerFitToWindow) {
+      (window as any).triggerFitToWindow();
+    } else {
+      // Fallback to setting scale to 1 if fit to window is not available
+      handleScaleChange(1);
+    }
+  };
+
+  const handlePDFLoaded = (totalPages: number) => {
+    setTotalPages(totalPages);
+    setCurrentPage(1);
+  };
+
+  const handleCalibrationComplete = (isCalibrated: boolean, scaleFactor: number, unit: string) => {
+    console.log('Calibration completed:', { isCalibrated, scaleFactor, unit });
+    
+    if (currentCalibrationKey) {
+      setCalibrationState(prev => ({
+        ...prev,
+        [currentCalibrationKey]: {
+          isCalibrated,
+          scaleFactor,
+          unit
+        }
+      }));
+    }
   };
 
   const handlePdfUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -262,6 +423,90 @@ export function TakeoffWorkspace() {
 
           </div>
         </div>
+
+        {/* Center - PDF Controls */}
+        {currentPdfFile && (
+          <div className="flex items-center gap-4">
+            {/* Navigation Controls */}
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handlePageChange(Math.max(1, currentPage - 1))}
+                disabled={currentPage <= 1}
+              >
+                Previous
+              </Button>
+              <span className="px-3 py-1 bg-gray-100 rounded text-sm">
+                {currentPage} / {totalPages}
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handlePageChange(Math.min(totalPages, currentPage + 1))}
+                disabled={currentPage >= totalPages}
+              >
+                Next
+              </Button>
+            </div>
+
+            <Separator orientation="vertical" className="h-8" />
+
+            {/* Scale Controls */}
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleScaleChange(Math.max(0.5, scale - 0.1))}
+              >
+                -
+              </Button>
+              <span className="px-3 py-1 bg-gray-100 rounded text-sm min-w-[60px] text-center">
+                {Math.round(scale * 100)}%
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleScaleChange(Math.min(5, scale + 0.1))}
+              >
+                +
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleResetView}
+              >
+                Reset View
+              </Button>
+            </div>
+
+            <Separator orientation="vertical" className="h-8" />
+
+            {/* Calibration Controls */}
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant={isPageCalibrated ? "default" : "secondary"}
+                onClick={handleCalibrateScale}
+                className={isPageCalibrated ? "bg-green-600 hover:bg-green-700 text-white" : "bg-orange-600 hover:bg-orange-700 text-white"}
+              >
+                {isPageCalibrated ? 'Recalibrate' : 'Calibrate Scale'}
+              </Button>
+              {isPageCalibrated && (
+                <span className="text-xs text-gray-600">
+                  1px = {(scaleFactor * 0.0833).toFixed(4)} {unit}
+                </span>
+              )}
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={handleClearAll}
+              >
+                Clear All
+              </Button>
+            </div>
+          </div>
+        )}
 
         {/* Right side - File Info and Actions */}
         <div className="flex items-center gap-4">
@@ -364,6 +609,20 @@ export function TakeoffWorkspace() {
                 console.log('Calibration requested');
               }}
               className="h-full"
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onPageChange={handlePageChange}
+              scale={scale}
+              onScaleChange={handleScaleChange}
+              onCalibrateScale={handleCalibrateScale}
+              onClearAll={handleClearAll}
+              isPageCalibrated={isPageCalibrated}
+              scaleFactor={scaleFactor}
+              unit={unit}
+              onPDFLoaded={handlePDFLoaded}
+              onCalibrationComplete={handleCalibrationComplete}
+              searchResults={ocrSearchResults}
+              currentSearchQuery={currentSearchQuery}
             />
           ) : (
             <div className="flex items-center justify-center flex-1 bg-gray-100">
@@ -398,13 +657,16 @@ export function TakeoffWorkspace() {
             }
           </Button>
           {rightSidebarOpen && (
-            <div className="w-80 bg-white border-l flex flex-col">
-              <SheetSidebar 
+            <div className="w-96 bg-white border-l flex flex-col h-full">
+              <EnhancedSheetSidebar 
                 projectId={jobId!}
-                onSheetSelect={handleSheetSelect}
-                selectedSheet={selectedSheet}
+                onPageSelect={handlePageSelect}
+                selectedDocumentId={selectedDocumentId}
+                selectedPageNumber={selectedPageNumber}
+                onOCRRequest={handleOCRRequest}
+                onTitleblockConfig={handleTitleblockConfig}
+                onOcrSearchResults={handleOcrSearchResults}
               />
-
             </div>
           )}
         </div>
@@ -445,6 +707,27 @@ export function TakeoffWorkspace() {
           <span className="text-sm text-gray-600">{uploading ? 'Uploading…' : 'Ready'}</span>
         </div>
       </div>
+
+      {/* Titleblock Configuration Dialog */}
+      <TitleblockConfigDialog
+        isOpen={showTitleblockConfig}
+        onClose={() => {
+          setShowTitleblockConfig(false);
+          setTitleblockConfigDocumentId(null);
+        }}
+        onSave={async (config) => {
+          try {
+            console.log('Saving titleblock configuration:', config);
+            const result = await sheetService.configureTitleblock(titleblockConfigDocumentId!, config);
+            console.log('Titleblock configuration saved:', result);
+          } catch (error) {
+            console.error('Failed to save titleblock configuration:', error);
+          }
+        }}
+        documentId={titleblockConfigDocumentId || ''}
+        pageNumber={1}
+      />
+
     </div>
   );
 }
