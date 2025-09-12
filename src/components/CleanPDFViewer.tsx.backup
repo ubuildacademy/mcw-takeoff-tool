@@ -1,11 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { useTakeoffStore } from '../store/useTakeoffStore';
-import { 
-  loadMeasurements, 
-  saveMeasurements, 
-  StoredMeasurement 
-} from '../utils/measurementStorage';
 import CalibrationDialog from './CalibrationDialog';
 import ScaleApplicationDialog from './ScaleApplicationDialog';
 import { formatFeetAndInches } from '../lib/utils';
@@ -146,7 +141,10 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
   const { 
     currentProjectId, 
     selectedConditionId,
-    getSelectedCondition
+    addTakeoffMeasurement,
+    getSelectedCondition,
+    getSheetTakeoffMeasurements,
+    deleteTakeoffMeasurement
   } = useTakeoffStore();
 
   // Load existing takeoff measurements for the current sheet
@@ -202,14 +200,173 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
     return pdfCoords;
   }, [viewportDimensions?.width, viewportDimensions?.height]);
 
+  // Debug function to show all measurements
+  const debugAllMeasurements = useCallback(() => {
+    if (!currentProjectId || !file?.id) return;
+    
+    const allMeasurements = getSheetTakeoffMeasurements(currentProjectId, file.id);
+    console.log('🐛 DEBUG_ALL_MEASUREMENTS:', {
+      currentPage,
+      fileId: file.id,
+      projectId: currentProjectId,
+      allMeasurements: allMeasurements.map(m => ({
+        id: m.id,
+        pdfPage: m.pdfPage,
+        conditionName: m.conditionName,
+        type: m.type,
+        points: m.points?.length || 0
+      }))
+    });
+  }, [currentProjectId, file?.id, currentPage, getSheetTakeoffMeasurements]);
+
+  // Load takeoff measurements for current sheet and page
+  const loadTakeoffMeasurements = useCallback(() => {
+    console.log('🔍 LOAD_TAKEOFF_MEASUREMENTS: Starting...', { 
+      currentProjectId, 
+      fileId: file?.id, 
+      currentPage,
+      viewportAvailable: !!viewportRef.current,
+      viewport: viewportRef.current ? { width: viewportRef.current.width, height: viewportRef.current.height } : null
+    });
+    
+    // Debug all measurements first
+    debugAllMeasurements();
+    
+    if (!currentProjectId || !file?.id) {
+      console.log('❌ LOAD_TAKEOFF_MEASUREMENTS: Missing required data', { currentProjectId, fileId: file?.id });
+      console.log('🧹 CLEARING_MEASUREMENTS: Due to missing data', { stackTrace: new Error().stack });
+      setLocalTakeoffMeasurements([]); // Clear measurements if no valid data
+      return;
+    }
+    
+    const sheetMeasurements = getSheetTakeoffMeasurements(currentProjectId, file.id);
+    console.log('📊 LOAD_TAKEOFF_MEASUREMENTS: Sheet measurements found', { 
+      totalMeasurements: sheetMeasurements.length,
+      projectId: currentProjectId,
+      sheetId: file.id,
+      measurements: sheetMeasurements.map(m => ({
+        id: m.id,
+        type: m.type,
+        pdfPage: m.pdfPage,
+        sheetId: m.sheetId,
+        projectId: m.projectId,
+        hasPdfCoords: !!m.pdfCoordinates,
+        hasPoints: !!m.points,
+        pdfCoords: m.pdfCoordinates,
+        points: m.points
+      }))
+    });
+    
+    // Filter measurements for current page - this is the critical filter
+    const pageMeasurements = sheetMeasurements.filter(m => {
+      const matches = m.pdfPage === currentPage;
+      console.log('🔍 PAGE_FILTER: Checking measurement', {
+        measurementId: m.id,
+        measurementPage: m.pdfPage,
+        currentPage,
+        matches,
+        conditionName: m.conditionName,
+        sheetId: m.sheetId,
+        projectId: m.projectId
+      });
+      return matches;
+    });
+    console.log('📄 LOAD_TAKEOFF_MEASUREMENTS: Page measurements', { 
+      currentPage,
+      totalSheetMeasurements: sheetMeasurements.length,
+      pageMeasurements: pageMeasurements.length,
+      allMeasurementsWithPages: sheetMeasurements.map(m => ({
+        id: m.id,
+        type: m.type,
+        pdfPage: m.pdfPage,
+        sheetId: m.sheetId,
+        conditionName: m.conditionName
+      })),
+      filteredMeasurements: pageMeasurements.map(m => ({
+        id: m.id,
+        type: m.type,
+        pdfPage: m.pdfPage,
+        sheetId: m.sheetId,
+        pdfCoords: m.pdfCoordinates,
+        points: m.points
+      }))
+    });
+    
+    // Convert takeoff measurements to renderable format
+    const renderableMeasurements = pageMeasurements.map(measurement => {
+      // Use PDF coordinates if available, otherwise use points
+      const coords = measurement.pdfCoordinates || measurement.points;
+      console.log('🔄 LOAD_TAKEOFF_MEASUREMENTS: Converting measurement', { 
+        id: measurement.id,
+        type: measurement.type,
+        usingPdfCoords: !!measurement.pdfCoordinates,
+        originalCoords: coords,
+        viewport: viewportRef.current ? { width: viewportRef.current.width, height: viewportRef.current.height } : null
+      });
+      
+      const canvasCoords = pdfToCanvasCoords(coords);
+      
+      console.log('✅ LOAD_TAKEOFF_MEASUREMENTS: Conversion result', { 
+        id: measurement.id, 
+        originalCoords: coords, 
+        canvasCoords 
+      });
+      
+      return {
+        id: measurement.id,
+        type: measurement.type,
+        points: canvasCoords,
+        calculatedValue: measurement.calculatedValue,
+        unit: measurement.unit,
+        conditionId: measurement.conditionId,
+        color: measurement.conditionColor,
+        conditionName: measurement.conditionName,
+        pdfPage: measurement.pdfPage // Include pdfPage for rendering safety checks
+      };
+    });
+    
+    console.log('🎯 LOAD_TAKEOFF_MEASUREMENTS: Final renderable measurements', { 
+      count: renderableMeasurements.length,
+      currentPage,
+      projectId: currentProjectId,
+      fileId: file?.id,
+      measurements: renderableMeasurements.map(m => ({
+        id: m.id,
+        type: m.type,
+        pdfPage: m.pdfPage,
+        points: m.points,
+        color: m.color
+      }))
+    });
+    
+    setLocalTakeoffMeasurements(renderableMeasurements);
+    console.log('✅ LOAD_TAKEOFF_MEASUREMENTS: Set local measurements to store', { 
+      count: renderableMeasurements.length,
+      currentPage,
+      projectId: currentProjectId,
+      fileId: file?.id,
+      stackTrace: new Error().stack
+    });
+  }, [currentProjectId, file?.id, currentPage, getSheetTakeoffMeasurements, pdfToCanvasCoords]);
 
 
   // Clear all takeoff measurements for current project
   const clearAllTakeoffMeasurements = useCallback(() => {
-    if (!currentProjectId || !file?.id) return;
+    if (!currentProjectId) return;
     
-    // Clear measurements for current page
-    saveMeasurements(currentProjectId, file.id, currentPage, []);
+    // Get all measurements for this project
+    const { takeoffMeasurements: allMeasurements } = useTakeoffStore.getState();
+    const projectMeasurements = allMeasurements.filter(m => m.projectId === currentProjectId);
+    
+    console.log('Clearing all takeoff measurements:', projectMeasurements.length);
+    
+    // Delete each measurement
+    projectMeasurements.forEach(measurement => {
+      deleteTakeoffMeasurement(measurement.id);
+    });
+    
+    // Clear local state
+    console.log('🧹 CLEARING_ALL_MEASUREMENTS: Clear all takeoff measurements', { stackTrace: new Error().stack });
     setLocalTakeoffMeasurements([]);
     setMeasurements([]);
     setCurrentMeasurement([]);
@@ -220,10 +377,10 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
       if (pdfDocument && currentPage) {
         renderPage(currentPage);
       }
-    }, 100);
+    }, 100); // Small delay to ensure state updates are processed
     
-    console.log('All takeoff measurements cleared for current page');
-  }, [currentProjectId, file?.id, currentPage]);
+    console.log('All takeoff measurements cleared');
+  }, [currentProjectId, deleteTakeoffMeasurement]);
 
   // Load PDF document
   useEffect(() => {
@@ -288,17 +445,14 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
 
   // Project conditions are loaded by the parent TakeoffWorkspace component
 
-  // Simple localStorage-based measurement loading
+  // Load takeoff measurements when component mounts or dependencies change
   useEffect(() => {
-    if (!currentProjectId || !file?.id || !currentPage) {
-      setLocalTakeoffMeasurements([]);
-      return;
+    // Only load if we have valid data
+    if (currentProjectId && file?.id && currentPage) {
+      console.log('🔄 PAGE_CHANGE: Loading measurements for page', { currentPage, fileId: file.id });
+      loadTakeoffMeasurements();
     }
-    
-    // Load measurements from localStorage for this specific page
-    const pageMeasurements = loadMeasurements(currentProjectId, file.id, currentPage);
-    setLocalTakeoffMeasurements(pageMeasurements);
-  }, [currentProjectId, file?.id, currentPage]);
+  }, [currentProjectId, file?.id, currentPage, loadTakeoffMeasurements]);
 
   // Note: Measurements are cleared and loaded in the main useEffect above
 
@@ -501,14 +655,6 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
       return;
     }
     
-    // Prevent concurrent renders
-    if (isRenderingRef.current) {
-      console.log('🔄 RENDER_ANNOTATIONS: Skipping render - already rendering');
-      return;
-    }
-    
-    isRenderingRef.current = true;
-    
     const canvas = canvasRef.current;
     const context = canvas.getContext('2d');
     if (!context) {
@@ -535,45 +681,16 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
         viewport: viewport
       };
       
-      // Cancel any existing render task to prevent canvas conflicts
-      if (renderTaskRef.current) {
-        renderTaskRef.current.cancel();
-        renderTaskRef.current = null;
-      }
-      
       const renderTask = pdfPageRef.current.render(renderContext);
       renderTaskRef.current = renderTask;
       
       // Wait for PDF render to complete, then draw annotations
       renderTask.promise.then(() => {
         // Draw takeoff measurements (persisted) - only for current page
-        console.log('🎨 RENDER_ANNOTATIONS: Processing measurements', {
-          currentPage,
-          totalMeasurements: localTakeoffMeasurements.length,
-          measurements: localTakeoffMeasurements.map(m => ({
-            id: m.id,
-            pdfPage: m.pdfPage,
-            type: m.type,
-            conditionName: m.conditionName
-          }))
-        });
-        
         localTakeoffMeasurements.forEach((measurement) => {
           // Only render measurements that explicitly belong to the current page
           if (measurement.pdfPage === currentPage) {
-            console.log('✅ RENDER_ANNOTATIONS: Rendering measurement', {
-              id: measurement.id,
-              pdfPage: measurement.pdfPage,
-              currentPage,
-              type: measurement.type
-            });
             renderMeasurement(context, measurement);
-          } else {
-            console.log('❌ RENDER_ANNOTATIONS: Skipping measurement from different page', {
-              id: measurement.id,
-              pdfPage: measurement.pdfPage,
-              currentPage
-            });
           }
         });
         
@@ -599,30 +716,11 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
       }).catch((error: any) => {
         if (error.name !== 'RenderingCancelledException') {
           console.error('❌ RENDER_ANNOTATIONS: Error in PDF render promise:', error);
-          // If render fails, try to draw annotations on existing canvas without re-rendering PDF
-          try {
-            localTakeoffMeasurements.forEach((measurement) => {
-              if (measurement.pdfPage === currentPage) {
-                renderMeasurement(context, measurement);
-              }
-            });
-            
-            if (currentMeasurement.length > 0) {
-              renderCurrentMeasurement(context);
-            }
-          } catch (annotationError) {
-            console.error('❌ RENDER_ANNOTATIONS: Error drawing annotations:', annotationError);
-          }
         }
-        // Reset rendering flag on error
-        isRenderingRef.current = false;
       });
       
       context.restore();
     }
-    
-    // Reset rendering flag
-    isRenderingRef.current = false;
   }, [localTakeoffMeasurements, measurements, currentMeasurement, measurementType, isCalibrating, calibrationPoints, mousePosition, currentPage]);
 
 
@@ -1141,58 +1239,79 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
       perimeterValue = perimeter / scaleFactor;
     }
 
-    // Create measurement object for localStorage
-    const measurement: StoredMeasurement = {
+    // Create measurement object for local state (use PDF-relative coordinates for consistency)
+    const measurement: Measurement = {
       id: Date.now().toString(),
       type: measurementType,
-      points: canvasPoints, // Canvas coordinates for rendering
+      points: points, // Use PDF-relative coordinates for consistency
       calculatedValue,
       unit,
       conditionId: selectedConditionId,
       color: selectedCondition.color,
       conditionName: selectedCondition.name,
-      timestamp: Date.now(),
-      pdfPage: currentPage,
-      pdfCoordinates: points, // PDF-relative coordinates (0-1 scale)
       perimeterValue
     };
     
-    // Save to localStorage
-    if (currentProjectId && file?.id) {
-      const existingMeasurements = loadMeasurements(currentProjectId, file.id, currentPage);
-      const updatedMeasurements = [...existingMeasurements, measurement];
-      
-      console.log('💾 SAVING_MEASUREMENT: Saving to localStorage', {
+    // Add to local state
+    setMeasurements(prev => [...prev, measurement]);
+    
+    // Add to store
+    if (currentProjectId) {
+      const measurementData = {
         projectId: currentProjectId,
-        fileId: file.id,
+        sheetId: file.id || 'default',
+        conditionId: selectedConditionId,
+        type: measurementType,
+        points: canvasPoints, // Canvas coordinates for backward compatibility
+        calculatedValue,
+        unit,
+        pdfPage: currentPage,
+        pdfCoordinates: points, // Store PDF-relative coordinates (already in 0-1 scale)
+        conditionColor: selectedCondition.color,
+        conditionName: selectedCondition.name,
+        perimeterValue
+      };
+      
+      console.log('💾 COMPLETE_MEASUREMENT: Adding to store with page number', {
+        measurementData,
         currentPage,
-        measurement: {
-          id: measurement.id,
-          pdfPage: measurement.pdfPage,
-          type: measurement.type,
-          conditionName: measurement.conditionName
-        },
-        existingCount: existingMeasurements.length,
-        updatedCount: updatedMeasurements.length
+        fileId: file?.id,
+        projectId: currentProjectId,
+        pdfPageInData: measurementData.pdfPage,
+        currentPageMatch: measurementData.pdfPage === currentPage
       });
       
-      saveMeasurements(currentProjectId, file.id, currentPage, updatedMeasurements);
+      // Double-check that the page number is correct
+      if (measurementData.pdfPage !== currentPage) {
+        console.error('🚨 PAGE_MISMATCH: Measurement page does not match current page!', {
+          measurementPage: measurementData.pdfPage,
+          currentPage,
+          fileId: file?.id
+        });
+      }
       
-      // Update local state
-      setLocalTakeoffMeasurements(updatedMeasurements);
-      
-      console.log('✅ MEASUREMENT_SAVED: Measurement saved and local state updated');
-    } else {
-      console.error('❌ SAVE_FAILED: Missing required data', {
-        currentProjectId,
-        fileId: file?.id
-      });
+      addTakeoffMeasurement(measurementData);
     }
     
     // Clear current measurement and mouse position
     setCurrentMeasurement([]);
     setMousePosition(null);
-  }, [selectedConditionId, getSelectedCondition, measurementType, scaleFactor, currentProjectId, currentPage, file.id, canvasToPdfCoords]);
+    
+    // Add the new measurement to local state immediately for current page
+    const newRenderableMeasurement = {
+      id: measurement.id,
+      type: measurement.type,
+      points: canvasPoints,
+      calculatedValue: measurement.calculatedValue,
+      unit: measurement.unit,
+      conditionId: measurement.conditionId,
+      color: measurement.color,
+      conditionName: measurement.conditionName,
+      pdfPage: currentPage
+    };
+    
+    setLocalTakeoffMeasurements(prev => [...prev, newRenderableMeasurement]);
+  }, [selectedConditionId, getSelectedCondition, measurementType, scaleFactor, currentProjectId, addTakeoffMeasurement, currentPage, file.id, canvasToPdfCoords]);
 
   // Complete calibration
   const completeCalibration = useCallback((points: { x: number; y: number }[]) => {
@@ -1473,13 +1592,13 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
   useEffect(() => {
     (window as any).debugTakeoffs = () => {
       console.log('🐛 DEBUG_TAKEOFFS: Manual debug triggered');
+      debugAllMeasurements();
       
-      // Show current state
+      // Also show current state
       console.log('🐛 CURRENT_STATE:', {
         currentPage,
         currentProjectId,
         fileId: file?.id,
-        localTakeoffMeasurements: localTakeoffMeasurements.length,
         viewport: viewportRef.current ? {
           width: viewportRef.current.width,
           height: viewportRef.current.height
@@ -1490,7 +1609,7 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
     return () => {
       delete (window as any).debugTakeoffs;
     };
-  }, [currentPage, currentProjectId, file?.id, localTakeoffMeasurements.length]);
+  }, [debugAllMeasurements, currentPage, currentProjectId, file?.id]);
 
   // Calculate distance between two points
   const calculateDistance = (point1: { x: number; y: number }, point2: { x: number; y: number }) => {

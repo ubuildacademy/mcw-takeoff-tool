@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Textarea } from './ui/textarea';
 import { X } from 'lucide-react';
 import { useTakeoffStore } from '../store/useTakeoffStore';
+import { saveConditions, loadConditions } from '../utils/measurementStorage';
 
 interface CreateConditionDialogProps {
   projectId: string;
@@ -28,7 +29,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated }
   const [formData, setFormData] = useState({
     name: '',
     type: 'area' as 'area' | 'volume' | 'linear' | 'count',
-    unit: '',
+    unit: 'SF', // Initialize with default unit for 'area' type
     wasteFactor: 0,
     color: generateRandomColor(),
     description: '',
@@ -40,16 +41,35 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated }
 
   const { addCondition } = useTakeoffStore();
 
+  // Debug: Log form data changes
+  useEffect(() => {
+    console.log('Form data updated:', formData);
+  }, [formData]);
+
+  // Ensure unit is set when component mounts
+  useEffect(() => {
+    if (!formData.unit) {
+      const defaultUnit = getDefaultUnit(formData.type);
+      console.log('Setting default unit on mount:', defaultUnit);
+      setFormData(prev => ({ ...prev, unit: defaultUnit }));
+    }
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
     try {
+      console.log('Form data before submission:', formData);
+      // Ensure unit is set - use formData.unit or fall back to default for the type
+      const unit = formData.unit || getDefaultUnit(formData.type);
+      console.log('Unit resolved:', { formDataUnit: formData.unit, defaultUnit: getDefaultUnit(formData.type), finalUnit: unit });
+      
       const newCondition = {
         projectId,
         name: formData.name,
         type: formData.type,
-        unit: formData.unit,
+        unit: unit,
         wasteFactor: formData.wasteFactor,
         color: formData.color,
         description: formData.description,
@@ -57,13 +77,24 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated }
         materialCost: formData.materialCost ? parseFloat(formData.materialCost) : undefined,
         includePerimeter: formData.includePerimeter,
       };
+      console.log('New condition data:', newCondition);
       
-      // Use the store method which will save to both local store and backend
-      const conditionId = await addCondition(newCondition);
-      console.log('Condition added with ID:', conditionId);
+      // Create condition with ID and timestamp
+      const conditionId = Date.now().toString();
+      const createdCondition = {
+        ...newCondition,
+        id: conditionId,
+        createdAt: new Date().toISOString()
+      };
+      
+      // Save to localStorage
+      const existingConditions = loadConditions(projectId);
+      const updatedConditions = [...existingConditions, createdCondition];
+      saveConditions(projectId, updatedConditions);
+      
+      console.log('Condition saved to localStorage:', createdCondition);
       
       // Call the callback with the new condition
-      const createdCondition = { ...newCondition, id: conditionId };
       onConditionCreated(createdCondition);
       
     } catch (error) {
@@ -76,6 +107,20 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated }
 
   const handleInputChange = (field: string, value: string | number | boolean) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleTypeChange = (value: string) => {
+    const defaultUnit = getDefaultUnit(value);
+    console.log('Type changed to:', value, 'Default unit:', defaultUnit);
+    setFormData(prev => {
+      const newData = { 
+        ...prev, 
+        type: value as 'area' | 'volume' | 'linear' | 'count',
+        unit: defaultUnit 
+      };
+      console.log('Setting form data to:', newData);
+      return newData;
+    });
   };
 
   const getDefaultUnit = (type: string) => {
@@ -113,10 +158,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated }
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label htmlFor="type">Type *</Label>
-              <Select value={formData.type} onValueChange={(value: any) => {
-                handleInputChange('type', value);
-                handleInputChange('unit', getDefaultUnit(value));
-              }}>
+              <Select value={formData.type} onValueChange={handleTypeChange}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -131,9 +173,12 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated }
 
             <div>
               <Label htmlFor="unit">Unit *</Label>
-              <Select value={formData.unit} onValueChange={(value) => handleInputChange('unit', value)}>
+              <Select value={formData.unit || getDefaultUnit(formData.type)} onValueChange={(value) => {
+                console.log('Unit changed to:', value);
+                handleInputChange('unit', value);
+              }}>
                 <SelectTrigger>
-                  <SelectValue placeholder={getDefaultUnit(formData.type)} />
+                  <SelectValue placeholder="Select unit" />
                 </SelectTrigger>
                 <SelectContent>
                   {formData.type === 'area' && (

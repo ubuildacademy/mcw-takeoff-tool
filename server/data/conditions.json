@@ -1,1 +1,125 @@
-[]
+[
+  {
+    "id": "ab1f27e9-a784-4fae-a0ca-0a932bacd831",
+    "projectId": "26364d26-442b-4b0a-a32a-6808dd4a2076",
+    "name": "Test Condition for Frontend",
+    "type": "area",
+    "unit": "SF",
+    "wasteFactor": 5,
+    "color": "#ff6b6b",
+    "description": "Test condition to see if it shows in frontend",
+    "createdAt": "2025-09-11T17:33:18.212Z"
+  },
+  {
+    "id": "7eb83fcb-fdee-4608-b2eb-01f3cd626dac",
+    "projectId": "26364d26-442b-4b0a-a32a-6808dd4a2076",
+    "name": "test-linear",
+    "type": "linear",
+    "unit": "LF",
+    "wasteFactor": 0,
+    "color": "#ff6b6b",
+    "description": "Test condition",
+    "laborCost": 0,
+    "materialCost": 0,
+    "createdAt": "2025-09-11T17:44:35.185Z"
+  },
+  {
+    "id": "74bb3d65-e493-4c07-b723-8bd4ed1a0556",
+    "projectId": "26364d26-442b-4b0a-a32a-6808dd4a2076",
+    "name": "test-linear-fixed",
+    "type": "linear",
+    "unit": "LF",
+    "wasteFactor": 0,
+    "color": "#ff6b6b",
+    "description": "Test condition after fix",
+    "createdAt": "2025-09-11T17:45:49.174Z"
+  },
+  {
+    "id": "20af7c3a-667d-46cf-9556-7dcaceb08ec8",
+    "projectId": "26364d26-442b-4b0a-a32a-6808dd4a2076",
+    "name": "Test",
+    "type": "area",
+    "unit": "SF",
+    "wasteFactor": 0,
+    "color": "#ee5a24",
+    "description": "",
+    "createdAt": "2025-09-11T17:46:16.207Z"
+  },
+  {
+    "id": "4fa79e44-ac2f-4c16-a701-0eb82241c087",
+    "projectId": "26364d26-442b-4b0a-a32a-6808dd4a2076",
+    "name": "test-linear-final",
+    "type": "linear",
+    "unit": "LF",
+    "wasteFactor": 0,
+    "color": "#ff6b6b",
+    "description": "Test condition after final fix",
+    "createdAt": "2025-09-11T17:47:41.455Z"
+  },
+  {
+    "id": "df2d59a3-8350-4be8-9701-da27eb9ee7a6",
+    "projectId": "26364d26-442b-4b0a-a32a-6808dd4a2076",
+    "name": "linear",
+    "type": "linear",
+    "unit": "LF",
+    "wasteFactor": 0,
+    "color": "#a29bfe",
+    "description": "",
+    "createdAt": "2025-09-12T19:02:29.791Z"
+  },
+  {
+    "id": "71704c48-5d70-480d-a43b-672c7abcf2ce",
+    "projectId": "26364d26-442b-4b0a-a32a-6808dd4a2076",
+    "name": "linear",
+    "type": "linear",
+    "unit": "LF",
+    "wasteFactor": 0,
+    "color": "#ff9ff3",
+    "description": "",
+    "createdAt": "2025-09-12T19:21:22.987Z"
+  },
+  {
+    "id": "9d0e0381-1319-47c2-a713-abb3cb4c7118",
+    "projectId": "26364d26-442b-4b0a-a32a-6808dd4a2076",
+    "name": "linear",
+    "type": "linear",
+    "unit": "LF",
+    "wasteFactor": 0,
+    "color": "#ff9ff3",
+    "description": "",
+    "createdAt": "2025-09-12T19:26:55.318Z"
+  },
+  {
+    "id": "201c86ab-810b-4bb2-99b6-aab14cc3eafc",
+    "projectId": "26364d26-442b-4b0a-a32a-6808dd4a2076",
+    "name": "linear",
+    "type": "linear",
+    "unit": "LF",
+    "wasteFactor": 0,
+    "color": "#e17055",
+    "description": "",
+    "createdAt": "2025-09-12T19:31:27.386Z"
+  },
+  {
+    "id": "2c527f27-784b-425f-aa32-06d16f347a5a",
+    "projectId": "demo-project-1",
+    "name": "linear",
+    "type": "linear",
+    "unit": "LF",
+    "wasteFactor": 0,
+    "color": "#e17055",
+    "description": "",
+    "createdAt": "2025-09-12T19:48:11.002Z"
+  },
+  {
+    "id": "a2a978ca-71ec-4d24-a348-97e6ef89239e",
+    "projectId": "demo-project-1",
+    "name": "linear",
+    "type": "linear",
+    "unit": "LF",
+    "wasteFactor": 0,
+    "color": "#5f27cd",
+    "description": "",
+    "createdAt": "2025-09-12T19:50:24.943Z"
+  }
+]

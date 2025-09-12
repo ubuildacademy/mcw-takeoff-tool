@@ -43,21 +43,41 @@ export interface StoredCondition {
   createdAt: string;
 }
 
+export interface StoredTakeoffMeasurement {
+  id: string;
+  projectId: string;
+  sheetId: string;
+  conditionId: string;
+  type: 'area' | 'volume' | 'linear' | 'count';
+  points: Array<{ x: number; y: number }>;
+  calculatedValue: number;
+  unit: string;
+  timestamp: string;
+  pdfPage: number;
+  pdfCoordinates: Array<{ x: number; y: number }>;
+  conditionColor: string;
+  conditionName: string;
+  perimeterValue?: number;
+}
+
 class JsonStorage {
   private readonly dataDir: string;
   private readonly projectsFile: string;
   private readonly filesFile: string;
   private readonly conditionsFile: string;
+  private readonly takeoffMeasurementsFile: string;
 
   constructor() {
     this.dataDir = path.join(__dirname, '../data');
     this.projectsFile = path.join(this.dataDir, 'projects.json');
     this.filesFile = path.join(this.dataDir, 'files.json');
     this.conditionsFile = path.join(this.dataDir, 'conditions.json');
+    this.takeoffMeasurementsFile = path.join(this.dataDir, 'takeoffMeasurements.json');
     fs.ensureDirSync(this.dataDir);
     if (!fs.existsSync(this.projectsFile)) fs.writeJsonSync(this.projectsFile, []);
     if (!fs.existsSync(this.filesFile)) fs.writeJsonSync(this.filesFile, []);
     if (!fs.existsSync(this.conditionsFile)) fs.writeJsonSync(this.conditionsFile, []);
+    if (!fs.existsSync(this.takeoffMeasurementsFile)) fs.writeJsonSync(this.takeoffMeasurementsFile, []);
   }
 
   // Projects
@@ -85,6 +105,15 @@ class JsonStorage {
 
   saveConditions(conditions: StoredCondition[]): void {
     fs.writeJsonSync(this.conditionsFile, conditions, { spaces: 2 });
+  }
+
+  // Takeoff Measurements
+  getTakeoffMeasurements(): StoredTakeoffMeasurement[] {
+    return fs.readJsonSync(this.takeoffMeasurementsFile);
+  }
+
+  saveTakeoffMeasurements(measurements: StoredTakeoffMeasurement[]): void {
+    fs.writeJsonSync(this.takeoffMeasurementsFile, measurements, { spaces: 2 });
   }
 
   // Seed initial data if empty
