@@ -126,8 +126,15 @@ export const conditionService = {
   },
 
   async getProjectConditions(projectId: string) {
-    const response = await apiClient.get(`/conditions/project/${projectId}`);
-    return response.data;
+    console.log('🌐 API_GET_PROJECT_CONDITIONS: Making API call for project:', projectId);
+    try {
+      const response = await apiClient.get(`/conditions/project/${projectId}`);
+      console.log('✅ API_GET_PROJECT_CONDITIONS: API call successful:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('❌ API_GET_PROJECT_CONDITIONS: API call failed:', error);
+      throw error;
+    }
   },
 
   async getCondition(id: string) {
@@ -136,8 +143,15 @@ export const conditionService = {
   },
 
   async createCondition(conditionData: any) {
-    const response = await apiClient.post('/conditions', conditionData);
-    return response.data;
+    console.log('🌐 API_CREATE_CONDITION: Making API call with data:', conditionData);
+    try {
+      const response = await apiClient.post('/conditions', conditionData);
+      console.log('✅ API_CREATE_CONDITION: API call successful:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('❌ API_CREATE_CONDITION: API call failed:', error);
+      throw error;
+    }
   },
 
   async updateCondition(id: string, updates: any) {
@@ -215,6 +229,46 @@ export const sheetService = {
     const response = await apiClient.get(`/sheets/${documentId}/thumbnail/${pageNumber}`, {
       responseType: 'blob'
     });
+    return response.data;
+  },
+};
+
+// Takeoff Measurements service
+export const takeoffMeasurementService = {
+  async getTakeoffMeasurements() {
+    const response = await apiClient.get('/takeoff-measurements');
+    return response.data;
+  },
+
+  async getProjectTakeoffMeasurements(projectId: string) {
+    const response = await apiClient.get(`/takeoff-measurements/project/${projectId}`);
+    return response.data;
+  },
+
+  async getSheetTakeoffMeasurements(sheetId: string) {
+    const response = await apiClient.get(`/takeoff-measurements/sheet/${sheetId}`);
+    return response.data;
+  },
+
+  async createTakeoffMeasurement(measurementData: any) {
+    console.log('🌐 API_CREATE_TAKEOFF_MEASUREMENT: Making API call with data:', measurementData);
+    try {
+      const response = await apiClient.post('/takeoff-measurements', measurementData);
+      console.log('✅ API_CREATE_TAKEOFF_MEASUREMENT: API call successful:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('❌ API_CREATE_TAKEOFF_MEASUREMENT: API call failed:', error);
+      throw error;
+    }
+  },
+
+  async updateTakeoffMeasurement(id: string, updates: any) {
+    const response = await apiClient.put(`/takeoff-measurements/${id}`, updates);
+    return response.data;
+  },
+
+  async deleteTakeoffMeasurement(id: string) {
+    const response = await apiClient.delete(`/takeoff-measurements/${id}`);
     return response.data;
   },
 };

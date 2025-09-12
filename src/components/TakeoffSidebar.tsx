@@ -17,6 +17,7 @@ import {
 import { useTakeoffStore } from '../store/useTakeoffStore';
 import { CreateConditionDialog } from './CreateConditionDialog';
 import { formatFeetAndInches } from '../lib/utils';
+import { loadConditions } from '../utils/measurementStorage';
 
 interface TakeoffCondition {
   id: string;
@@ -44,15 +45,24 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect }: T
   const [loading, setLoading] = useState(true);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
 
-  const { addCondition, conditions, setSelectedCondition, selectedConditionId, getConditionTakeoffMeasurements, loadProjectConditions } = useTakeoffStore();
+  const { addCondition, conditions, setSelectedCondition, selectedConditionId, getConditionTakeoffMeasurements, setConditions } = useTakeoffStore();
+
+  // Function to reload conditions from localStorage
+  const reloadConditions = () => {
+    const loadedConditions = loadConditions(projectId);
+    console.log('🔄 RELOAD_CONDITIONS: Loading conditions from localStorage', {
+      projectId,
+      conditionsCount: loadedConditions.length,
+      conditions: loadedConditions.map(c => ({ id: c.id, name: c.name }))
+    });
+    setConditions(loadedConditions);
+  };
 
   useEffect(() => {
-    // Load conditions for this project when projectId changes
-    if (projectId) {
-      loadProjectConditions(projectId);
-    }
+    // Load conditions from localStorage when component mounts or projectId changes
+    reloadConditions();
     setLoading(false);
-  }, [projectId, loadProjectConditions]);
+  }, [projectId]);
 
   const filteredConditions = conditions.filter(condition =>
     condition.projectId === projectId && (
@@ -327,6 +337,8 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect }: T
           projectId={projectId}
           onClose={() => setShowCreateDialog(false)}
           onConditionCreated={(newCondition) => {
+            console.log('✅ CONDITION_CREATED: New condition created, reloading conditions', newCondition);
+            reloadConditions(); // Reload conditions from localStorage
             setShowCreateDialog(false);
           }}
         />

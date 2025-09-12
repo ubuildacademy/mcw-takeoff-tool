@@ -98,6 +98,7 @@ interface TakeoffStore {
   updateCondition: (id: string, updates: Partial<TakeoffCondition>) => Promise<void>;
   deleteCondition: (id: string) => Promise<void>;
   setSelectedCondition: (id: string | null) => void;
+  setConditions: (conditions: TakeoffCondition[]) => void;
   
   addMeasurement: (measurement: Omit<Measurement, 'id' | 'timestamp'>) => string;
   updateMeasurement: (id: string, updates: Partial<Measurement>) => void;
@@ -108,12 +109,13 @@ interface TakeoffStore {
   getCalibration: (projectId: string, sheetId: string) => Calibration | null;
   
   // Takeoff measurement actions
-  addTakeoffMeasurement: (measurement: Omit<TakeoffMeasurement, 'id' | 'timestamp'>) => string;
+  addTakeoffMeasurement: (measurement: Omit<TakeoffMeasurement, 'id' | 'timestamp'>) => Promise<string>;
   updateTakeoffMeasurement: (id: string, updates: Partial<TakeoffMeasurement>) => void;
   deleteTakeoffMeasurement: (id: string) => void;
   
   // New methods for takeoff functionality
   getSheetTakeoffMeasurements: (projectId: string, sheetId: string) => TakeoffMeasurement[];
+  getPageTakeoffMeasurements: (projectId: string, sheetId: string, pageNumber: number) => TakeoffMeasurement[];
   getConditionTakeoffMeasurements: (projectId: string, conditionId: string) => TakeoffMeasurement[];
   getProjectTakeoffSummary: (projectId: string) => {
     totalMeasurements: number;
@@ -130,6 +132,7 @@ interface TakeoffStore {
   // Data loading
   loadInitialData: () => Promise<void>;
   loadProjectConditions: (projectId: string) => Promise<void>;
+  loadProjectTakeoffMeasurements: (projectId: string) => Promise<void>;
 }
 
 export const useTakeoffStore = create<TakeoffStore>()(
@@ -223,35 +226,31 @@ export const useTakeoffStore = create<TakeoffStore>()(
       },
       
       addCondition: async (conditionData) => {
+        console.log('🔄 ADD_CONDITION: Starting to create condition:', conditionData);
         try {
           // Import the API service dynamically to avoid circular dependencies
           const { conditionService } = await import('../services/apiService');
           
-          // Create condition via API
+          console.log('🔄 ADD_CONDITION: Calling API to create condition...');
+          // Create condition via API - this is the source of truth
           const response = await conditionService.createCondition(conditionData);
+          console.log('✅ ADD_CONDITION: API response received:', response);
           const condition = response.condition || response;
           
-          // Add to local store
-          set(state => ({
-            conditions: [...state.conditions, condition]
-          }));
+          // Add to local store with the backend response
+          set(state => {
+            console.log('💾 ADD_CONDITION: Adding condition to store from backend:', condition);
+            return {
+              conditions: [...state.conditions, condition]
+            };
+          });
           
+          console.log('✅ ADD_CONDITION: Condition created successfully with ID:', condition.id);
           return condition.id;
         } catch (error: any) {
-          console.warn('Failed to create condition via API, creating locally:', error.message);
-          
-          // Create condition locally as fallback
-          const id = Date.now().toString();
-          const condition = {
-            ...conditionData,
-            id
-          };
-          
-          set(state => ({
-            conditions: [...state.conditions, condition]
-          }));
-          
-          return id;
+          console.error('❌ ADD_CONDITION: Failed to create condition via API:', error);
+          // Don't create locally - throw the error so the user knows it failed
+          throw new Error(`Failed to create condition: ${error.message}`);
         }
       },
       
@@ -297,6 +296,10 @@ export const useTakeoffStore = create<TakeoffStore>()(
       
       setSelectedCondition: (id) => {
         set({ selectedConditionId: id });
+      },
+      
+      setConditions: (conditions) => {
+        set({ conditions });
       },
       
       addMeasurement: (measurementData) => {
@@ -387,38 +390,40 @@ export const useTakeoffStore = create<TakeoffStore>()(
          return calibration;
        },
       
-      addTakeoffMeasurement: (measurementData) => {
-        const id = Date.now().toString();
-        const condition = get().conditions.find(c => c.id === measurementData.conditionId);
-        const measurement: TakeoffMeasurement = {
-          ...measurementData,
-          id,
-          timestamp: new Date(),
-          conditionColor: condition?.color || '#000000',
-          conditionName: condition?.name || 'Unknown'
-        };
-        
-        console.log('💾 STORE_ADD_TAKEOFF: Adding takeoff measurement to store', {
-          measurementData,
-          measurement,
-          pdfPage: measurement.pdfPage,
-          projectId: measurement.projectId,
-          sheetId: measurement.sheetId
-        });
-        
-        // Also log to localStorage for debugging
-        console.log('💾 STORAGE_DEBUG: Current localStorage takeoffMeasurements:', 
-          JSON.parse(localStorage.getItem('takeoff-store') || '{}').state?.takeoffMeasurements || []);
-        
-        set(state => {
-          const newState = {
-            takeoffMeasurements: [...state.takeoffMeasurements, measurement]
+      addTakeoffMeasurement: async (measurementData) => {
+        console.log('🔄 ADD_TAKEOFF_MEASUREMENT: Starting to create takeoff measurement:', measurementData);
+        try {
+          // Import the API service dynamically to avoid circular dependencies
+          const { takeoffMeasurementService } = await import('../services/apiService');
+          
+          const condition = get().conditions.find(c => c.id === measurementData.conditionId);
+          const measurementPayload = {
+            ...measurementData,
+            conditionColor: condition?.color || '#000000',
+            conditionName: condition?.name || 'Unknown'
           };
-          console.log('New store state:', newState);
-          return newState;
-        });
-        
-        return id;
+          
+          console.log('🔄 ADD_TAKEOFF_MEASUREMENT: Calling API to create measurement...');
+          // Create measurement via API - this is the source of truth
+          const response = await takeoffMeasurementService.createTakeoffMeasurement(measurementPayload);
+          console.log('✅ ADD_TAKEOFF_MEASUREMENT: API response received:', response);
+          const measurement = response.measurement || response;
+          
+          // Add to local store with the backend response
+          set(state => {
+            console.log('💾 ADD_TAKEOFF_MEASUREMENT: Adding measurement to store from backend:', measurement);
+            return {
+              takeoffMeasurements: [...state.takeoffMeasurements, measurement]
+            };
+          });
+          
+          console.log('✅ ADD_TAKEOFF_MEASUREMENT: Measurement created successfully with ID:', measurement.id);
+          return measurement.id;
+        } catch (error: any) {
+          console.error('❌ ADD_TAKEOFF_MEASUREMENT: Failed to create measurement via API:', error);
+          // Don't create locally - throw the error so the user knows it failed
+          throw new Error(`Failed to create takeoff measurement: ${error.message}`);
+        }
       },
       
       updateTakeoffMeasurement: (id, updates) => {
@@ -438,21 +443,16 @@ export const useTakeoffStore = create<TakeoffStore>()(
       // New methods for takeoff functionality
       getSheetTakeoffMeasurements: (projectId, sheetId) => {
         const { takeoffMeasurements } = get();
-        console.log('🔍 STORE_GET_SHEET_TAKEOFFS: Called with', { projectId, sheetId });
-        console.log('🔍 STORE_GET_SHEET_TAKEOFFS: All takeoff measurements:', takeoffMeasurements.map(m => ({
-          id: m.id,
-          projectId: m.projectId,
-          sheetId: m.sheetId,
-          pdfPage: m.pdfPage,
-          conditionName: m.conditionName
-        })));
-        const filtered = takeoffMeasurements.filter(m => m.projectId === projectId && m.sheetId === sheetId);
-        console.log('🔍 STORE_GET_SHEET_TAKEOFFS: Filtered measurements:', filtered.map(m => ({
-          id: m.id,
-          pdfPage: m.pdfPage,
-          conditionName: m.conditionName
-        })));
-        return filtered;
+        return takeoffMeasurements.filter(m => m.projectId === projectId && m.sheetId === sheetId);
+      },
+      
+      getPageTakeoffMeasurements: (projectId, sheetId, pageNumber) => {
+        const { takeoffMeasurements } = get();
+        return takeoffMeasurements.filter(m => 
+          m.projectId === projectId && 
+          m.sheetId === sheetId && 
+          m.pdfPage === pageNumber
+        );
       },
       
       getConditionTakeoffMeasurements: (projectId, conditionId) => {
@@ -518,66 +518,45 @@ export const useTakeoffStore = create<TakeoffStore>()(
       loadInitialData: async () => {
         try {
           // Import the API service dynamically to avoid circular dependencies
-          const { projectService, conditionService } = await import('../services/apiService');
+          const { projectService } = await import('../services/apiService');
           
-          // Load projects
+          // Load projects only - conditions will be loaded per project as needed
           const projectsResponse = await projectService.getProjects();
           const projects = projectsResponse.projects || [];
           
-          // Load all conditions
-          const conditionsResponse = await conditionService.getConditions();
-          const conditions = conditionsResponse.conditions || [];
-          
           set(state => ({
             projects,
-            conditions
+            conditions: [] // Always start with empty conditions - load from backend per project
           }));
           
-          console.log('Initial data loaded:', { projects: projects.length, conditions: conditions.length });
+          console.log('Initial data loaded:', { projects: projects.length });
         } catch (error: any) {
-          console.warn('Failed to load initial data from API, using offline mode:', error.message);
+          console.error('Failed to load initial data from API, using offline mode:', error);
+          console.error('Error details:', {
+            message: error.message,
+            code: error.code,
+            isOffline: error.isOffline,
+            response: error.response?.data
+          });
           
           // Provide fallback data for offline mode
           const fallbackProjects = [
             {
-              id: 'demo-project-1',
-              name: 'Demo Construction Project',
-              client: 'Demo Client',
-              location: 'Demo Location',
+              id: '26364d26-442b-4b0a-a32a-6808dd4a2076',
+              name: 'Tru Hilton',
+              client: 'ABC',
+              location: 'FTL',
               status: 'active' as const,
               lastModified: new Date(),
               takeoffCount: 0,
               totalValue: 0,
-              description: 'This is a demo project for testing the takeoff tool'
-            }
-          ];
-          
-          const fallbackConditions = [
-            {
-              id: 'demo-condition-1',
-              projectId: 'demo-project-1',
-              name: 'Concrete Slab',
-              type: 'area' as const,
-              unit: 'sq ft',
-              wasteFactor: 0.1,
-              color: '#3B82F6',
-              description: 'Concrete slab area measurement'
-            },
-            {
-              id: 'demo-condition-2',
-              projectId: 'demo-project-1',
-              name: 'Steel Reinforcement',
-              type: 'linear' as const,
-              unit: 'ft',
-              wasteFactor: 0.05,
-              color: '#EF4444',
-              description: 'Steel rebar linear measurement'
+              description: 'Tru Hilton project'
             }
           ];
           
           set(state => ({
             projects: fallbackProjects,
-            conditions: fallbackConditions
+            conditions: [] // Always start with empty conditions
           }));
           
           console.log('Using fallback data for offline mode');
@@ -585,24 +564,66 @@ export const useTakeoffStore = create<TakeoffStore>()(
       },
       
       loadProjectConditions: async (projectId: string) => {
+        console.log('🔄 LOAD_PROJECT_CONDITIONS: Starting to load conditions for project:', projectId);
         try {
           // Import the API service dynamically to avoid circular dependencies
           const { conditionService } = await import('../services/apiService');
           
+          console.log('🔄 LOAD_PROJECT_CONDITIONS: Calling API to get project conditions...');
           // Load conditions for specific project
           const conditionsResponse = await conditionService.getProjectConditions(projectId);
+          console.log('✅ LOAD_PROJECT_CONDITIONS: API response received:', conditionsResponse);
           const projectConditions = conditionsResponse.conditions || [];
           
           // Merge with existing conditions, avoiding duplicates
           set(state => {
+            // Remove existing conditions for this project and add the new ones
             const existingConditions = state.conditions.filter(c => c.projectId !== projectId);
             const allConditions = [...existingConditions, ...projectConditions];
+            console.log(`💾 LOAD_PROJECT_CONDITIONS: Merging conditions for project ${projectId}:`, {
+              existingCount: existingConditions.length,
+              projectConditionsCount: projectConditions.length,
+              totalCount: allConditions.length,
+              projectConditions: projectConditions
+            });
             return { conditions: allConditions };
           });
           
-          console.log(`Project conditions loaded for ${projectId}:`, projectConditions.length);
+          console.log(`✅ LOAD_PROJECT_CONDITIONS: Project conditions loaded for ${projectId}:`, projectConditions.length);
         } catch (error) {
-          console.error(`Failed to load conditions for project ${projectId}:`, error);
+          console.error(`❌ LOAD_PROJECT_CONDITIONS: Failed to load conditions for project ${projectId}:`, error);
+        }
+      },
+
+      loadProjectTakeoffMeasurements: async (projectId: string) => {
+        console.log('🔄 LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Starting to load measurements for project:', projectId);
+        try {
+          // Import the API service dynamically to avoid circular dependencies
+          const { takeoffMeasurementService } = await import('../services/apiService');
+          
+          console.log('🔄 LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Calling API to get project measurements...');
+          // Load measurements for specific project
+          const measurementsResponse = await takeoffMeasurementService.getProjectTakeoffMeasurements(projectId);
+          console.log('✅ LOAD_PROJECT_TAKEOFF_MEASUREMENTS: API response received:', measurementsResponse);
+          const projectMeasurements = measurementsResponse.measurements || [];
+          
+          // Merge with existing measurements, avoiding duplicates
+          set(state => {
+            // Remove existing measurements for this project and add the new ones
+            const existingMeasurements = state.takeoffMeasurements.filter(m => m.projectId !== projectId);
+            const allMeasurements = [...existingMeasurements, ...projectMeasurements];
+            console.log(`💾 LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Merging measurements for project ${projectId}:`, {
+              existingCount: existingMeasurements.length,
+              projectMeasurementsCount: projectMeasurements.length,
+              totalCount: allMeasurements.length,
+              projectMeasurements: projectMeasurements
+            });
+            return { takeoffMeasurements: allMeasurements };
+          });
+          
+          console.log(`✅ LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Project measurements loaded for ${projectId}:`, projectMeasurements.length);
+        } catch (error) {
+          console.error(`❌ LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Failed to load measurements for project ${projectId}:`, error);
         }
       }
     }),
@@ -610,7 +631,7 @@ export const useTakeoffStore = create<TakeoffStore>()(
       name: 'takeoff-store',
       partialize: (state) => ({
         projects: state.projects,
-        conditions: state.conditions,
+        // Don't persist conditions to localStorage - always load from backend
         measurements: state.measurements,
         calibrations: state.calibrations,
         takeoffMeasurements: state.takeoffMeasurements

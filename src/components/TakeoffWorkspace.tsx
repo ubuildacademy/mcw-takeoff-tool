@@ -8,6 +8,7 @@ import { TitleblockConfigDialog } from './TitleblockConfigDialog';
 import { OCRProcessingDialog } from './OCRProcessingDialog';
 
 import { useTakeoffStore } from '../store/useTakeoffStore';
+import { loadConditions } from '../utils/measurementStorage';
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Separator } from "./ui/separator";
@@ -82,6 +83,13 @@ export function TakeoffWorkspace() {
   const { jobId } = useParams<{ jobId: string }>();
   const navigate = useNavigate();
   
+  console.log('🏗️ TAKEOFF_WORKSPACE: Component initialized', { 
+    jobId, 
+    hasJobId: !!jobId,
+    currentUrl: window.location.href,
+    pathname: window.location.pathname
+  });
+  
   const [selectedSheet, setSelectedSheet] = useState<Sheet | null>(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const [selectedPageNumber, setSelectedPageNumber] = useState<number | null>(null);
@@ -98,6 +106,7 @@ export function TakeoffWorkspace() {
     getCurrentProject,
     getProjectTakeoffSummary,
     loadProjectConditions,
+    loadProjectTakeoffMeasurements,
     setCalibration,
     getCalibration
   } = useTakeoffStore();
@@ -142,43 +151,66 @@ export function TakeoffWorkspace() {
 
   useEffect(() => {
     async function loadFiles() {
-      if (!jobId) return;
+      console.log('🔄 FILE_LOAD_EFFECT: Starting file loading effect', { jobId, hasJobId: !!jobId });
+      if (!jobId) {
+        console.log('❌ FILE_LOAD_EFFECT: No jobId provided');
+        return;
+      }
       try {
-        console.log('Loading files for project:', jobId);
+        console.log('📁 FILE_LOAD_EFFECT: Loading files for project:', jobId);
         const res = await fileService.getProjectFiles(jobId);
         const files = res.files || [];
-        console.log('Files response:', res);
-        console.log('Files array:', files);
+        console.log('📁 FILE_LOAD_EFFECT: Files response:', res);
+        console.log('📁 FILE_LOAD_EFFECT: Files array:', files);
         setProjectFiles(files);
         
         // Set the first PDF file as current if no current file is set
         if (files.length > 0 && !currentPdfFile) {
           const firstPdfFile = files.find((file: any) => file.mimetype === 'application/pdf');
           if (firstPdfFile) {
-            console.log('Setting current PDF file:', firstPdfFile);
+            console.log('✅ Setting current PDF file:', firstPdfFile);
             setCurrentPdfFile(firstPdfFile);
           } else {
-            console.log('No PDF files found in project');
+            console.log('❌ No PDF files found in project');
+            console.log('Available files:', files.map((f: any) => ({ id: f.id, name: f.originalName, mimetype: f.mimetype })));
           }
+        } else {
+          console.log('📁 File loading status:', { 
+            filesCount: files.length, 
+            hasCurrentPdfFile: !!currentPdfFile,
+            currentPdfFileId: currentPdfFile?.id 
+          });
         }
         
         console.log('Project files loaded:', files);
         console.log('Current PDF file:', currentPdfFile);
-      } catch (e) {
-        console.error('Error loading project files:', e);
+      } catch (e: any) {
+        console.error('❌ FILE_LOAD_EFFECT: Error loading project files:', e);
+        console.error('❌ FILE_LOAD_EFFECT: Error details:', { 
+          message: e?.message, 
+          stack: e?.stack,
+          jobId 
+        });
       }
     }
     loadFiles();
   }, [jobId]); // Removed currentPdfFile from dependencies to prevent infinite loop
 
-  // Set current project in store and load its conditions
+  // Set current project in store and load its data
   useEffect(() => {
     if (jobId) {
       setCurrentProject(jobId);
-      // Load conditions for this project
-      loadProjectConditions(jobId);
+      // Load conditions from localStorage
+      const conditions = loadConditions(jobId);
+      console.log('Loaded conditions from localStorage:', conditions);
+      
+      // Update the store with the loaded conditions
+      useTakeoffStore.getState().setConditions(conditions);
+      
+      // Load measurements for this project
+      loadProjectTakeoffMeasurements(jobId);
     }
-  }, [jobId, setCurrentProject, loadProjectConditions]);
+  }, [jobId, setCurrentProject, loadProjectTakeoffMeasurements]);
 
   const handleConditionSelect = (condition: TakeoffCondition | null) => {
     if (condition === null) {
@@ -639,8 +671,8 @@ export function TakeoffWorkspace() {
               <EnhancedSheetSidebar 
                 projectId={jobId!}
                 onPageSelect={handlePageSelect}
-                selectedDocumentId={selectedDocumentId}
-                selectedPageNumber={selectedPageNumber}
+                selectedDocumentId={selectedDocumentId || undefined}
+                selectedPageNumber={selectedPageNumber || undefined}
                 onOCRRequest={handleOCRRequest}
                 onTitleblockConfig={handleTitleblockConfig}
                 onOcrSearchResults={handleOcrSearchResults}

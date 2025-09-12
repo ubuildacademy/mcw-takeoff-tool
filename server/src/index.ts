@@ -8,6 +8,7 @@ import { projectRoutes } from './routes/projects';
 import { fileRoutes } from './routes/files';
 import { conditionRoutes } from './routes/conditions';
 import { sheetRoutes } from './routes/sheets';
+import takeoffMeasurementRoutes from './routes/takeoffMeasurements';
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '4000', 10);
@@ -36,6 +37,7 @@ app.use('/api/projects', projectRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/conditions', conditionRoutes);
 app.use('/api/sheets', sheetRoutes);
+app.use('/api/takeoff-measurements', takeoffMeasurementRoutes);
 
 // Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));

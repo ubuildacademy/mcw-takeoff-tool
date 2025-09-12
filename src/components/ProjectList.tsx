@@ -30,6 +30,11 @@ export function ProjectList() {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  
+  console.log('📋 PROJECT_LIST: Component initialized', { 
+    currentUrl: window.location.href,
+    pathname: window.location.pathname
+  });
 
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -62,6 +67,12 @@ export function ProjectList() {
     (project.client || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
     (project.location || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
+  
+  console.log('📋 PROJECT_LIST: Projects loaded', { 
+    projectsCount: projects?.length || 0,
+    filteredCount: filteredProjects.length,
+    projects: projects?.map(p => ({ id: p.id, name: p.name, client: p.client }))
+  });
 
   const handleProjectClick = (projectId: string) => {
     navigate(`/job/${projectId}`);

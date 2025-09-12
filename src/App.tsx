@@ -8,6 +8,11 @@ function App() {
   const { loadInitialData } = useTakeoffStore();
   
   useEffect(() => {
+    console.log('🚀 APP: App component mounted', { 
+      currentUrl: window.location.href,
+      pathname: window.location.pathname,
+      search: window.location.search
+    });
     // Load initial data when app starts
     loadInitialData();
   }, [loadInitialData]);
