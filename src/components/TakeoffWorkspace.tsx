@@ -9,7 +9,6 @@ import { OCRProcessingDialog } from './OCRProcessingDialog';
 
 import { useTakeoffStore } from '../store/useTakeoffStore';
 import type { TakeoffCondition, Sheet, ProjectFile } from '../types';
-import { loadConditions } from '../utils/measurementStorage';
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Separator } from "./ui/separator";
@@ -150,17 +149,12 @@ export function TakeoffWorkspace() {
   useEffect(() => {
     if (jobId) {
       setCurrentProject(jobId);
-      // Load conditions from localStorage
-      const conditions = loadConditions(jobId);
-      console.log('Loaded conditions from localStorage:', conditions);
-      
-      // Update the store with the loaded conditions
-      useTakeoffStore.getState().setConditions(conditions);
-      
+      // Load conditions from API
+      loadProjectConditions(jobId);
       // Load measurements for this project
       loadProjectTakeoffMeasurements(jobId);
     }
-  }, [jobId, setCurrentProject, loadProjectTakeoffMeasurements]);
+  }, [jobId, setCurrentProject, loadProjectConditions, loadProjectTakeoffMeasurements]);
 
   const handleConditionSelect = (condition: TakeoffCondition | null) => {
     if (condition === null) {
@@ -265,18 +259,6 @@ export function TakeoffWorkspace() {
     }
   };
 
-  const handleClearAll = () => {
-    // Trigger the PDF viewer's clear all function
-    console.log('Clear all requested');
-    
-    // Note: We should NOT reset calibration when clearing takeoffs
-    // Calibration should remain intact, only takeoff measurements should be cleared
-    
-    // Use the global trigger function set up by the PDF viewer
-    if ((window as any).triggerClearAll) {
-      (window as any).triggerClearAll();
-    }
-  };
 
   const handleResetView = () => {
     // Trigger the PDF viewer's fit to window function
@@ -457,13 +439,6 @@ export function TakeoffWorkspace() {
                   1px = {(scaleFactor * 0.0833).toFixed(4)} {unit}
                 </span>
               )}
-              <Button
-                size="sm"
-                variant="destructive"
-                onClick={handleClearAll}
-              >
-                Clear All
-              </Button>
             </div>
           </div>
         )}
@@ -575,7 +550,6 @@ export function TakeoffWorkspace() {
               scale={scale}
               onScaleChange={handleScaleChange}
               onCalibrateScale={handleCalibrateScale}
-              onClearAll={handleClearAll}
               isPageCalibrated={isPageCalibrated}
               scaleFactor={scaleFactor}
               unit={unit}

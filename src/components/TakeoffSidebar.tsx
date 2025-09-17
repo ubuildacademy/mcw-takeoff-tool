@@ -18,7 +18,6 @@ import { useTakeoffStore } from '../store/useTakeoffStore';
 import type { TakeoffCondition } from '../types';
 import { CreateConditionDialog } from './CreateConditionDialog';
 import { formatFeetAndInches } from '../lib/utils';
-import { loadConditions } from '../utils/measurementStorage';
 
 // TakeoffCondition interface imported from shared types
 
@@ -34,24 +33,16 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect }: T
   const [loading, setLoading] = useState(true);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
 
-  const { addCondition, conditions, setSelectedCondition, selectedConditionId, getConditionTakeoffMeasurements, setConditions } = useTakeoffStore();
-
-  // Function to reload conditions from localStorage
-  const reloadConditions = () => {
-    const loadedConditions = loadConditions(projectId);
-    console.log('🔄 RELOAD_CONDITIONS: Loading conditions from localStorage', {
-      projectId,
-      conditionsCount: loadedConditions.length,
-      conditions: loadedConditions.map(c => ({ id: c.id, name: c.name }))
-    });
-    setConditions(loadedConditions);
-  };
+  const { addCondition, conditions, setSelectedCondition, selectedConditionId, getConditionTakeoffMeasurements, loadProjectConditions } = useTakeoffStore();
 
   useEffect(() => {
-    // Load conditions from localStorage when component mounts or projectId changes
-    reloadConditions();
-    setLoading(false);
-  }, [projectId]);
+    // Load conditions from API when component mounts or projectId changes
+    if (projectId) {
+      console.log('🔄 LOADING_CONDITIONS: Loading conditions for project:', projectId);
+      loadProjectConditions(projectId);
+      setLoading(false);
+    }
+  }, [projectId, loadProjectConditions]);
 
   const filteredConditions = conditions.filter(condition =>
     condition.projectId === projectId && (
@@ -81,10 +72,16 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect }: T
 
 
 
-  const handleDeleteCondition = (conditionId: string) => {
-    // Remove condition from store
-    useTakeoffStore.getState().deleteCondition(conditionId);
-    setShowDeleteConfirm(null);
+  const handleDeleteCondition = async (conditionId: string) => {
+    try {
+      // Delete condition via API and update store
+      await useTakeoffStore.getState().deleteCondition(conditionId);
+      setShowDeleteConfirm(null);
+      console.log('✅ Condition deleted successfully:', conditionId);
+    } catch (error) {
+      console.error('❌ Failed to delete condition:', error);
+      // You might want to show an error message to the user here
+    }
   };
 
   const handleDuplicateCondition = (condition: TakeoffCondition) => {
@@ -327,7 +324,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect }: T
           onClose={() => setShowCreateDialog(false)}
           onConditionCreated={(newCondition) => {
             console.log('✅ CONDITION_CREATED: New condition created, reloading conditions', newCondition);
-            reloadConditions(); // Reload conditions from localStorage
+            loadProjectConditions(projectId); // Reload conditions from API
             setShowCreateDialog(false);
           }}
         />
