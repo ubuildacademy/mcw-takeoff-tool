@@ -25,7 +25,7 @@ import {
 import { projectService, fileService } from '../services/apiService';
 import { useTakeoffStore } from '../store/useTakeoffStore';
 
-interface JobCreationDialogProps {
+interface ProjectCreationDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated?: (project: any) => void;
@@ -44,7 +44,7 @@ interface JobFormData {
   contactPhone: string;
 }
 
-export function JobCreationDialog({ open, onOpenChange, onCreated }: JobCreationDialogProps) {
+export function ProjectCreationDialog({ open, onOpenChange, onCreated }: ProjectCreationDialogProps) {
   const { addProject } = useTakeoffStore();
   
   const [formData, setFormData] = useState<JobFormData>({

@@ -69,9 +69,4 @@ CREATE POLICY "Allow all operations on projects" ON projects FOR ALL USING (true
 CREATE POLICY "Allow all operations on conditions" ON conditions FOR ALL USING (true);
 CREATE POLICY "Allow all operations on measurements" ON measurements FOR ALL USING (true);
 
--- Insert some sample data
-INSERT INTO projects (id, name, client, location, status, description, project_type) 
-VALUES 
-  ('26364d26-442b-4b0a-a32a-6808dd4a2076', 'Tru Hilton', 'ABC', 'FTL', 'active', '', 'Commercial'),
-  ('58c82b0d-ab15-41cd-821b-ab9ddd5bb946', 'Demo Construction Project', 'Demo Client', 'Demo Location', 'active', 'Demo project for testing', 'Commercial')
-ON CONFLICT (id) DO NOTHING;
+-- No sample data - start with empty tables

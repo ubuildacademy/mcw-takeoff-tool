@@ -15,23 +15,12 @@ import {
   EyeOff
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
+import type { TitleblockField, TitleblockConfig } from '../types';
 
 // Configure PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
-interface TitleblockField {
-  name: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  color: string;
-}
-
-interface TitleblockConfig {
-  sheetNumberField: TitleblockField;
-  sheetNameField: TitleblockField;
-}
+// TitleblockField and TitleblockConfig interfaces imported from shared types
 
 interface TitleblockConfigDialogProps {
   isOpen: boolean;

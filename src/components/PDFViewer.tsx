@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { useTakeoffStore } from '../store/useTakeoffStore';
+import type { SearchResult } from '../types';
 import { 
   loadMeasurements, 
   saveMeasurements, 
@@ -9,22 +10,15 @@ import {
 import CalibrationDialog from './CalibrationDialog';
 import ScaleApplicationDialog from './ScaleApplicationDialog';
 import { formatFeetAndInches } from '../lib/utils';
+import { calculateDistance } from '../utils/commonUtils';
 
 // Configure PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 console.log('🔧 PDF_WORKER: Worker configured with path:', pdfjsLib.GlobalWorkerOptions.workerSrc);
 
-interface SearchResult {
-  documentId: string;
-  pageNumber: number;
-  matches: Array<{
-    text: string;
-    context: string;
-    confidence: number;
-  }>;
-}
+// SearchResult interface imported from shared types
 
-interface CleanPDFViewerProps {
+interface PDFViewerProps {
   file: File | string | any;
   className?: string;
   // Control props
@@ -60,7 +54,7 @@ interface Measurement {
   perimeterValue?: number; // Perimeter in linear feet for area measurements
 }
 
-const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({ 
+const PDFViewer: React.FC<PDFViewerProps> = ({ 
   file, 
   className = '',
   currentPage: externalCurrentPage,
@@ -1492,12 +1486,7 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
     };
   }, [currentPage, currentProjectId, file?.id, localTakeoffMeasurements.length]);
 
-  // Calculate distance between two points
-  const calculateDistance = (point1: { x: number; y: number }, point2: { x: number; y: number }) => {
-    const dx = point2.x - point1.x;
-    const dy = point2.y - point1.y;
-    return Math.sqrt(dx * dx + dy * dy);
-  };
+  // Distance calculation now imported from common utils
 
   // Calculate scale to fit PDF in container
   const calculateFitToWindowScale = useCallback(() => {
@@ -1676,4 +1665,4 @@ const CleanPDFViewer: React.FC<CleanPDFViewerProps> = ({
   );
 };
 
-export default CleanPDFViewer;
+export default PDFViewer;

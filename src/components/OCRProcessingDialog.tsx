@@ -12,14 +12,9 @@ import {
   Clock,
   Download
 } from 'lucide-react';
+import type { OCRResult } from '../types';
 
-interface OCRResult {
-  pageNumber: number;
-  success: boolean;
-  extractedText?: string;
-  error?: string;
-  processingTime?: number;
-}
+// OCRResult interface imported from shared types
 
 interface OCRProcessingDialogProps {
   isOpen: boolean;
