@@ -42,13 +42,13 @@ interface DocumentMetadata {
 }
 
 // Get all sheets for a project
-router.get('/project/:projectId', (req, res) => {
+router.get('/project/:projectId', async (req, res) => {
   try {
     const { projectId } = req.params;
     
     // Get all files for the project
-    const files = storage.getFiles().filter(f => f.projectId === projectId);
-    const pdfFiles = files.filter(f => f.mimetype === 'application/pdf');
+    const files = await storage.getFilesByProject(projectId);
+    const pdfFiles = files.filter((f: any) => f.mimetype === 'application/pdf');
     
     // For now, return basic sheet information
     // In a real implementation, you'd load this from a database

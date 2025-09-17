@@ -240,11 +240,26 @@ export const useTakeoffStore = create<TakeoffStore>()(
           // Delete condition via API
           await conditionService.deleteCondition(id);
           
-          // Update local store
+          // Update local store - remove condition and all associated measurements
           set(state => ({
             conditions: state.conditions.filter(condition => condition.id !== id),
-            selectedConditionId: state.selectedConditionId === id ? null : state.selectedConditionId
+            selectedConditionId: state.selectedConditionId === id ? null : state.selectedConditionId,
+            // Also remove all measurements associated with this condition
+            takeoffMeasurements: state.takeoffMeasurements.filter(measurement => measurement.conditionId !== id)
           }));
+          
+          console.log(`✅ DELETE_CONDITION: Deleted condition ${id} and all associated measurements`, {
+            deletedConditionId: id,
+            remainingMeasurements: get().takeoffMeasurements.filter(measurement => measurement.conditionId !== id).length,
+            totalMeasurements: get().takeoffMeasurements.length
+          });
+          
+          // Force reload measurements for the current project to ensure UI is updated
+          const currentProjectId = get().currentProjectId;
+          if (currentProjectId) {
+            console.log(`🔄 DELETE_CONDITION: Reloading measurements for project ${currentProjectId}`);
+            get().loadProjectTakeoffMeasurements(currentProjectId);
+          }
         } catch (error) {
           console.error('Failed to delete condition:', error);
           throw error;

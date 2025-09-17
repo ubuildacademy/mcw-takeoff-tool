@@ -6,7 +6,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Textarea } from './ui/textarea';
 import { X } from 'lucide-react';
 import { useTakeoffStore } from '../store/useTakeoffStore';
-import { saveConditions, loadConditions } from '../utils/measurementStorage';
 import { generateRandomColor, getDefaultUnit, generateId } from '../utils/commonUtils';
 
 interface CreateConditionDialogProps {
@@ -16,7 +15,7 @@ interface CreateConditionDialogProps {
 }
 
 export function CreateConditionDialog({ projectId, onClose, onConditionCreated }: CreateConditionDialogProps) {
-  // Random color generation now imported from common utils
+  const { addCondition } = useTakeoffStore();
 
   const [formData, setFormData] = useState({
     name: '',
@@ -30,8 +29,6 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated }
     includePerimeter: false
   });
   const [loading, setLoading] = useState(false);
-
-  const { addCondition } = useTakeoffStore();
 
   // Debug: Log form data changes
   useEffect(() => {
@@ -72,19 +69,10 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated }
       console.log('New condition data:', newCondition);
       
       // Create condition with ID and timestamp
-      const conditionId = generateId();
-      const createdCondition = {
-        ...newCondition,
-        id: conditionId,
-        createdAt: new Date().toISOString()
-      };
+      // Save to API via store
+      const createdCondition = await addCondition(newCondition);
       
-      // Save to localStorage
-      const existingConditions = loadConditions(projectId);
-      const updatedConditions = [...existingConditions, createdCondition];
-      saveConditions(projectId, updatedConditions);
-      
-      console.log('Condition saved to localStorage:', createdCondition);
+      console.log('Condition saved to API:', createdCondition);
       
       // Call the callback with the new condition
       onConditionCreated(createdCondition);

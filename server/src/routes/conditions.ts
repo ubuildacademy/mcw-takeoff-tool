@@ -5,9 +5,9 @@ import { storage } from '../storage';
 const router = express.Router();
 
 // Get all conditions
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
-    const conditions = storage.getConditions();
+    const conditions = await storage.getConditions();
     return res.json({ conditions });
   } catch (error) {
     console.error('Error fetching all conditions:', error);
@@ -16,10 +16,10 @@ router.get('/', (req, res) => {
 });
 
 // Get all conditions for a project
-router.get('/project/:projectId', (req, res) => {
+router.get('/project/:projectId', async (req, res) => {
   try {
     const { projectId } = req.params;
-    const conditions = storage.getConditions().filter(c => c.projectId === projectId);
+    const conditions = await storage.getConditionsByProject(projectId);
     return res.json({ conditions });
   } catch (error) {
     console.error('Error fetching conditions:', error);
@@ -28,10 +28,10 @@ router.get('/project/:projectId', (req, res) => {
 });
 
 // Get a specific condition by ID
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const conditions = storage.getConditions();
+    const conditions = await storage.getConditions();
     const condition = conditions.find(c => c.id === id);
     
     if (!condition) {
@@ -46,7 +46,7 @@ router.get('/:id', (req, res) => {
 });
 
 // Create a new condition
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const {
       projectId,
@@ -90,13 +90,11 @@ router.post('/', (req, res) => {
       createdAt: now
     };
     
-    const conditions = storage.getConditions();
-    conditions.push(newCondition);
-    storage.saveConditions(conditions);
+    const savedCondition = await storage.saveCondition(newCondition);
     
     return res.status(201).json({ 
       success: true, 
-      condition: newCondition 
+      condition: savedCondition 
     });
   } catch (error) {
     console.error('Error creating condition:', error);
@@ -105,7 +103,7 @@ router.post('/', (req, res) => {
 });
 
 // Update an existing condition
-router.put('/:id', (req, res) => {
+router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const {
@@ -126,16 +124,16 @@ router.put('/:id', (req, res) => {
       });
     }
 
-    const conditions = storage.getConditions();
-    const conditionIndex = conditions.findIndex(c => c.id === id);
+    const conditions = await storage.getConditions();
+    const existingCondition = conditions.find(c => c.id === id);
     
-    if (conditionIndex === -1) {
+    if (!existingCondition) {
       return res.status(404).json({ error: 'Condition not found' });
     }
     
     // Update the condition
     const updatedCondition = {
-      ...conditions[conditionIndex],
+      ...existingCondition,
       ...(name !== undefined && { name }),
       ...(type !== undefined && { type }),
       ...(unit !== undefined && { unit }),
@@ -146,12 +144,11 @@ router.put('/:id', (req, res) => {
       ...(materialCost !== undefined && { materialCost })
     };
     
-    conditions[conditionIndex] = updatedCondition;
-    storage.saveConditions(conditions);
+    const savedCondition = await storage.saveCondition(updatedCondition);
     
     return res.json({ 
       success: true, 
-      condition: updatedCondition 
+      condition: savedCondition 
     });
   } catch (error) {
     console.error('Error updating condition:', error);
@@ -160,19 +157,10 @@ router.put('/:id', (req, res) => {
 });
 
 // Delete a condition
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const conditions = storage.getConditions();
-    const conditionIndex = conditions.findIndex(c => c.id === id);
-    
-    if (conditionIndex === -1) {
-      return res.status(404).json({ error: 'Condition not found' });
-    }
-    
-    conditions.splice(conditionIndex, 1);
-    storage.saveConditions(conditions);
-    
+    await storage.deleteCondition(id);
     return res.json({ success: true });
   } catch (error) {
     console.error('Error deleting condition:', error);
@@ -181,10 +169,10 @@ router.delete('/:id', (req, res) => {
 });
 
 // Duplicate a condition (copy to same project)
-router.post('/:id/duplicate', (req, res) => {
+router.post('/:id/duplicate', async (req, res) => {
   try {
     const { id } = req.params;
-    const conditions = storage.getConditions();
+    const conditions = await storage.getConditions();
     const originalCondition = conditions.find(c => c.id === id);
     
     if (!originalCondition) {
@@ -201,12 +189,11 @@ router.post('/:id/duplicate', (req, res) => {
       createdAt: now
     };
     
-    conditions.push(newCondition);
-    storage.saveConditions(conditions);
+    const savedCondition = await storage.saveCondition(newCondition);
     
     return res.status(201).json({ 
       success: true, 
-      condition: newCondition 
+      condition: savedCondition 
     });
   } catch (error) {
     console.error('Error duplicating condition:', error);
