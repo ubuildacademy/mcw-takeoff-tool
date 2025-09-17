@@ -2,11 +2,6 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import * as pdfjsLib from 'pdfjs-dist';
 import { useTakeoffStore } from '../store/useTakeoffStore';
 import type { SearchResult } from '../types';
-import { 
-  loadMeasurements, 
-  saveMeasurements, 
-  StoredMeasurement 
-} from '../utils/measurementStorage';
 import CalibrationDialog from './CalibrationDialog';
 import ScaleApplicationDialog from './ScaleApplicationDialog';
 import { formatFeetAndInches } from '../lib/utils';
@@ -140,7 +135,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const { 
     currentProjectId, 
     selectedConditionId,
-    getSelectedCondition
+    getSelectedCondition,
+    takeoffMeasurements
   } = useTakeoffStore();
 
   // Load existing takeoff measurements for the current sheet
@@ -202,8 +198,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const clearAllTakeoffMeasurements = useCallback(() => {
     if (!currentProjectId || !file?.id) return;
     
-    // Clear measurements for current page
-    saveMeasurements(currentProjectId, file.id, currentPage, []);
+    // Clear measurements for current page (local state only - API data remains)
     setLocalTakeoffMeasurements([]);
     setMeasurements([]);
     setCurrentMeasurement([]);
@@ -282,17 +277,90 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Project conditions are loaded by the parent TakeoffWorkspace component
 
-  // Simple localStorage-based measurement loading
+  // Load measurements from API only
   useEffect(() => {
     if (!currentProjectId || !file?.id || !currentPage) {
       setLocalTakeoffMeasurements([]);
       return;
     }
     
-    // Load measurements from localStorage for this specific page
-    const pageMeasurements = loadMeasurements(currentProjectId, file.id, currentPage);
-    setLocalTakeoffMeasurements(pageMeasurements);
-  }, [currentProjectId, file?.id, currentPage]);
+    // Load measurements from API only
+    const { getPageTakeoffMeasurements } = useTakeoffStore.getState();
+    const apiMeasurements = getPageTakeoffMeasurements(currentProjectId, file.id, currentPage);
+    
+    console.log('🔄 LOADING_MEASUREMENTS: Loading from API only', {
+      projectId: currentProjectId,
+      fileId: file.id,
+      currentPage,
+      apiCount: apiMeasurements.length,
+      apiMeasurements: apiMeasurements.map(m => ({
+        id: m.id,
+        type: m.type,
+        pdfPage: m.pdfPage,
+        conditionId: m.conditionId,
+        conditionName: m.conditionName
+      }))
+    });
+    
+    // Debug: Check if measurements are being filtered correctly
+    console.log('🔍 PAGE_FILTER_DEBUG: Checking page filtering', {
+      currentPage,
+      allMeasurements: useTakeoffStore.getState().takeoffMeasurements.map(m => ({ 
+        id: m.id, 
+        pdfPage: m.pdfPage, 
+        projectId: m.projectId, 
+        sheetId: m.sheetId 
+      })),
+      filteredMeasurements: apiMeasurements.map(m => ({ 
+        id: m.id, 
+        pdfPage: m.pdfPage 
+      }))
+    });
+    
+    // Convert API measurements to display format
+    const displayMeasurements = apiMeasurements.map(apiMeasurement => ({
+      id: apiMeasurement.id,
+      type: apiMeasurement.type,
+      points: apiMeasurement.points,
+      calculatedValue: apiMeasurement.calculatedValue,
+      unit: apiMeasurement.unit,
+      conditionId: apiMeasurement.conditionId,
+      conditionName: apiMeasurement.conditionName,
+      color: apiMeasurement.conditionColor,
+      timestamp: new Date(apiMeasurement.timestamp).getTime(),
+      pdfPage: apiMeasurement.pdfPage,
+      pdfCoordinates: apiMeasurement.pdfCoordinates,
+      perimeterValue: apiMeasurement.perimeterValue
+    }));
+    
+    console.log('✅ LOADING_MEASUREMENTS: Setting local measurements', {
+      currentPage,
+      displayCount: displayMeasurements.length,
+      displayMeasurements: displayMeasurements.map(m => ({
+        id: m.id,
+        type: m.type,
+        pdfPage: m.pdfPage,
+        points: m.points
+      }))
+    });
+    
+    setLocalTakeoffMeasurements(displayMeasurements);
+    
+    // Force a re-render to ensure measurements are displayed
+    setTimeout(() => {
+      if (displayMeasurements.length > 0) {
+        console.log('🔄 FORCE_RERENDER: Triggering re-render after measurements loaded', {
+          currentPage,
+          measurementCount: displayMeasurements.length
+        });
+      } else {
+        console.log('🔄 FORCE_RERENDER: No measurements found, clearing canvas', {
+          currentPage
+        });
+      }
+      renderAnnotations(false); // Re-render annotations without PDF background
+    }, 100);
+  }, [currentProjectId, file?.id, currentPage, takeoffMeasurements]);
 
   // Note: Measurements are cleared and loaded in the main useEffect above
 
@@ -446,8 +514,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       renderTaskRef.current = renderTask;
       await renderTask.promise;
       
-      // Re-render annotations
-      renderAnnotations();
+      // Re-render annotations with PDF background
+      renderAnnotations(true);
       
       // Note: takeoff measurements are now loaded in the page change effect with proper timing
       
@@ -489,8 +557,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     return newCanvas;
   }, [pageCanvases]);
 
-  // Clean annotation rendering - original logic but with page-specific takeoff canvas
-  const renderAnnotations = useCallback(() => {
+  // Optimized annotation rendering - only re-render PDF when necessary
+  const renderAnnotations = useCallback((forcePdfRerender = false) => {
     if (!canvasRef.current || !viewportRef.current) {
       return;
     }
@@ -506,17 +574,79 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     const canvas = canvasRef.current;
     const context = canvas.getContext('2d');
     if (!context) {
+      isRenderingRef.current = false;
       return;
     }
     
-    console.log('🎨 RENDER_ANNOTATIONS: Starting render', {
-      currentPage,
-      localTakeoffCount: localTakeoffMeasurements.length,
-      measurementsCount: measurements.length
-    });
+    // Only log when there are measurements or when forced to re-render
+    if (localTakeoffMeasurements.length > 0 || forcePdfRerender) {
+      console.log('🎨 RENDER_ANNOTATIONS: Starting render', {
+        currentPage,
+        localTakeoffCount: localTakeoffMeasurements.length,
+        measurementsCount: measurements.length,
+        forcePdfRerender
+      });
+    }
     
-    // Clear previous annotations by re-rendering PDF
-    if (pdfPageRef.current) {
+    const renderAnnotationsOnly = () => {
+      // Draw takeoff measurements (persisted) - only for current page
+      if (localTakeoffMeasurements.length > 0) {
+        console.log('🎨 RENDER_ANNOTATIONS: Processing measurements', {
+          currentPage,
+          totalMeasurements: localTakeoffMeasurements.length
+        });
+      }
+      
+      localTakeoffMeasurements.forEach((measurement) => {
+        // Only render measurements that explicitly belong to the current page
+        if (measurement.pdfPage === currentPage) {
+          console.log('✅ RENDER_ANNOTATIONS: Rendering measurement on page', { 
+            id: measurement.id, 
+            type: measurement.type, 
+            pdfPage: measurement.pdfPage, 
+            currentPage 
+          });
+          renderMeasurement(context, measurement);
+        } else {
+          console.log('❌ RENDER_ANNOTATIONS: Skipping measurement on wrong page', { 
+            id: measurement.id, 
+            pdfPage: measurement.pdfPage, 
+            currentPage 
+          });
+        }
+      });
+      
+      // Draw current measurement being created (only if actively measuring and has enough points)
+      if (currentMeasurement.length > 0 && isMeasuring) {
+        // For linear measurements, need at least 2 points to draw a line
+        // For area measurements, need at least 3 points to draw a polygon
+        const minPoints = measurementType === 'linear' ? 2 : measurementType === 'area' ? 3 : 1;
+        console.log('🔍 RENDER_CHECK: Checking if should render current measurement', {
+          currentMeasurementLength: currentMeasurement.length,
+          minPoints,
+          measurementType,
+          shouldRender: currentMeasurement.length >= minPoints
+        });
+        if (currentMeasurement.length >= minPoints) {
+          renderCurrentMeasurement(context);
+        } else {
+          console.log('🚫 RENDER_CHECK: Skipping render - not enough points');
+        }
+      }
+      
+      // Draw calibration points
+      if (isCalibrating && calibrationPoints.length > 0) {
+        renderCalibrationPoints(context);
+      }
+      
+      // Draw search highlights
+      if (searchHighlights[currentPage] && searchHighlights[currentPage].length > 0) {
+        renderSearchHighlights(context);
+      }
+    };
+    
+    // Only re-render PDF background if forced or if this is the first render
+    if (forcePdfRerender && pdfPageRef.current) {
       const viewport = viewportRef.current;
       const devicePixelRatio = window.devicePixelRatio || 1;
       
@@ -540,87 +670,25 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       
       // Wait for PDF render to complete, then draw annotations
       renderTask.promise.then(() => {
-        // Draw takeoff measurements (persisted) - only for current page
-        console.log('🎨 RENDER_ANNOTATIONS: Processing measurements', {
-          currentPage,
-          totalMeasurements: localTakeoffMeasurements.length,
-          measurements: localTakeoffMeasurements.map(m => ({
-            id: m.id,
-            pdfPage: m.pdfPage,
-            type: m.type,
-            conditionName: m.conditionName
-          }))
-        });
-        
-        localTakeoffMeasurements.forEach((measurement) => {
-          // Only render measurements that explicitly belong to the current page
-          if (measurement.pdfPage === currentPage) {
-            console.log('✅ RENDER_ANNOTATIONS: Rendering measurement', {
-              id: measurement.id,
-              pdfPage: measurement.pdfPage,
-              currentPage,
-              type: measurement.type
-            });
-            renderMeasurement(context, measurement);
-          } else {
-            console.log('❌ RENDER_ANNOTATIONS: Skipping measurement from different page', {
-              id: measurement.id,
-              pdfPage: measurement.pdfPage,
-              currentPage
-            });
-          }
-        });
-        
-        // Draw local measurements (temporary)
-        measurements.forEach(measurement => {
-          renderMeasurement(context, measurement);
-        });
-        
-        // Draw current measurement
-        if (currentMeasurement.length > 0) {
-          renderCurrentMeasurement(context);
-        }
-        
-        // Draw calibration points
-        if (isCalibrating && calibrationPoints.length > 0) {
-          renderCalibrationPoints(context);
-        }
-        
-        // Draw search highlights
-        if (searchHighlights[currentPage] && searchHighlights[currentPage].length > 0) {
-          renderSearchHighlights(context);
-        }
+        renderAnnotationsOnly();
+        context.restore();
       }).catch((error: any) => {
         if (error.name !== 'RenderingCancelledException') {
           console.error('❌ RENDER_ANNOTATIONS: Error in PDF render promise:', error);
-          // If render fails, try to draw annotations on existing canvas without re-rendering PDF
-          try {
-            localTakeoffMeasurements.forEach((measurement) => {
-              if (measurement.pdfPage === currentPage) {
-                renderMeasurement(context, measurement);
-              }
-            });
-            
-            if (currentMeasurement.length > 0) {
-              renderCurrentMeasurement(context);
-            }
-          } catch (annotationError) {
-            console.error('❌ RENDER_ANNOTATIONS: Error drawing annotations:', annotationError);
-          }
         }
         // Reset rendering flag on error
         isRenderingRef.current = false;
+        context.restore();
       });
-      
-      context.restore();
+    } else {
+      // Just draw annotations on existing canvas
+      renderAnnotationsOnly();
+      isRenderingRef.current = false;
     }
-    
-    // Reset rendering flag
-    isRenderingRef.current = false;
   }, [localTakeoffMeasurements, measurements, currentMeasurement, measurementType, isCalibrating, calibrationPoints, mousePosition, currentPage]);
 
 
-  // Clean measurement rendering
+  // Clean measurement rendering with proper coordinate conversion
   const renderMeasurement = (context: CanvasRenderingContext2D, measurement: Measurement) => {
     const points = measurement.points;
     if (points.length < 2) {
@@ -636,27 +704,41 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     context.save();
     context.lineWidth = 2;
     
+    // Helper function to convert coordinates
+    const convertCoords = (point: { x: number; y: number }) => {
+      // Check if coordinates are already in canvas space (large values) or PDF-relative (0-1)
+      if (point.x > 1 || point.y > 1) {
+        // Already in canvas coordinates
+        return { x: point.x, y: point.y };
+      } else {
+        // PDF-relative coordinates, convert to canvas
+        return {
+          x: point.x * viewport.width,
+          y: point.y * viewport.height
+        };
+      }
+    };
+    
     switch (measurement.type) {
       case 'linear':
         context.beginPath();
         context.strokeStyle = measurement.color;
         
-        // Convert PDF-relative coordinates to canvas coordinates
-        const startCanvasX = points[0].x * viewport.width;
-        const startCanvasY = points[0].y * viewport.height;
-        context.moveTo(startCanvasX, startCanvasY);
+        // Convert first point
+        const startPoint = convertCoords(points[0]);
+        context.moveTo(startPoint.x, startPoint.y);
         
+        // Draw line segments
         for (let i = 1; i < points.length; i++) {
-          const canvasX = points[i].x * viewport.width;
-          const canvasY = points[i].y * viewport.height;
-          context.lineTo(canvasX, canvasY);
+          const point = convertCoords(points[i]);
+          context.lineTo(point.x, point.y);
         }
         context.stroke();
         
         // Draw measurement text
         const midPoint = {
-          x: (points[0].x + points[points.length - 1].x) / 2 * viewport.width,
-          y: (points[0].y + points[points.length - 1].y) / 2 * viewport.height
+          x: (startPoint.x + convertCoords(points[points.length - 1]).x) / 2,
+          y: (startPoint.y + convertCoords(points[points.length - 1]).y) / 2
         };
         context.fillStyle = measurement.color;
         context.font = '12px Arial';
@@ -669,14 +751,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       case 'area':
         if (points.length >= 3) {
           context.beginPath();
-          const startCanvasX = points[0].x * viewport.width;
-          const startCanvasY = points[0].y * viewport.height;
-          context.moveTo(startCanvasX, startCanvasY);
+          const startPoint = convertCoords(points[0]);
+          context.moveTo(startPoint.x, startPoint.y);
           
           for (let i = 1; i < points.length; i++) {
-            const canvasX = points[i].x * viewport.width;
-            const canvasY = points[i].y * viewport.height;
-            context.lineTo(canvasX, canvasY);
+            const point = convertCoords(points[i]);
+            context.lineTo(point.x, point.y);
           }
           context.closePath();
           
@@ -690,8 +770,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           context.stroke();
           
           // Draw area text in center
-          const centerX = points.reduce((sum, p) => sum + p.x, 0) / points.length * viewport.width;
-          const centerY = points.reduce((sum, p) => sum + p.y, 0) / points.length * viewport.height;
+          const centerX = points.reduce((sum, p) => {
+            const converted = convertCoords(p);
+            return sum + converted.x;
+          }, 0) / points.length;
+          const centerY = points.reduce((sum, p) => {
+            const converted = convertCoords(p);
+            return sum + converted.y;
+          }, 0) / points.length;
           
           // Set text style
           context.fillStyle = measurement.color;
@@ -738,7 +824,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         break;
         
       case 'count':
-        const point = points[0];
+        const point = convertCoords(points[0]);
         context.beginPath();
         context.strokeStyle = measurement.color;
         context.fillStyle = measurement.color + '40'; // Semi-transparent fill
@@ -759,23 +845,45 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Render current measurement being drawn
   const renderCurrentMeasurement = (context: CanvasRenderingContext2D) => {
-    if (currentMeasurement.length === 0) return;
-    
     if (!viewportRef.current) {
       return;
     }
     
     const viewport = viewportRef.current;
     
+    // Get the selected condition to use its color
+    const selectedCondition = getSelectedCondition();
+    const conditionColor = selectedCondition?.color || '#000000';
+    
+    // Check if we have enough points to render
+    const minPoints = measurementType === 'linear' ? 2 : measurementType === 'area' ? 3 : 1;
+    if (currentMeasurement.length < minPoints) {
+      console.log('🚫 RENDER_CURRENT_MEASUREMENT: Not enough points to render', {
+        currentMeasurementLength: currentMeasurement.length,
+        minPoints,
+        measurementType
+      });
+      return;
+    }
+    
+    // Only log when actually rendering something
+    if (currentMeasurement.length > 0 || mousePosition) {
+      console.log('🎨 RENDER_CURRENT_MEASUREMENT: Rendering current measurement', {
+        currentMeasurementLength: currentMeasurement.length,
+        hasMousePosition: !!mousePosition,
+        measurementType
+      });
+    }
+    
     context.save();
     
     switch (measurementType) {
       case 'linear':
-        // Draw existing line segments with bright magenta color
-        if (currentMeasurement.length >= 2) {
-          context.strokeStyle = 'magenta';
-          context.lineWidth = 4;
-          context.setLineDash([]); // Solid lines for existing segments
+        // Draw the complete line including the preview segment in the condition's color
+        if (currentMeasurement.length > 0) {
+          context.strokeStyle = conditionColor;
+          context.lineWidth = 3;
+          context.setLineDash([]); // Solid lines
           context.beginPath();
           
           // Convert PDF-relative coordinates to canvas coordinates
@@ -783,56 +891,56 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           const startCanvasY = currentMeasurement[0].y * viewport.height;
           context.moveTo(startCanvasX, startCanvasY);
           
+          // Draw existing segments
           for (let i = 1; i < currentMeasurement.length; i++) {
             const canvasX = currentMeasurement[i].x * viewport.width;
             const canvasY = currentMeasurement[i].y * viewport.height;
             context.lineTo(canvasX, canvasY);
           }
+          
+          // Draw preview segment to mouse position if available
+          if (mousePosition) {
+            const mouseCanvasX = mousePosition.x * viewport.width;
+            const mouseCanvasY = mousePosition.y * viewport.height;
+            
+            // Safety check: ensure coordinates are within reasonable bounds
+            if (mouseCanvasX >= 0 && mouseCanvasX <= viewport.width && 
+                mouseCanvasY >= 0 && mouseCanvasY <= viewport.height) {
+              context.lineTo(mouseCanvasX, mouseCanvasY);
+            }
+          }
+          
           context.stroke();
         }
         
-        // Draw preview line from last point to mouse position
-        if (currentMeasurement.length > 0 && mousePosition) {
-          const lastPoint = currentMeasurement[currentMeasurement.length - 1];
-          
-          // Convert PDF-relative coordinates to canvas coordinates
-          const lastCanvasX = lastPoint.x * viewport.width;
-          const lastCanvasY = lastPoint.y * viewport.height;
+        // Draw crosshair at mouse position for better visual feedback (only when actively measuring)
+        if (mousePosition && isMeasuring) {
           const mouseCanvasX = mousePosition.x * viewport.width;
           const mouseCanvasY = mousePosition.y * viewport.height;
           
-          context.strokeStyle = 'lime';
-          context.lineWidth = 3;
-          context.setLineDash([8, 4]); // Dashed line for preview
-          context.beginPath();
-          context.moveTo(lastCanvasX, lastCanvasY);
-          context.lineTo(mouseCanvasX, mouseCanvasY);
-          context.stroke();
-        }
-        
-        // Draw crosshair at mouse position for better visual feedback
-        if (mousePosition) {
-          const mouseCanvasX = mousePosition.x * viewport.width;
-          const mouseCanvasY = mousePosition.y * viewport.height;
-          
-          context.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-          context.lineWidth = 1;
-          context.setLineDash([]);
-          
-          // Draw crosshair
-          const crosshairSize = 20;
-          context.beginPath();
-          context.moveTo(mouseCanvasX - crosshairSize, mouseCanvasY);
-          context.lineTo(mouseCanvasX + crosshairSize, mouseCanvasY);
-          context.moveTo(mouseCanvasX, mouseCanvasY - crosshairSize);
-          context.lineTo(mouseCanvasX, mouseCanvasY + crosshairSize);
-          context.stroke();
-          
-          // Draw center dot
-          context.fillStyle = 'rgba(255, 255, 255, 0.9)';
-          context.beginPath();
-          context.arc(mouseCanvasX, mouseCanvasY, 2, 0, 2 * Math.PI);
-          context.fill();
+          // Safety check: ensure coordinates are within reasonable bounds
+          if (mouseCanvasX >= 0 && mouseCanvasX <= viewport.width && 
+              mouseCanvasY >= 0 && mouseCanvasY <= viewport.height) {
+            
+            context.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+            context.lineWidth = 1;
+            context.setLineDash([]);
+            
+            // Draw crosshair
+            const crosshairSize = 20;
+            context.beginPath();
+            context.moveTo(mouseCanvasX - crosshairSize, mouseCanvasY);
+            context.lineTo(mouseCanvasX + crosshairSize, mouseCanvasY);
+            context.moveTo(mouseCanvasX, mouseCanvasY - crosshairSize);
+            context.lineTo(mouseCanvasX, mouseCanvasY + crosshairSize);
+            context.stroke();
+            
+            // Draw center dot
+            context.fillStyle = 'rgba(255, 255, 255, 0.9)';
+            context.beginPath();
+            context.arc(mouseCanvasX, mouseCanvasY, 2, 0, 2 * Math.PI);
+            context.fill();
+          }
         }
         break;
       case 'area':
@@ -943,9 +1051,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     context.restore();
   };
 
-  // Handle mouse move for preview rendering
+  // Handle mouse move for preview rendering with throttling
   const handleCanvasMouseMove = useCallback((event: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isMeasuring) {
+    if (!isMeasuring || !selectedConditionId) {
+      // Clear mouse position when not measuring
+      if (mousePosition) {
+        console.log('🧹 MOUSE_MOVE: Clearing mouse position - not measuring');
+        setMousePosition(null);
+      }
       return;
     }
     
@@ -963,8 +1076,26 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     const pdfX = canvasX / viewport.width;
     const pdfY = canvasY / viewport.height;
     
+    // Only update if the position has changed significantly to reduce rendering
+    const threshold = 0.005; // Increased threshold to prevent excessive updates
+    if (mousePosition && 
+        Math.abs(mousePosition.x - pdfX) < threshold && 
+        Math.abs(mousePosition.y - pdfY) < threshold) {
+      return;
+    }
+    
+    console.log('🖱️ MOUSE_MOVE: Setting mouse position', {
+      canvasX,
+      canvasY,
+      pdfX,
+      pdfY,
+      viewport: { width: viewport.width, height: viewport.height },
+      isMeasuring,
+      selectedConditionId
+    });
+    
     setMousePosition({ x: pdfX, y: pdfY });
-  }, [isMeasuring, currentMeasurement.length, selectedConditionId, measurementType]);
+  }, [isMeasuring, selectedConditionId, mousePosition]);
 
   // Handle canvas click for measurements and calibration
   const handleCanvasClick = useCallback((event: React.MouseEvent<HTMLCanvasElement>) => {
@@ -1013,9 +1144,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     
     // Handle measurement clicks
-    if (!isMeasuring || !selectedConditionId) {
-      console.log('❌ CLICK: Not measuring or no condition selected', { isMeasuring, selectedConditionId });
+    if (!selectedConditionId) {
+      console.log('❌ CLICK: No condition selected', { selectedConditionId });
       return;
+    }
+    
+    // Start measuring if not already measuring (only when user actually clicks to add a point)
+    if (!isMeasuring) {
+      console.log('🖱️ CLICK: Starting measurement mode');
+      setIsMeasuring(true);
     }
     
     // Convert canvas coordinates to PDF-relative coordinates (0-1 scale)
@@ -1135,47 +1272,69 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       perimeterValue = perimeter / scaleFactor;
     }
 
-    // Create measurement object for localStorage
-    const measurement: StoredMeasurement = {
-      id: Date.now().toString(),
-      type: measurementType,
-      points: canvasPoints, // Canvas coordinates for rendering
-      calculatedValue,
-      unit,
-      conditionId: selectedConditionId,
-      color: selectedCondition.color,
-      conditionName: selectedCondition.name,
-      timestamp: Date.now(),
-      pdfPage: currentPage,
-      pdfCoordinates: points, // PDF-relative coordinates (0-1 scale)
-      perimeterValue
-    };
-    
-    // Save to localStorage
+    // Save to API only
     if (currentProjectId && file?.id) {
-      const existingMeasurements = loadMeasurements(currentProjectId, file.id, currentPage);
-      const updatedMeasurements = [...existingMeasurements, measurement];
-      
-      console.log('💾 SAVING_MEASUREMENT: Saving to localStorage', {
+      console.log('💾 SAVING_MEASUREMENT: Saving to API only', {
         projectId: currentProjectId,
         fileId: file.id,
         currentPage,
         measurement: {
-          id: measurement.id,
-          pdfPage: measurement.pdfPage,
-          type: measurement.type,
-          conditionName: measurement.conditionName
-        },
-        existingCount: existingMeasurements.length,
-        updatedCount: updatedMeasurements.length
+          type: measurementType,
+          conditionName: selectedCondition.name
+        }
       });
       
-      saveMeasurements(currentProjectId, file.id, currentPage, updatedMeasurements);
-      
-      // Update local state
-      setLocalTakeoffMeasurements(updatedMeasurements);
-      
-      console.log('✅ MEASUREMENT_SAVED: Measurement saved and local state updated');
+      // Save to API for persistence
+      const { addTakeoffMeasurement, getPageTakeoffMeasurements } = useTakeoffStore.getState();
+      addTakeoffMeasurement({
+        projectId: currentProjectId,
+        sheetId: file.id,
+        conditionId: selectedConditionId,
+        type: measurementType,
+        points: points, // Use PDF-relative coordinates for storage
+        calculatedValue,
+        unit,
+        pdfPage: currentPage,
+        pdfCoordinates: points, // Same as points for consistency
+        conditionColor: selectedCondition.color,
+        conditionName: selectedCondition.name,
+        perimeterValue
+      }).then(savedMeasurementId => {
+        console.log('✅ MEASUREMENT_SAVED: Measurement saved to API with ID:', savedMeasurementId);
+        
+        // Reload measurements from API to get the complete saved measurement
+        const updatedMeasurements = getPageTakeoffMeasurements(currentProjectId, file.id, currentPage);
+        const displayMeasurements = updatedMeasurements.map(apiMeasurement => ({
+          id: apiMeasurement.id,
+          type: apiMeasurement.type,
+          points: apiMeasurement.points,
+          calculatedValue: apiMeasurement.calculatedValue,
+          unit: apiMeasurement.unit,
+          conditionId: apiMeasurement.conditionId,
+          conditionName: apiMeasurement.conditionName,
+          color: apiMeasurement.conditionColor,
+          timestamp: new Date(apiMeasurement.timestamp).getTime(),
+          pdfPage: apiMeasurement.pdfPage,
+          pdfCoordinates: apiMeasurement.pdfCoordinates,
+          perimeterValue: apiMeasurement.perimeterValue
+        }));
+        
+        console.log('✅ MEASUREMENT_SAVED: Reloaded measurements for current page', {
+          currentPage,
+          updatedCount: updatedMeasurements.length,
+          displayCount: displayMeasurements.length
+        });
+        
+        setLocalTakeoffMeasurements(displayMeasurements);
+        
+        // Force immediate re-render to show the new measurement
+        setTimeout(() => {
+          renderAnnotations(false);
+        }, 50);
+      }).catch(error => {
+        console.error('❌ API_SAVE_FAILED: Failed to save measurement to API:', error);
+        // Show error to user - measurement was not saved
+      });
     } else {
       console.error('❌ SAVE_FAILED: Missing required data', {
         currentProjectId,
@@ -1186,6 +1345,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Clear current measurement and mouse position
     setCurrentMeasurement([]);
     setMousePosition(null);
+    setMeasurements([]); // Clear any temporary measurements
+    
+    // Force a clean render to remove any lingering preview lines and show the completed measurement
+    setTimeout(() => {
+      renderAnnotations(false);
+    }, 100);
   }, [selectedConditionId, getSelectedCondition, measurementType, scaleFactor, currentProjectId, currentPage, file.id, canvasToPdfCoords]);
 
   // Complete calibration
@@ -1335,9 +1500,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       isMeasuring
     });
     
+    // Only clear temporary measurement state, not the persisted measurements
     setCurrentMeasurement([]);
     setMousePosition(null);
-    setIsMeasuring(false);
+    setMeasurements([]); // Clear any temporary measurements
+    // Don't clear isMeasuring - let the condition selection handle that
   }, [currentPage]);
 
   // Re-render when view state changes
@@ -1356,25 +1523,57 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
   }, [viewState, renderPage, currentPage]);
 
-  // Re-render annotations when measurement state changes (for live drawing)
+  // Re-render annotations when measurement state changes (for live drawing) with throttling
   useEffect(() => {
-    console.log('🔄 LIVE_RENDER: Triggering render due to state change', {
-      currentMeasurementLength: currentMeasurement.length,
-      mousePosition,
-      isMeasuring,
-      measurementType
-    });
+    // Only log when actually rendering something
+    if (currentMeasurement.length > 0 || mousePosition) {
+      console.log('🔄 LIVE_RENDER: Triggering render due to state change', {
+        currentMeasurementLength: currentMeasurement.length,
+        mousePosition,
+        isMeasuring,
+        measurementType
+      });
+    }
     
     if (pdfDocument && (isMeasuring || currentMeasurement.length > 0)) {
-      renderAnnotations();
+      // Throttle the rendering to prevent excessive updates
+      const timeoutId = setTimeout(() => {
+        // Only re-render if we have a current measurement with enough points or mouse position
+        const minPoints = measurementType === 'linear' ? 2 : measurementType === 'area' ? 3 : 1;
+        if (currentMeasurement.length >= minPoints || mousePosition) {
+          renderAnnotations(false); // Don't re-render PDF, just annotations
+        }
+      }, 32); // ~30fps for smoother preview
+      
+      return () => clearTimeout(timeoutId);
     }
-  }, [currentMeasurement, mousePosition, isMeasuring, measurementType, pdfDocument, renderAnnotations]);
+  }, [currentMeasurement, mousePosition, isMeasuring, measurementType, pdfDocument]);
 
-  // Start measuring when condition is selected
+  // Ensure measurements are always rendered - this is critical for persistence
+  useEffect(() => {
+    if (pdfDocument) {
+      // Only log when there are measurements to render
+      if (localTakeoffMeasurements.length > 0) {
+        console.log('🔄 PERSISTENT_RENDER: Ensuring measurements are rendered', {
+          currentPage,
+          measurementCount: localTakeoffMeasurements.length
+        });
+      }
+      
+      // Force a render to ensure measurements are visible (or cleared if empty)
+      const timeoutId = setTimeout(() => {
+        renderAnnotations(false);
+      }, 50);
+      
+      return () => clearTimeout(timeoutId);
+    }
+  }, [localTakeoffMeasurements, currentPage, pdfDocument]);
+
+  // Set measurement type when condition is selected, but don't start measuring until user clicks
   useEffect(() => {
     console.log('Condition selection changed:', { selectedConditionId });
     if (selectedConditionId) {
-      setIsMeasuring(true);
+      // Don't set isMeasuring to true here - only when user actually starts drawing
       const condition = getSelectedCondition();
       console.log('Selected condition:', condition);
       if (condition) {
@@ -1393,20 +1592,29 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       }
     } else {
       setIsMeasuring(false);
+      // Only clear current measurement being drawn, not the persisted measurements
       setCurrentMeasurement([]);
       setMousePosition(null);
+      setMeasurements([]); // Clear any temporary measurements
+      
+      // Ensure existing measurements remain visible when condition is deselected
+      setTimeout(() => {
+        renderAnnotations(false);
+      }, 100);
     }
-  }, [selectedConditionId, getSelectedCondition]);
+  }, [selectedConditionId]);
 
-  // Debug current state
+  // Debug current state - only log when there are changes
   useEffect(() => {
-    console.log('Current measurement state:', { 
-      isMeasuring, 
-      selectedConditionId, 
-      measurementType, 
-      currentMeasurement: currentMeasurement.length,
-      mousePosition 
-    });
+    if (isMeasuring || currentMeasurement.length > 0 || mousePosition) {
+      console.log('Current measurement state:', { 
+        isMeasuring, 
+        selectedConditionId, 
+        measurementType, 
+        currentMeasurement: currentMeasurement.length,
+        mousePosition 
+      });
+    }
   }, [isMeasuring, selectedConditionId, measurementType, currentMeasurement.length, mousePosition]);
 
   // Debug canvas setup
@@ -1448,20 +1656,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
   }, [onCalibrationRequest]);
 
-  // Set up Clear All trigger for parent component
-  useEffect(() => {
-    const handleClearAllRequest = () => {
-      console.log('Clear all requested from parent component');
-      clearAllTakeoffMeasurements();
-    };
-    
-    // Store the handler so parent can call it
-    (window as any).triggerClearAll = handleClearAllRequest;
-    
-    return () => {
-      delete (window as any).triggerClearAll;
-    };
-  }, [clearAllTakeoffMeasurements]);
 
   // Set up debug function for browser console
   useEffect(() => {
@@ -1630,7 +1824,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             onDoubleClick={handleCanvasDoubleClick}
             onMouseMove={handleCanvasMouseMove}
             onMouseEnter={() => console.log('Mouse entered canvas')}
-            onMouseLeave={() => console.log('Mouse left canvas')}
+            onMouseLeave={() => {
+              console.log('Mouse left canvas');
+              // Clear mouse position when leaving canvas to prevent lingering preview lines
+              setMousePosition(null);
+            }}
             style={{ 
               cursor: isMeasuring ? 'crosshair' : 'default',
               position: 'relative',

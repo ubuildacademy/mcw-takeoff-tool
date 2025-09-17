@@ -5,9 +5,9 @@ import { storage, StoredTakeoffMeasurement } from '../storage';
 const router = express.Router();
 
 // Get all takeoff measurements
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
-    const measurements = storage.getTakeoffMeasurements();
+    const measurements = await storage.getTakeoffMeasurements();
     return res.json({ measurements });
   } catch (error) {
     console.error('Error fetching takeoff measurements:', error);
@@ -16,10 +16,10 @@ router.get('/', (req, res) => {
 });
 
 // Get takeoff measurements for a project
-router.get('/project/:projectId', (req, res) => {
+router.get('/project/:projectId', async (req, res) => {
   try {
     const { projectId } = req.params;
-    const measurements = storage.getTakeoffMeasurements().filter(m => m.projectId === projectId);
+    const measurements = await storage.getTakeoffMeasurementsByProject(projectId);
     return res.json({ measurements });
   } catch (error) {
     console.error('Error fetching project takeoff measurements:', error);
@@ -28,10 +28,10 @@ router.get('/project/:projectId', (req, res) => {
 });
 
 // Get takeoff measurements for a specific sheet
-router.get('/sheet/:sheetId', (req, res) => {
+router.get('/sheet/:sheetId', async (req, res) => {
   try {
     const { sheetId } = req.params;
-    const measurements = storage.getTakeoffMeasurements().filter(m => m.sheetId === sheetId);
+    const measurements = await storage.getTakeoffMeasurementsBySheet(sheetId);
     return res.json({ measurements });
   } catch (error) {
     console.error('Error fetching sheet takeoff measurements:', error);
@@ -40,7 +40,7 @@ router.get('/sheet/:sheetId', (req, res) => {
 });
 
 // Create a new takeoff measurement
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const {
       projectId,
@@ -90,13 +90,11 @@ router.post('/', (req, res) => {
       perimeterValue
     };
     
-    const measurements = storage.getTakeoffMeasurements();
-    measurements.push(newMeasurement);
-    storage.saveTakeoffMeasurements(measurements);
+    const savedMeasurement = await storage.saveTakeoffMeasurement(newMeasurement);
     
     return res.status(201).json({ 
       success: true, 
-      measurement: newMeasurement 
+      measurement: savedMeasurement 
     });
   } catch (error) {
     console.error('Error creating takeoff measurement:', error);
@@ -105,24 +103,24 @@ router.post('/', (req, res) => {
 });
 
 // Update an existing takeoff measurement
-router.put('/:id', (req, res) => {
+router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const updates = req.body;
     
-    const measurements = storage.getTakeoffMeasurements();
-    const measurementIndex = measurements.findIndex(m => m.id === id);
+    const measurements = await storage.getTakeoffMeasurements();
+    const existingMeasurement = measurements.find(m => m.id === id);
     
-    if (measurementIndex === -1) {
+    if (!existingMeasurement) {
       return res.status(404).json({ error: 'Takeoff measurement not found' });
     }
     
-    measurements[measurementIndex] = { ...measurements[measurementIndex], ...updates };
-    storage.saveTakeoffMeasurements(measurements);
+    const updatedMeasurement = { ...existingMeasurement, ...updates };
+    const savedMeasurement = await storage.saveTakeoffMeasurement(updatedMeasurement);
     
     return res.json({ 
       success: true, 
-      measurement: measurements[measurementIndex] 
+      measurement: savedMeasurement 
     });
   } catch (error) {
     console.error('Error updating takeoff measurement:', error);
@@ -131,20 +129,10 @@ router.put('/:id', (req, res) => {
 });
 
 // Delete a takeoff measurement
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    
-    const measurements = storage.getTakeoffMeasurements();
-    const measurementIndex = measurements.findIndex(m => m.id === id);
-    
-    if (measurementIndex === -1) {
-      return res.status(404).json({ error: 'Takeoff measurement not found' });
-    }
-    
-    measurements.splice(measurementIndex, 1);
-    storage.saveTakeoffMeasurements(measurements);
-    
+    await storage.deleteTakeoffMeasurement(id);
     return res.json({ success: true });
   } catch (error) {
     console.error('Error deleting takeoff measurement:', error);

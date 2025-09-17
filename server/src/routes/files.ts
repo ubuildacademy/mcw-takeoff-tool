@@ -117,14 +117,12 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     
     console.log('File metadata created:', fileMeta);
 
-    const files = storage.getFiles();
-    files.unshift(fileMeta);
-    storage.saveFiles(files);
+    const savedFile = await storage.saveFile(fileMeta);
     
     console.log('File saved to storage successfully');
-    console.log('Total files in storage:', files.length);
+    console.log('File saved:', savedFile);
 
-    return res.json({ success: true, file: fileMeta });
+    return res.json({ success: true, file: savedFile });
   } catch (e) {
     console.error('Upload error:', e);
     return res.status(500).json({ error: 'Upload failed', details: String(e) });
@@ -132,58 +130,77 @@ router.post('/upload', upload.single('file'), async (req, res) => {
 });
 
 // Get all files
-router.get('/', (req, res) => {
-  const files = storage.getFiles();
-  return res.json({ files });
-});
-
-router.get('/:fileId', (req, res) => {
-  const { fileId } = req.params;
-  const files = storage.getFiles();
-  const meta = files.find(f => f.id === fileId);
-  if (!meta) return res.status(404).json({ error: 'Not found' });
-  if (!fs.existsSync(meta.path)) return res.status(404).json({ error: 'File missing on disk' });
-  return res.sendFile(meta.path);
-});
-
-router.get('/project/:projectId', (req, res) => {
-  const { projectId } = req.params;
-  const files = storage.getFiles().filter(f => f.projectId === projectId);
-  return res.json({ files });
-});
-
-router.delete('/:fileId', (req, res) => {
-  const { fileId } = req.params;
-  console.log('🗑️ DELETE FILE REQUEST:', { fileId });
-  
-  const files = storage.getFiles();
-  const meta = files.find(f => f.id === fileId);
-  
-  if (!meta) {
-    console.log('❌ File not found in storage:', fileId);
-    return res.status(404).json({ error: 'Not found' });
-  }
-  
-  console.log('🗑️ Deleting file:', { 
-    id: meta.id, 
-    name: meta.originalName, 
-    path: meta.path,
-    projectId: meta.projectId 
-  });
-
-  try { 
-    fs.removeSync(meta.path); 
-    console.log('✅ File removed from disk:', meta.path);
+router.get('/', async (req, res) => {
+  try {
+    const files = await storage.getFiles();
+    return res.json({ files });
   } catch (error) {
-    console.error('❌ Error removing file from disk:', error);
-    // Continue with metadata removal even if file deletion fails
+    console.error('Error fetching files:', error);
+    return res.status(500).json({ error: 'Failed to fetch files' });
   }
-  
-  const updatedFiles = files.filter(f => f.id !== fileId);
-  storage.saveFiles(updatedFiles);
-  console.log('✅ File metadata removed from storage. Total files remaining:', updatedFiles.length);
-  
-  return res.json({ success: true });
+});
+
+router.get('/:fileId', async (req, res) => {
+  try {
+    const { fileId } = req.params;
+    const files = await storage.getFiles();
+    const meta = files.find(f => f.id === fileId);
+    if (!meta) return res.status(404).json({ error: 'Not found' });
+    if (!fs.existsSync(meta.path)) return res.status(404).json({ error: 'File missing on disk' });
+    return res.sendFile(meta.path);
+  } catch (error) {
+    console.error('Error fetching file:', error);
+    return res.status(500).json({ error: 'Failed to fetch file' });
+  }
+});
+
+router.get('/project/:projectId', async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const files = await storage.getFilesByProject(projectId);
+    return res.json({ files });
+  } catch (error) {
+    console.error('Error fetching project files:', error);
+    return res.status(500).json({ error: 'Failed to fetch project files' });
+  }
+});
+
+router.delete('/:fileId', async (req, res) => {
+  try {
+    const { fileId } = req.params;
+    console.log('🗑️ DELETE FILE REQUEST:', { fileId });
+    
+    const files = await storage.getFiles();
+    const meta = files.find(f => f.id === fileId);
+    
+    if (!meta) {
+      console.log('❌ File not found in storage:', fileId);
+      return res.status(404).json({ error: 'Not found' });
+    }
+    
+    console.log('🗑️ Deleting file:', { 
+      id: meta.id, 
+      name: meta.originalName, 
+      path: meta.path,
+      projectId: meta.projectId 
+    });
+
+    try { 
+      fs.removeSync(meta.path); 
+      console.log('✅ File removed from disk:', meta.path);
+    } catch (error) {
+      console.error('❌ Error removing file from disk:', error);
+      // Continue with metadata removal even if file deletion fails
+    }
+    
+    await storage.deleteFile(fileId);
+    console.log('✅ File metadata removed from storage');
+    
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting file:', error);
+    return res.status(500).json({ error: 'Failed to delete file' });
+  }
 });
 
 export { router as fileRoutes };
