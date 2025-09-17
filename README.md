@@ -5,7 +5,7 @@ A beautifully styled, intuitive takeoff software for construction professionals.
 ## Features
 
 ### Core Functionality
-- **PDF Viewer & Markup**: Advanced PDF viewing with drawing tools for takeoff measurements
+- **PDF Viewer & Markup**: Advanced PDF viewing with custom canvas drawing tools for takeoff measurements
 - **Job Management**: Complete project organization and management
 - **Takeoff Conditions**: Support for linear, area, volume, and count measurements
 - **Professional Reports**: Generate detailed quantity and cost reports
@@ -86,9 +86,9 @@ src/
 ### PDF Viewer & Markup
 The PDFViewer component is the heart of the application, featuring:
 - PDF.js integration for fast rendering
-- Canvas overlay for drawing tools
-- Support for lines, rectangles, circles, and polygons
-- Layer management for different markup types
+- Custom HTML5 canvas for drawing tools
+- Support for linear, area, volume, and count measurements
+- PDF-relative coordinate system for persistent positioning
 - Zoom, pan, and rotation controls
 - Search functionality within documents
 

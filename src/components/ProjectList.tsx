@@ -12,7 +12,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { projectService } from '../services/apiService';
-import { JobCreationDialog } from './JobCreationDialog';
+import { ProjectCreationDialog } from './ProjectCreationDialog';
 import { useTakeoffStore } from '../store/useTakeoffStore';
 
 interface ApiProject {
@@ -236,7 +236,7 @@ export function ProjectList() {
         )}
       </div>
 
-      <JobCreationDialog 
+        <ProjectCreationDialog
         open={showCreate}
         onOpenChange={setShowCreate}
         onCreated={async (proj) => {

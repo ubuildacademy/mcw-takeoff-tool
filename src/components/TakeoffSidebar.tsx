@@ -15,23 +15,12 @@ import {
   Copy
 } from 'lucide-react';
 import { useTakeoffStore } from '../store/useTakeoffStore';
+import type { TakeoffCondition } from '../types';
 import { CreateConditionDialog } from './CreateConditionDialog';
 import { formatFeetAndInches } from '../lib/utils';
 import { loadConditions } from '../utils/measurementStorage';
 
-interface TakeoffCondition {
-  id: string;
-  projectId: string;
-  name: string;
-  type: 'area' | 'volume' | 'linear' | 'count';
-  unit: string;
-  wasteFactor: number;
-  color: string;
-  description: string;
-  laborCost?: number;
-  materialCost?: number;
-  tools?: string[];
-}
+// TakeoffCondition interface imported from shared types
 
 interface TakeoffSidebarProps {
   projectId: string;

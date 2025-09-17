@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 
 import { useParams, useNavigate } from 'react-router-dom';
-import CleanPDFViewer from './CleanPDFViewer';
+import PDFViewer from './PDFViewer';
 import { TakeoffSidebar } from './TakeoffSidebar';
-import { EnhancedSheetSidebar } from './EnhancedSheetSidebar';
+import { SheetSidebar } from './SheetSidebar';
 import { TitleblockConfigDialog } from './TitleblockConfigDialog';
 import { OCRProcessingDialog } from './OCRProcessingDialog';
 
 import { useTakeoffStore } from '../store/useTakeoffStore';
+import type { TakeoffCondition, Sheet, ProjectFile } from '../types';
 import { loadConditions } from '../utils/measurementStorage';
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
@@ -18,7 +19,6 @@ import {
   Download, 
   Settings, 
   FileText, 
-  Calculator,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
@@ -27,57 +27,7 @@ import {
 } from "lucide-react";
 import { fileService, sheetService } from '../services/apiService';
 
-interface TakeoffCondition {
-  id: string;
-  projectId: string;
-  name: string;
-  type: 'area' | 'volume' | 'linear' | 'count';
-  unit: string;
-  wasteFactor: number;
-  color: string;
-  description: string;
-  laborCost?: number;
-  materialCost?: number;
-  tools?: string[];
-}
-
-interface Sheet {
-  id: string;
-  name: string;
-  pageNumber: number;
-  thumbnail?: string;
-  isVisible: boolean;
-  hasTakeoffs: boolean;
-  takeoffCount: number;
-}
-
-interface Project {
-  id: string;
-  name: string;
-  client: string;
-  location: string;
-  status: string;
-  description?: string;
-  projectType?: string;
-  startDate?: string;
-  estimatedValue?: number;
-  contactPerson?: string;
-  contactEmail?: string;
-  contactPhone?: string;
-  createdAt: string;
-  lastModified: string;
-}
-
-interface ProjectFile {
-  id: string;
-  projectId: string;
-  originalName: string;
-  filename: string;
-  path: string;
-  size: number;
-  mimetype: string;
-  uploadedAt: string;
-}
+// All interfaces now imported from shared types
 
 export function TakeoffWorkspace() {
   const { jobId } = useParams<{ jobId: string }>();
@@ -613,7 +563,7 @@ export function TakeoffWorkspace() {
         {/* PDF Viewer - Fixed height container */}
         <div className="flex-1 flex flex-col h-full overflow-hidden">
           {currentPdfFile ? (
-            <CleanPDFViewer 
+            <PDFViewer 
               file={currentPdfFile}
               onCalibrationRequest={() => {
                 console.log('Calibration requested');
@@ -668,7 +618,7 @@ export function TakeoffWorkspace() {
           </Button>
           {rightSidebarOpen && (
             <div className="w-96 bg-white border-l flex flex-col h-full">
-              <EnhancedSheetSidebar 
+              <SheetSidebar 
                 projectId={jobId!}
                 onPageSelect={handlePageSelect}
                 selectedDocumentId={selectedDocumentId || undefined}

@@ -7,6 +7,7 @@ import { Textarea } from './ui/textarea';
 import { X } from 'lucide-react';
 import { useTakeoffStore } from '../store/useTakeoffStore';
 import { saveConditions, loadConditions } from '../utils/measurementStorage';
+import { generateRandomColor, getDefaultUnit, generateId } from '../utils/commonUtils';
 
 interface CreateConditionDialogProps {
   projectId: string;
@@ -15,16 +16,7 @@ interface CreateConditionDialogProps {
 }
 
 export function CreateConditionDialog({ projectId, onClose, onConditionCreated }: CreateConditionDialogProps) {
-  // Generate a random color for new conditions
-  const generateRandomColor = () => {
-    const colors = [
-      '#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4', '#feca57',
-      '#ff9ff3', '#54a0ff', '#5f27cd', '#00d2d3', '#ff9f43',
-      '#10ac84', '#ee5a24', '#0984e3', '#6c5ce7', '#a29bfe',
-      '#fd79a8', '#fdcb6e', '#e17055', '#74b9ff', '#00b894'
-    ];
-    return colors[Math.floor(Math.random() * colors.length)];
-  };
+  // Random color generation now imported from common utils
 
   const [formData, setFormData] = useState({
     name: '',
@@ -80,7 +72,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated }
       console.log('New condition data:', newCondition);
       
       // Create condition with ID and timestamp
-      const conditionId = Date.now().toString();
+      const conditionId = generateId();
       const createdCondition = {
         ...newCondition,
         id: conditionId,

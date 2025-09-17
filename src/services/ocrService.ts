@@ -42,6 +42,7 @@ class OCRService {
           }
         },
         // Optimize for architectural drawings and technical text
+        // @ts-ignore - tessedit_char_whitelist is a valid Tesseract option
         tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:!?()[]{}\'"-+=/\\@#$%^&*|<>~` ',
         tessedit_pageseg_mode: Tesseract.PSM.AUTO_OSD, // Better for mixed text/graphics
         preserve_interword_spaces: '1',
@@ -589,7 +590,7 @@ class OCRService {
 
   // Create OCR result from data
   private createOCRResult(data: any, pageNumber: number, processingTime: number): OCRResult {
-    const words = (data.words || []).map(word => ({
+    const words = (data.words || []).map((word: any) => ({
       text: word.text || '',
       bbox: word.bbox || { x0: 0, y0: 0, x1: 0, y1: 0 },
       confidence: word.confidence || 0

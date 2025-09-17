@@ -1,34 +1,16 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import type { 
+  Project, 
+  TakeoffCondition, 
+  TakeoffMeasurement, 
+  Calibration 
+} from '../types';
 
-interface Project {
-  id: string;
-  name: string;
-  client: string;
-  location: string;
-  status: 'active' | 'completed' | 'on-hold';
-  lastModified: Date;
-  takeoffCount: number;
-  totalValue: number;
-  description?: string;
-  projectType?: string;
-  startDate?: string;
-  contactPerson?: string;
-  contactEmail?: string;
-  contactPhone?: string;
-}
+// Re-export types for backward compatibility
+export type { TakeoffCondition, TakeoffMeasurement, Calibration, Project };
 
-interface TakeoffCondition {
-  id: string;
-  projectId: string;
-  name: string;
-  type: 'area' | 'volume' | 'linear' | 'count';
-  unit: string;
-  wasteFactor: number;
-  color: string;
-  description: string;
-  includePerimeter?: boolean; // For area measurements, include perimeter calculation
-}
+// Project and TakeoffCondition interfaces now imported from types
 
 interface Measurement {
   id: string;
@@ -38,35 +20,10 @@ interface Measurement {
   unit: string;
   description: string;
   conditionId?: string;
-  timestamp: Date;
+  timestamp: string;
 }
 
-interface Calibration {
-  projectId: string;
-  sheetId: string;
-  scaleFactor: number;
-  unit: string;
-  calibratedAt: Date;
-}
-
-interface TakeoffMeasurement {
-  id: string;
-  projectId: string;
-  sheetId: string;
-  conditionId: string;
-  type: 'area' | 'volume' | 'linear' | 'count';
-  points: Array<{ x: number; y: number }>;
-  calculatedValue: number;
-  unit: string;
-  timestamp: Date;
-  // PDF-specific properties
-  pdfPage: number;
-  pdfCoordinates: Array<{ x: number; y: number }>; // PDF-relative coordinates (0-1 scale)
-  conditionColor: string;
-  conditionName: string;
-  // Perimeter data for area measurements
-  perimeterValue?: number; // Perimeter in linear feet
-}
+// Calibration and TakeoffMeasurement interfaces now imported from types
 
 interface TakeoffStore {
   // Projects
@@ -153,7 +110,7 @@ export const useTakeoffStore = create<TakeoffStore>()(
           sheetId: 'default',
           scaleFactor: 1, // 1 unit = 1 foot (default scale)
           unit: 'ft',
-          calibratedAt: new Date()
+          calibratedAt: new Date().toISOString()
         }
       ],
       currentCalibration: null,
@@ -184,7 +141,7 @@ export const useTakeoffStore = create<TakeoffStore>()(
           const project = {
             ...projectData,
             id,
-            lastModified: new Date(),
+            lastModified: new Date().toISOString(),
             takeoffCount: 0,
             totalValue: 0
           };
@@ -207,7 +164,7 @@ export const useTakeoffStore = create<TakeoffStore>()(
         set(state => ({
           projects: state.projects.map(project =>
             project.id === id
-              ? { ...project, ...updates, lastModified: new Date() }
+              ? { ...project, ...updates, lastModified: new Date().toISOString() }
               : project
           )
         }));
@@ -307,14 +264,14 @@ export const useTakeoffStore = create<TakeoffStore>()(
         const measurement: Measurement = {
           ...measurementData,
           id,
-          timestamp: new Date()
+          timestamp: new Date().toISOString()
         };
         
         set(state => ({
           measurements: [...state.measurements, measurement],
           projects: state.projects.map(project =>
             project.id === measurementData.projectId
-              ? { ...project, takeoffCount: project.takeoffCount + 1 }
+              ? { ...project, takeoffCount: (project.takeoffCount || 0) + 1 }
               : project
           )
         }));
@@ -337,7 +294,7 @@ export const useTakeoffStore = create<TakeoffStore>()(
             measurements: state.measurements.filter(m => m.id !== id),
             projects: measurement ? state.projects.map(project =>
               project.id === measurement.projectId
-                ? { ...project, takeoffCount: Math.max(0, project.takeoffCount - 1) }
+                ? { ...project, takeoffCount: Math.max(0, (project.takeoffCount || 0) - 1) }
                 : project
             ) : state.projects
           };
@@ -361,7 +318,7 @@ export const useTakeoffStore = create<TakeoffStore>()(
                sheetId, 
                scaleFactor, 
                unit, 
-               calibratedAt: new Date() 
+               calibratedAt: new Date().toISOString() 
              };
              console.log('💾 SET_CALIBRATION: Updated existing calibration', updatedCalibrations[existingIndex]);
              return { calibrations: updatedCalibrations };
@@ -372,7 +329,7 @@ export const useTakeoffStore = create<TakeoffStore>()(
                sheetId, 
                scaleFactor, 
                unit, 
-               calibratedAt: new Date() 
+               calibratedAt: new Date().toISOString() 
              };
              console.log('💾 SET_CALIBRATION: Added new calibration', newCalibration);
              return {
@@ -539,27 +496,13 @@ export const useTakeoffStore = create<TakeoffStore>()(
             response: error.response?.data
           });
           
-          // Provide fallback data for offline mode
-          const fallbackProjects = [
-            {
-              id: '26364d26-442b-4b0a-a32a-6808dd4a2076',
-              name: 'Tru Hilton',
-              client: 'ABC',
-              location: 'FTL',
-              status: 'active' as const,
-              lastModified: new Date(),
-              takeoffCount: 0,
-              totalValue: 0,
-              description: 'Tru Hilton project'
-            }
-          ];
-          
+          // Start with empty state for offline mode
           set(state => ({
-            projects: fallbackProjects,
-            conditions: [] // Always start with empty conditions
+            projects: [],
+            conditions: []
           }));
           
-          console.log('Using fallback data for offline mode');
+          console.log('Starting with empty state for offline mode');
         }
       },
       
