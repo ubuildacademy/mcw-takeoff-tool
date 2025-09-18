@@ -41,8 +41,9 @@ interface TakeoffStore {
   calibrations: Calibration[];
   currentCalibration: Calibration | null;
   
-  // Takeoff measurements
+  // Takeoff measurements - organized by page for better isolation
   takeoffMeasurements: TakeoffMeasurement[];
+  markupsByPage: Record<string, TakeoffMeasurement[]>; // Key: `${projectId}-${sheetId}-${pageNumber}`
   
   // Actions
   addProject: (project: Omit<Project, 'id' | 'lastModified' | 'takeoffCount'>) => Promise<string>;
@@ -80,6 +81,11 @@ interface TakeoffStore {
     byCondition: Record<string, { count: number; value: number; unit: string }>;
   };
   
+  // Page-based markup management
+  getPageMarkups: (projectId: string, sheetId: string, pageNumber: number) => TakeoffMeasurement[];
+  updateMarkupsByPage: () => void;
+  getPageKey: (projectId: string, sheetId: string, pageNumber: number) => string;
+  
   // Computed values
   getCurrentProject: () => Project | null;
   getProjectMeasurements: (projectId: string) => Measurement[];
@@ -116,6 +122,7 @@ export const useTakeoffStore = create<TakeoffStore>()(
       currentCalibration: null,
       
       takeoffMeasurements: [],
+      markupsByPage: {},
       
       // Actions
       addProject: async (projectData) => {
@@ -395,6 +402,9 @@ export const useTakeoffStore = create<TakeoffStore>()(
             };
           });
           
+          // Update markupsByPage structure
+          get().updateMarkupsByPage();
+          
           console.log('✅ ADD_TAKEOFF_MEASUREMENT: Measurement created successfully with ID:', measurement.id);
           return measurement.id;
         } catch (error: any) {
@@ -410,12 +420,18 @@ export const useTakeoffStore = create<TakeoffStore>()(
             measurement.id === id ? { ...measurement, ...updates } : measurement
           )
         }));
+        
+        // Update markupsByPage structure
+        get().updateMarkupsByPage();
       },
       
       deleteTakeoffMeasurement: (id) => {
         set(state => ({
           takeoffMeasurements: state.takeoffMeasurements.filter(measurement => measurement.id !== id)
         }));
+        
+        // Update markupsByPage structure
+        get().updateMarkupsByPage();
       },
       
       // New methods for takeoff functionality
@@ -469,6 +485,34 @@ export const useTakeoffStore = create<TakeoffStore>()(
         });
 
         return summary;
+      },
+      
+      // Page-based markup management methods
+      getPageKey: (projectId, sheetId, pageNumber) => {
+        return `${projectId}-${sheetId}-${pageNumber}`;
+      },
+      
+      getPageMarkups: (projectId, sheetId, pageNumber) => {
+        const { markupsByPage } = get();
+        const pageKey = get().getPageKey(projectId, sheetId, pageNumber);
+        return markupsByPage[pageKey] || [];
+      },
+      
+      updateMarkupsByPage: () => {
+        const { takeoffMeasurements } = get();
+        const markupsByPage: Record<string, TakeoffMeasurement[]> = {};
+        
+        // Group measurements by page
+        takeoffMeasurements.forEach(measurement => {
+          const pageKey = get().getPageKey(measurement.projectId, measurement.sheetId, measurement.pdfPage);
+          if (!markupsByPage[pageKey]) {
+            markupsByPage[pageKey] = [];
+          }
+          markupsByPage[pageKey].push(measurement);
+        });
+        
+        set({ markupsByPage });
+        console.log('🔄 Updated markupsByPage:', Object.keys(markupsByPage).length, 'pages');
       },
       
       // Computed values
@@ -585,6 +629,9 @@ export const useTakeoffStore = create<TakeoffStore>()(
             return { takeoffMeasurements: allMeasurements };
           });
           
+          // Update markupsByPage structure
+          get().updateMarkupsByPage();
+          
           console.log(`✅ LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Project measurements loaded for ${projectId}:`, projectMeasurements.length);
         } catch (error) {
           console.error(`❌ LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Failed to load measurements for project ${projectId}:`, error);
@@ -598,7 +645,8 @@ export const useTakeoffStore = create<TakeoffStore>()(
         // Don't persist conditions to localStorage - always load from backend
         measurements: state.measurements,
         calibrations: state.calibrations,
-        takeoffMeasurements: state.takeoffMeasurements
+        takeoffMeasurements: state.takeoffMeasurements,
+        markupsByPage: state.markupsByPage
       })
     }
   )
