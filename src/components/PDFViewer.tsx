@@ -90,6 +90,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [mousePosition, setMousePosition] = useState<{ x: number; y: number } | null>(null);
   
+  // Continuous linear drawing state
+  const [isContinuousDrawing, setIsContinuousDrawing] = useState(false);
+  const [activePoints, setActivePoints] = useState<{ x: number; y: number }[]>([]);
+  const [rubberBandElement, setRubberBandElement] = useState<SVGLineElement | null>(null);
+  const [runningLength, setRunningLength] = useState<number>(0);
+  
+  // Page-scoped refs to prevent cross-page DOM issues
+  const pageRubberBandRefs = useRef<Record<number, SVGLineElement | null>>({});
+  const pageCommittedPolylineRefs = useRef<Record<number, SVGPolylineElement | null>>({});
+  
   // Scale calibration
   const [internalScaleFactor, setInternalScaleFactor] = useState(1);
   const [internalIsPageCalibrated, setInternalIsPageCalibrated] = useState(false);
@@ -126,6 +136,23 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const currentOutputScale = useMemo(() => {
     return pageOutputScales[currentPage] || 1;
   }, [pageOutputScales, currentPage]);
+
+  // Calculate running length for continuous linear drawing
+  const calculateRunningLength = useCallback((points: { x: number; y: number }[], currentMousePos?: { x: number; y: number }) => {
+    if (!currentViewport || points.length === 0) return 0;
+    
+    const allPoints = currentMousePos ? [...points, currentMousePos] : points;
+    if (allPoints.length < 2) return 0;
+    
+    let totalDistance = 0;
+    for (let i = 1; i < allPoints.length; i++) {
+      const dx = (allPoints[i].x - allPoints[i - 1].x) * currentViewport.width;
+      const dy = (allPoints[i].y - allPoints[i - 1].y) * currentViewport.height;
+      totalDistance += Math.sqrt(dx * dx + dy * dy);
+    }
+    
+    return totalDistance / scaleFactor;
+  }, [currentViewport, scaleFactor]);
 
   // Store integration
   const { 
@@ -319,7 +346,23 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (mousePosition && isMeasuring && pageNum === currentPage) {
       renderSVGCrosshair(svgOverlay, mousePosition, viewport);
     }
-  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, currentPage]);
+    
+    // Draw running length display for continuous linear drawing
+    if (isContinuousDrawing && activePoints.length > 0 && pageNum === currentPage) {
+      renderRunningLengthDisplay(svgOverlay, viewport);
+    }
+    
+    // Debug: Log SVG element count after rendering
+    const elementCount = svgOverlay.children.length;
+    console.log(`🎯 SVG overlay now has ${elementCount} elements:`, {
+      pageNum,
+      isContinuousDrawing,
+      activePointsLength: activePoints.length,
+      currentMeasurementLength: currentMeasurement.length,
+      isMeasuring,
+      mousePosition: !!mousePosition
+    });
+  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, currentPage, isContinuousDrawing, activePoints, runningLength]);
 
   // Page visibility handler - ensures overlay is properly initialized when page becomes visible
   const onPageShown = useCallback((pageNum: number, viewport: any) => {
@@ -331,6 +374,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     svgOverlay.setAttribute('width', viewport.width.toString());
     svgOverlay.setAttribute('height', viewport.height.toString());
     svgOverlay.setAttribute('viewBox', `0 0 ${viewport.width} ${viewport.height}`);
+    svgOverlay.setAttribute('overflow', 'visible');
+    
+    // Add a transparent hit area for pointer events
+    const existingHitArea = svgOverlay.querySelector('#hit-area');
+    if (!existingHitArea) {
+      const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      hitArea.setAttribute('id', 'hit-area');
+      hitArea.setAttribute('width', '100%');
+      hitArea.setAttribute('height', '100%');
+      hitArea.setAttribute('fill', 'transparent');
+      hitArea.setAttribute('pointer-events', 'all');
+      svgOverlay.appendChild(hitArea);
+    }
     
     console.log(`🔄 PAGE_SHOWN: Initializing overlay for page ${pageNum} with viewport ${viewport.width}x${viewport.height}`);
     
@@ -526,7 +582,43 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     switch (measurementType) {
       case 'linear':
-        if (currentMeasurement.length > 0) {
+        if (isContinuousDrawing && activePoints.length > 0) {
+          // Render committed segments for continuous linear drawing
+          if (activePoints.length > 1) {
+            // Remove existing committed polyline for this page if it exists
+            const existingPolyline = pageCommittedPolylineRefs.current[currentPage];
+            if (existingPolyline && existingPolyline.parentNode === svg) {
+              svg.removeChild(existingPolyline);
+            }
+            
+            const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+            const pointString = activePoints.map(p => {
+              // Points are stored in PDF coordinates (0-1), convert to viewport pixels
+              return `${p.x * viewport.width},${p.y * viewport.height}`;
+            }).join(' ');
+            
+            polyline.setAttribute('points', pointString);
+            polyline.setAttribute('stroke', conditionColor);
+            polyline.setAttribute('stroke-width', '2');
+            polyline.setAttribute('stroke-linecap', 'round');
+            polyline.setAttribute('stroke-linejoin', 'round');
+            polyline.setAttribute('fill', 'none');
+            polyline.setAttribute('vector-effect', 'non-scaling-stroke');
+            polyline.setAttribute('id', `committed-segments-${currentPage}`);
+            svg.appendChild(polyline);
+            
+            // Store in page-scoped refs
+            pageCommittedPolylineRefs.current[currentPage] = polyline;
+            
+            console.log('🎯 Rendered committed segments for page', currentPage, ':', {
+              points: pointString,
+              color: conditionColor,
+              element: polyline,
+              parentNode: polyline.parentNode
+            });
+          }
+        } else if (currentMeasurement.length > 0) {
+          // Render traditional linear measurement (non-continuous)
           const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
           let pointString = currentMeasurement.map(p => {
             // Points are stored in PDF coordinates (0-1), convert to viewport pixels
@@ -540,9 +632,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           
           polyline.setAttribute('points', pointString);
           polyline.setAttribute('stroke', conditionColor);
-          polyline.setAttribute('stroke-width', '3');
+          polyline.setAttribute('stroke-width', '2');
+          polyline.setAttribute('stroke-linecap', 'round');
+          polyline.setAttribute('stroke-linejoin', 'round');
           polyline.setAttribute('fill', 'none');
           polyline.setAttribute('stroke-dasharray', '5,5');
+          polyline.setAttribute('vector-effect', 'non-scaling-stroke');
           svg.appendChild(polyline);
         }
         break;
@@ -686,6 +781,47 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     svg.appendChild(dot);
   };
 
+  // Render running length display for continuous linear drawing
+  const renderRunningLengthDisplay = (svg: SVGSVGElement, viewport: any) => {
+    if (!viewport || !isContinuousDrawing || activePoints.length === 0) return;
+    
+    const selectedCondition = getSelectedCondition();
+    const conditionColor = selectedCondition?.color || '#000000';
+    const unit = selectedCondition?.unit || 'ft';
+    
+    // Position the text near the last point
+    const lastPoint = activePoints[activePoints.length - 1];
+    const textX = lastPoint.x * viewport.width + 10;
+    const textY = lastPoint.y * viewport.height - 10;
+    
+    // Create background rectangle for better visibility
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', (textX - 5).toString());
+    rect.setAttribute('y', (textY - 20).toString());
+    rect.setAttribute('width', '120');
+    rect.setAttribute('height', '20');
+    rect.setAttribute('fill', 'rgba(255, 255, 255, 0.9)');
+    rect.setAttribute('stroke', conditionColor);
+    rect.setAttribute('stroke-width', '1');
+    rect.setAttribute('rx', '3');
+    svg.appendChild(rect);
+    
+    // Create text element
+    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    text.setAttribute('x', textX.toString());
+    text.setAttribute('y', (textY - 5).toString());
+    text.setAttribute('fill', conditionColor);
+    text.setAttribute('font-size', '12');
+    text.setAttribute('font-family', 'Arial');
+    text.setAttribute('font-weight', 'bold');
+    
+    const displayValue = unit === 'ft' || unit === 'feet' 
+      ? formatFeetAndInches(runningLength)
+      : `${runningLength.toFixed(2)} ${unit}`;
+    text.textContent = `Length: ${displayValue}`;
+    svg.appendChild(text);
+  };
+
   // Handle mouse move - direct coordinate conversion
   const handleMouseMove = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
     if (!isMeasuring || !selectedConditionId) {
@@ -718,7 +854,40 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     
     setMousePosition(pdfCoords);
-  }, [isMeasuring, selectedConditionId, mousePosition]);
+    
+    // Update rubber band preview for continuous linear drawing
+    if (isContinuousDrawing && activePoints.length > 0 && svgOverlayRef.current) {
+      const currentRubberBand = pageRubberBandRefs.current[currentPage];
+      if (currentRubberBand && currentRubberBand.parentNode === svgOverlayRef.current) {
+        const lastPoint = activePoints[activePoints.length - 1];
+        const lastPointPixels = {
+          x: lastPoint.x * currentViewport.width,
+          y: lastPoint.y * currentViewport.height
+        };
+        const currentPointPixels = {
+          x: cssX,
+          y: cssY
+        };
+        
+        currentRubberBand.setAttribute('x1', lastPointPixels.x.toString());
+        currentRubberBand.setAttribute('y1', lastPointPixels.y.toString());
+        currentRubberBand.setAttribute('x2', currentPointPixels.x.toString());
+        currentRubberBand.setAttribute('y2', currentPointPixels.y.toString());
+        
+        // Update running length calculation
+        const newLength = calculateRunningLength(activePoints, pdfCoords);
+        setRunningLength(newLength);
+        
+        console.log('🎯 Rubber band update:', {
+          lastPoint: lastPointPixels,
+          currentPoint: currentPointPixels,
+          length: newLength,
+          activePoints: activePoints.length,
+          element: currentRubberBand
+        });
+      }
+    }
+  }, [isMeasuring, selectedConditionId, mousePosition, isContinuousDrawing, activePoints, rubberBandElement, currentViewport, calculateRunningLength]);
 
   // Handle click - direct coordinate conversion
   const handleClick = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
@@ -757,27 +926,99 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       y: cssY / currentViewport.height
     };
     
-    setCurrentMeasurement(prev => {
-      const newMeasurement = [...prev, pdfCoords];
-      
-      // Complete measurement based on type
-      if (measurementType === 'count') {
-        completeMeasurement([pdfCoords]);
-      } else if (measurementType === 'linear' && newMeasurement.length >= 2) {
-        // Auto-complete linear measurements after 2 points
-        requestAnimationFrame(() => {
-          completeMeasurement(newMeasurement);
-        });
-      } else if (measurementType === 'area' && newMeasurement.length >= 3) {
-        // Auto-complete area measurements after 3 points
-        requestAnimationFrame(() => {
-          completeMeasurement(newMeasurement);
+    // Handle continuous linear drawing mode
+    if (measurementType === 'linear') {
+      if (!isContinuousDrawing) {
+        // Start continuous drawing mode
+        console.log('🎯 Starting continuous linear drawing mode');
+        setIsContinuousDrawing(true);
+        setActivePoints([pdfCoords]);
+        createRubberBandElement();
+      } else {
+        // Add point to active measurement
+        console.log('🎯 Adding point to continuous measurement');
+        setActivePoints(prev => {
+          const newPoints = [...prev, pdfCoords];
+          // Update running length after adding point
+          const newLength = calculateRunningLength(newPoints);
+          setRunningLength(newLength);
+          return newPoints;
         });
       }
-      
-      return newMeasurement;
+    } else {
+      // Handle other measurement types (existing behavior)
+      setCurrentMeasurement(prev => {
+        const newMeasurement = [...prev, pdfCoords];
+        
+        // Complete measurement based on type
+        if (measurementType === 'count') {
+          completeMeasurement([pdfCoords]);
+        } else if (measurementType === 'area' && newMeasurement.length >= 3) {
+          // Auto-complete area measurements after 3 points
+          requestAnimationFrame(() => {
+            completeMeasurement(newMeasurement);
+          });
+        }
+        
+        return newMeasurement;
+      });
+    }
+  }, [isCalibrating, measurementType, currentMeasurement, isContinuousDrawing, activePoints, calculateRunningLength]);
+
+  // Create rubber band element for continuous linear drawing
+  const createRubberBandElement = useCallback(() => {
+    if (!svgOverlayRef.current || !currentViewport) return;
+    
+    const svgOverlay = svgOverlayRef.current;
+    
+    // Ensure SVG has correct dimensions and viewBox
+    svgOverlay.setAttribute('width', currentViewport.width.toString());
+    svgOverlay.setAttribute('height', currentViewport.height.toString());
+    svgOverlay.setAttribute('viewBox', `0 0 ${currentViewport.width} ${currentViewport.height}`);
+    svgOverlay.setAttribute('overflow', 'visible');
+    
+    const selectedCondition = getSelectedCondition();
+    const conditionColor = selectedCondition?.color || '#000000';
+    
+    // Remove existing rubber band for this page if it exists
+    const existingRubberBand = pageRubberBandRefs.current[currentPage];
+    if (existingRubberBand && existingRubberBand.parentNode === svgOverlay) {
+      svgOverlay.removeChild(existingRubberBand);
+    }
+    
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('stroke', conditionColor);
+    line.setAttribute('stroke-width', '2');
+    line.setAttribute('stroke-dasharray', '5,5');
+    line.setAttribute('stroke-linecap', 'round');
+    line.setAttribute('stroke-linejoin', 'round');
+    line.setAttribute('fill', 'none');
+    line.setAttribute('opacity', '0.8');
+    line.setAttribute('id', `rubber-band-line-${currentPage}`);
+    line.setAttribute('vector-effect', 'non-scaling-stroke');
+    line.setAttribute('pointer-events', 'none');
+    
+    // Set initial coordinates (will be updated on mouse move)
+    line.setAttribute('x1', '0');
+    line.setAttribute('y1', '0');
+    line.setAttribute('x2', '0');
+    line.setAttribute('y2', '0');
+    
+    svgOverlay.appendChild(line);
+    
+    // Store in page-scoped refs
+    pageRubberBandRefs.current[currentPage] = line;
+    setRubberBandElement(line);
+    
+    console.log('🎯 Created rubber band element for page', currentPage, ':', {
+      svgWidth: currentViewport.width,
+      svgHeight: currentViewport.height,
+      viewBox: `0 0 ${currentViewport.width} ${currentViewport.height}`,
+      color: conditionColor,
+      element: line,
+      parentNode: line.parentNode
     });
-  }, [isCalibrating, measurementType, currentMeasurement]);
+  }, [currentViewport, currentPage]);
 
   // Complete current measurement
   const completeMeasurement = useCallback((points: { x: number; y: number }[]) => {
@@ -910,6 +1151,105 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setCurrentMeasurement([]);
     setMousePosition(null);
   }, [getSelectedCondition, measurementType, scaleFactor, currentProjectId, currentPage, file.id, renderPDFPage]);
+
+  // Complete continuous linear measurement
+  const completeContinuousLinearMeasurement = useCallback(() => {
+    if (activePoints.length < 2) return;
+    
+    // Remove rubber band element with guarded removal
+    const currentRubberBand = pageRubberBandRefs.current[currentPage];
+    if (currentRubberBand && svgOverlayRef.current && currentRubberBand.parentNode === svgOverlayRef.current) {
+      svgOverlayRef.current.removeChild(currentRubberBand);
+      console.log('🎯 Removed rubber band element for page', currentPage);
+    }
+    
+    // Clear page-scoped refs
+    pageRubberBandRefs.current[currentPage] = null;
+    setRubberBandElement(null);
+    
+    // Complete the measurement with all active points
+    completeMeasurement(activePoints);
+    
+    // Reset continuous drawing state
+    setIsContinuousDrawing(false);
+    setActivePoints([]);
+    setRunningLength(0);
+  }, [activePoints, currentPage, completeMeasurement]);
+
+  // Handle double-click to complete continuous linear measurement
+  const handleDoubleClick = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
+    console.log('🎯 Double-click detected:', { isContinuousDrawing, activePointsLength: activePoints.length });
+    if (isContinuousDrawing && activePoints.length >= 2) {
+      // Complete the continuous linear measurement
+      console.log('🎯 Completing continuous linear measurement');
+      completeContinuousLinearMeasurement();
+    }
+  }, [isContinuousDrawing, activePoints, completeContinuousLinearMeasurement]);
+
+  // Cleanup continuous drawing state
+  const cleanupContinuousDrawing = useCallback(() => {
+    // Clean up rubber band for current page
+    const currentRubberBand = pageRubberBandRefs.current[currentPage];
+    if (currentRubberBand && svgOverlayRef.current && currentRubberBand.parentNode === svgOverlayRef.current) {
+      try {
+        svgOverlayRef.current.removeChild(currentRubberBand);
+        console.log('🎯 Cleaned up rubber band for page', currentPage);
+      } catch (e) {
+        console.warn('🎯 Failed to remove rubber band:', e);
+      }
+    }
+    
+    // Clear page-scoped refs
+    pageRubberBandRefs.current[currentPage] = null;
+    setRubberBandElement(null);
+    setIsContinuousDrawing(false);
+    setActivePoints([]);
+    setRunningLength(0);
+  }, [currentPage]);
+
+  // Reset continuous drawing when measurement type changes
+  useEffect(() => {
+    if (measurementType !== 'linear') {
+      cleanupContinuousDrawing();
+    }
+  }, [measurementType, cleanupContinuousDrawing]);
+
+  // Clean up page-scoped refs when page changes
+  useEffect(() => {
+    // Clean up any existing rubber band elements from previous pages
+    Object.keys(pageRubberBandRefs.current).forEach(pageNum => {
+      const pageNumInt = parseInt(pageNum);
+      if (pageNumInt !== currentPage) {
+        const rubberBand = pageRubberBandRefs.current[pageNumInt];
+        if (rubberBand && rubberBand.parentNode) {
+          try {
+            rubberBand.parentNode.removeChild(rubberBand);
+            console.log('🎯 Cleaned up rubber band from page', pageNumInt);
+          } catch (e) {
+            console.warn('🎯 Failed to clean up rubber band from page', pageNumInt, e);
+          }
+        }
+        pageRubberBandRefs.current[pageNumInt] = null;
+      }
+    });
+    
+    // Clean up any existing committed polylines from previous pages
+    Object.keys(pageCommittedPolylineRefs.current).forEach(pageNum => {
+      const pageNumInt = parseInt(pageNum);
+      if (pageNumInt !== currentPage) {
+        const polyline = pageCommittedPolylineRefs.current[pageNumInt];
+        if (polyline && polyline.parentNode) {
+          try {
+            polyline.parentNode.removeChild(polyline);
+            console.log('🎯 Cleaned up committed polyline from page', pageNumInt);
+          } catch (e) {
+            console.warn('🎯 Failed to clean up committed polyline from page', pageNumInt, e);
+          }
+        }
+        pageCommittedPolylineRefs.current[pageNumInt] = null;
+      }
+    });
+  }, [currentPage]);
 
   // Complete calibration
   const completeCalibration = useCallback((points: { x: number; y: number }[]) => {
@@ -1195,6 +1535,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 outline: 'none'
               }}
               onClick={handleClick}
+              onDoubleClick={handleDoubleClick}
               onMouseMove={handleMouseMove}
               onMouseLeave={() => setMousePosition(null)}
             />
