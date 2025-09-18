@@ -106,16 +106,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const [pendingScaleData, setPendingScaleData] = useState<{scaleFactor: number, unit: string} | null>(null);
   const [calibrationData, setCalibrationData] = useState<{knownDistance: number, unit: string} | null>(null);
   
-  // Refs - Dual Canvas System
+  // Refs - Single Canvas + SVG Overlay System
   const containerRef = useRef<HTMLDivElement>(null);
   const pdfCanvasRef = useRef<HTMLCanvasElement>(null);
-  const annotationCanvasRef = useRef<HTMLCanvasElement>(null);
+  const svgOverlayRef = useRef<SVGSVGElement>(null);
   const pdfPageRef = useRef<any>(null);
   const viewportRef = useRef<any>(null);
+  const outputScaleRef = useRef<number>(1);
   const renderTaskRef = useRef<any>(null);
   const isRenderingRef = useRef<boolean>(false);
-  const isAnnotationRenderingRef = useRef<boolean>(false);
-  const annotationRenderFrameRef = useRef<number | null>(null);
 
   // Store integration
   const { 
@@ -225,12 +224,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       renderTaskRef.current = null;
     }
     
-    if (annotationRenderFrameRef.current) {
-      cancelAnimationFrame(annotationRenderFrameRef.current);
-      annotationRenderFrameRef.current = null;
-    }
-    
-    // Clear canvas contexts
+    // Clear canvas context
     if (pdfCanvasRef.current) {
       const context = pdfCanvasRef.current.getContext('2d');
       if (context) {
@@ -239,68 +233,41 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       }
     }
     
-    if (annotationCanvasRef.current) {
-      const context = annotationCanvasRef.current.getContext('2d');
-      if (context) {
-        context.clearRect(0, 0, annotationCanvasRef.current.width, annotationCanvasRef.current.height);
-        context.setTransform(1, 0, 0, 1, 0, 0);
-      }
+    // Clear SVG overlay
+    if (svgOverlayRef.current) {
+      svgOverlayRef.current.innerHTML = '';
     }
     
     // Reset rendering flags
     isRenderingRef.current = false;
-    isAnnotationRenderingRef.current = false;
   }, [file?.id]);
 
-  // Synchronized canvas dimension update function
-  const updateCanvasDimensions = useCallback((viewport: any) => {
-    if (!pdfCanvasRef.current || !annotationCanvasRef.current) return;
+  // Proper canvas sizing with outputScale for crisp rendering
+  const updateCanvasDimensions = useCallback((viewport: any, outputScale: number) => {
+    if (!pdfCanvasRef.current || !svgOverlayRef.current) return;
     
     const pdfCanvas = pdfCanvasRef.current;
-    const annotationCanvas = annotationCanvasRef.current;
+    const svgOverlay = svgOverlayRef.current;
     
-    // Round viewport dimensions to integers to prevent floating-point precision issues
-    const canvasWidth = Math.round(viewport.width);
-    const canvasHeight = Math.round(viewport.height);
+    // Set canvas bitmap size to viewport * outputScale for crisp rendering
+    const canvasWidth = Math.round(viewport.width * outputScale);
+    const canvasHeight = Math.round(viewport.height * outputScale);
     
-    // Update PDF canvas dimensions (only set actual canvas dimensions, not CSS styles)
+    // Set canvas CSS size to viewport logical size
     pdfCanvas.width = canvasWidth;
     pdfCanvas.height = canvasHeight;
+    pdfCanvas.style.width = `${viewport.width}px`;
+    pdfCanvas.style.height = `${viewport.height}px`;
     
-    // Update annotation canvas dimensions to match exactly (only set actual canvas dimensions, not CSS styles)
-    annotationCanvas.width = canvasWidth;
-    annotationCanvas.height = canvasHeight;
+    // Set SVG overlay to match viewport dimensions exactly
+    svgOverlay.setAttribute('width', viewport.width.toString());
+    svgOverlay.setAttribute('height', viewport.height.toString());
+    svgOverlay.setAttribute('viewBox', `0 0 ${viewport.width} ${viewport.height}`);
     
-    // Verify synchronization and positioning
-    if (pdfCanvas.width !== annotationCanvas.width || pdfCanvas.height !== annotationCanvas.height) {
-      console.warn('Canvas dimension mismatch detected, forcing synchronization');
-      console.warn(`PDF: ${pdfCanvas.width}x${pdfCanvas.height}, Annotation: ${annotationCanvas.width}x${annotationCanvas.height}`);
-      annotationCanvas.width = pdfCanvas.width;
-      annotationCanvas.height = pdfCanvas.height;
-    }
-    
-    console.log(`📐 CANVAS DIMENSIONS: PDF=${pdfCanvas.width}x${pdfCanvas.height}, Annotation=${annotationCanvas.width}x${annotationCanvas.height}, Viewport=${viewport.width}x${viewport.height} (rounded to ${canvasWidth}x${canvasHeight})`);
-    
-    // Don't set CSS styles - let the canvas handle its own dimensions
-    
-    // Ensure perfect positioning alignment
-    const pdfRect = pdfCanvas.getBoundingClientRect();
-    const annotationRect = annotationCanvas.getBoundingClientRect();
-    
-    if (Math.abs(pdfRect.left - annotationRect.left) > 1 || 
-        Math.abs(pdfRect.top - annotationRect.top) > 1) {
-      console.warn('Canvas positioning mismatch detected, forcing alignment');
-      // Force re-positioning by temporarily removing and re-adding the absolute positioning
-      annotationCanvas.style.position = 'static';
-      requestAnimationFrame(() => {
-        annotationCanvas.style.position = 'absolute';
-        annotationCanvas.style.top = '0px';
-        annotationCanvas.style.left = '0px';
-      });
-    }
+    console.log(`📐 CANVAS SIZING: Bitmap=${canvasWidth}x${canvasHeight}, CSS=${viewport.width}x${viewport.height}, OutputScale=${outputScale}`);
   }, []);
 
-  // PDF-only render function
+  // PDF render function with proper outputScale
   const renderPDFPage = useCallback(async (pageNum: number) => {
     if (!pdfDocument || !pdfCanvasRef.current) return;
     
@@ -319,45 +286,44 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const pdfContext = pdfCanvas.getContext('2d');
       if (!pdfContext) return;
 
+      // Create viewport with current scale
       const viewport = page.getViewport({ 
         scale: viewState.scale,
         rotation: 0
       });
       
+      // Calculate outputScale for crisp rendering
+      const outputScale = window.devicePixelRatio || 1;
+      
+      // Store viewport and outputScale for coordinate calculations
       viewportRef.current = viewport;
+      outputScaleRef.current = outputScale;
       
-      // Synchronize both canvas dimensions
-      updateCanvasDimensions(viewport);
+      // Update canvas and SVG dimensions
+      updateCanvasDimensions(viewport, outputScale);
       
-      // Round viewport dimensions to prevent floating-point precision issues
-      const canvasWidth = Math.round(viewport.width);
-      const canvasHeight = Math.round(viewport.height);
-      
-      // Clear and reset PDF canvas
-      pdfContext.clearRect(0, 0, canvasWidth, canvasHeight);
+      // Clear canvas
+      pdfContext.clearRect(0, 0, pdfCanvas.width, pdfCanvas.height);
       pdfContext.setTransform(1, 0, 0, 1, 0, 0);
       
-      // Also clear annotation canvas immediately to prevent sync issues
-      if (annotationCanvasRef.current) {
-        const annotationContext = annotationCanvasRef.current.getContext('2d');
-        if (annotationContext) {
-          annotationContext.clearRect(0, 0, canvasWidth, canvasHeight);
-          annotationContext.setTransform(1, 0, 0, 1, 0, 0);
-        }
+      // Clear SVG overlay
+      if (svgOverlayRef.current) {
+        svgOverlayRef.current.innerHTML = '';
       }
       
+      // Render with proper transform for outputScale
       const renderContext = {
         canvasContext: pdfContext,
-        viewport: viewport
+        viewport: viewport,
+        transform: [outputScale, 0, 0, outputScale, 0, 0]
       };
       
       const renderTask = page.render(renderContext);
       renderTaskRef.current = renderTask;
       await renderTask.promise;
       
-      // After PDF is rendered, render annotations on separate canvas
-      // Use queued rendering to prevent race conditions
-      queueAnnotationRender();
+      // After PDF is rendered, render takeoff annotations on SVG
+      renderTakeoffAnnotations();
       
     } catch (error: any) {
       if (error.name !== 'RenderingCancelledException') {
@@ -366,345 +332,330 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     } finally {
       isRenderingRef.current = false;
     }
-  }, [pdfDocument, viewState, updateCanvasDimensions, currentProjectId, file?.id]);
+  }, [pdfDocument, viewState, updateCanvasDimensions]);
 
-  // Annotation-only renderer for separate canvas
-  const renderAnnotations = useCallback(() => {
-    if (!viewportRef.current || !annotationCanvasRef.current) return;
+  // SVG-based takeoff annotation renderer
+  const renderTakeoffAnnotations = useCallback(() => {
+    if (!viewportRef.current || !svgOverlayRef.current) return;
     
-    if (isAnnotationRenderingRef.current) return;
-    isAnnotationRenderingRef.current = true;
+    const svgOverlay = svgOverlayRef.current;
+    const viewport = viewportRef.current;
     
-    try {
-      const annotationCanvas = annotationCanvasRef.current;
-      const annotationContext = annotationCanvas.getContext('2d');
-      if (!annotationContext) return;
-      
-      const viewport = viewportRef.current;
-      
-      // Canvas dimensions should already be synchronized by updateCanvasDimensions
-      // Just verify they match and clear the canvas
-      if (annotationCanvas.width !== viewport.width || annotationCanvas.height !== viewport.height) {
-        console.warn('Annotation canvas dimensions out of sync, forcing update');
-        updateCanvasDimensions(viewport);
-      }
-      
-      // Clear annotation canvas using rounded dimensions
-      const canvasWidth = Math.round(viewport.width);
-      const canvasHeight = Math.round(viewport.height);
-      annotationContext.clearRect(0, 0, canvasWidth, canvasHeight);
-      annotationContext.setTransform(1, 0, 0, 1, 0, 0);
-      
-      // Draw takeoff measurements
-      console.log(`🎨 RENDERING: ${localTakeoffMeasurements.length} measurements on annotation canvas`);
-      console.log(`🎨 MEASUREMENTS TO RENDER:`, localTakeoffMeasurements.map(m => ({ id: m.id, pdfPage: m.pdfPage, type: m.type })));
-      localTakeoffMeasurements.forEach((measurement) => {
-        renderMeasurement(annotationContext, measurement, viewport);
-      });
-      
-      // Draw current measurement being created
-      if (currentMeasurement.length > 0 && isMeasuring) {
-        const minPoints = measurementType === 'linear' ? 2 : measurementType === 'area' ? 3 : 1;
-        if (currentMeasurement.length >= minPoints) {
-          renderCurrentMeasurement(annotationContext, viewport);
-        }
-      }
-      
-      // Draw calibration points
-      if (isCalibrating && calibrationPoints.length > 0) {
-        renderCalibrationPoints(annotationContext);
-      }
-      
-      // Draw crosshair if measuring
-      if (mousePosition && isMeasuring) {
-        renderCrosshair(annotationContext, mousePosition, viewport);
-      }
-    } catch (error) {
-      console.error('Error rendering annotations:', error);
-    } finally {
-      isAnnotationRenderingRef.current = false;
-    }
-  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, updateCanvasDimensions]);
-
-  // Queued annotation rendering to prevent race conditions
-  const queueAnnotationRender = useCallback(() => {
-    // Cancel any pending render
-    if (annotationRenderFrameRef.current) {
-      cancelAnimationFrame(annotationRenderFrameRef.current);
-    }
+    // Clear existing annotations
+    svgOverlay.innerHTML = '';
     
-    // Queue new render
-    annotationRenderFrameRef.current = requestAnimationFrame(() => {
-      renderAnnotations();
-      annotationRenderFrameRef.current = null;
+    // Draw takeoff measurements
+    console.log(`🎨 RENDERING: ${localTakeoffMeasurements.length} measurements on SVG overlay`);
+    localTakeoffMeasurements.forEach((measurement) => {
+      renderSVGMeasurement(svgOverlay, measurement, viewport);
     });
-  }, [renderAnnotations]);
-
-
-  // Immediate annotation rendering when measurements are loaded and PDF is ready
-  useEffect(() => {
-    if (localTakeoffMeasurements.length > 0 && pdfDocument && viewportRef.current && !isRenderingRef.current) {
-      // Use queued rendering to prevent race conditions
-      queueAnnotationRender();
+    
+    // Draw current measurement being created
+    if (currentMeasurement.length > 0 && isMeasuring) {
+      const minPoints = measurementType === 'linear' ? 2 : measurementType === 'area' ? 3 : 1;
+      if (currentMeasurement.length >= minPoints) {
+        renderSVGCurrentMeasurement(svgOverlay, viewport);
+      }
     }
-  }, [localTakeoffMeasurements, pdfDocument, queueAnnotationRender]);
-
-  // Re-render annotations when viewState (zoom) changes
-  useEffect(() => {
-    if (localTakeoffMeasurements.length > 0 && pdfDocument && viewportRef.current && !isRenderingRef.current) {
-      // Use queued rendering to prevent race conditions
-      queueAnnotationRender();
+    
+    // Draw calibration points
+    if (isCalibrating && calibrationPoints.length > 0) {
+      renderSVGCalibrationPoints(svgOverlay);
     }
-  }, [viewState, queueAnnotationRender, localTakeoffMeasurements, pdfDocument]);
+    
+    // Draw crosshair if measuring
+    if (mousePosition && isMeasuring) {
+      renderSVGCrosshair(svgOverlay, mousePosition, viewport);
+    }
+  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition]);
 
-  // Unified coordinate conversion system
-  const convertToCanvasCoords = useCallback((point: { x: number; y: number }, viewport: any) => {
-    // All stored coordinates should be in normalized PDF space (0-1)
-    // Convert to canvas pixel coordinates
-    return {
-      x: point.x * viewport.width,
-      y: point.y * viewport.height
-    };
-  }, []);
+  // No coordinate conversions needed - SVG viewBox matches viewport exactly
+  // CSS pixels = SVG pixels = viewport pixels (1:1 mapping)
 
-  const convertToPDFCoords = useCallback((canvasX: number, canvasY: number, viewport: any) => {
-    // Convert canvas pixel coordinates to normalized PDF coordinates (0-1)
-    return {
-      x: canvasX / viewport.width,
-      y: canvasY / viewport.height
-    };
-  }, []);
-
-  // Render individual measurement
-  const renderMeasurement = (context: CanvasRenderingContext2D, measurement: Measurement, viewport: any) => {
+  // Render individual measurement as SVG
+  const renderSVGMeasurement = (svg: SVGSVGElement, measurement: Measurement, viewport: any) => {
+    if (!measurement || !measurement.points || !viewport) {
+      console.warn('renderSVGMeasurement: Missing measurement or viewport');
+      return;
+    }
+    
     const points = measurement.points;
     if (points.length < 2) return;
     
-    context.save();
-    context.lineWidth = 2;
-    
     switch (measurement.type) {
       case 'linear':
-        context.beginPath();
-        context.strokeStyle = measurement.color;
+        // Create polyline for linear measurement
+        const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+        const pointString = points.map(p => {
+          // Points are stored in PDF coordinates (0-1), convert to viewport pixels
+          return `${p.x * viewport.width},${p.y * viewport.height}`;
+        }).join(' ');
+        polyline.setAttribute('points', pointString);
+        polyline.setAttribute('stroke', measurement.color);
+        polyline.setAttribute('stroke-width', '2');
+        polyline.setAttribute('fill', 'none');
+        svg.appendChild(polyline);
         
-        const startPoint = convertToCanvasCoords(points[0], viewport);
-        context.moveTo(startPoint.x, startPoint.y);
-        
-        for (let i = 1; i < points.length; i++) {
-          const point = convertToCanvasCoords(points[i], viewport);
-          context.lineTo(point.x, point.y);
-        }
-        context.stroke();
-        
-        const endPoint = convertToCanvasCoords(points[points.length - 1], viewport);
+        // Add measurement text
+        const startPoint = { x: points[0].x * viewport.width, y: points[0].y * viewport.height };
+        const endPoint = { x: points[points.length - 1].x * viewport.width, y: points[points.length - 1].y * viewport.height };
         const midPoint = {
           x: (startPoint.x + endPoint.x) / 2,
           y: (startPoint.y + endPoint.y) / 2
         };
-        context.fillStyle = measurement.color;
-        context.font = '12px Arial';
+        
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('x', midPoint.x.toString());
+        text.setAttribute('y', (midPoint.y - 5).toString());
+        text.setAttribute('fill', measurement.color);
+        text.setAttribute('font-size', '12');
+        text.setAttribute('font-family', 'Arial');
+        text.setAttribute('text-anchor', 'middle');
+        
         const displayValue = measurement.unit === 'ft' || measurement.unit === 'feet' 
           ? formatFeetAndInches(measurement.calculatedValue)
           : `${measurement.calculatedValue.toFixed(2)} ${measurement.unit}`;
-        context.fillText(displayValue, midPoint.x, midPoint.y - 5);
+        text.textContent = displayValue;
+        svg.appendChild(text);
         break;
         
       case 'area':
         if (points.length >= 3) {
-          context.beginPath();
-          const startPoint = convertToCanvasCoords(points[0], viewport);
-          context.moveTo(startPoint.x, startPoint.y);
+          // Create polygon for area measurement
+          const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+          const pointString = points.map(p => {
+            // Points are stored in PDF coordinates (0-1), convert to viewport pixels
+            return `${p.x * viewport.width},${p.y * viewport.height}`;
+          }).join(' ');
+          polygon.setAttribute('points', pointString);
+          polygon.setAttribute('fill', measurement.color + '40');
+          polygon.setAttribute('stroke', measurement.color);
+          polygon.setAttribute('stroke-width', '2');
+          svg.appendChild(polygon);
           
-          for (let i = 1; i < points.length; i++) {
-            const point = convertToCanvasCoords(points[i], viewport);
-            context.lineTo(point.x, point.y);
-          }
-          context.closePath();
+          // Add area text
+          const centerX = points.reduce((sum, p) => sum + p.x * viewport.width, 0) / points.length;
+          const centerY = points.reduce((sum, p) => sum + p.y * viewport.height, 0) / points.length;
           
-          context.fillStyle = measurement.color + '40';
-          context.fill();
-          
-          context.strokeStyle = measurement.color;
-          context.lineWidth = 2;
-          context.stroke();
-          
-          const centerX = points.reduce((sum, p) => {
-            const converted = convertToCanvasCoords(p, viewport);
-            return sum + converted.x;
-          }, 0) / points.length;
-          const centerY = points.reduce((sum, p) => {
-            const converted = convertToCanvasCoords(p, viewport);
-            return sum + converted.y;
-          }, 0) / points.length;
-          
-          context.fillStyle = measurement.color;
-          context.font = 'bold 12px Arial';
-          context.textAlign = 'center';
-          context.textBaseline = 'middle';
+          const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          text.setAttribute('x', centerX.toString());
+          text.setAttribute('y', centerY.toString());
+          text.setAttribute('fill', measurement.color);
+          text.setAttribute('font-size', '12');
+          text.setAttribute('font-family', 'Arial');
+          text.setAttribute('font-weight', 'bold');
+          text.setAttribute('text-anchor', 'middle');
+          text.setAttribute('dominant-baseline', 'middle');
           
           const areaValue = `${measurement.calculatedValue.toFixed(0)} SF`;
           const displayValue = measurement.perimeterValue 
             ? `${areaValue} / ${formatFeetAndInches(measurement.perimeterValue)}`
             : areaValue;
-          
-          context.fillText(displayValue, centerX, centerY);
+          text.textContent = displayValue;
+          svg.appendChild(text);
         }
         break;
         
       case 'count':
-        const point = convertToCanvasCoords(points[0], viewport);
-        context.beginPath();
-        context.strokeStyle = measurement.color;
-        context.fillStyle = measurement.color + '40';
-        context.arc(point.x, point.y, 10, 0, 2 * Math.PI);
-        context.fill();
-        context.stroke();
+        const point = { x: points[0].x * viewport.width, y: points[0].y * viewport.height };
         
-        context.fillStyle = 'white';
-        context.font = 'bold 12px Arial';
-        context.textAlign = 'center';
-        context.fillText('1', point.x, point.y + 4);
-        context.textAlign = 'left';
+        // Create circle for count measurement
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', point.x.toString());
+        circle.setAttribute('cy', point.y.toString());
+        circle.setAttribute('r', '10');
+        circle.setAttribute('fill', measurement.color + '40');
+        circle.setAttribute('stroke', measurement.color);
+        circle.setAttribute('stroke-width', '2');
+        svg.appendChild(circle);
+        
+        // Add count text
+        const countText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        countText.setAttribute('x', point.x.toString());
+        countText.setAttribute('y', (point.y + 4).toString());
+        countText.setAttribute('fill', 'white');
+        countText.setAttribute('font-size', '12');
+        countText.setAttribute('font-family', 'Arial');
+        countText.setAttribute('font-weight', 'bold');
+        countText.setAttribute('text-anchor', 'middle');
+        countText.setAttribute('dominant-baseline', 'middle');
+        countText.textContent = '1';
+        svg.appendChild(countText);
         break;
     }
-    
-    context.restore();
   };
 
-  // Render current measurement being drawn
-  const renderCurrentMeasurement = (context: CanvasRenderingContext2D, viewport: any) => {
+  // Render current measurement being drawn as SVG
+  const renderSVGCurrentMeasurement = (svg: SVGSVGElement, viewport: any) => {
     if (!viewport) return;
 
     const selectedCondition = getSelectedCondition();
     const conditionColor = selectedCondition?.color || '#000000';
     
-    context.save();
-    
     switch (measurementType) {
       case 'linear':
         if (currentMeasurement.length > 0) {
-          context.strokeStyle = conditionColor;
-          context.lineWidth = 3;
-          context.setLineDash([]);
-          context.beginPath();
-          
-          const startPoint = convertToCanvasCoords(currentMeasurement[0], viewport);
-          context.moveTo(startPoint.x, startPoint.y);
-          
-          for (let i = 1; i < currentMeasurement.length; i++) {
-            const point = convertToCanvasCoords(currentMeasurement[i], viewport);
-            context.lineTo(point.x, point.y);
-          }
+          const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+          let pointString = currentMeasurement.map(p => {
+            // Points are stored in PDF coordinates (0-1), convert to viewport pixels
+            return `${p.x * viewport.width},${p.y * viewport.height}`;
+          }).join(' ');
           
           if (mousePosition) {
-            const mousePoint = convertToCanvasCoords(mousePosition, viewport);
-            context.lineTo(mousePoint.x, mousePoint.y);
+            const mousePoint = { x: mousePosition.x * viewport.width, y: mousePosition.y * viewport.height };
+            pointString += ` ${mousePoint.x},${mousePoint.y}`;
           }
           
-          context.stroke();
+          polyline.setAttribute('points', pointString);
+          polyline.setAttribute('stroke', conditionColor);
+          polyline.setAttribute('stroke-width', '3');
+          polyline.setAttribute('fill', 'none');
+          polyline.setAttribute('stroke-dasharray', '5,5');
+          svg.appendChild(polyline);
         }
         break;
         
       case 'area':
         if (currentMeasurement.length >= 3) {
-          context.beginPath();
-          const startPoint = convertToCanvasCoords(currentMeasurement[0], viewport);
-          context.moveTo(startPoint.x, startPoint.y);
+          const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+          const pointString = currentMeasurement.map(p => {
+            // Points are stored in PDF coordinates (0-1), convert to viewport pixels
+            return `${p.x * viewport.width},${p.y * viewport.height}`;
+          }).join(' ');
           
-          for (let i = 1; i < currentMeasurement.length; i++) {
-            const point = convertToCanvasCoords(currentMeasurement[i], viewport);
-            context.lineTo(point.x, point.y);
-          }
-          context.closePath();
-          context.fill();
-          context.stroke();
+          polygon.setAttribute('points', pointString);
+          polygon.setAttribute('fill', conditionColor + '40');
+          polygon.setAttribute('stroke', conditionColor);
+          polygon.setAttribute('stroke-width', '3');
+          polygon.setAttribute('stroke-dasharray', '5,5');
+          svg.appendChild(polygon);
         }
         break;
         
       case 'count':
         if (currentMeasurement.length >= 1) {
-          const point = convertToCanvasCoords(currentMeasurement[0], viewport);
-          context.beginPath();
-          context.arc(point.x, point.y, 10, 0, 2 * Math.PI);
-          context.fill();
-          context.stroke();
+          const point = { x: currentMeasurement[0].x * viewport.width, y: currentMeasurement[0].y * viewport.height };
+          const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          circle.setAttribute('cx', point.x.toString());
+          circle.setAttribute('cy', point.y.toString());
+          circle.setAttribute('r', '10');
+          circle.setAttribute('fill', conditionColor + '40');
+          circle.setAttribute('stroke', conditionColor);
+          circle.setAttribute('stroke-width', '3');
+          circle.setAttribute('stroke-dasharray', '5,5');
+          svg.appendChild(circle);
         }
         break;
     }
-    
-    context.restore();
   };
 
-  // Render calibration points
-  const renderCalibrationPoints = (context: CanvasRenderingContext2D) => {
+  // Render calibration points as SVG
+  const renderSVGCalibrationPoints = (svg: SVGSVGElement) => {
     if (!viewportRef.current) return;
     
-    context.save();
-    context.strokeStyle = '#ff0000';
-    context.fillStyle = '#ff0000';
-    context.lineWidth = 3;
-    
-    const viewport = viewportRef.current;
-    
     calibrationPoints.forEach((point, index) => {
-      // Convert canvas coordinates to proper position
-      const canvasX = point.x;
-      const canvasY = point.y;
+      // Create calibration point circle
+      const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('cx', point.x.toString());
+      circle.setAttribute('cy', point.y.toString());
+      circle.setAttribute('r', '8');
+      circle.setAttribute('fill', '#ff0000');
+      circle.setAttribute('stroke', '#ff0000');
+      circle.setAttribute('stroke-width', '3');
+      svg.appendChild(circle);
       
-      context.beginPath();
-      context.arc(canvasX, canvasY, 8, 0, 2 * Math.PI);
-      context.fill();
-      
-      context.fillStyle = 'white';
-      context.font = 'bold 12px Arial';
-      context.textAlign = 'center';
-      context.fillText((index + 1).toString(), canvasX, canvasY + 4);
-      context.fillStyle = '#ff0000';
+      // Add point number
+      const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      text.setAttribute('x', point.x.toString());
+      text.setAttribute('y', (point.y + 4).toString());
+      text.setAttribute('fill', 'white');
+      text.setAttribute('font-size', '12');
+      text.setAttribute('font-family', 'Arial');
+      text.setAttribute('font-weight', 'bold');
+      text.setAttribute('text-anchor', 'middle');
+      text.setAttribute('dominant-baseline', 'middle');
+      text.textContent = (index + 1).toString();
+      svg.appendChild(text);
     });
     
     if (calibrationPoints.length === 2) {
-      context.beginPath();
-      context.moveTo(calibrationPoints[0].x, calibrationPoints[0].y);
-      context.lineTo(calibrationPoints[1].x, calibrationPoints[1].y);
-      context.stroke();
+      // Draw line between calibration points
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', calibrationPoints[0].x.toString());
+      line.setAttribute('y1', calibrationPoints[0].y.toString());
+      line.setAttribute('x2', calibrationPoints[1].x.toString());
+      line.setAttribute('y2', calibrationPoints[1].y.toString());
+      line.setAttribute('stroke', '#ff0000');
+      line.setAttribute('stroke-width', '3');
+      svg.appendChild(line);
       
+      // Add distance text
       const midX = (calibrationPoints[0].x + calibrationPoints[1].x) / 2;
       const midY = (calibrationPoints[0].y + calibrationPoints[1].y) / 2;
       const distance = calculateDistance(calibrationPoints[0], calibrationPoints[1]);
       
-      context.fillStyle = '#ff0000';
-      context.font = 'bold 14px Arial';
-      context.fillText(`${distance.toFixed(1)} px`, midX, midY - 10);
+      const distanceText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      distanceText.setAttribute('x', midX.toString());
+      distanceText.setAttribute('y', (midY - 10).toString());
+      distanceText.setAttribute('fill', '#ff0000');
+      distanceText.setAttribute('font-size', '14');
+      distanceText.setAttribute('font-family', 'Arial');
+      distanceText.setAttribute('font-weight', 'bold');
+      distanceText.setAttribute('text-anchor', 'middle');
+      distanceText.textContent = `${distance.toFixed(1)} px`;
+      svg.appendChild(distanceText);
+    }
+  };
+
+  // Render crosshair as SVG
+  const renderSVGCrosshair = (svg: SVGSVGElement, position: { x: number; y: number }, viewport: any) => {
+    if (!position || !viewport) {
+      console.warn('renderSVGCrosshair: Missing position or viewport');
+      return;
     }
     
-    context.restore();
-  };
-
-  // Render crosshair
-  const renderCrosshair = (context: CanvasRenderingContext2D, position: { x: number; y: number }, viewport: any) => {
-    const canvasPoint = convertToCanvasCoords(position, viewport);
+    // Position is in PDF coordinates (0-1), convert to viewport pixels
+    const viewportPoint = { x: position.x * viewport.width, y: position.y * viewport.height };
     
-    context.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-    context.lineWidth = 1;
-    context.setLineDash([]);
+    if (typeof viewportPoint.x !== 'number' || typeof viewportPoint.y !== 'number') {
+      console.warn('renderSVGCrosshair: Invalid viewport point', viewportPoint);
+      return;
+    }
     
+    // Create crosshair lines
     const crosshairSize = 20;
-    context.beginPath();
-    context.moveTo(canvasPoint.x - crosshairSize, canvasPoint.y);
-    context.lineTo(canvasPoint.x + crosshairSize, canvasPoint.y);
-    context.moveTo(canvasPoint.x, canvasPoint.y - crosshairSize);
-    context.lineTo(canvasPoint.x, canvasPoint.y + crosshairSize);
-    context.stroke();
     
-    context.fillStyle = 'rgba(255, 255, 255, 0.9)';
-    context.beginPath();
-    context.arc(canvasPoint.x, canvasPoint.y, 2, 0, 2 * Math.PI);
-    context.fill();
+    // Horizontal line
+    const hLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    hLine.setAttribute('x1', (viewportPoint.x - crosshairSize).toString());
+    hLine.setAttribute('y1', viewportPoint.y.toString());
+    hLine.setAttribute('x2', (viewportPoint.x + crosshairSize).toString());
+    hLine.setAttribute('y2', viewportPoint.y.toString());
+    hLine.setAttribute('stroke', 'rgba(255, 255, 255, 0.8)');
+    hLine.setAttribute('stroke-width', '1');
+    svg.appendChild(hLine);
+    
+    // Vertical line
+    const vLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    vLine.setAttribute('x1', viewportPoint.x.toString());
+    vLine.setAttribute('y1', (viewportPoint.y - crosshairSize).toString());
+    vLine.setAttribute('x2', viewportPoint.x.toString());
+    vLine.setAttribute('y2', (viewportPoint.y + crosshairSize).toString());
+    vLine.setAttribute('stroke', 'rgba(255, 255, 255, 0.8)');
+    vLine.setAttribute('stroke-width', '1');
+    svg.appendChild(vLine);
+    
+    // Center dot
+    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    dot.setAttribute('cx', viewportPoint.x.toString());
+    dot.setAttribute('cy', viewportPoint.y.toString());
+    dot.setAttribute('r', '2');
+    dot.setAttribute('fill', 'rgba(255, 255, 255, 0.9)');
+    svg.appendChild(dot);
   };
 
-  // Handle mouse move - works with either canvas
-  const handleCanvasMouseMove = useCallback((event: React.MouseEvent<HTMLCanvasElement>) => {
+  // Handle mouse move - direct coordinate conversion
+  const handleMouseMove = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
     if (!isMeasuring || !selectedConditionId) {
       if (mousePosition) {
         setMousePosition(null);
@@ -712,17 +663,20 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       return;
     }
     
-    // Use the PDF canvas for coordinate calculations (both canvases should have same dimensions)
     if (!pdfCanvasRef.current || !viewportRef.current) {
       return;
     }
     
+    // Get CSS pixel coordinates relative to the canvas/SVG
     const rect = pdfCanvasRef.current.getBoundingClientRect();
-    const canvasX = event.clientX - rect.left;
-    const canvasY = event.clientY - rect.top;
+    const cssX = event.clientX - rect.left;
+    const cssY = event.clientY - rect.top;
     
-    const viewport = viewportRef.current;
-    const pdfCoords = convertToPDFCoords(canvasX, canvasY, viewport);
+    // Convert CSS coordinates to PDF coordinates (0-1) for storage
+    const pdfCoords = {
+      x: cssX / viewportRef.current.width,
+      y: cssY / viewportRef.current.height
+    };
     
     const threshold = 0.005;
     if (mousePosition && 
@@ -732,24 +686,24 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     
     setMousePosition(pdfCoords);
-  }, [isMeasuring, selectedConditionId, mousePosition, convertToPDFCoords]);
+  }, [isMeasuring, selectedConditionId, mousePosition]);
 
-  // Handle canvas click - works with either canvas
-  const handleCanvasClick = useCallback((event: React.MouseEvent<HTMLCanvasElement>) => {
+  // Handle click - direct coordinate conversion
+  const handleClick = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
     const currentStoreState = useTakeoffStore.getState();
     const currentSelectedConditionId = currentStoreState.selectedConditionId;
     
-    // Use the PDF canvas for coordinate calculations (both canvases should have same dimensions)
-    if (!pdfCanvasRef.current) return;
+    if (!pdfCanvasRef.current || !viewportRef.current) return;
     
-    const canvasRect = pdfCanvasRef.current.getBoundingClientRect();
-    const x = event.clientX - canvasRect.left;
-    const y = event.clientY - canvasRect.top;
+    // Get CSS pixel coordinates relative to the canvas/SVG
+    const rect = pdfCanvasRef.current.getBoundingClientRect();
+    const cssX = event.clientX - rect.left;
+    const cssY = event.clientY - rect.top;
     
     // Handle calibration clicks
     if (isCalibrating) {
       setCalibrationPoints(prev => {
-        const newPoints = [...prev, { x, y }];
+        const newPoints = [...prev, { x: cssX, y: cssY }];
         
         if (newPoints.length === 2) {
           completeCalibration(newPoints);
@@ -765,12 +719,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       return;
     }
     
-    if (!viewportRef.current) {
-      return;
-    }
-    
-    const viewport = viewportRef.current;
-    const pdfCoords = convertToPDFCoords(x, y, viewport);
+    // Convert CSS coordinates to PDF coordinates (0-1) for storage
+    const pdfCoords = {
+      x: cssX / viewportRef.current.width,
+      y: cssY / viewportRef.current.height
+    };
     
     setCurrentMeasurement(prev => {
       const newMeasurement = [...prev, pdfCoords];
@@ -792,7 +745,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       
       return newMeasurement;
     });
-  }, [isCalibrating, measurementType, currentMeasurement, convertToPDFCoords]);
+  }, [isCalibrating, measurementType, currentMeasurement]);
 
   // Complete current measurement
   const completeMeasurement = useCallback((points: { x: number; y: number }[]) => {
@@ -816,27 +769,30 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     
     const viewport = viewportRef.current;
-    const canvasPoints = points.map(point => convertToCanvasCoords(point, viewport));
+    const viewportPoints = points.map(point => ({
+      x: point.x * viewport.width,
+      y: point.y * viewport.height
+    }));
     
     switch (measurementType) {
       case 'linear':
-        if (canvasPoints.length >= 2) {
+        if (viewportPoints.length >= 2) {
           let totalDistance = 0;
-          for (let i = 1; i < canvasPoints.length; i++) {
-            const dx = canvasPoints[i].x - canvasPoints[i - 1].x;
-            const dy = canvasPoints[i].y - canvasPoints[i - 1].y;
+          for (let i = 1; i < viewportPoints.length; i++) {
+            const dx = viewportPoints[i].x - viewportPoints[i - 1].x;
+            const dy = viewportPoints[i].y - viewportPoints[i - 1].y;
             totalDistance += Math.sqrt(dx * dx + dy * dy);
           }
           calculatedValue = totalDistance / scaleFactor;
         }
         break;
       case 'area':
-        if (canvasPoints.length >= 3) {
+        if (viewportPoints.length >= 3) {
           let area = 0;
-          for (let i = 0; i < canvasPoints.length; i++) {
-            const j = (i + 1) % canvasPoints.length;
-            area += canvasPoints[i].x * canvasPoints[j].y;
-            area -= canvasPoints[j].x * canvasPoints[i].y;
+          for (let i = 0; i < viewportPoints.length; i++) {
+            const j = (i + 1) % viewportPoints.length;
+            area += viewportPoints[i].x * viewportPoints[j].y;
+            area -= viewportPoints[j].x * viewportPoints[i].y;
           }
           calculatedValue = Math.abs(area) / (2 * scaleFactor * scaleFactor);
         }
@@ -848,12 +804,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Calculate perimeter for area measurements
     let perimeterValue: number | undefined;
-    if (measurementType === 'area' && selectedCondition.includePerimeter && canvasPoints.length >= 3) {
+    if (measurementType === 'area' && selectedCondition.includePerimeter && viewportPoints.length >= 3) {
       let perimeter = 0;
-      for (let i = 0; i < canvasPoints.length; i++) {
-        const j = (i + 1) % canvasPoints.length;
-        const dx = canvasPoints[j].x - canvasPoints[i].x;
-        const dy = canvasPoints[j].y - canvasPoints[i].y;
+      for (let i = 0; i < viewportPoints.length; i++) {
+        const j = (i + 1) % viewportPoints.length;
+        const dx = viewportPoints[j].x - viewportPoints[i].x;
+        const dy = viewportPoints[j].y - viewportPoints[i].y;
         perimeter += Math.sqrt(dx * dx + dy * dy);
       }
       perimeterValue = perimeter / scaleFactor;
@@ -921,7 +877,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Clear current measurement
     setCurrentMeasurement([]);
     setMousePosition(null);
-  }, [getSelectedCondition, measurementType, scaleFactor, currentProjectId, currentPage, file.id, renderPDFPage, convertToCanvasCoords]);
+  }, [getSelectedCondition, measurementType, scaleFactor, currentProjectId, currentPage, file.id, renderPDFPage]);
 
   // Complete calibration
   const completeCalibration = useCallback((points: { x: number; y: number }[]) => {
@@ -1036,10 +992,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Re-render annotations when measurements or interaction state changes
   useEffect(() => {
     if (pdfDocument && viewportRef.current && !isRenderingRef.current) {
-      // Use queued rendering to prevent race conditions
-      queueAnnotationRender();
+      renderTakeoffAnnotations();
     }
-  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, queueAnnotationRender]);
+  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, renderTakeoffAnnotations]);
 
   // Set measurement type when condition is selected
   useEffect(() => {
@@ -1090,13 +1045,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         renderTaskRef.current = null;
       }
       
-      // Cancel any pending animation frames
-      if (annotationRenderFrameRef.current) {
-        cancelAnimationFrame(annotationRenderFrameRef.current);
-        annotationRenderFrameRef.current = null;
-      }
-      
-      // Clear and reset canvas contexts
+      // Clear and reset canvas context
       if (pdfCanvasRef.current) {
         const context = pdfCanvasRef.current.getContext('2d');
         if (context) {
@@ -1108,22 +1057,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         pdfCanvasRef.current.height = 0;
       }
       
-      if (annotationCanvasRef.current) {
-        const context = annotationCanvasRef.current.getContext('2d');
-        if (context) {
-          context.clearRect(0, 0, annotationCanvasRef.current.width, annotationCanvasRef.current.height);
-          context.setTransform(1, 0, 0, 1, 0, 0);
-        }
-        // Reset canvas dimensions to free memory
-        annotationCanvasRef.current.width = 0;
-        annotationCanvasRef.current.height = 0;
+      // Clear SVG overlay
+      if (svgOverlayRef.current) {
+        svgOverlayRef.current.innerHTML = '';
       }
       
       // Clear refs to prevent memory leaks
       pdfPageRef.current = null;
       viewportRef.current = null;
+      outputScaleRef.current = 1;
       isRenderingRef.current = false;
-      isAnnotationRenderingRef.current = false;
     };
   }, []);
 
@@ -1173,7 +1116,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         </div>
       )}
 
-      {/* Dual Canvas Container */}
+      {/* Single Canvas + SVG Overlay Container */}
       <div 
         ref={containerRef}
         className="canvas-container flex-1 h-full overflow-auto"
@@ -1202,21 +1145,20 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 display: 'block',
                 position: 'relative',
                 zIndex: 1,
-                // Ensure no extra spacing and no CSS scaling
+                // Ensure no extra spacing
                 margin: 0,
                 padding: 0,
                 border: 'none',
                 outline: 'none'
-                // Don't set width/height - let canvas handle its own dimensions
               }}
-              onClick={handleCanvasClick}
-              onMouseMove={handleCanvasMouseMove}
+              onClick={handleClick}
+              onMouseMove={handleMouseMove}
               onMouseLeave={() => setMousePosition(null)}
             />
             
-            {/* Annotation Canvas (Foreground Layer) */}
-            <canvas
-              ref={annotationCanvasRef}
+            {/* SVG Overlay (Foreground Layer) */}
+            <svg
+              ref={svgOverlayRef}
               className="shadow-lg"
               style={{
                 cursor: isMeasuring ? 'crosshair' : 'default',
@@ -1225,15 +1167,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 top: 0,
                 left: 0,
                 zIndex: 2,
-                // Ensure perfect overlay alignment and no CSS scaling
+                // Ensure perfect overlay alignment
                 margin: 0,
                 padding: 0,
                 border: 'none',
                 outline: 'none',
-                // Don't set width/height - let canvas handle its own dimensions
-                pointerEvents: 'none' // Always let clicks pass through to PDF canvas for consistent behavior
+                pointerEvents: 'none' // Let clicks pass through to PDF canvas
               }}
-              onMouseMove={handleCanvasMouseMove}
+              onMouseMove={handleMouseMove}
               onMouseLeave={() => setMousePosition(null)}
             />
           </div>
