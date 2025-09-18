@@ -267,6 +267,12 @@ export const useTakeoffStore = create<TakeoffStore>()(
       },
       
       setSelectedCondition: (id) => {
+        console.log('🏪 STORE_SET_SELECTED_CONDITION:', {
+          newId: id,
+          previousId: get().selectedConditionId,
+          timestamp: new Date().toISOString(),
+          stackTrace: new Error().stack?.split('\n').slice(1, 4)
+        });
         set({ selectedConditionId: id });
       },
       
