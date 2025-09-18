@@ -77,6 +77,9 @@ export function TakeoffWorkspace() {
   const [totalPages, setTotalPages] = useState(0);
   const [scale, setScale] = useState(1);
   
+  // Store scale per document to preserve zoom when switching between files
+  const [documentScales, setDocumentScales] = useState<Record<string, number>>({});
+  
   // Current calibration state for the active document/page
   const getCurrentCalibration = () => {
     if (!currentPdfFile || !jobId) {
@@ -183,6 +186,17 @@ export function TakeoffWorkspace() {
     if (selectedFile) {
       console.log('Setting current PDF file to:', selectedFile);
       setCurrentPdfFile(selectedFile);
+      
+      // Restore scale for this document if it exists
+      const savedScale = documentScales[selectedFile.id];
+      if (savedScale) {
+        console.log('Restoring scale for document:', savedScale);
+        setScale(savedScale);
+      } else {
+        console.log('No saved scale for document, using default');
+        setScale(1);
+      }
+      
       // Calibration state is now managed per document/page, no need to reset
     } else {
       console.error('Could not find PDF file for sheet:', sheet);
@@ -201,6 +215,17 @@ export function TakeoffWorkspace() {
       console.log('Setting current PDF file to:', selectedFile);
       setCurrentPdfFile(selectedFile);
       setCurrentPage(pageNumber);
+      
+      // Restore scale for this document if it exists
+      const savedScale = documentScales[selectedFile.id];
+      if (savedScale) {
+        console.log('Restoring scale for document:', savedScale);
+        setScale(savedScale);
+      } else {
+        console.log('No saved scale for document, using default');
+        setScale(1);
+      }
+      
       // Calibration state is now managed per document/page, no need to reset
     } else {
       console.error('Could not find PDF file for document:', documentId);
@@ -242,6 +267,13 @@ export function TakeoffWorkspace() {
 
   const handleScaleChange = (newScale: number) => {
     setScale(newScale);
+    // Store scale for current document
+    if (currentPdfFile) {
+      setDocumentScales(prev => ({
+        ...prev,
+        [currentPdfFile.id]: newScale
+      }));
+    }
   };
 
   const handleCalibrateScale = () => {
