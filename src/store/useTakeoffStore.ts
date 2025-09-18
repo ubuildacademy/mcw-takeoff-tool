@@ -255,6 +255,9 @@ export const useTakeoffStore = create<TakeoffStore>()(
             takeoffMeasurements: state.takeoffMeasurements.filter(measurement => measurement.conditionId !== id)
           }));
           
+          // Update markupsByPage structure to reflect the deleted measurements
+          get().updateMarkupsByPage();
+          
           console.log(`✅ DELETE_CONDITION: Deleted condition ${id} and all associated measurements`, {
             deletedConditionId: id,
             remainingMeasurements: get().takeoffMeasurements.filter(measurement => measurement.conditionId !== id).length,

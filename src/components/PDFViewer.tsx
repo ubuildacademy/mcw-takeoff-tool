@@ -222,7 +222,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     setLocalTakeoffMeasurements(displayMeasurements);
     console.log(`📝 SET LOCAL MEASUREMENTS: ${displayMeasurements.length} measurements for page ${currentPage}`);
-  }, [currentProjectId, file?.id, currentPage]);
+  }, [currentProjectId, file?.id, currentPage, takeoffMeasurements]);
 
   // Clear measurements and cleanup when file changes
   useEffect(() => {
@@ -281,6 +281,63 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     console.log(`📐 PAGE ${pageNum} CANVAS SIZING: Bitmap=${canvasWidth}x${canvasHeight}, CSS=${viewport.width}x${viewport.height}, OutputScale=${outputScale}`);
   }, []);
 
+
+  // SVG-based takeoff annotation renderer - Page-specific with viewport isolation
+  const renderTakeoffAnnotations = useCallback((pageNum: number, viewport: any) => {
+    if (!viewport || !svgOverlayRef.current) return;
+    
+    const svgOverlay = svgOverlayRef.current;
+    
+    // Clear existing annotations completely - this ensures no cross-page contamination
+    svgOverlay.innerHTML = '';
+    
+    // Only render measurements for the specific page being rendered
+    console.log(`🎨 RENDERING PAGE ${pageNum}: ${localTakeoffMeasurements.length} measurements on SVG overlay`);
+    localTakeoffMeasurements.forEach((measurement) => {
+      // Double-check that this measurement belongs to the page being rendered
+      if (measurement.pdfPage === pageNum) {
+        renderSVGMeasurement(svgOverlay, measurement, viewport);
+      } else {
+        console.warn(`🚨 SKIPPING measurement ${measurement.id} - belongs to page ${measurement.pdfPage}, rendering page ${pageNum}`);
+      }
+    });
+    
+    // Draw current measurement being created (only if on the page being rendered)
+    if (currentMeasurement.length > 0 && isMeasuring && pageNum === currentPage) {
+      const minPoints = measurementType === 'linear' ? 2 : measurementType === 'area' ? 3 : 1;
+      if (currentMeasurement.length >= minPoints) {
+        renderSVGCurrentMeasurement(svgOverlay, viewport);
+      }
+    }
+    
+    // Draw calibration points (only if on the page being rendered)
+    if (isCalibrating && calibrationPoints.length > 0 && pageNum === currentPage) {
+      renderSVGCalibrationPoints(svgOverlay);
+    }
+    
+    // Draw crosshair if measuring (only if on the page being rendered)
+    if (mousePosition && isMeasuring && pageNum === currentPage) {
+      renderSVGCrosshair(svgOverlay, mousePosition, viewport);
+    }
+  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, currentPage]);
+
+  // Page visibility handler - ensures overlay is properly initialized when page becomes visible
+  const onPageShown = useCallback((pageNum: number, viewport: any) => {
+    if (!viewport || !svgOverlayRef.current) return;
+    
+    const svgOverlay = svgOverlayRef.current;
+    
+    // Ensure SVG overlay has correct dimensions and viewBox for this page
+    svgOverlay.setAttribute('width', viewport.width.toString());
+    svgOverlay.setAttribute('height', viewport.height.toString());
+    svgOverlay.setAttribute('viewBox', `0 0 ${viewport.width} ${viewport.height}`);
+    
+    console.log(`🔄 PAGE_SHOWN: Initializing overlay for page ${pageNum} with viewport ${viewport.width}x${viewport.height}`);
+    
+    // Re-render all annotations for this page
+    renderTakeoffAnnotations(pageNum, viewport);
+  }, [renderTakeoffAnnotations]);
+
   // PDF render function with page-specific viewport isolation
   const renderPDFPage = useCallback(async (pageNum: number) => {
     if (!pdfDocument || !pdfCanvasRef.current) return;
@@ -332,8 +389,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       renderTaskRef.current = renderTask;
       await renderTask.promise;
       
-      // After PDF is rendered, render takeoff annotations on SVG for this specific page
-      renderTakeoffAnnotations(pageNum, viewport);
+      // After PDF is rendered, ensure overlay is properly initialized and render takeoff annotations
+      onPageShown(pageNum, viewport);
       
     } catch (error: any) {
       if (error.name !== 'RenderingCancelledException') {
@@ -342,46 +399,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     } finally {
       isRenderingRef.current = false;
     }
-  }, [pdfDocument, viewState, updateCanvasDimensions]);
-
-  // SVG-based takeoff annotation renderer - Page-specific with viewport isolation
-  const renderTakeoffAnnotations = useCallback((pageNum: number, viewport: any) => {
-    if (!viewport || !svgOverlayRef.current) return;
-    
-    const svgOverlay = svgOverlayRef.current;
-    
-    // Clear existing annotations completely - this ensures no cross-page contamination
-    svgOverlay.innerHTML = '';
-    
-    // Only render measurements for the specific page being rendered
-    console.log(`🎨 RENDERING PAGE ${pageNum}: ${localTakeoffMeasurements.length} measurements on SVG overlay`);
-    localTakeoffMeasurements.forEach((measurement) => {
-      // Double-check that this measurement belongs to the page being rendered
-      if (measurement.pdfPage === pageNum) {
-        renderSVGMeasurement(svgOverlay, measurement, viewport);
-      } else {
-        console.warn(`🚨 SKIPPING measurement ${measurement.id} - belongs to page ${measurement.pdfPage}, rendering page ${pageNum}`);
-      }
-    });
-    
-    // Draw current measurement being created (only if on the page being rendered)
-    if (currentMeasurement.length > 0 && isMeasuring && pageNum === currentPage) {
-      const minPoints = measurementType === 'linear' ? 2 : measurementType === 'area' ? 3 : 1;
-      if (currentMeasurement.length >= minPoints) {
-        renderSVGCurrentMeasurement(svgOverlay, viewport);
-      }
-    }
-    
-    // Draw calibration points (only if on the page being rendered)
-    if (isCalibrating && calibrationPoints.length > 0 && pageNum === currentPage) {
-      renderSVGCalibrationPoints(svgOverlay);
-    }
-    
-    // Draw crosshair if measuring (only if on the page being rendered)
-    if (mousePosition && isMeasuring && pageNum === currentPage) {
-      renderSVGCrosshair(svgOverlay, mousePosition, viewport);
-    }
-  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, currentPage]);
+  }, [pdfDocument, viewState, updateCanvasDimensions, onPageShown]);
 
   // No coordinate conversions needed - SVG viewBox matches viewport exactly
   // CSS pixels = SVG pixels = viewport pixels (1:1 mapping)
@@ -989,6 +1007,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
   }, [pdfDocument, currentPage, renderPDFPage]);
 
+  // Page visibility handler - ensures overlays are rendered when returning to a page
+  useEffect(() => {
+    if (pdfDocument && currentViewport && !isRenderingRef.current) {
+      // Use the dedicated page shown handler to ensure proper overlay initialization
+      console.log(`🔄 PAGE_VISIBILITY: Calling onPageShown for page ${currentPage}`);
+      onPageShown(currentPage, currentViewport);
+    }
+  }, [currentPage, currentViewport, onPageShown]);
+
   // Clear current measurement state when page changes
   useEffect(() => {
     setCurrentMeasurement([]);
@@ -996,7 +1023,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setMeasurements([]);
   }, [currentPage]);
 
-  // Re-render when view state changes
+  // Re-render when view state changes (zoom/rotation)
   useEffect(() => {
     if (pdfDocument) {
       renderPDFPage(currentPage);
@@ -1172,8 +1199,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               onMouseLeave={() => setMousePosition(null)}
             />
             
-            {/* SVG Overlay (Foreground Layer) - Page-specific */}
+            {/* SVG Overlay (Foreground Layer) - Page-specific with stable key */}
             <svg
+              key={`overlay-${currentPage}-${file?.id || 'default'}`}
               ref={svgOverlayRef}
               id={`overlay-page-${currentPage}`}
               className="shadow-lg"
