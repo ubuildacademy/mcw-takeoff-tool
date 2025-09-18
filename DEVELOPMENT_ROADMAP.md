@@ -176,12 +176,30 @@
 6. **Simplified Architecture**: Removed complex dual-canvas synchronization and coordinate transformation overhead
 7. **Vector Graphics**: SVG-based takeoff annotations for crisp, scalable rendering
 8. **Memory Optimization**: Proper cleanup of render tasks and canvas contexts
+9. **Page Overlay Synchronization**: Fixed render/visibility sync bug where takeoffs disappeared when returning to pages until zoom changes
 
 ### Key Files Modified
 - `src/components/PDFViewer.tsx` - Complete architecture overhaul (1200+ lines)
 - `src/store/useTakeoffStore.ts` - State management for measurements
 - `server/src/storage.ts` - Database operations for takeoff data
 - `src/components/TakeoffWorkspace.tsx` - UI integration
+
+### Page Overlay Synchronization Fix (Latest) ✅
+**Problem**: Takeoffs would disappear when returning to a page until zoom level was changed, which forced a re-render.
+
+**Root Cause**: SVG overlay was not properly re-initialized when returning to a page, causing stale DOM state.
+
+**Solution Implemented**:
+1. **Page-scoped SVG Overlay**: Added stable keys (`overlay-${currentPage}-${fileId}`) to force proper re-mounting
+2. **Dedicated Page Visibility Handler**: Created `onPageShown()` function that explicitly initializes overlay when page becomes visible
+3. **Separated Navigation from Zoom**: Added dedicated effect for page changes that doesn't depend on zoom events
+4. **Consistent Overlay Initialization**: Both PDF rendering and page navigation use same overlay initialization routine
+
+**Technical Details**:
+- SVG overlay now has correct viewport dimensions and viewBox set on every page show
+- `onPageShown(pageNum, viewport)` ensures overlay is properly sized and markups are re-rendered
+- Page navigation triggers overlay re-initialization immediately, not just on zoom
+- Maintains existing page-based markup system (`markupsByPage`) for proper isolation
 
 ### Testing Recommendations
 1. **Architecture Validation Testing**:
