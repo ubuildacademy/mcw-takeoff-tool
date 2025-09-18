@@ -52,11 +52,14 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect }: T
   );
 
   const handleConditionClick = (condition: TakeoffCondition) => {
-    console.log('Condition clicked:', condition);
+    console.log('🖱️ SIDEBAR_CLICK: Condition clicked:', condition, {
+      selectedConditionId,
+      timestamp: new Date().toISOString()
+    });
     
     // If the condition is already selected, deselect it
     if (selectedConditionId === condition.id) {
-      console.log('Deselecting condition:', condition.id);
+      console.log('🔄 SIDEBAR_CLICK: Deselecting condition:', condition.id);
       setSelectedCondition(null);
       onConditionSelect(null);
       return;
