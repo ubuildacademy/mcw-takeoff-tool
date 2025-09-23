@@ -89,6 +89,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const [currentMeasurement, setCurrentMeasurement] = useState<{ x: number; y: number }[]>([]);
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [mousePosition, setMousePosition] = useState<{ x: number; y: number } | null>(null);
+  const [isCompletingMeasurement, setIsCompletingMeasurement] = useState(false);
+  
+  // Selection state for deleting markups
+  const [selectedMarkupId, setSelectedMarkupId] = useState<string | null>(null);
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
   
   // Scale calibration
   const [internalScaleFactor, setInternalScaleFactor] = useState(1);
@@ -202,8 +207,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Use the new page-based markup system
     const pageMarkups = getPageMarkups(currentProjectId, file.id, currentPage);
-    console.log(`🎯 Found ${pageMarkups.length} markups for page ${currentPage} using page-based system`);
-    console.log(`🎯 Page markups:`, pageMarkups.map(m => ({ id: m.id, pdfPage: m.pdfPage })));
     
     const displayMeasurements = pageMarkups.map(apiMeasurement => ({
       id: apiMeasurement.id,
@@ -222,11 +225,30 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     setLocalTakeoffMeasurements(displayMeasurements);
     console.log(`📝 SET LOCAL MEASUREMENTS: ${displayMeasurements.length} measurements for page ${currentPage}`);
+    console.log(`📝 MEASUREMENT DETAILS:`, displayMeasurements.map(m => ({ 
+      id: m.id, 
+      type: m.type, 
+      pdfPage: m.pdfPage, 
+      conditionId: m.conditionId 
+    })));
   }, [currentProjectId, file?.id, currentPage, takeoffMeasurements]);
 
+  // Track previous file ID to prevent unnecessary clearing
+  const prevFileIdRef = useRef<string | undefined>(undefined);
+  
   // Clear measurements and cleanup when file changes
   useEffect(() => {
-    setLocalTakeoffMeasurements([]);
+    const currentFileId = file?.id;
+    const prevFileId = prevFileIdRef.current;
+    
+    // Only clear if the file ID actually changed
+    if (currentFileId !== prevFileId) {
+      console.log(`🧹 CLEARING MEASUREMENTS: File ID changed from ${prevFileId} to ${currentFileId}`);
+      setLocalTakeoffMeasurements([]);
+      prevFileIdRef.current = currentFileId;
+    } else {
+      console.log(`🧹 SKIPPING CLEAR: File ID unchanged (${currentFileId})`);
+    }
     
     // Cancel any pending operations
     if (renderTaskRef.current) {
@@ -293,9 +315,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Only render measurements for the specific page being rendered
     console.log(`🎨 RENDERING PAGE ${pageNum}: ${localTakeoffMeasurements.length} measurements on SVG overlay`);
+    console.log(`🔍 LOCAL MEASUREMENTS DEBUG:`, localTakeoffMeasurements.map(m => ({ 
+      id: m.id, 
+      type: m.type, 
+      pdfPage: m.pdfPage, 
+      conditionId: m.conditionId 
+    })));
+    const countMeasurements = localTakeoffMeasurements.filter(m => m.type === 'count');
+    console.log(`🎯 COUNT MEASUREMENTS: ${countMeasurements.length} count measurements found for page ${pageNum}`);
+    
     localTakeoffMeasurements.forEach((measurement) => {
       // Double-check that this measurement belongs to the page being rendered
       if (measurement.pdfPage === pageNum) {
+        console.log(`🎯 RENDERING MEASUREMENT: ${measurement.type} measurement ${measurement.id} on page ${pageNum}`);
         renderSVGMeasurement(svgOverlay, measurement, viewport);
       } else {
         console.warn(`🚨 SKIPPING measurement ${measurement.id} - belongs to page ${measurement.pdfPage}, rendering page ${pageNum}`);
@@ -304,8 +336,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Draw current measurement being created (only if on the page being rendered)
     if (currentMeasurement.length > 0 && isMeasuring && pageNum === currentPage) {
-      const minPoints = measurementType === 'linear' ? 2 : measurementType === 'area' ? 3 : 1;
-      if (currentMeasurement.length >= minPoints) {
+      // Always render preview for linear, area, and volume from first point
+      // Only count measurements need to wait for completion
+      if (measurementType !== 'count') {
         renderSVGCurrentMeasurement(svgOverlay, viewport);
       }
     }
@@ -319,7 +352,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (mousePosition && isMeasuring && pageNum === currentPage) {
       renderSVGCrosshair(svgOverlay, mousePosition, viewport);
     }
-  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, currentPage]);
+  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, selectedMarkupId, isSelectionMode, currentPage]);
 
   // Page visibility handler - ensures overlay is properly initialized when page becomes visible
   const onPageShown = useCallback((pageNum: number, viewport: any) => {
@@ -333,6 +366,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     svgOverlay.setAttribute('viewBox', `0 0 ${viewport.width} ${viewport.height}`);
     
     console.log(`🔄 PAGE_SHOWN: Initializing overlay for page ${pageNum} with viewport ${viewport.width}x${viewport.height}`);
+    console.log(`🔄 SVG OVERLAY: width=${svgOverlay.getAttribute('width')}, height=${svgOverlay.getAttribute('height')}, viewBox=${svgOverlay.getAttribute('viewBox')}`);
     
     // Re-render all annotations for this page
     renderTakeoffAnnotations(pageNum, viewport);
@@ -407,12 +441,20 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Render individual measurement as SVG
   const renderSVGMeasurement = (svg: SVGSVGElement, measurement: Measurement, viewport: any) => {
     if (!measurement || !measurement.points || !viewport) {
-      console.warn('renderSVGMeasurement: Missing measurement or viewport');
       return;
     }
     
     const points = measurement.points;
-    if (points.length < 2) return;
+    if (points.length < 1) return;
+    
+    // For count measurements, we only need 1 point
+    if (measurement.type === 'count' && points.length < 1) return;
+    // For other measurements, we need at least 2 points
+    if (measurement.type !== 'count' && points.length < 2) return;
+    
+    const isSelected = selectedMarkupId === measurement.id;
+    const strokeColor = isSelected ? '#ff0000' : measurement.color;
+    const strokeWidth = isSelected ? '4' : '2';
     
     switch (measurement.type) {
       case 'linear':
@@ -423,9 +465,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           return `${p.x * viewport.width},${p.y * viewport.height}`;
         }).join(' ');
         polyline.setAttribute('points', pointString);
-        polyline.setAttribute('stroke', measurement.color);
-        polyline.setAttribute('stroke-width', '2');
+        polyline.setAttribute('stroke', strokeColor);
+        polyline.setAttribute('stroke-width', strokeWidth);
         polyline.setAttribute('fill', 'none');
+        
+        // Add click handler for selection
+        if (isSelectionMode) {
+          polyline.style.cursor = 'pointer';
+          polyline.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setSelectedMarkupId(measurement.id);
+          });
+        }
+        
         svg.appendChild(polyline);
         
         // Add measurement text
@@ -439,7 +491,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         text.setAttribute('x', midPoint.x.toString());
         text.setAttribute('y', (midPoint.y - 5).toString());
-        text.setAttribute('fill', measurement.color);
+        text.setAttribute('fill', strokeColor);
         text.setAttribute('font-size', '12');
         text.setAttribute('font-family', 'Arial');
         text.setAttribute('text-anchor', 'middle');
@@ -461,8 +513,18 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           }).join(' ');
           polygon.setAttribute('points', pointString);
           polygon.setAttribute('fill', measurement.color + '40');
-          polygon.setAttribute('stroke', measurement.color);
-          polygon.setAttribute('stroke-width', '2');
+          polygon.setAttribute('stroke', strokeColor);
+          polygon.setAttribute('stroke-width', strokeWidth);
+          
+          // Add click handler for selection
+          if (isSelectionMode) {
+            polygon.style.cursor = 'pointer';
+            polygon.addEventListener('click', (e) => {
+              e.stopPropagation();
+              setSelectedMarkupId(measurement.id);
+            });
+          }
+          
           svg.appendChild(polygon);
           
           // Add area text
@@ -472,7 +534,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
           text.setAttribute('x', centerX.toString());
           text.setAttribute('y', centerY.toString());
-          text.setAttribute('fill', measurement.color);
+          text.setAttribute('fill', strokeColor);
           text.setAttribute('font-size', '12');
           text.setAttribute('font-family', 'Arial');
           text.setAttribute('font-weight', 'bold');
@@ -488,6 +550,53 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
         break;
         
+      case 'volume':
+        if (points.length >= 3) {
+          // Create polygon for volume measurement (same as area)
+          const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+          const pointString = points.map(p => {
+            // Points are stored in PDF coordinates (0-1), convert to viewport pixels
+            return `${p.x * viewport.width},${p.y * viewport.height}`;
+          }).join(' ');
+          polygon.setAttribute('points', pointString);
+          polygon.setAttribute('fill', measurement.color + '40');
+          polygon.setAttribute('stroke', strokeColor);
+          polygon.setAttribute('stroke-width', strokeWidth);
+          
+          // Add click handler for selection
+          if (isSelectionMode) {
+            polygon.style.cursor = 'pointer';
+            polygon.addEventListener('click', (e) => {
+              e.stopPropagation();
+              setSelectedMarkupId(measurement.id);
+            });
+          }
+          
+          svg.appendChild(polygon);
+          
+          // Add volume text
+          const centerX = points.reduce((sum, p) => sum + p.x * viewport.width, 0) / points.length;
+          const centerY = points.reduce((sum, p) => sum + p.y * viewport.height, 0) / points.length;
+          
+          const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          text.setAttribute('x', centerX.toString());
+          text.setAttribute('y', centerY.toString());
+          text.setAttribute('fill', strokeColor);
+          text.setAttribute('font-size', '12');
+          text.setAttribute('font-family', 'Arial');
+          text.setAttribute('font-weight', 'bold');
+          text.setAttribute('text-anchor', 'middle');
+          text.setAttribute('dominant-baseline', 'middle');
+          
+          const volumeValue = `${measurement.calculatedValue.toFixed(0)} CY`;
+          const displayValue = measurement.perimeterValue 
+            ? `${volumeValue} / ${formatFeetAndInches(measurement.perimeterValue)}`
+            : volumeValue;
+          text.textContent = displayValue;
+          svg.appendChild(text);
+        }
+        break;
+        
       case 'count':
         const point = { x: points[0].x * viewport.width, y: points[0].y * viewport.height };
         
@@ -495,24 +604,21 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
         circle.setAttribute('cx', point.x.toString());
         circle.setAttribute('cy', point.y.toString());
-        circle.setAttribute('r', '10');
-        circle.setAttribute('fill', measurement.color + '40');
-        circle.setAttribute('stroke', measurement.color);
-        circle.setAttribute('stroke-width', '2');
-        svg.appendChild(circle);
+        circle.setAttribute('r', '8');
+        circle.setAttribute('fill', measurement.color || '#74b9ff');
+        circle.setAttribute('stroke', isSelected ? '#ff0000' : '#ffffff');
+        circle.setAttribute('stroke-width', isSelected ? '3' : '2');
         
-        // Add count text
-        const countText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        countText.setAttribute('x', point.x.toString());
-        countText.setAttribute('y', (point.y + 4).toString());
-        countText.setAttribute('fill', 'white');
-        countText.setAttribute('font-size', '12');
-        countText.setAttribute('font-family', 'Arial');
-        countText.setAttribute('font-weight', 'bold');
-        countText.setAttribute('text-anchor', 'middle');
-        countText.setAttribute('dominant-baseline', 'middle');
-        countText.textContent = '1';
-        svg.appendChild(countText);
+        // Add click handler for selection
+        if (isSelectionMode) {
+          circle.style.cursor = 'pointer';
+          circle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setSelectedMarkupId(measurement.id);
+          });
+        }
+        
+        svg.appendChild(circle);
         break;
     }
   };
@@ -548,19 +654,74 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         break;
         
       case 'area':
-        if (currentMeasurement.length >= 3) {
-          const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-          const pointString = currentMeasurement.map(p => {
+        if (currentMeasurement.length > 0) {
+          // Create a polyline for the preview (including mouse position)
+          const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+          let pointString = currentMeasurement.map(p => {
             // Points are stored in PDF coordinates (0-1), convert to viewport pixels
             return `${p.x * viewport.width},${p.y * viewport.height}`;
           }).join(' ');
           
-          polygon.setAttribute('points', pointString);
-          polygon.setAttribute('fill', conditionColor + '40');
-          polygon.setAttribute('stroke', conditionColor);
-          polygon.setAttribute('stroke-width', '3');
-          polygon.setAttribute('stroke-dasharray', '5,5');
-          svg.appendChild(polygon);
+          if (mousePosition) {
+            const mousePoint = { x: mousePosition.x * viewport.width, y: mousePosition.y * viewport.height };
+            pointString += ` ${mousePoint.x},${mousePoint.y}`;
+          }
+          
+          polyline.setAttribute('points', pointString);
+          polyline.setAttribute('stroke', conditionColor);
+          polyline.setAttribute('stroke-width', '3');
+          polyline.setAttribute('fill', 'none');
+          polyline.setAttribute('stroke-dasharray', '5,5');
+          svg.appendChild(polyline);
+          
+          // If we have 3+ points, also show the filled polygon preview
+          if (currentMeasurement.length >= 3) {
+            const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+            const polygonPointString = currentMeasurement.map(p => {
+              return `${p.x * viewport.width},${p.y * viewport.height}`;
+            }).join(' ');
+            
+            polygon.setAttribute('points', polygonPointString);
+            polygon.setAttribute('fill', conditionColor + '40');
+            polygon.setAttribute('stroke', 'none');
+            svg.appendChild(polygon);
+          }
+        }
+        break;
+        
+      case 'volume':
+        if (currentMeasurement.length > 0) {
+          // Create a polyline for the preview (including mouse position)
+          const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+          let pointString = currentMeasurement.map(p => {
+            // Points are stored in PDF coordinates (0-1), convert to viewport pixels
+            return `${p.x * viewport.width},${p.y * viewport.height}`;
+          }).join(' ');
+          
+          if (mousePosition) {
+            const mousePoint = { x: mousePosition.x * viewport.width, y: mousePosition.y * viewport.height };
+            pointString += ` ${mousePoint.x},${mousePoint.y}`;
+          }
+          
+          polyline.setAttribute('points', pointString);
+          polyline.setAttribute('stroke', conditionColor);
+          polyline.setAttribute('stroke-width', '3');
+          polyline.setAttribute('fill', 'none');
+          polyline.setAttribute('stroke-dasharray', '5,5');
+          svg.appendChild(polyline);
+          
+          // If we have 3+ points, also show the filled polygon preview
+          if (currentMeasurement.length >= 3) {
+            const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+            const polygonPointString = currentMeasurement.map(p => {
+              return `${p.x * viewport.width},${p.y * viewport.height}`;
+            }).join(' ');
+            
+            polygon.setAttribute('points', polygonPointString);
+            polygon.setAttribute('fill', conditionColor + '40');
+            polygon.setAttribute('stroke', 'none');
+            svg.appendChild(polygon);
+          }
         }
         break;
         
@@ -570,12 +731,27 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
           circle.setAttribute('cx', point.x.toString());
           circle.setAttribute('cy', point.y.toString());
-          circle.setAttribute('r', '10');
-          circle.setAttribute('fill', conditionColor + '40');
-          circle.setAttribute('stroke', conditionColor);
-          circle.setAttribute('stroke-width', '3');
-          circle.setAttribute('stroke-dasharray', '5,5');
+          circle.setAttribute('r', '12'); // Match the final size
+          circle.setAttribute('fill', conditionColor + '80'); // More opaque
+          circle.setAttribute('stroke', 'white');
+          circle.setAttribute('stroke-width', '3'); // Thicker stroke for preview
+          circle.setAttribute('stroke-dasharray', '5,5'); // More visible dash pattern
           svg.appendChild(circle);
+          
+          // Add preview text
+          const previewText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          previewText.setAttribute('x', point.x.toString());
+          previewText.setAttribute('y', (point.y + 4).toString());
+          previewText.setAttribute('fill', 'white');
+          previewText.setAttribute('font-size', '14');
+          previewText.setAttribute('font-family', 'Arial');
+          previewText.setAttribute('font-weight', 'bold');
+          previewText.setAttribute('text-anchor', 'middle');
+          previewText.setAttribute('dominant-baseline', 'middle');
+          previewText.setAttribute('stroke', 'black');
+          previewText.setAttribute('stroke-width', '0.5');
+          previewText.textContent = '1';
+          svg.appendChild(previewText);
         }
         break;
     }
@@ -720,65 +896,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setMousePosition(pdfCoords);
   }, [isMeasuring, selectedConditionId, mousePosition]);
 
-  // Handle click - direct coordinate conversion
-  const handleClick = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
-    const currentStoreState = useTakeoffStore.getState();
-    const currentSelectedConditionId = currentStoreState.selectedConditionId;
-    
-    if (!pdfCanvasRef.current || !currentViewport) return;
-    
-    // Get CSS pixel coordinates relative to the canvas/SVG
-    const rect = pdfCanvasRef.current.getBoundingClientRect();
-    const cssX = event.clientX - rect.left;
-    const cssY = event.clientY - rect.top;
-    
-    // Handle calibration clicks
-    if (isCalibrating) {
-      setCalibrationPoints(prev => {
-        const newPoints = [...prev, { x: cssX, y: cssY }];
-        
-        if (newPoints.length === 2) {
-          completeCalibration(newPoints);
-        }
-        
-        return newPoints;
-      });
-      return;
-    }
-    
-    // Handle measurement clicks
-    if (!currentSelectedConditionId) {
-      return;
-    }
-    
-    // Convert CSS coordinates to PDF coordinates (0-1) for storage using current page viewport
-    const pdfCoords = {
-      x: cssX / currentViewport.width,
-      y: cssY / currentViewport.height
-    };
-    
-    setCurrentMeasurement(prev => {
-      const newMeasurement = [...prev, pdfCoords];
-      
-      // Complete measurement based on type
-      if (measurementType === 'count') {
-        completeMeasurement([pdfCoords]);
-      } else if (measurementType === 'linear' && newMeasurement.length >= 2) {
-        // Auto-complete linear measurements after 2 points
-        requestAnimationFrame(() => {
-          completeMeasurement(newMeasurement);
-        });
-      } else if (measurementType === 'area' && newMeasurement.length >= 3) {
-        // Auto-complete area measurements after 3 points
-        requestAnimationFrame(() => {
-          completeMeasurement(newMeasurement);
-        });
-      }
-      
-      return newMeasurement;
-    });
-  }, [isCalibrating, measurementType, currentMeasurement]);
-
   // Complete current measurement
   const completeMeasurement = useCallback((points: { x: number; y: number }[]) => {
     const currentStoreState = useTakeoffStore.getState();
@@ -815,7 +932,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             const dy = viewportPoints[i].y - viewportPoints[i - 1].y;
             totalDistance += Math.sqrt(dx * dx + dy * dy);
           }
-          calculatedValue = totalDistance / scaleFactor;
+          // Calculate zoom-adjusted scale factor for accurate measurements at any zoom level
+          const zoomAdjustedScaleFactor = scaleFactor * viewState.scale;
+          calculatedValue = totalDistance / zoomAdjustedScaleFactor;
         }
         break;
       case 'area':
@@ -826,7 +945,35 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             area += viewportPoints[i].x * viewportPoints[j].y;
             area -= viewportPoints[j].x * viewportPoints[i].y;
           }
-          calculatedValue = Math.abs(area) / (2 * scaleFactor * scaleFactor);
+          // Calculate zoom-adjusted scale factor for accurate measurements at any zoom level
+          const zoomAdjustedScaleFactor = scaleFactor * viewState.scale;
+          calculatedValue = Math.abs(area) / (2 * zoomAdjustedScaleFactor * zoomAdjustedScaleFactor);
+        }
+        break;
+      case 'volume':
+        if (viewportPoints.length >= 3) {
+          let area = 0;
+          for (let i = 0; i < viewportPoints.length; i++) {
+            const j = (i + 1) % viewportPoints.length;
+            area += viewportPoints[i].x * viewportPoints[j].y;
+            area -= viewportPoints[j].x * viewportPoints[i].y;
+          }
+          // Calculate zoom-adjusted scale factor for accurate measurements at any zoom level
+          const zoomAdjustedScaleFactor = scaleFactor * viewState.scale;
+          // Calculate area in square feet
+          const areaInSquareFeet = Math.abs(area) / (2 * zoomAdjustedScaleFactor * zoomAdjustedScaleFactor);
+          // Volume calculation: area × depth
+          const depth = selectedCondition.depth || 1; // Default to 1 foot if no depth specified
+          calculatedValue = areaInSquareFeet * depth;
+          console.log('🔍 VOLUME CALCULATION:', {
+            area: Math.abs(area),
+            zoomAdjustedScaleFactor,
+            areaInSquareFeet,
+            depth,
+            calculatedValue,
+            scaleFactor,
+            viewStateScale: viewState.scale
+          });
         }
         break;
       case 'count':
@@ -834,9 +981,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         break;
     }
     
-    // Calculate perimeter for area measurements
+    // Calculate perimeter for area and volume measurements
     let perimeterValue: number | undefined;
-    if (measurementType === 'area' && selectedCondition.includePerimeter && viewportPoints.length >= 3) {
+    if ((measurementType === 'area' || measurementType === 'volume') && selectedCondition.includePerimeter && viewportPoints.length >= 3) {
       let perimeter = 0;
       for (let i = 0; i < viewportPoints.length; i++) {
         const j = (i + 1) % viewportPoints.length;
@@ -844,7 +991,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         const dy = viewportPoints[j].y - viewportPoints[i].y;
         perimeter += Math.sqrt(dx * dx + dy * dy);
       }
-      perimeterValue = perimeter / scaleFactor;
+      // Calculate zoom-adjusted scale factor for accurate measurements at any zoom level
+      const zoomAdjustedScaleFactor = scaleFactor * viewState.scale;
+      perimeterValue = perimeter / zoomAdjustedScaleFactor;
     }
 
     // Save to API
@@ -861,7 +1010,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         calculatedValue,
         unit,
         pdfPage: currentPage,
-        pdfPageType: typeof currentPage
+        pdfPageType: typeof currentPage,
+        conditionDepth: selectedCondition.depth,
+        conditionIncludePerimeter: selectedCondition.includePerimeter,
+        perimeterValue
       });
       
       addTakeoffMeasurement({
@@ -878,8 +1030,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         conditionName: selectedCondition.name,
         perimeterValue
       }).then(savedMeasurementId => {
+        console.log(`✅ SAVED ${measurementType.toUpperCase()} measurement with ID:`, savedMeasurementId);
+        
         // Reload measurements from API
         const updatedMeasurements = getPageTakeoffMeasurements(currentProjectId, file.id, currentPage);
+        console.log(`📊 RELOADED measurements for page ${currentPage}:`, updatedMeasurements.length, 'total');
+        
         const displayMeasurements = updatedMeasurements.map(apiMeasurement => ({
           id: apiMeasurement.id,
           type: apiMeasurement.type,
@@ -902,7 +1058,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           renderPDFPage(currentPage);
         });
       }).catch(error => {
-        console.error('Failed to save measurement:', error);
+        console.error(`❌ FAILED to save ${measurementType.toUpperCase()} measurement:`, error);
+        console.error('Error details:', {
+          errorMessage: error.message,
+          errorStack: error.stack,
+          measurementType,
+          calculatedValue,
+          points: points.length
+        });
       });
     }
     
@@ -910,6 +1073,87 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setCurrentMeasurement([]);
     setMousePosition(null);
   }, [getSelectedCondition, measurementType, scaleFactor, currentProjectId, currentPage, file.id, renderPDFPage]);
+
+  // Handle click - direct coordinate conversion
+  const handleClick = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
+    // Prevent double-clicking by checking if this is a double-click event
+    if (event.detail > 1) {
+      return;
+    }
+    
+    const currentStoreState = useTakeoffStore.getState();
+    const currentSelectedConditionId = currentStoreState.selectedConditionId;
+    
+    if (!pdfCanvasRef.current || !currentViewport) return;
+    
+    // Get CSS pixel coordinates relative to the canvas/SVG
+    const rect = pdfCanvasRef.current.getBoundingClientRect();
+    const cssX = event.clientX - rect.left;
+    const cssY = event.clientY - rect.top;
+    
+    // Handle calibration clicks
+    if (isCalibrating) {
+      setCalibrationPoints(prev => {
+        const newPoints = [...prev, { x: cssX, y: cssY }];
+        
+        if (newPoints.length === 2) {
+          completeCalibration(newPoints);
+        }
+        
+        return newPoints;
+      });
+      return;
+    }
+    
+    // Handle selection mode clicks (when no condition is selected)
+    if (isSelectionMode && !currentSelectedConditionId) {
+      // Clear selection when clicking on empty space
+      setSelectedMarkupId(null);
+      return;
+    }
+    
+    // Handle measurement clicks
+    if (!currentSelectedConditionId) {
+      return;
+    }
+    
+    // Convert CSS coordinates to PDF coordinates (0-1) for storage using current page viewport
+    const pdfCoords = {
+      x: cssX / currentViewport.width,
+      y: cssY / currentViewport.height
+    };
+    
+    // Only auto-complete count measurements immediately
+    if (measurementType === 'count') {
+      // Prevent double-completion by checking if we're already completing a measurement
+      if (!isCompletingMeasurement) {
+        setIsCompletingMeasurement(true);
+        completeMeasurement([pdfCoords]);
+        // Reset the flag after a short delay
+        setTimeout(() => setIsCompletingMeasurement(false), 100);
+      }
+    } else {
+      // For linear, area, and volume - just add the point and continue
+      // They will be completed on double-click
+      setCurrentMeasurement(prev => [...prev, pdfCoords]);
+    }
+  }, [isCalibrating, measurementType, currentMeasurement, currentViewport, isSelectionMode, completeMeasurement, isCompletingMeasurement]);
+
+  // Handle double-click to complete linear, area, and volume measurements
+  const handleDoubleClick = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
+    if (!pdfCanvasRef.current || !currentViewport) return;
+    
+    if (measurementType === 'linear' && currentMeasurement.length >= 2) {
+      // Complete the linear measurement
+      completeMeasurement(currentMeasurement);
+    } else if (measurementType === 'area' && currentMeasurement.length >= 3) {
+      // Complete the area measurement
+      completeMeasurement(currentMeasurement);
+    } else if (measurementType === 'volume' && currentMeasurement.length >= 3) {
+      // Complete the volume measurement
+      completeMeasurement(currentMeasurement);
+    }
+  }, [measurementType, currentMeasurement, completeMeasurement, currentViewport]);
 
   // Complete calibration
   const completeCalibration = useCallback((points: { x: number; y: number }[]) => {
@@ -999,6 +1243,73 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     return () => container.removeEventListener('wheel', handleWheel);
   }, [handleWheel]);
 
+  // Handle escape key to back out vertices one-by-one and delete key to delete selected markup
+  const handleKeyDown = useCallback(async (event: KeyboardEvent) => {
+    if (event.key === 'Escape' && isMeasuring && currentMeasurement.length > 0) {
+      event.preventDefault();
+      
+      setCurrentMeasurement(prev => {
+        const newMeasurement = [...prev];
+        newMeasurement.pop(); // Remove the last vertex
+        
+        // If no vertices remain, exit measurement mode
+        if (newMeasurement.length === 0) {
+          setIsMeasuring(false);
+          setMousePosition(null);
+        }
+        
+        return newMeasurement;
+      });
+    } else if (event.key === 'Delete' && selectedMarkupId && isSelectionMode) {
+      event.preventDefault();
+      
+      // Delete the selected markup
+      if (currentProjectId && file?.id) {
+        const { deleteTakeoffMeasurement, getPageTakeoffMeasurements } = useTakeoffStore.getState();
+        
+        try {
+          await deleteTakeoffMeasurement(selectedMarkupId);
+          console.log(`🗑️ DELETED markup with ID:`, selectedMarkupId);
+          
+          // Reload measurements from API
+          const updatedMeasurements = getPageTakeoffMeasurements(currentProjectId, file.id, currentPage);
+          console.log(`📊 RELOADED measurements for page ${currentPage}:`, updatedMeasurements.length, 'total');
+          
+          const displayMeasurements = updatedMeasurements.map(apiMeasurement => ({
+            id: apiMeasurement.id,
+            type: apiMeasurement.type,
+            points: apiMeasurement.points,
+            calculatedValue: apiMeasurement.calculatedValue,
+            unit: apiMeasurement.unit,
+            conditionId: apiMeasurement.conditionId,
+            conditionName: apiMeasurement.conditionName,
+            color: apiMeasurement.conditionColor,
+            timestamp: new Date(apiMeasurement.timestamp).getTime(),
+            pdfPage: apiMeasurement.pdfPage,
+            pdfCoordinates: apiMeasurement.pdfCoordinates,
+            perimeterValue: apiMeasurement.perimeterValue
+          }));
+          
+          setLocalTakeoffMeasurements(displayMeasurements);
+          setSelectedMarkupId(null);
+          
+          // Re-render the page
+          requestAnimationFrame(() => {
+            renderPDFPage(currentPage);
+          });
+        } catch (error: any) {
+          console.error(`❌ FAILED to delete markup:`, error);
+        }
+      }
+    }
+  }, [isMeasuring, currentMeasurement.length, selectedMarkupId, isSelectionMode, currentProjectId, file?.id, currentPage, renderPDFPage]);
+
+  // Add keyboard event listener
+  useEffect(() => {
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [handleKeyDown]);
+
   // Re-render when page changes
   useEffect(() => {
     if (pdfDocument) {
@@ -1033,9 +1344,17 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Re-render annotations when measurements or interaction state changes
   useEffect(() => {
     if (pdfDocument && currentViewport && !isRenderingRef.current) {
-      renderTakeoffAnnotations(currentPage, currentViewport);
+      // Only render if we have measurements or if we're in measuring mode
+      if (localTakeoffMeasurements.length > 0 || isMeasuring || isCalibrating || currentMeasurement.length > 0) {
+        // Add a small delay to ensure measurements are loaded before rendering
+        const timeoutId = setTimeout(() => {
+          renderTakeoffAnnotations(currentPage, currentViewport);
+        }, 10);
+        
+        return () => clearTimeout(timeoutId);
+      }
     }
-  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, renderTakeoffAnnotations, currentPage, currentViewport]);
+  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, selectedMarkupId, isSelectionMode, renderTakeoffAnnotations, currentPage, currentViewport]);
 
   // Set measurement type when condition is selected
   useEffect(() => {
@@ -1043,6 +1362,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const condition = getSelectedCondition();
       if (condition) {
         setIsMeasuring(true);
+        setIsSelectionMode(false);
+        setSelectedMarkupId(null);
         
         if (condition.unit === 'EA' || condition.unit === 'each') {
           setMeasurementType('count');
@@ -1056,6 +1377,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       }
     } else {
       setIsMeasuring(false);
+      setIsSelectionMode(true);
       setCurrentMeasurement([]);
       setMousePosition(null);
       setMeasurements([]);
@@ -1164,7 +1486,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         ref={containerRef}
         className="canvas-container flex-1 h-full overflow-auto"
         style={{ 
-          cursor: isMeasuring ? 'crosshair' : (isCalibrating ? 'crosshair' : 'default')
+          cursor: isMeasuring ? 'crosshair' : (isCalibrating ? 'crosshair' : (isSelectionMode ? 'pointer' : 'default'))
         }}
       >
         <div className="flex items-center justify-center min-h-full p-6 relative">
@@ -1184,7 +1506,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               ref={pdfCanvasRef}
               className="shadow-lg"
               style={{
-                cursor: isMeasuring ? 'crosshair' : 'default',
+                cursor: isMeasuring ? 'crosshair' : (isSelectionMode ? 'pointer' : 'default'),
                 display: 'block',
                 position: 'relative',
                 zIndex: 1,
@@ -1195,6 +1517,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 outline: 'none'
               }}
               onClick={handleClick}
+              onDoubleClick={handleDoubleClick}
               onMouseMove={handleMouseMove}
               onMouseLeave={() => setMousePosition(null)}
             />
@@ -1206,7 +1529,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               id={`overlay-page-${currentPage}`}
               className="shadow-lg"
               style={{
-                cursor: isMeasuring ? 'crosshair' : 'default',
+                cursor: isMeasuring ? 'crosshair' : (isSelectionMode ? 'pointer' : 'default'),
                 display: 'block',
                 position: 'absolute',
                 top: 0,
@@ -1217,10 +1540,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 padding: 0,
                 border: 'none',
                 outline: 'none',
-                pointerEvents: 'none' // Let clicks pass through to PDF canvas
+                pointerEvents: isSelectionMode ? 'auto' : 'none' // Allow clicks in selection mode
               }}
               onMouseMove={handleMouseMove}
               onMouseLeave={() => setMousePosition(null)}
+              onClick={(e) => {
+                // Only handle clicks in selection mode, let measuring clicks go to canvas
+                if (isSelectionMode) {
+                  e.stopPropagation();
+                }
+              }}
             />
           </div>
         </div>
