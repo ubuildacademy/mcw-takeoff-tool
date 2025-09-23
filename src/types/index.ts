@@ -29,6 +29,9 @@ export interface TakeoffCondition {
   color: string;
   description: string;
   includePerimeter?: boolean; // For area measurements, include perimeter calculation
+  depth?: number; // For volume measurements, depth in feet
+  laborCost?: number; // Labor cost per hour
+  materialCost?: number; // Material cost per unit
 }
 
 export interface TakeoffMeasurement {

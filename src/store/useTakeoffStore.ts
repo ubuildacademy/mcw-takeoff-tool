@@ -69,7 +69,7 @@ interface TakeoffStore {
   // Takeoff measurement actions
   addTakeoffMeasurement: (measurement: Omit<TakeoffMeasurement, 'id' | 'timestamp'>) => Promise<string>;
   updateTakeoffMeasurement: (id: string, updates: Partial<TakeoffMeasurement>) => void;
-  deleteTakeoffMeasurement: (id: string) => void;
+  deleteTakeoffMeasurement: (id: string) => Promise<void>;
   
   // New methods for takeoff functionality
   getSheetTakeoffMeasurements: (projectId: string, sheetId: string) => TakeoffMeasurement[];
@@ -428,13 +428,27 @@ export const useTakeoffStore = create<TakeoffStore>()(
         get().updateMarkupsByPage();
       },
       
-      deleteTakeoffMeasurement: (id) => {
-        set(state => ({
-          takeoffMeasurements: state.takeoffMeasurements.filter(measurement => measurement.id !== id)
-        }));
-        
-        // Update markupsByPage structure
-        get().updateMarkupsByPage();
+      deleteTakeoffMeasurement: async (id) => {
+        try {
+          // Import the API service dynamically to avoid circular dependencies
+          const { takeoffMeasurementService } = await import('../services/apiService');
+          
+          // Delete measurement via API
+          await takeoffMeasurementService.deleteTakeoffMeasurement(id);
+          console.log('✅ DELETE_TAKEOFF_MEASUREMENT: Measurement deleted successfully from API');
+          
+          // Remove from local store
+          set(state => ({
+            takeoffMeasurements: state.takeoffMeasurements.filter(measurement => measurement.id !== id)
+          }));
+          
+          // Update markupsByPage structure
+          get().updateMarkupsByPage();
+        } catch (error: any) {
+          console.error('❌ DELETE_TAKEOFF_MEASUREMENT: Failed to delete measurement via API:', error);
+          // Don't remove from local store if API call failed
+          throw new Error(`Failed to delete takeoff measurement: ${error.message}`);
+        }
       },
       
       // New methods for takeoff functionality

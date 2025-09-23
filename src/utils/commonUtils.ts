@@ -150,3 +150,55 @@ export const deepClone = <T>(obj: T): T => {
   }
   return obj;
 };
+
+/**
+ * Parse feet and inches format (e.g., "1'2"", "1'2½"", "2'") to decimal feet
+ * Also handles decimal feet format (e.g., "1.5")
+ */
+export const parseDepthInput = (input: string): number | null => {
+  if (!input || input.trim() === '') return null;
+  
+  const trimmedInput = input.trim();
+  
+  // Handle decimal feet format (e.g., "1.5", "2.25")
+  if (/^\d*\.?\d+$/.test(trimmedInput)) {
+    const decimalValue = parseFloat(trimmedInput);
+    return isNaN(decimalValue) ? null : decimalValue;
+  }
+  
+  // Handle feet and inches format (e.g., "1'2"", "1'2½"", "2'", "6"")
+  const feetInchesMatch = trimmedInput.match(/^(?:(\d+)')?(?:(\d+(?:\.\d+)?)(?:½)?")?$/);
+  if (feetInchesMatch) {
+    const feet = feetInchesMatch[1] ? parseInt(feetInchesMatch[1], 10) : 0;
+    let inches = 0;
+    
+    if (feetInchesMatch[2]) {
+      inches = parseFloat(feetInchesMatch[2]);
+      // Handle ½ inch notation
+      if (trimmedInput.includes('½')) {
+        inches += 0.5;
+      }
+    }
+    
+    // Convert to decimal feet
+    return feet + (inches / 12);
+  }
+  
+  return null;
+};
+
+/**
+ * Format decimal feet to feet and inches format (e.g., 1.5 -> "1'6"")
+ */
+export const formatDepthOutput = (decimalFeet: number): string => {
+  const feet = Math.floor(decimalFeet);
+  const inches = Math.round((decimalFeet - feet) * 12);
+  
+  if (feet === 0) {
+    return `${inches}"`;
+  } else if (inches === 0) {
+    return `${feet}'`;
+  } else {
+    return `${feet}'${inches}"`;
+  }
+};

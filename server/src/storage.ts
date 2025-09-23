@@ -39,6 +39,8 @@ export interface StoredCondition {
   description?: string;
   laborCost?: number;
   materialCost?: number;
+  includePerimeter?: boolean;
+  depth?: number;
   createdAt: string;
 }
 

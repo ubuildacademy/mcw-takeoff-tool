@@ -32,6 +32,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect }: T
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [editingCondition, setEditingCondition] = useState<TakeoffCondition | null>(null);
 
   const { addCondition, conditions, setSelectedCondition, selectedConditionId, getConditionTakeoffMeasurements, loadProjectConditions } = useTakeoffStore();
 
@@ -109,8 +110,14 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect }: T
   };
 
   const handleEditCondition = (condition: TakeoffCondition) => {
-    // Edit functionality - could be implemented with a dialog in the future
     console.log('Edit condition:', condition);
+    setEditingCondition(condition);
+    setShowCreateDialog(true);
+  };
+
+  const handleCloseDialog = () => {
+    setShowCreateDialog(false);
+    setEditingCondition(null);
   };
 
   const getTypeIcon = (type: string) => {
@@ -320,16 +327,17 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect }: T
         </div>
       )}
 
-      {/* Create Condition Dialog */}
+      {/* Create/Edit Condition Dialog */}
       {showCreateDialog && (
         <CreateConditionDialog
           projectId={projectId}
-          onClose={() => setShowCreateDialog(false)}
-          onConditionCreated={(newCondition) => {
-            console.log('✅ CONDITION_CREATED: New condition created, reloading conditions', newCondition);
+          onClose={handleCloseDialog}
+          onConditionCreated={(condition) => {
+            console.log('✅ CONDITION_SAVED: Condition saved, reloading conditions', condition);
             loadProjectConditions(projectId); // Reload conditions from API
-            setShowCreateDialog(false);
+            handleCloseDialog();
           }}
+          editingCondition={editingCondition}
         />
       )}
 
