@@ -1129,12 +1129,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         // Complete measurement based on type
         if (measurementType === 'count') {
           completeMeasurement([pdfCoords]);
-        } else if (measurementType === 'area' && newMeasurement.length >= 3) {
-          // Auto-complete area measurements after 3 points
-          requestAnimationFrame(() => {
-            completeMeasurement(newMeasurement);
-          });
         }
+        // Area and volume measurements will be completed on double-click
         
         return newMeasurement;
       });
@@ -1397,15 +1393,25 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setRunningLength(0);
   }, [activePoints, currentPage, completeMeasurement]);
 
-  // Handle double-click to complete continuous linear measurement
+  // Handle double-click to complete measurements
   const handleDoubleClick = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
-    console.log('🎯 Double-click detected:', { isContinuousDrawing, activePointsLength: activePoints.length });
+    console.log('🎯 Double-click detected:', { 
+      isContinuousDrawing, 
+      activePointsLength: activePoints.length,
+      measurementType,
+      currentMeasurementLength: currentMeasurement.length
+    });
+    
     if (isContinuousDrawing && activePoints.length >= 2) {
       // Complete the continuous linear measurement
       console.log('🎯 Completing continuous linear measurement');
       completeContinuousLinearMeasurement();
+    } else if ((measurementType === 'area' || measurementType === 'volume') && currentMeasurement.length >= 3) {
+      // Complete area or volume measurement
+      console.log('🎯 Completing area/volume measurement');
+      completeMeasurement(currentMeasurement);
     }
-  }, [isContinuousDrawing, activePoints, completeContinuousLinearMeasurement]);
+  }, [isContinuousDrawing, activePoints, measurementType, currentMeasurement, completeContinuousLinearMeasurement, completeMeasurement]);
 
   // Cleanup continuous drawing state
   const cleanupContinuousDrawing = useCallback(() => {
