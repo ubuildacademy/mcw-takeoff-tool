@@ -6,29 +6,32 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Textarea } from './ui/textarea';
 import { X } from 'lucide-react';
 import { useTakeoffStore } from '../store/useTakeoffStore';
-import { generateRandomColor, getDefaultUnit, generateId } from '../utils/commonUtils';
+import { generateRandomColor, getDefaultUnit, generateId, parseDepthInput, formatDepthOutput } from '../utils/commonUtils';
 
 interface CreateConditionDialogProps {
   projectId: string;
   onClose: () => void;
   onConditionCreated: (condition: any) => void;
+  editingCondition?: any; // Condition to edit, if provided
 }
 
-export function CreateConditionDialog({ projectId, onClose, onConditionCreated }: CreateConditionDialogProps) {
-  const { addCondition } = useTakeoffStore();
+export function CreateConditionDialog({ projectId, onClose, onConditionCreated, editingCondition }: CreateConditionDialogProps) {
+  const { addCondition, updateCondition } = useTakeoffStore();
 
   const [formData, setFormData] = useState({
-    name: '',
-    type: 'area' as 'area' | 'volume' | 'linear' | 'count',
-    unit: 'SF', // Initialize with default unit for 'area' type
-    wasteFactor: 0,
-    color: generateRandomColor(),
-    description: '',
-    laborCost: '',
-    materialCost: '',
-    includePerimeter: false
+    name: editingCondition?.name || '',
+    type: (editingCondition?.type || 'area') as 'area' | 'volume' | 'linear' | 'count',
+    unit: editingCondition?.unit || 'SF', // Initialize with default unit for 'area' type
+    wasteFactor: editingCondition?.wasteFactor || 0,
+    color: editingCondition?.color || generateRandomColor(),
+    description: editingCondition?.description || '',
+    laborCost: editingCondition?.laborCost?.toString() || '',
+    materialCost: editingCondition?.materialCost?.toString() || '',
+    includePerimeter: editingCondition?.includePerimeter || false,
+    depth: editingCondition?.depth ? formatDepthOutput(editingCondition.depth) : ''
   });
   const [loading, setLoading] = useState(false);
+  const [depthError, setDepthError] = useState<string>('');
 
   // Debug: Log form data changes
   useEffect(() => {
@@ -54,7 +57,18 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated }
       const unit = formData.unit || getDefaultUnit(formData.type);
       console.log('Unit resolved:', { formDataUnit: formData.unit, defaultUnit: getDefaultUnit(formData.type), finalUnit: unit });
       
-      const newCondition = {
+      // Parse depth value (supports both decimal feet and feet/inches format)
+      let parsedDepth: number | undefined;
+      if (formData.depth && formData.depth.trim() !== '') {
+        parsedDepth = parseDepthInput(formData.depth);
+        if (parsedDepth === null) {
+          setDepthError('Invalid depth format. Use decimal feet (e.g., 1.5) or feet/inches (e.g., 1\'6")');
+          setLoading(false);
+          return;
+        }
+      }
+
+      const conditionData = {
         projectId,
         name: formData.name,
         type: formData.type,
@@ -65,21 +79,27 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated }
         laborCost: formData.laborCost ? parseFloat(formData.laborCost) : undefined,
         materialCost: formData.materialCost ? parseFloat(formData.materialCost) : undefined,
         includePerimeter: formData.includePerimeter,
+        depth: parsedDepth,
       };
-      console.log('New condition data:', newCondition);
+      console.log('Condition data:', conditionData);
       
-      // Create condition with ID and timestamp
-      // Save to API via store
-      const createdCondition = await addCondition(newCondition);
+      let result;
+      if (editingCondition) {
+        // Update existing condition
+        result = await updateCondition(editingCondition.id, conditionData);
+        console.log('Condition updated in API:', result);
+      } else {
+        // Create new condition
+        result = await addCondition(conditionData);
+        console.log('Condition created in API:', result);
+      }
       
-      console.log('Condition saved to API:', createdCondition);
-      
-      // Call the callback with the new condition
-      onConditionCreated(createdCondition);
+      // Call the callback with the result
+      onConditionCreated(result);
       
     } catch (error) {
-      console.error('Error creating condition:', error);
-      alert('Failed to create condition. Please try again.');
+      console.error('Error saving condition:', error);
+      alert(`Failed to ${editingCondition ? 'update' : 'create'} condition. Please try again.`);
     } finally {
       setLoading(false);
     }
@@ -87,6 +107,11 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated }
 
   const handleInputChange = (field: string, value: string | number | boolean) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+    
+    // Clear depth error when user starts typing
+    if (field === 'depth' && depthError) {
+      setDepthError('');
+    }
   };
 
   const handleTypeChange = (value: string) => {
@@ -117,7 +142,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated }
     <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-white p-6 rounded-lg max-w-md mx-4 w-full max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold">Create New Condition</h3>
+          <h3 className="text-lg font-semibold">{editingCondition ? 'Edit Condition' : 'Create New Condition'}</h3>
           <Button variant="ghost" size="sm" onClick={onClose}>
             <X className="w-4 h-4" />
           </Button>
@@ -209,6 +234,26 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated }
             </div>
           )}
 
+          {formData.type === 'volume' && (
+            <div>
+              <Label htmlFor="depth">Depth</Label>
+              <Input
+                id="depth"
+                type="text"
+                value={formData.depth}
+                onChange={(e) => handleInputChange('depth', e.target.value)}
+                placeholder="e.g., 1.5 or 1'6&quot;"
+                className={depthError ? 'border-red-500' : ''}
+              />
+              {depthError && (
+                <p className="text-sm text-red-500 mt-1">{depthError}</p>
+              )}
+              <p className="text-xs text-gray-500 mt-1">
+                Enter depth as decimal feet (1.5) or feet/inches (1'6&quot;)
+              </p>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label htmlFor="wasteFactor">Waste Factor (%)</Label>
@@ -279,7 +324,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated }
               Cancel
             </Button>
             <Button type="submit" disabled={loading} className="flex-1">
-              {loading ? 'Creating...' : 'Create Condition'}
+              {loading ? (editingCondition ? 'Updating...' : 'Creating...') : (editingCondition ? 'Update Condition' : 'Create Condition')}
             </Button>
           </div>
         </form>
