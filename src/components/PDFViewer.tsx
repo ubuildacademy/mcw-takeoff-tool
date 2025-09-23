@@ -1812,7 +1812,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           cursor: isMeasuring ? 'crosshair' : (isCalibrating ? 'crosshair' : (isSelectionMode ? 'pointer' : 'default'))
         }}
       >
-        <div className="flex items-center justify-center min-h-full p-6 relative">
+        <div className="flex justify-start p-6 relative">
           {/* Canvas Container - Ensures perfect alignment */}
           <div 
             className="relative inline-block"
