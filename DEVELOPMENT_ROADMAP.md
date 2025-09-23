@@ -3,7 +3,7 @@
 ## Current Status
 **Last Updated**: January 2025  
 **Version**: Development Build  
-**Commit**: Latest - Area measurement behavior fixed, report exports next priority
+**Commit**: Latest - Linear measurement preview enhanced, report exports next priority
 **Status**: 🟢 **MAJOR ARCHITECTURE UPGRADE** - Professional PDF.js rendering with page isolation following industry standards
 
 ## ✅ **MAJOR ARCHITECTURE UPGRADE COMPLETED**
@@ -300,15 +300,15 @@
 4. **Print Integration** - Export PDFs with measurement overlays for field reference
 5. **Report Validation** - Ensure accuracy and professional presentation standards
 
-### In Progress (Current Sprint)
-1. **Rubber Band Preview for Linear Takeoff** - Continuous drawing mode with live preview
-   - ✅ **State Management**: Page-scoped DOM refs and continuous drawing state
-   - ✅ **Event Handling**: Click/double-click detection and mouse move tracking
-   - ✅ **Length Calculation**: Real-time distance calculation and HUD display
-   - ✅ **SVG Rendering**: Committed segments rendering with proper stroke styling
-   - ✅ **DOM Management**: Page-scoped element lifecycle and cleanup
-   - 🔄 **Rubber Band Preview**: Live line preview following cursor (needs final fixes)
-   - **Status**: 90% complete - core functionality working, preview visibility needs adjustment
+### Recently Completed ✅
+1. **Linear Measurement Preview Enhancement** - Professional preview behavior matching area/volume measurements
+   - ✅ **Preview Line from First Click**: Linear measurements now show dashed preview line from first click onwards
+   - ✅ **Mouse Position Tracking**: Preview line follows cursor in real-time with proper styling
+   - ✅ **Escape Key Functionality**: Press Escape to remove vertices one by one, exit measurement mode when empty
+   - ✅ **Continuous Drawing Mode**: Works seamlessly with existing continuous linear drawing system
+   - ✅ **Visual Consistency**: Uses same dashed line styling as area/volume measurements
+   - ✅ **State Management**: Proper cleanup of rubber band elements and measurement state
+   - **Status**: 🟢 **COMPLETED** - Linear measurements now provide consistent preview experience
 
 ### Long Term (Next Month)
 1. **Advanced Professional Features** - Plan overlay/compare, advanced drawing tools
