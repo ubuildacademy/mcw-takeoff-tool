@@ -238,6 +238,16 @@
 3. **Export Capabilities** - Print current view, measurement reports
 4. **User Experience Polish** - Enhanced visual feedback, keyboard shortcuts
 
+### In Progress (Current Sprint)
+1. **Rubber Band Preview for Linear Takeoff** - Continuous drawing mode with live preview
+   - ✅ **State Management**: Page-scoped DOM refs and continuous drawing state
+   - ✅ **Event Handling**: Click/double-click detection and mouse move tracking
+   - ✅ **Length Calculation**: Real-time distance calculation and HUD display
+   - ✅ **SVG Rendering**: Committed segments rendering with proper stroke styling
+   - ✅ **DOM Management**: Page-scoped element lifecycle and cleanup
+   - 🔄 **Rubber Band Preview**: Live line preview following cursor (needs final fixes)
+   - **Status**: 90% complete - core functionality working, preview visibility needs adjustment
+
 ### Long Term (Next Month)
 1. **Industry Feature Parity** - Match STACK and On-Screen Takeoff capabilities
 2. **Advanced Calibration** - Multi-point calibration, automatic scale detection
