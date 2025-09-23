@@ -76,6 +76,7 @@ export function TakeoffWorkspace() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
   const [scale, setScale] = useState(1);
+  const [rotation, setRotation] = useState(0);
   
   // Store scale per document to preserve zoom when switching between files
   const [documentScales, setDocumentScales] = useState<Record<string, number>>({});
@@ -175,6 +176,12 @@ export function TakeoffWorkspace() {
 
   const handleToolSelect = (tool: string) => {
     console.log('Tool selected:', tool);
+  };
+
+  const rotatePage = (direction: 'clockwise' | 'counterclockwise') => {
+    const rotationStep = direction === 'clockwise' ? 90 : -90;
+    const newRotation = (rotation + rotationStep) % 360;
+    setRotation(newRotation);
   };
 
   const handleSheetSelect = (sheet: Sheet) => {
@@ -456,6 +463,34 @@ export function TakeoffWorkspace() {
 
             <Separator orientation="vertical" className="h-8" />
 
+            {/* Rotation Controls */}
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => rotatePage('counterclockwise')}
+                title="Rotate counterclockwise"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                  <path d="M3 3v5h5"/>
+                </svg>
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => rotatePage('clockwise')}
+                title="Rotate clockwise"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/>
+                  <path d="M21 3v5h-5"/>
+                </svg>
+              </Button>
+            </div>
+
+            <Separator orientation="vertical" className="h-8" />
+
             {/* Calibration Controls */}
             <div className="flex items-center gap-2">
               <Button
@@ -581,6 +616,7 @@ export function TakeoffWorkspace() {
               onPageChange={handlePageChange}
               scale={scale}
               onScaleChange={handleScaleChange}
+              rotation={rotation}
               onCalibrateScale={handleCalibrateScale}
               isPageCalibrated={isPageCalibrated}
               scaleFactor={scaleFactor}

@@ -18,6 +18,7 @@ interface PDFViewerProps {
   onPageChange?: (page: number) => void;
   scale?: number;
   onScaleChange?: (scale: number) => void;
+  rotation?: number;
   onCalibrateScale?: () => void;
   onClearAll?: () => void;
   isPageCalibrated?: boolean;
@@ -50,6 +51,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   onPageChange,
   scale: externalScale,
   onScaleChange,
+  rotation: externalRotation,
   onCalibrateScale,
   onClearAll,
   isPageCalibrated: externalIsPageCalibrated,
@@ -80,8 +82,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   
   const viewState = useMemo(() => ({ 
     scale: externalScale ?? internalViewState.scale, 
-    rotation: 0
-  }), [externalScale, internalViewState.scale]);
+    rotation: externalRotation ?? internalViewState.rotation
+  }), [externalScale, internalViewState.scale, externalRotation, internalViewState.rotation]);
 
   // Measurement state
   const [isMeasuring, setIsMeasuring] = useState(false);
@@ -100,6 +102,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const [activePoints, setActivePoints] = useState<{ x: number; y: number }[]>([]);
   const [rubberBandElement, setRubberBandElement] = useState<SVGLineElement | null>(null);
   const [runningLength, setRunningLength] = useState<number>(0);
+  
+  // Ortho snapping state
+  const [isOrthoSnapping, setIsOrthoSnapping] = useState(false);
   
   // Page-scoped refs to prevent cross-page DOM issues
   const pageRubberBandRefs = useRef<Record<number, SVGLineElement | null>>({});
@@ -142,6 +147,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     return pageOutputScales[currentPage] || 1;
   }, [pageOutputScales, currentPage]);
 
+
   // Calculate running length for continuous linear drawing
   const calculateRunningLength = useCallback((points: { x: number; y: number }[], currentMousePos?: { x: number; y: number }) => {
     if (!currentViewport || points.length === 0) return 0;
@@ -158,6 +164,31 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     return totalDistance / scaleFactor;
   }, [currentViewport, scaleFactor]);
+
+  // Ortho snapping function - snaps to horizontal or vertical lines
+  const applyOrthoSnapping = useCallback((currentPos: { x: number; y: number }, referencePoints: { x: number; y: number }[]) => {
+    if (!isOrthoSnapping || referencePoints.length === 0) {
+      return currentPos;
+    }
+
+    // Get the last reference point (most recent point in the measurement)
+    const lastPoint = referencePoints[referencePoints.length - 1];
+    
+    // Calculate the distance from current position to the last point
+    const dx = currentPos.x - lastPoint.x;
+    const dy = currentPos.y - lastPoint.y;
+    
+    // Determine if we should snap to horizontal or vertical
+    // If the horizontal distance is greater, snap to horizontal (keep Y, adjust X)
+    // If the vertical distance is greater, snap to vertical (keep X, adjust Y)
+    if (Math.abs(dx) > Math.abs(dy)) {
+      // Snap to horizontal line (keep Y coordinate of last point)
+      return { x: currentPos.x, y: lastPoint.y };
+    } else {
+      // Snap to vertical line (keep X coordinate of last point)
+      return { x: lastPoint.x, y: currentPos.y };
+    }
+  }, [isOrthoSnapping]);
 
   // Store integration
   const { 
@@ -302,7 +333,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   }, [file?.id]);
 
   // Page-specific canvas sizing with outputScale for crisp rendering
-  const updateCanvasDimensions = useCallback((pageNum: number, viewport: any, outputScale: number) => {
+  const updateCanvasDimensions = useCallback((pageNum: number, viewport: any, outputScale: number, page?: any) => {
     if (!pdfCanvasRef.current || !svgOverlayRef.current) return;
     
     const pdfCanvas = pdfCanvasRef.current;
@@ -327,12 +358,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setPageViewports(prev => ({ ...prev, [pageNum]: viewport }));
     setPageOutputScales(prev => ({ ...prev, [pageNum]: outputScale }));
     
+    
     console.log(`📐 PAGE ${pageNum} CANVAS SIZING: Bitmap=${canvasWidth}x${canvasHeight}, CSS=${viewport.width}x${viewport.height}, OutputScale=${outputScale}`);
   }, []);
 
 
   // SVG-based takeoff annotation renderer - Page-specific with viewport isolation
-  const renderTakeoffAnnotations = useCallback((pageNum: number, viewport: any) => {
+  const renderTakeoffAnnotations = useCallback((pageNum: number, viewport: any, page?: any) => {
     if (!viewport || !svgOverlayRef.current) return;
     
     const svgOverlay = svgOverlayRef.current;
@@ -355,7 +387,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Double-check that this measurement belongs to the page being rendered
       if (measurement.pdfPage === pageNum) {
         console.log(`🎯 RENDERING MEASUREMENT: ${measurement.type} measurement ${measurement.id} on page ${pageNum}`);
-        renderSVGMeasurement(svgOverlay, measurement, viewport);
+        renderSVGMeasurement(svgOverlay, measurement, viewport, page);
       } else {
         console.warn(`🚨 SKIPPING measurement ${measurement.id} - belongs to page ${measurement.pdfPage}, rendering page ${pageNum}`);
       }
@@ -417,6 +449,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     svgOverlay.setAttribute('viewBox', `0 0 ${viewport.width} ${viewport.height}`);
     svgOverlay.setAttribute('overflow', 'visible');
     
+    
     // Add a transparent hit area for pointer events
     const existingHitArea = svgOverlay.querySelector('#hit-area');
     if (!existingHitArea) {
@@ -433,7 +466,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     console.log(`🔄 SVG OVERLAY: width=${svgOverlay.getAttribute('width')}, height=${svgOverlay.getAttribute('height')}, viewBox=${svgOverlay.getAttribute('viewBox')}`);
     
     // Re-render all annotations for this page
-    renderTakeoffAnnotations(pageNum, viewport);
+    renderTakeoffAnnotations(pageNum, viewport, pdfPageRef.current);
   }, [renderTakeoffAnnotations]);
 
   // PDF render function with page-specific viewport isolation
@@ -455,17 +488,17 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const pdfContext = pdfCanvas.getContext('2d');
       if (!pdfContext) return;
 
-      // Create page-specific viewport with current scale
+      // Create page-specific viewport with current scale and rotation
       const viewport = page.getViewport({ 
         scale: viewState.scale,
-        rotation: 0
+        rotation: viewState.rotation
       });
       
       // Calculate outputScale for crisp rendering
       const outputScale = window.devicePixelRatio || 1;
       
       // Update canvas and SVG dimensions with page-specific data
-      updateCanvasDimensions(pageNum, viewport, outputScale);
+      updateCanvasDimensions(pageNum, viewport, outputScale, page);
       
       // Clear canvas
       pdfContext.clearRect(0, 0, pdfCanvas.width, pdfCanvas.height);
@@ -503,7 +536,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // CSS pixels = SVG pixels = viewport pixels (1:1 mapping)
 
   // Render individual measurement as SVG
-  const renderSVGMeasurement = (svg: SVGSVGElement, measurement: Measurement, viewport: any) => {
+  const renderSVGMeasurement = (svg: SVGSVGElement, measurement: Measurement, viewport: any, page?: any) => {
     if (!measurement || !measurement.points || !viewport) {
       return;
     }
@@ -516,6 +549,18 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // For other measurements, we need at least 2 points
     if (measurement.type !== 'count' && points.length < 2) return;
     
+    // Transform points to match current viewport if needed
+    // Points are stored in normalized coordinates (0-1) relative to the viewport they were created in
+    // We need to map them to the current viewport
+    const transformedPoints = points.map(point => {
+      // For now, use points as-is since we're storing them in the current viewport coordinate system
+      // This ensures that when the page is rotated, the markups stay in the same relative position
+      return {
+        x: point.x,
+        y: point.y
+      };
+    });
+    
     const isSelected = selectedMarkupId === measurement.id;
     const strokeColor = isSelected ? '#ff0000' : measurement.color;
     const strokeWidth = isSelected ? '4' : '2';
@@ -524,7 +569,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       case 'linear':
         // Create polyline for linear measurement
         const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-        const pointString = points.map(p => {
+        const pointString = transformedPoints.map(p => {
           // Points are stored in PDF coordinates (0-1), convert to viewport pixels
           return `${p.x * viewport.width},${p.y * viewport.height}`;
         }).join(' ');
@@ -545,8 +590,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         svg.appendChild(polyline);
         
         // Add measurement text
-        const startPoint = { x: points[0].x * viewport.width, y: points[0].y * viewport.height };
-        const endPoint = { x: points[points.length - 1].x * viewport.width, y: points[points.length - 1].y * viewport.height };
+        const startPoint = { x: transformedPoints[0].x * viewport.width, y: transformedPoints[0].y * viewport.height };
+        const endPoint = { x: transformedPoints[transformedPoints.length - 1].x * viewport.width, y: transformedPoints[transformedPoints.length - 1].y * viewport.height };
         const midPoint = {
           x: (startPoint.x + endPoint.x) / 2,
           y: (startPoint.y + endPoint.y) / 2
@@ -568,10 +613,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         break;
         
       case 'area':
-        if (points.length >= 3) {
+        if (transformedPoints.length >= 3) {
           // Create polygon for area measurement
           const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-          const pointString = points.map(p => {
+          const pointString = transformedPoints.map(p => {
             // Points are stored in PDF coordinates (0-1), convert to viewport pixels
             return `${p.x * viewport.width},${p.y * viewport.height}`;
           }).join(' ');
@@ -592,8 +637,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           svg.appendChild(polygon);
           
           // Add area text
-          const centerX = points.reduce((sum, p) => sum + p.x * viewport.width, 0) / points.length;
-          const centerY = points.reduce((sum, p) => sum + p.y * viewport.height, 0) / points.length;
+          const centerX = transformedPoints.reduce((sum, p) => sum + p.x * viewport.width, 0) / transformedPoints.length;
+          const centerY = transformedPoints.reduce((sum, p) => sum + p.y * viewport.height, 0) / transformedPoints.length;
           
           const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
           text.setAttribute('x', centerX.toString());
@@ -615,10 +660,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         break;
         
       case 'volume':
-        if (points.length >= 3) {
+        if (transformedPoints.length >= 3) {
           // Create polygon for volume measurement (same as area)
           const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-          const pointString = points.map(p => {
+          const pointString = transformedPoints.map(p => {
             // Points are stored in PDF coordinates (0-1), convert to viewport pixels
             return `${p.x * viewport.width},${p.y * viewport.height}`;
           }).join(' ');
@@ -639,8 +684,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           svg.appendChild(polygon);
           
           // Add volume text
-          const centerX = points.reduce((sum, p) => sum + p.x * viewport.width, 0) / points.length;
-          const centerY = points.reduce((sum, p) => sum + p.y * viewport.height, 0) / points.length;
+          const centerX = transformedPoints.reduce((sum, p) => sum + p.x * viewport.width, 0) / transformedPoints.length;
+          const centerY = transformedPoints.reduce((sum, p) => sum + p.y * viewport.height, 0) / transformedPoints.length;
           
           const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
           text.setAttribute('x', centerX.toString());
@@ -662,7 +707,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         break;
         
       case 'count':
-        const point = { x: points[0].x * viewport.width, y: points[0].y * viewport.height };
+        const point = { x: transformedPoints[0].x * viewport.width, y: transformedPoints[0].y * viewport.height };
         
         // Create circle for count measurement
         const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
@@ -707,7 +752,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             
             const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
             const pointString = activePoints.map(p => {
-              // Points are stored in PDF coordinates (0-1), convert to viewport pixels
+              // Points are stored in normalized coordinates (0-1), convert to viewport pixels
               return `${p.x * viewport.width},${p.y * viewport.height}`;
             }).join(' ');
             
@@ -736,7 +781,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           if (activePoints.length > 0) {
             const previewPolyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
             let pointString = activePoints.map(p => {
-              // Points are stored in PDF coordinates (0-1), convert to viewport pixels
+              // Points are stored in normalized coordinates (0-1), convert to viewport pixels
               return `${p.x * viewport.width},${p.y * viewport.height}`;
             }).join(' ');
             
@@ -760,7 +805,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           // Render traditional linear measurement (non-continuous) with preview line
           const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
           let pointString = currentMeasurement.map(p => {
-            // Points are stored in PDF coordinates (0-1), convert to viewport pixels
+            // Points are stored in normalized coordinates (0-1), convert to viewport pixels
             return `${p.x * viewport.width},${p.y * viewport.height}`;
           }).join(' ');
           
@@ -786,7 +831,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           // Create a polyline for the preview (including mouse position)
           const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
           let pointString = currentMeasurement.map(p => {
-            // Points are stored in PDF coordinates (0-1), convert to viewport pixels
+            // Points are stored in normalized coordinates (0-1), convert to viewport pixels
             return `${p.x * viewport.width},${p.y * viewport.height}`;
           }).join(' ');
           
@@ -822,7 +867,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           // Create a polyline for the preview (including mouse position)
           const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
           let pointString = currentMeasurement.map(p => {
-            // Points are stored in PDF coordinates (0-1), convert to viewport pixels
+            // Points are stored in normalized coordinates (0-1), convert to viewport pixels
             return `${p.x * viewport.width},${p.y * viewport.height}`;
           }).join(' ');
           
@@ -1050,10 +1095,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     const cssY = event.clientY - rect.top;
     
     // Convert CSS coordinates to PDF coordinates (0-1) for storage using current page viewport
-    const pdfCoords = {
+    let pdfCoords = {
       x: cssX / currentViewport.width,
       y: cssY / currentViewport.height
     };
+    
+    // Apply ortho snapping if enabled and we have reference points
+    if (isOrthoSnapping) {
+      const referencePoints = isContinuousDrawing ? activePoints : currentMeasurement;
+      pdfCoords = applyOrthoSnapping(pdfCoords, referencePoints);
+    }
     
     const threshold = 0.005;
     if (mousePosition && 
@@ -1074,8 +1125,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           y: lastPoint.y * currentViewport.height
         };
         const currentPointPixels = {
-          x: cssX,
-          y: cssY
+          x: pdfCoords.x * currentViewport.width,
+          y: pdfCoords.y * currentViewport.height
         };
         
         currentRubberBand.setAttribute('x1', lastPointPixels.x.toString());
@@ -1130,10 +1181,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     
     // Convert CSS coordinates to PDF coordinates (0-1) for storage using current page viewport
-    const pdfCoords = {
+    let pdfCoords = {
       x: cssX / currentViewport.width,
       y: cssY / currentViewport.height
     };
+    
+    // Apply ortho snapping if enabled and we have reference points
+    if (isOrthoSnapping) {
+      const referencePoints = isContinuousDrawing ? activePoints : currentMeasurement;
+      pdfCoords = applyOrthoSnapping(pdfCoords, referencePoints);
+    }
     
     // Handle continuous linear drawing mode
     if (measurementType === 'linear') {
@@ -1158,15 +1215,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Handle other measurement types (existing behavior)
       setCurrentMeasurement(prev => {
         const newMeasurement = [...prev, pdfCoords];
-        
-        // Complete measurement based on type
-        if (measurementType === 'count') {
-          completeMeasurement([pdfCoords]);
-        }
-        // Area and volume measurements will be completed on double-click
-        
         return newMeasurement;
       });
+      
+      // Complete measurement based on type
+      if (measurementType === 'count') {
+        completeMeasurement([pdfCoords]);
+      }
+      // Area and volume measurements will be completed on double-click
     }
   }, [isCalibrating, measurementType, currentMeasurement, isContinuousDrawing, activePoints, calculateRunningLength]);
 
@@ -1225,7 +1281,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     });
   }, [currentViewport, currentPage]);
   // Complete current measurement
-  const completeMeasurement = useCallback((points: { x: number; y: number }[]) => {
+  const completeMeasurement = useCallback(async (points: { x: number; y: number }[]) => {
     const currentStoreState = useTakeoffStore.getState();
     const currentSelectedConditionId = currentStoreState.selectedConditionId;
     
@@ -1246,7 +1302,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     
     const viewport = currentViewport;
-    const viewportPoints = points.map(point => ({
+    
+    // Store points as-is in the current viewport coordinate system
+    // The rendering system will handle coordinate transformation when needed
+    const transformedPoints = points;
+    
+    const viewportPoints = transformedPoints.map(point => ({
       x: point.x * viewport.width,
       y: point.y * viewport.height
     }));
@@ -1349,7 +1410,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         sheetId: file.id,
         conditionId: currentSelectedConditionId,
         type: measurementType,
-        points: points,
+        points: transformedPoints,
         calculatedValue,
         unit,
         pdfPage: currentPage,
@@ -1403,7 +1464,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   }, [getSelectedCondition, measurementType, scaleFactor, currentProjectId, currentPage, file.id, renderPDFPage]);
 
   // Complete continuous linear measurement
-  const completeContinuousLinearMeasurement = useCallback(() => {
+  const completeContinuousLinearMeasurement = useCallback(async () => {
     if (activePoints.length < 2) return;
     
     // Remove rubber band element with guarded removal
@@ -1590,6 +1651,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
   }, [viewState.scale, onScaleChange]);
 
+  // Handle rotation
+
   // Add wheel event listener
   useEffect(() => {
     const container = containerRef.current;
@@ -1683,8 +1746,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           console.error(`❌ FAILED to delete markup:`, error);
         }
       }
+    } else if (event.key === 'Control' && isMeasuring) {
+      // Toggle ortho snapping when Ctrl is pressed during measurement
+      event.preventDefault();
+      setIsOrthoSnapping(prev => !prev);
+      console.log(`🎯 Ortho snapping ${!isOrthoSnapping ? 'enabled' : 'disabled'}`);
     }
-  }, [isMeasuring, currentMeasurement.length, selectedMarkupId, isSelectionMode, currentProjectId, file?.id, currentPage, renderPDFPage, measurementType, isContinuousDrawing, activePoints.length]);
+  }, [isMeasuring, currentMeasurement.length, selectedMarkupId, isSelectionMode, currentProjectId, file?.id, currentPage, renderPDFPage, measurementType, isContinuousDrawing, activePoints.length, isOrthoSnapping]);
 
   // Add keyboard event listener
   useEffect(() => {
@@ -1730,7 +1798,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       if (localTakeoffMeasurements.length > 0 || isMeasuring || isCalibrating || currentMeasurement.length > 0) {
         // Add a small delay to ensure measurements are loaded before rendering
         const timeoutId = setTimeout(() => {
-          renderTakeoffAnnotations(currentPage, currentViewport);
+          renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
         }, 10);
         
         return () => clearTimeout(timeoutId);
@@ -1852,6 +1920,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   return (
     <div className={`pdf-viewer-container h-full flex flex-col relative ${className}`}>
+
       {/* Interaction Status */}
       {(isMeasuring || isCalibrating) && (
         <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-10 bg-blue-600 text-white px-4 py-2 rounded-lg">
@@ -1860,6 +1929,17 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           ) : (
             `Measuring: ${measurementType} - Click to add points`
           )}
+        </div>
+      )}
+
+      {/* Ortho Snapping Indicator */}
+      {isOrthoSnapping && isMeasuring && (
+        <div className="absolute top-16 left-1/2 transform -translate-x-1/2 z-10 bg-green-600 text-white px-3 py-1 rounded-lg text-sm flex items-center gap-2">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 12h18"/>
+            <path d="M12 3v18"/>
+          </svg>
+          Ortho Snapping ON
         </div>
       )}
 
