@@ -362,11 +362,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     });
     
     // Draw current measurement being created (only if on the page being rendered)
-    if (currentMeasurement.length > 0 && isMeasuring && pageNum === currentPage) {
-      // Always render preview for linear, area, and volume from first point
-      // Only count measurements need to wait for completion
-      if (measurementType !== 'count') {
-        renderSVGCurrentMeasurement(svgOverlay, viewport);
+    if (isMeasuring && pageNum === currentPage) {
+      // For linear measurements in continuous mode, check activePoints
+      // For other measurements, check currentMeasurement
+      const hasMeasurementPoints = (measurementType === 'linear' && isContinuousDrawing && activePoints.length > 0) || 
+                                   (measurementType !== 'linear' && currentMeasurement.length > 0) ||
+                                   (measurementType === 'linear' && !isContinuousDrawing && currentMeasurement.length > 0);
+      
+      if (hasMeasurementPoints) {
+        // Always render preview for linear, area, and volume from first point
+        // Only count measurements need to wait for completion
+        if (measurementType !== 'count') {
+          renderSVGCurrentMeasurement(svgOverlay, viewport);
+        }
       }
     }
     
@@ -723,8 +731,33 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               parentNode: polyline.parentNode
             });
           }
+          
+          // Always show preview line from first click (similar to area/volume)
+          if (activePoints.length > 0) {
+            const previewPolyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+            let pointString = activePoints.map(p => {
+              // Points are stored in PDF coordinates (0-1), convert to viewport pixels
+              return `${p.x * viewport.width},${p.y * viewport.height}`;
+            }).join(' ');
+            
+            if (mousePosition) {
+              const mousePoint = { x: mousePosition.x * viewport.width, y: mousePosition.y * viewport.height };
+              pointString += ` ${mousePoint.x},${mousePoint.y}`;
+            }
+            
+            previewPolyline.setAttribute('points', pointString);
+            previewPolyline.setAttribute('stroke', conditionColor);
+            previewPolyline.setAttribute('stroke-width', '2');
+            previewPolyline.setAttribute('stroke-linecap', 'round');
+            previewPolyline.setAttribute('stroke-linejoin', 'round');
+            previewPolyline.setAttribute('fill', 'none');
+            previewPolyline.setAttribute('stroke-dasharray', '5,5');
+            previewPolyline.setAttribute('vector-effect', 'non-scaling-stroke');
+            previewPolyline.setAttribute('id', `linear-preview-${currentPage}`);
+            svg.appendChild(previewPolyline);
+          }
         } else if (currentMeasurement.length > 0) {
-          // Render traditional linear measurement (non-continuous)
+          // Render traditional linear measurement (non-continuous) with preview line
           const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
           let pointString = currentMeasurement.map(p => {
             // Points are stored in PDF coordinates (0-1), convert to viewport pixels
@@ -1568,21 +1601,47 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Handle escape key to back out vertices one-by-one and delete key to delete selected markup
   const handleKeyDown = useCallback(async (event: KeyboardEvent) => {
-    if (event.key === 'Escape' && isMeasuring && currentMeasurement.length > 0) {
+    if (event.key === 'Escape' && isMeasuring) {
       event.preventDefault();
       
-      setCurrentMeasurement(prev => {
-        const newMeasurement = [...prev];
-        newMeasurement.pop(); // Remove the last vertex
-        
-        // If no vertices remain, exit measurement mode
-        if (newMeasurement.length === 0) {
-          setIsMeasuring(false);
-          setMousePosition(null);
-        }
-        
-        return newMeasurement;
-      });
+      // Handle escape for continuous linear drawing
+      if (measurementType === 'linear' && isContinuousDrawing && activePoints.length > 0) {
+        setActivePoints(prev => {
+          const newPoints = [...prev];
+          newPoints.pop(); // Remove the last vertex
+          
+          // If no vertices remain, exit measurement mode
+          if (newPoints.length === 0) {
+            setIsMeasuring(false);
+            setMousePosition(null);
+            setIsContinuousDrawing(false);
+            setRunningLength(0);
+            // Clean up rubber band element
+            const currentRubberBand = pageRubberBandRefs.current[currentPage];
+            if (currentRubberBand && svgOverlayRef.current && currentRubberBand.parentNode === svgOverlayRef.current) {
+              svgOverlayRef.current.removeChild(currentRubberBand);
+            }
+            pageRubberBandRefs.current[currentPage] = null;
+            setRubberBandElement(null);
+          }
+          
+          return newPoints;
+        });
+      } else if (currentMeasurement.length > 0) {
+        // Handle escape for other measurement types
+        setCurrentMeasurement(prev => {
+          const newMeasurement = [...prev];
+          newMeasurement.pop(); // Remove the last vertex
+          
+          // If no vertices remain, exit measurement mode
+          if (newMeasurement.length === 0) {
+            setIsMeasuring(false);
+            setMousePosition(null);
+          }
+          
+          return newMeasurement;
+        });
+      }
     } else if (event.key === 'Delete' && selectedMarkupId && isSelectionMode) {
       event.preventDefault();
       
@@ -1625,7 +1684,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
       }
     }
-  }, [isMeasuring, currentMeasurement.length, selectedMarkupId, isSelectionMode, currentProjectId, file?.id, currentPage, renderPDFPage]);
+  }, [isMeasuring, currentMeasurement.length, selectedMarkupId, isSelectionMode, currentProjectId, file?.id, currentPage, renderPDFPage, measurementType, isContinuousDrawing, activePoints.length]);
 
   // Add keyboard event listener
   useEffect(() => {
