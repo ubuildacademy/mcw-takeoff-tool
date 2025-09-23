@@ -246,6 +246,22 @@
 - Page navigation triggers overlay re-initialization immediately, not just on zoom
 - Maintains existing page-based markup system (`markupsByPage`) for proper isolation
 
+### PDF Horizontal Scrolling Fix ✅
+**Problem**: Users could not scroll to the leftmost edge of PDFs due to canvas centering constraints that prevented proper horizontal scrolling.
+
+**Root Cause**: PDF canvas was being centered horizontally (`justify-center`) which created a negative offset that prevented access to the leftmost portion of the PDF content.
+
+**Solution Implemented**:
+1. **Fixed Container Layout**: Changed PDF container from `justify-center` to `justify-start` to align canvas to left edge
+2. **Improved Scrolling Range**: Canvas now properly positioned to allow full horizontal scroll range
+3. **Enhanced User Experience**: Users can now access all areas of the PDF, including leftmost edges
+
+**Technical Details**:
+- Changed `flex justify-center` to `flex justify-start` in PDF viewer container
+- Canvas offset changed from -707.5px (hidden) to +24px (visible) when scrollLeft = 0
+- Horizontal scroll range increased from 600px to 1223px for better PDF navigation
+- Maintains vertical scrolling functionality while fixing horizontal constraints
+
 ### Testing Recommendations
 1. **Architecture Validation Testing**:
    - Test measurement accuracy across all zoom levels (25% to 300%)
