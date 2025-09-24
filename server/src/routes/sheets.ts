@@ -73,24 +73,18 @@ router.get('/project/:projectId', async (req, res) => {
 });
 
 // Get specific sheet metadata
-router.get('/:sheetId', (req, res) => {
+router.get('/:sheetId', async (req, res) => {
   try {
     const { sheetId } = req.params;
     
-    // In a real implementation, you'd load this from a database
-    const sheetMetadata: SheetMetadata = {
-      id: sheetId,
-      documentId: sheetId,
-      pageNumber: 1,
-      hasTakeoffs: false,
-      takeoffCount: 0,
-      isVisible: true,
-      ocrProcessed: false,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
+    // Load sheet from database
+    const sheet = await storage.getSheet(sheetId);
     
-    res.json({ sheet: sheetMetadata });
+    if (!sheet) {
+      return res.status(404).json({ error: 'Sheet not found' });
+    }
+    
+    res.json({ sheet });
   } catch (error) {
     console.error('Error getting sheet metadata:', error);
     res.status(500).json({ error: 'Failed to get sheet metadata' });
@@ -98,28 +92,47 @@ router.get('/:sheetId', (req, res) => {
 });
 
 // Update sheet metadata
-router.put('/:sheetId', (req, res) => {
+router.put('/:sheetId', async (req, res) => {
   try {
     const { sheetId } = req.params;
     const updates = req.body;
     
     console.log(`Updating sheet ${sheetId}:`, updates);
     
-    // In a real implementation, you'd update this in a database
-    const updatedSheet: SheetMetadata = {
-      id: sheetId,
-      documentId: sheetId,
-      pageNumber: 1,
-      hasTakeoffs: false,
-      takeoffCount: 0,
-      isVisible: true,
-      ocrProcessed: false,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      ...updates
+    // Get existing sheet or create new one
+    let existingSheet = await storage.getSheet(sheetId);
+    
+    if (!existingSheet) {
+      // Create new sheet if it doesn't exist
+      // Extract documentId and pageNumber from sheetId (format: documentId-pageNumber)
+      const parts = sheetId.split('-');
+      const pageNumber = parseInt(parts[parts.length - 1]) || 1;
+      const documentId = parts.slice(0, -1).join('-');
+      
+      existingSheet = {
+        id: sheetId,
+        documentId: updates.documentId || documentId,
+        pageNumber: updates.pageNumber || pageNumber,
+        hasTakeoffs: false,
+        takeoffCount: 0,
+        isVisible: true,
+        ocrProcessed: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+    }
+    
+    // Update the sheet with new data
+    const updatedSheet = {
+      ...existingSheet,
+      ...updates,
+      updatedAt: new Date().toISOString()
     };
     
-    res.json({ sheet: updatedSheet });
+    // Save to database
+    const savedSheet = await storage.saveSheet(updatedSheet);
+    
+    res.json({ sheet: savedSheet });
   } catch (error) {
     console.error('Error updating sheet metadata:', error);
     res.status(500).json({ error: 'Failed to update sheet metadata' });

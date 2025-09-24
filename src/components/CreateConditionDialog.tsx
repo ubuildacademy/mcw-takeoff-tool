@@ -58,7 +58,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
       console.log('Unit resolved:', { formDataUnit: formData.unit, defaultUnit: getDefaultUnit(formData.type), finalUnit: unit });
       
       // Parse depth value (supports both decimal feet and feet/inches format)
-      let parsedDepth: number | undefined;
+      let parsedDepth: number | null | undefined;
       if (formData.depth && formData.depth.trim() !== '') {
         parsedDepth = parseDepthInput(formData.depth);
         if (parsedDepth === null) {
@@ -79,7 +79,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
         laborCost: formData.laborCost ? parseFloat(formData.laborCost) : undefined,
         materialCost: formData.materialCost ? parseFloat(formData.materialCost) : undefined,
         includePerimeter: formData.includePerimeter,
-        depth: parsedDepth,
+        depth: parsedDepth === null ? undefined : parsedDepth,
       };
       console.log('Condition data:', conditionData);
       
