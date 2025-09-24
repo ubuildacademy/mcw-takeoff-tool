@@ -273,7 +273,6 @@ export const takeoffMeasurementService = {
   },
 };
 
-
 // Health check
 export const healthService = {
   async checkHealth() {

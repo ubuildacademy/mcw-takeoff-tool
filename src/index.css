@@ -55,7 +55,6 @@
   }
   html, body, #root {
     height: 100%;
-    overflow: hidden; /* Prevent page-level scrolling */
   }
   body {
     @apply bg-background text-foreground;
@@ -81,10 +80,17 @@
   background: hsl(var(--foreground));
 }
 
+/* Landing Page Layout */
+.landing-page {
+  min-height: 100vh;
+  overflow-y: auto;
+}
+
 /* PDF Viewer Layout Fixes */
 .app-shell {
   display: flex;
   height: 100%;
+  overflow: hidden; /* Prevent page-level scrolling for app */
 }
 
 .viewer-pane {

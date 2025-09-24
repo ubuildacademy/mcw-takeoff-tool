@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { ProjectList } from './components/ProjectList';
 import { TakeoffWorkspace } from './components/TakeoffWorkspace';
+import LandingPage from './components/LandingPage';
 import { useTakeoffStore } from './store/useTakeoffStore';
 
 function App() {
@@ -20,7 +21,8 @@ function App() {
   return (
     <Router>
       <Routes>
-        <Route path="/" element={<ProjectList />} />
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/app" element={<ProjectList />} />
         <Route path="/job/:jobId" element={<TakeoffWorkspace />} />
       </Routes>
     </Router>
