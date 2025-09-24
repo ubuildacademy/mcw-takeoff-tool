@@ -337,6 +337,29 @@
 - ✅ **Real-time Data Processing**: Live aggregation of measurements across all pages and conditions
 - ✅ **Export Progress System**: User feedback during export operations with progress indicators
 
+#### Cutout Feature Implementation ✅
+**Achievement**: Complete cutout functionality for area and volume measurements with visual holes and quantity calculations
+**Status**: 🟢 **FULLY IMPLEMENTED** - Professional cutout system matching industry standards
+
+**Key Features Implemented**:
+- ✅ **Visual Hole Creation**: Cutouts create actual visible holes in parent measurements using SVG compound paths
+- ✅ **Quantity Calculation**: Cutout areas/volumes are properly subtracted from parent measurement totals
+- ✅ **Real-time Sidebar Updates**: Condition totals update immediately when cutouts are added
+- ✅ **Database Persistence**: Cutout data is saved to database with proper schema (cutouts and net_calculated_value columns)
+- ✅ **Area Cutout Support**: Full cutout functionality for area measurements (SF)
+- ✅ **Volume Cutout Support**: Full cutout functionality for volume measurements (CY)
+- ✅ **Multiple Cutouts**: Support for multiple cutouts per measurement
+- ✅ **Cutout Mode UI**: Scissors button to enter/exit cutout mode with visual feedback
+- ✅ **Defensive Programming**: Robust error handling for null/undefined cutout data
+
+**Technical Implementation**:
+- ✅ **SVG Compound Paths**: Uses `fill-rule="evenodd"` for proper hole rendering
+- ✅ **Database Schema**: Added `cutouts` (JSONB) and `net_calculated_value` (DECIMAL) columns
+- ✅ **API Integration**: Full CRUD operations for cutout data via REST API
+- ✅ **Store Synchronization**: Real-time updates between frontend store and database
+- ✅ **Measurement Loading**: Proper handling of cutout data when loading measurements
+- ✅ **Error Handling**: Comprehensive null checks and fallback values
+
 #### Linear Measurement Preview Enhancement ✅
 **Achievement**: Professional preview behavior matching area/volume measurements
 **Status**: 🟢 **COMPLETED** - Linear measurements now provide consistent preview experience

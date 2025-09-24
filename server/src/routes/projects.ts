@@ -7,7 +7,35 @@ const router = express.Router();
 router.get('/', async (req, res) => {
   try {
     const projects = await storage.getProjects();
-    return res.json({ projects });
+    
+    // Calculate takeoff counts for each project
+    const projectsWithCounts = await Promise.all(
+      projects.map(async (project) => {
+        try {
+          const measurements = await storage.getTakeoffMeasurementsByProject(project.id);
+          const takeoffCount = measurements.length;
+          
+          // Note: We don't calculate totalValue here since calculatedValue represents
+          // measurement quantities (SF, LF, etc.) not monetary values
+          // Total value would need to be calculated using condition pricing if available
+          
+          return {
+            ...project,
+            takeoffCount,
+            totalValue: 0 // Set to 0 since we don't have pricing information
+          };
+        } catch (error) {
+          console.error(`Error calculating takeoff count for project ${project.id}:`, error);
+          return {
+            ...project,
+            takeoffCount: 0,
+            totalValue: 0
+          };
+        }
+      })
+    );
+    
+    return res.json({ projects: projectsWithCounts });
   } catch (error) {
     console.error('Error fetching projects:', error);
     return res.status(500).json({ error: 'Failed to fetch projects' });
@@ -49,7 +77,32 @@ router.get('/:id', async (req, res) => {
     const projects = await storage.getProjects();
     const project = projects.find(p => p.id === id);
     if (!project) return res.status(404).json({ error: 'Project not found' });
-    return res.json({ project });
+    
+    // Calculate takeoff count for this project
+    try {
+      const measurements = await storage.getTakeoffMeasurementsByProject(project.id);
+      const takeoffCount = measurements.length;
+      
+      // Note: We don't calculate totalValue here since calculatedValue represents
+      // measurement quantities (SF, LF, etc.) not monetary values
+      // Total value would need to be calculated using condition pricing if available
+      
+      const projectWithCounts = {
+        ...project,
+        takeoffCount,
+        totalValue: 0 // Set to 0 since we don't have pricing information
+      };
+      
+      return res.json({ project: projectWithCounts });
+    } catch (error) {
+      console.error(`Error calculating takeoff count for project ${project.id}:`, error);
+      const projectWithCounts = {
+        ...project,
+        takeoffCount: 0,
+        totalValue: 0
+      };
+      return res.json({ project: projectWithCounts });
+    }
   } catch (error) {
     console.error('Error fetching project:', error);
     return res.status(500).json({ error: 'Failed to fetch project' });

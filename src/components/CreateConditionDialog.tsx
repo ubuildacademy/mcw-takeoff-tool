@@ -121,7 +121,9 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
       const newData = { 
         ...prev, 
         type: value as 'area' | 'volume' | 'linear' | 'count',
-        unit: defaultUnit 
+        unit: defaultUnit,
+        // Set waste factor to 0 for count conditions since they don't have waste
+        wasteFactor: value === 'count' ? 0 : prev.wasteFactor
       };
       console.log('Setting form data to:', newData);
       return newData;
@@ -255,20 +257,22 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
           )}
 
           <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="wasteFactor">Waste Factor (%)</Label>
-              <Input
-                id="wasteFactor"
-                type="number"
-                min="0"
-                max="100"
-                step="0.1"
-                value={formData.wasteFactor}
-                onChange={(e) => handleInputChange('wasteFactor', parseFloat(e.target.value) || 0)}
-              />
-            </div>
+            {formData.type !== 'count' && (
+              <div>
+                <Label htmlFor="wasteFactor">Waste Factor (%)</Label>
+                <Input
+                  id="wasteFactor"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  value={formData.wasteFactor}
+                  onChange={(e) => handleInputChange('wasteFactor', parseFloat(e.target.value) || 0)}
+                />
+              </div>
+            )}
 
-            <div>
+            <div className={formData.type === 'count' ? 'col-span-2' : ''}>
               <Label htmlFor="color">Color</Label>
               <Input
                 id="color"
