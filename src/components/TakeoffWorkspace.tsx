@@ -8,7 +8,7 @@ import { TitleblockConfigDialog } from './TitleblockConfigDialog';
 import { OCRProcessingDialog } from './OCRProcessingDialog';
 
 import { useTakeoffStore } from '../store/useTakeoffStore';
-import type { TakeoffCondition, Sheet, ProjectFile } from '../types';
+import type { TakeoffCondition, Sheet, ProjectFile, PDFDocument } from '../types';
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Separator } from "./ui/separator";
@@ -71,6 +71,8 @@ export function TakeoffWorkspace() {
   const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
   const [uploading, setUploading] = useState<boolean>(false);
   const [loading, setLoading] = useState(true);
+  const [documents, setDocuments] = useState<PDFDocument[]>([]);
+  const [exportStatus, setExportStatus] = useState<{type: 'excel' | 'pdf' | null, progress: number}>({type: null, progress: 0});
   
   // PDF viewer controls state
   const [currentPage, setCurrentPage] = useState(1);
@@ -264,6 +266,14 @@ export function TakeoffWorkspace() {
     console.log('📊 Received OCR search results:', results);
     setOcrSearchResults(results);
     setCurrentSearchQuery(query);
+  };
+
+  const handleDocumentsUpdate = (updatedDocuments: PDFDocument[]) => {
+    setDocuments(updatedDocuments);
+  };
+
+  const handleExportStatusUpdate = (type: 'excel' | 'pdf' | null, progress: number) => {
+    setExportStatus({type, progress});
   };
 
   // PDF viewer control handlers
@@ -587,6 +597,9 @@ export function TakeoffWorkspace() {
               projectId={jobId!}
               onConditionSelect={handleConditionSelect}
               onToolSelect={handleToolSelect}
+              documents={documents}
+              onPageSelect={handlePageSelect}
+              onExportStatusUpdate={handleExportStatusUpdate}
             />
           )}
           <Button
@@ -668,6 +681,7 @@ export function TakeoffWorkspace() {
                 onOCRRequest={handleOCRRequest}
                 onTitleblockConfig={handleTitleblockConfig}
                 onOcrSearchResults={handleOcrSearchResults}
+                onDocumentsUpdate={handleDocumentsUpdate}
               />
             </div>
           )}
@@ -706,9 +720,70 @@ export function TakeoffWorkspace() {
         </div>
         
         <div className="flex items-center gap-4">
-          <span className="text-sm text-gray-600">{uploading ? 'Uploading…' : 'Ready'}</span>
+          {exportStatus.type ? (
+            <div className="flex items-center gap-3 bg-blue-50 px-3 py-2 rounded-lg border border-blue-200">
+              <div className="animate-spin w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full"></div>
+              <div className="flex flex-col">
+                <span className="text-sm font-medium text-blue-700">
+                  Exporting {exportStatus.type.toUpperCase()} report...
+                </span>
+                <div className="flex items-center gap-2 mt-1">
+                  <div className="w-32 h-2 bg-blue-200 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-blue-500 transition-all duration-300 ease-out rounded-full"
+                      style={{ width: `${exportStatus.progress}%` }}
+                    ></div>
+                  </div>
+                  <span className="text-xs text-blue-600 font-medium">
+                    {exportStatus.progress}%
+                  </span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <span className="text-sm text-gray-600">{uploading ? 'Uploading…' : 'Ready'}</span>
+          )}
         </div>
       </div>
+
+      {/* Export Progress Overlay */}
+      {exportStatus.type && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
+            <div className="flex items-center gap-4 mb-4">
+              <div className="animate-spin w-8 h-8 border-3 border-blue-500 border-t-transparent rounded-full"></div>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Exporting {exportStatus.type.toUpperCase()} Report
+                </h3>
+                <p className="text-sm text-gray-600">
+                  Please wait while we process your data...
+                </p>
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm text-gray-600">
+                <span>Progress</span>
+                <span>{exportStatus.progress}%</span>
+              </div>
+              <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-blue-500 transition-all duration-500 ease-out rounded-full"
+                  style={{ width: `${exportStatus.progress}%` }}
+                ></div>
+              </div>
+            </div>
+            
+            {exportStatus.type === 'pdf' && exportStatus.progress > 20 && (
+              <div className="mt-4 text-xs text-gray-500">
+                <p>📄 Capturing PDF pages with measurements...</p>
+                <p>This may take a moment for large projects.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Titleblock Configuration Dialog */}
       <TitleblockConfigDialog

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Input } from './ui/input';
@@ -12,12 +12,21 @@ import {
   Package,
   Trash2,
   Edit3,
-  Copy
+  Copy,
+  FileText,
+  ChevronDown,
+  ChevronRight,
+  Download,
+  FileSpreadsheet,
+  FileImage
 } from 'lucide-react';
 import { useTakeoffStore } from '../store/useTakeoffStore';
-import type { TakeoffCondition } from '../types';
+import type { TakeoffCondition, PDFDocument } from '../types';
 import { CreateConditionDialog } from './CreateConditionDialog';
 import { formatFeetAndInches } from '../lib/utils';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 
 // TakeoffCondition interface imported from shared types
 
@@ -25,16 +34,23 @@ interface TakeoffSidebarProps {
   projectId: string;
   onConditionSelect: (condition: TakeoffCondition | null) => void;
   onToolSelect: (tool: string) => void;
+  documents?: PDFDocument[];
+  onPageSelect?: (documentId: string, pageNumber: number) => void;
+  onExportStatusUpdate?: (type: 'excel' | 'pdf' | null, progress: number) => void;
 }
 
-export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect }: TakeoffSidebarProps) {
+export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, documents = [], onPageSelect, onExportStatusUpdate }: TakeoffSidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [editingCondition, setEditingCondition] = useState<TakeoffCondition | null>(null);
+  const [activeTab, setActiveTab] = useState<'conditions' | 'reports'>('conditions');
+  const [expandedConditions, setExpandedConditions] = useState<Set<string>>(new Set());
+  const [showExportDropdown, setShowExportDropdown] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const { addCondition, conditions, setSelectedCondition, selectedConditionId, getConditionTakeoffMeasurements, loadProjectConditions } = useTakeoffStore();
+  const { addCondition, conditions, setSelectedCondition, selectedConditionId, getConditionTakeoffMeasurements, loadProjectConditions, getProjectTakeoffMeasurements } = useTakeoffStore();
 
   useEffect(() => {
     // Load conditions from API when component mounts or projectId changes
@@ -45,12 +61,703 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect }: T
     }
   }, [projectId, loadProjectConditions]);
 
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (showExportDropdown && dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowExportDropdown(false);
+      }
+    };
+
+    if (showExportDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showExportDropdown]);
+
   const filteredConditions = conditions.filter(condition =>
     condition.projectId === projectId && (
       condition.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       condition.description.toLowerCase().includes(searchQuery.toLowerCase())
     )
   );
+
+  // Helper function to get sheet name for a page
+  const getSheetName = (sheetId: string, pageNumber: number): string => {
+    const document = documents.find(doc => doc.id === sheetId);
+    if (!document) return `Page ${pageNumber}`;
+    
+    const page = document.pages.find(p => p.pageNumber === pageNumber);
+    if (!page) return `Page ${pageNumber}`;
+    
+    // Use sheetName if available, otherwise use sheetNumber, otherwise fall back to page number
+    return page.sheetName || page.sheetNumber || `Page ${pageNumber}`;
+  };
+
+  // Quantity Reports Data Aggregation
+  const getQuantityReportData = () => {
+    const projectMeasurements = getProjectTakeoffMeasurements(projectId);
+    const projectConditions = conditions.filter(c => c.projectId === projectId);
+    
+    // Get all unique pages that have measurements with their sheet names
+    const pagesWithMeasurements = new Map<string, { pageNumber: number; sheetName: string; sheetId: string }>();
+    projectMeasurements.forEach(measurement => {
+      const key = `${measurement.sheetId}-${measurement.pdfPage}`;
+      if (!pagesWithMeasurements.has(key)) {
+        pagesWithMeasurements.set(key, {
+          pageNumber: measurement.pdfPage,
+          sheetName: getSheetName(measurement.sheetId, measurement.pdfPage),
+          sheetId: measurement.sheetId
+        });
+      }
+    });
+    
+    const sortedPages = Array.from(pagesWithMeasurements.values()).sort((a, b) => a.pageNumber - b.pageNumber);
+    
+    // Group measurements by condition and page
+    const reportData: Record<string, {
+      condition: TakeoffCondition;
+      pages: Record<string, {
+        pageNumber: number;
+        sheetName: string;
+        sheetId: string;
+        measurements: any[];
+        total: number;
+      }>;
+      grandTotal: number;
+    }> = {};
+    
+    projectConditions.forEach(condition => {
+      const conditionMeasurements = getConditionTakeoffMeasurements(projectId, condition.id);
+      
+      if (conditionMeasurements.length > 0) {
+        const pages: Record<string, { pageNumber: number; sheetName: string; sheetId: string; measurements: any[]; total: number }> = {};
+        let grandTotal = 0;
+        
+        conditionMeasurements.forEach(measurement => {
+          const pageKey = `${measurement.sheetId}-${measurement.pdfPage}`;
+          if (!pages[pageKey]) {
+            pages[pageKey] = { 
+              pageNumber: measurement.pdfPage,
+              sheetName: getSheetName(measurement.sheetId, measurement.pdfPage),
+              sheetId: measurement.sheetId,
+              measurements: [], 
+              total: 0 
+            };
+          }
+          pages[pageKey].measurements.push(measurement);
+          pages[pageKey].total += measurement.calculatedValue;
+          grandTotal += measurement.calculatedValue;
+        });
+        
+        reportData[condition.id] = {
+          condition,
+          pages,
+          grandTotal
+        };
+      }
+    });
+    
+    return {
+      reportData,
+      sortedPages
+    };
+  };
+
+  const toggleConditionExpansion = (conditionId: string) => {
+    const newExpanded = new Set(expandedConditions);
+    if (newExpanded.has(conditionId)) {
+      newExpanded.delete(conditionId);
+    } else {
+      newExpanded.add(conditionId);
+    }
+    setExpandedConditions(newExpanded);
+  };
+
+  const handlePageClick = (sheetId: string, pageNumber: number, event: React.MouseEvent) => {
+    event.stopPropagation(); // Prevent expanding/collapsing the condition
+    if (onPageSelect) {
+      onPageSelect(sheetId, pageNumber);
+    }
+  };
+
+  const exportToExcel = async () => {
+    console.log('🚀 Starting Excel export...');
+    
+    try {
+      const { reportData, sortedPages } = getQuantityReportData();
+      const conditionIds = Object.keys(reportData);
+      
+      console.log('📊 Report data:', { conditionIds: conditionIds.length, sortedPages: sortedPages.length });
+      
+      if (conditionIds.length === 0) {
+        alert('No data to export');
+        return;
+      }
+
+      // Start export progress
+      console.log('📈 Updating status to 10%');
+      onExportStatusUpdate?.('excel', 10);
+
+    // Create workbook and worksheet
+    const workbook = XLSX.utils.book_new();
+    
+    // Get current project info
+    const currentProject = useTakeoffStore.getState().getCurrentProject();
+    
+    // Create summary sheet
+    const summaryData = [];
+    
+    // Header row with industry-standard page labeling
+    const headerRow = ['Condition', 'Type', 'Unit', ...sortedPages.map(p => {
+      // Only show (P#) format if the page has been renamed from default
+      const isDefaultName = p.sheetName === `Page ${p.pageNumber}`;
+      return isDefaultName ? `Page ${p.pageNumber}` : `${p.sheetName} (P${p.pageNumber})`;
+    }), 'Total'];
+    summaryData.push(headerRow);
+    
+    // Data rows
+    conditionIds.forEach(conditionId => {
+      const conditionData = reportData[conditionId];
+      const row = [
+        conditionData.condition.name,
+        conditionData.condition.type,
+        conditionData.condition.unit,
+        ...sortedPages.map(page => {
+          const pageKey = Object.keys(conditionData.pages).find(key => 
+            conditionData.pages[key].pageNumber === page.pageNumber
+          );
+          const pageData = pageKey ? conditionData.pages[pageKey] : null;
+          return pageData ? pageData.total.toFixed(2) : '';
+        }),
+        conditionData.grandTotal.toFixed(2)
+      ];
+      summaryData.push(row);
+    });
+    
+    // Add totals row
+    const totalsRow = ['TOTALS', '', '', ...sortedPages.map(page => {
+      let total = 0;
+      conditionIds.forEach(conditionId => {
+        const pageKey = Object.keys(reportData[conditionId].pages).find(key => 
+          reportData[conditionId].pages[key].pageNumber === page.pageNumber
+        );
+        const pageData = pageKey ? reportData[conditionId].pages[pageKey] : null;
+        if (pageData) total += pageData.total;
+      });
+      return total > 0 ? total.toFixed(2) : '';
+    }), conditionIds.reduce((sum, id) => sum + reportData[id].grandTotal, 0).toFixed(2)];
+    summaryData.push(totalsRow);
+    
+    const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
+    
+    // Set column widths for better readability
+    const summaryColWidths = [
+      { wch: 25 }, // Condition
+      { wch: 10 }, // Type
+      { wch: 8 },  // Unit
+      ...sortedPages.map(() => ({ wch: 15 })), // Page columns
+      { wch: 12 }  // Total
+    ];
+    summarySheet['!cols'] = summaryColWidths;
+    
+    XLSX.utils.book_append_sheet(workbook, summarySheet, 'Quantity Summary');
+    
+    // Update progress
+    onExportStatusUpdate?.('excel', 50);
+    
+    // Create detailed sheet
+    const detailData = [];
+    detailData.push(['Condition', 'Sheet Name', 'Page Reference', 'Measurement #', 'Value', 'Unit', 'Timestamp']);
+    
+    conditionIds.forEach(conditionId => {
+      const conditionData = reportData[conditionId];
+      Object.values(conditionData.pages).forEach(pageData => {
+        pageData.measurements.forEach((measurement, idx) => {
+          detailData.push([
+            conditionData.condition.name,
+            pageData.sheetName,
+            `P${pageData.pageNumber}`,
+            idx + 1,
+            measurement.calculatedValue.toFixed(2),
+            conditionData.condition.unit,
+            new Date(measurement.timestamp).toLocaleString()
+          ]);
+        });
+      });
+    });
+    
+    const detailSheet = XLSX.utils.aoa_to_sheet(detailData);
+    
+    // Set column widths for detailed sheet
+    const detailColWidths = [
+      { wch: 25 }, // Condition
+      { wch: 20 }, // Sheet Name
+      { wch: 12 }, // Page Reference
+      { wch: 12 }, // Measurement #
+      { wch: 12 }, // Value
+      { wch: 8 },  // Unit
+      { wch: 20 }  // Timestamp
+    ];
+    detailSheet['!cols'] = detailColWidths;
+    
+    XLSX.utils.book_append_sheet(workbook, detailSheet, 'Detailed Measurements');
+    
+    // Create project information sheet
+    const projectInfoData = [
+      ['Project Information', ''],
+      ['Project Name', currentProject?.name || 'Unknown Project'],
+      ['Client', currentProject?.client || 'N/A'],
+      ['Location', currentProject?.location || 'N/A'],
+      ['Project Type', currentProject?.projectType || 'N/A'],
+      ['Status', currentProject?.status || 'N/A'],
+      ['', ''],
+      ['Report Information', ''],
+      ['Generated On', new Date().toLocaleString()],
+      ['Total Conditions', conditionIds.length],
+      ['Total Pages with Measurements', sortedPages.length],
+      ['Total Measurements', conditionIds.reduce((sum, id) => sum + Object.values(reportData[id].pages).reduce((pageSum, page) => pageSum + page.measurements.length, 0), 0)],
+      ['', ''],
+      ['Notes', 'This report follows industry standards for quantity takeoff reporting.'],
+      ['', 'Page references use format: Sheet Name (P#) where P# is the page number.']
+    ];
+    
+    const projectInfoSheet = XLSX.utils.aoa_to_sheet(projectInfoData);
+    projectInfoSheet['!cols'] = [{ wch: 20 }, { wch: 30 }];
+    XLSX.utils.book_append_sheet(workbook, projectInfoSheet, 'Project Info');
+    
+    // Generate filename with project name and timestamp
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+    const projectName = currentProject?.name?.replace(/[^a-zA-Z0-9]/g, '-') || 'project';
+    const filename = `${projectName}-quantity-report-${timestamp}.xlsx`;
+    
+    // Update progress
+    onExportStatusUpdate?.('excel', 90);
+    
+    // Save file
+    XLSX.writeFile(workbook, filename);
+    
+    // Complete
+    onExportStatusUpdate?.('excel', 100);
+    
+    // Reset status after a brief delay
+    setTimeout(() => {
+      onExportStatusUpdate?.(null, 0);
+    }, 1000);
+    
+    console.log('✅ Excel export completed successfully');
+    
+    } catch (error) {
+      console.error('❌ Excel export error:', error);
+      onExportStatusUpdate?.(null, 0);
+      throw error; // Re-throw to be caught by the button handler
+    }
+  };
+
+  const exportToPDF = async () => {
+    console.log('🚀 Starting PDF export...');
+    
+    try {
+      const { reportData } = getQuantityReportData();
+      const conditionIds = Object.keys(reportData);
+      
+      console.log('📊 PDF Report data:', { conditionIds: conditionIds.length });
+      
+      if (conditionIds.length === 0) {
+        alert('No data to export');
+        return;
+      }
+
+      // Start export progress
+      console.log('📈 Updating status to 5%');
+      onExportStatusUpdate?.('pdf', 5);
+
+      // Get all unique pages that have measurements from the report data
+      const pagesWithMeasurements = new Map<string, { pageNumber: number; sheetName: string; sheetId: string }>();
+      conditionIds.forEach(conditionId => {
+        Object.entries(reportData[conditionId].pages).forEach(([pageKey, pageData]) => {
+          if (!pagesWithMeasurements.has(pageKey)) {
+            pagesWithMeasurements.set(pageKey, {
+              pageNumber: pageData.pageNumber,
+              sheetName: pageData.sheetName,
+              sheetId: pageData.sheetId
+            });
+          }
+        });
+      });
+
+      if (pagesWithMeasurements.size === 0) {
+        alert('No pages with measurements found');
+        return;
+      }
+
+      // Update progress
+      onExportStatusUpdate?.('pdf', 10);
+
+      // Create a new PDF document
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const currentProject = useTakeoffStore.getState().getCurrentProject();
+      
+                  // Add summary page with formatted table
+                  console.log('📋 Creating summary page...');
+                  
+                  pdf.setFontSize(20);
+                  pdf.setFont('helvetica', 'bold');
+                  pdf.text('Takeoff Summary Report', 20, 30);
+                  
+                  if (currentProject) {
+                    pdf.setFontSize(12);
+                    pdf.setFont('helvetica', 'normal');
+                    pdf.text(`Project: ${currentProject.name}`, 20, 45);
+                    pdf.text(`Generated: ${new Date().toLocaleString()}`, 20, 55);
+                    pdf.text(`Total Conditions: ${conditionIds.length}`, 20, 65);
+                    pdf.text(`Pages with Measurements: ${pagesWithMeasurements.size}`, 20, 75);
+                  }
+
+                  // Create summary table
+                  const tableStartY = 90;
+                  const colWidths = [60, 20, 15, 25]; // Condition, Type, Unit, Total
+                  const rowHeight = 8;
+                  
+                  // Table headers
+                  pdf.setFontSize(10);
+                  pdf.setFont('helvetica', 'bold');
+                  pdf.text('Condition', 20, tableStartY);
+                  pdf.text('Type', 20 + colWidths[0], tableStartY);
+                  pdf.text('Unit', 20 + colWidths[0] + colWidths[1], tableStartY);
+                  pdf.text('Total', 20 + colWidths[0] + colWidths[1] + colWidths[2], tableStartY);
+                  
+                  // Draw header line
+                  pdf.line(20, tableStartY + 2, 20 + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3], tableStartY + 2);
+                  
+                  // Table data
+                  pdf.setFont('helvetica', 'normal');
+                  let currentY = tableStartY + rowHeight;
+                  
+                  console.log(`📊 Adding ${conditionIds.length} conditions to summary table...`);
+                  
+                  conditionIds.forEach((conditionId, index) => {
+                    const conditionData = reportData[conditionId];
+                    
+                    // Check if we need a new page
+                    if (currentY > 250) {
+                      pdf.addPage();
+                      currentY = 20;
+                    }
+                    
+                    // Truncate long condition names to fit
+                    const conditionName = conditionData.condition.name.length > 25 
+                      ? conditionData.condition.name.substring(0, 22) + '...' 
+                      : conditionData.condition.name;
+                    
+                    pdf.text(conditionName, 20, currentY);
+                    pdf.text(conditionData.condition.type, 20 + colWidths[0], currentY);
+                    pdf.text(conditionData.condition.unit, 20 + colWidths[0] + colWidths[1], currentY);
+                    pdf.text(conditionData.grandTotal.toFixed(2), 20 + colWidths[0] + colWidths[1] + colWidths[2], currentY);
+                    
+                    currentY += rowHeight;
+                    console.log(`✅ Added condition ${index + 1}: ${conditionName} - ${conditionData.grandTotal.toFixed(2)} ${conditionData.condition.unit}`);
+                  });
+                  
+                  console.log('✅ Summary page completed');
+
+      // Update progress
+      onExportStatusUpdate?.('pdf', 20);
+
+      // Process each page with measurements
+      const pageEntries = Array.from(pagesWithMeasurements.entries());
+      for (let i = 0; i < pageEntries.length; i++) {
+        const [pageKey, pageInfo] = pageEntries[i];
+        const progress = 20 + (i / pageEntries.length) * 70;
+        onExportStatusUpdate?.('pdf', Math.round(progress));
+
+        // Add new page for each PDF page with measurements
+        if (i > 0) {
+          pdf.addPage();
+        }
+
+        // Add page header
+        pdf.setFontSize(12);
+        pdf.setFont('helvetica', 'bold');
+        pdf.text(`${pageInfo.sheetName} - Page ${pageInfo.pageNumber}`, 20, 20);
+        
+        // Add a separator line
+        pdf.line(20, 25, 190, 25);
+
+                    // Navigate to the page and capture it
+                    console.log(`📄 Capturing page ${pageInfo.pageNumber} from document ${pageInfo.sheetId}`);
+                    
+                    // Navigate to the page
+                    if (onPageSelect) {
+                      onPageSelect(pageInfo.sheetId, pageInfo.pageNumber);
+                    }
+
+                    // Wait for page to load and render
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                    
+                    // Fit the page to screen to ensure we capture the entire page
+                    console.log('🔍 Fitting page to screen for full capture...');
+                    
+                    // Try multiple approaches to fit the page
+                    let pageFitted = false;
+                    
+                    // Method 1: Look for "Reset View" button (common in PDF viewers)
+                    const resetViewButton = document.querySelector('button[title*="Reset"], button[title*="reset"], button[aria-label*="Reset"], button[aria-label*="reset"]') as HTMLButtonElement;
+                    if (resetViewButton) {
+                      resetViewButton.click();
+                      console.log('✅ Clicked Reset View button');
+                      await new Promise(resolve => setTimeout(resolve, 2000)); // Wait longer for page to fit
+                      
+                      // Try to zoom out further to ensure full page is visible
+                      const zoomOutButton = document.querySelector('button[title*="Zoom out"], button[aria-label*="Zoom out"], button[title*="zoom out"], button[aria-label*="zoom out"]') as HTMLButtonElement;
+                      if (zoomOutButton) {
+                        // Click zoom out multiple times to ensure full page is visible
+                        for (let i = 0; i < 5; i++) {
+                          zoomOutButton.click();
+                          await new Promise(resolve => setTimeout(resolve, 300));
+                        }
+                        console.log('✅ Zoomed out to ensure full page visibility');
+                      }
+                      pageFitted = true;
+                    }
+                    
+                    // Method 2: Look for zoom controls and try to fit
+                    if (!pageFitted) {
+                      const zoomControls = document.querySelector('.zoom-controls, [class*="zoom"], [class*="control"]');
+                      if (zoomControls) {
+                        console.log('🔍 Found zoom controls, looking for fit button');
+                        const fitButton = zoomControls.querySelector('button[title*="fit"], button[aria-label*="fit"], button[title*="Fit"], button[aria-label*="Fit"]') as HTMLButtonElement;
+                        if (fitButton) {
+                          fitButton.click();
+                          console.log('✅ Clicked fit button in zoom controls');
+                          pageFitted = true;
+                          await new Promise(resolve => setTimeout(resolve, 1500));
+                        }
+                      }
+                    }
+                    
+                    // Method 3: Try to find any button with "fit" in the text or title
+                    if (!pageFitted) {
+                      const allButtons = document.querySelectorAll('button');
+                      for (const button of allButtons) {
+                        const title = button.getAttribute('title') || '';
+                        const ariaLabel = button.getAttribute('aria-label') || '';
+                        const textContent = button.textContent || '';
+                        
+                        if (title.toLowerCase().includes('fit') || 
+                            ariaLabel.toLowerCase().includes('fit') || 
+                            textContent.toLowerCase().includes('fit') ||
+                            title.toLowerCase().includes('reset') ||
+                            ariaLabel.toLowerCase().includes('reset') ||
+                            textContent.toLowerCase().includes('reset')) {
+                          button.click();
+                          console.log('✅ Clicked button with fit/reset:', { title, ariaLabel, textContent });
+                          pageFitted = true;
+                          await new Promise(resolve => setTimeout(resolve, 1500));
+                          break;
+                        }
+                      }
+                    }
+                    
+                    // Method 4: Try to set zoom to a specific level that shows full page
+                    if (!pageFitted) {
+                      console.log('🔍 Attempting to set zoom level for full page view');
+                      // Try to find zoom percentage and set it to a reasonable level
+                      const zoomDisplay = document.querySelector('[class*="zoom"], [class*="scale"], [class*="percentage"]');
+                      if (zoomDisplay) {
+                        // Look for zoom controls nearby
+                        const parent = zoomDisplay.closest('div');
+                        if (parent) {
+                          const zoomButtons = parent.querySelectorAll('button');
+                          // Try clicking the minus button a few times to zoom out
+                          for (let i = 0; i < 3; i++) {
+                            const minusButton = Array.from(zoomButtons).find(btn => 
+                              btn.textContent?.includes('-') || 
+                              btn.getAttribute('title')?.toLowerCase().includes('zoom out') ||
+                              btn.getAttribute('aria-label')?.toLowerCase().includes('zoom out')
+                            );
+                            if (minusButton) {
+                              minusButton.click();
+                              await new Promise(resolve => setTimeout(resolve, 500));
+                            }
+                          }
+                          pageFitted = true;
+                        }
+                      }
+                    }
+                    
+                    if (!pageFitted) {
+                      console.log('⚠️ Could not find fit/reset button, proceeding with current view');
+                    }
+
+                    try {
+                      // Find the PDF viewer container - try multiple selectors to get the full page
+                      let pdfViewerContainer = document.querySelector('.canvas-container') as HTMLElement;
+                      
+                      // If canvas-container doesn't work, try the main PDF viewer
+                      if (!pdfViewerContainer) {
+                        pdfViewerContainer = document.querySelector('[data-testid="pdf-viewer"]') as HTMLElement;
+                      }
+                      
+                      // If still not found, try the main content area
+                      if (!pdfViewerContainer) {
+                        pdfViewerContainer = document.querySelector('.pdf-viewer') as HTMLElement;
+                      }
+                      
+                      // Try to find the main PDF container that includes the entire viewer
+                      if (!pdfViewerContainer) {
+                        pdfViewerContainer = document.querySelector('.pdf-container, .document-viewer, .viewer-container') as HTMLElement;
+                      }
+                      
+                      // Try to find the main content area that contains the PDF
+                      if (!pdfViewerContainer) {
+                        pdfViewerContainer = document.querySelector('main, .main-content, .content-area') as HTMLElement;
+                      }
+                      
+                      // Look for the actual PDF canvas element specifically
+                      if (!pdfViewerContainer) {
+                        const canvas = document.querySelector('canvas') as HTMLElement;
+                        if (canvas) {
+                          // Find the parent container that holds the canvas
+                          pdfViewerContainer = canvas.closest('div') as HTMLElement;
+                        }
+                      }
+                      
+                      // Last resort - try to find any canvas element
+                      if (!pdfViewerContainer) {
+                        pdfViewerContainer = document.querySelector('canvas') as HTMLElement;
+                      }
+                      
+                      // If we still don't have a good container, try to find the largest visible element
+                      if (!pdfViewerContainer || pdfViewerContainer.getBoundingClientRect().width < 500) {
+                        console.log('🔍 Looking for larger container...');
+                        const allDivs = document.querySelectorAll('div');
+                        let largestDiv = null;
+                        let largestArea = 0;
+                        
+                        for (const div of allDivs) {
+                          const rect = div.getBoundingClientRect();
+                          const area = rect.width * rect.height;
+                          if (area > largestArea && rect.width > 800 && rect.height > 600) {
+                            largestArea = area;
+                            largestDiv = div;
+                          }
+                        }
+                        
+                        if (largestDiv) {
+                          pdfViewerContainer = largestDiv as HTMLElement;
+                          console.log('✅ Found larger container:', largestDiv.className || 'unnamed');
+                        }
+                      }
+                      
+                      if (pdfViewerContainer) {
+                        console.log('📸 Found PDF viewer container, capturing...');
+                        
+                        // Get the full dimensions of the container
+                        const rect = pdfViewerContainer.getBoundingClientRect();
+                        console.log(`📐 Container dimensions: ${rect.width}x${rect.height}`);
+                        
+                        // Capture the PDF viewer with markups at higher quality and preserve colors
+                        const canvas = await html2canvas(pdfViewerContainer, {
+                          backgroundColor: '#ffffff',
+                          scale: 3, // Even higher scale for better quality
+                          useCORS: true,
+                          allowTaint: true,
+                          logging: false,
+                          width: rect.width,
+                          height: rect.height,
+                          scrollX: 0,
+                          scrollY: 0,
+                          foreignObjectRendering: true, // Better rendering for complex elements
+                          removeContainer: false, // Keep container for better rendering
+                          imageTimeout: 30000, // Longer timeout for large images
+                          onclone: (clonedDoc) => {
+                            // Ensure colors are preserved in the cloned document
+                            const clonedContainer = clonedDoc.querySelector('.canvas-container');
+                            if (clonedContainer) {
+                              clonedContainer.style.color = 'inherit';
+                              clonedContainer.style.backgroundColor = 'white';
+                            }
+                          }
+                        });
+
+                        console.log(`📐 Captured canvas dimensions: ${canvas.width}x${canvas.height}`);
+
+                        // Convert canvas to image data with high quality
+                        const imgData = canvas.toDataURL('image/png', 1.0);
+                        
+                        // Calculate dimensions to fit the page while maintaining aspect ratio
+                        const pageWidth = 210; // A4 width in mm
+                        const pageHeight = 297; // A4 height in mm
+                        const margin = 5; // Smaller margin for more content
+                        const availableWidth = pageWidth - (2 * margin);
+                        const availableHeight = pageHeight - (2 * margin) - 15; // Leave space for header
+                        
+                        const aspectRatio = canvas.width / canvas.height;
+                        let imgWidth = availableWidth;
+                        let imgHeight = imgWidth / aspectRatio;
+                        
+                        // If height exceeds available space, scale down
+                        if (imgHeight > availableHeight) {
+                          imgHeight = availableHeight;
+                          imgWidth = imgHeight * aspectRatio;
+                        }
+                        
+                        // Center the image on the page
+                        const xOffset = (pageWidth - imgWidth) / 2;
+                        const yOffset = 25; // Start below the header
+                        
+                        // Add the captured image to PDF with high quality
+                        pdf.addImage(imgData, 'PNG', xOffset, yOffset, imgWidth, imgHeight, undefined, 'FAST');
+                        
+                        console.log(`✅ Successfully captured page ${pageInfo.pageNumber} at ${imgWidth}x${imgHeight}mm (${canvas.width}x${canvas.height}px)`);
+                      } else {
+                        console.warn('⚠️ PDF viewer container not found, adding placeholder');
+                        
+                        // Add placeholder text if container not found
+                        pdf.setFontSize(10);
+                        pdf.setFont('helvetica', 'normal');
+                        pdf.text('PDF page with measurements would be displayed here.', 20, 50);
+                        pdf.text('Please ensure the PDF viewer is visible and try again.', 20, 60);
+                      }
+                    } catch (captureError) {
+                      console.error('❌ Error capturing page:', captureError);
+                      
+                      // Add error message to PDF
+                      pdf.setFontSize(10);
+                      pdf.setFont('helvetica', 'normal');
+                      pdf.text('Error capturing this page. Please try again.', 20, 50);
+                    }
+      }
+
+      // Update progress
+      onExportStatusUpdate?.('pdf', 90);
+
+      // Generate filename
+      const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+      const projectName = currentProject?.name?.replace(/[^a-zA-Z0-9]/g, '-') || 'project';
+      const filename = `${projectName}-takeoff-pages-${timestamp}.pdf`;
+
+      // Save the PDF
+      pdf.save(filename);
+      
+      // Complete
+      onExportStatusUpdate?.('pdf', 100);
+      
+      // Reset status after a brief delay
+      setTimeout(() => {
+        onExportStatusUpdate?.(null, 0);
+      }, 1000);
+
+      console.log('✅ PDF export completed successfully');
+      
+    } catch (error) {
+      console.error('❌ PDF export error:', error);
+      alert('Error exporting PDF. Please try again.');
+      onExportStatusUpdate?.(null, 0);
+      throw error; // Re-throw to be caught by the button handler
+    }
+  };
 
   const handleConditionClick = (condition: TakeoffCondition) => {
     console.log('🖱️ SIDEBAR_CLICK: Condition clicked:', condition, {
@@ -157,32 +864,124 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect }: T
     <div className="w-80 bg-white border-r flex flex-col">
       {/* Header */}
       <div className="p-4 border-b">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">Takeoff Conditions</h2>
-          <Button size="sm" variant="outline" onClick={() => setShowCreateDialog(true)}>
-            <Plus className="w-4 h-4" />
-          </Button>
+        {/* Tabs */}
+        <div className="flex mb-4">
+          <button
+            className={`flex-1 px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'conditions'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+            onClick={() => setActiveTab('conditions')}
+          >
+            <div className="flex items-center justify-center gap-2">
+              <Calculator className="w-4 h-4" />
+              Conditions
+            </div>
+          </button>
+          <button
+            className={`flex-1 px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'reports'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+            onClick={() => setActiveTab('reports')}
+          >
+            <div className="flex items-center justify-center gap-2">
+              <FileText className="w-4 h-4" />
+              Reports
+            </div>
+          </button>
         </div>
-        
-        <Input
-          placeholder="Search conditions..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="mb-4"
-        />
+
+        {/* Tab Content Header */}
+        {activeTab === 'conditions' && (
+          <>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">Takeoff Conditions</h2>
+              <Button size="sm" variant="outline" onClick={() => setShowCreateDialog(true)}>
+                <Plus className="w-4 h-4" />
+              </Button>
+            </div>
+            
+            <Input
+              placeholder="Search conditions..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="mb-4"
+            />
+          </>
+        )}
+
+        {activeTab === 'reports' && (
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold">Quantity Reports</h2>
+            <div className="relative">
+              <Button 
+                size="sm" 
+                variant="outline" 
+                onClick={() => setShowExportDropdown(!showExportDropdown)}
+              >
+                <Download className="w-4 h-4 mr-1" />
+                Export
+                <ChevronDown className="w-3 h-3 ml-1" />
+              </Button>
+              
+              {showExportDropdown && (
+                <div ref={dropdownRef} className="absolute right-0 top-full mt-1 w-48 bg-white border rounded-lg shadow-lg z-50">
+                  <button
+                    className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                    onClick={async (e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      try {
+                        await exportToExcel();
+                        setShowExportDropdown(false);
+                      } catch (error) {
+                        console.error('Excel export error:', error);
+                        alert('Error exporting Excel file. Please try again.');
+                      }
+                    }}
+                  >
+                    <FileSpreadsheet className="w-4 h-4" />
+                    Export Excel Report
+                  </button>
+                  <button
+                    className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                    onClick={async (e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      try {
+                        await exportToPDF();
+                        setShowExportDropdown(false);
+                      } catch (error) {
+                        console.error('PDF export error:', error);
+                        alert('Error exporting PDF file. Please try again.');
+                      }
+                    }}
+                  >
+                    <FileImage className="w-4 h-4" />
+                    Export PDF Report
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
-        <div className="p-4 space-y-3">
-          {filteredConditions.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <Calculator className="w-12 h-12 mx-auto mb-2 opacity-50" />
-              <p>No takeoff conditions yet</p>
-              <p className="text-sm">Click the + button to create your first condition</p>
-            </div>
-          ) : (
-            filteredConditions.map((condition) => (
+        {activeTab === 'conditions' && (
+          <div className="p-4 space-y-3">
+            {filteredConditions.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <Calculator className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                <p>No takeoff conditions yet</p>
+                <p className="text-sm">Click the + button to create your first condition</p>
+              </div>
+            ) : (
+              filteredConditions.map((condition) => (
               <div
                 key={condition.id}
                 className={`p-3 border rounded-lg cursor-pointer transition-colors ${
@@ -298,7 +1097,110 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect }: T
               </div>
             ))
           )}
-        </div>
+          </div>
+        )}
+
+        {activeTab === 'reports' && (
+          <div className="p-4">
+            {(() => {
+              const { reportData } = getQuantityReportData();
+              const conditionIds = Object.keys(reportData);
+              
+              if (conditionIds.length === 0) {
+                return (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <FileText className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                    <p>No quantity data yet</p>
+                    <p className="text-sm">Create conditions and add measurements to see reports</p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="space-y-3">
+                  {conditionIds.map(conditionId => {
+                    const conditionData = reportData[conditionId];
+                    const isExpanded = expandedConditions.has(conditionId);
+                    const pageCount = Object.keys(conditionData.pages).length;
+                    
+                    return (
+                      <div key={conditionId} className="border rounded-lg">
+                        {/* Condition Row */}
+                        <div 
+                          className="p-3 hover:bg-gray-50 cursor-pointer"
+                          onClick={() => toggleConditionExpansion(conditionId)}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              {isExpanded ? (
+                                <ChevronDown className="w-4 h-4 text-gray-500" />
+                              ) : (
+                                <ChevronRight className="w-4 h-4 text-gray-500" />
+                              )}
+                              <div 
+                                className="w-4 h-4 rounded-full" 
+                                style={{ backgroundColor: conditionData.condition.color }}
+                              />
+                              <div>
+                                <div className="font-medium text-sm">
+                                  {conditionData.condition.name}
+                                </div>
+                                <div className="text-xs text-gray-500">
+                                  {pageCount} page{pageCount !== 1 ? 's' : ''} • {conditionData.condition.type} • {conditionData.condition.unit}
+                                </div>
+                              </div>
+                            </div>
+                            
+                            <div className="text-right">
+                              <div className="font-semibold text-sm">
+                                {conditionData.condition.unit === 'ft' || conditionData.condition.unit === 'feet' 
+                                  ? formatFeetAndInches(conditionData.grandTotal)
+                                  : `${conditionData.grandTotal.toFixed(0)} ${conditionData.condition.unit}`
+                                }
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                Total
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Expanded Measurements */}
+                        {isExpanded && (
+                          <div className="border-t bg-gray-50 p-3 space-y-3">
+                            {Object.values(conditionData.pages).map(pageData => (
+                              <div key={`${pageData.pageNumber}-${pageData.sheetName}`} className="bg-white rounded p-2">
+                                <div className="flex justify-between items-center mb-2">
+                                  <button
+                                    className="font-medium text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer text-left"
+                                    onClick={(e) => handlePageClick(pageData.sheetId, pageData.pageNumber, e)}
+                                    title={`Go to ${pageData.sheetName}`}
+                                  >
+                                    {pageData.sheetName}
+                                  </button>
+                                  <div className="text-sm font-semibold">
+                                    {conditionData.condition.unit === 'ft' || conditionData.condition.unit === 'feet' 
+                                      ? formatFeetAndInches(pageData.total)
+                                      : `${pageData.total.toFixed(2)} ${conditionData.condition.unit}`
+                                    }
+                                  </div>
+                                </div>
+                                
+                                <div className="text-xs text-gray-500">
+                                  {pageData.measurements.length} measurement{pageData.measurements.length !== 1 ? 's' : ''}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+        )}
       </div>
 
       {/* Delete Confirmation Modal */}

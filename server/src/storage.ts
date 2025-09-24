@@ -28,6 +28,26 @@ export interface StoredFileMeta {
   uploadedAt: string;
 }
 
+export interface StoredSheet {
+  id: string;
+  documentId: string;
+  pageNumber: number;
+  sheetNumber?: string;
+  sheetName?: string;
+  extractedText?: string;
+  thumbnail?: string;
+  hasTakeoffs: boolean;
+  takeoffCount: number;
+  isVisible: boolean;
+  ocrProcessed: boolean;
+  titleblockConfig?: {
+    sheetNumberField: { x: number; y: number; width: number; height: number };
+    sheetNameField: { x: number; y: number; width: number; height: number };
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface StoredCondition {
   id: string;
   projectId: string;
@@ -541,6 +561,158 @@ class SupabaseStorage {
     
     if (error) {
       console.error('Error deleting takeoff measurement:', error);
+      throw error;
+    }
+  }
+
+  // Sheets
+  async getSheets(): Promise<StoredSheet[]> {
+    const { data, error } = await supabase
+      .from(TABLES.SHEETS)
+      .select('*')
+      .order('created_at', { ascending: false });
+    
+    if (error) {
+      console.error('Error getting sheets:', error);
+      throw error;
+    }
+    
+    return data.map((item: any) => ({
+      id: item.id,
+      documentId: item.document_id,
+      pageNumber: item.page_number,
+      sheetNumber: item.sheet_number,
+      sheetName: item.sheet_name,
+      extractedText: item.extracted_text,
+      thumbnail: item.thumbnail,
+      hasTakeoffs: item.has_takeoffs,
+      takeoffCount: item.takeoff_count,
+      isVisible: item.is_visible,
+      ocrProcessed: item.ocr_processed,
+      titleblockConfig: item.titleblock_config,
+      createdAt: item.created_at,
+      updatedAt: item.updated_at
+    }));
+  }
+
+  async getSheet(id: string): Promise<StoredSheet | null> {
+    try {
+      const { data, error } = await supabase
+        .from(TABLES.SHEETS)
+        .select('*')
+        .eq('id', id)
+        .single();
+      
+      if (error) {
+        if (error.code === 'PGRST116') {
+          return null; // Not found
+        }
+        if (error.code === 'PGRST205') {
+          // Table doesn't exist yet - return null
+          console.log('Sheets table does not exist yet, returning null');
+          return null;
+        }
+        console.error('Error getting sheet:', error);
+        throw error;
+      }
+      
+      return {
+        id: data.id,
+        documentId: data.document_id,
+        pageNumber: data.page_number,
+        sheetNumber: data.sheet_number,
+        sheetName: data.sheet_name,
+        extractedText: data.extracted_text,
+        thumbnail: data.thumbnail,
+        hasTakeoffs: data.has_takeoffs,
+        takeoffCount: data.takeoff_count,
+        isVisible: data.is_visible,
+        ocrProcessed: data.ocr_processed,
+        titleblockConfig: data.titleblock_config,
+        createdAt: data.created_at,
+        updatedAt: data.updated_at
+      };
+    } catch (error: any) {
+      if (error.code === 'PGRST205') {
+        // Table doesn't exist yet - return null
+        console.log('Sheets table does not exist yet, returning null');
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async saveSheet(sheet: StoredSheet): Promise<StoredSheet> {
+    try {
+      // Map camelCase to snake_case for database
+      const dbSheet = {
+        id: sheet.id,
+        document_id: sheet.documentId,
+        page_number: sheet.pageNumber,
+        sheet_number: sheet.sheetNumber,
+        sheet_name: sheet.sheetName,
+        extracted_text: sheet.extractedText,
+        thumbnail: sheet.thumbnail,
+        has_takeoffs: sheet.hasTakeoffs,
+        takeoff_count: sheet.takeoffCount,
+        is_visible: sheet.isVisible,
+        ocr_processed: sheet.ocrProcessed,
+        titleblock_config: sheet.titleblockConfig,
+        created_at: sheet.createdAt,
+        updated_at: sheet.updatedAt
+      };
+      
+      const { data, error } = await supabase
+        .from(TABLES.SHEETS)
+        .upsert(dbSheet)
+        .select()
+        .single();
+      
+      if (error) {
+        if (error.code === 'PGRST205') {
+          // Table doesn't exist yet - return the sheet as-is (no persistence)
+          console.log('Sheets table does not exist yet, returning sheet without persistence');
+          return sheet;
+        }
+        console.error('Error saving sheet:', error);
+        throw error;
+      }
+      
+      // Map snake_case back to camelCase
+      return {
+        id: data.id,
+        documentId: data.document_id,
+        pageNumber: data.page_number,
+        sheetNumber: data.sheet_number,
+        sheetName: data.sheet_name,
+        extractedText: data.extracted_text,
+        thumbnail: data.thumbnail,
+        hasTakeoffs: data.has_takeoffs,
+        takeoffCount: data.takeoff_count,
+        isVisible: data.is_visible,
+        ocrProcessed: data.ocr_processed,
+        titleblockConfig: data.titleblock_config,
+        createdAt: data.created_at,
+        updatedAt: data.updated_at
+      };
+    } catch (error: any) {
+      if (error.code === 'PGRST205') {
+        // Table doesn't exist yet - return the sheet as-is (no persistence)
+        console.log('Sheets table does not exist yet, returning sheet without persistence');
+        return sheet;
+      }
+      throw error;
+    }
+  }
+
+  async deleteSheet(id: string): Promise<void> {
+    const { error } = await supabase
+      .from(TABLES.SHEETS)
+      .delete()
+      .eq('id', id);
+    
+    if (error) {
+      console.error('Error deleting sheet:', error);
       throw error;
     }
   }
