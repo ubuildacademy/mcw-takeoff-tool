@@ -43,6 +43,7 @@ interface SheetSidebarProps {
   onOCRRequest?: (documentId: string, pageNumbers: number[]) => void;
   onTitleblockConfig?: (documentId: string) => void;
   onOcrSearchResults?: (results: any[], query: string) => void;
+  onDocumentsUpdate?: (documents: PDFDocument[]) => void;
 }
 
 export function SheetSidebar({ 
@@ -52,7 +53,8 @@ export function SheetSidebar({
   selectedPageNumber,
   onOCRRequest,
   onTitleblockConfig,
-  onOcrSearchResults
+  onOcrSearchResults,
+  onDocumentsUpdate
 }: SheetSidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'list'>('list');
@@ -92,14 +94,43 @@ export function SheetSidebar({
             const pdf = await pdfjsLib.getDocument(pdfUrl).promise;
             const totalPages = pdf.numPages;
             
-            // Create pages array
-            const pages: PDFPage[] = Array.from({ length: totalPages }, (_, index) => ({
-              pageNumber: index + 1,
-              hasTakeoffs: false, // Will be updated from takeoff data
-              takeoffCount: 0,
-              isVisible: true,
-              ocrProcessed: false
-            }));
+            // Create pages array and load existing sheet data from database
+            const pages: PDFPage[] = await Promise.all(
+              Array.from({ length: totalPages }, async (_, index) => {
+                const pageNumber = index + 1;
+                const sheetId = `${file.id}-${pageNumber}`;
+                
+                try {
+                  // Try to load existing sheet data from database
+                  const sheetData = await sheetService.getSheet(sheetId);
+                  if (sheetData && sheetData.sheet) {
+                    return {
+                      pageNumber,
+                      hasTakeoffs: sheetData.sheet.hasTakeoffs || false,
+                      takeoffCount: sheetData.sheet.takeoffCount || 0,
+                      isVisible: sheetData.sheet.isVisible !== false,
+                      ocrProcessed: sheetData.sheet.ocrProcessed || false,
+                      sheetName: sheetData.sheet.sheetName,
+                      sheetNumber: sheetData.sheet.sheetNumber,
+                      extractedText: sheetData.sheet.extractedText,
+                      thumbnail: sheetData.sheet.thumbnail
+                    };
+                  }
+                } catch (error) {
+                  // Sheet doesn't exist in database yet, use defaults
+                  console.log(`No existing sheet data for ${sheetId}, using defaults`);
+                }
+                
+                // Default page data
+                return {
+                  pageNumber,
+                  hasTakeoffs: false,
+                  takeoffCount: 0,
+                  isVisible: true,
+                  ocrProcessed: false
+                };
+              })
+            );
             
             return {
               id: file.id,
@@ -131,6 +162,11 @@ export function SheetSidebar({
       );
       
       setDocuments(documents);
+      
+      // Notify parent component of documents update
+      if (onDocumentsUpdate) {
+        onDocumentsUpdate(documents);
+      }
       
     } catch (error) {
       console.error('Error loading project documents:', error);
@@ -278,7 +314,8 @@ export function SheetSidebar({
 
   // Start editing sheet name
   const startEditingSheetName = (documentId: string, pageNumber: number, currentName: string) => {
-    setEditingSheetId(documentId);
+    const sheetId = `${documentId}-${pageNumber}`;
+    setEditingSheetId(sheetId);
     setEditingPageNumber(pageNumber);
     setEditingSheetName(currentName || `Page ${pageNumber}`);
   };
@@ -298,14 +335,19 @@ export function SheetSidebar({
     }
 
     try {
+      // Extract document ID from the sheet ID (format: documentId-pageNumber)
+      const documentId = editingSheetId.split('-').slice(0, -1).join('-');
+      
       // Update the sheet name in the backend
       await sheetService.updateSheet(editingSheetId, {
+        documentId: documentId,
+        pageNumber: editingPageNumber,
         sheetName: editingSheetName.trim()
       });
 
       // Update the local state
-      setDocuments(prev => prev.map(doc => 
-        doc.id === editingSheetId 
+      const updatedDocuments = documents.map(doc => 
+        doc.id === documentId 
           ? {
               ...doc,
               pages: doc.pages.map(page => 
@@ -315,7 +357,14 @@ export function SheetSidebar({
               )
             }
           : doc
-      ));
+      );
+      
+      setDocuments(updatedDocuments);
+      
+      // Notify parent component of documents update
+      if (onDocumentsUpdate) {
+        onDocumentsUpdate(updatedDocuments);
+      }
 
       cancelEditingSheetName();
     } catch (error) {

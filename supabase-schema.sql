@@ -46,6 +46,24 @@ CREATE TABLE IF NOT EXISTS files (
   uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Sheets table
+CREATE TABLE IF NOT EXISTS sheets (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  document_id TEXT NOT NULL,
+  page_number INTEGER NOT NULL,
+  sheet_number TEXT,
+  sheet_name TEXT,
+  extracted_text TEXT,
+  thumbnail TEXT,
+  has_takeoffs BOOLEAN DEFAULT false,
+  takeoff_count INTEGER DEFAULT 0,
+  is_visible BOOLEAN DEFAULT true,
+  ocr_processed BOOLEAN DEFAULT false,
+  titleblock_config JSONB,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- Takeoff measurements table
 CREATE TABLE IF NOT EXISTS takeoff_measurements (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -68,6 +86,7 @@ CREATE TABLE IF NOT EXISTS takeoff_measurements (
 -- Indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_conditions_project_id ON conditions(project_id);
 CREATE INDEX IF NOT EXISTS idx_files_project_id ON files(project_id);
+CREATE INDEX IF NOT EXISTS idx_sheets_document_id ON sheets(document_id);
 CREATE INDEX IF NOT EXISTS idx_takeoff_measurements_project_id ON takeoff_measurements(project_id);
 CREATE INDEX IF NOT EXISTS idx_takeoff_measurements_sheet_id ON takeoff_measurements(sheet_id);
 CREATE INDEX IF NOT EXISTS idx_takeoff_measurements_condition_id ON takeoff_measurements(condition_id);
@@ -76,12 +95,14 @@ CREATE INDEX IF NOT EXISTS idx_takeoff_measurements_condition_id ON takeoff_meas
 ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE conditions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE files ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sheets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE takeoff_measurements ENABLE ROW LEVEL SECURITY;
 
 -- For now, allow all operations (you can restrict this later based on user authentication)
 CREATE POLICY "Allow all operations on projects" ON projects FOR ALL USING (true);
 CREATE POLICY "Allow all operations on conditions" ON conditions FOR ALL USING (true);
 CREATE POLICY "Allow all operations on files" ON files FOR ALL USING (true);
+CREATE POLICY "Allow all operations on sheets" ON sheets FOR ALL USING (true);
 CREATE POLICY "Allow all operations on takeoff_measurements" ON takeoff_measurements FOR ALL USING (true);
 
 -- No sample data - start with empty tables
