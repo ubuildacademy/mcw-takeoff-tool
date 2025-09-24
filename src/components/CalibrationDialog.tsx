@@ -125,7 +125,7 @@ const CalibrationDialog: React.FC<CalibrationDialogProps> = ({
               </p>
               <p className="text-xs text-yellow-600 mt-1">
                 • First click: Place point 1<br/>
-                • Second click: Place point 2<br/>
+                • Second click: Place point 2 (automatically snaps to horizontal/vertical)<br/>
                 • A red line will appear showing the measured distance<br/>
                 • Press Escape to cancel
               </p>
