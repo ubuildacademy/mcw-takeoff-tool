@@ -935,20 +935,26 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (!currentViewport) return;
     
     calibrationPoints.forEach((point, index) => {
+      // Convert PDF coordinates (0-1) to viewport pixels for rendering
+      const viewportPoint = {
+        x: point.x * currentViewport.width,
+        y: point.y * currentViewport.height
+      };
+      
       // Create calibration point circle
       const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      circle.setAttribute('cx', point.x.toString());
-      circle.setAttribute('cy', point.y.toString());
+      circle.setAttribute('cx', viewportPoint.x.toString());
+      circle.setAttribute('cy', viewportPoint.y.toString());
       circle.setAttribute('r', '8');
       circle.setAttribute('fill', '#ff0000');
-      circle.setAttribute('stroke', '#ff0000');
-      circle.setAttribute('stroke-width', '3');
+      circle.setAttribute('stroke', '#ffffff');
+      circle.setAttribute('stroke-width', '2');
       svg.appendChild(circle);
       
       // Add point number
       const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      text.setAttribute('x', point.x.toString());
-      text.setAttribute('y', (point.y + 4).toString());
+      text.setAttribute('x', viewportPoint.x.toString());
+      text.setAttribute('y', (viewportPoint.y + 4).toString());
       text.setAttribute('fill', 'white');
       text.setAttribute('font-size', '12');
       text.setAttribute('font-family', 'Arial');
@@ -959,21 +965,80 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       svg.appendChild(text);
     });
     
+    // Draw preview line from first point to mouse position (if only one point)
+    if (calibrationPoints.length === 1 && mousePosition) {
+      const firstPoint = {
+        x: calibrationPoints[0].x * currentViewport.width,
+        y: calibrationPoints[0].y * currentViewport.height
+      };
+      const mousePoint = {
+        x: mousePosition.x * currentViewport.width,
+        y: mousePosition.y * currentViewport.height
+      };
+      
+      // Apply ortho snapping to the preview line
+      const snappedMousePoint = applyOrthoSnapping(mousePosition, calibrationPoints);
+      const snappedViewportPoint = {
+        x: snappedMousePoint.x * currentViewport.width,
+        y: snappedMousePoint.y * currentViewport.height
+      };
+      
+      const previewLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      previewLine.setAttribute('x1', firstPoint.x.toString());
+      previewLine.setAttribute('y1', firstPoint.y.toString());
+      previewLine.setAttribute('x2', snappedViewportPoint.x.toString());
+      previewLine.setAttribute('y2', snappedViewportPoint.y.toString());
+      previewLine.setAttribute('stroke', '#ff0000');
+      previewLine.setAttribute('stroke-width', '2');
+      previewLine.setAttribute('stroke-dasharray', '5,5');
+      previewLine.setAttribute('opacity', '0.7');
+      svg.appendChild(previewLine);
+      
+      // Add distance preview text
+      const midX = (firstPoint.x + snappedViewportPoint.x) / 2;
+      const midY = (firstPoint.y + snappedViewportPoint.y) / 2;
+      const distance = calculateDistance(
+        { x: firstPoint.x, y: firstPoint.y },
+        { x: snappedViewportPoint.x, y: snappedViewportPoint.y }
+      );
+      
+      const distanceText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      distanceText.setAttribute('x', midX.toString());
+      distanceText.setAttribute('y', (midY - 10).toString());
+      distanceText.setAttribute('fill', '#ff0000');
+      distanceText.setAttribute('font-size', '12');
+      distanceText.setAttribute('font-family', 'Arial');
+      distanceText.setAttribute('font-weight', 'bold');
+      distanceText.setAttribute('text-anchor', 'middle');
+      distanceText.textContent = `${distance.toFixed(1)} px`;
+      svg.appendChild(distanceText);
+    }
+    
+    // Draw final line between calibration points (if two points)
     if (calibrationPoints.length === 2) {
+      const firstPoint = {
+        x: calibrationPoints[0].x * currentViewport.width,
+        y: calibrationPoints[0].y * currentViewport.height
+      };
+      const secondPoint = {
+        x: calibrationPoints[1].x * currentViewport.width,
+        y: calibrationPoints[1].y * currentViewport.height
+      };
+      
       // Draw line between calibration points
       const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      line.setAttribute('x1', calibrationPoints[0].x.toString());
-      line.setAttribute('y1', calibrationPoints[0].y.toString());
-      line.setAttribute('x2', calibrationPoints[1].x.toString());
-      line.setAttribute('y2', calibrationPoints[1].y.toString());
+      line.setAttribute('x1', firstPoint.x.toString());
+      line.setAttribute('y1', firstPoint.y.toString());
+      line.setAttribute('x2', secondPoint.x.toString());
+      line.setAttribute('y2', secondPoint.y.toString());
       line.setAttribute('stroke', '#ff0000');
       line.setAttribute('stroke-width', '3');
       svg.appendChild(line);
       
       // Add distance text
-      const midX = (calibrationPoints[0].x + calibrationPoints[1].x) / 2;
-      const midY = (calibrationPoints[0].y + calibrationPoints[1].y) / 2;
-      const distance = calculateDistance(calibrationPoints[0], calibrationPoints[1]);
+      const midX = (firstPoint.x + secondPoint.x) / 2;
+      const midY = (firstPoint.y + secondPoint.y) / 2;
+      const distance = calculateDistance(firstPoint, secondPoint);
       
       const distanceText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       distanceText.setAttribute('x', midX.toString());
@@ -1078,6 +1143,40 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Handle mouse move - direct coordinate conversion
   const handleMouseMove = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
+    // Handle mouse move for calibration mode
+    if (isCalibrating) {
+      if (!pdfCanvasRef.current || !currentViewport) {
+        return;
+      }
+      
+      // Get CSS pixel coordinates relative to the canvas/SVG
+      const rect = pdfCanvasRef.current.getBoundingClientRect();
+      const cssX = event.clientX - rect.left;
+      const cssY = event.clientY - rect.top;
+      
+      // Convert CSS coordinates to PDF coordinates (0-1)
+      let pdfCoords = {
+        x: cssX / currentViewport.width,
+        y: cssY / currentViewport.height
+      };
+      
+      // Apply ortho snapping for calibration if we have a first point
+      if (calibrationPoints.length > 0) {
+        pdfCoords = applyOrthoSnapping(pdfCoords, calibrationPoints);
+      }
+      
+      const threshold = 0.005;
+      if (mousePosition && 
+          Math.abs(mousePosition.x - pdfCoords.x) < threshold && 
+          Math.abs(mousePosition.y - pdfCoords.y) < threshold) {
+        return;
+      }
+      
+      setMousePosition(pdfCoords);
+      return;
+    }
+    
+    // Handle mouse move for measurement mode
     if (!isMeasuring || !selectedConditionId) {
       if (mousePosition) {
         setMousePosition(null);
@@ -1147,7 +1246,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         });
       }
     }
-  }, [isMeasuring, selectedConditionId, mousePosition, isContinuousDrawing, activePoints, rubberBandElement, currentViewport, calculateRunningLength]);
+  }, [isCalibrating, calibrationPoints, isMeasuring, selectedConditionId, mousePosition, isContinuousDrawing, activePoints, rubberBandElement, currentViewport, calculateRunningLength]);
 
   // Handle click - direct coordinate conversion
   const handleClick = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
@@ -1164,9 +1263,29 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Handle calibration clicks
     if (isCalibrating) {
       setCalibrationPoints(prev => {
-        const newPoints = [...prev, { x: cssX, y: cssY }];
+        // Convert CSS coordinates to PDF coordinates (0-1) for consistency
+        let pdfCoords = {
+          x: cssX / currentViewport.width,
+          y: cssY / currentViewport.height
+        };
+        
+        // Apply ortho snapping for calibration (enabled by default)
+        if (prev.length > 0) {
+          pdfCoords = applyOrthoSnapping(pdfCoords, prev);
+        }
+        
+        // Store points in PDF coordinates (0-1) for consistency with measurement system
+        const newPoints = [...prev, pdfCoords];
+        
+        console.log('🎯 Calibration point added:', {
+          pointIndex: newPoints.length,
+          pdfCoords,
+          cssCoords: { x: cssX, y: cssY },
+          viewport: { width: currentViewport.width, height: currentViewport.height }
+        });
         
         if (newPoints.length === 2) {
+          console.log('🎯 Completing calibration with points:', newPoints);
           completeCalibration(newPoints);
         }
         
@@ -1224,7 +1343,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       }
       // Area and volume measurements will be completed on double-click
     }
-  }, [isCalibrating, measurementType, currentMeasurement, isContinuousDrawing, activePoints, calculateRunningLength]);
+  }, [isCalibrating, calibrationPoints, measurementType, currentMeasurement, isContinuousDrawing, activePoints, calculateRunningLength, currentViewport]);
 
   // Create rubber band element for continuous linear drawing
   const createRubberBandElement = useCallback(() => {
@@ -1574,13 +1693,33 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Complete calibration
   const completeCalibration = useCallback((points: { x: number; y: number }[]) => {
-    if (points.length !== 2 || !calibrationData) return;
+    if (points.length !== 2 || !calibrationData || !currentViewport) return;
     
-    const pixelDistance = calculateDistance(points[0], points[1]);
+    // Convert PDF coordinates (0-1) to viewport pixels for distance calculation
+    const point1 = {
+      x: points[0].x * currentViewport.width,
+      y: points[0].y * currentViewport.height
+    };
+    const point2 = {
+      x: points[1].x * currentViewport.width,
+      y: points[1].y * currentViewport.height
+    };
+    
+    const pixelDistance = calculateDistance(point1, point2);
     const knownDistance = calibrationData.knownDistance;
     const unit = calibrationData.unit;
     
     const newScaleFactor = pixelDistance / knownDistance;
+    
+    console.log('🎯 Calibration completed:', {
+      point1: { pdf: points[0], viewport: point1 },
+      point2: { pdf: points[1], viewport: point2 },
+      pixelDistance,
+      knownDistance,
+      unit,
+      newScaleFactor,
+      viewport: { width: currentViewport.width, height: currentViewport.height }
+    });
     
     if (externalScaleFactor === undefined) {
       setInternalScaleFactor(newScaleFactor);
@@ -1601,7 +1740,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setCalibrationPoints([]);
     setIsCalibrating(false);
     setCalibrationData(null);
-  }, [calibrationData, onCalibrationComplete]);
+  }, [calibrationData, onCalibrationComplete, currentViewport]);
 
   // Start calibration
   const startCalibration = useCallback((knownDistance: number, unit: string) => {
@@ -1933,15 +2072,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       )}
 
       {/* Ortho Snapping Indicator */}
-      {isOrthoSnapping && isMeasuring && (
+      {(isOrthoSnapping && isMeasuring) || (isCalibrating && calibrationPoints.length > 0) ? (
         <div className="absolute top-16 left-1/2 transform -translate-x-1/2 z-10 bg-green-600 text-white px-3 py-1 rounded-lg text-sm flex items-center gap-2">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M3 12h18"/>
             <path d="M12 3v18"/>
           </svg>
-          Ortho Snapping ON
+          {isCalibrating ? 'Calibration Ortho Snapping ON' : 'Ortho Snapping ON'}
         </div>
-      )}
+      ) : null}
 
       {/* Single Canvas + SVG Overlay Container */}
       <div 
@@ -2002,14 +2141,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 padding: 0,
                 border: 'none',
                 outline: 'none',
-                pointerEvents: isSelectionMode ? 'auto' : 'none' // Allow clicks in selection mode
+                pointerEvents: (isSelectionMode || isCalibrating) ? 'auto' : 'none' // Allow clicks in selection mode or calibration mode
               }}
               onMouseMove={handleMouseMove}
               onMouseLeave={() => setMousePosition(null)}
               onClick={(e) => {
-                // Only handle clicks in selection mode, let measuring clicks go to canvas
-                if (isSelectionMode) {
+                // Handle clicks in selection mode or calibration mode
+                if (isSelectionMode || isCalibrating) {
                   e.stopPropagation();
+                  handleClick(e);
                 }
               }}
             />
