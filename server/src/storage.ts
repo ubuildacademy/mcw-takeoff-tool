@@ -538,7 +538,6 @@ class SupabaseStorage {
       net_calculated_value: measurement.netCalculatedValue
     };
     
-    console.log('🔍 DEBUG: Attempting to save measurement with data:', JSON.stringify(dbMeasurement, null, 2));
     
     const { data, error } = await supabase
       .from(TABLES.TAKEOFF_MEASUREMENTS)
