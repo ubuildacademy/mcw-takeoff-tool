@@ -372,9 +372,7 @@ export const useTakeoffStore = create<TakeoffStore>()(
        
        getCalibration: (projectId, sheetId) => {
          const { calibrations } = get();
-         console.log('🔍 GET_CALIBRATION_STORE: Looking for calibration', { projectId, sheetId, totalCalibrations: calibrations.length });
          const calibration = calibrations.find(c => c.projectId === projectId && c.sheetId === sheetId) || null;
-         console.log('🔍 GET_CALIBRATION_STORE: Found calibration', calibration);
          return calibration;
        },
       

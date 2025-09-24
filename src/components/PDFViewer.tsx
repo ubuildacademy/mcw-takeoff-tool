@@ -401,15 +401,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     svgOverlay.innerHTML = '';
     
     // Only render measurements for the specific page being rendered
-    console.log(`🎨 RENDERING PAGE ${pageNum}: ${localTakeoffMeasurements.length} measurements on SVG overlay`);
-    console.log(`🔍 LOCAL MEASUREMENTS DEBUG:`, localTakeoffMeasurements.map(m => ({ 
-      id: m.id, 
-      type: m.type, 
-      pdfPage: m.pdfPage, 
-      conditionId: m.conditionId 
-    })));
-    const countMeasurements = localTakeoffMeasurements.filter(m => m.type === 'count');
-    console.log(`🎯 COUNT MEASUREMENTS: ${countMeasurements.length} count measurements found for page ${pageNum}`);
     
     localTakeoffMeasurements.forEach((measurement) => {
       // Double-check that this measurement belongs to the page being rendered
@@ -1108,13 +1099,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const isPointInPolygon = (point: { x: number; y: number }, polygon: { x: number; y: number }[]): boolean => {
     if (polygon.length < 3) return false;
     
-    console.log('🔍 POINT_IN_POLYGON_DEBUG:', {
-      point: { x: point.x.toFixed(6), y: point.y.toFixed(6) },
-      polygonLength: polygon.length,
-      polygonPoints: polygon.map(p => ({ x: p.x.toFixed(6), y: p.y.toFixed(6) })),
-      firstPoint: { x: polygon[0].x.toFixed(6), y: polygon[0].y.toFixed(6) },
-      lastPoint: { x: polygon[polygon.length - 1].x.toFixed(6), y: polygon[polygon.length - 1].y.toFixed(6) }
-    });
     
     let inside = false;
     for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
@@ -1131,7 +1115,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       }
     }
     
-    console.log('🔍 POINT_IN_POLYGON_RESULT:', { point, inside });
     return inside;
   };
 
@@ -1749,15 +1732,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           // Volume calculation: area × depth
           const depth = selectedCondition.depth || 1; // Default to 1 foot if no depth specified
           calculatedValue = areaInSquareFeet * depth;
-          console.log('🔍 VOLUME CALCULATION:', {
-            area: Math.abs(area),
-            scaleFactor,
-            adjustedScaleFactor,
-            currentScale: viewState.scale,
-            areaInSquareFeet,
-            depth,
-            calculatedValue
-          });
         }
         break;
       case 'count':
@@ -2194,7 +2168,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Fit PDF to window function
   const fitToWindow = useCallback(async () => {
     if (!pdfDocument || !containerRef.current || !pdfPageRef.current) {
-      console.log('🔍 FIT_TO_WINDOW: Missing required refs or document');
       return;
     }
 
@@ -2206,33 +2179,17 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const availableWidth = containerRect.width - 20; // 10px padding on each side
       const availableHeight = containerRect.height - 20; // 10px padding on each side
       
-      console.log('🔍 FIT_TO_WINDOW: Container dimensions', {
-        containerWidth: containerRect.width,
-        containerHeight: containerRect.height,
-        availableWidth,
-        availableHeight
-      });
 
       // Get the current page to calculate its dimensions
       const page = pdfPageRef.current;
       const viewport = page.getViewport({ scale: 1.0, rotation: viewState.rotation });
       
-      console.log('🔍 FIT_TO_WINDOW: Page dimensions', {
-        pageWidth: viewport.width,
-        pageHeight: viewport.height,
-        rotation: viewState.rotation
-      });
 
       // Calculate scale to fit both width and height
       const scaleX = availableWidth / viewport.width;
       const scaleY = availableHeight / viewport.height;
       const optimalScale = Math.min(scaleX, scaleY, 5); // Cap at 5x zoom
       
-      console.log('🔍 FIT_TO_WINDOW: Calculated scales', {
-        scaleX,
-        scaleY,
-        optimalScale
-      });
 
       // Apply the new scale
       if (onScaleChange) {

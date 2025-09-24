@@ -500,7 +500,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                     await new Promise(resolve => setTimeout(resolve, 1500));
                     
                     // Fit the page to screen to ensure we capture the entire page
-                    console.log('🔍 Fitting page to screen for full capture...');
                     
                     // Try multiple approaches to fit the page
                     let pageFitted = false;
@@ -529,7 +528,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                     if (!pageFitted) {
                       const zoomControls = document.querySelector('.zoom-controls, [class*="zoom"], [class*="control"]');
                       if (zoomControls) {
-                        console.log('🔍 Found zoom controls, looking for fit button');
                         const fitButton = zoomControls.querySelector('button[title*="fit"], button[aria-label*="fit"], button[title*="Fit"], button[aria-label*="Fit"]') as HTMLButtonElement;
                         if (fitButton) {
                           fitButton.click();
@@ -565,7 +563,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                     
                     // Method 4: Try to set zoom to a specific level that shows full page
                     if (!pageFitted) {
-                      console.log('🔍 Attempting to set zoom level for full page view');
                       // Try to find zoom percentage and set it to a reasonable level
                       const zoomDisplay = document.querySelector('[class*="zoom"], [class*="scale"], [class*="percentage"]');
                       if (zoomDisplay) {
@@ -634,7 +631,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                       
                       // If we still don't have a good container, try to find the largest visible element
                       if (!pdfViewerContainer || pdfViewerContainer.getBoundingClientRect().width < 500) {
-                        console.log('🔍 Looking for larger container...');
                         const allDivs = document.querySelectorAll('div');
                         let largestDiv = null;
                         let largestArea = 0;
@@ -1103,18 +1099,15 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                   )}
                   <div className="font-medium text-blue-600">
                     {(() => {
-                      console.log('Getting measurements for condition:', { projectId, conditionId: condition.id });
                       const measurements = getConditionTakeoffMeasurements(projectId, condition.id);
                       const totalValue = measurements.reduce((sum, m) => {
                         // Use net value if cutouts exist, otherwise use calculated value
                         const value = m.netCalculatedValue !== undefined && m.netCalculatedValue !== null 
                           ? m.netCalculatedValue 
                           : m.calculatedValue;
-                        console.log(`Measurement ${m.id}: calculatedValue=${m.calculatedValue}, netCalculatedValue=${m.netCalculatedValue}, using=${value}`);
                         return sum + (value || 0);
                       }, 0);
                       const totalPerimeter = measurements.reduce((sum, m) => sum + (m.perimeterValue || 0), 0);
-                      console.log('Condition measurements:', { conditionId: condition.id, measurements, totalValue, totalPerimeter });
                       
                       if (totalValue > 0) {
                         // For linear measurements (feet), use feet and inches format

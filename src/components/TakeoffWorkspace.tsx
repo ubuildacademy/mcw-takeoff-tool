@@ -89,16 +89,9 @@ export function TakeoffWorkspace() {
   // Current calibration state for the active document/page
   const getCurrentCalibration = () => {
     if (!currentPdfFile || !jobId) {
-      console.log('🔍 GET_CALIBRATION: Missing data', { currentPdfFile: !!currentPdfFile, jobId });
       return null;
     }
     const calibration = getCalibration(jobId, currentPdfFile.id);
-    console.log('🔍 GET_CALIBRATION: Retrieved calibration', { 
-      projectId: jobId, 
-      sheetId: currentPdfFile.id, 
-      calibration,
-      hasCalibration: !!calibration
-    });
     return calibration;
   };
   
