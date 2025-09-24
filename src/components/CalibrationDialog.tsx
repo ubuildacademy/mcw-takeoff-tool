@@ -3,7 +3,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 
 interface CalibrationDialogProps {
   isOpen: boolean;
@@ -20,34 +19,22 @@ const CalibrationDialog: React.FC<CalibrationDialogProps> = ({
   currentScale,
   isCalibrating = false
 }) => {
-  const [knownDistance, setKnownDistance] = useState('');
-  const [unit, setUnit] = useState(currentScale?.unit || 'ft');
+  const [feet, setFeet] = useState('');
+  const [inches, setInches] = useState('');
 
-  const parseDistance = useCallback((input: string): number => {
-    // Handle feet and inches format (e.g., "7'6"", "7'", "6"")
-    const feetInchesMatch = input.match(/^(\d+(?:\.\d+)?)'(?:(\d+(?:\.\d+)?)")?$/);
-    if (feetInchesMatch) {
-      const feet = parseFloat(feetInchesMatch[1]) || 0;
-      const inches = parseFloat(feetInchesMatch[2]) || 0;
-      return feet + (inches / 12);
-    }
-    
-    // Handle decimal feet
-    const decimal = parseFloat(input);
-    if (!isNaN(decimal) && decimal > 0) {
-      return decimal;
-    }
-    
-    return 0;
-  }, []);
+  const parseDistance = useCallback((): number => {
+    const feetValue = parseFloat(feet) || 0;
+    const inchesValue = parseFloat(inches) || 0;
+    return feetValue + (inchesValue / 12);
+  }, [feet, inches]);
 
   const handleStartCalibration = useCallback(() => {
-    const distance = parseDistance(knownDistance);
+    const distance = parseDistance();
     if (distance <= 0) {
       return;
     }
-    onStartCalibration(distance, unit);
-  }, [knownDistance, unit, onStartCalibration, parseDistance]);
+    onStartCalibration(distance, 'ft');
+  }, [parseDistance, onStartCalibration]);
 
   const handleCancel = useCallback(() => {
     onClose();
@@ -67,29 +54,37 @@ const CalibrationDialog: React.FC<CalibrationDialogProps> = ({
         <div className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="known-distance">Known Distance on Drawing</Label>
-            <div className="flex gap-2">
-              <Input
-                id="known-distance"
-                type="text"
-                value={knownDistance}
-                onChange={(e) => setKnownDistance(e.target.value)}
-                placeholder="e.g., 7'6&quot; or 7.5"
-                disabled={isCalibrating}
-              />
-              <Select value={unit} onValueChange={setUnit} disabled={isCalibrating}>
-                <SelectTrigger className="w-20">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ft">ft</SelectItem>
-                  <SelectItem value="in">in</SelectItem>
-                  <SelectItem value="m">m</SelectItem>
-                  <SelectItem value="cm">cm</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="flex gap-2 items-end">
+              <div className="flex-1">
+                <Label htmlFor="feet-input" className="text-xs text-gray-600">Feet</Label>
+                <Input
+                  id="feet-input"
+                  type="number"
+                  value={feet}
+                  onChange={(e) => setFeet(e.target.value)}
+                  placeholder="10"
+                  disabled={isCalibrating}
+                  min="0"
+                  step="0.1"
+                />
+              </div>
+              <div className="flex-1">
+                <Label htmlFor="inches-input" className="text-xs text-gray-600">Inches</Label>
+                <Input
+                  id="inches-input"
+                  type="number"
+                  value={inches}
+                  onChange={(e) => setInches(e.target.value)}
+                  placeholder="0"
+                  disabled={isCalibrating}
+                  min="0"
+                  max="11.99"
+                  step="0.1"
+                />
+              </div>
             </div>
             <p className="text-sm text-gray-500">
-              Enter distance as 7'6" or 7.5 (decimal feet). Use a known dimension like a wall length, door width, or scale bar.
+              Enter the known distance in feet and inches. Use a known dimension like a wall length, door width, or scale bar.
             </p>
           </div>
 
@@ -108,7 +103,7 @@ const CalibrationDialog: React.FC<CalibrationDialogProps> = ({
             {!isCalibrating && (
               <Button 
                 onClick={handleStartCalibration}
-                disabled={!knownDistance || parseDistance(knownDistance) <= 0}
+                disabled={(!feet && !inches) || parseDistance() <= 0}
               >
                 Start Calibration
               </Button>
@@ -121,7 +116,7 @@ const CalibrationDialog: React.FC<CalibrationDialogProps> = ({
                 Calibration Mode Active
               </p>
               <p className="text-xs text-yellow-600 mt-1">
-                Click two points on the PDF to draw a line representing {parseDistance(knownDistance).toFixed(3)} {unit}
+                Click two points on the PDF to draw a line representing {parseDistance().toFixed(3)} ft
               </p>
               <p className="text-xs text-yellow-600 mt-1">
                 • First click: Place point 1<br/>

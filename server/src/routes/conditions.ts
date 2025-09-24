@@ -60,6 +60,9 @@ router.post('/', async (req, res) => {
       materialCost
     } = req.body;
 
+    // Count conditions should not have waste factors
+    const finalWasteFactor = type === 'count' ? 0 : wasteFactor;
+
     // Validation
     if (!projectId || !name || !type || !unit) {
       return res.status(400).json({ 
@@ -82,7 +85,7 @@ router.post('/', async (req, res) => {
       name,
       type,
       unit,
-      wasteFactor,
+      wasteFactor: finalWasteFactor,
       color,
       description,
       laborCost,
@@ -131,13 +134,17 @@ router.put('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Condition not found' });
     }
     
+    // Count conditions should not have waste factors
+    const finalWasteFactor = (type !== undefined && type === 'count') ? 0 : 
+                            (wasteFactor !== undefined ? wasteFactor : existingCondition.wasteFactor);
+
     // Update the condition
     const updatedCondition = {
       ...existingCondition,
       ...(name !== undefined && { name }),
       ...(type !== undefined && { type }),
       ...(unit !== undefined && { unit }),
-      ...(wasteFactor !== undefined && { wasteFactor }),
+      ...(wasteFactor !== undefined && { wasteFactor: finalWasteFactor }),
       ...(color !== undefined && { color }),
       ...(description !== undefined && { description }),
       ...(laborCost !== undefined && { laborCost }),

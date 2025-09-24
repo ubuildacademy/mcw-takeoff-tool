@@ -68,7 +68,7 @@ interface TakeoffStore {
   
   // Takeoff measurement actions
   addTakeoffMeasurement: (measurement: Omit<TakeoffMeasurement, 'id' | 'timestamp'>) => Promise<string>;
-  updateTakeoffMeasurement: (id: string, updates: Partial<TakeoffMeasurement>) => void;
+  updateTakeoffMeasurement: (id: string, updates: Partial<TakeoffMeasurement>) => Promise<void>;
   deleteTakeoffMeasurement: (id: string) => Promise<void>;
   
   // New methods for takeoff functionality
@@ -417,15 +417,38 @@ export const useTakeoffStore = create<TakeoffStore>()(
         }
       },
       
-      updateTakeoffMeasurement: (id, updates) => {
-        set(state => ({
-          takeoffMeasurements: state.takeoffMeasurements.map(measurement =>
-            measurement.id === id ? { ...measurement, ...updates } : measurement
-          )
-        }));
-        
-        // Update markupsByPage structure
-        get().updateMarkupsByPage();
+      updateTakeoffMeasurement: async (id, updates) => {
+        try {
+          // Import the API service dynamically to avoid circular dependencies
+          const { takeoffMeasurementService } = await import('../services/apiService');
+          
+          console.log('🔄 UPDATE_TAKEOFF_MEASUREMENT: Updating measurement via API:', { id, updates });
+          // Update measurement via API
+          const response = await takeoffMeasurementService.updateTakeoffMeasurement(id, updates);
+          console.log('✅ UPDATE_TAKEOFF_MEASUREMENT: API update successful:', response);
+          const updatedMeasurement = response.measurement || response;
+          
+          // Update local store with the backend response
+          set(state => ({
+            takeoffMeasurements: state.takeoffMeasurements.map(measurement =>
+              measurement.id === id ? { ...measurement, ...updatedMeasurement } : measurement
+            )
+          }));
+          
+          // Update markupsByPage structure
+          get().updateMarkupsByPage();
+        } catch (error: any) {
+          console.error('❌ UPDATE_TAKEOFF_MEASUREMENT: Failed to update measurement via API:', error);
+          // Fallback to local update if API fails
+          set(state => ({
+            takeoffMeasurements: state.takeoffMeasurements.map(measurement =>
+              measurement.id === id ? { ...measurement, ...updates } : measurement
+            )
+          }));
+          
+          // Update markupsByPage structure
+          get().updateMarkupsByPage();
+        }
       },
       
       deleteTakeoffMeasurement: async (id) => {

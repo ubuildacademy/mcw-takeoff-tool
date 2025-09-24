@@ -161,7 +161,17 @@ export function SheetSidebar({
         })
       );
       
-      setDocuments(documents);
+      // Preserve existing expansion state when reloading documents
+      setDocuments(prevDocuments => {
+        const documentsWithPreservedState = documents.map(newDoc => {
+          const existingDoc = prevDocuments.find(prevDoc => prevDoc.id === newDoc.id);
+          return {
+            ...newDoc,
+            isExpanded: existingDoc?.isExpanded || false
+          };
+        });
+        return documentsWithPreservedState;
+      });
       
       // Notify parent component of documents update
       if (onDocumentsUpdate) {
@@ -786,7 +796,7 @@ export function SheetSidebar({
                           {/* Page Info */}
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-1">
-                              {editingSheetId === document.id && editingPageNumber === page.pageNumber ? (
+                              {editingSheetId === `${document.id}-${page.pageNumber}` ? (
                                 <div className="flex items-center gap-1 flex-1">
                                   <Input
                                     value={editingSheetName}
