@@ -18,7 +18,8 @@ import {
   ChevronRight,
   Download,
   FileSpreadsheet,
-  FileImage
+  FileImage,
+  Scissors,
 } from 'lucide-react';
 import { useTakeoffStore } from '../store/useTakeoffStore';
 import type { TakeoffCondition, PDFDocument } from '../types';
@@ -37,9 +38,12 @@ interface TakeoffSidebarProps {
   documents?: PDFDocument[];
   onPageSelect?: (documentId: string, pageNumber: number) => void;
   onExportStatusUpdate?: (type: 'excel' | 'pdf' | null, progress: number) => void;
+  onCutoutMode?: (conditionId: string | null) => void;
+  cutoutMode?: boolean;
+  cutoutTargetConditionId?: string | null;
 }
 
-export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, documents = [], onPageSelect, onExportStatusUpdate }: TakeoffSidebarProps) {
+export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, documents = [], onPageSelect, onExportStatusUpdate, onCutoutMode, cutoutMode, cutoutTargetConditionId }: TakeoffSidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -50,7 +54,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
   const [showExportDropdown, setShowExportDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const { addCondition, conditions, setSelectedCondition, selectedConditionId, getConditionTakeoffMeasurements, loadProjectConditions, getProjectTakeoffMeasurements } = useTakeoffStore();
+  const { addCondition, conditions, setSelectedCondition, selectedConditionId, getConditionTakeoffMeasurements, loadProjectConditions, getProjectTakeoffMeasurements, takeoffMeasurements } = useTakeoffStore();
 
   useEffect(() => {
     // Load conditions from API when component mounts or projectId changes
@@ -822,6 +826,18 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
     setShowCreateDialog(true);
   };
 
+  const handleCutoutMode = (condition: TakeoffCondition) => {
+    if (onCutoutMode) {
+      // If already in cut-out mode for this condition, turn it off
+      if (cutoutMode && cutoutTargetConditionId === condition.id) {
+        onCutoutMode(null);
+      } else {
+        // Turn on cut-out mode for this condition
+        onCutoutMode(condition.id);
+      }
+    }
+  };
+
   const handleCloseDialog = () => {
     setShowCreateDialog(false);
     setEditingCondition(null);
@@ -846,6 +862,13 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       default: return 'bg-gray-100 text-gray-800';
     }
   };
+
+  // Helper function to check if condition has measurements
+  const hasMeasurements = (condition: TakeoffCondition): boolean => {
+    const measurements = getConditionTakeoffMeasurements(projectId, condition.id);
+    return measurements.length > 0;
+  };
+
 
   if (loading) {
     return (
@@ -1000,6 +1023,21 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                     </Badge>
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+                    {/* Cut-out button - only show for area/volume conditions */}
+                    {(condition.type === 'area' || condition.type === 'volume') && onCutoutMode && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCutoutMode(condition);
+                        }}
+                        className={`h-6 w-6 p-0 ${cutoutMode && cutoutTargetConditionId === condition.id ? 'bg-red-100 text-red-600' : 'text-red-500 hover:text-red-600'}`}
+                        title="Add cut-out to existing measurements"
+                      >
+                        <Scissors className="w-3 h-3" />
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="sm"
@@ -1060,12 +1098,21 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                     />
                     <span>Color</span>
                   </div>
-                  <span>Waste: {condition.wasteFactor}%</span>
+                  {condition.type !== 'count' && (
+                    <span>Waste: {condition.wasteFactor}%</span>
+                  )}
                   <div className="font-medium text-blue-600">
                     {(() => {
                       console.log('Getting measurements for condition:', { projectId, conditionId: condition.id });
                       const measurements = getConditionTakeoffMeasurements(projectId, condition.id);
-                      const totalValue = measurements.reduce((sum, m) => sum + m.calculatedValue, 0);
+                      const totalValue = measurements.reduce((sum, m) => {
+                        // Use net value if cutouts exist, otherwise use calculated value
+                        const value = m.netCalculatedValue !== undefined && m.netCalculatedValue !== null 
+                          ? m.netCalculatedValue 
+                          : m.calculatedValue;
+                        console.log(`Measurement ${m.id}: calculatedValue=${m.calculatedValue}, netCalculatedValue=${m.netCalculatedValue}, using=${value}`);
+                        return sum + (value || 0);
+                      }, 0);
                       const totalPerimeter = measurements.reduce((sum, m) => sum + (m.perimeterValue || 0), 0);
                       console.log('Condition measurements:', { conditionId: condition.id, measurements, totalValue, totalPerimeter });
                       

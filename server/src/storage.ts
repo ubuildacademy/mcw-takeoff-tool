@@ -79,6 +79,13 @@ export interface StoredTakeoffMeasurement {
   conditionColor: string;
   conditionName: string;
   perimeterValue?: number;
+  cutouts?: Array<{
+    id: string;
+    points: Array<{ x: number; y: number }>;
+    pdfCoordinates: Array<{ x: number; y: number }>;
+    calculatedValue: number;
+  }>;
+  netCalculatedValue?: number;
 }
 
 class SupabaseStorage {
@@ -438,7 +445,9 @@ class SupabaseStorage {
       pdfCoordinates: item.pdf_coordinates,
       conditionColor: item.condition_color,
       conditionName: item.condition_name,
-      perimeterValue: item.perimeter_value
+      perimeterValue: item.perimeter_value,
+      cutouts: item.cutouts,
+      netCalculatedValue: item.net_calculated_value
     }));
   }
 
@@ -469,7 +478,9 @@ class SupabaseStorage {
       pdfCoordinates: item.pdf_coordinates,
       conditionColor: item.condition_color,
       conditionName: item.condition_name,
-      perimeterValue: item.perimeter_value
+      perimeterValue: item.perimeter_value,
+      cutouts: item.cutouts,
+      netCalculatedValue: item.net_calculated_value
     }));
   }
 
@@ -500,7 +511,9 @@ class SupabaseStorage {
       pdfCoordinates: item.pdf_coordinates,
       conditionColor: item.condition_color,
       conditionName: item.condition_name,
-      perimeterValue: item.perimeter_value
+      perimeterValue: item.perimeter_value,
+      cutouts: item.cutouts,
+      netCalculatedValue: item.net_calculated_value
     }));
   }
 
@@ -520,7 +533,9 @@ class SupabaseStorage {
       pdf_coordinates: measurement.pdfCoordinates,
       condition_color: measurement.conditionColor,
       condition_name: measurement.conditionName,
-      perimeter_value: measurement.perimeterValue
+      perimeter_value: measurement.perimeterValue,
+      cutouts: measurement.cutouts,
+      net_calculated_value: measurement.netCalculatedValue
     };
     
     console.log('🔍 DEBUG: Attempting to save measurement with data:', JSON.stringify(dbMeasurement, null, 2));
@@ -558,7 +573,9 @@ class SupabaseStorage {
       pdfCoordinates: data.pdf_coordinates,
       conditionColor: data.condition_color,
       conditionName: data.condition_name,
-      perimeterValue: data.perimeter_value
+      perimeterValue: data.perimeter_value,
+      cutouts: data.cutouts,
+      netCalculatedValue: data.net_calculated_value
     };
   }
 

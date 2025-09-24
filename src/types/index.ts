@@ -49,6 +49,13 @@ export interface TakeoffMeasurement {
   conditionColor: string;
   conditionName: string;
   perimeterValue?: number; // Perimeter in linear feet for area measurements
+  cutouts?: Array<{
+    id: string;
+    points: Array<{ x: number; y: number }>;
+    pdfCoordinates: Array<{ x: number; y: number }>;
+    calculatedValue: number;
+  }>;
+  netCalculatedValue?: number; // calculatedValue - sum of all cutouts
 }
 
 export interface Sheet {

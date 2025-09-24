@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS takeoff_files (
 
 -- Sheets table
 CREATE TABLE IF NOT EXISTS takeoff_sheets (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id TEXT PRIMARY KEY,
   document_id TEXT NOT NULL,
   page_number INTEGER NOT NULL,
   sheet_number TEXT,
@@ -80,6 +80,8 @@ CREATE TABLE IF NOT EXISTS takeoff_measurements (
   condition_color TEXT NOT NULL,
   condition_name TEXT NOT NULL,
   perimeter_value DECIMAL(15,4),
+  cutouts JSONB, -- Array of cut-out objects
+  net_calculated_value DECIMAL(15,4), -- calculated_value - sum of all cutouts
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

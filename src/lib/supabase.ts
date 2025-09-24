@@ -117,6 +117,8 @@ export interface Database {
           timestamp: number
           pdf_coordinates: any // JSON array of PDF-relative coordinates
           perimeter_value: number | null
+          cutouts: any | null // JSON array of cut-out objects
+          net_calculated_value: number | null
           created_at: string
         }
         Insert: {
@@ -134,6 +136,8 @@ export interface Database {
           timestamp?: number
           pdf_coordinates: any
           perimeter_value?: number | null
+          cutouts?: any | null
+          net_calculated_value?: number | null
           created_at?: string
         }
         Update: {
@@ -151,6 +155,8 @@ export interface Database {
           timestamp?: number
           pdf_coordinates?: any
           perimeter_value?: number | null
+          cutouts?: any | null
+          net_calculated_value?: number | null
           created_at?: string
         }
       }

@@ -46,6 +46,10 @@ export function TakeoffWorkspace() {
   const [showTitleblockConfig, setShowTitleblockConfig] = useState(false);
   const [titleblockConfigDocumentId, setTitleblockConfigDocumentId] = useState<string | null>(null);
   
+  // Cut-out states
+  const [cutoutMode, setCutoutMode] = useState(false);
+  const [cutoutTargetConditionId, setCutoutTargetConditionId] = useState<string | null>(null);
+  
   // Store integration
   const { 
     setCurrentProject, 
@@ -275,6 +279,12 @@ export function TakeoffWorkspace() {
     setExportStatus({type, progress});
   };
 
+  const handleCutoutMode = (conditionId: string | null) => {
+    console.log('Cut-out mode changed:', conditionId);
+    setCutoutMode(!!conditionId);
+    setCutoutTargetConditionId(conditionId);
+  };
+
   // PDF viewer control handlers
   const handlePageChange = (page: number) => {
     setCurrentPage(page);
@@ -383,6 +393,7 @@ export function TakeoffWorkspace() {
   const handleBackToProjects = () => {
     navigate('/');
   };
+
 
   const storeCurrentProject = getCurrentProject();
   const currentProject = storeCurrentProject || {
@@ -586,6 +597,9 @@ export function TakeoffWorkspace() {
               documents={documents}
               onPageSelect={handlePageSelect}
               onExportStatusUpdate={handleExportStatusUpdate}
+              onCutoutMode={handleCutoutMode}
+              cutoutMode={cutoutMode}
+              cutoutTargetConditionId={cutoutTargetConditionId}
             />
           )}
           <Button
@@ -624,6 +638,9 @@ export function TakeoffWorkspace() {
               onCalibrationComplete={handleCalibrationComplete}
               searchResults={ocrSearchResults}
               currentSearchQuery={currentSearchQuery}
+              cutoutMode={cutoutMode}
+              cutoutTargetConditionId={cutoutTargetConditionId}
+              onCutoutModeChange={handleCutoutMode}
             />
           ) : (
             <div className="flex items-center justify-center flex-1 bg-gray-100">
