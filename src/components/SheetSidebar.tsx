@@ -18,8 +18,6 @@ import {
   ChevronDown,
   ChevronRight,
   Filter,
-  SortAsc,
-  SortDesc,
   RefreshCw,
   Edit2,
   Check,
@@ -27,6 +25,7 @@ import {
 } from 'lucide-react';
 import { fileService, sheetService } from '../services/apiService';
 import { ocrService } from '../services/ocrService';
+import { useTakeoffStore } from '../store/useTakeoffStore';
 import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFPage, PDFDocument } from '../types';
 
@@ -58,8 +57,6 @@ export function SheetSidebar({
 }: SheetSidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'list'>('list');
-  const [sortBy, setSortBy] = useState<'page' | 'name' | 'sheetNumber'>('page');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [filterBy, setFilterBy] = useState<'all' | 'withTakeoffs' | 'withoutTakeoffs'>('all');
   const [documents, setDocuments] = useState<PDFDocument[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,6 +70,36 @@ export function SheetSidebar({
   const [editingSheetId, setEditingSheetId] = useState<string | null>(null);
   const [editingSheetName, setEditingSheetName] = useState<string>('');
   const [editingPageNumber, setEditingPageNumber] = useState<number | null>(null);
+
+  // Store integration
+  const { getProjectTakeoffMeasurements } = useTakeoffStore();
+
+  // Update hasTakeoffs property based on actual takeoff measurements
+  const updateHasTakeoffs = useCallback((docs: PDFDocument[]) => {
+    const takeoffMeasurements = getProjectTakeoffMeasurements(projectId);
+    
+    return docs.map(doc => ({
+      ...doc,
+      // Preserve isExpanded and other document-level properties
+      isExpanded: doc.isExpanded,
+      ocrEnabled: doc.ocrEnabled,
+      pages: doc.pages.map(page => {
+        const pageKey = `${projectId}-${doc.id}-${page.pageNumber}`;
+        const hasMeasurements = takeoffMeasurements.some(measurement => 
+          measurement.sheetId === doc.id && measurement.pdfPage === page.pageNumber
+        );
+        const measurementCount = takeoffMeasurements.filter(measurement => 
+          measurement.sheetId === doc.id && measurement.pdfPage === page.pageNumber
+        ).length;
+        
+        return {
+          ...page,
+          hasTakeoffs: hasMeasurements,
+          takeoffCount: measurementCount
+        };
+      })
+    }));
+  }, [projectId, getProjectTakeoffMeasurements]);
 
   // Load project files and convert to enhanced document structure
   const loadProjectDocuments = useCallback(async () => {
@@ -161,9 +188,10 @@ export function SheetSidebar({
         })
       );
       
-      // Preserve existing expansion state when reloading documents
+      // Update hasTakeoffs based on actual measurements and preserve expansion state
       setDocuments(prevDocuments => {
-        const documentsWithPreservedState = documents.map(newDoc => {
+        const documentsWithUpdatedTakeoffs = updateHasTakeoffs(documents);
+        const documentsWithPreservedState = documentsWithUpdatedTakeoffs.map(newDoc => {
           const existingDoc = prevDocuments.find(prevDoc => prevDoc.id === newDoc.id);
           return {
             ...newDoc,
@@ -175,7 +203,7 @@ export function SheetSidebar({
       
       // Notify parent component of documents update
       if (onDocumentsUpdate) {
-        onDocumentsUpdate(documents);
+        onDocumentsUpdate(updateHasTakeoffs(documents));
       }
       
     } catch (error) {
@@ -188,6 +216,22 @@ export function SheetSidebar({
   useEffect(() => {
     loadProjectDocuments();
   }, [loadProjectDocuments]);
+
+  // Update hasTakeoffs when takeoff measurements change (but preserve expansion state)
+  useEffect(() => {
+    if (documents.length > 0) {
+      setDocuments(prevDocuments => {
+        const updatedDocuments = updateHasTakeoffs(prevDocuments);
+        
+        // Notify parent component of the update
+        if (onDocumentsUpdate) {
+          onDocumentsUpdate(updatedDocuments);
+        }
+        
+        return updatedDocuments;
+      });
+    }
+  }, [getProjectTakeoffMeasurements, updateHasTakeoffs, onDocumentsUpdate]);
 
   // Listen for OCR progress events
   useEffect(() => {
@@ -473,55 +517,39 @@ export function SheetSidebar({
     return () => clearTimeout(timeoutId);
   };
 
-  // Filter and sort pages
-  const getFilteredAndSortedPages = () => {
-    let allPages: Array<{ document: PDFDocument; page: PDFPage }> = [];
+  // Filter and sort documents
+  const getFilteredAndSortedDocuments = () => {
+    let filteredDocuments = [...documents];
     
-    documents.forEach(doc => {
-      doc.pages.forEach(page => {
-        allPages.push({ document: doc, page });
-      });
-    });
+    // Apply takeoff filter - filter documents but also filter pages within documents
+    if (filterBy === 'withTakeoffs') {
+      filteredDocuments = filteredDocuments.map(doc => ({
+        ...doc,
+        pages: doc.pages.filter(page => page.hasTakeoffs)
+      })).filter(doc => doc.pages.length > 0); // Only show documents that have pages with takeoffs
+    } else if (filterBy === 'withoutTakeoffs') {
+      filteredDocuments = filteredDocuments.map(doc => ({
+        ...doc,
+        pages: doc.pages.filter(page => !page.hasTakeoffs)
+      })).filter(doc => doc.pages.length > 0); // Only show documents that have pages without takeoffs
+    }
     
     // Apply search filter
     if (searchQuery) {
-      allPages = allPages.filter(({ document, page }) => 
-        document.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        page.extractedText?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        page.sheetName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        page.sheetNumber?.toLowerCase().includes(searchQuery.toLowerCase())
+      filteredDocuments = filteredDocuments.filter(doc => 
+        doc.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        doc.pages.some(page => 
+          page.extractedText?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          page.sheetName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          page.sheetNumber?.toLowerCase().includes(searchQuery.toLowerCase())
+        )
       );
     }
     
-    // Apply takeoff filter
-    if (filterBy === 'withTakeoffs') {
-      allPages = allPages.filter(({ page }) => page.hasTakeoffs);
-    } else if (filterBy === 'withoutTakeoffs') {
-      allPages = allPages.filter(({ page }) => !page.hasTakeoffs);
-    }
+    // Sort by document name (simple alphabetical sorting)
+    filteredDocuments.sort((a, b) => a.name.localeCompare(b.name));
     
-    // Apply sorting
-    allPages.sort((a, b) => {
-      let comparison = 0;
-      
-      switch (sortBy) {
-        case 'page':
-          comparison = a.page.pageNumber - b.page.pageNumber;
-          break;
-        case 'name':
-          comparison = (a.page.sheetName || `Page ${a.page.pageNumber}`).localeCompare(
-            b.page.sheetName || `Page ${b.page.pageNumber}`
-          );
-          break;
-        case 'sheetNumber':
-          comparison = (a.page.sheetNumber || '').localeCompare(b.page.sheetNumber || '');
-          break;
-      }
-      
-      return sortOrder === 'asc' ? comparison : -comparison;
-    });
-    
-    return allPages;
+    return filteredDocuments;
   };
 
   if (loading) {
@@ -537,14 +565,14 @@ export function SheetSidebar({
     );
   }
 
-  const filteredPages = getFilteredAndSortedPages();
+  const filteredDocuments = getFilteredAndSortedDocuments();
 
   return (
     <div className="w-96 bg-white border-l flex flex-col h-full">
       {/* Header */}
       <div className="p-4 border-b">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">Project Sheets</h2>
+          <h2 className="text-lg font-semibold">Project Documents</h2>
           <div className="flex gap-2">
             <Button size="sm" variant="outline" onClick={() => loadProjectDocuments()}>
               <RefreshCw className="w-4 h-4" />
@@ -570,37 +598,22 @@ export function SheetSidebar({
 
         {/* Controls */}
         <div className="space-y-3">
-
-          {/* Sort and Filter */}
-          <div className="flex gap-2">
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as any)}
-              className="flex-1 px-2 py-1 text-sm border rounded"
-            >
-              <option value="page">Sort by Page</option>
-              <option value="name">Sort by Name</option>
-              <option value="sheetNumber">Sort by Sheet #</option>
-            </select>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
-            >
-              {sortOrder === 'asc' ? <SortAsc className="w-4 h-4" /> : <SortDesc className="w-4 h-4" />}
-            </Button>
-          </div>
-
           {/* Filter */}
-          <select
-            value={filterBy}
-            onChange={(e) => setFilterBy(e.target.value as any)}
-            className="w-full px-2 py-1 text-sm border rounded"
-          >
-            <option value="all">All Pages</option>
-            <option value="withTakeoffs">With Takeoffs</option>
-            <option value="withoutTakeoffs">Without Takeoffs</option>
-          </select>
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-gray-700 flex items-center gap-2">
+              <Filter className="w-4 h-4" />
+              Filter Pages
+            </label>
+            <select
+              value={filterBy}
+              onChange={(e) => setFilterBy(e.target.value as any)}
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md bg-white hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+            >
+              <option value="all">All Pages</option>
+              <option value="withTakeoffs">With Takeoffs</option>
+              <option value="withoutTakeoffs">Without Takeoffs</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -714,20 +727,22 @@ export function SheetSidebar({
           </div>
         ) : (
           <div className="p-4 space-y-2">
-            {documents.map((document) => (
+            {filteredDocuments.map((document) => (
               <div key={document.id} className="border rounded-lg">
                 {/* Document Header */}
                 <div
-                  className="p-3 cursor-pointer hover:bg-accent/50"
+                  className="p-3 cursor-pointer hover:bg-accent/50 transition-colors"
                   onClick={() => toggleDocumentExpansion(document.id)}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      {document.isExpanded ? (
-                        <ChevronDown className="w-4 h-4" />
-                      ) : (
-                        <ChevronRight className="w-4 h-4" />
-                      )}
+                      <div className="flex items-center justify-center w-6 h-6 rounded hover:bg-gray-200 transition-colors">
+                        {document.isExpanded ? (
+                          <ChevronDown className="w-4 h-4 text-gray-600" />
+                        ) : (
+                          <ChevronRight className="w-4 h-4 text-gray-600" />
+                        )}
+                      </div>
                       <FileText className="w-4 h-4 text-muted-foreground" />
                       <span className="font-medium text-sm">{document.name}</span>
                       <Badge variant="outline" className="text-xs">
@@ -922,7 +937,7 @@ export function SheetSidebar({
       {/* Footer */}
       <div className="p-4 border-t bg-muted/30">
         <div className="text-center text-sm text-muted-foreground">
-          {documents.length} document{documents.length !== 1 ? 's' : ''} • {filteredPages.length} page{filteredPages.length !== 1 ? 's' : ''} shown
+          {documents.length} document{documents.length !== 1 ? 's' : ''} • {filteredDocuments.length} shown
         </div>
       </div>
     </div>

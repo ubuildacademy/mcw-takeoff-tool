@@ -14,9 +14,6 @@ import { Badge } from "./ui/badge";
 import { Separator } from "./ui/separator";
 import { 
   ArrowLeft, 
-  Save, 
-  Settings, 
-  FileText, 
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
@@ -515,18 +512,8 @@ export function TakeoffWorkspace() {
           </div>
         )}
 
-        {/* Right side - File Info and Actions */}
+        {/* Right side - Actions */}
         <div className="flex items-center gap-4">
-          {/* File Status */}
-          <div className="flex items-center gap-2 text-sm text-gray-600">
-            <FileText className="w-4 h-4" />
-            <span>Files: {projectFiles.length}</span>
-            <span>•</span>
-            <span>Last saved: {'lastSaved' in currentProject ? currentProject.lastSaved : 'Unknown'}</span>
-          </div>
-          
-          <Separator orientation="vertical" className="h-8" />
-          
           {/* Action Buttons */}
           <div className="flex items-center gap-2">
             <label htmlFor="pdf-upload" className="cursor-pointer">
@@ -546,34 +533,11 @@ export function TakeoffWorkspace() {
               id="pdf-upload"
             />
             
-            <Button 
-              size="sm" 
-              className="flex items-center gap-2"
-              onClick={() => {
-                // Save current project data
-                if (jobId) {
-                  const project = getCurrentProject();
-                  if (project) {
-                    // Update last saved timestamp
-                    const updatedProject = {
-                      ...project,
-                      lastModified: new Date()
-                    };
-                    // The store automatically persists data, so we just need to update the project
-                    console.log('Saving project:', updatedProject);
-                    // You could add API call here if needed
-                    alert('Project saved successfully!');
-                  }
-                }
-              }}
-            >
-              <Save className="w-4 h-4" />
-              Save
-            </Button>
+            <div className="flex items-center gap-2 text-sm text-gray-600">
+              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+              <span>All changes saved</span>
+            </div>
             
-            <Button variant="ghost" size="sm">
-              <Settings className="w-4 h-4" />
-            </Button>
           </div>
         </div>
       </div>
