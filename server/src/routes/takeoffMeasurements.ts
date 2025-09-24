@@ -71,7 +71,7 @@ router.post('/', async (req, res) => {
     }
 
     const id = uuidv4();
-    const now = new Date().toISOString();
+    const now = Date.now().toString(); // Use Unix timestamp as string
     
     const newMeasurement: StoredTakeoffMeasurement = {
       id,
@@ -97,8 +97,16 @@ router.post('/', async (req, res) => {
       measurement: savedMeasurement 
     });
   } catch (error) {
-    console.error('Error creating takeoff measurement:', error);
-    return res.status(500).json({ error: 'Failed to create takeoff measurement' });
+    console.error('❌ ERROR: Error creating takeoff measurement:', error);
+    console.error('❌ ERROR: Error details:', {
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      name: error instanceof Error ? error.name : undefined
+    });
+    return res.status(500).json({ 
+      error: 'Failed to create takeoff measurement',
+      details: error instanceof Error ? error.message : JSON.stringify(error)
+    });
   }
 });
 

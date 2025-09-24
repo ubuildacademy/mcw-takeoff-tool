@@ -523,6 +523,8 @@ class SupabaseStorage {
       perimeter_value: measurement.perimeterValue
     };
     
+    console.log('🔍 DEBUG: Attempting to save measurement with data:', JSON.stringify(dbMeasurement, null, 2));
+    
     const { data, error } = await supabase
       .from(TABLES.TAKEOFF_MEASUREMENTS)
       .upsert(dbMeasurement)
@@ -530,8 +532,15 @@ class SupabaseStorage {
       .single();
     
     if (error) {
-      console.error('Error saving takeoff measurement:', error);
-      throw error;
+      console.error('❌ ERROR: Failed to save takeoff measurement:', error);
+      console.error('❌ ERROR: Error details:', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code
+      });
+      console.error('❌ ERROR: Full error object:', JSON.stringify(error, null, 2));
+      throw new Error(`Database error: ${error.message} (${error.code})`);
     }
     
     // Map snake_case back to camelCase

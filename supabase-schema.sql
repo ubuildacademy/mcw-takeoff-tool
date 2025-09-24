@@ -2,7 +2,7 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Projects table
-CREATE TABLE IF NOT EXISTS projects (
+CREATE TABLE IF NOT EXISTS takeoff_projects (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name TEXT NOT NULL,
   client TEXT NOT NULL,
@@ -19,9 +19,9 @@ CREATE TABLE IF NOT EXISTS projects (
 );
 
 -- Conditions table
-CREATE TABLE IF NOT EXISTS conditions (
+CREATE TABLE IF NOT EXISTS takeoff_conditions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  project_id UUID NOT NULL REFERENCES takeoff_projects(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   type TEXT NOT NULL CHECK (type IN ('area', 'volume', 'linear', 'count')),
   unit TEXT NOT NULL,
@@ -35,9 +35,9 @@ CREATE TABLE IF NOT EXISTS conditions (
 );
 
 -- Files table
-CREATE TABLE IF NOT EXISTS files (
+CREATE TABLE IF NOT EXISTS takeoff_files (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  project_id UUID NOT NULL REFERENCES takeoff_projects(id) ON DELETE CASCADE,
   original_name TEXT NOT NULL,
   filename TEXT NOT NULL,
   path TEXT NOT NULL,
@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS files (
 );
 
 -- Sheets table
-CREATE TABLE IF NOT EXISTS sheets (
+CREATE TABLE IF NOT EXISTS takeoff_sheets (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   document_id TEXT NOT NULL,
   page_number INTEGER NOT NULL,
@@ -67,9 +67,9 @@ CREATE TABLE IF NOT EXISTS sheets (
 -- Takeoff measurements table
 CREATE TABLE IF NOT EXISTS takeoff_measurements (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  project_id UUID NOT NULL REFERENCES takeoff_projects(id) ON DELETE CASCADE,
   sheet_id TEXT NOT NULL,
-  condition_id UUID NOT NULL REFERENCES conditions(id) ON DELETE CASCADE,
+  condition_id UUID NOT NULL REFERENCES takeoff_conditions(id) ON DELETE CASCADE,
   type TEXT NOT NULL CHECK (type IN ('area', 'volume', 'linear', 'count')),
   points JSONB NOT NULL, -- Canvas coordinates for rendering
   calculated_value DECIMAL(15,4) NOT NULL,
@@ -84,25 +84,25 @@ CREATE TABLE IF NOT EXISTS takeoff_measurements (
 );
 
 -- Indexes for better performance
-CREATE INDEX IF NOT EXISTS idx_conditions_project_id ON conditions(project_id);
-CREATE INDEX IF NOT EXISTS idx_files_project_id ON files(project_id);
-CREATE INDEX IF NOT EXISTS idx_sheets_document_id ON sheets(document_id);
+CREATE INDEX IF NOT EXISTS idx_takeoff_conditions_project_id ON takeoff_conditions(project_id);
+CREATE INDEX IF NOT EXISTS idx_takeoff_files_project_id ON takeoff_files(project_id);
+CREATE INDEX IF NOT EXISTS idx_takeoff_sheets_document_id ON takeoff_sheets(document_id);
 CREATE INDEX IF NOT EXISTS idx_takeoff_measurements_project_id ON takeoff_measurements(project_id);
 CREATE INDEX IF NOT EXISTS idx_takeoff_measurements_sheet_id ON takeoff_measurements(sheet_id);
 CREATE INDEX IF NOT EXISTS idx_takeoff_measurements_condition_id ON takeoff_measurements(condition_id);
 
 -- Row Level Security (RLS) policies
-ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
-ALTER TABLE conditions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE files ENABLE ROW LEVEL SECURITY;
-ALTER TABLE sheets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE takeoff_projects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE takeoff_conditions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE takeoff_files ENABLE ROW LEVEL SECURITY;
+ALTER TABLE takeoff_sheets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE takeoff_measurements ENABLE ROW LEVEL SECURITY;
 
 -- For now, allow all operations (you can restrict this later based on user authentication)
-CREATE POLICY "Allow all operations on projects" ON projects FOR ALL USING (true);
-CREATE POLICY "Allow all operations on conditions" ON conditions FOR ALL USING (true);
-CREATE POLICY "Allow all operations on files" ON files FOR ALL USING (true);
-CREATE POLICY "Allow all operations on sheets" ON sheets FOR ALL USING (true);
+CREATE POLICY "Allow all operations on takeoff_projects" ON takeoff_projects FOR ALL USING (true);
+CREATE POLICY "Allow all operations on takeoff_conditions" ON takeoff_conditions FOR ALL USING (true);
+CREATE POLICY "Allow all operations on takeoff_files" ON takeoff_files FOR ALL USING (true);
+CREATE POLICY "Allow all operations on takeoff_sheets" ON takeoff_sheets FOR ALL USING (true);
 CREATE POLICY "Allow all operations on takeoff_measurements" ON takeoff_measurements FOR ALL USING (true);
 
 -- No sample data - start with empty tables

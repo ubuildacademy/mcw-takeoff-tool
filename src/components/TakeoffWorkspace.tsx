@@ -15,7 +15,6 @@ import { Separator } from "./ui/separator";
 import { 
   ArrowLeft, 
   Save, 
-  Download, 
   Settings, 
   FileText, 
   PanelLeftClose,
@@ -405,14 +404,6 @@ export function TakeoffWorkspace() {
           
           <Separator orientation="vertical" className="h-8" />
           
-          <div className="flex items-center gap-4">
-            <div>
-              <h1 className="text-xl font-semibold text-gray-900">{currentProject.name}</h1>
-              <p className="text-sm text-gray-600">{currentProject.client}</p>
-            </div>
-            
-
-          </div>
         </div>
 
         {/* Center - PDF Controls */}
@@ -550,11 +541,6 @@ export function TakeoffWorkspace() {
               className="hidden"
               id="pdf-upload"
             />
-            
-            <Button variant="outline" size="sm" className="flex items-center gap-2">
-              <Download className="w-4 h-4" />
-              Export
-            </Button>
             
             <Button 
               size="sm" 
