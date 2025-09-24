@@ -119,6 +119,39 @@ class SupabaseStorage {
     }));
   }
 
+  async getProject(id: string): Promise<StoredProject | null> {
+    const { data, error } = await supabase
+      .from(TABLES.PROJECTS)
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return null; // Project not found
+      }
+      console.error('Error fetching project:', error);
+      throw new Error('Failed to fetch project');
+    }
+
+    // Map snake_case to camelCase
+    return {
+      id: data.id,
+      name: data.name,
+      client: data.client,
+      location: data.location,
+      status: data.status,
+      description: data.description,
+      projectType: data.project_type,
+      startDate: data.start_date,
+      contactPerson: data.contact_person,
+      contactEmail: data.contact_email,
+      contactPhone: data.contact_phone,
+      createdAt: data.created_at,
+      lastModified: data.last_modified
+    };
+  }
+
   async saveProject(project: StoredProject): Promise<StoredProject> {
     // Map camelCase to snake_case for database
     const dbProject = {
@@ -603,6 +636,36 @@ class SupabaseStorage {
     }
     
     return data.map((item: any) => ({
+      id: item.id,
+      documentId: item.document_id,
+      pageNumber: item.page_number,
+      sheetNumber: item.sheet_number,
+      sheetName: item.sheet_name,
+      extractedText: item.extracted_text,
+      thumbnail: item.thumbnail,
+      hasTakeoffs: item.has_takeoffs,
+      takeoffCount: item.takeoff_count,
+      isVisible: item.is_visible,
+      ocrProcessed: item.ocr_processed,
+      titleblockConfig: item.titleblock_config,
+      createdAt: item.created_at,
+      updatedAt: item.updated_at
+    }));
+  }
+
+  async getSheetsByDocument(documentId: string): Promise<StoredSheet[]> {
+    const { data, error } = await supabase
+      .from(TABLES.SHEETS)
+      .select('*')
+      .eq('document_id', documentId)
+      .order('page_number', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching sheets by document:', error);
+      return [];
+    }
+
+    return (data || []).map((item: any) => ({
       id: item.id,
       documentId: item.document_id,
       pageNumber: item.page_number,

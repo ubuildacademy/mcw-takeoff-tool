@@ -8,11 +8,14 @@ import {
   FolderOpen, 
   Calendar,
   Upload,
-  Database,
-  Trash2
+  Trash2,
+  Settings,
+  Download
 } from 'lucide-react';
 import { projectService } from '../services/apiService';
 import { ProjectCreationDialog } from './ProjectCreationDialog';
+import { ProjectSettingsDialog } from './ProjectSettingsDialog';
+import { BackupDialog } from './BackupDialog';
 import { useTakeoffStore } from '../store/useTakeoffStore';
 
 interface ApiProject {
@@ -39,6 +42,11 @@ export function ProjectList() {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showBackup, setShowBackup] = useState(false);
+  const [editingProject, setEditingProject] = useState<ApiProject | null>(null);
+  const [backupMode, setBackupMode] = useState<'backup' | 'restore'>('restore');
+  const [selectedProjectForBackup, setSelectedProjectForBackup] = useState<ApiProject | null>(null);
   
   // Use the store
   const { projects, loadInitialData } = useTakeoffStore();
@@ -80,6 +88,24 @@ export function ProjectList() {
 
   const handleNewProject = () => setShowCreate(true);
 
+  const handleOpenExisting = () => {
+    setBackupMode('restore');
+    setShowBackup(true);
+  };
+
+  const handleProjectBackup = (project: ApiProject, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent opening the project
+    setBackupMode('backup');
+    setSelectedProjectForBackup(project);
+    setShowBackup(true);
+  };
+
+  const handleEditProject = (project: ApiProject, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent opening the project
+    setEditingProject(project);
+    setShowSettings(true);
+  };
+
   const handleDeleteProject = async (projectId: string, e: React.MouseEvent) => {
     e.stopPropagation(); // Prevent opening the project
     if (window.confirm('Are you sure you want to delete this project? This action cannot be undone.')) {
@@ -118,13 +144,9 @@ export function ProjectList() {
               </p>
             </div>
             <div className="flex items-center gap-3">
-              <Button variant="outline" size="lg">
+              <Button variant="outline" size="lg" onClick={handleOpenExisting}>
                 <Upload className="w-5 h-5 mr-2" />
                 Open Existing
-              </Button>
-              <Button variant="outline" size="lg">
-                <Database className="w-5 h-5 mr-2" />
-                Backup/Restore
               </Button>
               <Button size="lg" onClick={handleNewProject}>
                 <Plus className="w-5 h-5 mr-2" />
@@ -163,15 +185,16 @@ export function ProjectList() {
         </div>
       </div>
 
-      {/* Projects Grid */}
+      {/* Projects Container */}
       <div className="max-w-7xl mx-auto px-6 py-8">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredProjects.map((project) => (
-            <div
-              key={project.id}
-              className="bg-white border rounded-lg p-6 cursor-pointer hover:shadow-md transition-shadow"
-              onClick={() => handleProjectClick(project.id)}
-            >
+        {viewMode === 'grid' ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filteredProjects.map((project) => (
+              <div
+                key={project.id}
+                className="bg-white border rounded-lg p-6 cursor-pointer hover:shadow-md transition-shadow"
+                onClick={() => handleProjectClick(project.id)}
+              >
               <div className="flex items-start justify-between mb-4">
                 <div className="flex-1">
                   <h3 className="text-lg font-semibold text-foreground mb-1">
@@ -185,14 +208,35 @@ export function ProjectList() {
                     {project.location}
                   </div>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={(e) => handleDeleteProject(project.id, e)}
-                  className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </Button>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(e) => handleProjectBackup(project, e)}
+                    className="text-blue-500 hover:text-blue-700 hover:bg-blue-50"
+                    title="Backup project"
+                  >
+                    <Download className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(e) => handleEditProject(project, e)}
+                    className="text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+                    title="Project settings"
+                  >
+                    <Settings className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(e) => handleDeleteProject(project.id, e)}
+                    className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                    title="Delete project"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                </div>
               </div>
 
               <div className="space-y-3">
@@ -215,7 +259,81 @@ export function ProjectList() {
               </div>
             </div>
           ))}
-        </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {filteredProjects.map((project) => (
+              <div
+                key={project.id}
+                className="bg-white border rounded-lg p-6 cursor-pointer hover:shadow-md transition-shadow"
+                onClick={() => handleProjectClick(project.id)}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-4">
+                      <div className="flex-1">
+                        <h3 className="text-lg font-semibold text-foreground mb-1">
+                          {project.name}
+                        </h3>
+                        <p className="text-sm text-muted-foreground mb-2">
+                          {project.client}
+                        </p>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <FolderOpen className="w-3 h-3" />
+                          {project.location}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <Badge variant="outline">
+                          {project.status || 'active'}
+                        </Badge>
+                        <span className="text-sm font-medium text-foreground">
+                          ${Number(project.totalValue || 0).toLocaleString()}
+                        </span>
+                        <span className="text-sm text-muted-foreground">
+                          {project.takeoffCount || 0} takeoffs
+                        </span>
+                        <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                          <Calendar className="w-3 h-3" />
+                          {project.lastModified ? new Date(project.lastModified).toLocaleDateString() : ''}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 ml-4">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => handleProjectBackup(project, e)}
+                      className="text-blue-500 hover:text-blue-700 hover:bg-blue-50"
+                      title="Backup project"
+                    >
+                      <Download className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => handleEditProject(project, e)}
+                      className="text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+                      title="Project settings"
+                    >
+                      <Settings className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => handleDeleteProject(project.id, e)}
+                      className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                      title="Delete project"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {filteredProjects.length === 0 && (
           <div className="text-center py-12">
@@ -244,6 +362,28 @@ export function ProjectList() {
           // Just close the dialog
           setShowCreate(false);
         }}
+      />
+
+      {editingProject && (
+        <ProjectSettingsDialog
+          open={showSettings}
+          onOpenChange={setShowSettings}
+          project={editingProject}
+          onUpdated={async () => {
+            // The project is already updated in the store by updateProject
+            // Just close the dialog and clear the editing project
+            setShowSettings(false);
+            setEditingProject(null);
+          }}
+        />
+      )}
+
+      <BackupDialog
+        open={showBackup}
+        onOpenChange={setShowBackup}
+        mode={backupMode}
+        projectId={selectedProjectForBackup?.id}
+        projectName={selectedProjectForBackup?.name}
       />
     </div>
   );
