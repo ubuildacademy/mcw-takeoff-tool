@@ -32,6 +32,7 @@ interface PDFViewerProps {
   cutoutMode?: boolean;
   cutoutTargetConditionId?: string | null;
   onCutoutModeChange?: (conditionId: string | null) => void;
+  onMeasurementStateChange?: (isMeasuring: boolean, isCalibrating: boolean, measurementType: string, isOrthoSnapping: boolean) => void;
 }
 
 interface Measurement {
@@ -67,7 +68,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   currentSearchQuery = '',
   cutoutMode = false,
   cutoutTargetConditionId = null,
-  onCutoutModeChange
+  onCutoutModeChange,
+  onMeasurementStateChange
 }) => {
   // Core PDF state
   const [pdfDocument, setPdfDocument] = useState<any>(null);
@@ -144,6 +146,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const isRenderingRef = useRef<boolean>(false);
   const [isComponentMounted, setIsComponentMounted] = useState(false);
   
+  // Notify parent component of measurement state changes
+  useEffect(() => {
+    if (onMeasurementStateChange) {
+      onMeasurementStateChange(isMeasuring, isCalibrating, measurementType, isOrthoSnapping);
+    }
+  }, [isMeasuring, isCalibrating, measurementType, isOrthoSnapping, onMeasurementStateChange]);
+
   // Page-specific viewport and transform state for proper isolation
   const [pageViewports, setPageViewports] = useState<Record<number, any>>({});
   const [pageOutputScales, setPageOutputScales] = useState<Record<number, number>>({});
@@ -270,7 +279,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   useEffect(() => {
     
     if (!currentProjectId || !file?.id || !currentPage) {
-      console.log(`❌ Missing required data - clearing measurements`);
       setLocalTakeoffMeasurements([]);
       return;
     }
@@ -308,18 +316,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }).filter(Boolean);
     
     setLocalTakeoffMeasurements(displayMeasurements);
-    console.log(`📝 SET LOCAL MEASUREMENTS: ${displayMeasurements.length} measurements for page ${currentPage}`);
-    console.log(`📝 MEASUREMENT DETAILS:`, displayMeasurements.map(m => ({ 
-      id: m.id, 
-      type: m.type, 
-      pdfPage: m.pdfPage, 
-      conditionId: m.conditionId 
-    })));
-    console.log(`📝 VIEWPORT STATUS:`, {
-      hasCurrentViewport: !!currentViewport,
-      viewportSize: currentViewport ? `${currentViewport.width}x${currentViewport.height}` : 'null',
-      currentPage
-    });
     
     // If we have measurements and a viewport is available, trigger a re-render
     if (displayMeasurements.length > 0 && currentViewport) {
@@ -348,11 +344,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Only clear if the file ID actually changed
     if (currentFileId !== prevFileId) {
-      console.log(`🧹 CLEARING MEASUREMENTS: File ID changed from ${prevFileId} to ${currentFileId}`);
       setLocalTakeoffMeasurements([]);
       prevFileIdRef.current = currentFileId;
-    } else {
-      console.log(`🧹 SKIPPING CLEAR: File ID unchanged (${currentFileId})`);
     }
     
     // Cancel any pending operations
@@ -406,7 +399,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setPageOutputScales(prev => ({ ...prev, [pageNum]: outputScale }));
     
     
-    console.log(`📐 PAGE ${pageNum} CANVAS SIZING: Bitmap=${canvasWidth}x${canvasHeight}, CSS=${viewport.width}x${viewport.height}, OutputScale=${outputScale}`);
   }, []);
 
 
@@ -426,7 +418,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       if (measurement.pdfPage === pageNum) {
         renderSVGMeasurement(svgOverlay, measurement, viewport, page);
       } else {
-        console.warn(`🚨 SKIPPING measurement ${measurement.id} - belongs to page ${measurement.pdfPage}, rendering page ${pageNum}`);
       }
     });
     
@@ -970,13 +961,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             
             // Store in page-scoped refs
             pageCommittedPolylineRefs.current[currentPage] = polyline;
-            
-            console.log('🎯 Rendered committed segments for page', currentPage, ':', {
-              points: pointString,
-              color: conditionColor,
-              element: polyline,
-              parentNode: polyline.parentNode
-            });
           }
           
           // Always show preview line from first click (similar to area/volume)
@@ -1499,14 +1483,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         // Update running length calculation
         const newLength = calculateRunningLength(activePoints, pdfCoords);
         setRunningLength(newLength);
-        
-        console.log('🎯 Rubber band update:', {
-          lastPoint: lastPointPixels,
-          currentPoint: currentPointPixels,
-          length: newLength,
-          activePoints: activePoints.length,
-          element: currentRubberBand
-        });
       }
     }
   }, [isCalibrating, calibrationPoints, isMeasuring, selectedConditionId, mousePosition, isContinuousDrawing, activePoints, rubberBandElement, currentViewport, calculateRunningLength]);
@@ -1548,15 +1524,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         // Store points in PDF coordinates (0-1) for consistency with measurement system
         const newPoints = [...prev, pdfCoords];
         
-        console.log('🎯 Calibration point added:', {
-          pointIndex: newPoints.length,
-          pdfCoords,
-          cssCoords: { x: cssX, y: cssY },
-          viewport: { width: currentViewport.width, height: currentViewport.height }
-        });
-        
         if (newPoints.length === 2) {
-          console.log('🎯 Completing calibration with points:', newPoints);
           completeCalibration(newPoints);
         }
         
@@ -1609,13 +1577,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (measurementType === 'linear') {
       if (!isContinuousDrawing) {
         // Start continuous drawing mode
-        console.log('🎯 Starting continuous linear drawing mode');
         setIsContinuousDrawing(true);
         setActivePoints([pdfCoords]);
         createRubberBandElement();
       } else {
         // Add point to active measurement
-        console.log('🎯 Adding point to continuous measurement');
         setActivePoints(prev => {
           const newPoints = [...prev, pdfCoords];
           // Update running length after adding point
@@ -1683,15 +1649,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Store in page-scoped refs
     pageRubberBandRefs.current[currentPage] = line;
     setRubberBandElement(line);
-    
-    console.log('🎯 Created rubber band element for page', currentPage, ':', {
-      svgWidth: currentViewport.width,
-      svgHeight: currentViewport.height,
-      viewBox: `0 0 ${currentViewport.width} ${currentViewport.height}`,
-      color: conditionColor,
-      element: line,
-      parentNode: line.parentNode
-    });
   }, [currentViewport, currentPage]);
   // Complete current measurement
   const completeMeasurement = useCallback(async (points: { x: number; y: number }[]) => {
@@ -1795,22 +1752,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (currentProjectId && file?.id) {
       const { addTakeoffMeasurement, getPageTakeoffMeasurements } = useTakeoffStore.getState();
       
-      console.log(`💾 SAVING: Page ${currentPage} (type: ${typeof currentPage}) for project ${currentProjectId}, sheet ${file.id}`);
-      console.log(`💾 MEASUREMENT DATA:`, {
-        projectId: currentProjectId,
-        sheetId: file.id,
-        conditionId: currentSelectedConditionId,
-        type: measurementType,
-        points: points.length,
-        calculatedValue,
-        unit,
-        pdfPage: currentPage,
-        pdfPageType: typeof currentPage,
-        conditionDepth: selectedCondition.depth,
-        conditionIncludePerimeter: selectedCondition.includePerimeter,
-        perimeterValue
-      });
-      
       addTakeoffMeasurement({
         projectId: currentProjectId,
         sheetId: file.id,
@@ -1825,11 +1766,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         conditionName: selectedCondition.name,
         perimeterValue
       }).then(savedMeasurementId => {
-        console.log(`✅ SAVED ${measurementType.toUpperCase()} measurement with ID:`, savedMeasurementId);
-        
         // Reload measurements from API
         const updatedMeasurements = getPageTakeoffMeasurements(currentProjectId, file.id, currentPage);
-        console.log(`📊 RELOADED measurements for page ${currentPage}:`, updatedMeasurements.length, 'total');
         
         const displayMeasurements = updatedMeasurements.map(apiMeasurement => ({
           id: apiMeasurement.id,
@@ -1853,14 +1791,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           renderPDFPage(currentPage);
         });
       }).catch(error => {
-        console.error(`❌ FAILED to save ${measurementType.toUpperCase()} measurement:`, error);
-        console.error('Error details:', {
-          errorMessage: error.message,
-          errorStack: error.stack,
-          measurementType,
-          calculatedValue,
-          points: points.length
-        });
+        console.error(`Failed to save ${measurementType.toUpperCase()} measurement:`, error);
       });
     }
     
@@ -1939,7 +1870,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Update the measurement
     try {
       await updateTakeoffMeasurement(targetMeasurement.id, updatedMeasurement);
-      console.log('✅ Cut-out added successfully');
       
       // Update local measurements immediately with the new data
       setLocalTakeoffMeasurements(prevMeasurements => 
@@ -1974,7 +1904,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     const currentRubberBand = pageRubberBandRefs.current[currentPage];
     if (currentRubberBand && svgOverlayRef.current && currentRubberBand.parentNode === svgOverlayRef.current) {
       svgOverlayRef.current.removeChild(currentRubberBand);
-      console.log('🎯 Removed rubber band element for page', currentPage);
     }
     
     // Clear page-scoped refs
@@ -1992,29 +1921,18 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Handle double-click to complete measurements
   const handleDoubleClick = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
-    console.log('🎯 Double-click detected:', { 
-      isContinuousDrawing, 
-      activePointsLength: activePoints.length,
-      measurementType,
-      currentMeasurementLength: currentMeasurement.length,
-      cutoutMode,
-      currentCutoutLength: currentCutout.length
-    });
     
     // Handle cut-out completion
     if (cutoutMode && currentCutout.length >= 3) {
-      console.log('🎯 Completing cut-out');
       completeCutout(currentCutout);
       return;
     }
     
     if (isContinuousDrawing && activePoints.length >= 2) {
       // Complete the continuous linear measurement
-      console.log('🎯 Completing continuous linear measurement');
       completeContinuousLinearMeasurement();
     } else if ((measurementType === 'area' || measurementType === 'volume') && currentMeasurement.length >= 3) {
       // Complete area or volume measurement
-      console.log('🎯 Completing area/volume measurement');
       completeMeasurement(currentMeasurement);
     }
   }, [isContinuousDrawing, activePoints, measurementType, currentMeasurement, completeContinuousLinearMeasurement, completeMeasurement, cutoutMode, currentCutout, completeCutout]);
@@ -2026,7 +1944,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (currentRubberBand && svgOverlayRef.current && currentRubberBand.parentNode === svgOverlayRef.current) {
       try {
         svgOverlayRef.current.removeChild(currentRubberBand);
-        console.log('🎯 Cleaned up rubber band for page', currentPage);
       } catch (e) {
         console.warn('🎯 Failed to remove rubber band:', e);
       }
@@ -2057,7 +1974,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         if (rubberBand && rubberBand.parentNode) {
           try {
             rubberBand.parentNode.removeChild(rubberBand);
-            console.log('🎯 Cleaned up rubber band from page', pageNumInt);
           } catch (e) {
             console.warn('🎯 Failed to clean up rubber band from page', pageNumInt, e);
           }
@@ -2074,7 +1990,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         if (polyline && polyline.parentNode) {
           try {
             polyline.parentNode.removeChild(polyline);
-            console.log('🎯 Cleaned up committed polyline from page', pageNumInt);
           } catch (e) {
             console.warn('🎯 Failed to clean up committed polyline from page', pageNumInt, e);
           }
@@ -2119,19 +2034,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     const basePixelDistance = calculateDistance(basePoint1, basePoint2);
     const newScaleFactor = basePixelDistance / knownDistance;
-    
-    console.log('🎯 Calibration completed:', {
-      point1: { pdf: points[0], viewport: point1 },
-      point2: { pdf: points[1], viewport: point2 },
-      pixelDistance,
-      basePixelDistance,
-      knownDistance,
-      unit,
-      newScaleFactor,
-      currentViewport: { width: currentViewport.width, height: currentViewport.height },
-      baseViewport: { width: baseViewport.width, height: baseViewport.height },
-      currentScale: viewState.scale
-    });
     
     if (externalScaleFactor === undefined) {
       setInternalScaleFactor(newScaleFactor);
@@ -2235,7 +2137,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         setInternalViewState(prev => ({ ...prev, scale: optimalScale }));
       }
 
-      console.log('✅ FIT_TO_WINDOW: Successfully applied scale', optimalScale);
     } catch (error) {
       console.error('❌ FIT_TO_WINDOW: Error fitting to window', error);
     }
@@ -2330,11 +2231,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         
         try {
           await deleteTakeoffMeasurement(selectedMarkupId);
-          console.log(`🗑️ DELETED markup with ID:`, selectedMarkupId);
-          
           // Reload measurements from API
           const updatedMeasurements = getPageTakeoffMeasurements(currentProjectId, file.id, currentPage);
-          console.log(`📊 RELOADED measurements for page ${currentPage}:`, updatedMeasurements.length, 'total');
           
           const displayMeasurements = updatedMeasurements.map(apiMeasurement => ({
             id: apiMeasurement.id,
@@ -2364,14 +2262,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             renderPDFPage(currentPage);
           });
         } catch (error: any) {
-          console.error(`❌ FAILED to delete markup:`, error);
+          console.error(`Failed to delete markup:`, error);
         }
       }
     } else if (event.key === 'Control' && (isMeasuring || isCalibrating)) {
       // Toggle ortho snapping when Ctrl is pressed during measurement or calibration
       event.preventDefault();
       setIsOrthoSnapping(prev => !prev);
-      console.log(`🎯 Ortho snapping ${!isOrthoSnapping ? 'enabled' : 'disabled'}`);
     }
   }, [isMeasuring, isCalibrating, calibrationPoints.length, currentMeasurement.length, selectedMarkupId, isSelectionMode, currentProjectId, file?.id, currentPage, renderPDFPage, measurementType, isContinuousDrawing, activePoints.length, isOrthoSnapping]);
 
@@ -2391,7 +2288,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         if (pdfCanvasRef.current && containerRef.current) {
           await renderPDFPage(currentPage);
         } else if (retries > 0) {
-          console.log(`Canvas not ready, retrying in 100ms... (${retries} retries left)`);
           setTimeout(() => attemptRender(retries - 1), 100);
         } else {
           console.warn('Canvas not ready after retries, skipping render');
@@ -2550,27 +2446,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   return (
     <div className={`pdf-viewer-container h-full flex flex-col relative ${className}`}>
 
-      {/* Interaction Status */}
-      {(isMeasuring || isCalibrating) && (
-        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-10 bg-blue-600 text-white px-4 py-2 rounded-lg">
-          {isCalibrating ? (
-            'Calibrating: Click two points to set scale'
-          ) : (
-            `Measuring: ${measurementType} - Click to add points`
-          )}
-        </div>
-      )}
-
-      {/* Ortho Snapping Indicator */}
-      {(isOrthoSnapping && isMeasuring) || (isCalibrating && calibrationPoints.length > 0) ? (
-        <div className="absolute top-16 left-1/2 transform -translate-x-1/2 z-10 bg-green-600 text-white px-3 py-1 rounded-lg text-sm flex items-center gap-2">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3 12h18"/>
-            <path d="M12 3v18"/>
-          </svg>
-          {isCalibrating ? 'Calibration Ortho Snapping ON' : 'Ortho Snapping ON'}
-        </div>
-      ) : null}
 
       {/* Single Canvas + SVG Overlay Container */}
       <div 
