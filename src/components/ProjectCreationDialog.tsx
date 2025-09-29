@@ -88,14 +88,9 @@ export function ProjectCreationDialog({ open, onOpenChange, onCreated }: Project
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    console.log('Submit button clicked!');
-    console.log('Form data:', formData);
-    console.log('Is form valid?', isFormValid);
-    console.log('Is submitting?', isSubmitting);
     
     if (isSubmitting) return;
     if (!isFormValid) {
-      console.log('Form is not valid, cannot submit');
       return;
     }
     
@@ -116,9 +111,7 @@ export function ProjectCreationDialog({ open, onOpenChange, onCreated }: Project
         contactPhone: formData.contactPhone
       };
 
-      console.log('🔥 Creating project with payload:', payload);
       const projectId = await addProject(payload);
-      console.log('🔥 Project created successfully with ID:', projectId);
       
       // Get the created project from the store
       const project = { id: projectId, ...payload };
@@ -138,29 +131,13 @@ export function ProjectCreationDialog({ open, onOpenChange, onCreated }: Project
         estimatedValue: '', contactPerson: '', contactEmail: '', contactPhone: ''
       });
     } catch (error) {
-      console.error('🔥 Error creating job:', error);
-      console.error('🔥 Error details:', {
-        message: error instanceof Error ? error.message : 'Unknown error',
-        stack: error instanceof Error ? error.stack : 'No stack trace',
-        error
-      });
+      console.error('Error creating job:', error);
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const isFormValid = Boolean(formData.name?.trim()) && Boolean(formData.client?.trim()) && Boolean(formData.location?.trim());
-  
-  // Debug form validation
-  console.log('Form validation:', {
-    name: formData.name,
-    client: formData.client,
-    location: formData.location,
-    nameValid: Boolean(formData.name?.trim()),
-    clientValid: Boolean(formData.client?.trim()),
-    locationValid: Boolean(formData.location?.trim()),
-    isValid: isFormValid
-  });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
