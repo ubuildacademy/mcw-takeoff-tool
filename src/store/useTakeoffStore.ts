@@ -33,6 +33,7 @@ interface TakeoffStore {
   // Takeoff conditions
   conditions: TakeoffCondition[];
   selectedConditionId: string | null;
+  loadingConditions: boolean;
   
   // Measurements
   measurements: Measurement[];
@@ -96,6 +97,8 @@ interface TakeoffStore {
   loadInitialData: () => Promise<void>;
   loadProjectConditions: (projectId: string) => Promise<void>;
   loadProjectTakeoffMeasurements: (projectId: string) => Promise<void>;
+  refreshProjectConditions: (projectId: string) => Promise<void>;
+  ensureConditionsLoaded: (projectId: string) => Promise<void>;
 }
 
 export const useTakeoffStore = create<TakeoffStore>()(
@@ -107,6 +110,7 @@ export const useTakeoffStore = create<TakeoffStore>()(
       
       conditions: [],
       selectedConditionId: null,
+      loadingConditions: false,
       
       measurements: [],
       
@@ -585,8 +589,8 @@ export const useTakeoffStore = create<TakeoffStore>()(
           const projects = projectsResponse.projects || [];
           
           set(state => ({
-            projects,
-            conditions: [] // Always start with empty conditions - load from backend per project
+            projects
+            // Don't clear conditions - they should persist from localStorage
           }));
           
           console.log('Initial data loaded:', { projects: projects.length });
@@ -599,10 +603,10 @@ export const useTakeoffStore = create<TakeoffStore>()(
             response: error.response?.data
           });
           
-          // Start with empty state for offline mode
+          // Start with empty state for offline mode, but preserve conditions
           set(state => ({
-            projects: [],
-            conditions: []
+            projects: []
+            // Don't clear conditions - they should persist from localStorage
           }));
           
           console.log('Starting with empty state for offline mode');
@@ -610,7 +614,34 @@ export const useTakeoffStore = create<TakeoffStore>()(
       },
       
       loadProjectConditions: async (projectId: string) => {
+        const state = get();
+        
+        // Check if we already have conditions for this project from localStorage
+        const existingProjectConditions = state.conditions.filter(c => c.projectId === projectId);
+        if (existingProjectConditions.length > 0) {
+          console.log(`🔄 LOAD_PROJECT_CONDITIONS: Already have ${existingProjectConditions.length} conditions for project ${projectId} from localStorage, refreshing from API`);
+        }
+        
+        // Prevent multiple simultaneous loads for the same project
+        if (state.loadingConditions) {
+          console.log('🔄 LOAD_PROJECT_CONDITIONS: Already loading conditions, skipping duplicate request');
+          return;
+        }
+        
         console.log('🔄 LOAD_PROJECT_CONDITIONS: Starting to load conditions for project:', projectId);
+        
+        // Set loading state with timeout to prevent getting stuck
+        set({ loadingConditions: true });
+        
+        // Set a timeout to reset loading state if it gets stuck
+        const loadingTimeout = setTimeout(() => {
+          const currentState = get();
+          if (currentState.loadingConditions) {
+            console.warn('⚠️ LOAD_PROJECT_CONDITIONS: Loading timeout, resetting loading state');
+            set({ loadingConditions: false });
+          }
+        }, 10000); // 10 second timeout
+        
         try {
           // Import the API service dynamically to avoid circular dependencies
           const { conditionService } = await import('../services/apiService');
@@ -632,13 +663,44 @@ export const useTakeoffStore = create<TakeoffStore>()(
               totalCount: allConditions.length,
               projectConditions: projectConditions
             });
-            return { conditions: allConditions };
+            return { 
+              conditions: allConditions,
+              loadingConditions: false
+            };
           });
+          
+          // Clear the timeout since we completed successfully
+          clearTimeout(loadingTimeout);
           
           console.log(`✅ LOAD_PROJECT_CONDITIONS: Project conditions loaded for ${projectId}:`, projectConditions.length);
         } catch (error) {
           console.error(`❌ LOAD_PROJECT_CONDITIONS: Failed to load conditions for project ${projectId}:`, error);
+          // Reset loading state on error
+          set({ loadingConditions: false });
+          // Clear the timeout
+          clearTimeout(loadingTimeout);
         }
+      },
+
+      refreshProjectConditions: async (projectId: string) => {
+        console.log('🔄 REFRESH_PROJECT_CONDITIONS: Force refreshing conditions for project:', projectId);
+        // Reset loading state to allow fresh load
+        set({ loadingConditions: false });
+        // Load conditions fresh from API
+        await get().loadProjectConditions(projectId);
+      },
+
+      ensureConditionsLoaded: async (projectId: string) => {
+        const state = get();
+        const existingProjectConditions = state.conditions.filter(c => c.projectId === projectId);
+        
+        if (existingProjectConditions.length > 0) {
+          console.log(`✅ ENSURE_CONDITIONS_LOADED: Already have ${existingProjectConditions.length} conditions for project ${projectId} from localStorage`);
+          return;
+        }
+        
+        console.log(`🔄 ENSURE_CONDITIONS_LOADED: No conditions found for project ${projectId}, loading from API`);
+        await get().loadProjectConditions(projectId);
       },
 
       loadProjectTakeoffMeasurements: async (projectId: string) => {
@@ -680,7 +742,8 @@ export const useTakeoffStore = create<TakeoffStore>()(
       name: 'takeoff-store',
       partialize: (state) => ({
         projects: state.projects,
-        // Don't persist conditions to localStorage - always load from backend
+        // Persist conditions to localStorage for better UX and faster loading
+        conditions: state.conditions,
         measurements: state.measurements,
         calibrations: state.calibrations,
         takeoffMeasurements: state.takeoffMeasurements,
