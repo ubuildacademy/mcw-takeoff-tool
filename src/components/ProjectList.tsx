@@ -33,11 +33,6 @@ export function ProjectList() {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  
-  console.log('📋 PROJECT_LIST: Component initialized', { 
-    currentUrl: window.location.href,
-    pathname: window.location.pathname
-  });
 
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -49,7 +44,7 @@ export function ProjectList() {
   const [selectedProjectForBackup, setSelectedProjectForBackup] = useState<ApiProject | null>(null);
   
   // Use the store
-  const { projects, loadInitialData } = useTakeoffStore();
+  const { projects, loadInitialData, getProjectTotalCost } = useTakeoffStore();
 
   useEffect(() => {
     let mounted = true;
@@ -75,12 +70,6 @@ export function ProjectList() {
     (project.client || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
     (project.location || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
-  
-  console.log('📋 PROJECT_LIST: Projects loaded', { 
-    projectsCount: projects?.length || 0,
-    filteredCount: filteredProjects.length,
-    projects: projects?.map(p => ({ id: p.id, name: p.name, client: p.client }))
-  });
 
   const handleProjectClick = (projectId: string) => {
     navigate(`/job/${projectId}`);
@@ -245,7 +234,7 @@ export function ProjectList() {
                     {project.status || 'active'}
                   </Badge>
                   <span className="text-sm font-medium text-foreground">
-                    ${Number(project.totalValue || 0).toLocaleString()}
+                    ${getProjectTotalCost(project.id).toLocaleString()}
                   </span>
                 </div>
 
@@ -288,7 +277,7 @@ export function ProjectList() {
                           {project.status || 'active'}
                         </Badge>
                         <span className="text-sm font-medium text-foreground">
-                          ${Number(project.totalValue || 0).toLocaleString()}
+                          ${getProjectTotalCost(project.id).toLocaleString()}
                         </span>
                         <span className="text-sm text-muted-foreground">
                           {project.takeoffCount || 0} takeoffs

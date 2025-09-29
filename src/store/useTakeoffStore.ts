@@ -92,6 +92,7 @@ interface TakeoffStore {
   getProjectMeasurements: (projectId: string) => Measurement[];
   getSelectedCondition: () => TakeoffCondition | null;
   getProjectTakeoffMeasurements: (projectId: string) => TakeoffMeasurement[];
+  getProjectTotalCost: (projectId: string) => number;
   
   // Data loading
   loadInitialData: () => Promise<void>;
@@ -576,6 +577,41 @@ export const useTakeoffStore = create<TakeoffStore>()(
       getProjectTakeoffMeasurements: (projectId) => {
         const { takeoffMeasurements } = get();
         return takeoffMeasurements.filter(m => m.projectId === projectId);
+      },
+      
+      getProjectTotalCost: (projectId) => {
+        const { conditions, takeoffMeasurements } = get();
+        
+        // Get all conditions for this project
+        const projectConditions = conditions.filter(c => c.projectId === projectId);
+        
+        // Get all measurements for this project
+        const projectMeasurements = takeoffMeasurements.filter(m => m.projectId === projectId);
+        
+        let totalCost = 0;
+        
+        // Calculate cost for each condition
+        projectConditions.forEach(condition => {
+          // Get all measurements for this condition
+          const conditionMeasurements = projectMeasurements.filter(m => m.conditionId === condition.id);
+          
+          // Calculate total quantity for this condition
+          const totalQuantity = conditionMeasurements.reduce((sum, measurement) => {
+            return sum + (measurement.calculatedValue || 0);
+          }, 0);
+          
+          // Calculate cost for this condition
+          const materialCostPerUnit = condition.materialCost || 0;
+          const laborCostPerUnit = condition.laborCost || 0;
+          
+          const totalMaterialCost = totalQuantity * materialCostPerUnit;
+          const totalLaborCost = totalQuantity * laborCostPerUnit;
+          const conditionTotalCost = totalMaterialCost + totalLaborCost;
+          
+          totalCost += conditionTotalCost;
+        });
+        
+        return totalCost;
       },
       
       // Data loading

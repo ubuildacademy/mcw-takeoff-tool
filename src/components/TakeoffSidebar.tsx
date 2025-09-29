@@ -22,6 +22,7 @@ import {
   Scissors,
 } from 'lucide-react';
 import { useTakeoffStore } from '../store/useTakeoffStore';
+import { sheetService } from '../services/apiService';
 import type { TakeoffCondition, PDFDocument } from '../types';
 import { CreateConditionDialog } from './CreateConditionDialog';
 import { formatFeetAndInches } from '../lib/utils';
@@ -58,14 +59,11 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
   useEffect(() => {
     // Ensure conditions are loaded when component mounts or projectId changes
     if (projectId) {
-      console.log('🔄 LOADING_CONDITIONS: Ensuring conditions are loaded for project:', projectId);
-      ensureConditionsLoaded(projectId).then(() => {
-        console.log('✅ LOADING_CONDITIONS: Conditions ensured');
-      }).catch((error) => {
-        console.error('❌ LOADING_CONDITIONS: Failed to ensure conditions:', error);
+      ensureConditionsLoaded(projectId).catch((error) => {
+        console.error('Failed to ensure conditions:', error);
       });
     }
-  }, [projectId]); // Remove function dependencies to prevent infinite loops
+  }, [projectId]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -88,35 +86,123 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
     )
   );
 
-  // Debug logging for conditions (reduced frequency)
-  useEffect(() => {
-    if (conditions.length > 0) {
-      const timeoutId = setTimeout(() => {
-        const projectConditions = conditions.filter(c => c.projectId === projectId);
-        console.log('📊 CONDITIONS_STATE: Current conditions state:', {
-          totalConditions: conditions.length,
-          projectConditions: projectConditions.length,
-          projectId
-        });
-      }, 500); // Reduced frequency for cleaner logs
-      
-      return () => clearTimeout(timeoutId);
-    }
-  }, [conditions.length, projectId]); // Only log when conditions count changes
 
   // Helper function to get sheet name for a page
   const getSheetName = (sheetId: string, pageNumber: number): string => {
     const document = documents.find(doc => doc.id === sheetId);
-    if (!document) return `Page ${pageNumber}`;
+    if (!document) {
+      return `Page ${pageNumber}`;
+    }
     
     const page = document.pages.find(p => p.pageNumber === pageNumber);
-    if (!page) return `Page ${pageNumber}`;
+    if (!page) {
+      return `Page ${pageNumber}`;
+    }
     
     // Use sheetName if available, otherwise use sheetNumber, otherwise fall back to page number
     return page.sheetName || page.sheetNumber || `Page ${pageNumber}`;
   };
 
-  // Quantity Reports Data Aggregation
+  // Enhanced helper function to get sheet name with fallback to backend
+  const getSheetNameWithFallback = async (sheetId: string, pageNumber: number): Promise<string> => {
+    // First try to get from local documents
+    const localResult = getSheetName(sheetId, pageNumber);
+    
+    // If we got a custom sheet name, return it
+    if (localResult && localResult !== `Page ${pageNumber}`) {
+      return localResult;
+    }
+    
+    // If no custom name found locally, try to fetch from backend
+    try {
+      const sheetIdForBackend = `${sheetId}-${pageNumber}`;
+      const sheetData = await sheetService.getSheet(sheetIdForBackend);
+      if (sheetData && sheetData.sheet && sheetData.sheet.sheetName) {
+        return sheetData.sheet.sheetName;
+      }
+    } catch (error) {
+      // Silently handle error - fall back to local result
+    }
+    
+    // Fall back to local result
+    return localResult;
+  };
+
+  // Quantity Reports Data Aggregation (async version for exports)
+  const getQuantityReportDataAsync = async () => {
+    const projectMeasurements = getProjectTakeoffMeasurements(projectId);
+    const projectConditions = conditions.filter(c => c.projectId === projectId);
+    
+    // Get all unique pages that have measurements with their sheet names
+    const pagesWithMeasurements = new Map<string, { pageNumber: number; sheetName: string; sheetId: string }>();
+    
+    // Use Promise.all to fetch all sheet names in parallel
+    const sheetNamePromises = projectMeasurements.map(async (measurement) => {
+      const key = `${measurement.sheetId}-${measurement.pdfPage}`;
+      if (!pagesWithMeasurements.has(key)) {
+        const sheetName = await getSheetNameWithFallback(measurement.sheetId, measurement.pdfPage);
+        pagesWithMeasurements.set(key, {
+          pageNumber: measurement.pdfPage,
+          sheetName: sheetName,
+          sheetId: measurement.sheetId
+        });
+      }
+    });
+    
+    await Promise.all(sheetNamePromises);
+    
+    const sortedPages = Array.from(pagesWithMeasurements.values()).sort((a, b) => a.pageNumber - b.pageNumber);
+    
+    // Group measurements by condition and page
+    const reportData: Record<string, {
+      condition: TakeoffCondition;
+      pages: Record<string, {
+        pageNumber: number;
+        sheetName: string;
+        sheetId: string;
+        measurements: any[];
+        total: number;
+      }>;
+      grandTotal: number;
+    }> = {};
+    
+    projectConditions.forEach(condition => {
+      const conditionMeasurements = getConditionTakeoffMeasurements(projectId, condition.id);
+      
+      if (conditionMeasurements.length > 0) {
+        const pages: Record<string, { pageNumber: number; sheetName: string; sheetId: string; measurements: any[]; total: number }> = {};
+        let grandTotal = 0;
+        
+        conditionMeasurements.forEach(measurement => {
+          const pageKey = `${measurement.sheetId}-${measurement.pdfPage}`;
+          if (!pages[pageKey]) {
+            const pageInfo = pagesWithMeasurements.get(pageKey);
+            pages[pageKey] = { 
+              pageNumber: measurement.pdfPage,
+              sheetName: pageInfo?.sheetName || `Page ${measurement.pdfPage}`,
+              sheetId: measurement.sheetId,
+              measurements: [], 
+              total: 0 
+            };
+          }
+          
+          pages[pageKey].measurements.push(measurement);
+          pages[pageKey].total += measurement.netCalculatedValue || measurement.calculatedValue;
+          grandTotal += measurement.netCalculatedValue || measurement.calculatedValue;
+        });
+        
+        reportData[condition.id] = {
+          condition,
+          pages,
+          grandTotal
+        };
+      }
+    });
+    
+    return { reportData, sortedPages };
+  };
+
+  // Quantity Reports Data Aggregation (synchronous version for UI)
   const getQuantityReportData = () => {
     const projectMeasurements = getProjectTakeoffMeasurements(projectId);
     const projectConditions = conditions.filter(c => c.projectId === projectId);
@@ -270,13 +356,9 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
   };
 
   const exportToExcel = async () => {
-    console.log('🚀 Starting Excel export...');
-    
     try {
-      const { reportData, sortedPages } = getQuantityReportData();
+      const { reportData, sortedPages } = await getQuantityReportDataAsync();
       const conditionIds = Object.keys(reportData);
-      
-      console.log('📊 Report data:', { conditionIds: conditionIds.length, sortedPages: sortedPages.length });
       
       if (conditionIds.length === 0) {
         alert('No data to export');
@@ -284,7 +366,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       }
 
       // Start export progress
-      console.log('📈 Updating status to 10%');
       onExportStatusUpdate?.('excel', 10);
 
     // Create workbook and worksheet
@@ -298,9 +379,9 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
     
     // Header row with industry-standard page labeling
     const headerRow = ['Condition', 'Type', 'Unit', ...sortedPages.map(p => {
-      // Only show (P#) format if the page has been renamed from default
-      const isDefaultName = p.sheetName === `Page ${p.pageNumber}`;
-      return isDefaultName ? `Page ${p.pageNumber}` : `${p.sheetName} (P${p.pageNumber})`;
+      // Check if page has been relabeled (has a custom sheetName)
+      const hasCustomName = p.sheetName && p.sheetName !== `Page ${p.pageNumber}`;
+      return hasCustomName ? `${p.sheetName} (P.${p.pageNumber})` : `Page ${p.pageNumber}`;
     }), 'Total'];
     summaryData.push(headerRow);
     
@@ -515,23 +596,17 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       onExportStatusUpdate?.(null, 0);
     }, 1000);
     
-    console.log('✅ Excel export completed successfully');
-    
     } catch (error) {
-      console.error('❌ Excel export error:', error);
+      console.error('Excel export error:', error);
       onExportStatusUpdate?.(null, 0);
       throw error; // Re-throw to be caught by the button handler
     }
   };
 
   const exportToPDF = async () => {
-    console.log('🚀 Starting PDF export...');
-    
     try {
-      const { reportData } = getQuantityReportData();
+      const { reportData, sortedPages } = await getQuantityReportDataAsync();
       const conditionIds = Object.keys(reportData);
-      
-      console.log('📊 PDF Report data:', { conditionIds: conditionIds.length });
       
       if (conditionIds.length === 0) {
         alert('No data to export');
@@ -539,7 +614,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       }
 
       // Start export progress
-      console.log('📈 Updating status to 5%');
       onExportStatusUpdate?.('pdf', 5);
 
       // Get all unique pages that have measurements from the report data
@@ -569,8 +643,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       const currentProject = useTakeoffStore.getState().getCurrentProject();
       
                   // Add summary page with formatted table
-                  console.log('📋 Creating summary page...');
-                  
                   pdf.setFontSize(20);
                   pdf.setFont('helvetica', 'bold');
                   pdf.text('Takeoff Summary Report', 20, 30);
@@ -604,8 +676,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                   pdf.setFont('helvetica', 'normal');
                   let currentY = tableStartY + rowHeight;
                   
-                  console.log(`📊 Adding ${conditionIds.length} conditions to summary table...`);
-                  
                   conditionIds.forEach((conditionId, index) => {
                     const conditionData = reportData[conditionId];
                     
@@ -626,10 +696,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                     pdf.text(conditionData.grandTotal.toFixed(2), 20 + colWidths[0] + colWidths[1] + colWidths[2], currentY);
                     
                     currentY += rowHeight;
-                    console.log(`✅ Added condition ${index + 1}: ${conditionName} - ${conditionData.grandTotal.toFixed(2)} ${conditionData.condition.unit}`);
                   });
-                  
-                  console.log('✅ Summary page completed');
 
       // Update progress
       onExportStatusUpdate?.('pdf', 20);
@@ -649,14 +716,15 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         // Add page header
         pdf.setFontSize(12);
         pdf.setFont('helvetica', 'bold');
-        pdf.text(`${pageInfo.sheetName} - Page ${pageInfo.pageNumber}`, 20, 20);
+        // Use same page labeling logic as Excel export
+        const hasCustomName = pageInfo.sheetName && pageInfo.sheetName !== `Page ${pageInfo.pageNumber}`;
+        const pageLabel = hasCustomName ? `${pageInfo.sheetName} (P.${pageInfo.pageNumber})` : `Page ${pageInfo.pageNumber}`;
+        pdf.text(pageLabel, 20, 20);
         
         // Add a separator line
         pdf.line(20, 25, 190, 25);
 
                     // Navigate to the page and capture it
-                    console.log(`📄 Capturing page ${pageInfo.pageNumber} from document ${pageInfo.sheetId}`);
-                    
                     // Navigate to the page
                     if (onPageSelect) {
                       onPageSelect(pageInfo.sheetId, pageInfo.pageNumber);
@@ -674,7 +742,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                     const resetViewButton = document.querySelector('button[title*="Reset"], button[title*="reset"], button[aria-label*="Reset"], button[aria-label*="reset"]') as HTMLButtonElement;
                     if (resetViewButton) {
                       resetViewButton.click();
-                      console.log('✅ Clicked Reset View button');
                       await new Promise(resolve => setTimeout(resolve, 2000)); // Wait longer for page to fit
                       
                       // Try to zoom out further to ensure full page is visible
@@ -685,7 +752,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                           zoomOutButton.click();
                           await new Promise(resolve => setTimeout(resolve, 300));
                         }
-                        console.log('✅ Zoomed out to ensure full page visibility');
                       }
                       pageFitted = true;
                     }
@@ -697,7 +763,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                         const fitButton = zoomControls.querySelector('button[title*="fit"], button[aria-label*="fit"], button[title*="Fit"], button[aria-label*="Fit"]') as HTMLButtonElement;
                         if (fitButton) {
                           fitButton.click();
-                          console.log('✅ Clicked fit button in zoom controls');
                           pageFitted = true;
                           await new Promise(resolve => setTimeout(resolve, 1500));
                         }
@@ -719,7 +784,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                             ariaLabel.toLowerCase().includes('reset') ||
                             textContent.toLowerCase().includes('reset')) {
                           button.click();
-                          console.log('✅ Clicked button with fit/reset:', { title, ariaLabel, textContent });
                           pageFitted = true;
                           await new Promise(resolve => setTimeout(resolve, 1500));
                           break;
@@ -754,7 +818,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                     }
                     
                     if (!pageFitted) {
-                      console.log('⚠️ Could not find fit/reset button, proceeding with current view');
+                      // Could not find fit/reset button, proceeding with current view
                     }
 
                     try {
@@ -812,16 +876,12 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                         
                         if (largestDiv) {
                           pdfViewerContainer = largestDiv as HTMLElement;
-                          console.log('✅ Found larger container:', largestDiv.className || 'unnamed');
                         }
                       }
                       
                       if (pdfViewerContainer) {
-                        console.log('📸 Found PDF viewer container, capturing...');
-                        
                         // Get the full dimensions of the container
                         const rect = pdfViewerContainer.getBoundingClientRect();
-                        console.log(`📐 Container dimensions: ${rect.width}x${rect.height}`);
                         
                         // Capture the PDF viewer with markups at higher quality and preserve colors
                         const canvas = await html2canvas(pdfViewerContainer, {
@@ -846,8 +906,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                             }
                           }
                         });
-
-                        console.log(`📐 Captured canvas dimensions: ${canvas.width}x${canvas.height}`);
 
                         // Convert canvas to image data with high quality
                         const imgData = canvas.toDataURL('image/png', 1.0);
@@ -875,10 +933,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                         
                         // Add the captured image to PDF with high quality
                         pdf.addImage(imgData, 'PNG', xOffset, yOffset, imgWidth, imgHeight, undefined, 'FAST');
-                        
-                        console.log(`✅ Successfully captured page ${pageInfo.pageNumber} at ${imgWidth}x${imgHeight}mm (${canvas.width}x${canvas.height}px)`);
                       } else {
-                        console.warn('⚠️ PDF viewer container not found, adding placeholder');
                         
                         // Add placeholder text if container not found
                         pdf.setFontSize(10);
@@ -887,7 +942,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                         pdf.text('Please ensure the PDF viewer is visible and try again.', 20, 60);
                       }
                     } catch (captureError) {
-                      console.error('❌ Error capturing page:', captureError);
+                      console.error('Error capturing page:', captureError);
                       
                       // Add error message to PDF
                       pdf.setFontSize(10);
@@ -914,11 +969,9 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       setTimeout(() => {
         onExportStatusUpdate?.(null, 0);
       }, 1000);
-
-      console.log('✅ PDF export completed successfully');
       
     } catch (error) {
-      console.error('❌ PDF export error:', error);
+      console.error('PDF export error:', error);
       alert('Error exporting PDF. Please try again.');
       onExportStatusUpdate?.(null, 0);
       throw error; // Re-throw to be caught by the button handler
@@ -926,25 +979,16 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
   };
 
   const handleConditionClick = (condition: TakeoffCondition) => {
-    console.log('🖱️ SIDEBAR_CLICK: Condition clicked:', condition, {
-      selectedConditionId,
-      timestamp: new Date().toISOString()
-    });
-    
     // If the condition is already selected, deselect it
     if (selectedConditionId === condition.id) {
-      console.log('🔄 SIDEBAR_CLICK: Deselecting condition:', condition.id);
       setSelectedCondition(null);
       onConditionSelect(null);
       return;
     }
     
     // Otherwise, select the new condition
-    console.log('Selecting condition:', condition.id);
     onConditionSelect(condition);
     setSelectedCondition(condition.id);
-    console.log('Selected condition set to:', condition.id);
-    console.log('Current selected condition ID:', useTakeoffStore.getState().selectedConditionId);
   };
 
 
@@ -954,9 +998,8 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       // Delete condition via API and update store
       await useTakeoffStore.getState().deleteCondition(conditionId);
       setShowDeleteConfirm(null);
-      console.log('✅ Condition deleted successfully:', conditionId);
     } catch (error) {
-      console.error('❌ Failed to delete condition:', error);
+      console.error('Failed to delete condition:', error);
       // You might want to show an error message to the user here
     }
   };
@@ -983,7 +1026,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
   };
 
   const handleEditCondition = (condition: TakeoffCondition) => {
-    console.log('Edit condition:', condition);
     setEditingCondition(condition);
     setShowCreateDialog(true);
   };
@@ -1441,7 +1483,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
           projectId={projectId}
           onClose={handleCloseDialog}
           onConditionCreated={(condition) => {
-            console.log('✅ CONDITION_SAVED: Condition saved, refreshing conditions', condition);
             refreshProjectConditions(projectId); // Force refresh conditions from API
             handleCloseDialog();
           }}

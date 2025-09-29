@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Textarea } from './ui/textarea';
 import { X } from 'lucide-react';
 import { useTakeoffStore } from '../store/useTakeoffStore';
-import { generateRandomColor, getDefaultUnit, generateId, parseDepthInput, formatDepthOutput } from '../utils/commonUtils';
+import { generateRandomColor, getDefaultUnit, parseDepthInput, formatDepthOutput } from '../utils/commonUtils';
 
 interface CreateConditionDialogProps {
   projectId: string;
@@ -33,16 +33,11 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
   const [loading, setLoading] = useState(false);
   const [depthError, setDepthError] = useState<string>('');
 
-  // Debug: Log form data changes
-  useEffect(() => {
-    console.log('Form data updated:', formData);
-  }, [formData]);
 
   // Ensure unit is set when component mounts
   useEffect(() => {
     if (!formData.unit) {
       const defaultUnit = getDefaultUnit(formData.type);
-      console.log('Setting default unit on mount:', defaultUnit);
       setFormData(prev => ({ ...prev, unit: defaultUnit }));
     }
   }, []);
@@ -52,10 +47,8 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
     setLoading(true);
 
     try {
-      console.log('Form data before submission:', formData);
       // Ensure unit is set - use formData.unit or fall back to default for the type
       const unit = formData.unit || getDefaultUnit(formData.type);
-      console.log('Unit resolved:', { formDataUnit: formData.unit, defaultUnit: getDefaultUnit(formData.type), finalUnit: unit });
       
       // Parse depth value (supports both decimal feet and feet/inches format)
       let parsedDepth: number | null | undefined;
@@ -81,17 +74,14 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
         includePerimeter: formData.includePerimeter,
         depth: parsedDepth === null ? undefined : parsedDepth,
       };
-      console.log('Condition data:', conditionData);
       
       let result;
       if (editingCondition) {
         // Update existing condition
         result = await updateCondition(editingCondition.id, conditionData);
-        console.log('Condition updated in API:', result);
       } else {
         // Create new condition
         result = await addCondition(conditionData);
-        console.log('Condition created in API:', result);
       }
       
       // Call the callback with the result
@@ -116,7 +106,6 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
 
   const handleTypeChange = (value: string) => {
     const defaultUnit = getDefaultUnit(value);
-    console.log('Type changed to:', value, 'Default unit:', defaultUnit);
     setFormData(prev => {
       const newData = { 
         ...prev, 
@@ -125,7 +114,6 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
         // Set waste factor to 0 for count conditions since they don't have waste
         wasteFactor: value === 'count' ? 0 : prev.wasteFactor
       };
-      console.log('Setting form data to:', newData);
       return newData;
     });
   };
@@ -181,7 +169,6 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
             <div>
               <Label htmlFor="unit">Unit *</Label>
               <Select value={formData.unit || getDefaultUnit(formData.type)} onValueChange={(value) => {
-                console.log('Unit changed to:', value);
                 handleInputChange('unit', value);
               }}>
                 <SelectTrigger>

@@ -138,7 +138,6 @@ export function SheetSidebar({
                   }
                 } catch (error) {
                   // Sheet doesn't exist in database yet, use defaults
-                  console.log(`No existing sheet data for ${sheetId}, using defaults`);
                 }
                 
                 // Default page data

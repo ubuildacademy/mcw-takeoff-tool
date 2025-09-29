@@ -72,7 +72,6 @@ export function SearchTab({
       return;
     }
 
-    console.log('🔍 Performing OCR search for:', query);
     setIsSearching(true);
     setShowOcrProgress(true);
     
@@ -83,17 +82,13 @@ export function SearchTab({
       );
 
       if (documentsNeedingOCR.length > 0) {
-        console.log(`🔄 Starting OCR processing for ${documentsNeedingOCR.length} documents...`);
-        
         // Process all documents that need OCR
         const processingPromises = documentsNeedingOCR.map(async (doc) => {
           if (doc.id) {
             const pdfUrl = `http://localhost:4000/api/files/${doc.id}`;
-            console.log(`🔄 Processing OCR for: ${doc.name}`);
             
             try {
               const result = await ocrService.processDocument(doc.id, pdfUrl);
-              console.log(`✅ OCR completed for: ${doc.name}`);
               return result;
             } catch (error) {
               console.error(`❌ OCR failed for: ${doc.name}`, error);
@@ -104,12 +99,10 @@ export function SearchTab({
 
         // Wait for all OCR processing to complete
         await Promise.all(processingPromises);
-        console.log('✅ All OCR processing completed');
       }
 
       // Now perform the search
       const results = ocrService.searchText(query);
-      console.log('🎯 OCR search results:', results);
       setSearchResults(results);
       
       // Notify parent component of search results
@@ -118,7 +111,6 @@ export function SearchTab({
       }
       
       if (results.length === 0) {
-        console.log('ℹ️ No results found for the search query');
       }
     } catch (error) {
       console.error('❌ OCR search error:', error);

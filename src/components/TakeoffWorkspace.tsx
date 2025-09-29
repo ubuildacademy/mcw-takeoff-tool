@@ -31,12 +31,6 @@ export function TakeoffWorkspace() {
   const { jobId } = useParams<{ jobId: string }>();
   const navigate = useNavigate();
   
-  console.log('🏗️ TAKEOFF_WORKSPACE: Component initialized', { 
-    jobId, 
-    hasJobId: !!jobId,
-    currentUrl: window.location.href,
-    pathname: window.location.pathname
-  });
   
   const [selectedSheet, setSelectedSheet] = useState<Sheet | null>(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
@@ -67,6 +61,12 @@ export function TakeoffWorkspace() {
 
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
+  
+  // Measurement state from PDFViewer
+  const [isMeasuring, setIsMeasuring] = useState(false);
+  const [isCalibrating, setIsCalibrating] = useState(false);
+  const [measurementType, setMeasurementType] = useState<string>('');
+  const [isOrthoSnapping, setIsOrthoSnapping] = useState(false);
   const [rightSidebarTab, setRightSidebarTab] = useState<'documents' | 'search'>('documents');
   const [searchResults, setSearchResults] = useState<string[]>([]);
   const [ocrSearchResults, setOcrSearchResults] = useState<any[]>([]);
@@ -101,52 +101,37 @@ export function TakeoffWorkspace() {
   const scaleFactor = currentCalibration?.scaleFactor || 1;
   const unit = currentCalibration?.unit || 'ft';
 
+  // Handle measurement state changes from PDFViewer
+  const handleMeasurementStateChange = (measuring: boolean, calibrating: boolean, type: string, orthoSnapping: boolean) => {
+    setIsMeasuring(measuring);
+    setIsCalibrating(calibrating);
+    setMeasurementType(type);
+    setIsOrthoSnapping(orthoSnapping);
+  };
+
   useEffect(() => {
     async function loadFiles() {
-      console.log('🔄 FILE_LOAD_EFFECT: Starting file loading effect', { jobId, hasJobId: !!jobId });
       if (!jobId) {
-        console.log('❌ FILE_LOAD_EFFECT: No jobId provided');
         return;
       }
       try {
-        console.log('📁 FILE_LOAD_EFFECT: Loading files for project:', jobId);
         const res = await fileService.getProjectFiles(jobId);
         const files = res.files || [];
-        console.log('📁 FILE_LOAD_EFFECT: Files response:', res);
-        console.log('📁 FILE_LOAD_EFFECT: Files array:', files);
         setProjectFiles(files);
         
         // Set the first PDF file as current if no current file is set
         if (files.length > 0 && !currentPdfFile) {
           const firstPdfFile = files.find((file: any) => file.mimetype === 'application/pdf');
           if (firstPdfFile) {
-            console.log('✅ Setting current PDF file:', firstPdfFile);
             setCurrentPdfFile(firstPdfFile);
-          } else {
-            console.log('❌ No PDF files found in project');
-            console.log('Available files:', files.map((f: any) => ({ id: f.id, name: f.originalName, mimetype: f.mimetype })));
           }
-        } else {
-          console.log('📁 File loading status:', { 
-            filesCount: files.length, 
-            hasCurrentPdfFile: !!currentPdfFile,
-            currentPdfFileId: currentPdfFile?.id 
-          });
         }
-        
-        console.log('Project files loaded:', files);
-        console.log('Current PDF file:', currentPdfFile);
       } catch (e: any) {
-        console.error('❌ FILE_LOAD_EFFECT: Error loading project files:', e);
-        console.error('❌ FILE_LOAD_EFFECT: Error details:', { 
-          message: e?.message, 
-          stack: e?.stack,
-          jobId 
-        });
+        console.error('Error loading project files:', e);
       }
     }
     loadFiles();
-  }, [jobId]); // Removed currentPdfFile from dependencies to prevent infinite loop
+  }, [jobId]);
 
   // Set current project in store and load its data
   useEffect(() => {
@@ -159,12 +144,10 @@ export function TakeoffWorkspace() {
 
   const handleConditionSelect = (condition: TakeoffCondition | null) => {
     if (condition === null) {
-      console.log('Condition deselected in workspace');
       setSelectedCondition(null);
       // Also clear in the store
       useTakeoffStore.getState().setSelectedCondition(null);
     } else {
-      console.log('Condition selected in workspace:', condition);
       setSelectedCondition(condition.id);
       // Also set in the store
       useTakeoffStore.getState().setSelectedCondition(condition.id);
@@ -172,7 +155,7 @@ export function TakeoffWorkspace() {
   };
 
   const handleToolSelect = (tool: string) => {
-    console.log('Tool selected:', tool);
+    // Tool selection handled by PDF viewer
   };
 
   const rotatePage = (direction: 'clockwise' | 'counterclockwise') => {
@@ -182,57 +165,41 @@ export function TakeoffWorkspace() {
   };
 
   const handleSheetSelect = (sheet: Sheet) => {
-    console.log('Sheet selected:', sheet);
     setSelectedSheet(sheet);
     
     // Find the corresponding PDF file and set it as current
     const selectedFile = projectFiles.find(file => file.id === sheet.id);
     if (selectedFile) {
-      console.log('Setting current PDF file to:', selectedFile);
       setCurrentPdfFile(selectedFile);
       
       // Restore scale for this document if it exists
       const savedScale = documentScales[selectedFile.id];
       if (savedScale) {
-        console.log('Restoring scale for document:', savedScale);
         setScale(savedScale);
       } else {
-        console.log('No saved scale for document, using default');
         setScale(1);
       }
-      
-      // Calibration state is now managed per document/page, no need to reset
-    } else {
-      console.error('Could not find PDF file for sheet:', sheet);
     }
   };
 
   // Enhanced page selection handler
   const handlePageSelect = (documentId: string, pageNumber: number) => {
-    console.log('Page selected:', { documentId, pageNumber });
     setSelectedDocumentId(documentId);
     setSelectedPageNumber(pageNumber);
     
     // Find the corresponding PDF file and set it as current
     const selectedFile = projectFiles.find(file => file.id === documentId);
     if (selectedFile) {
-      console.log('Setting current PDF file to:', selectedFile);
       setCurrentPdfFile(selectedFile);
       setCurrentPage(pageNumber);
       
       // Restore scale for this document if it exists
       const savedScale = documentScales[selectedFile.id];
       if (savedScale) {
-        console.log('Restoring scale for document:', savedScale);
         setScale(savedScale);
       } else {
-        console.log('No saved scale for document, using default');
         setScale(1);
       }
-      
-      // Calibration state is now managed per document/page, no need to reset
-    } else {
-      console.error('Could not find PDF file for document:', documentId);
     }
   };
 
@@ -244,7 +211,6 @@ export function TakeoffWorkspace() {
 
   // OCR processing handler (now handled automatically in background)
   const handleOCRRequest = (documentId: string, pageNumbers: number[]) => {
-    console.log('OCR processing is now handled automatically in the background');
     // OCR processing is now automatic during upload
   };
 
@@ -258,7 +224,6 @@ export function TakeoffWorkspace() {
   };
 
   const handleOcrSearchResults = (results: any[], query: string) => {
-    console.log('📊 Received OCR search results:', results);
     setOcrSearchResults(results);
     setCurrentSearchQuery(query);
   };
@@ -272,7 +237,6 @@ export function TakeoffWorkspace() {
   };
 
   const handleCutoutMode = (conditionId: string | null) => {
-    console.log('Cut-out mode changed:', conditionId);
     setCutoutMode(!!conditionId);
     setCutoutTargetConditionId(conditionId);
   };
@@ -296,8 +260,6 @@ export function TakeoffWorkspace() {
 
   const handleCalibrateScale = () => {
     // Trigger the PDF viewer's calibration dialog
-    console.log('Calibrate scale requested');
-    
     // If already calibrated, clear the current calibration first
     if (isPageCalibrated && currentPdfFile && jobId) {
       setCalibration(jobId, currentPdfFile.id, 1, 'ft');
@@ -312,8 +274,6 @@ export function TakeoffWorkspace() {
 
   const handleResetView = () => {
     // Trigger the PDF viewer's fit to window function
-    console.log('Reset view requested - fitting PDF to window');
-    
     // Use the global trigger function set up by the PDF viewer
     if ((window as any).triggerFitToWindow) {
       (window as any).triggerFitToWindow();
@@ -329,8 +289,6 @@ export function TakeoffWorkspace() {
   };
 
   const handleCalibrationComplete = (isCalibrated: boolean, scaleFactor: number, unit: string) => {
-    console.log('Calibration completed:', { isCalibrated, scaleFactor, unit });
-    
     if (currentPdfFile && jobId) {
       setCalibration(jobId, currentPdfFile.id, scaleFactor, unit);
     }
@@ -338,45 +296,28 @@ export function TakeoffWorkspace() {
 
   const handlePdfUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    console.log('=== FRONTEND FILE UPLOAD ===');
-    console.log('File selected:', file);
-    console.log('File name:', file?.name);
-    console.log('File type:', file?.type);
-    console.log('File size:', file?.size);
-    console.log('Job ID:', jobId);
     
     if (!file || !jobId) {
-      console.log('ERROR: Missing file or jobId');
       return;
     }
     
     try {
-      console.log('Starting upload...');
       setUploading(true);
       
       const uploadRes = await fileService.uploadPDF(file, jobId);
-      console.log('Upload response:', uploadRes);
       
       // Refresh project files
-      console.log('Refreshing project files...');
       const filesRes = await fileService.getProjectFiles(jobId);
-      console.log('Files response:', filesRes);
-      
       const files = filesRes.files || [];
       setProjectFiles(files);
       
       // Set the newly uploaded file as current
       if (uploadRes.file) {
-        console.log('Setting current PDF file:', uploadRes.file);
         setCurrentPdfFile(uploadRes.file);
       }
       
-      console.log('Upload completed successfully');
-      
     } catch (error: any) {
       console.error('Upload failed:', error);
-      console.error('Error details:', error.response?.data);
-      console.error('Error status:', error.response?.status);
     } finally {
       setUploading(false);
     }
@@ -514,6 +455,17 @@ export function TakeoffWorkspace() {
           </div>
         )}
 
+        {/* Ortho Snapping Indicator */}
+        {((isOrthoSnapping && isMeasuring) || (isCalibrating && isOrthoSnapping)) && (
+          <div className="flex items-center gap-1 bg-green-600 text-white px-2 py-1 rounded text-xs">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 12h18"/>
+              <path d="M12 3v18"/>
+            </svg>
+            <span>Ortho</span>
+          </div>
+        )}
+
         {/* Right side - Actions */}
         <div className="flex items-center gap-4">
           {/* Action Buttons */}
@@ -580,7 +532,7 @@ export function TakeoffWorkspace() {
             <PDFViewer 
               file={currentPdfFile}
               onCalibrationRequest={() => {
-                console.log('Calibration requested');
+                // Calibration handled by PDF viewer
               }}
               className="h-full"
               currentPage={currentPage}
@@ -600,6 +552,7 @@ export function TakeoffWorkspace() {
               cutoutMode={cutoutMode}
               cutoutTargetConditionId={cutoutTargetConditionId}
               onCutoutModeChange={handleCutoutMode}
+              onMeasurementStateChange={handleMeasurementStateChange}
             />
           ) : (
             <div className="flex items-center justify-center flex-1 bg-gray-100">
@@ -745,7 +698,15 @@ export function TakeoffWorkspace() {
               </div>
             </div>
           ) : (
-            <span className="text-sm text-gray-600">{uploading ? 'Uploading…' : 'Ready'}</span>
+            <span className="text-sm text-gray-600">
+              {uploading ? 'Uploading…' : 
+               (isMeasuring || isCalibrating) ? (
+                 <span className="bg-blue-600 text-white px-3 py-1 rounded-lg text-sm">
+                   {isCalibrating ? 'Calibrating: Click two points to set scale' : `Measuring: ${measurementType} - Click to add points`}
+                 </span>
+               ) : 'Ready'
+              }
+            </span>
           )}
         </div>
       </div>
@@ -798,9 +759,7 @@ export function TakeoffWorkspace() {
         }}
         onSave={async (config) => {
           try {
-            console.log('Saving titleblock configuration:', config);
             const result = await sheetService.configureTitleblock(titleblockConfigDocumentId!, config);
-            console.log('Titleblock configuration saved:', result);
           } catch (error) {
             console.error('Failed to save titleblock configuration:', error);
           }
