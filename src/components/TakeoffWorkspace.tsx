@@ -4,6 +4,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import PDFViewer from './PDFViewer';
 import { TakeoffSidebar } from './TakeoffSidebar';
 import { SheetSidebar } from './SheetSidebar';
+import { SearchTab } from './SearchTab';
 import { TitleblockConfigDialog } from './TitleblockConfigDialog';
 import { OCRProcessingDialog } from './OCRProcessingDialog';
 
@@ -18,7 +19,9 @@ import {
   PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
-  Upload
+  Upload,
+  FileText,
+  Search
 } from "lucide-react";
 import { fileService, sheetService } from '../services/apiService';
 
@@ -64,6 +67,7 @@ export function TakeoffWorkspace() {
 
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
+  const [rightSidebarTab, setRightSidebarTab] = useState<'documents' | 'search'>('documents');
   const [searchResults, setSearchResults] = useState<string[]>([]);
   const [ocrSearchResults, setOcrSearchResults] = useState<any[]>([]);
   const [currentSearchQuery, setCurrentSearchQuery] = useState<string>('');
@@ -148,12 +152,10 @@ export function TakeoffWorkspace() {
   useEffect(() => {
     if (jobId) {
       setCurrentProject(jobId);
-      // Load conditions from API
-      loadProjectConditions(jobId);
-      // Load measurements for this project
+      // Load measurements for this project (conditions will be loaded by TakeoffSidebar)
       loadProjectTakeoffMeasurements(jobId);
     }
-  }, [jobId, setCurrentProject, loadProjectConditions, loadProjectTakeoffMeasurements]);
+  }, [jobId]); // Remove function dependencies to prevent infinite loops
 
   const handleConditionSelect = (condition: TakeoffCondition | null) => {
     if (condition === null) {
@@ -633,16 +635,58 @@ export function TakeoffWorkspace() {
           </Button>
           {rightSidebarOpen && (
             <div className="w-96 bg-white border-l flex flex-col h-full">
-              <SheetSidebar 
-                projectId={jobId!}
-                onPageSelect={handlePageSelect}
-                selectedDocumentId={selectedDocumentId || undefined}
-                selectedPageNumber={selectedPageNumber || undefined}
-                onOCRRequest={handleOCRRequest}
-                onTitleblockConfig={handleTitleblockConfig}
-                onOcrSearchResults={handleOcrSearchResults}
-                onDocumentsUpdate={handleDocumentsUpdate}
-              />
+              {/* Right Sidebar Tabs */}
+              <div className="flex border-b">
+                <button
+                  className={`flex-1 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                    rightSidebarTab === 'documents'
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                  onClick={() => setRightSidebarTab('documents')}
+                >
+                  <div className="flex items-center justify-center gap-2">
+                    <FileText className="w-4 h-4" />
+                    Documents
+                  </div>
+                </button>
+                <button
+                  className={`flex-1 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                    rightSidebarTab === 'search'
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                  onClick={() => setRightSidebarTab('search')}
+                >
+                  <div className="flex items-center justify-center gap-2">
+                    <Search className="w-4 h-4" />
+                    Search
+                  </div>
+                </button>
+              </div>
+
+              {/* Tab Content */}
+              {rightSidebarTab === 'documents' && (
+                <SheetSidebar 
+                  projectId={jobId!}
+                  onPageSelect={handlePageSelect}
+                  selectedDocumentId={selectedDocumentId || undefined}
+                  selectedPageNumber={selectedPageNumber || undefined}
+                  onOCRRequest={handleOCRRequest}
+                  onTitleblockConfig={handleTitleblockConfig}
+                  onOcrSearchResults={handleOcrSearchResults}
+                  onDocumentsUpdate={handleDocumentsUpdate}
+                />
+              )}
+              
+              {rightSidebarTab === 'search' && (
+                <SearchTab
+                  projectId={jobId!}
+                  documents={documents}
+                  onPageSelect={handlePageSelect}
+                  onOcrSearchResults={handleOcrSearchResults}
+                />
+              )}
             </div>
           )}
         </div>

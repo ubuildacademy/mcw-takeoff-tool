@@ -46,7 +46,6 @@ interface TakeoffSidebarProps {
 export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, documents = [], onPageSelect, onExportStatusUpdate, onCutoutMode, cutoutMode, cutoutTargetConditionId }: TakeoffSidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [editingCondition, setEditingCondition] = useState<TakeoffCondition | null>(null);
   const [activeTab, setActiveTab] = useState<'conditions' | 'reports'>('conditions');
@@ -54,16 +53,19 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
   const [showExportDropdown, setShowExportDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const { addCondition, conditions, setSelectedCondition, selectedConditionId, getConditionTakeoffMeasurements, loadProjectConditions, getProjectTakeoffMeasurements, takeoffMeasurements } = useTakeoffStore();
+  const { addCondition, conditions, setSelectedCondition, selectedConditionId, getConditionTakeoffMeasurements, loadProjectConditions, getProjectTakeoffMeasurements, takeoffMeasurements, loadingConditions, refreshProjectConditions, ensureConditionsLoaded } = useTakeoffStore();
 
   useEffect(() => {
-    // Load conditions from API when component mounts or projectId changes
+    // Ensure conditions are loaded when component mounts or projectId changes
     if (projectId) {
-      console.log('🔄 LOADING_CONDITIONS: Loading conditions for project:', projectId);
-      loadProjectConditions(projectId);
-      setLoading(false);
+      console.log('🔄 LOADING_CONDITIONS: Ensuring conditions are loaded for project:', projectId);
+      ensureConditionsLoaded(projectId).then(() => {
+        console.log('✅ LOADING_CONDITIONS: Conditions ensured');
+      }).catch((error) => {
+        console.error('❌ LOADING_CONDITIONS: Failed to ensure conditions:', error);
+      });
     }
-  }, [projectId, loadProjectConditions]);
+  }, [projectId]); // Remove function dependencies to prevent infinite loops
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -85,6 +87,22 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       condition.description.toLowerCase().includes(searchQuery.toLowerCase())
     )
   );
+
+  // Debug logging for conditions (reduced frequency)
+  useEffect(() => {
+    if (conditions.length > 0) {
+      const timeoutId = setTimeout(() => {
+        const projectConditions = conditions.filter(c => c.projectId === projectId);
+        console.log('📊 CONDITIONS_STATE: Current conditions state:', {
+          totalConditions: conditions.length,
+          projectConditions: projectConditions.length,
+          projectId
+        });
+      }, 500); // Reduced frequency for cleaner logs
+      
+      return () => clearTimeout(timeoutId);
+    }
+  }, [conditions.length, projectId]); // Only log when conditions count changes
 
   // Helper function to get sheet name for a page
   const getSheetName = (sheetId: string, pageNumber: number): string => {
@@ -165,6 +183,72 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
     return {
       reportData,
       sortedPages
+    };
+  };
+
+  // Cost Analysis Data Aggregation
+  const getCostAnalysisData = () => {
+    const { reportData } = getQuantityReportData();
+    const conditionIds = Object.keys(reportData);
+    
+    const costData: Record<string, {
+      condition: TakeoffCondition;
+      quantity: number;
+      materialCostPerUnit: number;
+      laborCostPerUnit: number;
+      totalMaterialCost: number;
+      totalLaborCost: number;
+      totalCost: number;
+      hasCosts: boolean;
+    }> = {};
+    
+    let totalMaterialCost = 0;
+    let totalLaborCost = 0;
+    let totalProjectCost = 0;
+    let conditionsWithCosts = 0;
+    
+    conditionIds.forEach(conditionId => {
+      const conditionData = reportData[conditionId];
+      const condition = conditionData.condition;
+      const quantity = conditionData.grandTotal;
+      
+      const materialCostPerUnit = condition.materialCost || 0;
+      const laborCostPerUnit = condition.laborCost || 0;
+      
+      const totalMaterialCostForCondition = quantity * materialCostPerUnit;
+      const totalLaborCostForCondition = quantity * laborCostPerUnit;
+      const totalCostForCondition = totalMaterialCostForCondition + totalLaborCostForCondition;
+      
+      const hasCosts = materialCostPerUnit > 0 || laborCostPerUnit > 0;
+      
+      costData[conditionId] = {
+        condition,
+        quantity,
+        materialCostPerUnit,
+        laborCostPerUnit,
+        totalMaterialCost: totalMaterialCostForCondition,
+        totalLaborCost: totalLaborCostForCondition,
+        totalCost: totalCostForCondition,
+        hasCosts
+      };
+      
+      if (hasCosts) {
+        totalMaterialCost += totalMaterialCostForCondition;
+        totalLaborCost += totalLaborCostForCondition;
+        totalProjectCost += totalCostForCondition;
+        conditionsWithCosts++;
+      }
+    });
+    
+    return {
+      costData,
+      summary: {
+        totalMaterialCost,
+        totalLaborCost,
+        totalProjectCost,
+        conditionsWithCosts,
+        totalConditions: conditionIds.length
+      }
     };
   };
 
@@ -330,10 +414,92 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
     projectInfoSheet['!cols'] = [{ wch: 20 }, { wch: 30 }];
     XLSX.utils.book_append_sheet(workbook, projectInfoSheet, 'Project Info');
     
+    // Update progress
+    onExportStatusUpdate?.('excel', 70);
+    
+    // Create Cost Analysis sheet
+    const { costData, summary } = getCostAnalysisData();
+    const costConditionIds = Object.keys(costData);
+    
+    if (summary.conditionsWithCosts > 0) {
+      const costAnalysisData = [];
+      
+      // Header row for cost analysis
+      costAnalysisData.push([
+        'Condition', 
+        'Type', 
+        'Unit', 
+        'Quantity', 
+        'Material Cost/Unit', 
+        'Labor Cost/Unit', 
+        'Total Material Cost', 
+        'Total Labor Cost', 
+        'Total Cost'
+      ]);
+      
+      // Data rows for conditions with costs
+      costConditionIds.forEach(conditionId => {
+        const data = costData[conditionId];
+        if (data.hasCosts) {
+          costAnalysisData.push([
+            data.condition.name,
+            data.condition.type,
+            data.condition.unit,
+            data.quantity.toFixed(2),
+            data.materialCostPerUnit > 0 ? `$${data.materialCostPerUnit.toFixed(2)}` : 'N/A',
+            data.laborCostPerUnit > 0 ? `$${data.laborCostPerUnit.toFixed(2)}` : 'N/A',
+            data.totalMaterialCost > 0 ? `$${data.totalMaterialCost.toFixed(2)}` : '$0.00',
+            data.totalLaborCost > 0 ? `$${data.totalLaborCost.toFixed(2)}` : '$0.00',
+            `$${data.totalCost.toFixed(2)}`
+          ]);
+        }
+      });
+      
+      // Add summary row
+      costAnalysisData.push(['', '', '', '', '', '', '', '', '']);
+      costAnalysisData.push([
+        'TOTALS', 
+        '', 
+        '', 
+        '', 
+        '', 
+        '', 
+        `$${summary.totalMaterialCost.toFixed(2)}`, 
+        `$${summary.totalLaborCost.toFixed(2)}`, 
+        `$${summary.totalProjectCost.toFixed(2)}`
+      ]);
+      
+      // Add cost analysis metrics
+      costAnalysisData.push(['', '', '', '', '', '', '', '', '']);
+      costAnalysisData.push(['COST ANALYSIS SUMMARY', '', '', '', '', '', '', '', '']);
+      costAnalysisData.push(['Total Conditions with Costs', summary.conditionsWithCosts, '', '', '', '', '', '', '']);
+      costAnalysisData.push(['Total Conditions', summary.totalConditions, '', '', '', '', '', '', '']);
+      costAnalysisData.push(['Material Cost Percentage', `${((summary.totalMaterialCost / summary.totalProjectCost) * 100).toFixed(1)}%`, '', '', '', '', '', '', '']);
+      costAnalysisData.push(['Labor Cost Percentage', `${((summary.totalLaborCost / summary.totalProjectCost) * 100).toFixed(1)}%`, '', '', '', '', '', '', '']);
+      
+      const costAnalysisSheet = XLSX.utils.aoa_to_sheet(costAnalysisData);
+      
+      // Set column widths for cost analysis sheet
+      const costColWidths = [
+        { wch: 25 }, // Condition
+        { wch: 10 }, // Type
+        { wch: 8 },  // Unit
+        { wch: 12 }, // Quantity
+        { wch: 18 }, // Material Cost/Unit
+        { wch: 16 }, // Labor Cost/Unit
+        { wch: 18 }, // Total Material Cost
+        { wch: 16 }, // Total Labor Cost
+        { wch: 12 }  // Total Cost
+      ];
+      costAnalysisSheet['!cols'] = costColWidths;
+      
+      XLSX.utils.book_append_sheet(workbook, costAnalysisSheet, 'Cost Analysis');
+    }
+    
     // Generate filename with project name and timestamp
     const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
     const projectName = currentProject?.name?.replace(/[^a-zA-Z0-9]/g, '-') || 'project';
-    const filename = `${projectName}-quantity-report-${timestamp}.xlsx`;
+    const filename = `${projectName}-takeoff-report-${timestamp}.xlsx`;
     
     // Update progress
     onExportStatusUpdate?.('excel', 90);
@@ -866,7 +1032,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
   };
 
 
-  if (loading) {
+  if (loadingConditions) {
     return (
       <div className="w-80 bg-white border-r flex flex-col">
         <div className="p-4 border-b">
@@ -1275,8 +1441,8 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
           projectId={projectId}
           onClose={handleCloseDialog}
           onConditionCreated={(condition) => {
-            console.log('✅ CONDITION_SAVED: Condition saved, reloading conditions', condition);
-            loadProjectConditions(projectId); // Reload conditions from API
+            console.log('✅ CONDITION_SAVED: Condition saved, refreshing conditions', condition);
+            refreshProjectConditions(projectId); // Force refresh conditions from API
             handleCloseDialog();
           }}
           editingCondition={editingCondition}

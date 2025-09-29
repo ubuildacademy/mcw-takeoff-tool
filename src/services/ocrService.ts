@@ -35,12 +35,18 @@ class OCRService {
     if (this.isInitialized && this.worker) return;
 
     try {
-      this.worker = await Tesseract.createWorker('eng', 1, {
-        logger: (m) => {
-          if (m.status === 'recognizing text') {
+      // Try to create worker with local files first, fallback to CDN
+      let workerConfig = {
+        logger: (m: any) => {
+          // Reduce OCR logging to prevent console spam - only log major milestones
+          if (m.status === 'recognizing text' && (m.progress === 0.25 || m.progress === 0.5 || m.progress === 0.75 || m.progress === 1.0)) {
             console.log(`OCR Progress: ${Math.round(m.progress * 100)}%`);
           }
         },
+        // Try local files first
+        workerPath: '/tesseract/',
+        langPath: '/tesseract/lang-data/',
+        corePath: '/tesseract/',
         // Optimize for architectural drawings and technical text
         // @ts-ignore - tessedit_char_whitelist is a valid Tesseract option
         tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:!?()[]{}\'"-+=/\\@#$%^&*|<>~` ',
@@ -50,10 +56,23 @@ class OCRService {
         tessedit_create_hocr: '0', // Disable HOCR output
         tessedit_create_tsv: '0', // Disable TSV output
         tessedit_create_pdf: '0', // Disable PDF output
-      });
+      };
+
+      try {
+        this.worker = await Tesseract.createWorker('eng', 1, workerConfig);
+        console.log('✅ Tesseract OCR worker initialized with local files');
+      } catch (localError) {
+        console.warn('⚠️ Local Tesseract files not found, trying CDN fallback:', localError);
+        // Fallback to CDN
+        const cdnConfig = { ...workerConfig };
+        delete (cdnConfig as any).workerPath;
+        delete (cdnConfig as any).langPath;
+        delete (cdnConfig as any).corePath;
+        this.worker = await Tesseract.createWorker('eng', 1, cdnConfig);
+        console.log('✅ Tesseract OCR worker initialized with CDN fallback');
+      }
 
       this.isInitialized = true;
-      console.log('✅ Tesseract OCR worker initialized');
     } catch (error) {
       console.error('❌ Failed to initialize Tesseract worker:', error);
       throw error;
@@ -65,7 +84,63 @@ class OCRService {
     canvas: HTMLCanvasElement, 
     pageNumber: number
   ): Promise<OCRResult> {
-    return this.processPageWithSpecializedSettings(canvas, pageNumber);
+    if (!this.worker) {
+      throw new Error('OCR worker not initialized');
+    }
+
+    const startTime = Date.now();
+    console.log(`🔍 Processing page ${pageNumber} with Tesseract...`);
+
+    try {
+      // Validate canvas before processing
+      if (!canvas || canvas.width === 0 || canvas.height === 0) {
+        throw new Error('Invalid canvas: width or height is 0');
+      }
+      
+      // Convert canvas to high-quality image data
+      const imageData = canvas.toDataURL('image/png', 1.0);
+      
+      // Validate image data
+      if (!imageData || imageData.length < 100) {
+        throw new Error('Invalid image data generated from canvas');
+      }
+      
+      // Set optimized parameters for architectural drawings
+      await this.worker.setParameters({
+        tessedit_pageseg_mode: Tesseract.PSM.AUTO_OSD, // Auto orientation and script detection
+        tessedit_ocr_engine_mode: Tesseract.OEM.LSTM_ONLY, // Use LSTM for better accuracy
+        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:!?()[]{}\'"-+=/\\@#$%^&*|<>~` ',
+        preserve_interword_spaces: '1',
+        // Optimize for small text in drawings
+        tessedit_min_char_height: '6',
+        tessedit_max_char_height: '120',
+        // Better handling of technical drawings
+        classify_bln_numeric_mode: '1',
+        textord_min_linesize: '2.0',
+        // Improve text detection in mixed content
+        textord_tabfind_show_vlines: '0',
+        textord_show_final_blobs: '0'
+      });
+
+      // Perform OCR recognition
+      const { data } = await this.worker.recognize(imageData);
+      
+      const processingTime = Date.now() - startTime;
+      
+      console.log(`✅ Page ${pageNumber} OCR completed:`, {
+        textLength: data.text?.length || 0,
+        confidence: data.confidence,
+        processingTime: `${processingTime}ms`,
+        textPreview: data.text?.substring(0, 100) + '...'
+      });
+
+      return this.createOCRResult(data, pageNumber, processingTime);
+      
+    } catch (error) {
+      console.error(`❌ OCR failed for page ${pageNumber}:`, error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`OCR processing failed for page ${pageNumber}: ${errorMessage}`);
+    }
   }
 
   // Process entire PDF document
@@ -78,6 +153,13 @@ class OCRService {
     // Check if already completed
     if (this.completedOCR.has(documentId)) {
       return this.completedOCR.get(documentId)!;
+    }
+
+    // Check memory usage before starting
+    const memoryInfo = this.getMemoryInfo();
+    if (memoryInfo.completedOCR > 10) {
+      console.warn('⚠️ High memory usage detected, cleaning up old OCR data');
+      this.cleanupOldData();
     }
 
     const processingPromise = this._processDocument(documentId, pdfUrl);
@@ -103,47 +185,71 @@ class OCRService {
     await this.initializeWorker();
 
     try {
-      // Load PDF document with error handling
+      // Load PDF document with comprehensive error handling
       console.log(`📥 Loading PDF from: ${pdfUrl}`);
+      
       const pdf = await pdfjsLib.getDocument({
         url: pdfUrl,
         httpHeaders: {
           'Accept': 'application/pdf'
-        }
+        },
+        // Add timeout and retry logic
+        maxImageSize: 1024 * 1024, // 1MB max image size
+        disableAutoFetch: false,
+        disableStream: false
       }).promise;
-      const totalPages = pdf.numPages;
       
-      console.log(`📄 Processing ${totalPages} pages...`);
+      const totalPages = pdf.numPages;
+      console.log(`📄 PDF loaded successfully: ${totalPages} pages`);
+
+      if (totalPages === 0) {
+        throw new Error('PDF contains no pages');
+      }
 
       const pages: OCRResult[] = [];
       const searchIndex = new Map<string, number[]>();
 
-      // Process pages in batches to avoid overwhelming the system
-      const batchSize = 3; // Process 3 pages at a time
+      // Process pages in smaller batches for better memory management
+      const batchSize = Math.min(2, totalPages); // Process max 2 pages at a time
+      console.log(`🔄 Processing in batches of ${batchSize} pages...`);
       
       for (let i = 0; i < totalPages; i += batchSize) {
         const batchPromises = [];
+        const batchStart = i + 1;
+        const batchEnd = Math.min(i + batchSize, totalPages);
         
-        for (let j = i; j < Math.min(i + batchSize, totalPages); j++) {
+        console.log(`📄 Processing batch: pages ${batchStart}-${batchEnd}`);
+        
+        for (let j = i; j < batchEnd; j++) {
           const pageNumber = j + 1;
-          batchPromises.push(this.processPageNumber(pdf, pageNumber));
+          batchPromises.push(this.processPageNumberWithRetry(pdf, pageNumber));
         }
 
-        const batchResults = await Promise.all(batchPromises);
-        
-        for (const result of batchResults) {
-          pages.push(result);
+        try {
+          const batchResults = await Promise.all(batchPromises);
           
-          // Build search index
-          this.buildSearchIndex(result, searchIndex);
-          
-          // Emit progress event
-          this.emitProgress(documentId, pages.length, totalPages);
+          for (const result of batchResults) {
+            if (result && result.text && result.text.trim().length > 0) {
+              pages.push(result);
+              
+              // Build search index
+              this.buildSearchIndex(result, searchIndex);
+              
+              // Emit progress event
+              this.emitProgress(documentId, pages.length, totalPages, 'Processing pages');
+            } else {
+              console.warn(`⚠️ Page ${result?.pageNumber || 'unknown'} produced no text`);
+            }
+          }
+        } catch (batchError) {
+          console.error(`❌ Batch processing failed for pages ${batchStart}-${batchEnd}:`, batchError);
+          // Continue with next batch instead of failing completely
         }
 
-        // Small delay between batches to prevent system overload
+        // Longer delay between batches for large documents
         if (i + batchSize < totalPages) {
-          await new Promise(resolve => setTimeout(resolve, 100));
+          const delay = totalPages > 20 ? 500 : 200; // Longer delay for large docs
+          await new Promise(resolve => setTimeout(resolve, delay));
         }
       }
 
@@ -155,13 +261,66 @@ class OCRService {
         searchIndex
       };
 
-      console.log(`✅ OCR processing completed for document: ${documentId}`);
+      console.log(`✅ OCR processing completed for document: ${documentId}`, {
+        totalPages,
+        processedPages: pages.length,
+        totalTextLength: pages.reduce((sum, page) => sum + page.text.length, 0)
+      });
+      
       return documentData;
 
     } catch (error) {
       console.error(`❌ OCR processing failed for document ${documentId}:`, error);
-      throw error;
+      
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      
+      // Provide more specific error messages
+      if (errorMessage.includes('Invalid PDF')) {
+        throw new Error(`Invalid PDF file: ${errorMessage}`);
+      } else if (errorMessage.includes('network')) {
+        throw new Error(`Network error loading PDF: ${errorMessage}`);
+      } else if (errorMessage.includes('timeout')) {
+        throw new Error(`PDF loading timeout: ${errorMessage}`);
+      } else {
+        throw new Error(`OCR processing failed: ${errorMessage}`);
+      }
     }
+  }
+
+  // Process a specific page number with retry mechanism
+  private async processPageNumberWithRetry(pdf: any, pageNumber: number, maxRetries: number = 2): Promise<OCRResult> {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await this.processPageNumber(pdf, pageNumber);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.warn(`⚠️ Attempt ${attempt} failed for page ${pageNumber}:`, errorMessage);
+        
+        if (attempt === maxRetries) {
+          console.error(`❌ All attempts failed for page ${pageNumber}`);
+          // Return empty result instead of throwing to allow processing to continue
+          return {
+            pageNumber,
+            text: '',
+            confidence: 0,
+            processingTime: 0,
+            words: []
+          };
+        }
+        
+        // Wait before retry
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+      }
+    }
+    
+    // This should never be reached, but TypeScript requires it
+    return {
+      pageNumber,
+      text: '',
+      confidence: 0,
+      processingTime: 0,
+      words: []
+    };
   }
 
   // Process a specific page number using quadrant-based approach
@@ -170,16 +329,17 @@ class OCRService {
       const page = await pdf.getPage(pageNumber);
       
       // First, try full-page OCR with high resolution
-      console.log(`🔍 Processing page ${pageNumber} with quadrant-based OCR...`);
+      console.log(`🔍 Processing page ${pageNumber} with full-page OCR...`);
       
       const fullPageResult = await this.processFullPage(page, pageNumber);
       
       // If full page OCR quality is poor, try quadrant-based approach
-      if (this.isGarbledText(fullPageResult.text) || fullPageResult.confidence < 50) {
-        console.log(`⚠️ Full page OCR quality poor, trying quadrant approach...`);
+      if (this.isGarbledText(fullPageResult.text) || fullPageResult.confidence < 40) {
+        console.log(`⚠️ Full page OCR quality poor (confidence: ${fullPageResult.confidence}), trying quadrant approach...`);
         return await this.processPageQuadrants(page, pageNumber);
       }
       
+      console.log(`✅ Page ${pageNumber} processed successfully with full-page OCR (confidence: ${fullPageResult.confidence})`);
       return fullPageResult;
     } catch (error) {
       console.error(`Error processing page ${pageNumber}:`, error);
@@ -196,17 +356,28 @@ class OCRService {
     canvas.height = viewport.height;
     canvas.width = viewport.width;
 
-    if (context) {
-      context.imageSmoothingEnabled = true;
-      context.imageSmoothingQuality = 'high';
-      
-      await page.render({
-        canvasContext: context,
-        viewport: viewport
-      }).promise;
-    }
+    try {
+      if (context) {
+        context.imageSmoothingEnabled = true;
+        context.imageSmoothingQuality = 'high';
+        
+        await page.render({
+          canvasContext: context,
+          viewport: viewport
+        }).promise;
+      }
 
-    return this.processPage(canvas, pageNumber);
+      const result = await this.processPage(canvas, pageNumber);
+      
+      // Clean up canvas resources
+      this.cleanupPageResources(canvas);
+      
+      return result;
+    } catch (error) {
+      // Clean up canvas resources even on error
+      this.cleanupPageResources(canvas);
+      throw error;
+    }
   }
 
   // Process page in quadrants for better text detection
@@ -279,11 +450,16 @@ class OCRService {
       context.imageSmoothingEnabled = true;
       context.imageSmoothingQuality = 'high';
       
+      // Clear canvas first
+      context.clearRect(0, 0, width, height);
+      
       // Render the quadrant
       await page.render({
         canvasContext: context,
         viewport: quadrantViewport
       }).promise;
+    } else {
+      throw new Error('Failed to get canvas context for quadrant rendering');
     }
 
     // Process with specialized settings for small text
@@ -418,10 +594,26 @@ class OCRService {
 
     console.log('🔍 Searching for:', searchQuery);
     console.log('📚 Available documents:', Array.from(this.completedOCR.keys()));
+    console.log('📊 Completed OCR data:', this.completedOCR.size, 'documents');
+    
+    // Only show detailed OCR data if there are results
+    if (this.completedOCR.size > 0) {
+      console.log('📋 OCR data details:', Array.from(this.completedOCR.entries()).map(([id, data]) => ({
+        documentId: id,
+        totalPages: data.totalPages,
+        processedPages: data.pages.length,
+        hasText: data.pages.some(p => p.text && p.text.trim().length > 0)
+      })));
+    }
 
     const documentsToSearch = documentId 
       ? [documentId].filter(id => this.completedOCR.has(id))
       : Array.from(this.completedOCR.keys());
+
+    if (documentsToSearch.length === 0) {
+      console.log('❌ No documents available for search');
+      return results;
+    }
 
     documentsToSearch.forEach(docId => {
       const docData = this.completedOCR.get(docId);
@@ -430,7 +622,7 @@ class OCRService {
         return;
       }
 
-      console.log(`📄 Searching document ${docId} with ${docData.pages.length} pages`);
+      // Only log document search start, not every page
 
       docData.pages.forEach(page => {
         const matches: Array<{
@@ -443,13 +635,14 @@ class OCRService {
         const text = page.text.toLowerCase();
         const queryWords = searchQuery.split(/\s+/);
         
-        console.log(`🔍 Searching page ${page.pageNumber}:`, {
-          query: searchQuery,
-          queryWords,
-          textLength: text.length,
-          textPreview: text.substring(0, 200) + '...',
-          hasQuery: text.includes(searchQuery)
-        });
+        // Only log if there's a potential match to reduce console spam
+        if (text.includes(searchQuery) || queryWords.some(word => text.includes(word))) {
+          console.log(`🔍 Potential match on page ${page.pageNumber}:`, {
+            query: searchQuery,
+            textLength: text.length,
+            hasQuery: text.includes(searchQuery)
+          });
+        }
         
         // Check if query is present (exact match or partial match)
         const hasExactMatch = text.includes(searchQuery);
@@ -504,7 +697,7 @@ class OCRService {
       });
     });
 
-    console.log('🎯 Search results:', results);
+    console.log('🎯 Final search results:', results);
     return results;
   }
 
@@ -547,45 +740,98 @@ class OCRService {
     return null;
   }
 
-  // Emit progress events
-  private emitProgress(documentId: string, current: number, total: number): void {
+  // Emit progress events with detailed information
+  private emitProgress(documentId: string, current: number, total: number, stage: string = 'Processing'): void {
+    const percentage = Math.round((current / total) * 100);
+    
     // Dispatch custom event for progress updates
     window.dispatchEvent(new CustomEvent('ocr-progress', {
-      detail: { documentId, current, total }
+      detail: { 
+        documentId, 
+        current, 
+        total, 
+        percentage,
+        stage,
+        estimatedTimeRemaining: this.calculateEstimatedTime(current, total)
+      }
     }));
+    
+    console.log(`📊 OCR Progress: ${current}/${total} pages (${percentage}%) - ${stage}`);
   }
 
-  // Check if text appears to be garbled
+  // Calculate estimated time remaining based on processing speed
+  private calculateEstimatedTime(current: number, total: number): number | null {
+    if (current === 0) return null;
+    
+    // Rough estimate: 2-5 seconds per page for architectural drawings
+    const avgTimePerPage = 3500; // 3.5 seconds average
+    const remainingPages = total - current;
+    return remainingPages * avgTimePerPage;
+  }
+
+  // Check if text appears to be garbled (optimized for construction documents)
   private isGarbledText(text: string): boolean {
-    if (!text || text.length < 10) return false;
+    if (!text || text.length < 5) return false;
     
     // Check for patterns that indicate garbled text
     const garbledPatterns = [
       /[a-z]{1,2}\s+[a-z]{1,2}\s+[a-z]{1,2}/g, // Short random letters
-      /[^a-zA-Z0-9\s.,;:!?()]{3,}/g, // Too many special characters
-      /\s{3,}/g, // Too many spaces
-      /[|]{2,}/g, // Multiple pipe characters
-      /[=]{3,}/g, // Multiple equals signs
-      /[#]{2,}/g, // Multiple hash signs
+      /[^a-zA-Z0-9\s.,;:!?()\[\]{}'"-+=/\\@#$%^&*|<>~`]{4,}/g, // Too many special characters
+      /\s{4,}/g, // Too many consecutive spaces
+      /[|]{3,}/g, // Multiple pipe characters
+      /[=]{4,}/g, // Multiple equals signs
+      /[#]{3,}/g, // Multiple hash signs
+      /[.]{3,}/g, // Multiple dots
+      /[~]{2,}/g, // Multiple tildes
     ];
     
     const matches = garbledPatterns.reduce((count, pattern) => {
       return count + (text.match(pattern) || []).length;
     }, 0);
     
-    // Check for architectural drawing keywords that should be present
-    const architecturalKeywords = ['elevator', 'detail', 'plan', 'section', 'floor', 'wall', 'door', 'window', 'dimension'];
-    const hasArchitecturalContent = architecturalKeywords.some(keyword => 
+    // Check for construction/architectural drawing keywords
+    const constructionKeywords = [
+      'elevator', 'detail', 'plan', 'section', 'floor', 'wall', 'door', 'window', 
+      'dimension', 'scale', 'drawing', 'sheet', 'revision', 'date', 'project',
+      'architect', 'engineer', 'contractor', 'specification', 'note', 'legend',
+      'title', 'block', 'north', 'south', 'east', 'west', 'elevation', 'foundation',
+      'roof', 'structural', 'electrical', 'plumbing', 'hvac', 'fire', 'safety',
+      'exit', 'stair', 'ramp', 'parking', 'landscape', 'site', 'utilities'
+    ];
+    
+    const hasConstructionContent = constructionKeywords.some(keyword => 
       text.toLowerCase().includes(keyword)
     );
     
-    // If we have architectural content, be more lenient
-    if (hasArchitecturalContent) {
-      return matches > (text.length * 0.3); // 30% threshold for architectural drawings
+    // Check for common construction document patterns
+    const constructionPatterns = [
+      /\d+['"]?\s*[x×]\s*\d+['"]?/g, // Dimensions like "10' x 12'"
+      /\d+['"]?\s*[-–]\s*\d+['"]?/g, // Ranges like "10'-12'"
+      /\d+\/\d+["']?\s*=\s*\d+['"]?/g, // Scales like "1/8" = 1'-0""
+      /[A-Z]\d+[-]\d+/g, // Drawing numbers like "A1-1"
+      /\d+['"]?\s*[x×]\s*\d+['"]?\s*[x×]\s*\d+['"]?/g, // 3D dimensions
+    ];
+    
+    const hasConstructionPatterns = constructionPatterns.some(pattern => 
+      pattern.test(text)
+    );
+    
+    // If we have construction content or patterns, be more lenient
+    if (hasConstructionContent || hasConstructionPatterns) {
+      return matches > (text.length * 0.4); // 40% threshold for construction drawings
     }
     
-    // If more than 20% of the text matches garbled patterns, consider it garbled
-    return matches > (text.length * 0.2);
+    // Check for reasonable text density (not too sparse)
+    const wordCount = text.split(/\s+/).filter(word => word.length > 1).length;
+    const textDensity = wordCount / text.length;
+    
+    // If text is too sparse, it might be garbled
+    if (textDensity < 0.05) {
+      return true;
+    }
+    
+    // If more than 25% of the text matches garbled patterns, consider it garbled
+    return matches > (text.length * 0.25);
   }
 
   // Create OCR result from data
@@ -605,13 +851,73 @@ class OCRService {
     };
   }
 
-  // Cleanup worker
+  // Cleanup worker and memory
   async cleanup(): Promise<void> {
     if (this.worker) {
-      await this.worker.terminate();
-      this.worker = null;
-      this.isInitialized = false;
-      console.log('🧹 OCR worker cleaned up');
+      try {
+        await this.worker.terminate();
+        this.worker = null;
+        this.isInitialized = false;
+        console.log('🧹 OCR worker cleaned up');
+      } catch (error) {
+        console.error('Error cleaning up OCR worker:', error);
+      }
+    }
+    
+    // Clear processing queues and completed results to free memory
+    this.processingQueue.clear();
+    this.completedOCR.clear();
+    
+    // Force garbage collection if available
+    if (typeof window !== 'undefined' && window.gc) {
+      window.gc();
+    }
+  }
+
+  // Memory management for large documents
+  private cleanupPageResources(canvas: HTMLCanvasElement): void {
+    try {
+      // Clear canvas to free memory
+      const context = canvas.getContext('2d');
+      if (context) {
+        context.clearRect(0, 0, canvas.width, canvas.height);
+      }
+      
+      // Remove canvas from DOM if it was added
+      if (canvas.parentNode) {
+        canvas.parentNode.removeChild(canvas);
+      }
+    } catch (error) {
+      console.warn('Error cleaning up canvas resources:', error);
+    }
+  }
+
+  // Get memory usage information
+  getMemoryInfo(): { processingQueue: number; completedOCR: number; workerActive: boolean } {
+    return {
+      processingQueue: this.processingQueue.size,
+      completedOCR: this.completedOCR.size,
+      workerActive: this.isInitialized && this.worker !== null
+    };
+  }
+
+  // Clean up old OCR data to prevent memory issues
+  private cleanupOldData(): void {
+    const entries = Array.from(this.completedOCR.entries());
+    if (entries.length > 5) {
+      // Keep only the 5 most recent documents
+      const sortedEntries = entries.sort((a, b) => 
+        new Date(b[1].processedAt).getTime() - new Date(a[1].processedAt).getTime()
+      );
+      
+      // Remove older entries
+      const toKeep = sortedEntries.slice(0, 5);
+      this.completedOCR.clear();
+      toKeep.forEach(([id, data]) => {
+        this.completedOCR.set(id, data);
+      });
+      
+      console.log(`🧹 Cleaned up OCR data, kept ${toKeep.length} most recent documents`);
     }
   }
 }

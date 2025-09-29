@@ -16,7 +16,17 @@ const apiClient = axios.create({
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
+    // Suppress 404 errors for individual sheet requests since they're expected for new documents
+    if (error.response?.status === 404 && 
+        error.config?.url?.includes('/sheets/') && 
+        !error.config?.url?.includes('/sheets/project/')) {
+      // Don't log these as they're normal when individual sheets don't exist yet
+      return Promise.reject(error);
+    }
+    
+    // Log other errors
     console.warn('API Error:', error.message);
+    
     // Return a mock response structure for failed requests
     if (error.code === 'ERR_NETWORK' || error.code === 'ECONNREFUSED') {
       return Promise.reject({
@@ -269,6 +279,26 @@ export const takeoffMeasurementService = {
 
   async deleteTakeoffMeasurement(id: string) {
     const response = await apiClient.delete(`/takeoff-measurements/${id}`);
+    return response.data;
+  },
+};
+
+// OCR service
+export const ocrService = {
+  async processDocument(documentId: string, projectId: string) {
+    const response = await apiClient.post(`/ocr/process-document/${documentId}`, {
+      projectId
+    });
+    return response.data;
+  },
+
+  async getJobStatus(jobId: string) {
+    const response = await apiClient.get(`/ocr/status/${jobId}`);
+    return response.data;
+  },
+
+  async searchDocument(documentId: string, query: string) {
+    const response = await apiClient.get(`/ocr/search/${documentId}?query=${encodeURIComponent(query)}`);
     return response.data;
   },
 };

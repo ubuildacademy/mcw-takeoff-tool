@@ -4,7 +4,6 @@ import { Badge } from './ui/badge';
 import { Input } from './ui/input';
 import { 
   FileText, 
-  Search, 
   Plus, 
   Upload, 
   Download,
@@ -24,7 +23,6 @@ import {
   X
 } from 'lucide-react';
 import { fileService, sheetService } from '../services/apiService';
-import { ocrService } from '../services/ocrService';
 import { useTakeoffStore } from '../store/useTakeoffStore';
 import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFPage, PDFDocument } from '../types';
@@ -55,16 +53,11 @@ export function SheetSidebar({
   onOcrSearchResults,
   onDocumentsUpdate
 }: SheetSidebarProps) {
-  const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'list'>('list');
   const [filterBy, setFilterBy] = useState<'all' | 'withTakeoffs' | 'withoutTakeoffs'>('all');
   const [documents, setDocuments] = useState<PDFDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [processingOCR, setProcessingOCR] = useState<string[]>([]);
-  const [ocrSearchResults, setOcrSearchResults] = useState<any[]>([]);
-  const [isSearchingOCR, setIsSearchingOCR] = useState(false);
-  const [ocrProgress, setOcrProgress] = useState<{[documentId: string]: {current: number, total: number}}>({});
-  const [showOcrProgress, setShowOcrProgress] = useState(false);
   
   // Sheet name editing state
   const [editingSheetId, setEditingSheetId] = useState<string | null>(null);
@@ -233,19 +226,6 @@ export function SheetSidebar({
     }
   }, [getProjectTakeoffMeasurements, updateHasTakeoffs, onDocumentsUpdate]);
 
-  // Listen for OCR progress events
-  useEffect(() => {
-    const handleOcrProgress = (event: CustomEvent) => {
-      const { documentId, current, total } = event.detail;
-      setOcrProgress(prev => ({
-        ...prev,
-        [documentId]: { current, total }
-      }));
-    };
-
-    window.addEventListener('ocr-progress', handleOcrProgress as EventListener);
-    return () => window.removeEventListener('ocr-progress', handleOcrProgress as EventListener);
-  }, []);
 
   // Generate thumbnail for a specific page
   const generateThumbnail = useCallback(async (documentId: string, pageNumber: number) => {
@@ -436,86 +416,6 @@ export function SheetSidebar({
     }
   };
 
-  // Perform OCR search with automatic processing
-  const performOCRSearch = useCallback(async (query: string) => {
-    if (!query.trim() || query.length < 2) {
-      setOcrSearchResults([]);
-      // Clear highlights when search is cleared
-      if (onOcrSearchResults) {
-        onOcrSearchResults([], '');
-      }
-      return;
-    }
-
-    console.log('🔍 Performing OCR search for:', query);
-    setIsSearchingOCR(true);
-    setShowOcrProgress(true);
-    
-    try {
-      // Check if any documents need OCR processing
-      const documentsNeedingOCR = documents.filter(doc => 
-        doc.id && !ocrService.isComplete(doc.id) && !ocrService.isProcessing(doc.id)
-      );
-
-      if (documentsNeedingOCR.length > 0) {
-        console.log(`🔄 Starting OCR processing for ${documentsNeedingOCR.length} documents...`);
-        
-        // Process all documents that need OCR
-        const processingPromises = documentsNeedingOCR.map(async (doc) => {
-          if (doc.id) {
-            const pdfUrl = `http://localhost:4000/api/files/${doc.id}`;
-            console.log(`🔄 Processing OCR for: ${doc.name}`);
-            
-            try {
-              const result = await ocrService.processDocument(doc.id, pdfUrl);
-              console.log(`✅ OCR completed for: ${doc.name}`);
-              return result;
-            } catch (error) {
-              console.error(`❌ OCR failed for: ${doc.name}`, error);
-              return null;
-            }
-          }
-        });
-
-        // Wait for all OCR processing to complete
-        await Promise.all(processingPromises);
-        console.log('✅ All OCR processing completed');
-      }
-
-      // Now perform the search
-      const results = ocrService.searchText(query);
-      console.log('🎯 OCR search results:', results);
-      setOcrSearchResults(results);
-      
-      // Notify parent component of search results
-      if (onOcrSearchResults) {
-        onOcrSearchResults(results, query);
-      }
-      
-      if (results.length === 0) {
-        console.log('ℹ️ No results found for the search query');
-      }
-    } catch (error) {
-      console.error('❌ OCR search error:', error);
-      setOcrSearchResults([]);
-    } finally {
-      setIsSearchingOCR(false);
-      setShowOcrProgress(false);
-    }
-  }, [documents]);
-
-  // Handle search input change
-  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const query = e.target.value;
-    setSearchQuery(query);
-    
-    // Debounce OCR search
-    const timeoutId = setTimeout(() => {
-      performOCRSearch(query);
-    }, 300);
-
-    return () => clearTimeout(timeoutId);
-  };
 
   // Filter and sort documents
   const getFilteredAndSortedDocuments = () => {
@@ -532,18 +432,6 @@ export function SheetSidebar({
         ...doc,
         pages: doc.pages.filter(page => !page.hasTakeoffs)
       })).filter(doc => doc.pages.length > 0); // Only show documents that have pages without takeoffs
-    }
-    
-    // Apply search filter
-    if (searchQuery) {
-      filteredDocuments = filteredDocuments.filter(doc => 
-        doc.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        doc.pages.some(page => 
-          page.extractedText?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          page.sheetName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          page.sheetNumber?.toLowerCase().includes(searchQuery.toLowerCase())
-        )
-      );
     }
     
     // Sort by document name (simple alphabetical sorting)
@@ -580,21 +468,6 @@ export function SheetSidebar({
           </div>
         </div>
         
-        {/* Search */}
-        <div className="relative mb-4">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-          <Input
-            placeholder="Search text in documents (OCR will process automatically)..."
-            value={searchQuery}
-            onChange={handleSearchChange}
-            className="pl-10"
-          />
-          {isSearchingOCR && (
-            <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-              <div className="animate-spin w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full"></div>
-            </div>
-          )}
-        </div>
 
         {/* Controls */}
         <div className="space-y-3">
@@ -617,105 +490,6 @@ export function SheetSidebar({
         </div>
       </div>
 
-      {/* OCR Progress Bar */}
-        {showOcrProgress && (
-          <div className="border-b bg-blue-50 p-4">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="animate-spin w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full"></div>
-              <h3 className="text-sm font-medium text-blue-800">
-                Processing documents for search...
-              </h3>
-            </div>
-            <div className="space-y-3">
-              {Object.entries(ocrProgress).map(([documentId, progress]) => {
-                const doc = documents.find(d => d.id === documentId);
-                const percentage = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0;
-                return (
-                  <div key={documentId} className="space-y-2">
-                    <div className="flex justify-between text-xs text-blue-700">
-                      <span className="font-medium">{doc?.name || 'Document'}</span>
-                      <span className="text-blue-600">{progress.current}/{progress.total} pages ({percentage}%)</span>
-                    </div>
-                    <div className="w-full bg-blue-200 rounded-full h-3 overflow-hidden">
-                      <div
-                        className="bg-gradient-to-r from-blue-500 to-blue-600 h-3 rounded-full transition-all duration-500 ease-out"
-                        style={{ width: `${percentage}%` }}
-                      ></div>
-                    </div>
-                    {percentage === 100 && (
-                      <div className="text-xs text-green-600 font-medium flex items-center gap-1">
-                        <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                        Complete
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-      {/* OCR Search Results */}
-      {searchQuery && !showOcrProgress && (
-        <div className="border-b bg-blue-50 p-4">
-          {ocrSearchResults.length > 0 ? (
-            <>
-              <h3 className="text-sm font-medium text-blue-800 mb-2">
-                OCR Search Results ({ocrSearchResults.length})
-              </h3>
-              <div className="space-y-2 max-h-40 overflow-y-auto">
-                {ocrSearchResults.map((result, index) => (
-                  <div
-                    key={`${result.documentId}-${result.pageNumber}-${index}`}
-                    className="p-2 bg-white rounded border cursor-pointer hover:bg-blue-100"
-                    onClick={() => onPageSelect(result.documentId, result.pageNumber)}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <FileText className="w-3 h-3 text-blue-600" />
-                        <span className="text-sm font-medium">
-                          Page {result.pageNumber}
-                        </span>
-                        <Badge variant="outline" className="text-xs">
-                          {result.matches.length} match{result.matches.length !== 1 ? 'es' : ''}
-                        </Badge>
-                      </div>
-                    </div>
-                    {result.matches.slice(0, 1).map((match: any, matchIndex: number) => (
-                      <div key={matchIndex} className="text-xs text-gray-600 mt-1">
-                        <span className="bg-yellow-200 px-1 rounded font-medium">
-                          {match.text}
-                        </span>
-                        <span className="text-gray-500 ml-1">
-                          {match.context}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            </>
-          ) : (
-            <div className="text-center py-4">
-              <div className="text-sm text-gray-600 mb-2">
-                {isSearchingOCR ? (
-                  <div className="flex items-center justify-center gap-2">
-                    <div className="animate-spin w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full"></div>
-                    Searching...
-                  </div>
-                ) : (
-                  <>
-                    <p>No results found for "{searchQuery}"</p>
-                    <p className="text-xs text-gray-500 mt-1">
-                      Documents may still be processing. Try again in a moment.
-                    </p>
-                  </>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Documents and Pages List */}
       <div className="flex-1 overflow-y-auto min-h-0">

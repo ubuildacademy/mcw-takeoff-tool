@@ -310,7 +310,9 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
             </div>
 
             <div>
-              <Label htmlFor="materialCost">Material Cost ($/unit)</Label>
+              <Label htmlFor="materialCost">
+                Material Cost ({formData.type === 'count' ? '$/unit' : `$/${formData.unit || getDefaultUnit(formData.type)}`})
+              </Label>
               <Input
                 id="materialCost"
                 type="number"

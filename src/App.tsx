@@ -14,6 +14,7 @@ function App() {
       pathname: window.location.pathname,
       search: window.location.search
     });
+    
     // Load initial data when app starts
     loadInitialData();
   }, [loadInitialData]);

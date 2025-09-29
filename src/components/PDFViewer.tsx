@@ -142,6 +142,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const pdfPageRef = useRef<any>(null);
   const renderTaskRef = useRef<any>(null);
   const isRenderingRef = useRef<boolean>(false);
+  const [isComponentMounted, setIsComponentMounted] = useState(false);
   
   // Page-specific viewport and transform state for proper isolation
   const [pageViewports, setPageViewports] = useState<Record<number, any>>({});
@@ -212,6 +213,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Load existing takeoff measurements for the current sheet
   const [localTakeoffMeasurements, setLocalTakeoffMeasurements] = useState<any[]>([]);
 
+  // Ensure component is mounted before rendering
+  useEffect(() => {
+    setIsComponentMounted(true);
+    return () => setIsComponentMounted(false);
+  }, []);
+
   // Load PDF document
   useEffect(() => {
     const loadPDF = async () => {
@@ -261,7 +268,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Load measurements for current page using new page-based system
   useEffect(() => {
-    console.log(`🔄 MEASUREMENT LOADING EFFECT: currentPage=${currentPage}, currentProjectId=${currentProjectId}, fileId=${file?.id}`);
     
     if (!currentProjectId || !file?.id || !currentPage) {
       console.log(`❌ Missing required data - clearing measurements`);
@@ -309,7 +315,20 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       pdfPage: m.pdfPage, 
       conditionId: m.conditionId 
     })));
-  }, [currentProjectId, file?.id, currentPage, takeoffMeasurements]);
+    console.log(`📝 VIEWPORT STATUS:`, {
+      hasCurrentViewport: !!currentViewport,
+      viewportSize: currentViewport ? `${currentViewport.width}x${currentViewport.height}` : 'null',
+      currentPage
+    });
+    
+    // If we have measurements and a viewport is available, trigger a re-render
+    if (displayMeasurements.length > 0 && currentViewport) {
+      // Use setTimeout to ensure state is updated before re-rendering
+      setTimeout(() => {
+        renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+      }, 0);
+    }
+  }, [currentProjectId, file?.id, currentPage, takeoffMeasurements, currentViewport]);
 
   // Sync external cut-out state with internal state
   useEffect(() => {
@@ -405,7 +424,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     localTakeoffMeasurements.forEach((measurement) => {
       // Double-check that this measurement belongs to the page being rendered
       if (measurement.pdfPage === pageNum) {
-        console.log(`🎯 RENDERING MEASUREMENT: ${measurement.type} measurement ${measurement.id} on page ${pageNum}`);
         renderSVGMeasurement(svgOverlay, measurement, viewport, page);
       } else {
         console.warn(`🚨 SKIPPING measurement ${measurement.id} - belongs to page ${measurement.pdfPage}, rendering page ${pageNum}`);
@@ -449,17 +467,17 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       renderRunningLengthDisplay(svgOverlay, viewport);
     }
     
-    // Debug: Log SVG element count after rendering
-    const elementCount = svgOverlay.children.length;
-    console.log(`🎯 SVG overlay now has ${elementCount} elements:`, {
-      pageNum,
-      isContinuousDrawing,
-      activePointsLength: activePoints.length,
-      currentMeasurementLength: currentMeasurement.length,
-      isMeasuring,
-      mousePosition: !!mousePosition
-    });
   }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, selectedMarkupId, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength]);
+
+  // Re-render annotations when measurements or interaction state changes
+  useEffect(() => {
+    if (pdfDocument && currentViewport && !isRenderingRef.current) {
+      // Only render if we have measurements or if we're in measuring mode
+      if (localTakeoffMeasurements.length > 0 || isMeasuring || isCalibrating || currentMeasurement.length > 0) {
+        renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+      }
+    }
+  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, selectedMarkupId, isSelectionMode, renderTakeoffAnnotations, currentPage, currentViewport]);
 
   // Page visibility handler - ensures overlay is properly initialized when page becomes visible
   const onPageShown = useCallback((pageNum: number, viewport: any) => {
@@ -473,7 +491,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     svgOverlay.setAttribute('viewBox', `0 0 ${viewport.width} ${viewport.height}`);
     svgOverlay.setAttribute('overflow', 'visible');
     
-    
     // Add a transparent hit area for pointer events
     const existingHitArea = svgOverlay.querySelector('#hit-area');
     if (!existingHitArea) {
@@ -486,16 +503,26 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       svgOverlay.appendChild(hitArea);
     }
     
-    console.log(`🔄 PAGE_SHOWN: Initializing overlay for page ${pageNum} with viewport ${viewport.width}x${viewport.height}`);
-    console.log(`🔄 SVG OVERLAY: width=${svgOverlay.getAttribute('width')}, height=${svgOverlay.getAttribute('height')}, viewBox=${svgOverlay.getAttribute('viewBox')}`);
-    
-    // Re-render all annotations for this page
+    // Always re-render all annotations for this page, regardless of current state
+    // This ensures takeoffs are visible immediately when the page loads
     renderTakeoffAnnotations(pageNum, viewport, pdfPageRef.current);
-  }, [renderTakeoffAnnotations]);
+  }, [renderTakeoffAnnotations, localTakeoffMeasurements]);
 
   // PDF render function with page-specific viewport isolation
   const renderPDFPage = useCallback(async (pageNum: number) => {
-    if (!pdfDocument || !pdfCanvasRef.current) return;
+    // Add a small delay to ensure DOM is fully mounted
+    await new Promise(resolve => setTimeout(resolve, 10));
+    
+    if (!isComponentMounted || !pdfDocument || !pdfCanvasRef.current || !containerRef.current) {
+      console.warn('PDF render skipped: missing dependencies', {
+        isComponentMounted,
+        pdfDocument: !!pdfDocument,
+        canvas: !!pdfCanvasRef.current,
+        container: !!containerRef.current,
+        pageNum
+      });
+      return;
+    }
     
     if (isRenderingRef.current) return;
     isRenderingRef.current = true;
@@ -508,9 +535,18 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const page = await pdfDocument.getPage(pageNum);
       pdfPageRef.current = page;
       
+      // Double-check canvas is still mounted after async operation
       const pdfCanvas = pdfCanvasRef.current;
+      if (!pdfCanvas || !containerRef.current) {
+        console.warn('PDF canvas or container unmounted during render, skipping');
+        return;
+      }
+      
       const pdfContext = pdfCanvas.getContext('2d');
-      if (!pdfContext) return;
+      if (!pdfContext) {
+        console.warn('PDF canvas context is null, skipping render');
+        return;
+      }
 
       // Create page-specific viewport with current scale and rotation
       const viewport = page.getViewport({ 
@@ -554,7 +590,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     } finally {
       isRenderingRef.current = false;
     }
-  }, [pdfDocument, viewState, updateCanvasDimensions, onPageShown]);
+  }, [pdfDocument, viewState, updateCanvasDimensions, onPageShown, isComponentMounted]);
 
   // No coordinate conversions needed - SVG viewBox matches viewport exactly
   // CSS pixels = SVG pixels = viewport pixels (1:1 mapping)
@@ -601,6 +637,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         polyline.setAttribute('stroke', strokeColor);
         polyline.setAttribute('stroke-width', strokeWidth);
         polyline.setAttribute('fill', 'none');
+        polyline.setAttribute('data-measurement-id', measurement.id);
         
         // Add click handler for selection
         if (isSelectionMode) {
@@ -2346,17 +2383,29 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Re-render when page changes
   useEffect(() => {
-    if (pdfDocument) {
+    if (pdfDocument && isComponentMounted) {
       setMeasurements([]);
-      renderPDFPage(currentPage);
+      
+      // Retry mechanism if canvas is not ready
+      const attemptRender = async (retries = 3) => {
+        if (pdfCanvasRef.current && containerRef.current) {
+          await renderPDFPage(currentPage);
+        } else if (retries > 0) {
+          console.log(`Canvas not ready, retrying in 100ms... (${retries} retries left)`);
+          setTimeout(() => attemptRender(retries - 1), 100);
+        } else {
+          console.warn('Canvas not ready after retries, skipping render');
+        }
+      };
+      
+      attemptRender();
     }
-  }, [pdfDocument, currentPage, renderPDFPage]);
+  }, [pdfDocument, currentPage, renderPDFPage, isComponentMounted]);
 
   // Page visibility handler - ensures overlays are rendered when returning to a page
   useEffect(() => {
     if (pdfDocument && currentViewport && !isRenderingRef.current) {
       // Use the dedicated page shown handler to ensure proper overlay initialization
-      console.log(`🔄 PAGE_VISIBILITY: Calling onPageShown for page ${currentPage}`);
       onPageShown(currentPage, currentViewport);
     }
   }, [currentPage, currentViewport, onPageShown]);
@@ -2370,21 +2419,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Re-render when view state changes (zoom/rotation)
   useEffect(() => {
-    if (pdfDocument) {
+    if (pdfDocument && isComponentMounted) {
       renderPDFPage(currentPage);
     }
-  }, [viewState, renderPDFPage, currentPage]);
+  }, [viewState, renderPDFPage, currentPage, isComponentMounted]);
 
-  // Re-render annotations when measurements or interaction state changes
-  useEffect(() => {
-    if (pdfDocument && currentViewport && !isRenderingRef.current) {
-      // Only render if we have measurements or if we're in measuring mode
-      if (localTakeoffMeasurements.length > 0 || isMeasuring || isCalibrating || currentMeasurement.length > 0) {
-        // Render immediately for better responsiveness
-        renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
-      }
-    }
-  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, selectedMarkupId, isSelectionMode, renderTakeoffAnnotations, currentPage, currentViewport]);
 
   // Set measurement type when condition is selected
   useEffect(() => {
