@@ -12,6 +12,8 @@
 - **Professional Reporting**: Excel and PDF export with industry-standard formatting
 - **Project Backup/Restore**: Complete project data backup and restore system
 - **Grid/List Views**: Flexible project dashboard with view mode switching
+- **Tooltip Positioning**: Blue on-screen tooltip positioned at bottom right with "ready" status
+- **Pricing Component**: Pricing component integrated into reports
 
 ### 🔄 Current Development Priorities
 
@@ -19,11 +21,9 @@
 - [ ] **Page Rotation Fix**: Takeoffs don't stay exactly where drawn when rotating pages
 - [ ] **PDF Flickering**: Fix flickering PDF when drawing conditions
 - [ ] **Markup Visibility**: Markups not visible across all zoom levels initially
-- [ ] **Tooltip Positioning**: Move blue on-screen tooltip to bottom right with "ready" status
 
 #### Medium Priority Enhancements
 - [ ] **OCR Enhancement**: Improve OCR accuracy with better highlights and fast navigation tab
-- [ ] **Pricing Component**: Add pricing component to reports
 
 ### 📋 Development Process
 
