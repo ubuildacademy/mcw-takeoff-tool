@@ -39,6 +39,12 @@
 ### 🔄 Current Development Priorities
 
 #### Critical Priority Issues
+- [ ] **Ollama Cloud Migration**: Migrate from local Ollama to cloud-based AI models
+  - Current Issue: AI chat requires local Ollama installation on user machines
+  - Need to implement: Server-side AI model hosting with cloud providers (OpenAI, Anthropic, etc.)
+  - Impact: Users won't need to install/configure Ollama locally, better scalability
+  - Technical: Replace `ollamaService.ts` with cloud API integration, update `ChatTab.tsx`
+
 - [ ] **Page Label Extraction**: Fix extraction of page labels from titleblocks - currently not working
   - Current Issue: "Extract Page Labels" feature shows "coming soon" alert
   - Need to fix: Implement actual page label extraction from configured titleblock areas
@@ -96,6 +102,25 @@ The OCR system has been successfully implemented and is fully functional:
 1. **Titleblock Configuration**: Save and apply titleblock field coordinates for targeted extraction
 2. **Page Label Extraction**: Use configured titleblock areas for automatic sheet number/name extraction
 3. **OCR Enhancement**: Improve accuracy with better text recognition and formatting
+
+#### Ollama Cloud Migration Plan
+**Current Architecture:**
+- Frontend: `src/services/ollamaService.ts` - Connects to local Ollama instance
+- Backend: `server/src/routes/ollama.ts` - Proxies requests to local Ollama
+- AI Chat: `src/components/ChatTab.tsx` - Uses local model selection
+
+**Target Architecture:**
+- Replace local Ollama with cloud AI providers (OpenAI GPT-4, Anthropic Claude, etc.)
+- Server-side model management and API key handling
+- Simplified frontend with cloud model selection
+- Better scalability and no local installation requirements
+
+**Implementation Steps:**
+1. **Backend**: Create cloud AI service integration (OpenAI/Anthropic APIs)
+2. **Frontend**: Update `ollamaService.ts` to use cloud endpoints
+3. **UI**: Simplify model selection in `ChatTab.tsx`
+4. **Configuration**: Add environment variables for API keys
+5. **Testing**: Ensure document context and project data still work with cloud models
 
 ### 📋 Development Process
 
