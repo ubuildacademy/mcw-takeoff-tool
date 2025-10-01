@@ -39,11 +39,11 @@
 ### 🔄 Current Development Priorities
 
 #### Critical Priority Issues
-- [ ] **Ollama Cloud Migration**: Migrate from local Ollama to cloud-based AI models
-  - Current Issue: AI chat requires local Ollama installation on user machines
-  - Need to implement: Server-side AI model hosting with cloud providers (OpenAI, Anthropic, etc.)
-  - Impact: Users won't need to install/configure Ollama locally, better scalability
-  - Technical: Replace `ollamaService.ts` with cloud API integration, update `ChatTab.tsx`
+- [ ] **Ollama Server Migration**: Move Ollama from local user installation to server-side hosting
+  - Current Issue: AI chat requires users to install and run Ollama locally (`ollama serve`)
+  - Need to implement: Server-side Ollama installation with model management
+  - Impact: Users won't need to install/configure Ollama locally, centralized model hosting
+  - Technical: Update `ollamaService.ts` to connect to server Ollama instance, add server model management
 
 - [ ] **Page Label Extraction**: Fix extraction of page labels from titleblocks - currently not working
   - Current Issue: "Extract Page Labels" feature shows "coming soon" alert
@@ -103,24 +103,26 @@ The OCR system has been successfully implemented and is fully functional:
 2. **Page Label Extraction**: Use configured titleblock areas for automatic sheet number/name extraction
 3. **OCR Enhancement**: Improve accuracy with better text recognition and formatting
 
-#### Ollama Cloud Migration Plan
+#### Ollama Server Migration Plan
 **Current Architecture:**
-- Frontend: `src/services/ollamaService.ts` - Connects to local Ollama instance
+- Frontend: `src/services/ollamaService.ts` - Connects to local Ollama instance (localhost:11434)
 - Backend: `server/src/routes/ollama.ts` - Proxies requests to local Ollama
 - AI Chat: `src/components/ChatTab.tsx` - Uses local model selection
+- User Requirement: Must run `ollama serve` locally
 
 **Target Architecture:**
-- Replace local Ollama with cloud AI providers (OpenAI GPT-4, Anthropic Claude, etc.)
-- Server-side model management and API key handling
-- Simplified frontend with cloud model selection
-- Better scalability and no local installation requirements
+- Server-side Ollama installation with model management
+- Frontend connects to server Ollama instance instead of localhost
+- Centralized model hosting and updates
+- No local installation requirements for users
 
 **Implementation Steps:**
-1. **Backend**: Create cloud AI service integration (OpenAI/Anthropic APIs)
-2. **Frontend**: Update `ollamaService.ts` to use cloud endpoints
-3. **UI**: Simplify model selection in `ChatTab.tsx`
-4. **Configuration**: Add environment variables for API keys
-5. **Testing**: Ensure document context and project data still work with cloud models
+1. **Server Setup**: Install Ollama on server and configure to serve models
+2. **Backend**: Update `server/src/routes/ollama.ts` to manage server-side Ollama
+3. **Frontend**: Update `ollamaService.ts` to connect to server Ollama endpoint
+4. **Model Management**: Add server endpoints for model installation/updates
+5. **Configuration**: Add environment variables for server Ollama URL
+6. **Testing**: Ensure document context and project data work with server Ollama
 
 ### 📋 Development Process
 
