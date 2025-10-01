@@ -1,322 +1,374 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
-import { Progress } from './ui/progress';
 import { Badge } from './ui/badge';
 import { 
   Search, 
   FileText, 
   Clock, 
-  CheckCircle, 
+  Eye,
+  ChevronRight,
+  Loader2,
   AlertCircle,
-  Play,
-  RefreshCw,
-  ExternalLink,
-  Filter
+  CheckCircle,
+  X
 } from 'lucide-react';
-import { ocrService } from '../services/ocrService';
+import { ocrService } from '../services/apiService';
 import type { PDFDocument } from '../types';
 
 interface SearchResult {
-  documentId: string;
   pageNumber: number;
   matches: Array<{
-    text: string;
-    context: string;
+    snippet: string;
+    position: number;
     confidence: number;
   }>;
+  totalMatches: number;
+  method: string;
+  processingTime: number;
 }
 
 interface SearchTabProps {
   projectId: string;
   documents: PDFDocument[];
   onPageSelect: (documentId: string, pageNumber: number) => void;
-  onOcrSearchResults?: (results: any[], query: string) => void;
+  selectedDocumentId?: string;
+  selectedPageNumber?: number;
 }
 
 export function SearchTab({ 
   projectId, 
   documents, 
   onPageSelect,
-  onOcrSearchResults
+  selectedDocumentId,
+  selectedPageNumber
 }: SearchTabProps) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searchResults, setSearchResults] = useState<Record<string, SearchResult[]>>({});
   const [isSearching, setIsSearching] = useState(false);
-  const [showOcrProgress, setShowOcrProgress] = useState(false);
-  const [ocrProgress, setOcrProgress] = useState<{[documentId: string]: {current: number, total: number}}>({});
-  const [filterBy, setFilterBy] = useState<'all' | 'withTakeoffs' | 'withoutTakeoffs'>('all');
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [selectedDocument, setSelectedDocument] = useState<string | null>(null);
+  const [expandedResults, setExpandedResults] = useState<Set<string>>(new Set());
 
-  // Listen for OCR progress events
-  useEffect(() => {
-    const handleOcrProgress = (event: CustomEvent) => {
-      const { documentId, current, total } = event.detail;
-      setOcrProgress(prev => ({
-        ...prev,
-        [documentId]: { current, total }
-      }));
-    };
+  // Get documents that have OCR processing enabled or completed
+  const ocrEnabledDocuments = documents.filter(doc => 
+    doc.ocrEnabled || doc.pages.some(page => page.ocrProcessed)
+  );
 
-    window.addEventListener('ocr-progress', handleOcrProgress as EventListener);
-    return () => window.removeEventListener('ocr-progress', handleOcrProgress as EventListener);
-  }, []);
 
-  // Perform OCR search with automatic processing
-  const performOCRSearch = useCallback(async (query: string) => {
+  // Search function
+  const performSearch = useCallback(async (query: string, documentId?: string) => {
     if (!query.trim() || query.length < 2) {
-      setSearchResults([]);
-      // Clear highlights when search is cleared
-      if (onOcrSearchResults) {
-        onOcrSearchResults([], '');
-      }
+      setSearchResults({});
       return;
     }
 
     setIsSearching(true);
-    setShowOcrProgress(true);
-    
+    setSearchError(null);
+
     try {
-      // Check if any documents need OCR processing
-      const documentsNeedingOCR = documents.filter(doc => 
-        doc.id && !ocrService.isComplete(doc.id) && !ocrService.isProcessing(doc.id)
-      );
+      const results: Record<string, SearchResult[]> = {};
 
-      if (documentsNeedingOCR.length > 0) {
-        // Process all documents that need OCR
-        const processingPromises = documentsNeedingOCR.map(async (doc) => {
-          if (doc.id) {
-            const pdfUrl = `http://localhost:4000/api/files/${doc.id}`;
-            
-            try {
-              const result = await ocrService.processDocument(doc.id, pdfUrl);
-              return result;
-            } catch (error) {
-              console.error(`❌ OCR failed for: ${doc.name}`, error);
-              return null;
-            }
+      if (documentId) {
+        // Search specific document
+        try {
+          const response = await ocrService.searchDocument(documentId, query, projectId);
+          if (response.results && response.results.length > 0) {
+            results[documentId] = response.results;
           }
-        });
-
-        // Wait for all OCR processing to complete
-        await Promise.all(processingPromises);
+        } catch (error) {
+          console.warn(`Search failed for document ${documentId}:`, error);
+        }
+      } else {
+        // Search all OCR-enabled documents
+        for (const doc of ocrEnabledDocuments) {
+          try {
+            const response = await ocrService.searchDocument(doc.id, query, projectId);
+            if (response.results && response.results.length > 0) {
+              results[doc.id] = response.results;
+            }
+          } catch (error) {
+            console.warn(`Search failed for document ${doc.id}:`, error);
+          }
+        }
       }
 
-      // Now perform the search
-      const results = ocrService.searchText(query);
       setSearchResults(results);
-      
-      // Notify parent component of search results
-      if (onOcrSearchResults) {
-        onOcrSearchResults(results, query);
-      }
-      
-      if (results.length === 0) {
-      }
     } catch (error) {
-      console.error('❌ OCR search error:', error);
-      setSearchResults([]);
+      console.error('Search error:', error);
+      setSearchError('Search failed. Please try again.');
     } finally {
       setIsSearching(false);
-      setShowOcrProgress(false);
     }
-  }, [documents, onOcrSearchResults]);
+  }, [projectId, ocrEnabledDocuments]);
 
-  // Handle search input change
-  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const query = e.target.value;
+  // Handle search input
+  const handleSearch = useCallback((query: string) => {
     setSearchQuery(query);
-    
-    // Debounce OCR search
-    const timeoutId = setTimeout(() => {
-      performOCRSearch(query);
-    }, 300);
+    if (query.trim().length >= 2) {
+      performSearch(query, selectedDocument || undefined);
+    } else {
+      setSearchResults({});
+    }
+  }, [performSearch, selectedDocument]);
 
-    return () => clearTimeout(timeoutId);
+  // Handle document selection
+  const handleDocumentSelect = (documentId: string) => {
+    setSelectedDocument(documentId);
+    if (searchQuery.trim().length >= 2) {
+      performSearch(searchQuery, documentId);
+    }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      performOCRSearch(searchQuery);
-    }
+  // Toggle result expansion
+  const toggleResultExpansion = (resultKey: string) => {
+    setExpandedResults(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(resultKey)) {
+        newSet.delete(resultKey);
+      } else {
+        newSet.add(resultKey);
+      }
+      return newSet;
+    });
+  };
+
+  // Clear search
+  const clearSearch = () => {
+    setSearchQuery('');
+    setSearchResults({});
+    setSearchError(null);
+    setSelectedDocument(null);
+  };
+
+  // Get total results count
+  const getTotalResultsCount = () => {
+    return Object.values(searchResults).reduce((total, results) => 
+      total + results.reduce((sum, result) => sum + result.totalMatches, 0), 0
+    );
+  };
+
+  // Get document name by ID
+  const getDocumentName = (documentId: string) => {
+    const doc = documents.find(d => d.id === documentId);
+    return doc?.name || 'Unknown Document';
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="w-96 bg-white border-l flex flex-col h-full">
       {/* Header */}
       <div className="p-4 border-b">
-        <h3 className="text-lg font-semibold mb-4">Search Documents</h3>
-        
-        {/* Search Input */}
-        <div className="relative mb-4">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-          <Input
-            placeholder="Search text in documents (OCR will process automatically)..."
-            value={searchQuery}
-            onChange={handleSearchChange}
-            onKeyPress={handleKeyPress}
-            className="pl-10"
-          />
-          {isSearching && (
-            <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-              <div className="animate-spin w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full"></div>
-            </div>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">Document Search</h2>
+          {searchQuery && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={clearSearch}
+              className="h-6 w-6 p-0"
+            >
+              <X className="w-4 h-4" />
+            </Button>
           )}
         </div>
 
-        {/* Filter */}
-        <div className="space-y-2">
-          <label className="text-sm font-medium text-gray-700 flex items-center gap-2">
-            <Filter className="w-4 h-4" />
-            Filter Results
-          </label>
-          <select
-            value={filterBy}
-            onChange={(e) => setFilterBy(e.target.value as any)}
-            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md bg-white hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
-          >
-            <option value="all">All Results</option>
-            <option value="withTakeoffs">Pages with Takeoffs</option>
-            <option value="withoutTakeoffs">Pages without Takeoffs</option>
-          </select>
+        {/* Search Input */}
+        <div className="space-y-3">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+            <Input
+              placeholder="Search in documents..."
+              value={searchQuery}
+              onChange={(e) => handleSearch(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+
+          {/* Document Filter */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-gray-700">Search in:</label>
+            <select
+              value={selectedDocument || ''}
+              onChange={(e) => handleDocumentSelect(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md bg-white hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+            >
+              <option value="">All Documents</option>
+              {ocrEnabledDocuments.map(doc => (
+                <option key={doc.id} value={doc.id}>
+                  {doc.name}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
-      {/* OCR Progress Bar */}
-      {showOcrProgress && (
-        <div className="border-b bg-blue-50 p-4">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="animate-spin w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full"></div>
-            <h3 className="text-sm font-medium text-blue-800">
-              Processing documents for search...
-            </h3>
-          </div>
-          <div className="space-y-3">
-            {Object.entries(ocrProgress).map(([documentId, progress]) => {
-              const doc = documents.find(d => d.id === documentId);
-              const percentage = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0;
-              return (
-                <div key={documentId} className="space-y-2">
-                  <div className="flex justify-between text-xs text-blue-700">
-                    <span className="font-medium">{doc?.name || 'Document'}</span>
-                    <span className="text-blue-600">{progress.current}/{progress.total} pages ({percentage}%)</span>
-                  </div>
-                  <div className="w-full bg-blue-200 rounded-full h-3 overflow-hidden">
-                    <div
-                      className="bg-gradient-to-r from-blue-500 to-blue-600 h-3 rounded-full transition-all duration-500 ease-out"
-                      style={{ width: `${percentage}%` }}
-                    ></div>
-                  </div>
-                  {percentage === 100 && (
-                    <div className="text-xs text-green-600 font-medium flex items-center gap-1">
-                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                      Complete
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
       {/* Search Results */}
-      <div className="flex-1 overflow-y-auto p-4">
-        {searchQuery && !showOcrProgress ? (
-          searchResults.length > 0 ? (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h4 className="font-medium">Search Results</h4>
-                <Badge variant="secondary">
-                  {searchResults.reduce((sum, result) => sum + result.matches.length, 0)} matches
-                </Badge>
-              </div>
-              
-              {searchResults.map((result, index) => {
-                const doc = documents.find(d => d.id === result.documentId);
-                const page = doc?.pages.find(p => p.pageNumber === result.pageNumber);
-                
-                // Apply filter
-                if (filterBy === 'withTakeoffs' && !page?.hasTakeoffs) return null;
-                if (filterBy === 'withoutTakeoffs' && page?.hasTakeoffs) return null;
-                
-                return (
-                  <div
-                    key={`${result.documentId}-${result.pageNumber}-${index}`}
-                    className="p-3 bg-white rounded border cursor-pointer hover:bg-blue-100"
-                    onClick={() => onPageSelect(result.documentId, result.pageNumber)}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <FileText className="w-3 h-3 text-blue-600" />
-                        <span className="text-sm font-medium">
-                          {doc?.name || 'Document'} - Page {result.pageNumber}
-                        </span>
-                        <Badge variant="outline" className="text-xs">
-                          {result.matches.length} match{result.matches.length !== 1 ? 'es' : ''}
-                        </Badge>
-                        {page?.hasTakeoffs && (
-                          <Badge variant="secondary" className="text-xs">
-                            {page.takeoffCount} takeoffs
-                          </Badge>
-                        )}
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onPageSelect(result.documentId, result.pageNumber);
-                        }}
-                      >
-                        <ExternalLink className="w-3 h-3 mr-1" />
-                        Go to Page
-                      </Button>
-                    </div>
-                    
-                    <div className="space-y-2">
-                      {result.matches.slice(0, 2).map((match, matchIndex) => (
-                        <div key={matchIndex} className="text-sm text-gray-700 bg-gray-100 p-2 rounded">
-                          <span className="bg-yellow-200 px-1 rounded font-medium">
-                            {match.text}
-                          </span>
-                          <span className="text-gray-500 ml-1">
-                            {match.context}
-                          </span>
-                        </div>
-                      ))}
-                      {result.matches.length > 2 && (
-                        <p className="text-xs text-gray-500">
-                          +{result.matches.length - 2} more matches on this page
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+      <div className="flex-1 overflow-y-auto min-h-0">
+        {searchError && (
+          <div className="p-4">
+            <div className="flex items-center gap-2 text-red-600 bg-red-50 p-3 rounded-lg">
+              <AlertCircle className="w-4 h-4" />
+              <span className="text-sm">{searchError}</span>
             </div>
-          ) : (
-            <div className="text-center py-8 text-gray-500">
-              {isSearching ? (
-                <div className="flex items-center justify-center gap-2">
-                  <div className="animate-spin w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full"></div>
-                  Searching...
-                </div>
-              ) : (
-                <>
-                  <Search className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                  <p>No results found for "{searchQuery}"</p>
-                  <p className="text-sm">Documents may still be processing. Try again in a moment.</p>
-                </>
-              )}
-            </div>
-          )
-        ) : (
-          <div className="text-center py-8 text-gray-500">
-            <FileText className="w-8 h-8 mx-auto mb-2 opacity-50" />
-            <p>Search through your documents</p>
-            <p className="text-sm">Enter a search term to find text in your PDFs</p>
           </div>
         )}
+
+        {isSearching && (
+          <div className="p-4">
+            <div className="flex items-center gap-2 text-blue-600 bg-blue-50 p-3 rounded-lg">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span className="text-sm">Searching documents...</span>
+            </div>
+          </div>
+        )}
+
+        {!isSearching && !searchError && searchQuery && Object.keys(searchResults).length === 0 && (
+          <div className="p-4">
+            <div className="text-center py-8 text-muted-foreground">
+              <Search className="w-12 h-12 mx-auto mb-2 opacity-50" />
+              <p>No results found</p>
+              <p className="text-sm">Try a different search term</p>
+            </div>
+          </div>
+        )}
+
+        {!isSearching && !searchError && Object.keys(searchResults).length > 0 && (
+          <div className="p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-gray-700">
+                {getTotalResultsCount()} result{getTotalResultsCount() !== 1 ? 's' : ''} found
+              </span>
+            </div>
+
+            {Object.entries(searchResults).map(([documentId, results]) => (
+              <div key={documentId} className="border rounded-lg">
+                {/* Document Header */}
+                <div className="p-3 bg-gray-50 border-b">
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-muted-foreground" />
+                    <span className="font-medium text-sm">{getDocumentName(documentId)}</span>
+                    <Badge variant="outline" className="text-xs">
+                      {results.length} page{results.length !== 1 ? 's' : ''}
+                    </Badge>
+                  </div>
+                </div>
+
+                {/* Results */}
+                <div className="divide-y">
+                  {results.map((result, index) => {
+                    const resultKey = `${documentId}-${result.pageNumber}`;
+                    const isExpanded = expandedResults.has(resultKey);
+                    const isSelected = selectedDocumentId === documentId && selectedPageNumber === result.pageNumber;
+
+                    return (
+                      <div
+                        key={resultKey}
+                        className={`p-3 cursor-pointer transition-colors ${
+                          isSelected
+                            ? 'bg-primary/10 border-l-4 border-primary'
+                            : 'hover:bg-accent/30'
+                        }`}
+                        onClick={() => onPageSelect(documentId, result.pageNumber)}
+                      >
+                        <div className="flex items-start gap-3">
+                          {/* Page Info */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="font-medium text-sm">Page {result.pageNumber}</span>
+                              <Badge variant="outline" className="text-xs">
+                                {result.totalMatches} match{result.totalMatches !== 1 ? 'es' : ''}
+                              </Badge>
+                              <Badge variant="secondary" className="text-xs">
+                                {result.method}
+                              </Badge>
+                            </div>
+
+                            {/* Match Preview */}
+                            {result.matches.length > 0 && (
+                              <div className="space-y-1">
+                                {result.matches.slice(0, isExpanded ? result.matches.length : 1).map((match, matchIndex) => (
+                                  <div key={matchIndex} className="text-xs text-gray-600 bg-gray-50 p-2 rounded">
+                                    <span className="font-medium text-blue-600">
+                                      {match.confidence}% confidence
+                                    </span>
+                                    <div className="mt-1">
+                                      ...{match.snippet}...
+                                    </div>
+                                  </div>
+                                ))}
+                                
+                                {result.matches.length > 1 && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      toggleResultExpansion(resultKey);
+                                    }}
+                                    className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
+                                  >
+                                    {isExpanded ? (
+                                      <>
+                                        <span>Show less</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <span>Show {result.matches.length - 1} more match{result.matches.length - 1 !== 1 ? 'es' : ''}</span>
+                                        <ChevronRight className="w-3 h-3" />
+                                      </>
+                                    )}
+                                  </button>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Processing Info */}
+                            <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
+                              <Clock className="w-3 h-3" />
+                              <span>{result.processingTime}ms</span>
+                            </div>
+                          </div>
+
+                          {/* Actions */}
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onPageSelect(documentId, result.pageNumber);
+                              }}
+                              className="h-6 w-6 p-0"
+                              title="Go to page"
+                            >
+                              <Eye className="w-3 h-3" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {!searchQuery && (
+          <div className="p-4">
+            <div className="text-center py-8 text-muted-foreground">
+              <Search className="w-12 h-12 mx-auto mb-2 opacity-50" />
+              <p>Search in your documents</p>
+              <p className="text-sm">Enter a search term to find text in OCR-processed documents</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div className="p-4 border-t bg-muted/30">
+        <div className="text-center text-sm text-muted-foreground">
+          {ocrEnabledDocuments.length} document{ocrEnabledDocuments.length !== 1 ? 's' : ''} with OCR
+        </div>
       </div>
     </div>
   );

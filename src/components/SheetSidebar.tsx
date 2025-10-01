@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Input } from './ui/input';
@@ -20,7 +20,9 @@ import {
   RefreshCw,
   Edit2,
   Check,
-  X
+  X,
+  Tag,
+  ChevronDown as ChevronDownIcon
 } from 'lucide-react';
 import { fileService, sheetService } from '../services/apiService';
 import { useTakeoffStore } from '../store/useTakeoffStore';
@@ -63,9 +65,40 @@ export function SheetSidebar({
   const [editingSheetId, setEditingSheetId] = useState<string | null>(null);
   const [editingSheetName, setEditingSheetName] = useState<string>('');
   const [editingPageNumber, setEditingPageNumber] = useState<number | null>(null);
+  
+  // Document menu dropdown state
+  const [openDocumentMenu, setOpenDocumentMenu] = useState<string | null>(null);
+  
+  // Ref to track if we're currently updating documents to prevent infinite loops
+  const isUpdatingDocuments = useRef(false);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (openDocumentMenu) {
+        setOpenDocumentMenu(null);
+      }
+    };
+
+    if (openDocumentMenu) {
+      document.addEventListener('click', handleClickOutside);
+      return () => document.removeEventListener('click', handleClickOutside);
+    }
+  }, [openDocumentMenu]);
 
   // Store integration
   const { getProjectTakeoffMeasurements } = useTakeoffStore();
+
+  // Check if document has OCR data
+  const checkDocumentOCRStatus = async (documentId: string): Promise<boolean> => {
+    try {
+      const { serverOcrService } = await import('../services/serverOcrService');
+      const ocrData = await serverOcrService.getDocumentData(documentId, projectId);
+      return ocrData && ocrData.results.length > 0;
+    } catch (error) {
+      return false;
+    }
+  };
 
   // Update hasTakeoffs property based on actual takeoff measurements
   const updateHasTakeoffs = useCallback((docs: PDFDocument[]) => {
@@ -138,6 +171,10 @@ export function SheetSidebar({
                   }
                 } catch (error) {
                   // Sheet doesn't exist in database yet, use defaults
+                  // This is expected for new documents, so we don't log it as an error
+                  if (!error.isExpected404 && error.response?.status !== 404) {
+                    console.warn(`Unexpected error loading sheet ${sheetId}:`, error);
+                  }
                 }
                 
                 // Default page data
@@ -151,17 +188,23 @@ export function SheetSidebar({
               })
             );
             
+            // Check if document has OCR data
+            const hasOCRData = await checkDocumentOCRStatus(file.id);
+            
             return {
               id: file.id,
               name: file.originalName.replace('.pdf', ''),
               totalPages,
               pages,
               isExpanded: false,
-              ocrEnabled: false
+              ocrEnabled: hasOCRData
             };
           } catch (error) {
             console.error(`Error loading PDF ${file.originalName}:`, error);
             // Return a basic document structure even if PDF loading fails
+            // Check if document has OCR data even if PDF loading failed
+            const hasOCRData = await checkDocumentOCRStatus(file.id);
+            
             return {
               id: file.id,
               name: file.originalName.replace('.pdf', ''),
@@ -174,56 +217,52 @@ export function SheetSidebar({
                 ocrProcessed: false
               }],
               isExpanded: false,
-              ocrEnabled: false
+              ocrEnabled: hasOCRData
             };
           }
         })
       );
       
       // Update hasTakeoffs based on actual measurements and preserve expansion state
+      const finalDocuments = updateHasTakeoffs(documents);
+      
       setDocuments(prevDocuments => {
-        const documentsWithUpdatedTakeoffs = updateHasTakeoffs(documents);
-        const documentsWithPreservedState = documentsWithUpdatedTakeoffs.map(newDoc => {
+        const documentsWithPreservedState = finalDocuments.map(newDoc => {
           const existingDoc = prevDocuments.find(prevDoc => prevDoc.id === newDoc.id);
           return {
             ...newDoc,
             isExpanded: existingDoc?.isExpanded || false
           };
         });
+        
+        // Note: We don't notify parent here to avoid infinite loops
+        // The parent will get updated documents through other means
+        
         return documentsWithPreservedState;
       });
-      
-      // Notify parent component of documents update
-      if (onDocumentsUpdate) {
-        onDocumentsUpdate(updateHasTakeoffs(documents));
-      }
       
     } catch (error) {
       console.error('Error loading project documents:', error);
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, updateHasTakeoffs, onDocumentsUpdate]);
 
   useEffect(() => {
     loadProjectDocuments();
-  }, [loadProjectDocuments]);
+  }, [projectId, loadProjectDocuments]); // Include loadProjectDocuments in dependencies
 
   // Update hasTakeoffs when takeoff measurements change (but preserve expansion state)
+  // This effect only runs when the takeoff measurements actually change, not on every render
   useEffect(() => {
     if (documents.length > 0) {
+      const takeoffMeasurements = getProjectTakeoffMeasurements(projectId);
       setDocuments(prevDocuments => {
         const updatedDocuments = updateHasTakeoffs(prevDocuments);
-        
-        // Notify parent component of the update
-        if (onDocumentsUpdate) {
-          onDocumentsUpdate(updatedDocuments);
-        }
-        
         return updatedDocuments;
       });
     }
-  }, [getProjectTakeoffMeasurements, updateHasTakeoffs, onDocumentsUpdate]);
+  }, [projectId]); // Only depend on projectId to avoid infinite loops
 
 
   // Generate thumbnail for a specific page
@@ -273,12 +312,12 @@ export function SheetSidebar({
     try {
       setProcessingOCR(prev => [...prev, `${documentId}-${pageNumber}`]);
       
-      // Call the backend OCR service
-      const result = await sheetService.processOCR(documentId, [pageNumber]);
+      // Use the server-side OCR service for OCR processing
+      const { serverOcrService } = await import('../services/serverOcrService');
+      const result = await serverOcrService.processDocument(documentId, projectId);
       
-      if (result.success && result.results.length > 0) {
-        const ocrResult = result.results[0];
-        
+      if (result.success) {
+        // Update the page with OCR processing status
         setDocuments(prev => prev.map(doc => 
           doc.id === documentId 
             ? {
@@ -287,8 +326,7 @@ export function SheetSidebar({
                   page.pageNumber === pageNumber 
                     ? { 
                         ...page, 
-                        extractedText: ocrResult.extractedText, 
-                        ocrProcessed: ocrResult.success 
+                        ocrProcessed: true 
                       }
                     : page
                 )
@@ -302,7 +340,7 @@ export function SheetSidebar({
     } finally {
       setProcessingOCR(prev => prev.filter(id => id !== `${documentId}-${pageNumber}`));
     }
-  }, []);
+  }, [projectId]);
 
   // Handle page selection
   const handlePageClick = (documentId: string, pageNumber: number) => {
@@ -393,12 +431,6 @@ export function SheetSidebar({
       );
       
       setDocuments(updatedDocuments);
-      
-      // Notify parent component of documents update
-      if (onDocumentsUpdate) {
-        onDocumentsUpdate(updatedDocuments);
-      }
-
       cancelEditingSheetName();
     } catch (error) {
       console.error('Error updating sheet name:', error);
@@ -522,31 +554,83 @@ export function SheetSidebar({
                         {document.totalPages} pages
                       </Badge>
                     </div>
-                    <div className="flex items-center gap-1">
+                    <div className="relative">
                       <Button
                         variant="ghost"
                         size="sm"
                         onClick={(e) => {
                           e.stopPropagation();
-                          onTitleblockConfig?.(document.id);
+                          setOpenDocumentMenu(openDocumentMenu === document.id ? null : document.id);
                         }}
                         className="h-6 w-6 p-0"
-                        title="Configure Titleblock"
+                        title="Document Options"
                       >
                         <Settings className="w-3 h-3" />
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteDocument(document.id);
-                        }}
-                        className="h-6 w-6 p-0 text-destructive hover:text-destructive"
-                        title="Delete Document"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </Button>
+                      
+                      {openDocumentMenu === document.id && (
+                        <div className="absolute right-0 top-full mt-1 w-48 bg-white border rounded-lg shadow-lg z-50 py-1">
+                          <button
+                            className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              onTitleblockConfig?.(document.id);
+                              setOpenDocumentMenu(null);
+                            }}
+                          >
+                            <Settings className="w-4 h-4" />
+                            Configure Titleblock
+                          </button>
+                          
+                          <button
+                            className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              onOCRRequest?.(document.id, document.pages.map(p => p.pageNumber));
+                              setOpenDocumentMenu(null);
+                            }}
+                            disabled={processingOCR.includes(document.id)}
+                          >
+                            {processingOCR.includes(document.id) ? (
+                              <RefreshCw className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Scan className="w-4 h-4" />
+                            )}
+                            Run OCR Processing
+                          </button>
+                          
+                          <button
+                            className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              // TODO: Implement extract page labels
+                              alert('Extract page labels feature coming soon!');
+                              setOpenDocumentMenu(null);
+                            }}
+                          >
+                            <Tag className="w-4 h-4" />
+                            Extract Page Labels
+                          </button>
+                          
+                          <div className="border-t border-gray-200"></div>
+                          
+                          <button
+                            className="w-full px-3 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center gap-2"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleDeleteDocument(document.id);
+                              setOpenDocumentMenu(null);
+                            }}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                            Delete Document
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

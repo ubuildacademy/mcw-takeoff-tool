@@ -382,7 +382,7 @@ export const useTakeoffStore = create<TakeoffStore>()(
        },
       
       addTakeoffMeasurement: async (measurementData) => {
-        console.log('🔄 ADD_TAKEOFF_MEASUREMENT: Starting to create takeoff measurement:', measurementData);
+        // console.log('🔄 ADD_TAKEOFF_MEASUREMENT: Starting to create takeoff measurement:', measurementData);
         try {
           // Import the API service dynamically to avoid circular dependencies
           const { takeoffMeasurementService } = await import('../services/apiService');
@@ -394,7 +394,7 @@ export const useTakeoffStore = create<TakeoffStore>()(
             conditionName: condition?.name || 'Unknown'
           };
           
-          console.log('🔄 ADD_TAKEOFF_MEASUREMENT: Calling API to create measurement...');
+          // console.log('🔄 ADD_TAKEOFF_MEASUREMENT: Calling API to create measurement...');
           // Create measurement via API - this is the source of truth
           const response = await takeoffMeasurementService.createTakeoffMeasurement(measurementPayload);
           console.log('✅ ADD_TAKEOFF_MEASUREMENT: API response received:', response);
@@ -494,10 +494,7 @@ export const useTakeoffStore = create<TakeoffStore>()(
       
       getConditionTakeoffMeasurements: (projectId, conditionId) => {
         const { takeoffMeasurements } = get();
-        console.log('getConditionTakeoffMeasurements called with:', { projectId, conditionId });
-        console.log('All takeoff measurements:', takeoffMeasurements);
         const filtered = takeoffMeasurements.filter(m => m.projectId === projectId && m.conditionId === conditionId);
-        console.log('Filtered condition measurements:', filtered);
         return filtered;
       },
       
@@ -730,12 +727,9 @@ export const useTakeoffStore = create<TakeoffStore>()(
         const state = get();
         const existingProjectConditions = state.conditions.filter(c => c.projectId === projectId);
         
-        if (existingProjectConditions.length > 0) {
-          console.log(`✅ ENSURE_CONDITIONS_LOADED: Already have ${existingProjectConditions.length} conditions for project ${projectId} from localStorage`);
-          return;
-        }
-        
-        console.log(`🔄 ENSURE_CONDITIONS_LOADED: No conditions found for project ${projectId}, loading from API`);
+        // Always load conditions from API to ensure we have the latest data
+        // This prevents issues where local storage has outdated conditions
+        console.log(`🔄 ENSURE_CONDITIONS_LOADED: Loading conditions for project ${projectId} from API (found ${existingProjectConditions.length} in local storage)`);
         await get().loadProjectConditions(projectId);
       },
 
