@@ -81,7 +81,24 @@ router.get('/:sheetId', async (req, res) => {
     const sheet = await storage.getSheet(sheetId);
     
     if (!sheet) {
-      return res.status(404).json({ error: 'Sheet not found' });
+      // Return a default sheet structure for new sheets
+      const parts = sheetId.split('-');
+      const pageNumber = parseInt(parts[parts.length - 1]) || 1;
+      const documentId = parts.slice(0, -1).join('-');
+      
+      const defaultSheet = {
+        id: sheetId,
+        documentId: documentId,
+        pageNumber: pageNumber,
+        hasTakeoffs: false,
+        takeoffCount: 0,
+        isVisible: true,
+        ocrProcessed: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      
+      return res.json({ sheet: defaultSheet });
     }
     
     res.json({ sheet });

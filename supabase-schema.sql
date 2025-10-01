@@ -85,6 +85,37 @@ CREATE TABLE IF NOT EXISTS takeoff_measurements (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- OCR results table
+CREATE TABLE IF NOT EXISTS ocr_results (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  project_id UUID NOT NULL REFERENCES takeoff_projects(id) ON DELETE CASCADE,
+  document_id TEXT NOT NULL,
+  page_number INTEGER NOT NULL,
+  text_content TEXT NOT NULL,
+  confidence_score DECIMAL(5,2),
+  processing_method TEXT NOT NULL CHECK (processing_method IN ('direct_extraction', 'trocr', 'tesseract')),
+  processing_time_ms INTEGER,
+  word_positions JSONB, -- Array of {text, bbox, confidence} objects
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE(project_id, document_id, page_number)
+);
+
+-- OCR jobs table for tracking processing status
+CREATE TABLE IF NOT EXISTS ocr_jobs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  project_id UUID NOT NULL REFERENCES takeoff_projects(id) ON DELETE CASCADE,
+  document_id TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
+  progress INTEGER DEFAULT 0,
+  total_pages INTEGER DEFAULT 0,
+  processed_pages INTEGER DEFAULT 0,
+  error_message TEXT,
+  started_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  completed_at TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- Indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_takeoff_conditions_project_id ON takeoff_conditions(project_id);
 CREATE INDEX IF NOT EXISTS idx_takeoff_files_project_id ON takeoff_files(project_id);
@@ -92,6 +123,10 @@ CREATE INDEX IF NOT EXISTS idx_takeoff_sheets_document_id ON takeoff_sheets(docu
 CREATE INDEX IF NOT EXISTS idx_takeoff_measurements_project_id ON takeoff_measurements(project_id);
 CREATE INDEX IF NOT EXISTS idx_takeoff_measurements_sheet_id ON takeoff_measurements(sheet_id);
 CREATE INDEX IF NOT EXISTS idx_takeoff_measurements_condition_id ON takeoff_measurements(condition_id);
+CREATE INDEX IF NOT EXISTS idx_ocr_results_project_document ON ocr_results(project_id, document_id);
+CREATE INDEX IF NOT EXISTS idx_ocr_results_document_page ON ocr_results(document_id, page_number);
+CREATE INDEX IF NOT EXISTS idx_ocr_jobs_project_document ON ocr_jobs(project_id, document_id);
+CREATE INDEX IF NOT EXISTS idx_ocr_jobs_status ON ocr_jobs(status);
 
 -- Row Level Security (RLS) policies
 ALTER TABLE takeoff_projects ENABLE ROW LEVEL SECURITY;
@@ -99,6 +134,8 @@ ALTER TABLE takeoff_conditions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE takeoff_files ENABLE ROW LEVEL SECURITY;
 ALTER TABLE takeoff_sheets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE takeoff_measurements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ocr_results ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ocr_jobs ENABLE ROW LEVEL SECURITY;
 
 -- For now, allow all operations (you can restrict this later based on user authentication)
 CREATE POLICY "Allow all operations on takeoff_projects" ON takeoff_projects FOR ALL USING (true);
@@ -106,5 +143,7 @@ CREATE POLICY "Allow all operations on takeoff_conditions" ON takeoff_conditions
 CREATE POLICY "Allow all operations on takeoff_files" ON takeoff_files FOR ALL USING (true);
 CREATE POLICY "Allow all operations on takeoff_sheets" ON takeoff_sheets FOR ALL USING (true);
 CREATE POLICY "Allow all operations on takeoff_measurements" ON takeoff_measurements FOR ALL USING (true);
+CREATE POLICY "Allow all operations on ocr_results" ON ocr_results FOR ALL USING (true);
+CREATE POLICY "Allow all operations on ocr_jobs" ON ocr_jobs FOR ALL USING (true);
 
 -- No sample data - start with empty tables
