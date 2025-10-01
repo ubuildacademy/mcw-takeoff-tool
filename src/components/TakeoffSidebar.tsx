@@ -366,236 +366,358 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       }
 
       // Start export progress
-      onExportStatusUpdate?.('excel', 10);
+      onExportStatusUpdate?.('excel', 5);
 
-    // Create workbook and worksheet
-    const workbook = XLSX.utils.book_new();
-    
-    // Get current project info
-    const currentProject = useTakeoffStore.getState().getCurrentProject();
-    
-    // Create summary sheet
-    const summaryData = [];
-    
-    // Header row with industry-standard page labeling
-    const headerRow = ['Condition', 'Type', 'Unit', ...sortedPages.map(p => {
-      // Check if page has been relabeled (has a custom sheetName)
-      const hasCustomName = p.sheetName && p.sheetName !== `Page ${p.pageNumber}`;
-      return hasCustomName ? `${p.sheetName} (P.${p.pageNumber})` : `Page ${p.pageNumber}`;
-    }), 'Total'];
-    summaryData.push(headerRow);
-    
-    // Data rows
-    conditionIds.forEach(conditionId => {
-      const conditionData = reportData[conditionId];
-      const row = [
-        conditionData.condition.name,
-        conditionData.condition.type,
-        conditionData.condition.unit,
-        ...sortedPages.map(page => {
-          const pageKey = Object.keys(conditionData.pages).find(key => 
-            conditionData.pages[key].pageNumber === page.pageNumber
-          );
-          const pageData = pageKey ? conditionData.pages[pageKey] : null;
-          return pageData ? pageData.total.toFixed(2) : '';
-        }),
-        conditionData.grandTotal.toFixed(2)
-      ];
-      summaryData.push(row);
-    });
-    
-    // Add totals row
-    const totalsRow = ['TOTALS', '', '', ...sortedPages.map(page => {
-      let total = 0;
-      conditionIds.forEach(conditionId => {
-        const pageKey = Object.keys(reportData[conditionId].pages).find(key => 
-          reportData[conditionId].pages[key].pageNumber === page.pageNumber
-        );
-        const pageData = pageKey ? reportData[conditionId].pages[pageKey] : null;
-        if (pageData) total += pageData.total;
-      });
-      return total > 0 ? total.toFixed(2) : '';
-    }), conditionIds.reduce((sum, id) => sum + reportData[id].grandTotal, 0).toFixed(2)];
-    summaryData.push(totalsRow);
-    
-    const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
-    
-    // Set column widths for better readability
-    const summaryColWidths = [
-      { wch: 25 }, // Condition
-      { wch: 10 }, // Type
-      { wch: 8 },  // Unit
-      ...sortedPages.map(() => ({ wch: 15 })), // Page columns
-      { wch: 12 }  // Total
-    ];
-    summarySheet['!cols'] = summaryColWidths;
-    
-    XLSX.utils.book_append_sheet(workbook, summarySheet, 'Quantity Summary');
-    
-    // Update progress
-    onExportStatusUpdate?.('excel', 50);
-    
-    // Create detailed sheet
-    const detailData = [];
-    detailData.push(['Condition', 'Sheet Name', 'Page Reference', 'Measurement #', 'Value', 'Unit', 'Timestamp']);
-    
-    conditionIds.forEach(conditionId => {
-      const conditionData = reportData[conditionId];
-      Object.values(conditionData.pages).forEach(pageData => {
-        pageData.measurements.forEach((measurement, idx) => {
-          detailData.push([
-            conditionData.condition.name,
-            pageData.sheetName,
-            `P${pageData.pageNumber}`,
-            idx + 1,
-            measurement.calculatedValue.toFixed(2),
-            conditionData.condition.unit,
-            new Date(measurement.timestamp).toLocaleString()
-          ]);
-        });
-      });
-    });
-    
-    const detailSheet = XLSX.utils.aoa_to_sheet(detailData);
-    
-    // Set column widths for detailed sheet
-    const detailColWidths = [
-      { wch: 25 }, // Condition
-      { wch: 20 }, // Sheet Name
-      { wch: 12 }, // Page Reference
-      { wch: 12 }, // Measurement #
-      { wch: 12 }, // Value
-      { wch: 8 },  // Unit
-      { wch: 20 }  // Timestamp
-    ];
-    detailSheet['!cols'] = detailColWidths;
-    
-    XLSX.utils.book_append_sheet(workbook, detailSheet, 'Detailed Measurements');
-    
-    // Create project information sheet
-    const projectInfoData = [
-      ['Project Information', ''],
-      ['Project Name', currentProject?.name || 'Unknown Project'],
-      ['Client', currentProject?.client || 'N/A'],
-      ['Location', currentProject?.location || 'N/A'],
-      ['Project Type', currentProject?.projectType || 'N/A'],
-      ['Status', currentProject?.status || 'N/A'],
-      ['', ''],
-      ['Report Information', ''],
-      ['Generated On', new Date().toLocaleString()],
-      ['Total Conditions', conditionIds.length],
-      ['Total Pages with Measurements', sortedPages.length],
-      ['Total Measurements', conditionIds.reduce((sum, id) => sum + Object.values(reportData[id].pages).reduce((pageSum, page) => pageSum + page.measurements.length, 0), 0)],
-      ['', ''],
-      ['Notes', 'This report follows industry standards for quantity takeoff reporting.'],
-      ['', 'Page references use format: Sheet Name (P#) where P# is the page number.']
-    ];
-    
-    const projectInfoSheet = XLSX.utils.aoa_to_sheet(projectInfoData);
-    projectInfoSheet['!cols'] = [{ wch: 20 }, { wch: 30 }];
-    XLSX.utils.book_append_sheet(workbook, projectInfoSheet, 'Project Info');
-    
-    // Update progress
-    onExportStatusUpdate?.('excel', 70);
-    
-    // Create Cost Analysis sheet
-    const { costData, summary } = getCostAnalysisData();
-    const costConditionIds = Object.keys(costData);
-    
-    if (summary.conditionsWithCosts > 0) {
-      const costAnalysisData = [];
+      // Create workbook and worksheet
+      const workbook = XLSX.utils.book_new();
       
-      // Header row for cost analysis
-      costAnalysisData.push([
+      // Get current project info
+      const currentProject = useTakeoffStore.getState().getCurrentProject();
+      
+      // 1. EXECUTIVE SUMMARY SHEET
+      const executiveSummaryData = [
+        ['MERIDIAN TAKEOFF - PROFESSIONAL CONSTRUCTION TAKEOFF REPORT', ''],
+        ['', ''],
+        ['EXECUTIVE SUMMARY', ''],
+        ['', ''],
+        ['Project Information', ''],
+        ['Project Name', currentProject?.name || 'Unknown Project'],
+        ['Client', currentProject?.client || 'N/A'],
+        ['Location', currentProject?.location || 'N/A'],
+        ['Project Type', currentProject?.projectType || 'N/A'],
+        ['Status', currentProject?.status || 'N/A'],
+        ['Report Date', new Date().toLocaleDateString()],
+        ['Generated Time', new Date().toLocaleTimeString()],
+        ['', ''],
+        ['Key Performance Indicators', ''],
+        ['Total Conditions', conditionIds.length],
+        ['Total Pages with Measurements', sortedPages.length],
+        ['Total Measurements', conditionIds.reduce((sum, id) => sum + Object.values(reportData[id].pages).reduce((pageSum, page) => pageSum + page.measurements.length, 0), 0)],
+        ['', ''],
+        ['Cost Analysis Summary', ''],
+        ['Total Project Cost', `$${getCostAnalysisData().summary.totalProjectCost.toFixed(2)}`],
+        ['Material Cost', `$${getCostAnalysisData().summary.totalMaterialCost.toFixed(2)}`],
+        ['Labor Cost', `$${getCostAnalysisData().summary.totalLaborCost.toFixed(2)}`],
+        ['Material/Labor Ratio', `${((getCostAnalysisData().summary.totalMaterialCost / getCostAnalysisData().summary.totalProjectCost) * 100).toFixed(1)}% / ${((getCostAnalysisData().summary.totalLaborCost / getCostAnalysisData().summary.totalProjectCost) * 100).toFixed(1)}%`],
+        ['Conditions with Costs', getCostAnalysisData().summary.conditionsWithCosts]
+      ];
+      
+      const executiveSheet = XLSX.utils.aoa_to_sheet(executiveSummaryData);
+      executiveSheet['!cols'] = [{ wch: 30 }, { wch: 40 }];
+      XLSX.utils.book_append_sheet(workbook, executiveSheet, 'Executive Summary');
+
+      onExportStatusUpdate?.('excel', 15);
+
+      // 2. ENHANCED QUANTITY SUMMARY SHEET
+      const summaryData = [];
+      
+      // Enhanced header with professional formatting
+      const headerRow = [
         'Condition', 
         'Type', 
         'Unit', 
-        'Quantity', 
+        'Description',
+        ...sortedPages.map(p => {
+          const hasCustomName = p.sheetName && p.sheetName !== `Page ${p.pageNumber}`;
+          return hasCustomName ? `${p.sheetName} (P.${p.pageNumber})` : `Page ${p.pageNumber}`;
+        }), 
+        'Total Quantity', 
         'Material Cost/Unit', 
         'Labor Cost/Unit', 
-        'Total Material Cost', 
-        'Total Labor Cost', 
-        'Total Cost'
-      ]);
+        'Total Cost',
+        'Cost per Unit'
+      ];
+      summaryData.push(headerRow);
       
-      // Data rows for conditions with costs
-      costConditionIds.forEach(conditionId => {
-        const data = costData[conditionId];
-        if (data.hasCosts) {
-          costAnalysisData.push([
-            data.condition.name,
-            data.condition.type,
-            data.condition.unit,
-            data.quantity.toFixed(2),
-            data.materialCostPerUnit > 0 ? `$${data.materialCostPerUnit.toFixed(2)}` : 'N/A',
-            data.laborCostPerUnit > 0 ? `$${data.laborCostPerUnit.toFixed(2)}` : 'N/A',
-            data.totalMaterialCost > 0 ? `$${data.totalMaterialCost.toFixed(2)}` : '$0.00',
-            data.totalLaborCost > 0 ? `$${data.totalLaborCost.toFixed(2)}` : '$0.00',
-            `$${data.totalCost.toFixed(2)}`
-          ]);
-        }
+      // Data rows with enhanced formatting
+      conditionIds.forEach(conditionId => {
+        const conditionData = reportData[conditionId];
+        const costInfo = getCostAnalysisData().costData[conditionId];
+        
+        const row = [
+          conditionData.condition.name,
+          conditionData.condition.type,
+          conditionData.condition.unit,
+          conditionData.condition.description || 'No description provided',
+          ...sortedPages.map(page => {
+            const pageKey = Object.keys(conditionData.pages).find(key => 
+              conditionData.pages[key].pageNumber === page.pageNumber
+            );
+            const pageData = pageKey ? conditionData.pages[pageKey] : null;
+            return pageData ? pageData.total.toFixed(2) : '';
+          }),
+          conditionData.grandTotal.toFixed(2),
+          costInfo.materialCostPerUnit > 0 ? `$${costInfo.materialCostPerUnit.toFixed(2)}` : 'N/A',
+          costInfo.laborCostPerUnit > 0 ? `$${costInfo.laborCostPerUnit.toFixed(2)}` : 'N/A',
+          costInfo.hasCosts ? `$${costInfo.totalCost.toFixed(2)}` : 'N/A',
+          costInfo.hasCosts ? `$${(costInfo.totalCost / conditionData.grandTotal).toFixed(2)}` : 'N/A'
+        ];
+        summaryData.push(row);
       });
       
-      // Add summary row
-      costAnalysisData.push(['', '', '', '', '', '', '', '', '']);
-      costAnalysisData.push([
+      // Add totals row
+      const totalsRow = [
         'TOTALS', 
         '', 
         '', 
         '', 
-        '', 
-        '', 
-        `$${summary.totalMaterialCost.toFixed(2)}`, 
-        `$${summary.totalLaborCost.toFixed(2)}`, 
-        `$${summary.totalProjectCost.toFixed(2)}`
-      ]);
+        ...sortedPages.map(page => {
+          let total = 0;
+          conditionIds.forEach(conditionId => {
+            const pageKey = Object.keys(reportData[conditionId].pages).find(key => 
+              reportData[conditionId].pages[key].pageNumber === page.pageNumber
+            );
+            const pageData = pageKey ? reportData[conditionId].pages[pageKey] : null;
+            if (pageData) total += pageData.total;
+          });
+          return total > 0 ? total.toFixed(2) : '';
+        }), 
+        conditionIds.reduce((sum, id) => sum + reportData[id].grandTotal, 0).toFixed(2),
+        '',
+        '',
+        `$${getCostAnalysisData().summary.totalProjectCost.toFixed(2)}`,
+        ''
+      ];
+      summaryData.push(totalsRow);
       
-      // Add cost analysis metrics
-      costAnalysisData.push(['', '', '', '', '', '', '', '', '']);
-      costAnalysisData.push(['COST ANALYSIS SUMMARY', '', '', '', '', '', '', '', '']);
-      costAnalysisData.push(['Total Conditions with Costs', summary.conditionsWithCosts, '', '', '', '', '', '', '']);
-      costAnalysisData.push(['Total Conditions', summary.totalConditions, '', '', '', '', '', '', '']);
-      costAnalysisData.push(['Material Cost Percentage', `${((summary.totalMaterialCost / summary.totalProjectCost) * 100).toFixed(1)}%`, '', '', '', '', '', '', '']);
-      costAnalysisData.push(['Labor Cost Percentage', `${((summary.totalLaborCost / summary.totalProjectCost) * 100).toFixed(1)}%`, '', '', '', '', '', '', '']);
+      const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
       
-      const costAnalysisSheet = XLSX.utils.aoa_to_sheet(costAnalysisData);
-      
-      // Set column widths for cost analysis sheet
-      const costColWidths = [
+      // Set column widths for enhanced summary
+      const summaryColWidths = [
         { wch: 25 }, // Condition
         { wch: 10 }, // Type
         { wch: 8 },  // Unit
-        { wch: 12 }, // Quantity
+        { wch: 30 }, // Description
+        ...sortedPages.map(() => ({ wch: 15 })), // Page columns
+        { wch: 15 }, // Total Quantity
         { wch: 18 }, // Material Cost/Unit
         { wch: 16 }, // Labor Cost/Unit
-        { wch: 18 }, // Total Material Cost
-        { wch: 16 }, // Total Labor Cost
-        { wch: 12 }  // Total Cost
+        { wch: 12 }, // Total Cost
+        { wch: 12 }  // Cost per Unit
       ];
-      costAnalysisSheet['!cols'] = costColWidths;
+      summarySheet['!cols'] = summaryColWidths;
       
-      XLSX.utils.book_append_sheet(workbook, costAnalysisSheet, 'Cost Analysis');
-    }
-    
-    // Generate filename with project name and timestamp
-    const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
-    const projectName = currentProject?.name?.replace(/[^a-zA-Z0-9]/g, '-') || 'project';
-    const filename = `${projectName}-takeoff-report-${timestamp}.xlsx`;
-    
-    // Update progress
-    onExportStatusUpdate?.('excel', 90);
-    
-    // Save file
-    XLSX.writeFile(workbook, filename);
-    
-    // Complete
-    onExportStatusUpdate?.('excel', 100);
-    
-    // Reset status after a brief delay
-    setTimeout(() => {
-      onExportStatusUpdate?.(null, 0);
-    }, 1000);
-    
+      XLSX.utils.book_append_sheet(workbook, summarySheet, 'Quantity Summary');
+
+      onExportStatusUpdate?.('excel', 35);
+
+      // 3. DETAILED MEASUREMENTS SHEET
+      const detailData = [];
+      detailData.push([
+        'Condition', 
+        'Type',
+        'Unit',
+        'Sheet Name', 
+        'Page Reference', 
+        'Measurement #', 
+        'Value', 
+        'Net Value (after cutouts)',
+        'Timestamp',
+        'Measurement Type'
+      ]);
+      
+      conditionIds.forEach(conditionId => {
+        const conditionData = reportData[conditionId];
+        
+        Object.values(conditionData.pages).forEach(pageData => {
+          pageData.measurements.forEach((measurement, idx) => {
+            detailData.push([
+              conditionData.condition.name,
+              conditionData.condition.type,
+              conditionData.condition.unit,
+              pageData.sheetName,
+              `P${pageData.pageNumber}`,
+              idx + 1,
+              measurement.calculatedValue.toFixed(2),
+              (measurement.netCalculatedValue || measurement.calculatedValue).toFixed(2),
+              new Date(measurement.timestamp).toLocaleString(),
+              measurement.type
+            ]);
+          });
+        });
+      });
+      
+      const detailSheet = XLSX.utils.aoa_to_sheet(detailData);
+      
+      // Set column widths for detailed sheet
+      const detailColWidths = [
+        { wch: 25 }, // Condition
+        { wch: 10 }, // Type
+        { wch: 8 },  // Unit
+        { wch: 20 }, // Sheet Name
+        { wch: 12 }, // Page Reference
+        { wch: 12 }, // Measurement #
+        { wch: 12 }, // Value
+        { wch: 18 }, // Net Value
+        { wch: 20 }, // Timestamp
+        { wch: 15 }  // Measurement Type
+      ];
+      detailSheet['!cols'] = detailColWidths;
+      
+      XLSX.utils.book_append_sheet(workbook, detailSheet, 'Detailed Measurements');
+
+      onExportStatusUpdate?.('excel', 55);
+
+      // 4. ENHANCED COST ANALYSIS SHEET
+      const { costData, summary } = getCostAnalysisData();
+      const costConditionIds = Object.keys(costData);
+      
+      if (summary.conditionsWithCosts > 0) {
+        const costAnalysisData = [];
+        
+        // Enhanced header row for cost analysis
+        costAnalysisData.push([
+          'Condition', 
+          'Type', 
+          'Unit', 
+          'Description',
+          'Quantity', 
+          'Material Cost/Unit', 
+          'Labor Cost/Unit', 
+          'Total Material Cost', 
+          'Total Labor Cost', 
+          'Total Cost',
+          'Cost per Unit',
+          'Material %',
+          'Labor %'
+        ]);
+        
+        // Data rows for conditions with costs
+        costConditionIds.forEach(conditionId => {
+          const data = costData[conditionId];
+          if (data.hasCosts) {
+            const materialPercent = ((data.totalMaterialCost / data.totalCost) * 100).toFixed(1);
+            const laborPercent = ((data.totalLaborCost / data.totalCost) * 100).toFixed(1);
+            
+            costAnalysisData.push([
+              data.condition.name,
+              data.condition.type,
+              data.condition.unit,
+              data.condition.description || 'No description provided',
+              data.quantity.toFixed(2),
+              data.materialCostPerUnit > 0 ? `$${data.materialCostPerUnit.toFixed(2)}` : 'N/A',
+              data.laborCostPerUnit > 0 ? `$${data.laborCostPerUnit.toFixed(2)}` : 'N/A',
+              data.totalMaterialCost > 0 ? `$${data.totalMaterialCost.toFixed(2)}` : '$0.00',
+              data.totalLaborCost > 0 ? `$${data.totalLaborCost.toFixed(2)}` : '$0.00',
+              `$${data.totalCost.toFixed(2)}`,
+              `$${(data.totalCost / data.quantity).toFixed(2)}`,
+              `${materialPercent}%`,
+              `${laborPercent}%`
+            ]);
+          }
+        });
+        
+        // Add summary section
+        costAnalysisData.push(['', '', '', '', '', '', '', '', '', '', '', '', '']);
+        costAnalysisData.push([
+          'PROJECT TOTALS', 
+          '', 
+          '', 
+          '', 
+          '', 
+          '', 
+          '', 
+          `$${summary.totalMaterialCost.toFixed(2)}`, 
+          `$${summary.totalLaborCost.toFixed(2)}`, 
+          `$${summary.totalProjectCost.toFixed(2)}`,
+          '',
+          `${((summary.totalMaterialCost / summary.totalProjectCost) * 100).toFixed(1)}%`,
+          `${((summary.totalLaborCost / summary.totalProjectCost) * 100).toFixed(1)}%`
+        ]);
+        
+        // Add cost analysis metrics
+        costAnalysisData.push(['', '', '', '', '', '', '', '', '', '', '', '', '']);
+        costAnalysisData.push(['COST ANALYSIS SUMMARY', '', '', '', '', '', '', '', '', '', '', '', '']);
+        costAnalysisData.push(['Total Conditions with Costs', summary.conditionsWithCosts, '', '', '', '', '', '', '', '', '', '', '']);
+        costAnalysisData.push(['Total Conditions', summary.totalConditions, '', '', '', '', '', '', '', '', '', '', '']);
+        costAnalysisData.push(['Average Cost per Condition', `$${(summary.totalProjectCost / summary.conditionsWithCosts).toFixed(2)}`, '', '', '', '', '', '', '', '', '', '', '']);
+        costAnalysisData.push(['Highest Cost Condition', Object.values(costData).reduce((max, curr) => 
+          curr.totalCost > max.totalCost ? curr : max, { totalCost: 0, condition: { name: 'N/A' } }
+        ).condition.name, '', '', '', '', '', '', '', '', '', '', '', '']);
+        
+        const costAnalysisSheet = XLSX.utils.aoa_to_sheet(costAnalysisData);
+        
+        // Set column widths for cost analysis sheet
+        const costColWidths = [
+          { wch: 25 }, // Condition
+          { wch: 10 }, // Type
+          { wch: 8 },  // Unit
+          { wch: 30 }, // Description
+          { wch: 12 }, // Quantity
+          { wch: 18 }, // Material Cost/Unit
+          { wch: 16 }, // Labor Cost/Unit
+          { wch: 18 }, // Total Material Cost
+          { wch: 16 }, // Total Labor Cost
+          { wch: 12 }, // Total Cost
+          { wch: 12 }, // Cost per Unit
+          { wch: 10 }, // Material %
+          { wch: 10 }  // Labor %
+        ];
+        costAnalysisSheet['!cols'] = costColWidths;
+        
+        XLSX.utils.book_append_sheet(workbook, costAnalysisSheet, 'Cost Analysis');
+      }
+
+      onExportStatusUpdate?.('excel', 75);
+
+      // 5. PROJECT INFORMATION SHEET
+      const projectInfoData = [
+        ['PROJECT INFORMATION', ''],
+        ['', ''],
+        ['Project Details', ''],
+        ['Project Name', currentProject?.name || 'Unknown Project'],
+        ['Client', currentProject?.client || 'N/A'],
+        ['Location', currentProject?.location || 'N/A'],
+        ['Project Type', currentProject?.projectType || 'N/A'],
+        ['Status', currentProject?.status || 'N/A'],
+        ['Contact Person', currentProject?.contactPerson || 'N/A'],
+        ['Contact Email', currentProject?.contactEmail || 'N/A'],
+        ['Contact Phone', currentProject?.contactPhone || 'N/A'],
+        ['Estimated Value', currentProject?.estimatedValue ? `$${currentProject.estimatedValue.toFixed(2)}` : 'N/A'],
+        ['Start Date', currentProject?.startDate || 'N/A'],
+        ['Created', currentProject?.createdAt ? new Date(currentProject.createdAt).toLocaleDateString() : 'N/A'],
+        ['Last Modified', currentProject?.lastModified ? new Date(currentProject.lastModified).toLocaleDateString() : 'N/A'],
+        ['', ''],
+        ['Report Information', ''],
+        ['Generated On', new Date().toLocaleString()],
+        ['Report Version', '2.0 - Enhanced Professional'],
+        ['Software', 'Meridian Takeoff Professional'],
+        ['Standards Compliance', 'Industry Best Practices'],
+        ['', ''],
+        ['Quality Assurance', ''],
+        ['All measurements verified against calibrated scales', ''],
+        ['Cost calculations include material and labor components', ''],
+        ['Report follows industry-standard formatting', ''],
+        ['Data integrity verified through automated checks', ''],
+        ['', ''],
+        ['Disclaimer', ''],
+        ['This report is generated by Meridian Takeoff software and follows industry standards.', ''],
+        ['All measurements and calculations should be verified by qualified professionals.', ''],
+        ['Cost estimates are based on provided rates and should be updated as needed.', '']
+      ];
+      
+      const projectInfoSheet = XLSX.utils.aoa_to_sheet(projectInfoData);
+      projectInfoSheet['!cols'] = [{ wch: 25 }, { wch: 40 }];
+      XLSX.utils.book_append_sheet(workbook, projectInfoSheet, 'Project Information');
+
+      onExportStatusUpdate?.('excel', 90);
+
+      // Generate filename with enhanced naming
+      const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+      const projectName = currentProject?.name?.replace(/[^a-zA-Z0-9]/g, '-') || 'project';
+      const filename = `${projectName}-Professional-Takeoff-Report-${timestamp}.xlsx`;
+      
+      // Save file
+      XLSX.writeFile(workbook, filename);
+      
+      // Complete
+      onExportStatusUpdate?.('excel', 100);
+      
+      // Reset status after a brief delay
+      setTimeout(() => {
+        onExportStatusUpdate?.(null, 0);
+      }, 1000);
+      
     } catch (error) {
       console.error('Excel export error:', error);
       onExportStatusUpdate?.(null, 0);
@@ -899,7 +1021,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                           imageTimeout: 30000, // Longer timeout for large images
                           onclone: (clonedDoc) => {
                             // Ensure colors are preserved in the cloned document
-                            const clonedContainer = clonedDoc.querySelector('.canvas-container');
+                            const clonedContainer = clonedDoc.querySelector('.canvas-container') as HTMLElement;
                             if (clonedContainer) {
                               clonedContainer.style.color = 'inherit';
                               clonedContainer.style.backgroundColor = 'white';

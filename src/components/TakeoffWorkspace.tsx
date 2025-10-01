@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 
 import { useParams, useNavigate } from 'react-router-dom';
 import PDFViewer from './PDFViewer';
 import { TakeoffSidebar } from './TakeoffSidebar';
 import { SheetSidebar } from './SheetSidebar';
+import { ChatTab } from './ChatTab';
 import { SearchTab } from './SearchTab';
 import { TitleblockConfigDialog } from './TitleblockConfigDialog';
 import { OCRProcessingDialog } from './OCRProcessingDialog';
@@ -21,7 +22,8 @@ import {
   PanelRightOpen,
   Upload,
   FileText,
-  Search
+  Search,
+  MessageSquare
 } from "lucide-react";
 import { fileService, sheetService } from '../services/apiService';
 
@@ -67,7 +69,7 @@ export function TakeoffWorkspace() {
   const [isCalibrating, setIsCalibrating] = useState(false);
   const [measurementType, setMeasurementType] = useState<string>('');
   const [isOrthoSnapping, setIsOrthoSnapping] = useState(false);
-  const [rightSidebarTab, setRightSidebarTab] = useState<'documents' | 'search'>('documents');
+  const [rightSidebarTab, setRightSidebarTab] = useState<'documents' | 'search' | 'ai-chat'>('documents');
   const [searchResults, setSearchResults] = useState<string[]>([]);
   const [ocrSearchResults, setOcrSearchResults] = useState<any[]>([]);
   const [currentSearchQuery, setCurrentSearchQuery] = useState<string>('');
@@ -140,7 +142,7 @@ export function TakeoffWorkspace() {
       // Load measurements for this project (conditions will be loaded by TakeoffSidebar)
       loadProjectTakeoffMeasurements(jobId);
     }
-  }, [jobId]); // Remove function dependencies to prevent infinite loops
+  }, [jobId]); // Only depend on jobId to prevent infinite loops
 
   const handleConditionSelect = (condition: TakeoffCondition | null) => {
     if (condition === null) {
@@ -209,9 +211,21 @@ export function TakeoffWorkspace() {
     setShowTitleblockConfig(true);
   };
 
-  // OCR processing handler (now handled automatically in background)
+  // OCR processing handler
+  const [showOCRDialog, setShowOCRDialog] = useState(false);
+  const [ocrDocumentId, setOcrDocumentId] = useState<string>('');
+  const [ocrPageNumbers, setOcrPageNumbers] = useState<number[]>([]);
+  const [ocrDocumentName, setOcrDocumentName] = useState<string>('');
+
   const handleOCRRequest = (documentId: string, pageNumbers: number[]) => {
-    // OCR processing is now automatic during upload
+    // Find the document name
+    const document = projectFiles.find(file => file.id === documentId);
+    const documentName = document?.name || 'Unknown Document';
+    
+    setOcrDocumentId(documentId);
+    setOcrPageNumbers(pageNumbers);
+    setOcrDocumentName(documentName);
+    setShowOCRDialog(true);
   };
 
   const handleSearchInDocument = (query: string) => {
@@ -231,6 +245,59 @@ export function TakeoffWorkspace() {
   const handleDocumentsUpdate = (updatedDocuments: PDFDocument[]) => {
     setDocuments(updatedDocuments);
   };
+
+  // Load project documents directly
+  const loadProjectDocuments = useCallback(async () => {
+    if (!jobId) return;
+    
+    try {
+      const filesRes = await fileService.getProjectFiles(jobId);
+      const files = filesRes.files || [];
+      
+      const pdfFiles = files.filter((file: any) => file.mimetype === 'application/pdf');
+      
+      const documents: PDFDocument[] = await Promise.all(
+        pdfFiles.map(async (file: any) => {
+          try {
+            // Check if document has OCR data
+            const { serverOcrService } = await import('../services/serverOcrService');
+            const ocrData = await serverOcrService.getDocumentData(file.id, jobId);
+            const hasOCRData = ocrData && ocrData.results.length > 0;
+            
+            return {
+              id: file.id,
+              name: file.originalName.replace('.pdf', ''),
+              totalPages: 1, // We don't need to load the full PDF here
+              pages: [], // We don't need the full page data here
+              isExpanded: false,
+              ocrEnabled: hasOCRData
+            };
+          } catch (error) {
+            console.error(`Error checking OCR status for ${file.originalName}:`, error);
+            return {
+              id: file.id,
+              name: file.originalName.replace('.pdf', ''),
+              totalPages: 1,
+              pages: [],
+              isExpanded: false,
+              ocrEnabled: false
+            };
+          }
+        })
+      );
+      
+      setDocuments(documents);
+    } catch (error) {
+      console.error('Error loading project documents:', error);
+    }
+  }, [jobId]);
+
+  // Load documents when project changes
+  useEffect(() => {
+    if (jobId) {
+      loadProjectDocuments();
+    }
+  }, [jobId, loadProjectDocuments]);
 
   const handleExportStatusUpdate = (type: 'excel' | 'pdf' | null, progress: number) => {
     setExportStatus({type, progress});
@@ -591,7 +658,7 @@ export function TakeoffWorkspace() {
               {/* Right Sidebar Tabs */}
               <div className="flex border-b">
                 <button
-                  className={`flex-1 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                  className={`flex-1 px-3 py-3 text-sm font-medium border-b-2 transition-colors ${
                     rightSidebarTab === 'documents'
                       ? 'border-blue-500 text-blue-600'
                       : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -604,7 +671,7 @@ export function TakeoffWorkspace() {
                   </div>
                 </button>
                 <button
-                  className={`flex-1 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                  className={`flex-1 px-3 py-3 text-sm font-medium border-b-2 transition-colors ${
                     rightSidebarTab === 'search'
                       ? 'border-blue-500 text-blue-600'
                       : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -614,6 +681,19 @@ export function TakeoffWorkspace() {
                   <div className="flex items-center justify-center gap-2">
                     <Search className="w-4 h-4" />
                     Search
+                  </div>
+                </button>
+                <button
+                  className={`flex-1 px-3 py-3 text-sm font-medium border-b-2 transition-colors ${
+                    rightSidebarTab === 'ai-chat'
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                  onClick={() => setRightSidebarTab('ai-chat')}
+                >
+                  <div className="flex items-center justify-center gap-2">
+                    <MessageSquare className="w-4 h-4" />
+                    AI Chat
                   </div>
                 </button>
               </div>
@@ -637,7 +717,17 @@ export function TakeoffWorkspace() {
                   projectId={jobId!}
                   documents={documents}
                   onPageSelect={handlePageSelect}
-                  onOcrSearchResults={handleOcrSearchResults}
+                  selectedDocumentId={selectedDocumentId || undefined}
+                  selectedPageNumber={selectedPageNumber || undefined}
+                />
+              )}
+              
+              {rightSidebarTab === 'ai-chat' && (
+                <ChatTab
+                  projectId={jobId!}
+                  documents={documents}
+                  onPageSelect={handlePageSelect}
+                  onOCRRequest={handleOCRRequest}
                 />
               )}
             </div>
@@ -766,6 +856,28 @@ export function TakeoffWorkspace() {
         }}
         documentId={titleblockConfigDocumentId || ''}
         pageNumber={1}
+      />
+
+      {/* OCR Processing Dialog */}
+      <OCRProcessingDialog
+        isOpen={showOCRDialog}
+        onClose={() => {
+          setShowOCRDialog(false);
+          setOcrDocumentId('');
+          setOcrPageNumbers([]);
+          setOcrDocumentName('');
+        }}
+        documentId={ocrDocumentId}
+        documentName={ocrDocumentName}
+        pageNumbers={ocrPageNumbers}
+        projectId={jobId!}
+        onOCRComplete={(results) => {
+          console.log('OCR processing completed:', results);
+          setShowOCRDialog(false);
+          
+          // Reload documents to get updated OCR status
+          loadProjectDocuments();
+        }}
       />
 
     </div>

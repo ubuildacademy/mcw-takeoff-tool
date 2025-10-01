@@ -10,6 +10,7 @@ import { conditionRoutes } from './routes/conditions';
 import { sheetRoutes } from './routes/sheets';
 import takeoffMeasurementRoutes from './routes/takeoffMeasurements';
 import { ocrRoutes } from './routes/ocr';
+import ollamaRoutes from './routes/ollama';
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '4000', 10);
@@ -40,6 +41,7 @@ app.use('/api/conditions', conditionRoutes);
 app.use('/api/sheets', sheetRoutes);
 app.use('/api/takeoff-measurements', takeoffMeasurementRoutes);
 app.use('/api/ocr', ocrRoutes);
+app.use('/api/ollama', ollamaRoutes);
 
 // Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));

@@ -21,7 +21,12 @@ apiClient.interceptors.response.use(
         error.config?.url?.includes('/sheets/') && 
         !error.config?.url?.includes('/sheets/project/')) {
       // Don't log these as they're normal when individual sheets don't exist yet
-      return Promise.reject(error);
+      // Return a structured error that can be handled gracefully
+      return Promise.reject({
+        ...error,
+        isExpected404: true,
+        message: 'Sheet not found (expected for new documents)'
+      });
     }
     
     // Log other errors
@@ -61,10 +66,9 @@ export const fileService = {
     // Automatically start OCR processing after successful upload
     if (response.data.success && response.data.file) {
       const { ocrService } = await import('./ocrService');
-      const pdfUrl = `http://localhost:4000/api/files/${response.data.file.id}`;
       
       // Start OCR processing in background (don't await)
-      ocrService.processDocument(response.data.file.id, pdfUrl)
+      ocrService.processDocument(response.data.file.id, projectId)
         .then(() => {
           console.log(`✅ OCR processing completed for ${response.data.file.originalName}`);
         })
@@ -286,6 +290,7 @@ export const takeoffMeasurementService = {
 // OCR service
 export const ocrService = {
   async processDocument(documentId: string, projectId: string) {
+    // Use the correct OCR endpoint that matches the backend
     const response = await apiClient.post(`/ocr/process-document/${documentId}`, {
       projectId
     });
@@ -297,8 +302,13 @@ export const ocrService = {
     return response.data;
   },
 
-  async searchDocument(documentId: string, query: string) {
-    const response = await apiClient.get(`/ocr/search/${documentId}?query=${encodeURIComponent(query)}`);
+  async searchDocument(documentId: string, query: string, projectId: string) {
+    const response = await apiClient.get(`/ocr/search/${documentId}?query=${encodeURIComponent(query)}&projectId=${projectId}`);
+    return response.data;
+  },
+
+  async getDocumentResults(documentId: string, projectId: string) {
+    const response = await apiClient.get(`/ocr/results/${documentId}?projectId=${projectId}`);
     return response.data;
   },
 };
