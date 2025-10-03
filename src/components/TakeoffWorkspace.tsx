@@ -8,6 +8,7 @@ import { ChatTab } from './ChatTab';
 import { SearchTab } from './SearchTab';
 import { TitleblockConfigDialog } from './TitleblockConfigDialog';
 import { OCRProcessingDialog } from './OCRProcessingDialog';
+import { OCRTrainingDialog } from './OCRTrainingDialog';
 
 import { useTakeoffStore } from '../store/useTakeoffStore';
 import type { TakeoffCondition, Sheet, ProjectFile, PDFDocument } from '../types';
@@ -23,7 +24,8 @@ import {
   Upload,
   FileText,
   Search,
-  MessageSquare
+  MessageSquare,
+  BarChart3
 } from "lucide-react";
 import { fileService, sheetService } from '../services/apiService';
 
@@ -216,14 +218,15 @@ export function TakeoffWorkspace() {
   const [ocrDocumentId, setOcrDocumentId] = useState<string>('');
   const [ocrPageNumbers, setOcrPageNumbers] = useState<number[]>([]);
   const [ocrDocumentName, setOcrDocumentName] = useState<string>('');
+  const [showOCRTrainingDialog, setShowOCRTrainingDialog] = useState(false);
 
-  const handleOCRRequest = (documentId: string, pageNumbers: number[]) => {
+  const handleOCRRequest = (documentId: string, pageNumbers?: number[]) => {
     // Find the document name
     const document = projectFiles.find(file => file.id === documentId);
     const documentName = document?.name || 'Unknown Document';
     
     setOcrDocumentId(documentId);
-    setOcrPageNumbers(pageNumbers);
+    setOcrPageNumbers(pageNumbers || []);
     setOcrDocumentName(documentName);
     setShowOCRDialog(true);
   };
@@ -245,6 +248,55 @@ export function TakeoffWorkspace() {
   const handleDocumentsUpdate = (updatedDocuments: PDFDocument[]) => {
     setDocuments(updatedDocuments);
   };
+
+  // Handle extracted sheet names from titleblock configuration
+  const handleExtractedSheetNames = useCallback(async (documentId: string, extractedData: Array<{ pageNumber: number; sheetNumber: string; sheetName: string }>) => {
+    try {
+      console.log('Updating sheet names with extracted data:', extractedData);
+      
+      // Update database for each page
+      for (const extractedInfo of extractedData) {
+        const sheetId = `${documentId}-${extractedInfo.pageNumber}`;
+        try {
+          await sheetService.updateSheet(sheetId, {
+            documentId: documentId,
+            pageNumber: extractedInfo.pageNumber,
+            sheetName: extractedInfo.sheetName,
+            sheetNumber: extractedInfo.sheetNumber
+          });
+          console.log(`Updated sheet ${sheetId}: ${extractedInfo.sheetNumber} - ${extractedInfo.sheetName}`);
+        } catch (error) {
+          console.error(`Failed to update sheet ${sheetId}:`, error);
+        }
+      }
+
+      // Update local documents state
+      const updatedDocuments = documents.map(doc => {
+        if (doc.id === documentId) {
+          return {
+            ...doc,
+            pages: doc.pages.map(page => {
+              const extractedInfo = extractedData.find(data => data.pageNumber === page.pageNumber);
+              if (extractedInfo) {
+                return {
+                  ...page,
+                  sheetName: extractedInfo.sheetName,
+                  sheetNumber: extractedInfo.sheetNumber
+                };
+              }
+              return page;
+            })
+          };
+        }
+        return doc;
+      });
+
+      setDocuments(updatedDocuments);
+      console.log('Successfully updated all sheet names and numbers');
+    } catch (error) {
+      console.error('Error updating sheet names:', error);
+    }
+  }, [documents]);
 
   // Load project documents directly
   const loadProjectDocuments = useCallback(async () => {
@@ -709,6 +761,7 @@ export function TakeoffWorkspace() {
                   onTitleblockConfig={handleTitleblockConfig}
                   onOcrSearchResults={handleOcrSearchResults}
                   onDocumentsUpdate={handleDocumentsUpdate}
+                  onExtractSheetNames={handleExtractedSheetNames}
                 />
               )}
               
@@ -856,6 +909,10 @@ export function TakeoffWorkspace() {
         }}
         documentId={titleblockConfigDocumentId || ''}
         pageNumber={1}
+        projectId={jobId}
+        onExtractSheetNames={titleblockConfigDocumentId ? (extractedData) => {
+          handleExtractedSheetNames(titleblockConfigDocumentId, extractedData);
+        } : undefined}
       />
 
       {/* OCR Processing Dialog */}
@@ -879,6 +936,14 @@ export function TakeoffWorkspace() {
           loadProjectDocuments();
         }}
       />
+
+      {/* OCR Training Dialog */}
+      <OCRTrainingDialog
+        isOpen={showOCRTrainingDialog}
+        onClose={() => setShowOCRTrainingDialog(false)}
+        projectId={jobId!}
+      />
+
 
     </div>
   );

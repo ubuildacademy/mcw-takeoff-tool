@@ -219,41 +219,9 @@ router.post('/:documentId/titleblock-config', (req, res) => {
   }
 });
 
-// Extract sheet numbers and names using titleblock configuration
-router.post('/:documentId/extract-sheet-info', async (req, res) => {
-  try {
-    const { documentId } = req.params;
-    const { titleblockConfig } = req.body;
-    
-    console.log(`Extracting sheet info for document ${documentId}:`, titleblockConfig);
-    
-    // In a real implementation, you'd:
-    // 1. Load the PDF file
-    // 2. For each page, extract text from the configured titleblock fields
-    // 3. Parse the extracted text to get sheet numbers and names
-    // 4. Update the sheet metadata
-    
-    const extractedInfo = {
-      documentId,
-      pages: [
-        {
-          pageNumber: 1,
-          sheetNumber: 'A-01',
-          sheetName: 'Floor Plan'
-        }
-      ]
-    };
-    
-    res.json({ 
-      success: true, 
-      extractedInfo,
-      message: 'Sheet information extracted successfully'
-    });
-  } catch (error) {
-    console.error('Error extracting sheet info:', error);
-    res.status(500).json({ error: 'Failed to extract sheet information' });
-  }
-});
+// Note: Titleblock extraction is handled entirely by the frontend TitleblockConfigDialog
+// This endpoint was removed as it was redundant - the frontend performs OCR extraction
+// directly and saves training data to the database without needing backend processing
 
 // Generate thumbnail for a specific page
 router.post('/:documentId/thumbnail/:pageNumber', async (req, res) => {

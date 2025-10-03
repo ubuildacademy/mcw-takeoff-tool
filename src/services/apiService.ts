@@ -229,10 +229,7 @@ export const sheetService = {
     return response.data;
   },
 
-  async extractSheetInfo(documentId: string, titleblockConfig: any) {
-    const response = await apiClient.post(`/sheets/${documentId}/extract-sheet-info`, { titleblockConfig });
-    return response.data;
-  },
+  // Note: extractSheetInfo removed - titleblock extraction is handled entirely by frontend TitleblockConfigDialog
 
   async generateThumbnail(documentId: string, pageNumber: number) {
     const response = await apiClient.post(`/sheets/${documentId}/thumbnail/${pageNumber}`);

@@ -22,7 +22,8 @@ import {
   Check,
   X,
   Tag,
-  ChevronDown as ChevronDownIcon
+  ChevronDown as ChevronDownIcon,
+  BarChart3
 } from 'lucide-react';
 import { fileService, sheetService } from '../services/apiService';
 import { useTakeoffStore } from '../store/useTakeoffStore';
@@ -43,6 +44,7 @@ interface SheetSidebarProps {
   onTitleblockConfig?: (documentId: string) => void;
   onOcrSearchResults?: (results: any[], query: string) => void;
   onDocumentsUpdate?: (documents: PDFDocument[]) => void;
+  onExtractSheetNames?: (documentId: string, extractedData: Array<{ pageNumber: number; sheetNumber: string; sheetName: string }>) => void;
 }
 
 export function SheetSidebar({ 
@@ -53,7 +55,8 @@ export function SheetSidebar({
   onOCRRequest,
   onTitleblockConfig,
   onOcrSearchResults,
-  onDocumentsUpdate
+  onDocumentsUpdate,
+  onExtractSheetNames
 }: SheetSidebarProps) {
   const [viewMode, setViewMode] = useState<'list'>('list');
   const [filterBy, setFilterBy] = useState<'all' | 'withTakeoffs' | 'withoutTakeoffs'>('all');
@@ -447,6 +450,19 @@ export function SheetSidebar({
     }
   };
 
+  // Handle extracted sheet names from titleblock configuration
+  const handleExtractedSheetNames = async (extractedData: Array<{ pageNumber: number; sheetNumber: string; sheetName: string }>) => {
+    if (!selectedDocumentId) {
+      console.error('No document selected for sheet name extraction');
+      return;
+    }
+
+    // Pass the extracted data to the parent component
+    if (onExtractSheetNames) {
+      onExtractSheetNames(selectedDocumentId, extractedData);
+    }
+  };
+
 
   // Filter and sort documents
   const getFilteredAndSortedDocuments = () => {
@@ -583,6 +599,7 @@ export function SheetSidebar({
                             Configure Titleblock
                           </button>
                           
+                          
                           <button
                             className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
                             onClick={(e) => {
@@ -599,20 +616,6 @@ export function SheetSidebar({
                               <Scan className="w-4 h-4" />
                             )}
                             Run OCR Processing
-                          </button>
-                          
-                          <button
-                            className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              // TODO: Implement extract page labels
-                              alert('Extract page labels feature coming soon!');
-                              setOpenDocumentMenu(null);
-                            }}
-                          >
-                            <Tag className="w-4 h-4" />
-                            Extract Page Labels
                           </button>
                           
                           <div className="border-t border-gray-200"></div>

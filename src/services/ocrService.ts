@@ -920,6 +920,17 @@ class OCRService {
       console.log(`🧹 Cleaned up OCR data, kept ${toKeep.length} most recent documents`);
     }
   }
+
+  // Public method to initialize the OCR service
+  async initialize(): Promise<void> {
+    await this.initializeWorker();
+  }
+
+  // Public method to process a canvas directly (for titleblock extraction)
+  async processCanvas(canvas: HTMLCanvasElement, pageNumber: number = 1): Promise<OCRResult> {
+    await this.initializeWorker();
+    return await this.processPage(canvas, pageNumber);
+  }
 }
 
 // Export singleton instance

@@ -10,14 +10,12 @@ import {
   Loader2,
   AlertCircle,
   CheckCircle,
-  Download,
-  Cloud,
   MessageSquare,
   Trash2,
   FileText,
   RefreshCw
 } from 'lucide-react';
-import { ollamaService, type OllamaModel, type OllamaMessage } from '../services/ollamaService';
+import { ollamaService, type OllamaMessage } from '../services/ollamaService';
 import { serverOcrService } from '../services/serverOcrService';
 import { useTakeoffStore } from '../store/useTakeoffStore';
 import type { PDFDocument } from '../types';
@@ -47,10 +45,7 @@ export function ChatTab({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [availableModels, setAvailableModels] = useState<OllamaModel[]>([]);
-  const [selectedModel, setSelectedModel] = useState<string>('gpt-oss:120b-cloud');
   const [isOllamaAvailable, setIsOllamaAvailable] = useState<boolean | null>(null);
-  const [showModelSelector, setShowModelSelector] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Store integration for full project data access
@@ -72,24 +67,12 @@ export function ChatTab({
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
-  // Check Ollama availability and load models on mount
+  // Check Ollama availability on mount
   useEffect(() => {
     const initializeOllama = async () => {
       try {
         const available = await ollamaService.isAvailable();
         setIsOllamaAvailable(available);
-        
-        if (available) {
-          const models = await ollamaService.getModels();
-          setAvailableModels(models);
-          
-          // Set default model if available
-          const defaultModel = models.find(m => m.name === 'gpt-oss:120b-cloud') || models[0];
-          if (defaultModel) {
-            setSelectedModel(defaultModel.name);
-            ollamaService.setDefaultModel(defaultModel.name);
-          }
-        }
       } catch (error) {
         console.error('Failed to initialize Ollama:', error);
         setIsOllamaAvailable(false);
@@ -233,7 +216,7 @@ When answering questions:
       // Send to Ollama with streaming
       let fullResponse = '';
       for await (const chunk of ollamaService.chatStream({
-        model: selectedModel,
+        model: ollamaService.getDefaultModel(),
         messages: ollamaMessages,
         stream: true,
         options: {
@@ -412,15 +395,6 @@ When answering questions:
     }
   };
 
-  // Get model display info
-  const getModelInfo = (modelName: string) => {
-    const isCloud = modelName.includes('-cloud');
-    return {
-      isCloud,
-      icon: isCloud ? Cloud : Download,
-      label: isCloud ? 'Cloud' : 'Local'
-    };
-  };
 
   // Clear chat history
   const clearChat = () => {
@@ -519,67 +493,6 @@ When answering questions:
               </>
             )}
             
-            {/* Model Selector */}
-            <div className="relative min-w-0">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowModelSelector(!showModelSelector)}
-                className="flex items-center gap-1 min-w-0 h-8 px-2"
-              >
-                {(() => {
-                  const modelInfo = getModelInfo(selectedModel);
-                  const Icon = modelInfo.icon;
-                  return (
-                    <>
-                      <Icon className="w-4 h-4 shrink-0" />
-                      <span className="hidden lg:inline truncate max-w-16 text-xs">{selectedModel}</span>
-                      <Badge variant={modelInfo.isCloud ? "default" : "secondary"} className="ml-1 shrink-0 text-xs px-1">
-                        {modelInfo.label}
-                      </Badge>
-                    </>
-                  );
-                })()}
-              </Button>
-
-              {showModelSelector && (
-                <div className="absolute right-0 top-full mt-2 w-80 bg-white border rounded-lg shadow-lg z-10">
-                  <div className="p-3 border-b">
-                    <h4 className="font-medium">Select Model</h4>
-                  </div>
-                  <div className="max-h-60 overflow-y-auto">
-                    {availableModels.map((model) => {
-                      const modelInfo = getModelInfo(model.name);
-                      const Icon = modelInfo.icon;
-                      return (
-                        <button
-                          key={model.name}
-                          onClick={() => {
-                            setSelectedModel(model.name);
-                            ollamaService.setDefaultModel(model.name);
-                            setShowModelSelector(false);
-                          }}
-                          className={`w-full p-3 text-left hover:bg-gray-50 flex items-center gap-3 ${
-                            selectedModel === model.name ? 'bg-blue-50' : ''
-                          }`}
-                        >
-                          <Icon className="w-4 h-4" />
-                          <div className="flex-1">
-                            <div className="font-medium">{model.name}</div>
-                            <div className="text-sm text-gray-500">
-                              {modelInfo.label} • {(model.size / 1024 / 1024 / 1024).toFixed(1)}GB
-                            </div>
-                          </div>
-                          {selectedModel === model.name && (
-                            <CheckCircle className="w-4 h-4 text-blue-500" />
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
           </div>
         </div>
 

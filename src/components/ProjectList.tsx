@@ -16,6 +16,7 @@ import { projectService } from '../services/apiService';
 import { ProjectCreationDialog } from './ProjectCreationDialog';
 import { ProjectSettingsDialog } from './ProjectSettingsDialog';
 import { BackupDialog } from './BackupDialog';
+import { AdminPanel } from './AdminPanel';
 import { useTakeoffStore } from '../store/useTakeoffStore';
 
 interface ApiProject {
@@ -42,6 +43,7 @@ export function ProjectList() {
   const [editingProject, setEditingProject] = useState<ApiProject | null>(null);
   const [backupMode, setBackupMode] = useState<'backup' | 'restore'>('restore');
   const [selectedProjectForBackup, setSelectedProjectForBackup] = useState<ApiProject | null>(null);
+  const [showAdminPanel, setShowAdminPanel] = useState(false);
   
   // Use the store
   const { projects, loadInitialData, getProjectTotalCost } = useTakeoffStore();
@@ -140,6 +142,15 @@ export function ProjectList() {
               <Button size="lg" onClick={handleNewProject}>
                 <Plus className="w-5 h-5 mr-2" />
                 New Project
+              </Button>
+              <Button 
+                variant="outline" 
+                size="lg" 
+                onClick={() => setShowAdminPanel(true)}
+                className="text-purple-600 border-purple-200 hover:bg-purple-50"
+              >
+                <Settings className="w-5 h-5 mr-2" />
+                Admin Panel
               </Button>
             </div>
           </div>
@@ -373,6 +384,12 @@ export function ProjectList() {
         mode={backupMode}
         projectId={selectedProjectForBackup?.id}
         projectName={selectedProjectForBackup?.name}
+      />
+
+      <AdminPanel
+        isOpen={showAdminPanel}
+        onClose={() => setShowAdminPanel(false)}
+        projectId="global" // Global admin panel, not project-specific
       />
     </div>
   );
