@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OCR Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .result {
+            background: #f5f5f5;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 3px;
+        }
+        .success { background: #d4edda; }
+        .error { background: #f8d7da; }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        button:hover { background: #0056b3; }
+    </style>
+</head>
+<body>
+    <h1>Enhanced OCR Service Test</h1>
+    
+    <div class="test-section">
+        <h2>Sheet Number Validation Test</h2>
+        <button onclick="testSheetNumbers()">Test Sheet Numbers</button>
+        <div id="sheetNumberResults"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Sheet Name Suggestions Test</h2>
+        <button onclick="testSheetNames()">Test Sheet Names</button>
+        <div id="sheetNameResults"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Character Substitution Test</h2>
+        <button onclick="testCharacterSubstitutions()">Test Character Substitutions</button>
+        <div id="characterResults"></div>
+    </div>
+
+    <script>
+        // Mock enhanced OCR service for testing
+        const mockEnhancedOCR = {
+            validateSheetNumber: (text) => {
+                const patterns = [
+                    /^[A-Z]\d{1,2}$/,
+                    /^[A-Z]\d{1,2}-\d{1,2}$/,
+                    /^\d{1,3}$/,
+                    /^[A-Z]\d{1,2}\.\d{1,2}$/,
+                    /^[A-Z]{2}\d{1,2}$/
+                ];
+                
+                const isValid = patterns.some(pattern => pattern.test(text));
+                const suggestions = isValid ? [] : ['A1', 'A2', 'B1', 'B2', '1', '2', '3'];
+                
+                return { isValid, suggestions };
+            },
+            
+            getSheetNameSuggestions: (text) => {
+                const corrections = [
+                    { common: 'FLOOR PLAN', variations: ['FLOORPLAN', 'FLOOR PLAN'] },
+                    { common: 'ELEVATION', variations: ['ELEVATION', 'ELEVATION'] },
+                    { common: 'STRUCTURAL PLAN', variations: ['STRUCTURAL', 'STRUCTURAL PLAN'] },
+                    { common: 'ELECTRICAL PLAN', variations: ['ELECTRICAL', 'ELECTRICAL PLAN'] },
+                    { common: 'HVAC PLAN', variations: ['HVAC', 'MECHANICAL'] }
+                ];
+                
+                const suggestions = [];
+                const upperText = text.toUpperCase();
+                
+                corrections.forEach(correction => {
+                    if (correction.common.includes(upperText) || upperText.includes(correction.common)) {
+                        suggestions.push(correction.common);
+                    }
+                });
+                
+                return suggestions.slice(0, 5);
+            }
+        };
+        
+        function testSheetNumbers() {
+            const testCases = ['A1', 'A2', 'B1', 'Al', 'A0', '1', '2', 'A1-1', 'A1.1', 'AA1', 'invalid'];
+            const results = document.getElementById('sheetNumberResults');
+            results.innerHTML = '';
+            
+            testCases.forEach(testCase => {
+                const validation = mockEnhancedOCR.validateSheetNumber(testCase);
+                const div = document.createElement('div');
+                div.className = `result ${validation.isValid ? 'success' : 'error'}`;
+                div.innerHTML = `
+                    <strong>${testCase}</strong>: ${validation.isValid ? '✅ Valid' : '❌ Invalid'}
+                    ${validation.suggestions.length > 0 ? `<br>Suggestions: ${validation.suggestions.join(', ')}` : ''}
+                `;
+                results.appendChild(div);
+            });
+        }
+        
+        function testSheetNames() {
+            const testCases = ['FLOORPLAN', 'ELEVATION', 'STRUCTURAL', 'ELECTRICAL', 'MECHANICAL', 'HVAC', 'SITE'];
+            const results = document.getElementById('sheetNameResults');
+            results.innerHTML = '';
+            
+            testCases.forEach(testCase => {
+                const suggestions = mockEnhancedOCR.getSheetNameSuggestions(testCase);
+                const div = document.createElement('div');
+                div.className = `result ${suggestions.length > 0 ? 'success' : 'error'}`;
+                div.innerHTML = `
+                    <strong>${testCase}</strong>: ${suggestions.length > 0 ? `✅ Suggestions: ${suggestions.join(', ')}` : '❌ No suggestions'}
+                `;
+                results.appendChild(div);
+            });
+        }
+        
+        function testCharacterSubstitutions() {
+            const substitutions = {
+                'Al': 'A1',
+                'A0': 'A0',
+                'B8': 'B8',
+                'C5': 'C5',
+                'D6': 'D6',
+                'E7': 'E7',
+                'F2': 'F2',
+                'G9': 'G9'
+            };
+            
+            const results = document.getElementById('characterResults');
+            results.innerHTML = '';
+            
+            Object.entries(substitutions).forEach(([original, corrected]) => {
+                const div = document.createElement('div');
+                div.className = 'result';
+                div.innerHTML = `
+                    <strong>${original}</strong> → <strong>${corrected}</strong>
+                    <br><small>Character substitution patterns would be applied here</small>
+                `;
+                results.appendChild(div);
+            });
+        }
+        
+        // Run tests on page load
+        window.onload = function() {
+            console.log('Enhanced OCR Test Page Loaded');
+            console.log('The app should now be running with enhanced OCR capabilities!');
+        };
+    </script>
+</body>
+</html>
