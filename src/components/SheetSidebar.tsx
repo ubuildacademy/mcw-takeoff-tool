@@ -23,7 +23,8 @@ import {
   X,
   Tag,
   ChevronDown as ChevronDownIcon,
-  BarChart3
+  BarChart3,
+  Search
 } from 'lucide-react';
 import { fileService, sheetService } from '../services/apiService';
 import { useTakeoffStore } from '../store/useTakeoffStore';
@@ -60,14 +61,23 @@ export function SheetSidebar({
 }: SheetSidebarProps) {
   const [viewMode, setViewMode] = useState<'list'>('list');
   const [filterBy, setFilterBy] = useState<'all' | 'withTakeoffs' | 'withoutTakeoffs'>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
   const [documents, setDocuments] = useState<PDFDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [processingOCR, setProcessingOCR] = useState<string[]>([]);
+  
+  // Use local documents
+  const currentDocuments = documents;
   
   // Sheet name editing state
   const [editingSheetId, setEditingSheetId] = useState<string | null>(null);
   const [editingSheetName, setEditingSheetName] = useState<string>('');
   const [editingPageNumber, setEditingPageNumber] = useState<number | null>(null);
+  
+  // Sheet number editing state
+  const [editingSheetNumberId, setEditingSheetNumberId] = useState<string | null>(null);
+  const [editingSheetNumber, setEditingSheetNumber] = useState<string>('');
+  const [editingSheetNumberPageNumber, setEditingSheetNumberPageNumber] = useState<number | null>(null);
   
   // Document menu dropdown state
   const [openDocumentMenu, setOpenDocumentMenu] = useState<string | null>(null);
@@ -128,7 +138,7 @@ export function SheetSidebar({
         };
       })
     }));
-  }, [projectId, getProjectTakeoffMeasurements]);
+  }, [projectId]); // Remove getProjectTakeoffMeasurements from dependencies to prevent unnecessary recreations
 
   // Load project files and convert to enhanced document structure
   const loadProjectDocuments = useCallback(async () => {
@@ -249,7 +259,7 @@ export function SheetSidebar({
     } finally {
       setLoading(false);
     }
-  }, [projectId, updateHasTakeoffs, onDocumentsUpdate]);
+  }, [projectId]); // Remove updateHasTakeoffs from dependencies to prevent unnecessary recreations
 
   useEffect(() => {
     loadProjectDocuments();
@@ -419,7 +429,7 @@ export function SheetSidebar({
         sheetName: editingSheetName.trim()
       });
 
-      // Update the local state
+      // Update the local state immediately for better UX
       const updatedDocuments = documents.map(doc => 
         doc.id === documentId 
           ? {
@@ -432,8 +442,11 @@ export function SheetSidebar({
             }
           : doc
       );
-      
       setDocuments(updatedDocuments);
+      
+      // Show success feedback
+      console.log(`✅ Sheet name saved: "${editingSheetName.trim()}" for page ${editingPageNumber}`);
+      
       cancelEditingSheetName();
     } catch (error) {
       console.error('Error updating sheet name:', error);
@@ -447,6 +460,118 @@ export function SheetSidebar({
       saveSheetName();
     } else if (e.key === 'Escape') {
       cancelEditingSheetName();
+    }
+  };
+
+  // Start editing sheet number
+  const startEditingSheetNumber = (documentId: string, pageNumber: number, currentSheetNumber: string) => {
+    const sheetId = `${documentId}-${pageNumber}`;
+    setEditingSheetNumberId(sheetId);
+    setEditingSheetNumber(currentSheetNumber || '');
+    setEditingSheetNumberPageNumber(pageNumber);
+  };
+
+  // Cancel editing sheet number
+  const cancelEditingSheetNumber = () => {
+    setEditingSheetNumberId(null);
+    setEditingSheetNumber('');
+    setEditingSheetNumberPageNumber(null);
+  };
+
+  // Save sheet number with OCR training data
+  const saveSheetNumber = async () => {
+    if (!editingSheetNumberId || !editingSheetNumberPageNumber) {
+      cancelEditingSheetNumber();
+      return;
+    }
+
+    try {
+      // Extract document ID from the sheet ID (format: documentId-pageNumber)
+      const documentId = editingSheetNumberId.split('-').slice(0, -1).join('-');
+      
+      // Get the original sheet number for training data
+      const originalDocument = currentDocuments.find(doc => doc.id === documentId);
+      const originalPage = originalDocument?.pages.find(page => page.pageNumber === editingSheetNumberPageNumber);
+      const originalSheetNumber = originalPage?.sheetNumber || '';
+      
+      // Prepare the update data - use null if empty string to clear the field
+      const updateData: any = {
+        documentId: documentId,
+        pageNumber: editingSheetNumberPageNumber
+      };
+      
+      if (editingSheetNumber.trim()) {
+        updateData.sheetNumber = editingSheetNumber.trim();
+      } else {
+        updateData.sheetNumber = null; // Clear the sheet number
+      }
+      
+      // Update the sheet number in the backend
+      await sheetService.updateSheet(editingSheetNumberId, updateData);
+
+      // Save training data if the sheet number was changed from an OCR result
+      if (originalSheetNumber !== editingSheetNumber.trim() && originalSheetNumber) {
+        try {
+          const { ocrTrainingService } = await import('../services/ocrTrainingService');
+          await ocrTrainingService.saveTrainingData({
+            projectId: projectId,
+            documentId: documentId,
+            pageNumber: editingSheetNumberPageNumber,
+            fieldType: 'sheet_number',
+            originalText: originalSheetNumber,
+            correctedText: editingSheetNumber.trim(),
+            confidence: 0.8, // Assume moderate confidence for user corrections
+            corrections: [{
+              type: 'sheet_number',
+              original: originalSheetNumber,
+              corrected: editingSheetNumber.trim(),
+              reason: 'User corrected OCR result'
+            }],
+            userValidated: true,
+            hasTitleblock: true
+          });
+          console.log('✅ Training data saved for sheet number correction');
+        } catch (trainingError) {
+          console.error('Failed to save training data:', trainingError);
+          // Don't fail the entire operation if training data save fails
+        }
+      } else if (!originalSheetNumber && editingSheetNumber.trim()) {
+        // If we're adding a sheet number where none existed before, 
+        // this could be useful training data for future OCR improvements
+        console.log('📝 Sheet number added manually - no training data needed');
+      }
+
+      // Update the local state immediately for better UX
+      const updatedDocuments = documents.map(doc => 
+        doc.id === documentId 
+          ? {
+              ...doc,
+              pages: doc.pages.map(page => 
+                page.pageNumber === editingSheetNumberPageNumber 
+                  ? { ...page, sheetNumber: editingSheetNumber.trim() || undefined }
+                  : page
+              )
+            }
+          : doc
+      );
+      setDocuments(updatedDocuments);
+      
+      // Show success feedback
+      console.log(`✅ Sheet number saved: "${editingSheetNumber.trim()}" for page ${editingSheetNumberPageNumber}`);
+      
+      cancelEditingSheetNumber();
+    } catch (error) {
+      console.error('Error updating sheet number:', error);
+      alert('Failed to update sheet number. Please try again.');
+    }
+  };
+
+  // Handle Enter key to save sheet number
+  const handleSheetNumberKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      saveSheetNumber();
+    } else if (e.key === 'Escape') {
+      cancelEditingSheetNumber();
     }
   };
 
@@ -466,7 +591,30 @@ export function SheetSidebar({
 
   // Filter and sort documents
   const getFilteredAndSortedDocuments = () => {
-    let filteredDocuments = [...documents];
+    let filteredDocuments = [...currentDocuments];
+    
+    // Apply search filter first
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase().trim();
+      filteredDocuments = filteredDocuments.map(doc => ({
+        ...doc,
+        pages: doc.pages.filter(page => {
+          // Search in page number
+          if (page.pageNumber.toString().includes(query)) return true;
+          
+          // Search in sheet name
+          if (page.sheetName && page.sheetName.toLowerCase().includes(query)) return true;
+          
+          // Search in sheet number
+          if (page.sheetNumber && page.sheetNumber.toLowerCase().includes(query)) return true;
+          
+          // Search in extracted text
+          if (page.extractedText && page.extractedText.toLowerCase().includes(query)) return true;
+          
+          return false;
+        })
+      })).filter(doc => doc.pages.length > 0); // Only show documents that have matching pages
+    }
     
     // Apply takeoff filter - filter documents but also filter pages within documents
     if (filterBy === 'withTakeoffs') {
@@ -509,7 +657,12 @@ export function SheetSidebar({
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">Project Documents</h2>
           <div className="flex gap-2">
-            <Button size="sm" variant="outline" onClick={() => loadProjectDocuments()}>
+            <Button 
+              size="sm" 
+              variant="outline" 
+              onClick={() => loadProjectDocuments()}
+              title="Refresh documents list"
+            >
               <RefreshCw className="w-4 h-4" />
             </Button>
           </div>
@@ -518,6 +671,21 @@ export function SheetSidebar({
 
         {/* Controls */}
         <div className="space-y-3">
+          {/* Search */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-gray-700 flex items-center gap-2">
+              <Search className="w-4 h-4" />
+              Search Pages
+            </label>
+            <Input
+              type="text"
+              placeholder="Search by page number, sheet name, or sheet number..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full"
+            />
+          </div>
+          
           {/* Filter */}
           <div className="space-y-2">
             <label className="text-sm font-medium text-gray-700 flex items-center gap-2">
@@ -540,7 +708,7 @@ export function SheetSidebar({
 
       {/* Documents and Pages List */}
       <div className="flex-1 overflow-y-auto min-h-0">
-        {documents.length === 0 ? (
+        {currentDocuments.length === 0 ? (
           <div className="text-center py-8 text-muted-foreground">
             <FileText className="w-12 h-12 mx-auto mb-2 opacity-50" />
             <p>No PDF documents found</p>
@@ -679,12 +847,18 @@ export function SheetSidebar({
                                     onKeyDown={handleSheetNameKeyDown}
                                     className="h-6 text-sm px-2 py-1"
                                     autoFocus
-                                    onBlur={saveSheetName}
+                                    onBlur={(e) => {
+                                      e.stopPropagation();
+                                      saveSheetName();
+                                    }}
                                   />
                                   <Button
                                     variant="ghost"
                                     size="sm"
-                                    onClick={saveSheetName}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      saveSheetName();
+                                    }}
                                     className="h-6 w-6 p-0 text-green-600 hover:text-green-700"
                                     title="Save"
                                   >
@@ -693,7 +867,10 @@ export function SheetSidebar({
                                   <Button
                                     variant="ghost"
                                     size="sm"
-                                    onClick={cancelEditingSheetName}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      cancelEditingSheetName();
+                                    }}
                                     className="h-6 w-6 p-0 text-red-600 hover:text-red-700"
                                     title="Cancel"
                                   >
@@ -719,11 +896,66 @@ export function SheetSidebar({
                                   </Button>
                                 </>
                               )}
-                              {page.sheetNumber && (
-                                <Badge variant="secondary" className="text-xs">
-                                  {page.sheetNumber}
-                                </Badge>
-                              )}
+                              <div className="flex items-center gap-1">
+                                {editingSheetNumberId === `${document.id}-${page.pageNumber}` ? (
+                                  <div className="flex items-center gap-1">
+                                    <Input
+                                      value={editingSheetNumber}
+                                      onChange={(e) => setEditingSheetNumber(e.target.value)}
+                                      onKeyDown={handleSheetNumberKeyDown}
+                                      className="h-5 text-xs w-16"
+                                      autoFocus
+                                      placeholder="Sheet #"
+                                    />
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        saveSheetNumber();
+                                      }}
+                                      className="h-5 w-5 p-0 text-green-600 hover:text-green-700"
+                                      title="Save sheet number"
+                                    >
+                                      <Check className="w-3 h-3" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        cancelEditingSheetNumber();
+                                      }}
+                                      className="h-5 w-5 p-0 text-red-600 hover:text-red-700"
+                                      title="Cancel editing"
+                                    >
+                                      <X className="w-3 h-3" />
+                                    </Button>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-1">
+                                    {page.sheetNumber ? (
+                                      <Badge variant="secondary" className="text-xs">
+                                        {page.sheetNumber}
+                                      </Badge>
+                                    ) : (
+                                      <span className="text-xs text-gray-400 italic">No sheet #</span>
+                                    )}
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        startEditingSheetNumber(document.id, page.pageNumber, page.sheetNumber || '');
+                                      }}
+                                      className="h-5 w-5 p-0 text-gray-400 hover:text-gray-600"
+                                      title={page.sheetNumber ? "Edit sheet number" : "Add sheet number"}
+                                    >
+                                      <Edit2 className="w-3 h-3" />
+                                    </Button>
+                                  </div>
+                                )}
+                              </div>
                             </div>
                             
                             <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
@@ -797,7 +1029,12 @@ export function SheetSidebar({
       {/* Footer */}
       <div className="p-4 border-t bg-muted/30">
         <div className="text-center text-sm text-muted-foreground">
-          {documents.length} document{documents.length !== 1 ? 's' : ''} • {filteredDocuments.length} shown
+          {currentDocuments.length} document{currentDocuments.length !== 1 ? 's' : ''} • {filteredDocuments.length} shown
+          {searchQuery.trim() && (
+            <span className="ml-2 text-blue-600">
+              • Searching for "{searchQuery}"
+            </span>
+          )}
         </div>
       </div>
     </div>

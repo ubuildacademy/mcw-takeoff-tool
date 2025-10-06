@@ -38,18 +38,22 @@ export function OCRProcessingDialog({
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [currentPage, setCurrentPage] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
   const [results, setResults] = useState<OCRResult[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isComplete, setIsComplete] = useState(false);
+  const [statusMessage, setStatusMessage] = useState('Initializing...');
 
   // Real OCR processing using server service
   const processOCR = async () => {
     setIsProcessing(true);
     setProgress(0);
     setCurrentPage(0);
+    setTotalPages(0);
     setResults([]);
     setError(null);
     setIsComplete(false);
+    setStatusMessage('Starting OCR processing...');
 
     try {
       // Import the server OCR service
@@ -57,9 +61,43 @@ export function OCRProcessingDialog({
       
       // Start OCR processing for the document
       console.log('🔄 Starting OCR processing for document:', documentId);
-      setProgress(10);
+      setProgress(5);
+      setStatusMessage('Initializing OCR processing...');
+      
+      // Create a progress monitoring interval
+      const progressInterval = setInterval(async () => {
+        try {
+          // Get the latest job status
+          const { ocrService } = await import('../services/apiService');
+          const jobStatus = await ocrService.getJobStatus(documentId);
+          
+          if (jobStatus) {
+            setProgress(jobStatus.progress || 0);
+            setCurrentPage(jobStatus.processedPages || 0);
+            setTotalPages(jobStatus.totalPages || 0);
+            
+            // Update status message based on progress
+            if (jobStatus.progress < 10) {
+              setStatusMessage('Reading PDF file...');
+            } else if (jobStatus.progress < 20) {
+              setStatusMessage('Parsing PDF structure...');
+            } else if (jobStatus.progress < 80) {
+              setStatusMessage(`Processing pages... (${jobStatus.processedPages}/${jobStatus.totalPages})`);
+            } else if (jobStatus.progress < 95) {
+              setStatusMessage('Saving results to database...');
+            } else {
+              setStatusMessage('Finalizing...');
+            }
+          }
+        } catch (error) {
+          console.log('Progress check error:', error);
+        }
+      }, 1000); // Check every second
       
       const result = await serverOcrService.processDocument(documentId, projectId);
+      
+      // Clear the progress interval
+      clearInterval(progressInterval);
       
       console.log('✅ OCR processing completed successfully');
       
@@ -73,12 +111,14 @@ export function OCRProcessingDialog({
       
       setResults(processingResults);
       setProgress(100);
+      setStatusMessage('OCR processing completed successfully!');
       setIsComplete(true);
       onOCRComplete(processingResults);
       
     } catch (err) {
       console.error('❌ OCR processing error:', err);
       setError('OCR processing failed: ' + (err as Error).message);
+      setStatusMessage('OCR processing failed');
     } finally {
       setIsProcessing(false);
     }
@@ -157,12 +197,24 @@ export function OCRProcessingDialog({
               </div>
               <SimpleProgress value={progress} className="w-full" />
               
-              {currentPage > 0 && (
+              <div className="space-y-2">
                 <div className="flex items-center gap-2 text-sm text-gray-600">
                   <Clock className="w-4 h-4" />
-                  <span>Currently processing page {currentPage}...</span>
+                  <span>{statusMessage}</span>
                 </div>
-              )}
+                
+                {totalPages > 0 && (
+                  <div className="flex items-center gap-2 text-sm text-gray-500">
+                    <span>Pages: {currentPage} / {totalPages}</span>
+                    {currentPage > 0 && (
+                      <span>•</span>
+                    )}
+                    {currentPage > 0 && (
+                      <span>Progress: {Math.round((currentPage / totalPages) * 100)}%</span>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 

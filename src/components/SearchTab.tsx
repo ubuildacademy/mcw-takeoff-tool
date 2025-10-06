@@ -55,6 +55,20 @@ export function SearchTab({
     doc.ocrEnabled || doc.pages.some(page => page.ocrProcessed)
   );
 
+  // Debug logging
+  useEffect(() => {
+    console.log('🔍 SearchTab Debug Info:');
+    console.log('📚 Total documents:', documents.length);
+    console.log('📋 Documents with OCR:', ocrEnabledDocuments.length);
+    console.log('📄 Document details:', documents.map(doc => ({
+      id: doc.id,
+      name: doc.name,
+      ocrEnabled: doc.ocrEnabled,
+      pagesWithOCR: doc.pages.filter(p => p.ocrProcessed).length,
+      totalPages: doc.pages.length
+    })));
+  }, [documents, ocrEnabledDocuments]);
+
 
   // Search function
   const performSearch = useCallback(async (query: string, documentId?: string) => {
@@ -62,6 +76,10 @@ export function SearchTab({
       setSearchResults({});
       return;
     }
+
+    console.log('🔍 Starting search for:', query);
+    console.log('📋 OCR enabled documents:', ocrEnabledDocuments.length);
+    console.log('🎯 Target document:', documentId || 'all documents');
 
     setIsSearching(true);
     setSearchError(null);
@@ -71,31 +89,45 @@ export function SearchTab({
 
       if (documentId) {
         // Search specific document
+        console.log(`🔍 Searching document ${documentId} for "${query}"`);
         try {
           const response = await ocrService.searchDocument(documentId, query, projectId);
+          console.log('📊 Search response:', response);
           if (response.results && response.results.length > 0) {
             results[documentId] = response.results;
+            console.log(`✅ Found ${response.results.length} results in document ${documentId}`);
+          } else {
+            console.log(`❌ No results found in document ${documentId}`);
           }
         } catch (error) {
-          console.warn(`Search failed for document ${documentId}:`, error);
+          console.error(`❌ Search failed for document ${documentId}:`, error);
         }
       } else {
         // Search all OCR-enabled documents
+        console.log(`🔍 Searching ${ocrEnabledDocuments.length} documents for "${query}"`);
         for (const doc of ocrEnabledDocuments) {
+          console.log(`🔍 Searching document ${doc.id} (${doc.name})`);
           try {
             const response = await ocrService.searchDocument(doc.id, query, projectId);
+            console.log(`📊 Search response for ${doc.id}:`, response);
             if (response.results && response.results.length > 0) {
+              // Debug: Log page numbers from backend
+              console.log(`🔍 Page numbers from backend:`, response.results.map(r => r.pageNumber));
               results[doc.id] = response.results;
+              console.log(`✅ Found ${response.results.length} results in document ${doc.id}`);
+            } else {
+              console.log(`❌ No results found in document ${doc.id}`);
             }
           } catch (error) {
-            console.warn(`Search failed for document ${doc.id}:`, error);
+            console.error(`❌ Search failed for document ${doc.id}:`, error);
           }
         }
       }
 
+      console.log('📊 Final search results:', results);
       setSearchResults(results);
     } catch (error) {
-      console.error('Search error:', error);
+      console.error('❌ Search error:', error);
       setSearchError('Search failed. Please try again.');
     } finally {
       setIsSearching(false);
@@ -172,6 +204,30 @@ export function SearchTab({
           )}
         </div>
 
+        {/* OCR Status */}
+        {ocrEnabledDocuments.length === 0 && documents.length > 0 && (
+          <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <div className="flex items-center gap-2 text-yellow-700">
+              <AlertCircle className="w-4 h-4" />
+              <span className="text-sm">
+                No documents have been OCR processed yet. Run OCR processing on your documents first to enable search.
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Page Number Info */}
+        {ocrEnabledDocuments.length > 0 && (
+          <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="flex items-center gap-2 text-blue-700">
+              <AlertCircle className="w-4 h-4" />
+              <span className="text-sm">
+                If search results show incorrect page numbers, re-run OCR processing to get accurate page-by-page results.
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* Search Input */}
         <div className="space-y-3">
           <div className="relative">
@@ -181,6 +237,7 @@ export function SearchTab({
               value={searchQuery}
               onChange={(e) => handleSearch(e.target.value)}
               className="pl-10"
+              disabled={ocrEnabledDocuments.length === 0}
             />
           </div>
 
@@ -240,6 +297,16 @@ export function SearchTab({
                 {getTotalResultsCount()} result{getTotalResultsCount() !== 1 ? 's' : ''} found
               </span>
             </div>
+            
+            {/* Helpful instruction */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <div className="flex items-center gap-2 text-blue-700">
+                <Eye className="w-4 h-4" />
+                <span className="text-sm">
+                  Click on any result to navigate to that page
+                </span>
+              </div>
+            </div>
 
             {Object.entries(searchResults).map(([documentId, results]) => (
               <div key={documentId} className="border rounded-lg">
@@ -264,35 +331,43 @@ export function SearchTab({
                     return (
                       <div
                         key={resultKey}
-                        className={`p-3 cursor-pointer transition-colors ${
+                        className={`p-3 cursor-pointer transition-all duration-200 ${
                           isSelected
-                            ? 'bg-primary/10 border-l-4 border-primary'
-                            : 'hover:bg-accent/30'
+                            ? 'bg-primary/10 border-l-4 border-primary shadow-sm'
+                            : 'hover:bg-accent/30 hover:shadow-sm'
                         }`}
-                        onClick={() => onPageSelect(documentId, result.pageNumber)}
+                        onClick={() => {
+                          console.log(`🔍 Navigating to document ${documentId}, page ${result.pageNumber}`);
+                          onPageSelect(documentId, result.pageNumber);
+                          
+                          // Show a brief success message
+                          const docName = getDocumentName(documentId);
+                          console.log(`✅ Navigated to ${docName} - Page ${result.pageNumber}`);
+                        }}
+                        title={`Click to go to page ${result.pageNumber}`}
                       >
                         <div className="flex items-start gap-3">
                           {/* Page Info */}
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-2">
-                              <span className="font-medium text-sm">Page {result.pageNumber}</span>
                               <Badge variant="outline" className="text-xs">
                                 {result.totalMatches} match{result.totalMatches !== 1 ? 'es' : ''}
                               </Badge>
                               <Badge variant="secondary" className="text-xs">
                                 {result.method}
                               </Badge>
+                              <ChevronRight className="w-3 h-3 text-muted-foreground ml-auto" />
                             </div>
 
                             {/* Match Preview */}
                             {result.matches.length > 0 && (
                               <div className="space-y-1">
                                 {result.matches.slice(0, isExpanded ? result.matches.length : 1).map((match, matchIndex) => (
-                                  <div key={matchIndex} className="text-xs text-gray-600 bg-gray-50 p-2 rounded">
-                                    <span className="font-medium text-blue-600">
-                                      {match.confidence}% confidence
-                                    </span>
-                                    <div className="mt-1">
+                                  <div key={matchIndex} className="text-sm text-gray-700 bg-gray-50 p-3 rounded border">
+                                    <div className="font-mono text-xs text-gray-500 mb-1">
+                                      Page {result.pageNumber}
+                                    </div>
+                                    <div className="text-gray-800">
                                       ...{match.snippet}...
                                     </div>
                                   </div>

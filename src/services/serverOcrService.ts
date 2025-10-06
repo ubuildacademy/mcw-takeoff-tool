@@ -93,7 +93,7 @@ class ServerOCRService {
   }
 
   private async pollForCompletion(jobId: string, documentId: string, projectId: string): Promise<DocumentOCRData> {
-    const maxAttempts = 120; // 10 minutes max (5 second intervals)
+    const maxAttempts = 600; // 10 minutes max (1 second intervals for better progress updates)
     let attempts = 0;
 
     while (attempts < maxAttempts) {
@@ -115,7 +115,7 @@ class ServerOCRService {
         }
         
         // Still processing, wait and try again
-        await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second for more frequent updates
         attempts++;
         
       } catch (error) {
@@ -126,7 +126,7 @@ class ServerOCRService {
           throw new Error('OCR processing timeout');
         }
         
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
     
