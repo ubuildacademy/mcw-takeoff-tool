@@ -80,12 +80,9 @@ router.post('/process-document/:documentId', async (req, res) => {
     // Check if document is already processed
     const isProcessed = await simpleOcrService.isDocumentProcessed(projectId, documentId);
     if (isProcessed) {
-      return res.json({
-        jobId: null,
-        message: 'Document already processed',
-        status: 'completed',
-        alreadyProcessed: true
-      });
+      // Allow re-processing by clearing existing results
+      console.log('🔄 Document already processed, clearing existing results for re-processing...');
+      await simpleOcrService.clearDocumentResults(projectId, documentId);
     }
 
     // Create OCR job in database
@@ -184,6 +181,8 @@ router.get('/search/:documentId', async (req, res) => {
   try {
       // Search OCR results using the simple OCR service
       const searchResults = await simpleOcrService.searchOCRResults(projectId, documentId, query);
+      
+      console.log(`🔍 Raw search results from database:`, searchResults.map(r => ({ page_number: r.page_number, text_preview: r.text_content.substring(0, 50) })));
 
     // Format results for frontend
     const formattedResults = searchResults.map(result => {
@@ -215,6 +214,8 @@ router.get('/search/:documentId', async (req, res) => {
       };
     }).filter(result => result.totalMatches > 0)
       .sort((a, b) => b.totalMatches - a.totalMatches);
+
+    console.log(`📊 Formatted results being sent to frontend:`, formattedResults.map(r => ({ pageNumber: r.pageNumber, totalMatches: r.totalMatches })));
 
     res.json({
       query,
@@ -249,6 +250,29 @@ router.get('/results/:documentId', async (req, res) => {
   } catch (error) {
     console.error('Error getting OCR results:', error);
     res.status(500).json({ error: 'Failed to get OCR results' });
+  }
+});
+
+// Clear OCR results for a document (allows re-processing)
+router.delete('/results/:documentId', async (req, res) => {
+  const { documentId } = req.params;
+  const { projectId } = req.body;
+
+  if (!projectId) {
+    return res.status(400).json({ error: 'Project ID is required' });
+  }
+
+  try {
+    console.log(`🗑️ Clearing OCR results for document: ${documentId}`);
+    await simpleOcrService.clearDocumentResults(projectId, documentId);
+    
+    res.json({
+      success: true,
+      message: 'OCR results cleared successfully'
+    });
+  } catch (error) {
+    console.error('Error clearing OCR results:', error);
+    res.status(500).json({ error: 'Failed to clear OCR results' });
   }
 });
 

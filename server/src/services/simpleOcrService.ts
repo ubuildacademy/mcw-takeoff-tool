@@ -27,8 +27,12 @@ class SimpleOCRService {
       const startTime = Date.now();
       const dataBuffer = await fs.readFile(pdfPath);
       
-      // Parse PDF
-      const data = await pdfParse(dataBuffer);
+      // Parse PDF with page-by-page extraction
+      const data = await pdfParse(dataBuffer, {
+        // Enable page-by-page extraction
+        max: 0, // Process all pages
+        version: 'v1.10.100' // Use specific version for stability
+      });
       
       const processingTime = Date.now() - startTime;
       
@@ -39,18 +43,52 @@ class SimpleOCRService {
         return [];
       }
       
-      // For vector PDFs, we'll treat the entire document as one result
-      // since pdf-parse extracts all text at once
-      const result: SimpleOCRResult = {
-        pageNumber: 1, // We'll treat it as page 1 for simplicity
-        text: data.text.trim(),
-        confidence: 100, // pdf-parse is considered 100% accurate for vector text
-        processingTime,
-        method: 'direct_extraction'
-      };
+      // Try to extract text per page if available
+      const totalPages = data.numpages;
+      const results: SimpleOCRResult[] = [];
       
-      console.log(`✅ Text extraction successful: ${result.text.length} characters`);
-      return [result];
+      // Check if we have page-specific data
+      if (data.pages && Array.isArray(data.pages) && data.pages.length > 0) {
+        console.log(`📄 Found ${data.pages.length} page-specific text blocks`);
+        
+        for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+          // Find text for this specific page
+          const pageText = data.pages.find((page: any) => page.page === pageNum)?.text || '';
+          
+          const result: SimpleOCRResult = {
+            pageNumber: pageNum,
+            text: pageText.trim(),
+            confidence: 100,
+            processingTime: Math.round(processingTime / totalPages),
+            method: 'direct_extraction'
+          };
+          results.push(result);
+        }
+      } else {
+        // Fallback: Split text evenly across pages (better than duplicating full text)
+        console.log('⚠️ No page-specific data available, splitting text evenly across pages');
+        
+        const textLength = data.text.length;
+        const charsPerPage = Math.ceil(textLength / totalPages);
+        
+        for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+          const startIndex = (pageNum - 1) * charsPerPage;
+          const endIndex = Math.min(startIndex + charsPerPage, textLength);
+          const pageText = data.text.substring(startIndex, endIndex);
+          
+          const result: SimpleOCRResult = {
+            pageNumber: pageNum,
+            text: pageText.trim(),
+            confidence: 100,
+            processingTime: Math.round(processingTime / totalPages),
+            method: 'direct_extraction'
+          };
+          results.push(result);
+        }
+      }
+      
+      console.log(`✅ Text extraction successful: ${results.length} pages processed`);
+      return results;
       
     } catch (error) {
       console.error('❌ PDF text extraction failed:', error);
@@ -243,6 +281,42 @@ class SimpleOCRService {
     } catch (error) {
       console.error('❌ Failed to check document processing status:', error);
       return false;
+    }
+  }
+
+  // Clear existing OCR results for a document (allows re-processing)
+  async clearDocumentResults(projectId: string, documentId: string): Promise<void> {
+    try {
+      console.log(`🗑️ Clearing existing OCR results for document: ${documentId}`);
+      
+      // Delete existing OCR results
+      const { error: resultsError } = await supabase
+        .from('ocr_results')
+        .delete()
+        .eq('project_id', projectId)
+        .eq('document_id', documentId);
+
+      if (resultsError) {
+        console.error('❌ Failed to clear OCR results:', resultsError);
+        throw resultsError;
+      }
+
+      // Delete existing OCR jobs
+      const { error: jobsError } = await supabase
+        .from('ocr_jobs')
+        .delete()
+        .eq('project_id', projectId)
+        .eq('document_id', documentId);
+
+      if (jobsError) {
+        console.error('❌ Failed to clear OCR jobs:', jobsError);
+        throw jobsError;
+      }
+
+      console.log('✅ Successfully cleared existing OCR data');
+    } catch (error) {
+      console.error('❌ Failed to clear document results:', error);
+      throw error;
     }
   }
 }
