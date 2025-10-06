@@ -96,6 +96,137 @@ class SimpleOCRService {
     }
   }
 
+  // Extract text from PDF with detailed progress updates
+  async extractTextFromPDFWithProgress(pdfPath: string, jobId: string): Promise<SimpleOCRResult[]> {
+    try {
+      console.log('📄 Extracting text from vector PDF using pdf-parse with progress updates...');
+      
+      // Update progress: Starting file read (5%)
+      await this.updateJobStatus(jobId, {
+        progress: 5,
+        total_pages: 0,
+        processed_pages: 0
+      });
+      
+      const startTime = Date.now();
+      const dataBuffer = await fs.readFile(pdfPath);
+      
+      // Update progress: File read complete, starting PDF parsing (10%)
+      await this.updateJobStatus(jobId, {
+        progress: 10,
+        total_pages: 0,
+        processed_pages: 0
+      });
+      
+      // Parse PDF with page-by-page extraction
+      const data = await pdfParse(dataBuffer, {
+        // Enable page-by-page extraction
+        max: 0, // Process all pages
+        version: 'v1.10.100' // Use specific version for stability
+      });
+      
+      const processingTime = Date.now() - startTime;
+      
+      console.log(`📄 PDF parsed: ${data.numpages} pages, ${data.text.length} characters`);
+      
+      if (!data.text || data.text.trim().length === 0) {
+        console.log('⚠️ No text found in PDF');
+        return [];
+      }
+      
+      // Update progress: PDF parsing complete, starting text processing (20%)
+      await this.updateJobStatus(jobId, {
+        progress: 20,
+        total_pages: data.numpages,
+        processed_pages: 0
+      });
+      
+      // Try to extract text per page if available
+      const totalPages = data.numpages;
+      const results: SimpleOCRResult[] = [];
+      
+      // Check if we have page-specific data
+      if (data.pages && Array.isArray(data.pages) && data.pages.length > 0) {
+        console.log(`📄 Found ${data.pages.length} page-specific text blocks`);
+        
+        for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+          // Find text for this specific page
+          const pageText = data.pages.find((page: any) => page.page === pageNum)?.text || '';
+          
+          const result: SimpleOCRResult = {
+            pageNumber: pageNum,
+            text: pageText.trim(),
+            confidence: 100,
+            processingTime: Math.round(processingTime / totalPages),
+            method: 'direct_extraction'
+          };
+          results.push(result);
+          
+          // Update progress: Processing pages (20-80%)
+          const pageProgress = 20 + Math.round((pageNum / totalPages) * 60);
+          await this.updateJobStatus(jobId, {
+            progress: pageProgress,
+            total_pages: totalPages,
+            processed_pages: pageNum
+          });
+          
+          // Add a small delay to make progress visible
+          if (pageNum % 5 === 0) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+        }
+      } else {
+        // Fallback: Split text evenly across pages (better than duplicating full text)
+        console.log('⚠️ No page-specific data available, splitting text evenly across pages');
+        
+        const textLength = data.text.length;
+        const charsPerPage = Math.ceil(textLength / totalPages);
+        
+        for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+          const startIndex = (pageNum - 1) * charsPerPage;
+          const endIndex = Math.min(startIndex + charsPerPage, textLength);
+          const pageText = data.text.substring(startIndex, endIndex);
+          
+          const result: SimpleOCRResult = {
+            pageNumber: pageNum,
+            text: pageText.trim(),
+            confidence: 100,
+            processingTime: Math.round(processingTime / totalPages),
+            method: 'direct_extraction'
+          };
+          results.push(result);
+          
+          // Update progress: Processing pages (20-80%)
+          const pageProgress = 20 + Math.round((pageNum / totalPages) * 60);
+          await this.updateJobStatus(jobId, {
+            progress: pageProgress,
+            total_pages: totalPages,
+            processed_pages: pageNum
+          });
+          
+          // Add a small delay to make progress visible
+          if (pageNum % 5 === 0) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+        }
+      }
+      
+      // Update progress: Text processing complete (80%)
+      await this.updateJobStatus(jobId, {
+        progress: 80,
+        total_pages: totalPages,
+        processed_pages: totalPages
+      });
+      
+      console.log(`✅ Text extraction successful: ${results.length} pages processed`);
+      return results;
+      
+    } catch (error) {
+      console.error('❌ PDF text extraction failed:', error);
+      throw error;
+    }
+  }
+
   // Save OCR results to database
   async saveOCRResults(projectId: string, documentId: string, results: SimpleOCRResult[]): Promise<void> {
     try {
@@ -166,17 +297,31 @@ class SimpleOCRService {
         started_at: new Date().toISOString()
       });
 
-      // Extract text from PDF
-      const results = await this.extractTextFromPDF(documentPath);
+      // Extract text from PDF with progress updates
+      const results = await this.extractTextFromPDFWithProgress(documentPath, jobId);
       
       if (results.length === 0) {
         throw new Error('No text could be extracted from the PDF');
       }
       
+      // Update progress: Saving results to database (90-95%)
+      await this.updateJobStatus(jobId, {
+        progress: 90,
+        total_pages: results.length,
+        processed_pages: results.length
+      });
+      
       // Save results to database
       await this.saveOCRResults(projectId, documentId, results);
       
-      // Update job status
+      // Update progress: Finalizing (95-100%)
+      await this.updateJobStatus(jobId, {
+        progress: 95,
+        total_pages: results.length,
+        processed_pages: results.length
+      });
+      
+      // Update job status to completed
       await this.updateJobStatus(jobId, {
         status: 'completed',
         progress: 100,
