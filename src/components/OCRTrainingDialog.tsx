@@ -226,8 +226,9 @@ export function OCRTrainingDialog({ isOpen, onClose, projectId }: OCRTrainingDia
     
     // Prevent scroll events from bubbling up to parent, but allow canvas events
     const preventScroll = (e: Event) => {
-      // Don't prevent events on the canvas - let it handle its own zoom/pan
-      if (e.target && (e.target as Element).tagName === 'CANVAS') {
+      // Don't prevent events on the canvas or its container - let it handle its own zoom/pan
+      const target = e.target as Element;
+      if (target && (target.tagName === 'CANVAS' || target.closest('[id^="pdf-page-"]'))) {
         return;
       }
       e.preventDefault();
@@ -236,10 +237,9 @@ export function OCRTrainingDialog({ isOpen, onClose, projectId }: OCRTrainingDia
       return false;
     };
     
+    // Only add scroll prevention to modal, not modalContent to avoid interfering with canvas
     modal.addEventListener('wheel', preventScroll, { passive: false, capture: true });
     modal.addEventListener('scroll', preventScroll, { passive: false, capture: true });
-    modalContent.addEventListener('wheel', preventScroll, { passive: false, capture: true });
-    modalContent.addEventListener('scroll', preventScroll, { passive: false, capture: true });
     modalContent.innerHTML = `
       <div class="flex justify-between items-center mb-4">
         <h3 class="text-lg font-semibold">PDF Page ${entry.pageNumber} - ${entry.fieldType.replace('_', ' ').toUpperCase()}</h3>
@@ -449,7 +449,8 @@ export function OCRTrainingDialog({ isOpen, onClose, projectId }: OCRTrainingDia
           return false;
         };
         
-        canvas.addEventListener('wheel', handleCanvasWheel, { passive: false });
+        // Add wheel event listener with capture to ensure it runs before modal's preventScroll
+        canvas.addEventListener('wheel', handleCanvasWheel, { passive: false, capture: true });
         
         // Mouse drag to pan
         canvas.addEventListener('mousedown', (e) => {
