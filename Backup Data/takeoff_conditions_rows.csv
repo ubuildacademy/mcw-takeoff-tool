@@ -1,5 +1,0 @@
-id,project_id,name,type,unit,waste_factor,color,description,labor_cost,material_cost,include_perimeter,created_at
-0aeebb4d-7702-45b9-a574-82fdf3776d0e,de929ac4-19de-4dfb-ab5a-267ab2e0a415,Volume,volume,CY,0,#e17055,,,10,,2025-09-24 18:47:49.709+00
-4949f8d2-c93d-46d5-9389-9cd8cf2d9d98,de929ac4-19de-4dfb-ab5a-267ab2e0a415,Baseboard,linear,LF,2,#96ceb4,,40,12.75,,2025-09-29 13:07:17.111+00
-5d88f651-5651-4adb-b241-2b78ef86e76b,de929ac4-19de-4dfb-ab5a-267ab2e0a415,Wood Floor,area,SF,5,#fd79a8,,30,2.25,,2025-09-29 13:30:55.032+00
-c6801eba-90da-46cb-8b8b-9347508654dd,de929ac4-19de-4dfb-ab5a-267ab2e0a415,Light Fixture,count,EA,0,#45b7d1,,20,70,,2025-09-29 15:07:35.424+00
