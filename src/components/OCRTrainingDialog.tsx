@@ -4,6 +4,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
 import { Badge } from './ui/badge';
+import { Checkbox } from './ui/checkbox';
 // import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { 
   BarChart3, 
@@ -31,6 +32,7 @@ export function OCRTrainingDialog({ isOpen, onClose, projectId }: OCRTrainingDia
   const [isLoading, setIsLoading] = useState(false);
   const [editingEntry, setEditingEntry] = useState<OCRTrainingData | null>(null);
   const [editText, setEditText] = useState('');
+  const [editHasTitleblock, setEditHasTitleblock] = useState(true);
 
   // Load training data when dialog opens
   useEffect(() => {
@@ -63,15 +65,18 @@ export function OCRTrainingDialog({ isOpen, onClose, projectId }: OCRTrainingDia
           console.log('📊 No project-specific data found, showing all training data');
           setTrainingData(allData);
           const stats = await ocrTrainingService.getTrainingStats(); // No projectId = all data stats
+          console.log('📊 Stats for all data:', stats);
           setStats(stats);
         } else {
           setTrainingData(projectData);
           const stats = await ocrTrainingService.getTrainingStats(projectId);
+          console.log('📊 Stats for project data:', stats);
           setStats(stats);
         }
       } else {
         setTrainingData([]);
         const stats = await ocrTrainingService.getTrainingStats(projectId);
+        console.log('📊 Stats for empty data:', stats);
         setStats(stats);
       }
     } catch (error) {
@@ -92,12 +97,14 @@ export function OCRTrainingDialog({ isOpen, onClose, projectId }: OCRTrainingDia
           entry.fieldType,
           entry.originalText,
           entry.correctedText,
-          entry.confidence
+          entry.confidence,
+          entry.hasTitleblock ?? true
         );
       } else {
         // User says correction is wrong, allow editing
         setEditingEntry(entry);
         setEditText(entry.correctedText);
+        setEditHasTitleblock(entry.hasTitleblock ?? true);
       }
       
       // Reload data
@@ -118,11 +125,13 @@ export function OCRTrainingDialog({ isOpen, onClose, projectId }: OCRTrainingDia
         editingEntry.fieldType,
         editingEntry.originalText,
         editText,
-        editingEntry.confidence
+        editingEntry.confidence,
+        editHasTitleblock
       );
       
       setEditingEntry(null);
       setEditText('');
+      setEditHasTitleblock(true);
       await loadTrainingData();
     } catch (error) {
       console.error('Failed to save edit:', error);
@@ -188,6 +197,12 @@ export function OCRTrainingDialog({ isOpen, onClose, projectId }: OCRTrainingDia
     const modal = document.createElement('div');
     modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
     modal.id = `modal-${entry.id}`;
+    modal.style.position = 'fixed';
+    modal.style.top = '0';
+    modal.style.left = '0';
+    modal.style.width = '100vw';
+    modal.style.height = '100vh';
+    modal.style.zIndex = '9999';
     
     // Create a unique close function for this modal
     const modalId = `modal-${entry.id}`;
@@ -196,34 +211,61 @@ export function OCRTrainingDialog({ isOpen, onClose, projectId }: OCRTrainingDia
       if (modalElement && modalElement.parentNode) {
         modalElement.parentNode.removeChild(modalElement);
       }
+      // Re-enable body scrolling
+      document.body.style.overflow = '';
     };
+    
+    // Disable body scrolling when modal is open
+    document.body.style.overflow = 'hidden';
     
     // Create the modal content
     const modalContent = document.createElement('div');
-    modalContent.className = 'bg-white rounded-lg p-6 max-w-6xl max-h-[95vh] overflow-auto relative';
+    modalContent.className = 'bg-white rounded-lg p-6 max-w-6xl max-h-[95vh] overflow-hidden relative';
+    modalContent.style.position = 'relative';
+    modalContent.style.zIndex = '10000';
+    
+    // Prevent scroll events from bubbling up to parent, but allow canvas events
+    const preventScroll = (e: Event) => {
+      // Don't prevent events on the canvas - let it handle its own zoom/pan
+      if (e.target && (e.target as Element).tagName === 'CANVAS') {
+        return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      return false;
+    };
+    
+    modal.addEventListener('wheel', preventScroll, { passive: false, capture: true });
+    modal.addEventListener('scroll', preventScroll, { passive: false, capture: true });
+    modalContent.addEventListener('wheel', preventScroll, { passive: false, capture: true });
+    modalContent.addEventListener('scroll', preventScroll, { passive: false, capture: true });
     modalContent.innerHTML = `
       <div class="flex justify-between items-center mb-4">
         <h3 class="text-lg font-semibold">PDF Page ${entry.pageNumber} - ${entry.fieldType.replace('_', ' ').toUpperCase()}</h3>
         <button class="close-modal-btn text-gray-500 hover:text-gray-700 text-2xl font-bold cursor-pointer">&times;</button>
       </div>
-      <div class="mb-4">
-        <p class="text-sm text-gray-600">Document: ${entry.documentId}</p>
-        <p class="text-sm text-gray-600">Original OCR: "${entry.originalText}"</p>
-        <p class="text-sm text-gray-600">Corrected: "${entry.correctedText}"</p>
-        <p class="text-xs text-blue-600 mt-1">Use Ctrl/Cmd + scroll to zoom in/out, or scroll to pan around the page</p>
-      </div>
-      <div class="border rounded-lg p-4 bg-gray-50">
-        <div id="pdf-page-${entry.id}" class="flex items-center justify-center min-h-[400px]">
-          <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-          <span class="ml-2">Loading PDF page...</span>
+      <div class="overflow-y-auto max-h-[calc(95vh-120px)]">
+        <div class="mb-4">
+          <p class="text-sm text-gray-600">Document: ${entry.documentId}</p>
+          <p class="text-sm text-gray-600">Original OCR: "${entry.originalText}"</p>
+          <p class="text-sm text-gray-600">Corrected: "${entry.correctedText}"</p>
+          <p class="text-xs text-blue-600 mt-1">Use <strong>Ctrl/Cmd + scroll</strong> to zoom in/out, or <strong>scroll</strong> to pan around the page</p>
+          <p class="text-xs text-gray-500 mt-1">Zoom range: 20% - 500% | Current zoom: <span id="zoom-level-${entry.id}">100%</span></p>
         </div>
-      </div>
-      <div class="mt-4 text-sm text-gray-500">
-        <p>This shows the full PDF page where the text was extracted. Look for the text in the titleblock area (usually bottom right corner).</p>
-        <div class="mt-4 flex justify-end gap-2">
-          <button class="backup-close-btn px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 cursor-pointer">
-            Close
-          </button>
+        <div class="border rounded-lg p-4 bg-gray-50">
+          <div id="pdf-page-${entry.id}" class="flex items-center justify-center min-h-[400px] overflow-hidden" style="touch-action: none;">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            <span class="ml-2">Loading PDF page...</span>
+          </div>
+        </div>
+        <div class="mt-4 text-sm text-gray-500">
+          <p>This shows the full PDF page where the text was extracted. Look for the text in the titleblock area (usually bottom right corner).</p>
+          <div class="mt-4 flex justify-end gap-2">
+            <button class="backup-close-btn px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 cursor-pointer">
+              Close
+            </button>
+          </div>
         </div>
       </div>
     `;
@@ -353,6 +395,8 @@ export function OCRTrainingDialog({ isOpen, onClose, projectId }: OCRTrainingDia
         canvas.style.maxWidth = '100%';
         canvas.style.height = 'auto';
         canvas.style.cursor = 'grab';
+        canvas.style.touchAction = 'none';
+        canvas.style.userSelect = 'none';
         
         // Add zoom functionality
         let isDragging = false;
@@ -363,28 +407,49 @@ export function OCRTrainingDialog({ isOpen, onClose, projectId }: OCRTrainingDia
         let currentY = 0;
         
         const updateTransform = () => {
-          canvas.style.transform = `scale(${currentScale}) translate(${currentX}px, ${currentY}px)`;
+          canvas.style.transform = `translate(${currentX}px, ${currentY}px) scale(${currentScale})`;
           canvas.style.transformOrigin = '0 0';
+          
+          // Update zoom level display
+          const zoomLevelElement = document.getElementById(`zoom-level-${entry.id}`);
+          if (zoomLevelElement) {
+            zoomLevelElement.textContent = `${Math.round(currentScale * 100)}%`;
+          }
         };
         
-        // Mouse wheel zoom
-        canvas.addEventListener('wheel', (e) => {
+        // Mouse wheel zoom with better handling - more aggressive event prevention
+        const handleCanvasWheel = (e: WheelEvent) => {
           e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+          
           const rect = canvas.getBoundingClientRect();
           const mouseX = e.clientX - rect.left;
           const mouseY = e.clientY - rect.top;
           
-          const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-          const newScale = Math.max(0.5, Math.min(3, currentScale * zoomFactor));
+          // Use Ctrl/Cmd + wheel for zoom, regular wheel for pan
+          if (e.ctrlKey || e.metaKey) {
+            const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+            const newScale = Math.max(0.2, Math.min(5, currentScale * zoomFactor));
+            
+            // Adjust position to zoom towards mouse
+            const scaleChange = newScale / currentScale;
+            currentX = mouseX - (mouseX - currentX) * scaleChange;
+            currentY = mouseY - (mouseY - currentY) * scaleChange;
+            
+            currentScale = newScale;
+            updateTransform();
+          } else {
+            // Pan with regular wheel
+            currentX -= e.deltaX * 0.5;
+            currentY -= e.deltaY * 0.5;
+            updateTransform();
+          }
           
-          // Adjust position to zoom towards mouse
-          const scaleChange = newScale / currentScale;
-          currentX = mouseX - (mouseX - currentX) * scaleChange;
-          currentY = mouseY - (mouseY - currentY) * scaleChange;
-          
-          currentScale = newScale;
-          updateTransform();
-        });
+          return false;
+        };
+        
+        canvas.addEventListener('wheel', handleCanvasWheel, { passive: false });
         
         // Mouse drag to pan
         canvas.addEventListener('mousedown', (e) => {
@@ -593,29 +658,50 @@ export function OCRTrainingDialog({ isOpen, onClose, projectId }: OCRTrainingDia
                         <div>
                           <Label className="text-xs text-gray-500">Corrected Text</Label>
                           {editingEntry?.id === entry.id ? (
-                            <div className="flex gap-2">
+                            <div className="space-y-2">
                               <Input
                                 value={editText}
                                 onChange={(e) => setEditText(e.target.value)}
                                 className="text-sm"
                               />
-                              <Button size="sm" onClick={handleSaveEdit}>
-                                Save
-                              </Button>
-                              <Button 
-                                size="sm" 
-                                variant="outline"
-                                onClick={() => {
-                                  setEditingEntry(null);
-                                  setEditText('');
-                                }}
-                              >
-                                Cancel
-                              </Button>
+                              <div className="flex items-center space-x-2">
+                                <Checkbox
+                                  id={`has-titleblock-${entry.id}`}
+                                  checked={editHasTitleblock}
+                                  onCheckedChange={(checked) => setEditHasTitleblock(checked === true)}
+                                />
+                                <Label htmlFor={`has-titleblock-${entry.id}`} className="text-xs text-gray-600">
+                                  Sheet has titleblock
+                                </Label>
+                              </div>
+                              <div className="flex gap-2">
+                                <Button size="sm" onClick={handleSaveEdit}>
+                                  Save
+                                </Button>
+                                <Button 
+                                  size="sm" 
+                                  variant="outline"
+                                  onClick={() => {
+                                    setEditingEntry(null);
+                                    setEditText('');
+                                    setEditHasTitleblock(true);
+                                  }}
+                                >
+                                  Cancel
+                                </Button>
+                              </div>
                             </div>
                           ) : (
-                            <div className="p-2 bg-green-50 rounded text-sm font-mono">
-                              {entry.correctedText}
+                            <div className="space-y-2">
+                              <div className="p-2 bg-green-50 rounded text-sm font-mono">
+                                {entry.correctedText}
+                              </div>
+                              <div className="flex items-center space-x-2">
+                                <div className={`w-2 h-2 rounded-full ${(entry.hasTitleblock ?? true) ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                                <span className="text-xs text-gray-600">
+                                  {(entry.hasTitleblock ?? true) ? 'Has titleblock' : 'No titleblock'}
+                                </span>
+                              </div>
                             </div>
                           )}
                         </div>
@@ -667,6 +753,7 @@ export function OCRTrainingDialog({ isOpen, onClose, projectId }: OCRTrainingDia
                             onClick={() => {
                               setEditingEntry(entry);
                               setEditText(entry.correctedText);
+                              setEditHasTitleblock(entry.hasTitleblock ?? true);
                             }}
                           >
                             <Edit3 className="w-4 h-4 mr-1" />

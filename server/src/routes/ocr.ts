@@ -291,7 +291,8 @@ router.get('/training-data', async (req, res) => {
       .select('*')
       .order('created_at', { ascending: false });
 
-    if (projectId && typeof projectId === 'string') {
+    // Handle special case for "global" - show all data
+    if (projectId && typeof projectId === 'string' && projectId !== 'global') {
       query = query.eq('project_id', projectId);
     }
 
@@ -363,7 +364,8 @@ router.get('/training-stats', async (req, res) => {
       .from('ocr_training_data')
       .select('*');
 
-    if (projectId && typeof projectId === 'string') {
+    // Handle special case for "global" - show all data
+    if (projectId && typeof projectId === 'string' && projectId !== 'global') {
       query = query.eq('project_id', projectId);
     }
 

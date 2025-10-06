@@ -16,6 +16,7 @@ export interface OCRTrainingData {
     reason: string;
   }>;
   userValidated: boolean;
+  hasTitleblock?: boolean; // Whether this sheet has a titleblock (defaults to true for backward compatibility)
   fieldCoordinates?: {
     x: number;
     y: number;
@@ -88,6 +89,7 @@ class OCRTrainingService {
         confidence: data.confidence,
         corrections: data.corrections,
         user_validated: data.userValidated,
+        has_titleblock: data.hasTitleblock ?? true, // Default to true for backward compatibility
         field_coordinates: data.fieldCoordinates
       };
       
@@ -142,6 +144,7 @@ class OCRTrainingService {
         confidence: row.confidence,
         corrections: row.corrections || [],
         userValidated: row.user_validated,
+        hasTitleblock: row.has_titleblock ?? true, // Default to true for backward compatibility
         fieldCoordinates: row.field_coordinates,
         createdAt: row.created_at
       }));
@@ -238,7 +241,8 @@ class OCRTrainingService {
     fieldType: 'sheet_number' | 'sheet_name',
     originalText: string,
     userCorrectedText: string,
-    ocrConfidence: number
+    ocrConfidence: number,
+    hasTitleblock: boolean = true
   ): Promise<void> {
     try {
       console.log('💾 Validating correction:', { projectId, documentId, pageNumber, fieldType, originalText, userCorrectedText });
@@ -305,7 +309,8 @@ class OCRTrainingService {
             corrected: userCorrectedText,
             reason: 'User validated correction'
           }],
-          userValidated: true
+          userValidated: true,
+          hasTitleblock
         };
 
         await this.saveTrainingData(trainingData);
@@ -342,16 +347,19 @@ class OCRTrainingService {
         ? `http://localhost:4000/api/ocr/training-stats?projectId=${projectId}`
         : 'http://localhost:4000/api/ocr/training-stats';
 
+      console.log('🔍 Fetching training stats from:', url);
       const response = await fetch(url);
       
       if (!response.ok) {
+        console.error('❌ HTTP error fetching training stats:', response.status, response.statusText);
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       const stats = await response.json();
+      console.log('📊 Training stats received:', stats);
       return stats;
     } catch (error) {
-      console.error('Error fetching training stats:', error);
+      console.error('❌ Error fetching training stats:', error);
       // Return empty stats on error
       return {
         totalEntries: 0,

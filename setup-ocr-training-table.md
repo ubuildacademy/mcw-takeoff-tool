@@ -9,7 +9,7 @@ You need to run the SQL migration script to create the table.
 ## Steps to Fix:
 
 ### 1. Go to Supabase Dashboard
-- Open your Supabase project: https://supabase.com/dashboard/project/ufbsppxapyuplxafmpsn
+- Open your Supabase project: https://supabase.com/dashboard/project/mxjyytwfhmoonkduvybr
 - Go to the "SQL Editor" tab
 
 ### 2. Run the Migration Script
@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS ocr_training_data (
     confidence DECIMAL(5,2) NOT NULL DEFAULT 0.00,
     corrections JSONB DEFAULT '[]'::jsonb,
     user_validated BOOLEAN DEFAULT false,
+    has_titleblock BOOLEAN DEFAULT true, -- Whether this sheet has a titleblock
+    field_coordinates JSONB, -- JSON object containing x, y, width, height coordinates
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -38,6 +40,7 @@ CREATE INDEX IF NOT EXISTS idx_ocr_training_data_document_id ON ocr_training_dat
 CREATE INDEX IF NOT EXISTS idx_ocr_training_data_field_type ON ocr_training_data(field_type);
 CREATE INDEX IF NOT EXISTS idx_ocr_training_data_created_at ON ocr_training_data(created_at);
 CREATE INDEX IF NOT EXISTS idx_ocr_training_data_user_validated ON ocr_training_data(user_validated);
+CREATE INDEX IF NOT EXISTS idx_ocr_training_data_has_titleblock ON ocr_training_data(has_titleblock);
 
 -- Create a composite index for common queries
 CREATE INDEX IF NOT EXISTS idx_ocr_training_data_project_field ON ocr_training_data(project_id, field_type);
@@ -71,6 +74,8 @@ COMMENT ON COLUMN ocr_training_data.corrected_text IS 'User-corrected or system-
 COMMENT ON COLUMN ocr_training_data.confidence IS 'OCR confidence score (0-100)';
 COMMENT ON COLUMN ocr_training_data.corrections IS 'JSON array of corrections applied';
 COMMENT ON COLUMN ocr_training_data.user_validated IS 'Whether the correction was validated by a user';
+COMMENT ON COLUMN ocr_training_data.has_titleblock IS 'Whether this sheet has a titleblock (helps OCR engine understand context)';
+COMMENT ON COLUMN ocr_training_data.field_coordinates IS 'JSON object containing x, y, width, height coordinates of the field';
 ```
 
 ### 3. Test the Connection
