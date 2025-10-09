@@ -630,6 +630,7 @@ export function TakeoffWorkspace() {
               onCutoutMode={handleCutoutMode}
               cutoutMode={cutoutMode}
               cutoutTargetConditionId={cutoutTargetConditionId}
+              selectedDocumentId={selectedDocumentId}
             />
           )}
           <Button

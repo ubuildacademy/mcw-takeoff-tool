@@ -19,6 +19,7 @@ import { ollamaService, type OllamaMessage } from '../services/ollamaService';
 import { serverOcrService } from '../services/serverOcrService';
 import { useTakeoffStore } from '../store/useTakeoffStore';
 import type { PDFDocument } from '../types';
+// Removed complex export libraries - keeping it simple
 
 interface ChatMessage {
   id: string;
@@ -47,6 +48,40 @@ export function ChatTab({
   const [isLoading, setIsLoading] = useState(false);
   const [isOllamaAvailable, setIsOllamaAvailable] = useState<boolean | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Function to strip markdown formatting from text
+  const stripMarkdown = (text: string): string => {
+    return text
+      // Remove code blocks
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/`([^`]+)`/g, '$1')
+      // Remove bold and italic
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/\*([^*]+)\*/g, '$1')
+      .replace(/__([^_]+)__/g, '$1')
+      .replace(/_([^_]+)_/g, '$1')
+      // Remove headers
+      .replace(/^#{1,6}\s+/gm, '')
+      // Remove links but keep the text
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      // Remove horizontal rules
+      .replace(/^[-*_]{3,}$/gm, '')
+      // Remove list markers
+      .replace(/^[\s]*[-*+]\s+/gm, '• ')
+      .replace(/^[\s]*\d+\.\s+/gm, '')
+      // Clean up extra whitespace
+      .replace(/\n\s*\n\s*\n/g, '\n\n')
+      .trim();
+  };
+
+  // Simple function to render message content as plain text
+  const renderMessageContent = (message: ChatMessage) => {
+    return (
+      <div className="whitespace-pre-wrap">
+        {stripMarkdown(message.content)}
+      </div>
+    );
+  };
 
   // Store integration for full project data access
   const { 
@@ -190,7 +225,8 @@ When answering questions:
 - If you reference a document or page, mention the document name and page number
 - Help users understand measurements, conditions, and project details
 - If you don't have enough information, ask clarifying questions
-- Be concise but thorough in your responses`
+- Be concise but thorough in your responses
+- IMPORTANT: Respond in plain text only. Do not use any markdown formatting, code blocks, asterisks, or special formatting. Use simple text with line breaks for readability.`
         },
         ...messages.slice(-10).map(msg => ({
           role: msg.role as 'user' | 'assistant',
@@ -227,19 +263,19 @@ When answering questions:
         if (chunk.message?.content) {
           fullResponse += chunk.message.content;
           
-          // Update the streaming message
+          // Update the streaming message with markdown stripped
           setMessages(prev => prev.map(msg => 
             msg.id === assistantMessage.id 
-              ? { ...msg, content: fullResponse }
+              ? { ...msg, content: stripMarkdown(fullResponse) }
               : msg
           ));
         }
 
         if (chunk.done) {
-          // Mark streaming as complete
+          // Mark streaming as complete and ensure final content is markdown-free
           setMessages(prev => prev.map(msg => 
             msg.id === assistantMessage.id 
-              ? { ...msg, isStreaming: false }
+              ? { ...msg, isStreaming: false, content: stripMarkdown(fullResponse) }
               : msg
           ));
           break;
@@ -337,12 +373,12 @@ When answering questions:
           try {
             const ocrData = await serverOcrService.getDocumentData(doc.id, projectId);
             if (ocrData && ocrData.results.length > 0) {
-              // Include sample text from first few pages
-              const sampleText = ocrData.results.slice(0, 2)
-                .map((result: any) => `    Page ${result.pageNumber}: ${result.text.substring(0, 150)}...`)
-                .join('\n');
-              if (sampleText) {
-                context += `  Sample content:\n${sampleText}\n`;
+              // Include full text content from all pages for comprehensive AI analysis
+              const fullText = ocrData.results
+                .map((result: any) => `    Page ${result.pageNumber}:\n${result.text}`)
+                .join('\n\n');
+              if (fullText) {
+                context += `  Full OCR content:\n${fullText}\n`;
               }
             }
           } catch (error) {
@@ -403,18 +439,34 @@ When answering questions:
     localStorage.removeItem(chatKey);
   };
 
-  // Export chat as DOCX
+  // Export chat as clean text file
   const exportChatAsDocx = async () => {
     try {
-      // Create a simple text document content
+      // Create a well-formatted text document
       const chatContent = messages.map(msg => {
         const timestamp = msg.timestamp.toLocaleString();
         const role = msg.role === 'user' ? 'User' : 'AI Assistant';
-        return `[${timestamp}] ${role}:\n${msg.content}\n\n`;
-      }).join('---\n\n');
+        
+        return `${role} - ${timestamp}\n${'='.repeat(50)}\n${stripMarkdown(msg.content)}\n\n`;
+      }).join('');
 
-      // Create a blob with the chat content
-      const blob = new Blob([chatContent], { type: 'text/plain' });
+      const fullContent = `AI CHAT EXPORT
+${'='.repeat(50)}
+
+Project ID: ${projectId}
+Export Date: ${new Date().toLocaleString()}
+Total Messages: ${messages.length}
+
+${'='.repeat(50)}
+
+${chatContent}
+
+${'='.repeat(50)}
+End of Chat Export
+Generated by Meridian Takeoff`;
+
+      // Create a blob with the formatted content
+      const blob = new Blob([fullContent], { type: 'text/plain; charset=utf-8' });
       const url = URL.createObjectURL(blob);
       
       // Create download link
@@ -425,8 +477,10 @@ When answering questions:
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      
     } catch (error) {
       console.error('Failed to export chat:', error);
+      alert('Failed to export chat. Please try again.');
     }
   };
 
@@ -459,14 +513,18 @@ When answering questions:
   }
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="p-4 border-b">
+    <div className="flex flex-col h-full bg-white">
+      {/* Header with AI icon */}
+      <div className="p-4 border-b border-slate-200">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold flex items-center">
-            <MessageSquare className="w-5 h-5 mr-2" />
-            AI Assistant
-          </h3>
+          <div className="flex items-center space-x-3">
+            <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-semibold text-slate-900">AI Assistant</h3>
+          </div>
           
           <div className="flex items-center gap-1 min-w-0">
             {/* Action Buttons */}
@@ -476,7 +534,7 @@ When answering questions:
                   variant="outline"
                   size="sm"
                   onClick={exportChatAsDocx}
-                  className="h-8 w-8 p-0 shrink-0"
+                  className="h-8 w-8 p-0 shrink-0 border-slate-300 hover:bg-slate-50"
                   title="Export chat"
                 >
                   <FileText className="w-4 h-4" />
@@ -485,14 +543,13 @@ When answering questions:
                   variant="outline"
                   size="sm"
                   onClick={clearChat}
-                  className="h-8 w-8 p-0 text-red-600 hover:text-red-700 shrink-0"
+                  className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50 border-slate-300 shrink-0"
                   title="Clear chat"
                 >
                   <Trash2 className="w-4 h-4" />
                 </Button>
               </>
             )}
-            
           </div>
         </div>
 
@@ -504,12 +561,13 @@ When answering questions:
             onChange={(e) => setInputMessage(e.target.value)}
             onKeyPress={handleKeyPress}
             disabled={isLoading}
-            className="flex-1"
+            className="flex-1 border-slate-300 focus:border-blue-500 focus:ring-blue-500"
           />
           <Button 
             onClick={handleSendMessage}
             disabled={!inputMessage.trim() || isLoading}
             size="sm"
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4"
           >
             {isLoading ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -521,51 +579,68 @@ When answering questions:
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.map((message) => (
-          <div
-            key={message.id}
-            className={`flex gap-3 ${
-              message.role === 'user' ? 'justify-end' : 'justify-start'
-            }`}
-          >
-            {message.role === 'assistant' && (
-              <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-                <Bot className="w-4 h-4 text-blue-600" />
-              </div>
-            )}
-            
+      <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-slate-50">
+        {messages.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-center">
+            <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mb-4">
+              <MessageSquare className="w-8 h-8 text-blue-600" />
+            </div>
+            <h3 className="text-lg font-semibold text-slate-900 mb-2">Start a conversation</h3>
+            <p className="text-slate-600 max-w-sm">
+              Ask me anything about your project documents, measurements, or conditions. I can help you understand your blueprints and project details.
+            </p>
+          </div>
+        ) : (
+          messages.map((message) => (
             <div
-              className={`max-w-[80%] rounded-lg p-3 ${
-                message.role === 'user'
-                  ? 'bg-blue-500 text-white'
-                  : 'bg-gray-100 text-gray-900'
+              key={message.id}
+              className={`flex gap-3 ${
+                message.role === 'user' ? 'justify-end' : 'justify-start'
               }`}
             >
-              <div className="whitespace-pre-wrap">
-                {message.content}
-                {message.isStreaming && (
-                  <span className="inline-block w-2 h-4 bg-current animate-pulse ml-1" />
-                )}
-              </div>
-              {message.error && (
-                <div className="mt-2 text-sm text-red-600">
-                  Error: {message.error}
+              {message.role === 'assistant' && (
+                <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+                  <Bot className="w-4 h-4 text-blue-600" />
                 </div>
               )}
-              <div className="text-xs opacity-70 mt-1">
-                {message.timestamp.toLocaleTimeString()}
+              
+              <div
+                className={`max-w-xs rounded-lg p-3 ${
+                  message.role === 'user'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-white text-slate-900 border border-slate-200 shadow-sm'
+                }`}
+              >
+                <div className="text-sm">
+                  {renderMessageContent(message)}
+                  {message.isStreaming && (
+                    <span className="inline-block w-2 h-4 bg-current animate-pulse ml-1" />
+                  )}
+                </div>
+                {message.error && (
+                  <div className="mt-2 text-sm text-red-600">
+                    Error: {message.error}
+                  </div>
+                )}
               </div>
-            </div>
 
-            {message.role === 'user' && (
-              <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
-                <User className="w-4 h-4 text-gray-600" />
-              </div>
-            )}
-          </div>
-        ))}
+              {message.role === 'user' && (
+                <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
+                  <User className="w-4 h-4 text-green-600" />
+                </div>
+              )}
+            </div>
+          ))
+        )}
         <div ref={messagesEndRef} />
+      </div>
+      
+      {/* Status bar */}
+      <div className="px-6 py-3 border-t border-slate-200 bg-white">
+        <div className="flex items-center space-x-2 text-slate-500">
+          <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+          <span className="text-sm">AI Assistant Online</span>
+        </div>
       </div>
     </div>
   );

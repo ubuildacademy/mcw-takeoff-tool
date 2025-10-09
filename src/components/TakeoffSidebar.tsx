@@ -42,9 +42,10 @@ interface TakeoffSidebarProps {
   onCutoutMode?: (conditionId: string | null) => void;
   cutoutMode?: boolean;
   cutoutTargetConditionId?: string | null;
+  selectedDocumentId?: string | null;
 }
 
-export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, documents = [], onPageSelect, onExportStatusUpdate, onCutoutMode, cutoutMode, cutoutTargetConditionId }: TakeoffSidebarProps) {
+export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, documents = [], onPageSelect, onExportStatusUpdate, onCutoutMode, cutoutMode, cutoutTargetConditionId, selectedDocumentId }: TakeoffSidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -1430,14 +1431,18 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                   <div className="font-medium text-blue-600">
                     {(() => {
                       const measurements = getConditionTakeoffMeasurements(projectId, condition.id);
-                      const totalValue = measurements.reduce((sum, m) => {
+                      // Filter measurements to only include those from currently selected document
+                      const currentDocumentMeasurements = selectedDocumentId 
+                        ? measurements.filter(m => m.sheetId === selectedDocumentId)
+                        : measurements;
+                      const totalValue = currentDocumentMeasurements.reduce((sum, m) => {
                         // Use net value if cutouts exist, otherwise use calculated value
                         const value = m.netCalculatedValue !== undefined && m.netCalculatedValue !== null 
                           ? m.netCalculatedValue 
                           : m.calculatedValue;
                         return sum + (value || 0);
                       }, 0);
-                      const totalPerimeter = measurements.reduce((sum, m) => sum + (m.perimeterValue || 0), 0);
+                      const totalPerimeter = currentDocumentMeasurements.reduce((sum, m) => sum + (m.perimeterValue || 0), 0);
                       
                       if (totalValue > 0) {
                         // For linear measurements (feet), use feet and inches format

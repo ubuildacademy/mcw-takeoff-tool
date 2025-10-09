@@ -65,79 +65,131 @@ export interface OllamaStreamResponse {
 
 class OllamaService {
   private baseUrl: string;
-  private defaultModel: string = 'gpt-oss:120b-cloud'; // Default to cloud model from your screenshot
+  private apiKey: string;
+  private defaultModel: string = 'gpt-oss:120b'; // Default to cloud model (without -cloud suffix for direct API calls)
+  private isConnected: boolean = false;
+  private connectionRetries: number = 0;
+  private maxRetries: number = 3;
+  private retryDelay: number = 1000; // 1 second
 
   constructor() {
-    // Use our backend API instead of direct Ollama calls
+    // Use backend proxy to avoid CORS issues
     this.baseUrl = 'http://localhost:4000/api/ollama';
+    this.apiKey = import.meta.env.VITE_OLLAMA_API_KEY || '';
+    
+    // Debug logging
+    console.log('OllamaService initialized with:', {
+      baseUrl: this.baseUrl,
+      hasApiKey: !!this.apiKey,
+      apiKeyLength: this.apiKey.length
+    });
   }
 
-  // Get list of available models (both local and cloud)
+  // Get list of available models (cloud models)
   async getModels(): Promise<OllamaModel[]> {
     try {
-      const response = await fetch(`${this.baseUrl}/models`);
+      const response = await this.makeRequest('/models', {
+        method: 'GET'
+      });
+      
       if (!response.ok) {
         throw new Error(`Failed to fetch models: ${response.statusText}`);
       }
+      
       const data = await response.json();
+      
+      // Update connection status on successful response
+      this.isConnected = true;
+      this.connectionRetries = 0;
+      
       return data.models || [];
     } catch (error) {
       console.error('Error fetching Ollama models:', error);
-      throw new Error('Failed to connect to Ollama. Make sure Ollama is running locally.');
+      this.isConnected = false;
+      this.connectionRetries++;
+      throw new Error('Failed to connect to Ollama cloud API. Check your API key.');
     }
   }
 
-  // Check if Ollama is running and accessible
+  // Check if Ollama cloud API is accessible with retry logic
   async isAvailable(): Promise<boolean> {
     try {
-      const response = await fetch(`${this.baseUrl}/health`, {
+      if (!this.apiKey) {
+        console.warn('Ollama API key not configured');
+        this.isConnected = false;
+        return false;
+      }
+      
+      const response = await this.makeRequest('/models', {
         method: 'GET',
         signal: AbortSignal.timeout(5000) // 5 second timeout
       });
-      const data = await response.json();
-      return data.available === true;
+      
+      this.isConnected = response.ok;
+      this.connectionRetries = 0; // Reset retry counter on success
+      return response.ok;
     } catch (error) {
-      console.warn('Ollama not available:', error);
+      console.warn('Ollama cloud API not available:', error);
+      this.isConnected = false;
       return false;
     }
   }
 
-  // Send a chat message to Ollama
-  async chat(request: OllamaChatRequest): Promise<OllamaChatResponse> {
+  // Robust request method with retry logic
+  private async makeRequest(endpoint: string, options: RequestInit = {}, retryCount: number = 0): Promise<Response> {
     try {
-      const response = await fetch(`${this.baseUrl}/chat`, {
-        method: 'POST',
+      const response = await fetch(`${this.baseUrl}${endpoint}`, {
+        ...options,
         headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
           'Content-Type': 'application/json',
+          ...options.headers,
         },
-        body: JSON.stringify({
-          ...request,
-          stream: false // For now, we'll use non-streaming
-        })
       });
 
-      if (!response.ok) {
-        throw new Error(`Ollama API error: ${response.statusText}`);
+      if (!response.ok && retryCount < this.maxRetries) {
+        console.warn(`Request failed (${response.status}), retrying... (${retryCount + 1}/${this.maxRetries})`);
+        await this.delay(this.retryDelay * (retryCount + 1)); // Exponential backoff
+        return this.makeRequest(endpoint, options, retryCount + 1);
       }
 
-      return await response.json();
+      return response;
     } catch (error) {
-      console.error('Error sending chat to Ollama:', error);
+      if (retryCount < this.maxRetries) {
+        console.warn(`Network error, retrying... (${retryCount + 1}/${this.maxRetries}):`, error);
+        await this.delay(this.retryDelay * (retryCount + 1));
+        return this.makeRequest(endpoint, options, retryCount + 1);
+      }
       throw error;
     }
   }
 
-  // Send a streaming chat message to Ollama
-  async *chatStream(request: OllamaChatRequest): AsyncGenerator<OllamaStreamResponse, void, unknown> {
+  // Utility method for delays
+  private delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  // Get connection status
+  getConnectionStatus(): { connected: boolean; retries: number } {
+    return {
+      connected: this.isConnected,
+      retries: this.connectionRetries
+    };
+  }
+
+  // Send a chat message to Ollama cloud with robust error handling
+  async chat(request: OllamaChatRequest): Promise<OllamaChatResponse> {
     try {
-      const response = await fetch(`${this.baseUrl}/chat`, {
+      const response = await this.makeRequest('/chat', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
-          ...request,
-          stream: true
+          model: request.model,
+          messages: request.messages,
+          stream: false,
+          options: {
+            temperature: request.options?.temperature || 0.7,
+            top_p: request.options?.top_p || 0.9,
+          }
         })
       });
 
@@ -145,51 +197,138 @@ class OllamaService {
         throw new Error(`Ollama API error: ${response.statusText}`);
       }
 
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error('No response body reader available');
-      }
+      const data = await response.json();
+      
+      // Update connection status on successful response
+      this.isConnected = true;
+      this.connectionRetries = 0;
+      
+      // Ollama API response format
+      return {
+        model: data.model,
+        created_at: data.created_at,
+        message: data.message,
+        done: data.done,
+        total_duration: data.total_duration,
+        prompt_eval_count: data.prompt_eval_count,
+        eval_count: data.eval_count,
+      };
+    } catch (error) {
+      console.error('Error sending chat to Ollama:', error);
+      this.isConnected = false;
+      this.connectionRetries++;
+      throw error;
+    }
+  }
 
-      const decoder = new TextDecoder();
-      let buffer = '';
+  // Send a streaming chat message to Ollama cloud with robust error handling
+  async *chatStream(request: OllamaChatRequest): AsyncGenerator<OllamaStreamResponse, void, unknown> {
+    let retryCount = 0;
+    const maxStreamRetries = 2;
 
+    while (retryCount <= maxStreamRetries) {
       try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+        const response = await this.makeRequest('/chat', {
+          method: 'POST',
+          body: JSON.stringify({
+            model: request.model,
+            messages: request.messages,
+            stream: true,
+            options: {
+              temperature: request.options?.temperature || 0.7,
+              top_p: request.options?.top_p || 0.9,
+            }
+          })
+        });
 
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
+        if (!response.ok) {
+          throw new Error(`Ollama API error: ${response.statusText}`);
+        }
 
-          for (const line of lines) {
-            if (line.trim()) {
-              try {
-                const data = JSON.parse(line);
-                yield data;
-              } catch (parseError) {
-                console.warn('Failed to parse Ollama response line:', line);
+        const reader = response.body?.getReader();
+        if (!reader) {
+          throw new Error('No response body reader available');
+        }
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let hasReceivedData = false;
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            hasReceivedData = true;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              if (line.trim()) {
+                try {
+                  const data = JSON.parse(line);
+                  
+                  // Ollama streaming response format
+                  yield {
+                    model: data.model,
+                    created_at: data.created_at,
+                    message: data.message,
+                    done: data.done,
+                  };
+                  
+                  if (data.done) {
+                    // Update connection status on successful completion
+                    this.isConnected = true;
+                    this.connectionRetries = 0;
+                    return;
+                  }
+                } catch (parseError) {
+                  console.warn('Failed to parse Ollama streaming response line:', line);
+                  // Continue processing other lines instead of failing completely
+                }
               }
             }
           }
+
+          // If we get here without receiving data, it might be a connection issue
+          if (!hasReceivedData && retryCount < maxStreamRetries) {
+            console.warn('No data received from stream, retrying...');
+            retryCount++;
+            await this.delay(this.retryDelay * retryCount);
+            continue;
+          }
+
+        } finally {
+          reader.releaseLock();
         }
-      } finally {
-        reader.releaseLock();
+
+        // If we reach here, the stream completed successfully
+        break;
+
+      } catch (error) {
+        console.error(`Error in streaming chat (attempt ${retryCount + 1}/${maxStreamRetries + 1}):`, error);
+        this.isConnected = false;
+        this.connectionRetries++;
+
+        if (retryCount < maxStreamRetries) {
+          console.warn('Retrying streaming chat...');
+          retryCount++;
+          await this.delay(this.retryDelay * retryCount);
+          continue;
+        } else {
+          // Final attempt failed, throw the error
+          throw new Error(`Streaming chat failed after ${maxStreamRetries + 1} attempts: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
       }
-    } catch (error) {
-      console.error('Error in streaming chat:', error);
-      throw error;
     }
   }
 
   // Generate embeddings for text (useful for document similarity)
   async generateEmbedding(model: string, prompt: string): Promise<number[]> {
     try {
-      const response = await fetch(`${this.baseUrl}/embeddings`, {
+      const response = await this.makeRequest('/embeddings', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           model,
           prompt
@@ -201,37 +340,21 @@ class OllamaService {
       }
 
       const data = await response.json();
-      return data.embedding;
+      
+      // Update connection status on successful response
+      this.isConnected = true;
+      this.connectionRetries = 0;
+      
+      return data.embedding || [];
     } catch (error) {
       console.error('Error generating embedding:', error);
+      this.isConnected = false;
+      this.connectionRetries++;
       throw error;
     }
   }
 
-  // Pull a model (download it locally)
-  async pullModel(modelName: string): Promise<void> {
-    try {
-      const response = await fetch(`${this.baseUrl}/pull`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: modelName,
-          stream: false
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to pull model: ${response.statusText}`);
-      }
-
-      await response.json();
-    } catch (error) {
-      console.error('Error pulling model:', error);
-      throw error;
-    }
-  }
+  // Note: pullModel is not needed for cloud models - they're available instantly
 
   // Set default model
   setDefaultModel(model: string): void {

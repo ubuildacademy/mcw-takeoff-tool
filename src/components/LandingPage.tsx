@@ -57,8 +57,8 @@ const LandingPage: React.FC = () => {
             </h1>
             <p className="text-xl text-slate-600 mb-8 max-w-3xl mx-auto">
               Professional-grade takeoff software that combines precision measurement tools 
-              with intelligent project management. Build faster, measure accurately, and 
-              win more bids.
+              with AI-powered document analysis. Chat with your blueprints, get instant answers 
+              about your projects, and build faster with intelligent assistance.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Button 
@@ -76,6 +76,119 @@ const LandingPage: React.FC = () => {
         </div>
       </section>
 
+      {/* AI Chat Feature Highlight */}
+      <section className="py-20 bg-gradient-to-r from-blue-50 to-indigo-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="grid lg:grid-cols-2 gap-12 items-center">
+            <div>
+              <Badge className="mb-4 bg-blue-100 text-blue-800 border-blue-200">
+                🤖 AI-Powered Intelligence
+              </Badge>
+              <h2 className="text-4xl font-bold text-slate-900 mb-6">
+                Chat with Your Construction Documents
+              </h2>
+              <p className="text-xl text-slate-600 mb-8">
+                Ask questions about your blueprints, specifications, and project details. Our AI assistant 
+                understands your documents and provides instant, accurate answers to help you work faster and smarter.
+              </p>
+              <div className="space-y-4">
+                <div className="flex items-start space-x-3">
+                  <div className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <svg className="w-3 h-3 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-slate-900">Instant Document Analysis</h3>
+                    <p className="text-slate-600">Get answers about measurements, specifications, and project requirements instantly</p>
+                  </div>
+                </div>
+                <div className="flex items-start space-x-3">
+                  <div className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <svg className="w-3 h-3 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-slate-900">Smart Project Context</h3>
+                    <p className="text-slate-600">AI understands your entire project including measurements, conditions, and documents</p>
+                  </div>
+                </div>
+                <div className="flex items-start space-x-3">
+                  <div className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <svg className="w-3 h-3 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-slate-900">Natural Language Queries</h3>
+                    <p className="text-slate-600">Ask questions in plain English and get precise, actionable answers</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="relative">
+              <div className="bg-white rounded-2xl shadow-2xl p-6 border border-slate-200">
+                <div className="flex items-center space-x-3 mb-4">
+                  <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+                  <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
+                  <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                  <div className="text-sm text-slate-500 ml-4">AI Chat Assistant</div>
+                </div>
+                <div className="space-y-4">
+                  <div className="flex items-start space-x-3">
+                    <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                      <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                      </svg>
+                    </div>
+                    <div className="bg-slate-100 rounded-lg p-3 max-w-xs">
+                      <p className="text-sm text-slate-700">What's the total square footage of the foundation?</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start space-x-3 justify-end">
+                    <div className="bg-blue-600 rounded-lg p-3 max-w-xs">
+                      <p className="text-sm text-white">Based on your foundation plan, the total square footage is 2,450 sq ft. This includes the main foundation area of 2,200 sq ft plus the garage extension of 250 sq ft.</p>
+                    </div>
+                    <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
+                      <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      </svg>
+                    </div>
+                  </div>
+                  <div className="flex items-start space-x-3">
+                    <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                      <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                      </svg>
+                    </div>
+                    <div className="bg-slate-100 rounded-lg p-3 max-w-xs">
+                      <p className="text-sm text-slate-700">Are there any special conditions I should know about?</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start space-x-3 justify-end">
+                    <div className="bg-blue-600 rounded-lg p-3 max-w-xs">
+                      <p className="text-sm text-white">Yes, there are 3 special conditions: 1) Excavation depth exceeds 8ft requiring shoring, 2) Concrete mix must meet freeze-thaw requirements, 3) Foundation must be inspected before backfill.</p>
+                    </div>
+                    <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
+                      <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-4 pt-4 border-t border-slate-200">
+                  <div className="flex items-center space-x-2 text-slate-500">
+                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                    <span className="text-sm">AI Assistant Online</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Features Section */}
       <section className="py-20 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -88,7 +201,7 @@ const LandingPage: React.FC = () => {
             </p>
           </div>
           
-          <div className="grid md:grid-cols-3 gap-8">
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
             <div className="text-center p-6 rounded-lg border border-slate-200 hover:shadow-lg transition-shadow">
               <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -98,6 +211,18 @@ const LandingPage: React.FC = () => {
               <h3 className="text-xl font-semibold text-slate-900 mb-2">PDF Takeoffs</h3>
               <p className="text-slate-600">
                 Import blueprints and drawings directly. Measure areas, lengths, and quantities with precision tools.
+              </p>
+            </div>
+
+            <div className="text-center p-6 rounded-lg border border-slate-200 hover:shadow-lg transition-shadow">
+              <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-8 h-8 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                </svg>
+              </div>
+              <h3 className="text-xl font-semibold text-slate-900 mb-2">AI Document Chat</h3>
+              <p className="text-slate-600">
+                Ask questions about your blueprints and get instant answers. AI understands your project context and documents.
               </p>
             </div>
 
@@ -135,7 +260,8 @@ const LandingPage: React.FC = () => {
             Ready to Transform Your Takeoff Process?
           </h2>
           <p className="text-xl text-blue-100 mb-8 max-w-2xl mx-auto">
-            Join thousands of construction professionals who trust Meridian Takeoff for their most important projects.
+            Experience the future of construction takeoffs with AI-powered document analysis. 
+            Chat with your blueprints, get instant answers, and work smarter than ever before.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Button 
