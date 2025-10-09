@@ -3,13 +3,26 @@ import axios from 'axios';
 
 const router = express.Router();
 
-// Ollama API configuration
-const OLLAMA_BASE_URL = 'http://localhost:11434';
+// Ollama Cloud API configuration
+const OLLAMA_BASE_URL = 'https://ollama.com';
+const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY;
 
 // Get available models
 router.get('/models', async (req, res) => {
   try {
-    const response = await axios.get(`${OLLAMA_BASE_URL}/api/tags`);
+    if (!OLLAMA_API_KEY) {
+      return res.status(500).json({ 
+        error: 'Ollama API key not configured',
+        details: 'Set OLLAMA_API_KEY environment variable'
+      });
+    }
+
+    const response = await axios.get(`${OLLAMA_BASE_URL}/api/tags`, {
+      headers: {
+        'Authorization': `Bearer ${OLLAMA_API_KEY}`,
+        'Content-Type': 'application/json'
+      }
+    });
     res.json(response.data);
   } catch (error) {
     console.error('Error fetching Ollama models:', error);
@@ -23,7 +36,18 @@ router.get('/models', async (req, res) => {
 // Check if Ollama is available
 router.get('/health', async (req, res) => {
   try {
+    if (!OLLAMA_API_KEY) {
+      return res.json({ 
+        available: false, 
+        error: 'Ollama API key not configured'
+      });
+    }
+
     const response = await axios.get(`${OLLAMA_BASE_URL}/api/tags`, {
+      headers: {
+        'Authorization': `Bearer ${OLLAMA_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
       timeout: 5000
     });
     res.json({ 
@@ -50,6 +74,13 @@ router.post('/chat', async (req, res) => {
       });
     }
 
+    if (!OLLAMA_API_KEY) {
+      return res.status(500).json({ 
+        error: 'Ollama API key not configured',
+        details: 'Set OLLAMA_API_KEY environment variable'
+      });
+    }
+
     const requestData = {
       model,
       messages,
@@ -71,6 +102,10 @@ router.post('/chat', async (req, res) => {
         `${OLLAMA_BASE_URL}/api/chat`,
         requestData,
         {
+          headers: {
+            'Authorization': `Bearer ${OLLAMA_API_KEY}`,
+            'Content-Type': 'application/json'
+          },
           responseType: 'stream',
           timeout: 300000 // 5 minutes timeout for long responses
         }
@@ -100,6 +135,10 @@ router.post('/chat', async (req, res) => {
         `${OLLAMA_BASE_URL}/api/chat`,
         requestData,
         {
+          headers: {
+            'Authorization': `Bearer ${OLLAMA_API_KEY}`,
+            'Content-Type': 'application/json'
+          },
           timeout: 300000 // 5 minutes timeout
         }
       );
@@ -147,10 +186,23 @@ router.post('/embeddings', async (req, res) => {
       });
     }
 
+    if (!OLLAMA_API_KEY) {
+      return res.status(500).json({ 
+        error: 'Ollama API key not configured',
+        details: 'Set OLLAMA_API_KEY environment variable'
+      });
+    }
+
     const response = await axios.post(
       `${OLLAMA_BASE_URL}/api/embeddings`,
       { model, prompt },
-      { timeout: 60000 } // 1 minute timeout
+      {
+        headers: {
+          'Authorization': `Bearer ${OLLAMA_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 60000 // 1 minute timeout
+      }
     );
 
     res.json(response.data);
@@ -174,10 +226,23 @@ router.post('/pull', async (req, res) => {
       });
     }
 
+    if (!OLLAMA_API_KEY) {
+      return res.status(500).json({ 
+        error: 'Ollama API key not configured',
+        details: 'Set OLLAMA_API_KEY environment variable'
+      });
+    }
+
     const response = await axios.post(
       `${OLLAMA_BASE_URL}/api/pull`,
       { name, stream },
-      { timeout: 1800000 } // 30 minutes timeout for model downloads
+      {
+        headers: {
+          'Authorization': `Bearer ${OLLAMA_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 1800000 // 30 minutes timeout for model downloads
+      }
     );
 
     res.json(response.data);
