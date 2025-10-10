@@ -1,8 +1,41 @@
 import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { storage } from '../storage';
+import { supabase, TABLES } from '../supabase';
 
 const router = express.Router();
+
+// Helper function to get authenticated user from request
+async function getAuthenticatedUser(req: express.Request) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return null;
+  }
+  
+  const token = authHeader.substring(7);
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  
+  if (error || !user) {
+    return null;
+  }
+  
+  return user;
+}
+
+// Helper function to check if user is admin
+async function isAdmin(userId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('user_metadata')
+    .select('role')
+    .eq('id', userId)
+    .single();
+  
+  if (error || !data) {
+    return false;
+  }
+  
+  return data.role === 'admin';
+}
 
 // Get all conditions
 router.get('/', async (req, res) => {
@@ -18,9 +51,46 @@ router.get('/', async (req, res) => {
 // Get all conditions for a project
 router.get('/project/:projectId', async (req, res) => {
   try {
+    // Get authenticated user
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    
     const { projectId } = req.params;
-    const conditions = await storage.getConditionsByProject(projectId);
-    return res.json({ conditions });
+    
+    // Check if user is admin
+    const userIsAdmin = await isAdmin(user.id);
+    
+    // First, verify the user has access to this project
+    let projectQuery = supabase
+      .from(TABLES.PROJECTS)
+      .select('id, user_id')
+      .eq('id', projectId);
+    
+    if (!userIsAdmin) {
+      projectQuery = projectQuery.eq('user_id', user.id);
+    }
+    
+    const { data: project, error: projectError } = await projectQuery.single();
+    
+    if (projectError || !project) {
+      return res.status(404).json({ error: 'Project not found or access denied' });
+    }
+    
+    // Get conditions for the project
+    const { data: conditions, error } = await supabase
+      .from(TABLES.CONDITIONS)
+      .select('*')
+      .eq('project_id', projectId)
+      .order('created_at', { ascending: false });
+    
+    if (error) {
+      console.error('Error fetching conditions:', error);
+      return res.status(500).json({ error: 'Failed to fetch conditions' });
+    }
+    
+    return res.json({ conditions: conditions || [] });
   } catch (error) {
     console.error('Error fetching conditions:', error);
     return res.status(500).json({ error: 'Failed to fetch conditions' });

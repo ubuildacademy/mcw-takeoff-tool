@@ -189,39 +189,6 @@ router.post('/:sheetId/ocr', async (req, res) => {
   }
 });
 
-// Configure titleblock fields for a document
-router.post('/:documentId/titleblock-config', (req, res) => {
-  try {
-    const { documentId } = req.params;
-    const { titleblockConfig } = req.body;
-    
-    console.log(`Configuring titleblock for document ${documentId}:`, titleblockConfig);
-    
-    // In a real implementation, you'd save this configuration to the database
-    const documentConfig: DocumentMetadata = {
-      id: documentId,
-      projectId: 'default', // This would come from the request context
-      name: 'Document',
-      totalPages: 1,
-      titleblockConfig,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    
-    res.json({ 
-      success: true, 
-      document: documentConfig,
-      message: 'Titleblock configuration saved'
-    });
-  } catch (error) {
-    console.error('Error configuring titleblock:', error);
-    res.status(500).json({ error: 'Failed to configure titleblock' });
-  }
-});
-
-// Note: Titleblock extraction is handled entirely by the frontend TitleblockConfigDialog
-// This endpoint was removed as it was redundant - the frontend performs OCR extraction
-// directly and saves training data to the database without needing backend processing
 
 // Generate thumbnail for a specific page
 router.post('/:documentId/thumbnail/:pageNumber', async (req, res) => {

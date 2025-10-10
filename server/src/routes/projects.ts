@@ -2,6 +2,7 @@ import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import multer from 'multer';
 import { storage, StoredProject } from '../storage';
+import { supabase, TABLES } from '../supabase';
 
 // Configure multer for file uploads
 const upload = multer({ 
@@ -11,20 +12,109 @@ const upload = multer({
 
 const router = express.Router();
 
+// Helper function to get authenticated user from request
+async function getAuthenticatedUser(req: express.Request) {
+  const authHeader = req.headers.authorization;
+  console.log('🔐 Auth header:', authHeader ? 'Present' : 'Missing');
+  
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    console.log('❌ No valid Bearer token');
+    return null;
+  }
+  
+  const token = authHeader.substring(7);
+  console.log('🎫 Token length:', token.length);
+  
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  
+  if (error) {
+    console.log('❌ Token verification error:', error.message);
+    return null;
+  }
+  
+  if (!user) {
+    console.log('❌ No user from token');
+    return null;
+  }
+  
+  console.log('✅ User authenticated:', user.id, user.email);
+  return user;
+}
+
+// Helper function to check if user is admin
+async function isAdmin(userId: string): Promise<boolean> {
+  console.log('🔍 Checking admin status for user:', userId);
+  
+  const { data, error } = await supabase
+    .from('user_metadata')
+    .select('role')
+    .eq('id', userId)
+    .single();
+  
+  if (error) {
+    console.log('❌ Error checking admin status:', error.message);
+    return false;
+  }
+  
+  if (!data) {
+    console.log('❌ No user metadata found');
+    return false;
+  }
+  
+  const isAdminUser = data.role === 'admin';
+  console.log('🔑 User role:', data.role, 'Is admin:', isAdminUser);
+  return isAdminUser;
+}
+
 router.get('/', async (req, res) => {
   try {
-    const projects = await storage.getProjects();
+    console.log('🔍 GET /projects - Headers:', req.headers.authorization ? 'Auth header present' : 'No auth header');
+    
+    // Get authenticated user
+    const user = await getAuthenticatedUser(req);
+    console.log('👤 Authenticated user:', user ? `${user.id} (${user.email})` : 'None');
+    
+    if (!user) {
+      console.log('❌ No authenticated user, returning 401');
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    
+    // Check if user is admin
+    const userIsAdmin = await isAdmin(user.id);
+    console.log('🔑 User is admin:', userIsAdmin);
+    
+    // Build query based on user role
+    let query = supabase
+      .from(TABLES.PROJECTS)
+      .select('*')
+      .order('last_modified', { ascending: false });
+    
+    // If not admin, only show user's own projects
+    if (!userIsAdmin) {
+      query = query.eq('user_id', user.id);
+      console.log('🔒 Filtering projects for user:', user.id);
+    } else {
+      console.log('👑 Admin user - showing all projects');
+    }
+    
+    const { data: projects, error } = await query;
+    console.log('📋 Query result:', { projectsCount: projects?.length || 0, error: error?.message });
+    
+    if (error) {
+      console.error('Error fetching projects:', error);
+      return res.status(500).json({ error: 'Failed to fetch projects' });
+    }
     
     // Calculate takeoff counts for each project
     const projectsWithCounts = await Promise.all(
-      projects.map(async (project) => {
+      (projects || []).map(async (project) => {
         try {
-          const measurements = await storage.getTakeoffMeasurementsByProject(project.id);
-          const takeoffCount = measurements.length;
+          const { data: measurements } = await supabase
+            .from(TABLES.TAKEOFF_MEASUREMENTS)
+            .select('id')
+            .eq('project_id', project.id);
           
-          // Note: We don't calculate totalValue here since calculatedValue represents
-          // measurement quantities (SF, LF, etc.) not monetary values
-          // Total value would need to be calculated using condition pricing if available
+          const takeoffCount = measurements?.length || 0;
           
           return {
             ...project,
