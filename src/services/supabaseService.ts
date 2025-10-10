@@ -1,4 +1,4 @@
-import { supabase, Database } from '../lib/supabase'
+import { supabase, Database, authHelpers } from '../lib/supabase'
 
 type Project = Database['public']['Tables']['projects']['Row']
 type ProjectInsert = Database['public']['Tables']['projects']['Insert']
@@ -12,26 +12,46 @@ type Measurement = Database['public']['Tables']['measurements']['Row']
 type MeasurementInsert = Database['public']['Tables']['measurements']['Insert']
 type MeasurementUpdate = Database['public']['Tables']['measurements']['Update']
 
+// Extended project type with user info
+export interface ProjectWithUser extends Project {
+  user_email?: string;
+  user_name?: string;
+}
+
 export const supabaseService = {
   // Projects
-  async getProjects(): Promise<Project[]> {
+  async getProjects(): Promise<ProjectWithUser[]> {
+    // Simple query that works with RLS
     const { data, error } = await supabase
-      .from('projects')
+      .from('takeoff_projects')
       .select('*')
-      .order('last_modified', { ascending: false })
+      .order('last_modified', { ascending: false });
     
     if (error) {
       console.error('Error fetching projects:', error)
       throw error
     }
     
-    return data || []
+    // Transform data to include user info (simplified)
+    const projectsWithUser = (data || []).map(project => ({
+      ...project,
+      user_email: undefined, // We'll add this later if needed
+      user_name: undefined
+    }));
+    
+    return projectsWithUser;
   },
 
-  async createProject(project: ProjectInsert): Promise<Project> {
+  async createProject(project: Omit<ProjectInsert, 'user_id'>): Promise<Project> {
+    const user = await authHelpers.getCurrentUser();
+    if (!user) throw new Error('No authenticated user');
+
     const { data, error } = await supabase
-      .from('projects')
-      .insert(project)
+      .from('takeoff_projects')
+      .insert({
+        ...project,
+        user_id: user.id
+      })
       .select()
       .single()
     
@@ -45,7 +65,7 @@ export const supabaseService = {
 
   async updateProject(id: string, updates: ProjectUpdate): Promise<Project> {
     const { data, error } = await supabase
-      .from('projects')
+      .from('takeoff_projects')
       .update({ ...updates, last_modified: new Date().toISOString() })
       .eq('id', id)
       .select()
@@ -62,7 +82,7 @@ export const supabaseService = {
   // Conditions
   async getProjectConditions(projectId: string): Promise<Condition[]> {
     const { data, error } = await supabase
-      .from('conditions')
+      .from('takeoff_conditions')
       .select('*')
       .eq('project_id', projectId)
       .order('created_at', { ascending: false })
@@ -77,7 +97,7 @@ export const supabaseService = {
 
   async createCondition(condition: ConditionInsert): Promise<Condition> {
     const { data, error } = await supabase
-      .from('conditions')
+      .from('takeoff_conditions')
       .insert(condition)
       .select()
       .single()
@@ -92,7 +112,7 @@ export const supabaseService = {
 
   async updateCondition(id: string, updates: ConditionUpdate): Promise<Condition> {
     const { data, error } = await supabase
-      .from('conditions')
+      .from('takeoff_conditions')
       .update(updates)
       .eq('id', id)
       .select()
@@ -108,7 +128,7 @@ export const supabaseService = {
 
   async deleteCondition(id: string): Promise<void> {
     const { error } = await supabase
-      .from('conditions')
+      .from('takeoff_conditions')
       .delete()
       .eq('id', id)
     
@@ -121,7 +141,7 @@ export const supabaseService = {
   // Measurements
   async getProjectMeasurements(projectId: string): Promise<Measurement[]> {
     const { data, error } = await supabase
-      .from('measurements')
+      .from('takeoff_measurements')
       .select('*')
       .eq('project_id', projectId)
       .order('created_at', { ascending: false })
@@ -136,10 +156,10 @@ export const supabaseService = {
 
   async getPageMeasurements(projectId: string, fileId: string, pageNumber: number): Promise<Measurement[]> {
     const { data, error } = await supabase
-      .from('measurements')
+      .from('takeoff_measurements')
       .select('*')
       .eq('project_id', projectId)
-      .eq('file_id', fileId)
+      .eq('sheet_id', fileId)
       .eq('pdf_page', pageNumber)
       .order('created_at', { ascending: false })
     
@@ -153,7 +173,7 @@ export const supabaseService = {
 
   async createMeasurement(measurement: MeasurementInsert): Promise<Measurement> {
     const { data, error } = await supabase
-      .from('measurements')
+      .from('takeoff_measurements')
       .insert(measurement)
       .select()
       .single()
@@ -168,7 +188,7 @@ export const supabaseService = {
 
   async updateMeasurement(id: string, updates: MeasurementUpdate): Promise<Measurement> {
     const { data, error } = await supabase
-      .from('measurements')
+      .from('takeoff_measurements')
       .update(updates)
       .eq('id', id)
       .select()
@@ -184,7 +204,7 @@ export const supabaseService = {
 
   async deleteMeasurement(id: string): Promise<void> {
     const { error } = await supabase
-      .from('measurements')
+      .from('takeoff_measurements')
       .delete()
       .eq('id', id)
     
@@ -196,15 +216,67 @@ export const supabaseService = {
 
   async clearPageMeasurements(projectId: string, fileId: string, pageNumber: number): Promise<void> {
     const { error } = await supabase
-      .from('measurements')
+      .from('takeoff_measurements')
       .delete()
       .eq('project_id', projectId)
-      .eq('file_id', fileId)
+      .eq('sheet_id', fileId)
       .eq('pdf_page', pageNumber)
     
     if (error) {
       console.error('Error clearing page measurements:', error)
       throw error
     }
+  },
+
+  // Files
+  async getProjectFiles(projectId: string): Promise<any[]> {
+    const { data, error } = await supabase
+      .from('takeoff_files')
+      .select('*')
+      .eq('project_id', projectId)
+      .order('created_at', { ascending: false })
+    
+    if (error) {
+      console.error('Error fetching files:', error)
+      throw error
+    }
+    
+    return data || []
+  },
+
+  async uploadPDF(file: File, projectId: string): Promise<any> {
+    // For now, we'll use the existing backend API for file uploads
+    // This is because file uploads are complex and the backend handles storage
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('projectId', projectId)
+    
+    const response = await fetch(`http://localhost:4000/api/files/upload`, {
+      method: 'POST',
+      body: formData
+    })
+    
+    if (!response.ok) {
+      throw new Error('Upload failed')
+    }
+    
+    return await response.json()
+  },
+
+  async deletePDF(fileId: string): Promise<void> {
+    const { error } = await supabase
+      .from('takeoff_files')
+      .delete()
+      .eq('id', fileId)
+    
+    if (error) {
+      console.error('Error deleting file:', error)
+      throw error
+    }
+  },
+
+  async getPDFUrl(fileId: string): Promise<string> {
+    // For now, use the backend API for file serving
+    return `http://localhost:4000/api/files/${fileId}`
   }
 }

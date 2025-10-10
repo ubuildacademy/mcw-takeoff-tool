@@ -1,10 +1,249 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient, User, Session } from '@supabase/supabase-js'
 
 // Supabase project credentials
 const supabaseUrl = 'https://mxjyytwfhmoonkduvybr.supabase.co'
 const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im14anl5dHdmaG1vb25rZHV2eWJyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTgxMzE4NTksImV4cCI6MjA3MzcwNzg1OX0.nG28P04Gdg9hbwasEeYKL2ekoSkWoInoT6RwUwA0BJ8'
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+
+// Auth types
+export interface UserMetadata {
+  id: string
+  role: 'admin' | 'user'
+  full_name?: string
+  company?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface UserInvitation {
+  id: string
+  email: string
+  role: 'admin' | 'user'
+  invite_token: string
+  status: 'pending' | 'accepted' | 'expired'
+  invited_by?: string
+  expires_at: string
+  created_at: string
+  accepted_at?: string
+}
+
+// Auth helper functions
+export const authHelpers = {
+  // Get current user
+  async getCurrentUser(): Promise<User | null> {
+    const { data: { user } } = await supabase.auth.getUser()
+    return user
+  },
+
+  // Get current session
+  async getCurrentSession(): Promise<Session | null> {
+    const { data: { session } } = await supabase.auth.getSession()
+    return session
+  },
+
+  // Sign in with email and password
+  async signIn(email: string, password: string) {
+    return await supabase.auth.signInWithPassword({
+      email,
+      password
+    })
+  },
+
+  // Sign up with email and password
+  async signUp(email: string, password: string, metadata?: { full_name?: string, company?: string }) {
+    return await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: metadata
+      }
+    })
+  },
+
+  // Sign out
+  async signOut() {
+    return await supabase.auth.signOut()
+  },
+
+  // Reset password
+  async resetPassword(email: string) {
+    return await supabase.auth.resetPasswordForEmail(email)
+  },
+
+  // Update password
+  async updatePassword(password: string) {
+    return await supabase.auth.updateUser({ password })
+  },
+
+  // Get user metadata
+  async getUserMetadata(userId?: string): Promise<UserMetadata | null> {
+    const targetUserId = userId || (await this.getCurrentUser())?.id
+    if (!targetUserId) return null
+
+    const { data, error } = await supabase
+      .from('user_metadata')
+      .select('*')
+      .eq('id', targetUserId)
+      .single()
+
+    if (error) {
+      console.error('Error fetching user metadata:', error)
+      return null
+    }
+
+    return data
+  },
+
+  // Update user metadata
+  async updateUserMetadata(updates: Partial<UserMetadata>) {
+    const user = await this.getCurrentUser()
+    if (!user) throw new Error('No authenticated user')
+
+    return await supabase
+      .from('user_metadata')
+      .update(updates)
+      .eq('id', user.id)
+  },
+
+  // Check if user is admin
+  async isAdmin(userId?: string): Promise<boolean> {
+    const metadata = await this.getUserMetadata(userId)
+    return metadata?.role === 'admin'
+  },
+
+  // Get all users (admin only)
+  async getAllUsers(): Promise<UserMetadata[]> {
+    const { data, error } = await supabase
+      .from('user_metadata')
+      .select('*')
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      console.error('Error fetching users:', error)
+      return []
+    }
+
+    return data || []
+  },
+
+  // Create user invitation
+  async createInvitation(email: string, role: 'admin' | 'user') {
+    const inviteToken = crypto.randomUUID()
+    const expiresAt = new Date()
+    expiresAt.setDate(expiresAt.getDate() + 7) // 7 days from now
+
+    const user = await this.getCurrentUser()
+    if (!user) throw new Error('No authenticated user')
+
+    return await supabase
+      .from('user_invitations')
+      .insert({
+        email,
+        role,
+        invite_token: inviteToken,
+        invited_by: user.id,
+        expires_at: expiresAt.toISOString()
+      })
+  },
+
+  // Get invitation by token
+  async getInvitationByToken(token: string): Promise<UserInvitation | null> {
+    const { data, error } = await supabase
+      .from('user_invitations')
+      .select('*')
+      .eq('invite_token', token)
+      .eq('status', 'pending')
+      .single()
+
+    if (error) {
+      console.error('Error fetching invitation:', error)
+      return null
+    }
+
+    // Check if invitation is expired
+    if (new Date(data.expires_at) < new Date()) {
+      // Mark as expired
+      await supabase
+        .from('user_invitations')
+        .update({ status: 'expired' })
+        .eq('id', data.id)
+      return null
+    }
+
+    return data
+  },
+
+  // Accept invitation
+  async acceptInvitation(token: string, userData: { full_name?: string, company?: string }) {
+    const invitation = await this.getInvitationByToken(token)
+    if (!invitation) throw new Error('Invalid or expired invitation')
+
+    // Create user metadata
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) throw new Error('No authenticated user')
+
+    const { error: metadataError } = await supabase
+      .from('user_metadata')
+      .insert({
+        id: user.id,
+        role: invitation.role,
+        full_name: userData.full_name,
+        company: userData.company
+      })
+
+    if (metadataError) {
+      console.error('Error creating user metadata:', metadataError)
+      throw new Error('Failed to create user profile')
+    }
+
+    // Mark invitation as accepted
+    await supabase
+      .from('user_invitations')
+      .update({ 
+        status: 'accepted',
+        accepted_at: new Date().toISOString()
+      })
+      .eq('id', invitation.id)
+  },
+
+  // Get all invitations (admin only)
+  async getAllInvitations(): Promise<UserInvitation[]> {
+    const { data, error } = await supabase
+      .from('user_invitations')
+      .select('*')
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      console.error('Error fetching invitations:', error)
+      return []
+    }
+
+    return data || []
+  },
+
+  // Delete invitation
+  async deleteInvitation(invitationId: string) {
+    return await supabase
+      .from('user_invitations')
+      .delete()
+      .eq('id', invitationId)
+  },
+
+  // Update user role (admin only)
+  async updateUserRole(userId: string, role: 'admin' | 'user') {
+    return await supabase
+      .from('user_metadata')
+      .update({ role })
+      .eq('id', userId)
+  },
+
+  // Delete user (admin only)
+  async deleteUser(userId: string) {
+    // This will cascade delete all user's projects and related data
+    return await supabase.auth.admin.deleteUser(userId)
+  }
+}
 
 // Database types
 export interface Database {

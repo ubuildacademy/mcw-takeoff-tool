@@ -4,7 +4,9 @@ import type {
   Project, 
   TakeoffCondition, 
   TakeoffMeasurement, 
-  Calibration 
+  Calibration,
+  ConditionCostBreakdown,
+  ProjectCostBreakdown
 } from '../types';
 
 // Re-export types for backward compatibility
@@ -94,6 +96,10 @@ interface TakeoffStore {
   getProjectTakeoffMeasurements: (projectId: string) => TakeoffMeasurement[];
   getProjectTotalCost: (projectId: string) => number;
   
+  // Enhanced cost calculation methods
+  getConditionCostBreakdown: (conditionId: string) => ConditionCostBreakdown | null;
+  getProjectCostBreakdown: (projectId: string) => ProjectCostBreakdown;
+  
   // Data loading
   loadInitialData: () => Promise<void>;
   loadProjectConditions: (projectId: string) => Promise<void>;
@@ -132,12 +138,11 @@ export const useTakeoffStore = create<TakeoffStore>()(
       // Actions
       addProject: async (projectData) => {
         try {
-          // Import the API service dynamically to avoid circular dependencies
-          const { projectService } = await import('../services/apiService');
+          // Import the Supabase service dynamically to avoid circular dependencies
+          const { supabaseService } = await import('../services/supabaseService');
           
-          // Create project via API
-          const response = await projectService.createProject(projectData);
-          const project = response.project || response;
+          // Create project via Supabase
+          const project = await supabaseService.createProject(projectData);
           
           // Add to local store
           set(state => ({
@@ -577,49 +582,120 @@ export const useTakeoffStore = create<TakeoffStore>()(
       },
       
       getProjectTotalCost: (projectId) => {
+        const costBreakdown = get().getProjectCostBreakdown(projectId);
+        return costBreakdown.summary.totalCost;
+      },
+      
+      getConditionCostBreakdown: (conditionId) => {
         const { conditions, takeoffMeasurements } = get();
+        const condition = conditions.find(c => c.id === conditionId);
+        
+        if (!condition) {
+          return null;
+        }
+        
+        // Get all measurements for this condition
+        const conditionMeasurements = takeoffMeasurements.filter(m => m.conditionId === conditionId);
+        
+        // Calculate total quantity for this condition
+        const quantity = conditionMeasurements.reduce((sum, measurement) => {
+          // Use net value if cutouts exist, otherwise use calculated value
+          const value = measurement.netCalculatedValue !== undefined && measurement.netCalculatedValue !== null 
+            ? measurement.netCalculatedValue 
+            : measurement.calculatedValue;
+          return sum + (value || 0);
+        }, 0);
+        
+        // Apply waste factor to get adjusted quantity
+        const adjustedQuantity = quantity * (1 + (condition.wasteFactor || 0) / 100);
+        
+        // Calculate costs
+        const materialCostPerUnit = condition.materialCost || 0;
+        const laborCostPerUnit = condition.laborCost || 0;
+        const equipmentCost = condition.equipmentCost || 0;
+        
+        const materialCost = adjustedQuantity * materialCostPerUnit;
+        const laborCost = adjustedQuantity * laborCostPerUnit;
+        const wasteCost = (adjustedQuantity - quantity) * materialCostPerUnit; // Additional cost due to waste
+        
+        const subtotal = materialCost + laborCost + equipmentCost + wasteCost;
+        
+        return {
+          condition,
+          quantity,
+          adjustedQuantity,
+          materialCost,
+          laborCost,
+          equipmentCost,
+          wasteCost,
+          subtotal,
+          hasCosts: materialCostPerUnit > 0 || laborCostPerUnit > 0 || equipmentCost > 0
+        };
+      },
+      
+      getProjectCostBreakdown: (projectId) => {
+        const { conditions, takeoffMeasurements } = get();
+        const currentProject = get().getCurrentProject();
         
         // Get all conditions for this project
         const projectConditions = conditions.filter(c => c.projectId === projectId);
         
-        // Get all measurements for this project
-        const projectMeasurements = takeoffMeasurements.filter(m => m.projectId === projectId);
-        
-        let totalCost = 0;
-        
-        // Calculate cost for each condition
-        projectConditions.forEach(condition => {
-          // Get all measurements for this condition
-          const conditionMeasurements = projectMeasurements.filter(m => m.conditionId === condition.id);
-          
-          // Calculate total quantity for this condition
-          const totalQuantity = conditionMeasurements.reduce((sum, measurement) => {
-            return sum + (measurement.calculatedValue || 0);
-          }, 0);
-          
-          // Calculate cost for this condition
-          const materialCostPerUnit = condition.materialCost || 0;
-          const laborCostPerUnit = condition.laborCost || 0;
-          
-          const totalMaterialCost = totalQuantity * materialCostPerUnit;
-          const totalLaborCost = totalQuantity * laborCostPerUnit;
-          const conditionTotalCost = totalMaterialCost + totalLaborCost;
-          
-          totalCost += conditionTotalCost;
+        // Calculate cost breakdown for each condition
+        const conditionBreakdowns: ConditionCostBreakdown[] = projectConditions.map(condition => {
+          const breakdown = get().getConditionCostBreakdown(condition.id);
+          return breakdown!; // We know it exists since we're filtering by projectId
         });
         
-        return totalCost;
+        // Calculate project-level summary
+        let totalMaterialCost = 0;
+        let totalLaborCost = 0;
+        let totalEquipmentCost = 0;
+        let totalWasteCost = 0;
+        let conditionsWithCosts = 0;
+        
+        conditionBreakdowns.forEach(breakdown => {
+          totalMaterialCost += breakdown.materialCost;
+          totalLaborCost += breakdown.laborCost;
+          totalEquipmentCost += breakdown.equipmentCost;
+          totalWasteCost += breakdown.wasteCost;
+          
+          if (breakdown.hasCosts) {
+            conditionsWithCosts++;
+          }
+        });
+        
+        const subtotal = totalMaterialCost + totalLaborCost + totalEquipmentCost + totalWasteCost;
+        
+        // Get profit margin from project settings (default 15%)
+        const profitMarginPercent = currentProject?.profitMarginPercent || 15;
+        const profitMarginAmount = subtotal * (profitMarginPercent / 100);
+        const totalCost = subtotal + profitMarginAmount;
+        
+        return {
+          conditions: conditionBreakdowns,
+          summary: {
+            totalMaterialCost,
+            totalLaborCost,
+            totalEquipmentCost,
+            totalWasteCost,
+            subtotal,
+            profitMarginPercent,
+            profitMarginAmount,
+            totalCost,
+            conditionsWithCosts,
+            totalConditions: projectConditions.length
+          }
+        };
       },
       
       // Data loading
       loadInitialData: async () => {
         try {
-          // Import the API service dynamically to avoid circular dependencies
-          const { projectService } = await import('../services/apiService');
+          // Import the Supabase service dynamically to avoid circular dependencies
+          const { supabaseService } = await import('../services/supabaseService');
           
-          // Load projects only - conditions will be loaded per project as needed
-          const projectsResponse = await projectService.getProjects();
-          const projects = projectsResponse.projects || [];
+          // Load projects using the new Supabase service with user authentication
+          const projects = await supabaseService.getProjects();
           
           set(state => ({
             projects
@@ -628,11 +704,10 @@ export const useTakeoffStore = create<TakeoffStore>()(
           
           console.log('Initial data loaded:', { projects: projects.length });
         } catch (error: any) {
-          console.error('Failed to load initial data from API, using offline mode:', error);
+          console.error('Failed to load initial data from Supabase:', error);
           console.error('Error details:', {
             message: error.message,
             code: error.code,
-            isOffline: error.isOffline,
             response: error.response?.data
           });
           

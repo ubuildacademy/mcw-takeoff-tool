@@ -13,6 +13,7 @@ export interface StoredProject {
   contactPerson?: string;
   contactEmail?: string;
   contactPhone?: string;
+  profitMarginPercent?: number;
   lastModified?: string;
   createdAt?: string;
 }
@@ -59,6 +60,7 @@ export interface StoredCondition {
   description?: string;
   laborCost?: number;
   materialCost?: number;
+  equipmentCost?: number;
   includePerimeter?: boolean;
   depth?: number;
   createdAt: string;
@@ -114,6 +116,7 @@ class SupabaseStorage {
       contactPerson: item.contact_person,
       contactEmail: item.contact_email,
       contactPhone: item.contact_phone,
+      profitMarginPercent: item.profit_margin_percent,
       createdAt: item.created_at,
       lastModified: item.last_modified
     }));
@@ -166,6 +169,7 @@ class SupabaseStorage {
       contact_person: project.contactPerson,
       contact_email: project.contactEmail,
       contact_phone: project.contactPhone,
+      profit_margin_percent: project.profitMarginPercent,
       created_at: project.createdAt,
       last_modified: project.lastModified
     };
@@ -194,6 +198,7 @@ class SupabaseStorage {
       contactPerson: data.contact_person,
       contactEmail: data.contact_email,
       contactPhone: data.contact_phone,
+      profitMarginPercent: data.profit_margin_percent,
       createdAt: data.created_at,
       lastModified: data.last_modified
     };
@@ -334,6 +339,7 @@ class SupabaseStorage {
       description: item.description,
       laborCost: item.labor_cost,
       materialCost: item.material_cost,
+      equipmentCost: item.equipment_cost,
       createdAt: item.created_at
     }));
   }
@@ -362,6 +368,7 @@ class SupabaseStorage {
       description: item.description,
       laborCost: item.labor_cost,
       materialCost: item.material_cost,
+      equipmentCost: item.equipment_cost,
       createdAt: item.created_at
     }));
   }
@@ -379,6 +386,7 @@ class SupabaseStorage {
       description: condition.description,
       labor_cost: condition.laborCost,
       material_cost: condition.materialCost,
+      equipment_cost: condition.equipmentCost,
       created_at: condition.createdAt
     };
     
@@ -405,6 +413,7 @@ class SupabaseStorage {
       description: data.description,
       laborCost: data.labor_cost,
       materialCost: data.material_cost,
+      equipmentCost: data.equipment_cost,
       createdAt: data.created_at
     };
   }

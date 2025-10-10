@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { supabase } from '../lib/supabase';
 
 const API_BASE_URL = process.env.NODE_ENV === 'production'
   ? 'https://mcw-takeoff-tool-backend.vercel.app/api' // We'll deploy backend separately
@@ -11,6 +12,24 @@ const apiClient = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+// Add request interceptor to include authentication token
+apiClient.interceptors.request.use(
+  async (config) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        config.headers.Authorization = `Bearer ${session.access_token}`;
+      }
+    } catch (error) {
+      console.error('Error getting session for API request:', error);
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
 
 // Add response interceptor to handle errors gracefully
 apiClient.interceptors.response.use(
@@ -90,7 +109,16 @@ export const fileService = {
 
   async getProjectFiles(projectId: string) {
     const response = await apiClient.get(`/files/project/${projectId}`);
-    return response.data;
+    
+    // Transform field names from snake_case to camelCase
+    const transformedFiles = response.data.files?.map((file: any) => ({
+      ...file,
+      projectId: file.project_id,
+      originalName: file.original_name,
+      uploadedAt: file.uploaded_at
+    })) || [];
+    
+    return { files: transformedFiles };
   },
 
   async deletePDF(fileId: string) {
@@ -144,7 +172,20 @@ export const conditionService = {
     try {
       const response = await apiClient.get(`/conditions/project/${projectId}`);
       console.log('✅ API_GET_PROJECT_CONDITIONS: API call successful:', response.data);
-      return response.data;
+      
+      // Transform field names from snake_case to camelCase
+      const transformedConditions = response.data.conditions?.map((condition: any) => ({
+        ...condition,
+        projectId: condition.project_id,
+        wasteFactor: condition.waste_factor,
+        laborCost: condition.labor_cost,
+        materialCost: condition.material_cost,
+        equipmentCost: condition.equipment_cost,
+        includePerimeter: condition.include_perimeter,
+        createdAt: condition.created_at
+      })) || [];
+      
+      return { conditions: transformedConditions };
     } catch (error) {
       console.error('❌ API_GET_PROJECT_CONDITIONS: API call failed:', error);
       throw error;
@@ -224,12 +265,6 @@ export const sheetService = {
     return response.data;
   },
 
-  async configureTitleblock(documentId: string, titleblockConfig: any) {
-    const response = await apiClient.post(`/sheets/${documentId}/titleblock-config`, { titleblockConfig });
-    return response.data;
-  },
-
-  // Note: extractSheetInfo removed - titleblock extraction is handled entirely by frontend TitleblockConfigDialog
 
   async generateThumbnail(documentId: string, pageNumber: number) {
     const response = await apiClient.post(`/sheets/${documentId}/thumbnail/${pageNumber}`);
@@ -253,7 +288,24 @@ export const takeoffMeasurementService = {
 
   async getProjectTakeoffMeasurements(projectId: string) {
     const response = await apiClient.get(`/takeoff-measurements/project/${projectId}`);
-    return response.data;
+    
+    // Transform field names from snake_case to camelCase
+    const transformedMeasurements = response.data.measurements?.map((measurement: any) => ({
+      ...measurement,
+      projectId: measurement.project_id,
+      sheetId: measurement.sheet_id,
+      conditionId: measurement.condition_id,
+      calculatedValue: measurement.calculated_value,
+      pdfPage: measurement.pdf_page,
+      pdfCoordinates: measurement.pdf_coordinates,
+      conditionColor: measurement.condition_color,
+      conditionName: measurement.condition_name,
+      perimeterValue: measurement.perimeter_value,
+      netCalculatedValue: measurement.net_calculated_value,
+      createdAt: measurement.created_at
+    })) || [];
+    
+    return { measurements: transformedMeasurements };
   },
 
   async getSheetTakeoffMeasurements(sheetId: string) {
