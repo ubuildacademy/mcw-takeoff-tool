@@ -4,8 +4,41 @@ import path from 'path';
 import fs from 'fs-extra';
 import { v4 as uuidv4 } from 'uuid';
 import { storage, StoredFileMeta } from '../storage';
+import { supabase, TABLES } from '../supabase';
 
 const router = express.Router();
+
+// Helper function to get authenticated user from request
+async function getAuthenticatedUser(req: express.Request) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return null;
+  }
+  
+  const token = authHeader.substring(7);
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  
+  if (error || !user) {
+    return null;
+  }
+  
+  return user;
+}
+
+// Helper function to check if user is admin
+async function isAdmin(userId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('user_metadata')
+    .select('role')
+    .eq('id', userId)
+    .single();
+  
+  if (error || !data) {
+    return false;
+  }
+  
+  return data.role === 'admin';
+}
 
 const uploadRoot = path.join(__dirname, '../../uploads');
 fs.ensureDirSync(uploadRoot);
@@ -156,9 +189,46 @@ router.get('/:fileId', async (req, res) => {
 
 router.get('/project/:projectId', async (req, res) => {
   try {
+    // Get authenticated user
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    
     const { projectId } = req.params;
-    const files = await storage.getFilesByProject(projectId);
-    return res.json({ files });
+    
+    // Check if user is admin
+    const userIsAdmin = await isAdmin(user.id);
+    
+    // First, verify the user has access to this project
+    let projectQuery = supabase
+      .from(TABLES.PROJECTS)
+      .select('id, user_id')
+      .eq('id', projectId);
+    
+    if (!userIsAdmin) {
+      projectQuery = projectQuery.eq('user_id', user.id);
+    }
+    
+    const { data: project, error: projectError } = await projectQuery.single();
+    
+    if (projectError || !project) {
+      return res.status(404).json({ error: 'Project not found or access denied' });
+    }
+    
+    // Get files for the project
+    const { data: files, error } = await supabase
+      .from(TABLES.FILES)
+      .select('*')
+      .eq('project_id', projectId)
+      .order('uploaded_at', { ascending: false });
+    
+    if (error) {
+      console.error('Error fetching project files:', error);
+      return res.status(500).json({ error: 'Failed to fetch project files' });
+    }
+    
+    return res.json({ files: files || [] });
   } catch (error) {
     console.error('Error fetching project files:', error);
     return res.status(500).json({ error: 'Failed to fetch project files' });

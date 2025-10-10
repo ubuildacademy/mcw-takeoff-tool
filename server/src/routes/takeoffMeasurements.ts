@@ -1,8 +1,41 @@
 import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { storage, StoredTakeoffMeasurement } from '../storage';
+import { supabase, TABLES } from '../supabase';
 
 const router = express.Router();
+
+// Helper function to get authenticated user from request
+async function getAuthenticatedUser(req: express.Request) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return null;
+  }
+  
+  const token = authHeader.substring(7);
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  
+  if (error || !user) {
+    return null;
+  }
+  
+  return user;
+}
+
+// Helper function to check if user is admin
+async function isAdmin(userId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('user_metadata')
+    .select('role')
+    .eq('id', userId)
+    .single();
+  
+  if (error || !data) {
+    return false;
+  }
+  
+  return data.role === 'admin';
+}
 
 // Get all takeoff measurements
 router.get('/', async (req, res) => {
@@ -18,9 +51,46 @@ router.get('/', async (req, res) => {
 // Get takeoff measurements for a project
 router.get('/project/:projectId', async (req, res) => {
   try {
+    // Get authenticated user
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    
     const { projectId } = req.params;
-    const measurements = await storage.getTakeoffMeasurementsByProject(projectId);
-    return res.json({ measurements });
+    
+    // Check if user is admin
+    const userIsAdmin = await isAdmin(user.id);
+    
+    // First, verify the user has access to this project
+    let projectQuery = supabase
+      .from(TABLES.PROJECTS)
+      .select('id, user_id')
+      .eq('id', projectId);
+    
+    if (!userIsAdmin) {
+      projectQuery = projectQuery.eq('user_id', user.id);
+    }
+    
+    const { data: project, error: projectError } = await projectQuery.single();
+    
+    if (projectError || !project) {
+      return res.status(404).json({ error: 'Project not found or access denied' });
+    }
+    
+    // Get measurements for the project
+    const { data: measurements, error } = await supabase
+      .from(TABLES.TAKEOFF_MEASUREMENTS)
+      .select('*')
+      .eq('project_id', projectId)
+      .order('created_at', { ascending: false });
+    
+    if (error) {
+      console.error('Error fetching project takeoff measurements:', error);
+      return res.status(500).json({ error: 'Failed to fetch project takeoff measurements' });
+    }
+    
+    return res.json({ measurements: measurements || [] });
   } catch (error) {
     console.error('Error fetching project takeoff measurements:', error);
     return res.status(500).json({ error: 'Failed to fetch project takeoff measurements' });
