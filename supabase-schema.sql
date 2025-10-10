@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS takeoff_projects (
   contact_person TEXT,
   contact_email TEXT,
   contact_phone TEXT,
+  profit_margin_percent DECIMAL(5,2) DEFAULT 15.00,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   last_modified TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -30,6 +32,7 @@ CREATE TABLE IF NOT EXISTS takeoff_conditions (
   description TEXT DEFAULT '',
   labor_cost DECIMAL(10,2),
   material_cost DECIMAL(10,2),
+  equipment_cost DECIMAL(10,2),
   include_perimeter BOOLEAN DEFAULT false,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -116,6 +119,29 @@ CREATE TABLE IF NOT EXISTS ocr_jobs (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- User metadata table for role management
+CREATE TABLE IF NOT EXISTS user_metadata (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user')),
+  full_name TEXT,
+  company TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- User invitations table
+CREATE TABLE IF NOT EXISTS user_invitations (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  email TEXT NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('admin', 'user')),
+  invite_token TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'expired')),
+  invited_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  accepted_at TIMESTAMP WITH TIME ZONE
+);
+
 -- Indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_takeoff_conditions_project_id ON takeoff_conditions(project_id);
 CREATE INDEX IF NOT EXISTS idx_takeoff_files_project_id ON takeoff_files(project_id);
@@ -127,6 +153,11 @@ CREATE INDEX IF NOT EXISTS idx_ocr_results_project_document ON ocr_results(proje
 CREATE INDEX IF NOT EXISTS idx_ocr_results_document_page ON ocr_results(document_id, page_number);
 CREATE INDEX IF NOT EXISTS idx_ocr_jobs_project_document ON ocr_jobs(project_id, document_id);
 CREATE INDEX IF NOT EXISTS idx_ocr_jobs_status ON ocr_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_takeoff_projects_user_id ON takeoff_projects(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_metadata_role ON user_metadata(role);
+CREATE INDEX IF NOT EXISTS idx_user_invitations_email ON user_invitations(email);
+CREATE INDEX IF NOT EXISTS idx_user_invitations_token ON user_invitations(invite_token);
+CREATE INDEX IF NOT EXISTS idx_user_invitations_status ON user_invitations(status);
 
 -- Row Level Security (RLS) policies
 ALTER TABLE takeoff_projects ENABLE ROW LEVEL SECURITY;
@@ -136,14 +167,143 @@ ALTER TABLE takeoff_sheets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE takeoff_measurements ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ocr_results ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ocr_jobs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_metadata ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_invitations ENABLE ROW LEVEL SECURITY;
 
--- For now, allow all operations (you can restrict this later based on user authentication)
-CREATE POLICY "Allow all operations on takeoff_projects" ON takeoff_projects FOR ALL USING (true);
-CREATE POLICY "Allow all operations on takeoff_conditions" ON takeoff_conditions FOR ALL USING (true);
-CREATE POLICY "Allow all operations on takeoff_files" ON takeoff_files FOR ALL USING (true);
-CREATE POLICY "Allow all operations on takeoff_sheets" ON takeoff_sheets FOR ALL USING (true);
-CREATE POLICY "Allow all operations on takeoff_measurements" ON takeoff_measurements FOR ALL USING (true);
-CREATE POLICY "Allow all operations on ocr_results" ON ocr_results FOR ALL USING (true);
-CREATE POLICY "Allow all operations on ocr_jobs" ON ocr_jobs FOR ALL USING (true);
+-- Helper function to check if user is admin
+CREATE OR REPLACE FUNCTION is_admin(user_id UUID)
+RETURNS BOOLEAN AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM user_metadata 
+    WHERE id = user_id AND role = 'admin'
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Projects policies
+CREATE POLICY "Admin can access all projects" ON takeoff_projects 
+  FOR ALL USING (is_admin(auth.uid()));
+
+CREATE POLICY "Users can access their own projects" ON takeoff_projects 
+  FOR ALL USING (auth.uid() = user_id);
+
+-- Conditions policies (inherit from projects)
+CREATE POLICY "Admin can access all conditions" ON takeoff_conditions 
+  FOR ALL USING (
+    EXISTS (
+      SELECT 1 FROM takeoff_projects 
+      WHERE id = project_id AND is_admin(auth.uid())
+    )
+  );
+
+CREATE POLICY "Users can access conditions for their projects" ON takeoff_conditions 
+  FOR ALL USING (
+    EXISTS (
+      SELECT 1 FROM takeoff_projects 
+      WHERE id = project_id AND user_id = auth.uid()
+    )
+  );
+
+-- Files policies (inherit from projects)
+CREATE POLICY "Admin can access all files" ON takeoff_files 
+  FOR ALL USING (
+    EXISTS (
+      SELECT 1 FROM takeoff_projects 
+      WHERE id = project_id AND is_admin(auth.uid())
+    )
+  );
+
+CREATE POLICY "Users can access files for their projects" ON takeoff_files 
+  FOR ALL USING (
+    EXISTS (
+      SELECT 1 FROM takeoff_projects 
+      WHERE id = project_id AND user_id = auth.uid()
+    )
+  );
+
+-- Sheets policies (inherit from projects via document_id)
+CREATE POLICY "Admin can access all sheets" ON takeoff_sheets 
+  FOR ALL USING (is_admin(auth.uid()));
+
+CREATE POLICY "Users can access sheets for their projects" ON takeoff_sheets 
+  FOR ALL USING (
+    EXISTS (
+      SELECT 1 FROM takeoff_projects tp
+      JOIN takeoff_files tf ON tp.id = tf.project_id
+      WHERE tf.filename = document_id AND tp.user_id = auth.uid()
+    )
+  );
+
+-- Measurements policies (inherit from projects)
+CREATE POLICY "Admin can access all measurements" ON takeoff_measurements 
+  FOR ALL USING (
+    EXISTS (
+      SELECT 1 FROM takeoff_projects 
+      WHERE id = project_id AND is_admin(auth.uid())
+    )
+  );
+
+CREATE POLICY "Users can access measurements for their projects" ON takeoff_measurements 
+  FOR ALL USING (
+    EXISTS (
+      SELECT 1 FROM takeoff_projects 
+      WHERE id = project_id AND user_id = auth.uid()
+    )
+  );
+
+-- OCR results policies (inherit from projects)
+CREATE POLICY "Admin can access all ocr results" ON ocr_results 
+  FOR ALL USING (
+    EXISTS (
+      SELECT 1 FROM takeoff_projects 
+      WHERE id = project_id AND is_admin(auth.uid())
+    )
+  );
+
+CREATE POLICY "Users can access ocr results for their projects" ON ocr_results 
+  FOR ALL USING (
+    EXISTS (
+      SELECT 1 FROM takeoff_projects 
+      WHERE id = project_id AND user_id = auth.uid()
+    )
+  );
+
+-- OCR jobs policies (inherit from projects)
+CREATE POLICY "Admin can access all ocr jobs" ON ocr_jobs 
+  FOR ALL USING (
+    EXISTS (
+      SELECT 1 FROM takeoff_projects 
+      WHERE id = project_id AND is_admin(auth.uid())
+    )
+  );
+
+CREATE POLICY "Users can access ocr jobs for their projects" ON ocr_jobs 
+  FOR ALL USING (
+    EXISTS (
+      SELECT 1 FROM takeoff_projects 
+      WHERE id = project_id AND user_id = auth.uid()
+    )
+  );
+
+-- User metadata policies
+CREATE POLICY "Users can view their own metadata" ON user_metadata 
+  FOR SELECT USING (auth.uid() = id);
+
+CREATE POLICY "Users can update their own metadata" ON user_metadata 
+  FOR UPDATE USING (auth.uid() = id);
+
+CREATE POLICY "Admin can view all user metadata" ON user_metadata 
+  FOR SELECT USING (is_admin(auth.uid()));
+
+CREATE POLICY "Admin can update all user metadata" ON user_metadata 
+  FOR UPDATE USING (is_admin(auth.uid()));
+
+-- User invitations policies
+CREATE POLICY "Admin can manage all invitations" ON user_invitations 
+  FOR ALL USING (is_admin(auth.uid()));
+
+CREATE POLICY "Users can view their own invitations" ON user_invitations 
+  FOR SELECT USING (email = auth.jwt() ->> 'email');
 
 -- No sample data - start with empty tables

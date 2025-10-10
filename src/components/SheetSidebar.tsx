@@ -8,12 +8,9 @@ import {
   Upload, 
   Download,
   Trash2,
-  Eye,
-  EyeOff,
   MoreVertical,
   Settings,
   Scan,
-  FileImage,
   ChevronDown,
   ChevronRight,
   Filter,
@@ -24,7 +21,8 @@ import {
   Tag,
   ChevronDown as ChevronDownIcon,
   BarChart3,
-  Search
+  Search,
+  Brain
 } from 'lucide-react';
 import { fileService, sheetService } from '../services/apiService';
 import { useTakeoffStore } from '../store/useTakeoffStore';
@@ -38,35 +36,35 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
 interface SheetSidebarProps {
   projectId: string;
+  documents: PDFDocument[];
   onPageSelect: (documentId: string, pageNumber: number) => void;
   selectedDocumentId?: string;
   selectedPageNumber?: number;
   onOCRRequest?: (documentId: string, pageNumbers: number[]) => void;
-  onTitleblockConfig?: (documentId: string) => void;
   onOcrSearchResults?: (results: any[], query: string) => void;
   onDocumentsUpdate?: (documents: PDFDocument[]) => void;
-  onExtractSheetNames?: (documentId: string, extractedData: Array<{ pageNumber: number; sheetNumber: string; sheetName: string }>) => void;
 }
 
 export function SheetSidebar({ 
   projectId, 
+  documents,
   onPageSelect, 
   selectedDocumentId,
   selectedPageNumber,
   onOCRRequest,
-  onTitleblockConfig,
   onOcrSearchResults,
-  onDocumentsUpdate,
-  onExtractSheetNames
+  onDocumentsUpdate
 }: SheetSidebarProps) {
   const [viewMode, setViewMode] = useState<'list'>('list');
   const [filterBy, setFilterBy] = useState<'all' | 'withTakeoffs' | 'withoutTakeoffs'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [documents, setDocuments] = useState<PDFDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [processingOCR, setProcessingOCR] = useState<string[]>([]);
+  const [showLabelingDialog, setShowLabelingDialog] = useState(false);
+  const [labelingProgress, setLabelingProgress] = useState('');
+  const [labelingProgressPercent, setLabelingProgressPercent] = useState(0);
   
-  // Use local documents
+  // Use documents from parent component
   const currentDocuments = documents;
   
   // Sheet name editing state
@@ -239,20 +237,17 @@ export function SheetSidebar({
       // Update hasTakeoffs based on actual measurements and preserve expansion state
       const finalDocuments = updateHasTakeoffs(documents);
       
-      setDocuments(prevDocuments => {
+      // Update documents through parent callback
+      if (onDocumentsUpdate) {
         const documentsWithPreservedState = finalDocuments.map(newDoc => {
-          const existingDoc = prevDocuments.find(prevDoc => prevDoc.id === newDoc.id);
+          const existingDoc = documents.find(prevDoc => prevDoc.id === newDoc.id);
           return {
             ...newDoc,
             isExpanded: existingDoc?.isExpanded || false
           };
         });
-        
-        // Note: We don't notify parent here to avoid infinite loops
-        // The parent will get updated documents through other means
-        
-        return documentsWithPreservedState;
-      });
+        onDocumentsUpdate(documentsWithPreservedState);
+      }
       
     } catch (error) {
       console.error('Error loading project documents:', error);
@@ -270,55 +265,15 @@ export function SheetSidebar({
   useEffect(() => {
     if (documents.length > 0) {
       const takeoffMeasurements = getProjectTakeoffMeasurements(projectId);
-      setDocuments(prevDocuments => {
-        const updatedDocuments = updateHasTakeoffs(prevDocuments);
-        return updatedDocuments;
-      });
+      // Update documents through parent callback
+      if (onDocumentsUpdate) {
+        const updatedDocuments = updateHasTakeoffs(documents);
+        onDocumentsUpdate(updatedDocuments);
+      }
     }
   }, [projectId]); // Only depend on projectId to avoid infinite loops
 
 
-  // Generate thumbnail for a specific page
-  const generateThumbnail = useCallback(async (documentId: string, pageNumber: number) => {
-    try {
-      const pdfUrl = `http://localhost:4000/api/files/${documentId}`;
-      const pdf = await pdfjsLib.getDocument(pdfUrl).promise;
-      const page = await pdf.getPage(pageNumber);
-      
-      const viewport = page.getViewport({ scale: 0.2 }); // Small scale for thumbnail
-      const canvas = document.createElement('canvas');
-      const context = canvas.getContext('2d');
-      
-      canvas.height = viewport.height;
-      canvas.width = viewport.width;
-      
-      if (context) {
-        await page.render({
-          canvasContext: context,
-          viewport: viewport,
-          canvas: canvas
-        }).promise;
-        
-        const thumbnail = canvas.toDataURL('image/jpeg', 0.7);
-        
-        // Update the document with the thumbnail
-        setDocuments(prev => prev.map(doc => 
-          doc.id === documentId 
-            ? {
-                ...doc,
-                pages: doc.pages.map(page => 
-                  page.pageNumber === pageNumber 
-                    ? { ...page, thumbnail }
-                    : page
-                )
-              }
-            : doc
-        ));
-      }
-    } catch (error) {
-      console.error(`Error generating thumbnail for page ${pageNumber}:`, error);
-    }
-  }, []);
 
   // Process OCR for a specific page
   const processOCR = useCallback(async (documentId: string, pageNumber: number) => {
@@ -331,21 +286,24 @@ export function SheetSidebar({
       
       if (result.success) {
         // Update the page with OCR processing status
-        setDocuments(prev => prev.map(doc => 
-          doc.id === documentId 
-            ? {
-                ...doc,
-                pages: doc.pages.map(page => 
-                  page.pageNumber === pageNumber 
-                    ? { 
-                        ...page, 
-                        ocrProcessed: true 
-                      }
-                    : page
-                )
-              }
-            : doc
-        ));
+        if (onDocumentsUpdate) {
+          const updatedDocuments = documents.map(doc => 
+            doc.id === documentId 
+              ? {
+                  ...doc,
+                  pages: doc.pages.map(page => 
+                    page.pageNumber === pageNumber 
+                      ? { 
+                          ...page, 
+                          ocrProcessed: true 
+                        }
+                      : page
+                  )
+                }
+              : doc
+          );
+          onDocumentsUpdate(updatedDocuments);
+        }
       }
       
     } catch (error) {
@@ -362,34 +320,25 @@ export function SheetSidebar({
 
   // Toggle document expansion
   const toggleDocumentExpansion = (documentId: string) => {
-    setDocuments(prev => prev.map(doc => 
-      doc.id === documentId 
-        ? { ...doc, isExpanded: !doc.isExpanded }
-        : doc
-    ));
+    if (onDocumentsUpdate) {
+      const updatedDocuments = documents.map(doc => 
+        doc.id === documentId 
+          ? { ...doc, isExpanded: !doc.isExpanded }
+          : doc
+      );
+      onDocumentsUpdate(updatedDocuments);
+    }
   };
 
-  // Toggle page visibility
-  const togglePageVisibility = (documentId: string, pageNumber: number) => {
-    setDocuments(prev => prev.map(doc => 
-      doc.id === documentId 
-        ? {
-            ...doc,
-            pages: doc.pages.map(page => 
-              page.pageNumber === pageNumber 
-                ? { ...page, isVisible: !page.isVisible }
-                : page
-            )
-          }
-        : doc
-    ));
-  };
 
   // Delete document
   const handleDeleteDocument = async (documentId: string) => {
     try {
       await fileService.deletePDF(documentId);
-      setDocuments(prev => prev.filter(doc => doc.id !== documentId));
+      if (onDocumentsUpdate) {
+        const updatedDocuments = documents.filter(doc => doc.id !== documentId);
+        onDocumentsUpdate(updatedDocuments);
+      }
     } catch (error) {
       console.error('Error deleting document:', error);
       alert('Failed to delete document. Please try again.');
@@ -442,7 +391,9 @@ export function SheetSidebar({
             }
           : doc
       );
-      setDocuments(updatedDocuments);
+      if (onDocumentsUpdate) {
+        onDocumentsUpdate(updatedDocuments);
+      }
       
       // Show success feedback
       console.log(`✅ Sheet name saved: "${editingSheetName.trim()}" for page ${editingPageNumber}`);
@@ -509,37 +460,6 @@ export function SheetSidebar({
       // Update the sheet number in the backend
       await sheetService.updateSheet(editingSheetNumberId, updateData);
 
-      // Save training data if the sheet number was changed from an OCR result
-      if (originalSheetNumber !== editingSheetNumber.trim() && originalSheetNumber) {
-        try {
-          const { ocrTrainingService } = await import('../services/ocrTrainingService');
-          await ocrTrainingService.saveTrainingData({
-            projectId: projectId,
-            documentId: documentId,
-            pageNumber: editingSheetNumberPageNumber,
-            fieldType: 'sheet_number',
-            originalText: originalSheetNumber,
-            correctedText: editingSheetNumber.trim(),
-            confidence: 0.8, // Assume moderate confidence for user corrections
-            corrections: [{
-              type: 'sheet_number',
-              original: originalSheetNumber,
-              corrected: editingSheetNumber.trim(),
-              reason: 'User corrected OCR result'
-            }],
-            userValidated: true,
-            hasTitleblock: true
-          });
-          console.log('✅ Training data saved for sheet number correction');
-        } catch (trainingError) {
-          console.error('Failed to save training data:', trainingError);
-          // Don't fail the entire operation if training data save fails
-        }
-      } else if (!originalSheetNumber && editingSheetNumber.trim()) {
-        // If we're adding a sheet number where none existed before, 
-        // this could be useful training data for future OCR improvements
-        console.log('📝 Sheet number added manually - no training data needed');
-      }
 
       // Update the local state immediately for better UX
       const updatedDocuments = documents.map(doc => 
@@ -554,7 +474,9 @@ export function SheetSidebar({
             }
           : doc
       );
-      setDocuments(updatedDocuments);
+      if (onDocumentsUpdate) {
+        onDocumentsUpdate(updatedDocuments);
+      }
       
       // Show success feedback
       console.log(`✅ Sheet number saved: "${editingSheetNumber.trim()}" for page ${editingSheetNumberPageNumber}`);
@@ -582,9 +504,126 @@ export function SheetSidebar({
       return;
     }
 
-    // Pass the extracted data to the parent component
-    if (onExtractSheetNames) {
-      onExtractSheetNames(selectedDocumentId, extractedData);
+  };
+
+  // Handle automatic sheet labeling using AI
+  const handleAutomaticSheetLabeling = async (documentId: string) => {
+    try {
+      console.log('Starting automatic sheet labeling for document:', documentId);
+      
+      // Check if document has OCR data
+      const document = documents.find(doc => doc.id === documentId);
+      if (!document) {
+        console.error('Document not found:', documentId);
+        alert('Document not found. Please try again.');
+        return;
+      }
+
+      // Check if document has OCR data
+      if (!document.ocrEnabled && !document.pages?.some(page => page.ocrProcessed)) {
+        alert('This document needs OCR processing first. Please run OCR processing before using automatic sheet labeling.');
+        return;
+      }
+
+      // Show loading state and dialog
+      setProcessingOCR(prev => [...prev, documentId]);
+      setShowLabelingDialog(true);
+      setLabelingProgress('Starting AI analysis...');
+      setLabelingProgressPercent(0);
+
+      // Call the AI service with Server-Sent Events for real-time progress
+      const response = await fetch('http://localhost:4000/api/ollama/analyze-sheets', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          documentId: documentId,
+          projectId: projectId,
+          customPrompt: localStorage.getItem('ai-page-labeling-prompt')
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to analyze sheets: ${response.statusText}`);
+      }
+
+      // Handle Server-Sent Events for real-time progress
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let result: any = null;
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value);
+          const lines = chunk.split('\n');
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                
+                if (data.error) {
+                  throw new Error(data.error);
+                }
+                
+                if (data.progress !== undefined && data.message) {
+                  setLabelingProgress(data.message);
+                  setLabelingProgressPercent(data.progress);
+                }
+                
+                if (data.success) {
+                  result = data;
+                }
+              } catch (parseError) {
+                console.warn('Failed to parse SSE data:', parseError);
+              }
+            }
+          }
+        }
+      }
+
+      if (!result) {
+        throw new Error('No result received from AI analysis');
+      }
+      
+      if (result.success && result.sheets && result.sheets.length > 0) {
+        setLabelingProgress('Updating sheet labels...');
+        setLabelingProgressPercent(95);
+        
+        // Update the documents with the AI-extracted sheet information
+        const extractedData = result.sheets.map((sheet: any) => ({
+          pageNumber: sheet.pageNumber,
+          sheetNumber: sheet.sheetNumber,
+          sheetName: sheet.sheetName
+        }));
+
+        
+        setLabelingProgress('Complete!');
+        setLabelingProgressPercent(100);
+        console.log('Successfully applied automatic sheet labeling:', extractedData);
+        
+        // Wait a moment to show completion
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        alert(`Successfully labeled ${extractedData.length} out of ${result.totalPages} sheets automatically! The AI processed all pages in your document.`);
+      } else {
+        console.warn('No sheet information could be extracted:', result);
+        alert('Could not automatically extract sheet information. The AI may need more context or the document structure may be unclear.');
+      }
+
+    } catch (error) {
+      console.error('Error in automatic sheet labeling:', error);
+      alert('Failed to perform automatic sheet labeling. Please try again or use manual labeling.');
+    } finally {
+      // Remove loading state and close dialog
+      setProcessingOCR(prev => prev.filter(id => id !== documentId));
+      setShowLabelingDialog(false);
+      setLabelingProgress('');
+      setLabelingProgressPercent(0);
     }
   };
 
@@ -753,21 +792,7 @@ export function SheetSidebar({
                       </Button>
                       
                       {openDocumentMenu === document.id && (
-                        <div className="absolute right-0 top-full mt-1 w-48 bg-white border rounded-lg shadow-lg z-50 py-1">
-                          <button
-                            className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              onTitleblockConfig?.(document.id);
-                              setOpenDocumentMenu(null);
-                            }}
-                          >
-                            <Settings className="w-4 h-4" />
-                            Configure Titleblock
-                          </button>
-                          
-                          
+                        <div className="absolute right-0 top-full mt-1 w-56 bg-white border rounded-lg shadow-lg z-50 py-1">
                           <button
                             className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
                             onClick={(e) => {
@@ -783,7 +808,21 @@ export function SheetSidebar({
                             ) : (
                               <Scan className="w-4 h-4" />
                             )}
-                            Run OCR Processing
+                            <span className="font-medium">1.</span> Run OCR Processing
+                          </button>
+                          
+                          <button
+                            className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleAutomaticSheetLabeling(document.id);
+                              setOpenDocumentMenu(null);
+                            }}
+                            disabled={processingOCR.includes(document.id)}
+                          >
+                            <Brain className="w-4 h-4" />
+                            <span className="font-medium">2.</span> Automatic Sheet Labeling
                           </button>
                           
                           <div className="border-t border-gray-200"></div>
@@ -830,7 +869,7 @@ export function SheetSidebar({
                               />
                             ) : (
                               <div className="text-center">
-                                <FileImage className="w-4 h-4 text-gray-400 mx-auto mb-1" />
+                                <FileText className="w-4 h-4 text-gray-400 mx-auto mb-1" />
                                 <span className="text-xs text-gray-400">{page.pageNumber}</span>
                               </div>
                             )}
@@ -838,65 +877,67 @@ export function SheetSidebar({
 
                           {/* Page Info */}
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
-                              {editingSheetId === `${document.id}-${page.pageNumber}` ? (
-                                <div className="flex items-center gap-1 flex-1">
-                                  <Input
-                                    value={editingSheetName}
-                                    onChange={(e) => setEditingSheetName(e.target.value)}
-                                    onKeyDown={handleSheetNameKeyDown}
-                                    className="h-6 text-sm px-2 py-1"
-                                    autoFocus
-                                    onBlur={(e) => {
-                                      e.stopPropagation();
-                                      saveSheetName();
-                                    }}
-                                  />
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      saveSheetName();
-                                    }}
-                                    className="h-6 w-6 p-0 text-green-600 hover:text-green-700"
-                                    title="Save"
-                                  >
-                                    <Check className="w-3 h-3" />
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      cancelEditingSheetName();
-                                    }}
-                                    className="h-6 w-6 p-0 text-red-600 hover:text-red-700"
-                                    title="Cancel"
-                                  >
-                                    <X className="w-3 h-3" />
-                                  </Button>
-                                </div>
-                              ) : (
-                                <>
-                                  <span className="font-medium text-sm">
-                                    {page.sheetName || `Page ${page.pageNumber}`}
-                                  </span>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      startEditingSheetName(document.id, page.pageNumber, page.sheetName || '');
-                                    }}
-                                    className="h-6 w-6 p-0 text-gray-400 hover:text-gray-600"
-                                    title="Edit sheet name"
-                                  >
-                                    <Edit2 className="w-3 h-3" />
-                                  </Button>
-                                </>
-                              )}
-                              <div className="flex items-center gap-1">
+                            <div className="flex justify-between mb-1">
+                              <div className="flex-1 min-w-0 pr-2">
+                                {editingSheetId === `${document.id}-${page.pageNumber}` ? (
+                                  <div className="flex items-center gap-1">
+                                    <Input
+                                      value={editingSheetName}
+                                      onChange={(e) => setEditingSheetName(e.target.value)}
+                                      onKeyDown={handleSheetNameKeyDown}
+                                      className="h-6 text-sm px-2 py-1"
+                                      autoFocus
+                                      onBlur={(e) => {
+                                        e.stopPropagation();
+                                        saveSheetName();
+                                      }}
+                                    />
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        saveSheetName();
+                                      }}
+                                      className="h-6 w-6 p-0 text-green-600 hover:text-green-700"
+                                      title="Save"
+                                    >
+                                      <Check className="w-3 h-3" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        cancelEditingSheetName();
+                                      }}
+                                      className="h-6 w-6 p-0 text-red-600 hover:text-red-700"
+                                      title="Cancel"
+                                    >
+                                      <X className="w-3 h-3" />
+                                    </Button>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-start gap-2">
+                                    <span className="font-medium text-sm break-words leading-tight">
+                                      {page.sheetName || `Page ${page.pageNumber}`}
+                                    </span>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        startEditingSheetName(document.id, page.pageNumber, page.sheetName || '');
+                                      }}
+                                      className="h-6 w-6 p-0 text-gray-400 hover:text-gray-600 flex-shrink-0 mt-0.5"
+                                      title="Edit sheet name"
+                                    >
+                                      <Edit2 className="w-3 h-3" />
+                                    </Button>
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1 flex-shrink-0">
                                 {editingSheetNumberId === `${document.id}-${page.pageNumber}` ? (
                                   <div className="flex items-center gap-1">
                                     <Input
@@ -980,41 +1021,6 @@ export function SheetSidebar({
                             )}
                           </div>
 
-                          {/* Actions */}
-                          <div className="flex items-center gap-1">
-                            {!page.thumbnail && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  generateThumbnail(document.id, page.pageNumber);
-                                }}
-                                className="h-6 w-6 p-0"
-                                title="Generate Thumbnail"
-                              >
-                                <FileImage className="w-3 h-3" />
-                              </Button>
-                            )}
-                            
-                            
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                togglePageVisibility(document.id, page.pageNumber);
-                              }}
-                              className="h-6 w-6 p-0"
-                              title={page.isVisible ? "Hide Page" : "Show Page"}
-                            >
-                              {page.isVisible ? (
-                                <Eye className="w-3 h-3" />
-                              ) : (
-                                <EyeOff className="w-3 h-3" />
-                              )}
-                            </Button>
-                          </div>
                         </div>
                       </div>
                     ))}
@@ -1037,6 +1043,30 @@ export function SheetSidebar({
           )}
         </div>
       </div>
+
+      {/* Loading Dialog for Automatic Sheet Labeling */}
+      {showLabelingDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <div className="flex flex-col items-center space-y-4">
+              <div className="relative">
+                <Brain className="w-12 h-12 text-blue-600 animate-pulse" />
+                <div className="absolute inset-0">
+                  <Brain className="w-12 h-12 text-blue-300 animate-spin" style={{animationDuration: '2s'}} />
+                </div>
+              </div>
+              <h3 className="text-lg font-semibold text-center">AI Analyzing Documents</h3>
+              <p className="text-gray-600 text-center text-sm">{labelingProgress}</p>
+              <div className="flex items-center space-x-2 text-blue-600">
+                <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce"></div>
+                <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
+                <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+              </div>
+            </div>
+            <p className="text-sm text-gray-500 mt-4 text-center">This may take a few moments...</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

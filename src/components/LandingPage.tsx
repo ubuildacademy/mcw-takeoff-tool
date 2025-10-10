@@ -7,7 +7,16 @@ const LandingPage: React.FC = () => {
   const navigate = useNavigate();
 
   const handleLogin = () => {
-    navigate('/app');
+    navigate('/login');
+  };
+
+  const handlePricing = () => {
+    navigate('/pricing');
+  };
+
+  const handleFeatures = () => {
+    navigate('/features');
+    window.scrollTo(0, 0);
   };
 
   return (
@@ -24,10 +33,18 @@ const LandingPage: React.FC = () => {
               </div>
             </div>
             <div className="flex items-center space-x-4">
-              <Button variant="ghost" className="text-slate-600 hover:text-slate-900">
+              <Button 
+                onClick={handleFeatures}
+                variant="ghost" 
+                className="text-slate-600 hover:text-slate-900"
+              >
                 Features
               </Button>
-              <Button variant="ghost" className="text-slate-600 hover:text-slate-900">
+              <Button 
+                onClick={handlePricing}
+                variant="ghost" 
+                className="text-slate-600 hover:text-slate-900"
+              >
                 Pricing
               </Button>
               <Button variant="ghost" className="text-slate-600 hover:text-slate-900">
@@ -48,9 +65,6 @@ const LandingPage: React.FC = () => {
       <section className="relative overflow-hidden">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16">
           <div className="text-center">
-            <Badge className="mb-6 bg-blue-100 text-blue-800 border-blue-200">
-              Professional Construction Takeoff Software
-            </Badge>
             <h1 className="text-5xl md:text-6xl font-bold text-slate-900 mb-6">
               Streamline Your
               <span className="text-blue-600 block">Construction Takeoffs</span>
@@ -81,9 +95,9 @@ const LandingPage: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
             <div>
-              <Badge className="mb-4 bg-blue-100 text-blue-800 border-blue-200">
+              <div className="mb-4 bg-blue-100 text-blue-800 border border-blue-200 rounded-full px-4 py-2 text-sm font-medium inline-block">
                 🤖 AI-Powered Intelligence
-              </Badge>
+              </div>
               <h2 className="text-4xl font-bold text-slate-900 mb-6">
                 Chat with Your Construction Documents
               </h2>
@@ -143,12 +157,12 @@ const LandingPage: React.FC = () => {
                       </svg>
                     </div>
                     <div className="bg-slate-100 rounded-lg p-3 max-w-xs">
-                      <p className="text-sm text-slate-700">What's the total square footage of the foundation?</p>
+                      <p className="text-sm text-slate-700">Can you analyze the door schedule and give me a count of all unit types?</p>
                     </div>
                   </div>
                   <div className="flex items-start space-x-3 justify-end">
                     <div className="bg-blue-600 rounded-lg p-3 max-w-xs">
-                      <p className="text-sm text-white">Based on your foundation plan, the total square footage is 2,450 sq ft. This includes the main foundation area of 2,200 sq ft plus the garage extension of 250 sq ft.</p>
+                      <p className="text-sm text-white">I found 12 different door types in your schedule: 6 - 3'0" x 7'0" hollow metal doors, 3 - 2'8" x 6'8" wood doors, 2 - 4'0" x 8'0" overhead doors, and 1 - 3'6" x 7'0" fire-rated door.</p>
                     </div>
                     <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
                       <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -163,12 +177,12 @@ const LandingPage: React.FC = () => {
                       </svg>
                     </div>
                     <div className="bg-slate-100 rounded-lg p-3 max-w-xs">
-                      <p className="text-sm text-slate-700">Are there any special conditions I should know about?</p>
+                      <p className="text-sm text-slate-700">What are the key project conditions I should be aware of?</p>
                     </div>
                   </div>
                   <div className="flex items-start space-x-3 justify-end">
                     <div className="bg-blue-600 rounded-lg p-3 max-w-xs">
-                      <p className="text-sm text-white">Yes, there are 3 special conditions: 1) Excavation depth exceeds 8ft requiring shoring, 2) Concrete mix must meet freeze-thaw requirements, 3) Foundation must be inspected before backfill.</p>
+                      <p className="text-sm text-white">Based on your project conditions, here are the key items: 1) Excavation requires shoring for depths over 8ft, 2) Concrete must meet freeze-thaw durability requirements, 3) All foundation work needs inspection before backfill.</p>
                     </div>
                     <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
                       <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -202,7 +216,7 @@ const LandingPage: React.FC = () => {
           </div>
           
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
-            <div className="text-center p-6 rounded-lg border border-slate-200 hover:shadow-lg transition-shadow">
+            <div className="text-center p-6 rounded-lg border border-slate-200 hover:shadow-lg transition-shadow cursor-pointer" onClick={handleFeatures}>
               <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -214,7 +228,7 @@ const LandingPage: React.FC = () => {
               </p>
             </div>
 
-            <div className="text-center p-6 rounded-lg border border-slate-200 hover:shadow-lg transition-shadow">
+            <div className="text-center p-6 rounded-lg border border-slate-200 hover:shadow-lg transition-shadow cursor-pointer" onClick={handleFeatures}>
               <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <svg className="w-8 h-8 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
@@ -226,7 +240,7 @@ const LandingPage: React.FC = () => {
               </p>
             </div>
 
-            <div className="text-center p-6 rounded-lg border border-slate-200 hover:shadow-lg transition-shadow">
+            <div className="text-center p-6 rounded-lg border border-slate-200 hover:shadow-lg transition-shadow cursor-pointer" onClick={handleFeatures}>
               <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
@@ -234,19 +248,19 @@ const LandingPage: React.FC = () => {
               </div>
               <h3 className="text-xl font-semibold text-slate-900 mb-2">Smart Calculations</h3>
               <p className="text-slate-600">
-                Automated quantity calculations with customizable formulas. Reduce errors and save time on every project.
+                Automated quantity calculations with labor rates, waste factors, and cost analysis. Build accurate project budgets with customizable formulas.
               </p>
             </div>
 
-            <div className="text-center p-6 rounded-lg border border-slate-200 hover:shadow-lg transition-shadow">
+            <div className="text-center p-6 rounded-lg border border-slate-200 hover:shadow-lg transition-shadow cursor-pointer" onClick={handleFeatures}>
               <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <svg className="w-8 h-8 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
               </div>
-              <h3 className="text-xl font-semibold text-slate-900 mb-2">Team Collaboration</h3>
+              <h3 className="text-xl font-semibold text-slate-900 mb-2">Professional Reports</h3>
               <p className="text-slate-600">
-                Share projects with your team. Real-time collaboration and version control for seamless workflows.
+                Generate detailed takeoff reports with quantities, measurements, and project summaries for professional documentation.
               </p>
             </div>
           </div>

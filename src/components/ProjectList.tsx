@@ -10,14 +10,17 @@ import {
   Upload,
   Trash2,
   Settings,
-  Download
+  Download,
+  User
 } from 'lucide-react';
 import { projectService } from '../services/apiService';
 import { ProjectCreationDialog } from './ProjectCreationDialog';
 import { ProjectSettingsDialog } from './ProjectSettingsDialog';
 import { BackupDialog } from './BackupDialog';
 import { AdminPanel } from './AdminPanel';
+import UserProfile from './UserProfile';
 import { useTakeoffStore } from '../store/useTakeoffStore';
+import { authHelpers } from '../lib/supabase';
 
 interface ApiProject {
   id: string;
@@ -44,6 +47,8 @@ export function ProjectList() {
   const [backupMode, setBackupMode] = useState<'backup' | 'restore'>('restore');
   const [selectedProjectForBackup, setSelectedProjectForBackup] = useState<ApiProject | null>(null);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [showUserProfile, setShowUserProfile] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   
   // Use the store
   const { projects, loadInitialData, getProjectTotalCost } = useTakeoffStore();
@@ -54,11 +59,19 @@ export function ProjectList() {
       setLoading(true);
       setError(null);
       try {
+        // Wait for authentication to complete before loading projects
+        const user = await authHelpers.getCurrentUser();
+        if (!user) {
+          setError('User not authenticated');
+          return;
+        }
+        
         await loadInitialData();
         if (!mounted) return;
       } catch (e: any) {
         if (!mounted) return;
-        setError('Could not reach server');
+        console.error('Error loading projects:', e);
+        setError('Could not load projects: ' + e.message);
       } finally {
         if (mounted) setLoading(false);
       }
@@ -135,6 +148,16 @@ export function ProjectList() {
               </p>
             </div>
             <div className="flex items-center gap-3">
+              <Button variant="outline" size="lg" onClick={() => setShowUserProfile(true)}>
+                <User className="w-5 h-5 mr-2" />
+                Profile
+              </Button>
+              {isAdmin && (
+                <Button variant="outline" size="lg" onClick={() => setShowAdminPanel(true)}>
+                  <Settings className="w-5 h-5 mr-2" />
+                  Admin
+                </Button>
+              )}
               <Button variant="outline" size="lg" onClick={handleOpenExisting}>
                 <Upload className="w-5 h-5 mr-2" />
                 Open Existing
@@ -391,6 +414,12 @@ export function ProjectList() {
         onClose={() => setShowAdminPanel(false)}
         projectId="global" // Global admin panel, not project-specific
       />
+
+      {showUserProfile && (
+        <UserProfile
+          onClose={() => setShowUserProfile(false)}
+        />
+      )}
     </div>
   );
 }

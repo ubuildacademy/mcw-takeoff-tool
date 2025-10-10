@@ -27,6 +27,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
     description: editingCondition?.description || '',
     laborCost: editingCondition?.laborCost?.toString() || '',
     materialCost: editingCondition?.materialCost?.toString() || '',
+    equipmentCost: editingCondition?.equipmentCost?.toString() || '',
     includePerimeter: editingCondition?.includePerimeter || false,
     depth: editingCondition?.depth ? formatDepthOutput(editingCondition.depth) : ''
   });
@@ -71,6 +72,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
         description: formData.description,
         laborCost: formData.laborCost ? parseFloat(formData.laborCost) : undefined,
         materialCost: formData.materialCost ? parseFloat(formData.materialCost) : undefined,
+        equipmentCost: formData.equipmentCost ? parseFloat(formData.equipmentCost) : undefined,
         includePerimeter: formData.includePerimeter,
         depth: parsedDepth === null ? undefined : parsedDepth,
       };
@@ -310,6 +312,22 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
                 placeholder="0.00"
               />
             </div>
+          </div>
+
+          <div>
+            <Label htmlFor="equipmentCost">Equipment Cost ($)</Label>
+            <Input
+              id="equipmentCost"
+              type="number"
+              min="0"
+              step="0.01"
+              value={formData.equipmentCost}
+              onChange={(e) => handleInputChange('equipmentCost', e.target.value)}
+              placeholder="0.00"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Fixed equipment cost for this condition (e.g., crane rental, specialized tools)
+            </p>
           </div>
 
           <div className="flex gap-2 pt-4">

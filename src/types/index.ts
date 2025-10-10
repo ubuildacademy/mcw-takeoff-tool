@@ -17,6 +17,7 @@ export interface Project {
   lastModified: string;
   takeoffCount?: number;
   totalValue?: number;
+  profitMarginPercent?: number; // Global profit margin percentage (default 15%)
 }
 
 export interface TakeoffCondition {
@@ -32,6 +33,7 @@ export interface TakeoffCondition {
   depth?: number; // For volume measurements, depth in feet
   laborCost?: number; // Labor cost per hour
   materialCost?: number; // Material cost per unit
+  equipmentCost?: number; // Fixed equipment cost for the condition
 }
 
 export interface TakeoffMeasurement {
@@ -141,5 +143,33 @@ export interface PDFDocument {
   titleblockConfig?: {
     sheetNumberField: { x: number; y: number; width: number; height: number };
     sheetNameField: { x: number; y: number; width: number; height: number };
+  };
+}
+
+export interface ConditionCostBreakdown {
+  condition: TakeoffCondition;
+  quantity: number;
+  adjustedQuantity: number; // quantity with waste factor applied
+  materialCost: number;
+  laborCost: number;
+  equipmentCost: number;
+  wasteCost: number; // additional cost due to waste factor
+  subtotal: number;
+  hasCosts: boolean;
+}
+
+export interface ProjectCostBreakdown {
+  conditions: ConditionCostBreakdown[];
+  summary: {
+    totalMaterialCost: number;
+    totalLaborCost: number;
+    totalEquipmentCost: number;
+    totalWasteCost: number;
+    subtotal: number;
+    profitMarginPercent: number;
+    profitMarginAmount: number;
+    totalCost: number;
+    conditionsWithCosts: number;
+    totalConditions: number;
   };
 }

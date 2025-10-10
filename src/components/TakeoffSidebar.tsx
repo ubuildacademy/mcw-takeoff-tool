@@ -20,6 +20,7 @@ import {
   FileSpreadsheet,
   FileImage,
   Scissors,
+  DollarSign,
 } from 'lucide-react';
 import { useTakeoffStore } from '../store/useTakeoffStore';
 import { sheetService } from '../services/apiService';
@@ -50,12 +51,12 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [editingCondition, setEditingCondition] = useState<TakeoffCondition | null>(null);
-  const [activeTab, setActiveTab] = useState<'conditions' | 'reports'>('conditions');
+  const [activeTab, setActiveTab] = useState<'conditions' | 'reports' | 'costs'>('conditions');
   const [expandedConditions, setExpandedConditions] = useState<Set<string>>(new Set());
   const [showExportDropdown, setShowExportDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const { addCondition, conditions, setSelectedCondition, selectedConditionId, getConditionTakeoffMeasurements, loadProjectConditions, getProjectTakeoffMeasurements, takeoffMeasurements, loadingConditions, refreshProjectConditions, ensureConditionsLoaded } = useTakeoffStore();
+  const { addCondition, conditions, setSelectedCondition, selectedConditionId, getConditionTakeoffMeasurements, loadProjectConditions, getProjectTakeoffMeasurements, takeoffMeasurements, loadingConditions, refreshProjectConditions, ensureConditionsLoaded, getProjectCostBreakdown, getConditionCostBreakdown } = useTakeoffStore();
 
   useEffect(() => {
     // Ensure conditions are loaded when component mounts or projectId changes
@@ -396,11 +397,14 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         ['Total Measurements', conditionIds.reduce((sum, id) => sum + Object.values(reportData[id].pages).reduce((pageSum, page) => pageSum + page.measurements.length, 0), 0)],
         ['', ''],
         ['Cost Analysis Summary', ''],
-        ['Total Project Cost', `$${getCostAnalysisData().summary.totalProjectCost.toFixed(2)}`],
-        ['Material Cost', `$${getCostAnalysisData().summary.totalMaterialCost.toFixed(2)}`],
-        ['Labor Cost', `$${getCostAnalysisData().summary.totalLaborCost.toFixed(2)}`],
-        ['Material/Labor Ratio', `${((getCostAnalysisData().summary.totalMaterialCost / getCostAnalysisData().summary.totalProjectCost) * 100).toFixed(1)}% / ${((getCostAnalysisData().summary.totalLaborCost / getCostAnalysisData().summary.totalProjectCost) * 100).toFixed(1)}%`],
-        ['Conditions with Costs', getCostAnalysisData().summary.conditionsWithCosts]
+        ['Total Project Cost', `$${getProjectCostBreakdown(projectId).summary.totalCost.toFixed(2)}`],
+        ['Material Cost', `$${getProjectCostBreakdown(projectId).summary.totalMaterialCost.toFixed(2)}`],
+        ['Labor Cost', `$${getProjectCostBreakdown(projectId).summary.totalLaborCost.toFixed(2)}`],
+        ['Equipment Cost', `$${getProjectCostBreakdown(projectId).summary.totalEquipmentCost.toFixed(2)}`],
+        ['Waste Factor Cost', `$${getProjectCostBreakdown(projectId).summary.totalWasteCost.toFixed(2)}`],
+        ['Subtotal', `$${getProjectCostBreakdown(projectId).summary.subtotal.toFixed(2)}`],
+        ['Profit Margin', `${getProjectCostBreakdown(projectId).summary.profitMarginPercent}% ($${getProjectCostBreakdown(projectId).summary.profitMarginAmount.toFixed(2)})`],
+        ['Conditions with Costs', getProjectCostBreakdown(projectId).summary.conditionsWithCosts]
       ];
       
       const executiveSheet = XLSX.utils.aoa_to_sheet(executiveSummaryData);
@@ -697,6 +701,44 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         ['Cost estimates are based on provided rates and should be updated as needed.', '']
       ];
       
+      // 3. COST ANALYSIS SHEET
+      const costBreakdown = getProjectCostBreakdown(projectId);
+      const costAnalysisData = [
+        ['COST ANALYSIS BREAKDOWN', ''],
+        ['', ''],
+        ['Project Cost Summary', ''],
+        ['Total Material Cost', `$${costBreakdown.summary.totalMaterialCost.toFixed(2)}`],
+        ['Total Labor Cost', `$${costBreakdown.summary.totalLaborCost.toFixed(2)}`],
+        ['Total Equipment Cost', `$${costBreakdown.summary.totalEquipmentCost.toFixed(2)}`],
+        ['Total Waste Factor Cost', `$${costBreakdown.summary.totalWasteCost.toFixed(2)}`],
+        ['Subtotal', `$${costBreakdown.summary.subtotal.toFixed(2)}`],
+        ['Profit Margin (%)', `${costBreakdown.summary.profitMarginPercent}%`],
+        ['Profit Margin Amount', `$${costBreakdown.summary.profitMarginAmount.toFixed(2)}`],
+        ['TOTAL PROJECT COST', `$${costBreakdown.summary.totalCost.toFixed(2)}`],
+        ['', ''],
+        ['Cost Breakdown by Condition', ''],
+        ['Condition', 'Quantity', 'Material Cost', 'Labor Cost', 'Equipment Cost', 'Waste Cost', 'Subtotal']
+      ];
+      
+      // Add condition cost breakdown rows
+      costBreakdown.conditions.forEach(condition => {
+        if (condition.hasCosts) {
+          costAnalysisData.push([
+            condition.condition.name,
+            `${condition.quantity.toFixed(2)} ${condition.condition.unit}`,
+            `$${condition.materialCost.toFixed(2)}`,
+            `$${condition.laborCost.toFixed(2)}`,
+            `$${condition.equipmentCost.toFixed(2)}`,
+            `$${condition.wasteCost.toFixed(2)}`,
+            `$${condition.subtotal.toFixed(2)}`
+          ]);
+        }
+      });
+      
+      const costAnalysisSheet = XLSX.utils.aoa_to_sheet(costAnalysisData);
+      costAnalysisSheet['!cols'] = [{ wch: 25 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }];
+      XLSX.utils.book_append_sheet(workbook, costAnalysisSheet, 'Cost Analysis');
+
       const projectInfoSheet = XLSX.utils.aoa_to_sheet(projectInfoData);
       projectInfoSheet['!cols'] = [{ wch: 25 }, { wch: 40 }];
       XLSX.utils.book_append_sheet(workbook, projectInfoSheet, 'Project Information');
@@ -777,10 +819,27 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                     pdf.text(`Generated: ${new Date().toLocaleString()}`, 20, 55);
                     pdf.text(`Total Conditions: ${conditionIds.length}`, 20, 65);
                     pdf.text(`Pages with Measurements: ${pagesWithMeasurements.size}`, 20, 75);
+                    
+                    // Add cost summary
+                    const costBreakdown = getProjectCostBreakdown(projectId);
+                    if (costBreakdown.summary.totalCost > 0) {
+                      pdf.setFontSize(14);
+                      pdf.setFont('helvetica', 'bold');
+                      pdf.text('Cost Summary', 20, 95);
+                      
+                      pdf.setFontSize(10);
+                      pdf.setFont('helvetica', 'normal');
+                      pdf.text(`Total Project Cost: $${costBreakdown.summary.totalCost.toFixed(2)}`, 20, 105);
+                      pdf.text(`Material Cost: $${costBreakdown.summary.totalMaterialCost.toFixed(2)}`, 20, 115);
+                      pdf.text(`Labor Cost: $${costBreakdown.summary.totalLaborCost.toFixed(2)}`, 20, 125);
+                      pdf.text(`Equipment Cost: $${costBreakdown.summary.totalEquipmentCost.toFixed(2)}`, 20, 135);
+                      pdf.text(`Waste Factor Cost: $${costBreakdown.summary.totalWasteCost.toFixed(2)}`, 20, 145);
+                      pdf.text(`Profit Margin: ${costBreakdown.summary.profitMarginPercent}% ($${costBreakdown.summary.profitMarginAmount.toFixed(2)})`, 20, 155);
+                    }
                   }
 
                   // Create summary table
-                  const tableStartY = 90;
+                  const tableStartY = costBreakdown.summary.totalCost > 0 ? 170 : 90;
                   const colWidths = [60, 20, 15, 25]; // Condition, Type, Unit, Total
                   const rowHeight = 8;
                   
@@ -1217,29 +1276,42 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         {/* Tabs */}
         <div className="flex mb-4">
           <button
-            className={`flex-1 px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+            className={`flex-1 px-2 py-2 text-sm font-medium border-b-2 transition-colors ${
               activeTab === 'conditions'
                 ? 'border-blue-500 text-blue-600'
                 : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
             onClick={() => setActiveTab('conditions')}
           >
-            <div className="flex items-center justify-center gap-2">
+            <div className="flex items-center justify-center gap-1">
               <Calculator className="w-4 h-4" />
-              Conditions
+              <span className="hidden sm:inline">Conditions</span>
             </div>
           </button>
           <button
-            className={`flex-1 px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+            className={`flex-1 px-2 py-2 text-sm font-medium border-b-2 transition-colors ${
               activeTab === 'reports'
                 ? 'border-blue-500 text-blue-600'
                 : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
             onClick={() => setActiveTab('reports')}
           >
-            <div className="flex items-center justify-center gap-2">
+            <div className="flex items-center justify-center gap-1">
               <FileText className="w-4 h-4" />
-              Reports
+              <span className="hidden sm:inline">Reports</span>
+            </div>
+          </button>
+          <button
+            className={`flex-1 px-2 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'costs'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+            onClick={() => setActiveTab('costs')}
+          >
+            <div className="flex items-center justify-center gap-1">
+              <DollarSign className="w-4 h-4" />
+              <span className="hidden sm:inline">Costs</span>
             </div>
           </button>
         </div>
@@ -1480,6 +1552,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
             {(() => {
               const { reportData } = getQuantityReportData();
               const conditionIds = Object.keys(reportData);
+              const costBreakdown = getProjectCostBreakdown(projectId);
               
               if (conditionIds.length === 0) {
                 return (
@@ -1492,8 +1565,35 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
               }
 
               return (
-                <div className="space-y-3">
-                  {conditionIds.map(conditionId => {
+                <div className="space-y-4">
+                  {/* Cost Summary Section */}
+                  {costBreakdown.summary.totalCost > 0 && (
+                    <div className="bg-gradient-to-br from-blue-50 to-indigo-100 rounded-lg p-4 border border-blue-200">
+                      <h3 className="text-lg font-semibold text-slate-900 mb-3">Project Cost Summary</h3>
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-slate-600">Total Cost:</span>
+                          <span className="font-semibold text-blue-600">${costBreakdown.summary.totalCost.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-600">Profit Margin:</span>
+                          <span className="font-semibold text-green-600">{costBreakdown.summary.profitMarginPercent}%</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-600">Subtotal:</span>
+                          <span className="font-medium">${costBreakdown.summary.subtotal.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-600">Conditions with Costs:</span>
+                          <span className="font-medium">{costBreakdown.summary.conditionsWithCosts}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Quantity Reports */}
+                  <div className="space-y-3">
+                    {conditionIds.map(conditionId => {
                     const conditionData = reportData[conditionId];
                     const isExpanded = expandedConditions.has(conditionId);
                     const pageCount = Object.keys(conditionData.pages).length;
@@ -1571,6 +1671,129 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                       </div>
                     );
                   })}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+        {activeTab === 'costs' && (
+          <div className="p-4">
+            {(() => {
+              const costBreakdown = getProjectCostBreakdown(projectId);
+              const { conditions: costConditions, summary } = costBreakdown;
+              
+              if (costConditions.length === 0) {
+                return (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <DollarSign className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                    <p>No cost data yet</p>
+                    <p className="text-sm">Create conditions with cost information to see cost analysis</p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="space-y-4">
+                  {/* Project Cost Summary */}
+                  <div className="bg-gradient-to-br from-purple-50 to-pink-100 rounded-lg p-4 border border-purple-200">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-lg font-semibold text-slate-900">Project Cost Summary</h3>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          // Open profit margin dialog
+                          const event = new CustomEvent('openProjectSettings');
+                          window.dispatchEvent(event);
+                        }}
+                        className="flex items-center gap-1 text-xs"
+                      >
+                        <Edit3 className="w-3 h-3" />
+                        Profit Margin
+                      </Button>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-slate-600">Material Costs</span>
+                        <span className="text-sm font-medium text-slate-900">${summary.totalMaterialCost.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-slate-600">Labor Costs</span>
+                        <span className="text-sm font-medium text-slate-900">${summary.totalLaborCost.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-slate-600">Equipment Costs</span>
+                        <span className="text-sm font-medium text-slate-900">${summary.totalEquipmentCost.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-slate-600">Waste Factor Costs</span>
+                        <span className="text-sm font-medium text-slate-900">${summary.totalWasteCost.toFixed(2)}</span>
+                      </div>
+                      <div className="border-t border-slate-200 pt-2">
+                        <div className="flex justify-between items-center">
+                          <span className="font-semibold text-slate-900">Subtotal</span>
+                          <span className="font-semibold text-slate-900">${summary.subtotal.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm text-slate-600">Profit Margin ({summary.profitMarginPercent}%)</span>
+                          <span className="text-sm text-green-600 font-medium">${summary.profitMarginAmount.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between items-center pt-2 border-t border-slate-200">
+                          <span className="text-lg font-bold text-slate-900">Total Cost</span>
+                          <span className="text-lg font-bold text-blue-600">${summary.totalCost.toFixed(2)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Condition Cost Breakdown */}
+                  <div className="space-y-3">
+                    <h4 className="font-semibold text-slate-900">Cost Breakdown by Condition</h4>
+                    {conditions.map(condition => {
+                      if (!condition.hasCosts) return null;
+                      
+                      return (
+                        <div key={condition.condition.id} className="border rounded-lg p-3 bg-white">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              <div 
+                                className="w-4 h-4 rounded-full" 
+                                style={{ backgroundColor: condition.condition.color }}
+                              />
+                              <span className="font-medium text-sm">{condition.condition.name}</span>
+                              <Badge variant="outline" className="text-xs">
+                                {condition.condition.unit}
+                              </Badge>
+                            </div>
+                            <span className="font-semibold text-blue-600">
+                              ${condition.subtotal.toFixed(2)}
+                            </span>
+                          </div>
+                          
+                          <div className="text-xs text-slate-500 space-y-1">
+                            <div className="flex justify-between">
+                              <span>Quantity: {condition.quantity.toFixed(2)} {condition.condition.unit}</span>
+                              {condition.condition.wasteFactor > 0 && (
+                                <span>+ {condition.condition.wasteFactor}% waste = {condition.adjustedQuantity.toFixed(2)} {condition.condition.unit}</span>
+                              )}
+                            </div>
+                            <div className="flex justify-between">
+                              <span>Material: ${condition.materialCost.toFixed(2)}</span>
+                              <span>Labor: ${condition.laborCost.toFixed(2)}</span>
+                            </div>
+                            {condition.equipmentCost > 0 && (
+                              <div className="flex justify-between">
+                                <span>Equipment: ${condition.equipmentCost.toFixed(2)}</span>
+                                {condition.wasteCost > 0 && <span>Waste: ${condition.wasteCost.toFixed(2)}</span>}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               );
             })()}

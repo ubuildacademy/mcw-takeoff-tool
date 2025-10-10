@@ -26,6 +26,7 @@ interface ProjectFormData {
   contactEmail: string;
   contactPhone: string;
   status: string;
+  profitMarginPercent: string;
 }
 
 export function ProjectSettingsDialog({ open, onOpenChange, project, onUpdated }: ProjectSettingsDialogProps) {
@@ -42,7 +43,8 @@ export function ProjectSettingsDialog({ open, onOpenChange, project, onUpdated }
     contactPerson: project?.contactPerson || '',
     contactEmail: project?.contactEmail || '',
     contactPhone: project?.contactPhone || '',
-    status: project?.status || 'active'
+    status: project?.status || 'active',
+    profitMarginPercent: project?.profitMarginPercent?.toString() || '15'
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -95,7 +97,8 @@ export function ProjectSettingsDialog({ open, onOpenChange, project, onUpdated }
         contactPerson: formData.contactPerson.trim(),
         contactEmail: formData.contactEmail.trim(),
         contactPhone: formData.contactPhone.trim(),
-        status: formData.status
+        status: formData.status,
+        profitMarginPercent: formData.profitMarginPercent ? parseFloat(formData.profitMarginPercent) : 15
       };
 
       await updateProject(project.id, projectData);
@@ -242,17 +245,36 @@ export function ProjectSettingsDialog({ open, onOpenChange, project, onUpdated }
             </div>
           </div>
 
-          <div>
-            <Label htmlFor="estimatedValue">Estimated Value</Label>
-            <Input
-              id="estimatedValue"
-              type="number"
-              step="0.01"
-              min="0"
-              value={formData.estimatedValue}
-              onChange={(e) => handleInputChange('estimatedValue', e.target.value)}
-              placeholder="Enter estimated project value"
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="estimatedValue">Estimated Value</Label>
+              <Input
+                id="estimatedValue"
+                type="number"
+                step="0.01"
+                min="0"
+                value={formData.estimatedValue}
+                onChange={(e) => handleInputChange('estimatedValue', e.target.value)}
+                placeholder="Enter estimated project value"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="profitMarginPercent">Profit Margin (%)</Label>
+              <Input
+                id="profitMarginPercent"
+                type="number"
+                step="0.1"
+                min="0"
+                max="100"
+                value={formData.profitMarginPercent}
+                onChange={(e) => handleInputChange('profitMarginPercent', e.target.value)}
+                placeholder="15.0"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Default profit margin applied to all cost calculations
+              </p>
+            </div>
           </div>
         </div>
 

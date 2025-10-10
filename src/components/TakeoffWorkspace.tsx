@@ -6,9 +6,8 @@ import { TakeoffSidebar } from './TakeoffSidebar';
 import { SheetSidebar } from './SheetSidebar';
 import { ChatTab } from './ChatTab';
 import { SearchTab } from './SearchTab';
-import { TitleblockConfigDialog } from './TitleblockConfigDialog';
 import { OCRProcessingDialog } from './OCRProcessingDialog';
-import { OCRTrainingDialog } from './OCRTrainingDialog';
+import { ProfitMarginDialog } from './ProfitMarginDialog';
 
 import { useTakeoffStore } from '../store/useTakeoffStore';
 import type { TakeoffCondition, Sheet, ProjectFile, PDFDocument } from '../types';
@@ -41,8 +40,7 @@ export function TakeoffWorkspace() {
   const [selectedPageNumber, setSelectedPageNumber] = useState<number | null>(null);
   
   // Dialog states
-  const [showTitleblockConfig, setShowTitleblockConfig] = useState(false);
-  const [titleblockConfigDocumentId, setTitleblockConfigDocumentId] = useState<string | null>(null);
+  const [showProfitMarginDialog, setShowProfitMarginDialog] = useState(false);
   
   // Cut-out states
   const [cutoutMode, setCutoutMode] = useState(false);
@@ -146,6 +144,18 @@ export function TakeoffWorkspace() {
     }
   }, [jobId]); // Only depend on jobId to prevent infinite loops
 
+  // Listen for profit margin dialog open event
+  useEffect(() => {
+    const handleOpenProfitMarginDialog = () => {
+      setShowProfitMarginDialog(true);
+    };
+
+    window.addEventListener('openProjectSettings', handleOpenProfitMarginDialog);
+    return () => {
+      window.removeEventListener('openProjectSettings', handleOpenProfitMarginDialog);
+    };
+  }, []);
+
   const handleConditionSelect = (condition: TakeoffCondition | null) => {
     if (condition === null) {
       setSelectedCondition(null);
@@ -207,18 +217,12 @@ export function TakeoffWorkspace() {
     }
   };
 
-  // Titleblock configuration handler
-  const handleTitleblockConfig = (documentId: string) => {
-    setTitleblockConfigDocumentId(documentId);
-    setShowTitleblockConfig(true);
-  };
 
   // OCR processing handler
   const [showOCRDialog, setShowOCRDialog] = useState(false);
   const [ocrDocumentId, setOcrDocumentId] = useState<string>('');
   const [ocrPageNumbers, setOcrPageNumbers] = useState<number[]>([]);
   const [ocrDocumentName, setOcrDocumentName] = useState<string>('');
-  const [showOCRTrainingDialog, setShowOCRTrainingDialog] = useState(false);
 
   const handleOCRRequest = (documentId: string, pageNumbers?: number[]) => {
     // Find the document name
@@ -249,54 +253,6 @@ export function TakeoffWorkspace() {
     setDocuments(updatedDocuments);
   };
 
-  // Handle extracted sheet names from titleblock configuration
-  const handleExtractedSheetNames = useCallback(async (documentId: string, extractedData: Array<{ pageNumber: number; sheetNumber: string; sheetName: string }>) => {
-    try {
-      console.log('Updating sheet names with extracted data:', extractedData);
-      
-      // Update database for each page
-      for (const extractedInfo of extractedData) {
-        const sheetId = `${documentId}-${extractedInfo.pageNumber}`;
-        try {
-          await sheetService.updateSheet(sheetId, {
-            documentId: documentId,
-            pageNumber: extractedInfo.pageNumber,
-            sheetName: extractedInfo.sheetName,
-            sheetNumber: extractedInfo.sheetNumber
-          });
-          console.log(`Updated sheet ${sheetId}: ${extractedInfo.sheetNumber} - ${extractedInfo.sheetName}`);
-        } catch (error) {
-          console.error(`Failed to update sheet ${sheetId}:`, error);
-        }
-      }
-
-      // Update local documents state
-      const updatedDocuments = documents.map(doc => {
-        if (doc.id === documentId) {
-          return {
-            ...doc,
-            pages: doc.pages.map(page => {
-              const extractedInfo = extractedData.find(data => data.pageNumber === page.pageNumber);
-              if (extractedInfo) {
-                return {
-                  ...page,
-                  sheetName: extractedInfo.sheetName,
-                  sheetNumber: extractedInfo.sheetNumber
-                };
-              }
-              return page;
-            })
-          };
-        }
-        return doc;
-      });
-
-      setDocuments(updatedDocuments);
-      console.log('Successfully updated all sheet names and numbers');
-    } catch (error) {
-      console.error('Error updating sheet names:', error);
-    }
-  }, [documents]);
 
   // Load project documents directly
   const loadProjectDocuments = useCallback(async () => {
@@ -443,7 +399,7 @@ export function TakeoffWorkspace() {
   };
 
   const handleBackToProjects = () => {
-    navigate('/');
+    navigate('/app');
   };
 
 
@@ -621,7 +577,7 @@ export function TakeoffWorkspace() {
         <div className="flex">
           {leftSidebarOpen && (
                         <TakeoffSidebar
-              projectId={jobId!}
+              projectId={storeCurrentProject?.id || jobId!}
               onConditionSelect={handleConditionSelect}
               onToolSelect={handleToolSelect}
               documents={documents}
@@ -754,21 +710,20 @@ export function TakeoffWorkspace() {
               {/* Tab Content */}
               {rightSidebarTab === 'documents' && (
                 <SheetSidebar 
-                  projectId={jobId!}
+                  projectId={storeCurrentProject?.id || jobId!}
+                  documents={documents}
                   onPageSelect={handlePageSelect}
                   selectedDocumentId={selectedDocumentId || undefined}
                   selectedPageNumber={selectedPageNumber || undefined}
                   onOCRRequest={handleOCRRequest}
-                  onTitleblockConfig={handleTitleblockConfig}
                   onOcrSearchResults={handleOcrSearchResults}
                   onDocumentsUpdate={handleDocumentsUpdate}
-                  onExtractSheetNames={handleExtractedSheetNames}
                 />
               )}
               
               {rightSidebarTab === 'search' && (
                 <SearchTab
-                  projectId={jobId!}
+                  projectId={storeCurrentProject?.id || jobId!}
                   documents={documents}
                   onPageSelect={handlePageSelect}
                   selectedDocumentId={selectedDocumentId || undefined}
@@ -778,7 +733,7 @@ export function TakeoffWorkspace() {
               
               {rightSidebarTab === 'ai-chat' && (
                 <ChatTab
-                  projectId={jobId!}
+                  projectId={storeCurrentProject?.id || jobId!}
                   documents={documents}
                   onPageSelect={handlePageSelect}
                   onOCRRequest={handleOCRRequest}
@@ -894,27 +849,6 @@ export function TakeoffWorkspace() {
         </div>
       )}
 
-      {/* Titleblock Configuration Dialog */}
-      <TitleblockConfigDialog
-        isOpen={showTitleblockConfig}
-        onClose={() => {
-          setShowTitleblockConfig(false);
-          setTitleblockConfigDocumentId(null);
-        }}
-        onSave={async (config) => {
-          try {
-            const result = await sheetService.configureTitleblock(titleblockConfigDocumentId!, config);
-          } catch (error) {
-            console.error('Failed to save titleblock configuration:', error);
-          }
-        }}
-        documentId={titleblockConfigDocumentId || ''}
-        pageNumber={1}
-        projectId={jobId}
-        onExtractSheetNames={titleblockConfigDocumentId ? (extractedData) => {
-          handleExtractedSheetNames(titleblockConfigDocumentId, extractedData);
-        } : undefined}
-      />
 
       {/* OCR Processing Dialog */}
       <OCRProcessingDialog
@@ -938,13 +872,14 @@ export function TakeoffWorkspace() {
         }}
       />
 
-      {/* OCR Training Dialog */}
-      <OCRTrainingDialog
-        isOpen={showOCRTrainingDialog}
-        onClose={() => setShowOCRTrainingDialog(false)}
-        projectId={jobId!}
-      />
-
+      {/* Profit Margin Dialog */}
+      {jobId && (
+        <ProfitMarginDialog
+          open={showProfitMarginDialog}
+          onOpenChange={setShowProfitMarginDialog}
+          projectId={jobId}
+        />
+      )}
 
     </div>
   );
