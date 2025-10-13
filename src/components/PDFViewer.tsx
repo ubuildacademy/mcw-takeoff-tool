@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { useTakeoffStore } from '../store/useTakeoffStore';
-import type { SearchResult } from '../types';
+import type { SearchResult, Annotation } from '../types';
 import CalibrationDialog from './CalibrationDialog';
 import ScaleApplicationDialog from './ScaleApplicationDialog';
 import { formatFeetAndInches } from '../lib/utils';
@@ -33,6 +33,9 @@ interface PDFViewerProps {
   cutoutTargetConditionId?: string | null;
   onCutoutModeChange?: (conditionId: string | null) => void;
   onMeasurementStateChange?: (isMeasuring: boolean, isCalibrating: boolean, measurementType: string, isOrthoSnapping: boolean) => void;
+  annotationTool?: 'text' | 'freehand' | 'arrow' | 'rectangle' | 'circle' | null;
+  annotationColor?: string;
+  onAnnotationToolChange?: (tool: 'text' | 'freehand' | 'arrow' | 'rectangle' | 'circle' | null) => void;
 }
 
 interface Measurement {
@@ -69,7 +72,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   cutoutMode = false,
   cutoutTargetConditionId = null,
   onCutoutModeChange,
-  onMeasurementStateChange
+  onMeasurementStateChange,
+  annotationTool = null,
+  annotationColor = '#FF0000',
+  onAnnotationToolChange
 }) => {
   // Core PDF state
   const [pdfDocument, setPdfDocument] = useState<any>(null);
@@ -98,6 +104,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const [measurementType, setMeasurementType] = useState<'linear' | 'area' | 'volume' | 'count'>('linear');
   const [currentMeasurement, setCurrentMeasurement] = useState<{ x: number; y: number }[]>([]);
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
+  
+  // Annotation state
+  const [localAnnotations, setLocalAnnotations] = useState<Annotation[]>([]);
+  const [currentAnnotation, setCurrentAnnotation] = useState<{ x: number; y: number }[]>([]);
+  const [showTextInput, setShowTextInput] = useState(false);
+  const [textInputPosition, setTextInputPosition] = useState<{ x: number; y: number } | null>(null);
+  const [textInputValue, setTextInputValue] = useState('');
   const [mousePosition, setMousePosition] = useState<{ x: number; y: number } | null>(null);
   const [isCompletingMeasurement, setIsCompletingMeasurement] = useState(false);
   
@@ -216,11 +229,27 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     currentProjectId, 
     selectedConditionId,
     getSelectedCondition,
-    takeoffMeasurements
+    takeoffMeasurements,
+    annotations: storeAnnotations,
+    addAnnotation,
+    getPageAnnotations
   } = useTakeoffStore();
   
   // Load existing takeoff measurements for the current sheet
   const [localTakeoffMeasurements, setLocalTakeoffMeasurements] = useState<any[]>([]);
+  
+  // Load annotations for the entire sheet - reactive to store changes
+  useEffect(() => {
+    if (currentProjectId && file?.id) {
+      // Get all annotations for this sheet, we'll filter by page during render
+      const sheetAnnotations = storeAnnotations.filter(
+        a => a.projectId === currentProjectId && a.sheetId === file.id
+      );
+      setLocalAnnotations(sheetAnnotations);
+    } else {
+      setLocalAnnotations([]);
+    }
+  }, [currentProjectId, file?.id, storeAnnotations]);
 
   // Ensure component is mounted before rendering
   useEffect(() => {
@@ -443,13 +472,27 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       renderSVGCurrentCutout(svgOverlay, viewport);
     }
     
+    // Render completed annotations for this page
+    localAnnotations.forEach(annotation => {
+      // Double-check that this annotation belongs to the page being rendered
+      if (annotation.pageNumber === pageNum) {
+        renderSVGAnnotation(svgOverlay, annotation, viewport);
+      }
+    });
+    
+    // Draw current annotation being created (only if on the page being rendered)
+    // Show preview even with no points yet (for initial mouse tracking)
+    if (annotationTool && pageNum === currentPage) {
+      renderSVGCurrentAnnotation(svgOverlay, viewport);
+    }
+    
     // Draw calibration points (only if on the page being rendered)
     if (isCalibrating && calibrationPoints.length > 0 && pageNum === currentPage) {
       renderSVGCalibrationPoints(svgOverlay);
     }
     
-    // Draw crosshair if measuring or calibrating (only if on the page being rendered)
-    if (mousePosition && (isMeasuring || isCalibrating) && pageNum === currentPage) {
+    // Draw crosshair if measuring, calibrating, or annotating (only if on the page being rendered)
+    if (mousePosition && (isMeasuring || isCalibrating || annotationTool) && pageNum === currentPage) {
       renderSVGCrosshair(svgOverlay, mousePosition, viewport, isCalibrating);
     }
     
@@ -458,17 +501,17 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       renderRunningLengthDisplay(svgOverlay, viewport);
     }
     
-  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, selectedMarkupId, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength]);
+  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, selectedMarkupId, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation]);
 
   // Re-render annotations when measurements or interaction state changes
   useEffect(() => {
     if (pdfDocument && currentViewport && !isRenderingRef.current) {
-      // Only render if we have measurements or if we're in measuring mode
-      if (localTakeoffMeasurements.length > 0 || isMeasuring || isCalibrating || currentMeasurement.length > 0) {
+      // Only render if we have measurements, annotations, or if we're in measuring/annotation mode
+      if (localTakeoffMeasurements.length > 0 || isMeasuring || isCalibrating || currentMeasurement.length > 0 || annotationTool || localAnnotations.length > 0) {
         renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
       }
     }
-  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, selectedMarkupId, isSelectionMode, renderTakeoffAnnotations, currentPage, currentViewport]);
+  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, selectedMarkupId, isSelectionMode, renderTakeoffAnnotations, currentPage, currentViewport, annotationTool, localAnnotations]);
 
   // Page visibility handler - ensures overlay is properly initialized when page becomes visible
   const onPageShown = useCallback((pageNum: number, viewport: any) => {
@@ -1177,6 +1220,276 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
   };
 
+  // Render completed annotation
+  const renderSVGAnnotation = (svg: SVGSVGElement, annotation: Annotation, viewport: any) => {
+    if (!viewport || annotation.points.length === 0) return;
+    
+    const points = annotation.points.map(p => ({
+      x: p.x * viewport.width,
+      y: p.y * viewport.height
+    }));
+    
+    const isSelected = selectedMarkupId === annotation.id;
+    const strokeWidth = isSelected ? '5' : '3';
+    const strokeColor = isSelected ? '#00ff00' : annotation.color; // Green when selected
+    
+    if (annotation.type === 'text' && annotation.text) {
+      const point = points[0];
+      const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      text.setAttribute('x', point.x.toString());
+      text.setAttribute('y', point.y.toString());
+      text.setAttribute('fill', strokeColor);
+      text.setAttribute('font-size', '14');
+      text.setAttribute('font-weight', 'bold');
+      text.textContent = annotation.text;
+      text.setAttribute('data-annotation-id', annotation.id);
+      
+      // Add click handler for selection
+      if (isSelectionMode) {
+        text.style.cursor = 'pointer';
+        text.addEventListener('click', (e) => {
+          e.stopPropagation();
+          setSelectedMarkupId(annotation.id);
+        });
+      }
+      
+      svg.appendChild(text);
+    } else if (annotation.type === 'freehand') {
+      const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+      const pointString = points.map(p => `${p.x},${p.y}`).join(' ');
+      polyline.setAttribute('points', pointString);
+      polyline.setAttribute('stroke', strokeColor);
+      polyline.setAttribute('stroke-width', strokeWidth);
+      polyline.setAttribute('fill', 'none');
+      polyline.setAttribute('stroke-linecap', 'round');
+      polyline.setAttribute('stroke-linejoin', 'round');
+      polyline.setAttribute('data-annotation-id', annotation.id);
+      
+      // Add click handler for selection
+      if (isSelectionMode) {
+        polyline.style.cursor = 'pointer';
+        polyline.addEventListener('click', (e) => {
+          e.stopPropagation();
+          setSelectedMarkupId(annotation.id);
+        });
+        
+        // Add invisible hit area for easier selection
+        const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+        hitArea.setAttribute('points', pointString);
+        hitArea.setAttribute('stroke', 'transparent');
+        hitArea.setAttribute('stroke-width', '20');
+        hitArea.setAttribute('fill', 'none');
+        hitArea.style.cursor = 'pointer';
+        hitArea.addEventListener('click', (e) => {
+          e.stopPropagation();
+          setSelectedMarkupId(annotation.id);
+        });
+        svg.appendChild(hitArea);
+      }
+      
+      svg.appendChild(polyline);
+    } else if (annotation.type === 'arrow' && points.length === 2) {
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', points[0].x.toString());
+      line.setAttribute('y1', points[0].y.toString());
+      line.setAttribute('x2', points[1].x.toString());
+      line.setAttribute('y2', points[1].y.toString());
+      line.setAttribute('stroke', strokeColor);
+      line.setAttribute('stroke-width', strokeWidth);
+      line.setAttribute('marker-end', 'url(#arrowhead)');
+      line.setAttribute('data-annotation-id', annotation.id);
+      
+      // Add click handler for selection
+      if (isSelectionMode) {
+        line.style.cursor = 'pointer';
+        line.addEventListener('click', (e) => {
+          e.stopPropagation();
+          setSelectedMarkupId(annotation.id);
+        });
+      }
+      
+      svg.appendChild(line);
+      
+      // Create arrowhead marker if it doesn't exist
+      if (!svg.querySelector('#arrowhead')) {
+        const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+        const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+        marker.setAttribute('id', 'arrowhead');
+        marker.setAttribute('markerWidth', '10');
+        marker.setAttribute('markerHeight', '10');
+        marker.setAttribute('refX', '9');
+        marker.setAttribute('refY', '3');
+        marker.setAttribute('orient', 'auto');
+        const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+        polygon.setAttribute('points', '0 0, 10 3, 0 6');
+        polygon.setAttribute('fill', strokeColor);
+        marker.appendChild(polygon);
+        defs.appendChild(marker);
+        svg.appendChild(defs);
+      }
+    } else if (annotation.type === 'rectangle' && points.length === 2) {
+      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      const x = Math.min(points[0].x, points[1].x);
+      const y = Math.min(points[0].y, points[1].y);
+      const width = Math.abs(points[1].x - points[0].x);
+      const height = Math.abs(points[1].y - points[0].y);
+      rect.setAttribute('x', x.toString());
+      rect.setAttribute('y', y.toString());
+      rect.setAttribute('width', width.toString());
+      rect.setAttribute('height', height.toString());
+      rect.setAttribute('stroke', strokeColor);
+      rect.setAttribute('stroke-width', strokeWidth);
+      rect.setAttribute('fill', 'none');
+      rect.setAttribute('data-annotation-id', annotation.id);
+      
+      // Add click handler for selection
+      if (isSelectionMode) {
+        rect.style.cursor = 'pointer';
+        rect.addEventListener('click', (e) => {
+          e.stopPropagation();
+          setSelectedMarkupId(annotation.id);
+        });
+      }
+      
+      svg.appendChild(rect);
+    } else if (annotation.type === 'circle' && points.length === 2) {
+      const cx = (points[0].x + points[1].x) / 2;
+      const cy = (points[0].y + points[1].y) / 2;
+      const rx = Math.abs(points[1].x - points[0].x) / 2;
+      const ry = Math.abs(points[1].y - points[0].y) / 2;
+      const ellipse = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
+      ellipse.setAttribute('cx', cx.toString());
+      ellipse.setAttribute('cy', cy.toString());
+      ellipse.setAttribute('rx', rx.toString());
+      ellipse.setAttribute('ry', ry.toString());
+      ellipse.setAttribute('stroke', strokeColor);
+      ellipse.setAttribute('stroke-width', strokeWidth);
+      ellipse.setAttribute('fill', 'none');
+      ellipse.setAttribute('data-annotation-id', annotation.id);
+      
+      // Add click handler for selection
+      if (isSelectionMode) {
+        ellipse.style.cursor = 'pointer';
+        ellipse.addEventListener('click', (e) => {
+          e.stopPropagation();
+          setSelectedMarkupId(annotation.id);
+        });
+      }
+      
+      svg.appendChild(ellipse);
+    }
+  };
+
+  // Render current annotation being created with rubber banding preview
+  const renderSVGCurrentAnnotation = (svg: SVGSVGElement, viewport: any) => {
+    if (!viewport || !annotationTool) return;
+    
+    const points = currentAnnotation.map(p => ({
+      x: p.x * viewport.width,
+      y: p.y * viewport.height
+    }));
+    
+    if (annotationTool === 'freehand') {
+      // Draw completed segments
+      if (points.length > 0) {
+        const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+        let pointString = points.map(p => `${p.x},${p.y}`).join(' ');
+        polyline.setAttribute('points', pointString);
+        polyline.setAttribute('stroke', annotationColor);
+        polyline.setAttribute('stroke-width', '3');
+        polyline.setAttribute('fill', 'none');
+        polyline.setAttribute('stroke-linecap', 'round');
+        polyline.setAttribute('stroke-linejoin', 'round');
+        svg.appendChild(polyline);
+      }
+      
+      // Draw rubber band line from last point to mouse (preview)
+      if (points.length > 0 && mousePosition) {
+        const rubberBand = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        const lastPoint = points[points.length - 1];
+        rubberBand.setAttribute('x1', lastPoint.x.toString());
+        rubberBand.setAttribute('y1', lastPoint.y.toString());
+        rubberBand.setAttribute('x2', (mousePosition.x * viewport.width).toString());
+        rubberBand.setAttribute('y2', (mousePosition.y * viewport.height).toString());
+        rubberBand.setAttribute('stroke', annotationColor);
+        rubberBand.setAttribute('stroke-width', '3');
+        rubberBand.setAttribute('stroke-dasharray', '5,5');
+        rubberBand.setAttribute('stroke-linecap', 'round');
+        rubberBand.setAttribute('opacity', '0.7');
+        svg.appendChild(rubberBand);
+      }
+    } else if (['arrow', 'rectangle', 'circle'].includes(annotationTool)) {
+      if (points.length === 0 && mousePosition) {
+        // Show a small dot at mouse position to indicate where first point will be
+        const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        dot.setAttribute('cx', (mousePosition.x * viewport.width).toString());
+        dot.setAttribute('cy', (mousePosition.y * viewport.height).toString());
+        dot.setAttribute('r', '4');
+        dot.setAttribute('fill', annotationColor);
+        dot.setAttribute('opacity', '0.7');
+        svg.appendChild(dot);
+      } else if (points.length === 1 && mousePosition) {
+        const endPoint = {
+          x: mousePosition.x * viewport.width,
+          y: mousePosition.y * viewport.height
+        };
+        
+        // Draw first point
+        const startDot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        startDot.setAttribute('cx', points[0].x.toString());
+        startDot.setAttribute('cy', points[0].y.toString());
+        startDot.setAttribute('r', '4');
+        startDot.setAttribute('fill', annotationColor);
+        svg.appendChild(startDot);
+        
+        if (annotationTool === 'arrow') {
+          const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+          line.setAttribute('x1', points[0].x.toString());
+          line.setAttribute('y1', points[0].y.toString());
+          line.setAttribute('x2', endPoint.x.toString());
+          line.setAttribute('y2', endPoint.y.toString());
+          line.setAttribute('stroke', annotationColor);
+          line.setAttribute('stroke-width', '3');
+          line.setAttribute('stroke-dasharray', '5,5');
+          line.setAttribute('opacity', '0.7');
+          svg.appendChild(line);
+        } else if (annotationTool === 'rectangle') {
+          const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+          const x = Math.min(points[0].x, endPoint.x);
+          const y = Math.min(points[0].y, endPoint.y);
+          const width = Math.abs(endPoint.x - points[0].x);
+          const height = Math.abs(endPoint.y - points[0].y);
+          rect.setAttribute('x', x.toString());
+          rect.setAttribute('y', y.toString());
+          rect.setAttribute('width', width.toString());
+          rect.setAttribute('height', height.toString());
+          rect.setAttribute('stroke', annotationColor);
+          rect.setAttribute('stroke-width', '3');
+          rect.setAttribute('fill', 'none');
+          rect.setAttribute('stroke-dasharray', '5,5');
+          rect.setAttribute('opacity', '0.7');
+          svg.appendChild(rect);
+        } else if (annotationTool === 'circle') {
+          const cx = (points[0].x + endPoint.x) / 2;
+          const cy = (points[0].y + endPoint.y) / 2;
+          const rx = Math.abs(endPoint.x - points[0].x) / 2;
+          const ry = Math.abs(endPoint.y - points[0].y) / 2;
+          const ellipse = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
+          ellipse.setAttribute('cx', cx.toString());
+          ellipse.setAttribute('cy', cy.toString());
+          ellipse.setAttribute('rx', rx.toString());
+          ellipse.setAttribute('ry', ry.toString());
+          ellipse.setAttribute('stroke', annotationColor);
+          ellipse.setAttribute('stroke-width', '3');
+          ellipse.setAttribute('fill', 'none');
+          ellipse.setAttribute('stroke-dasharray', '5,5');
+          ellipse.setAttribute('opacity', '0.7');
+          svg.appendChild(ellipse);
+        }
+      }
+    }
+  };
+
   // Render calibration points as SVG
   const renderSVGCalibrationPoints = (svg: SVGSVGElement) => {
     if (!currentViewport) return;
@@ -1426,6 +1739,28 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       return;
     }
     
+    // Handle mouse move for annotation mode
+    if (annotationTool) {
+      if (!pdfCanvasRef.current || !currentViewport) {
+        return;
+      }
+      
+      // Get CSS pixel coordinates relative to the canvas/SVG
+      const rect = pdfCanvasRef.current.getBoundingClientRect();
+      const cssX = event.clientX - rect.left;
+      const cssY = event.clientY - rect.top;
+      
+      // Convert CSS coordinates to PDF coordinates (0-1)
+      const pdfCoords = {
+        x: cssX / currentViewport.width,
+        y: cssY / currentViewport.height
+      };
+      
+      // Always update mouse position for annotation preview
+      setMousePosition(pdfCoords);
+      return;
+    }
+    
     // Handle mouse move for measurement mode
     if (!isMeasuring || !selectedConditionId) {
       if (mousePosition) {
@@ -1485,7 +1820,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         setRunningLength(newLength);
       }
     }
-  }, [isCalibrating, calibrationPoints, isMeasuring, selectedConditionId, mousePosition, isContinuousDrawing, activePoints, rubberBandElement, currentViewport, calculateRunningLength]);
+  }, [annotationTool, isCalibrating, calibrationPoints, isMeasuring, selectedConditionId, mousePosition, isContinuousDrawing, activePoints, rubberBandElement, currentViewport, calculateRunningLength]);
 
   // Handle click - direct coordinate conversion
   const handleClick = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
@@ -1552,6 +1887,46 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       });
       
       return;
+    }
+    
+    // Handle annotation tool clicks
+    if (annotationTool) {
+      const pdfCoords = {
+        x: cssX / currentViewport.width,
+        y: cssY / currentViewport.height
+      };
+      
+      if (annotationTool === 'text') {
+        // Show text input at clicked position
+        setTextInputPosition({ x: cssX, y: cssY });
+        setShowTextInput(true);
+        setCurrentAnnotation([pdfCoords]);
+        return;
+      } else if (annotationTool === 'freehand') {
+        // Add point to freehand drawing
+        setCurrentAnnotation(prev => [...prev, pdfCoords]);
+        return;
+      } else if (['arrow', 'rectangle', 'circle'].includes(annotationTool)) {
+        // For shapes, we need 2 points (start and end)
+        setCurrentAnnotation(prev => {
+          const newPoints = [...prev, pdfCoords];
+          if (newPoints.length === 2 && currentProjectId && file?.id) {
+            // Complete the annotation
+            addAnnotation({
+              projectId: currentProjectId,
+              sheetId: file.id,
+              type: annotationTool,
+              points: newPoints,
+              color: annotationColor,
+              pageNumber: currentPage
+            });
+            setCurrentAnnotation([]);
+            onAnnotationToolChange?.(null);
+          }
+          return newPoints;
+        });
+        return;
+      }
     }
     
     // Handle measurement clicks
@@ -1922,6 +2297,21 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Handle double-click to complete measurements
   const handleDoubleClick = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
     
+    // Handle freehand annotation completion
+    if (annotationTool === 'freehand' && currentAnnotation.length >= 2 && currentProjectId && file?.id) {
+      addAnnotation({
+        projectId: currentProjectId,
+        sheetId: file.id,
+        type: 'freehand',
+        points: currentAnnotation,
+        color: annotationColor,
+        pageNumber: currentPage
+      });
+      setCurrentAnnotation([]);
+      onAnnotationToolChange?.(null);
+      return;
+    }
+    
     // Handle cut-out completion
     if (cutoutMode && currentCutout.length >= 3) {
       completeCutout(currentCutout);
@@ -1935,7 +2325,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Complete area or volume measurement
       completeMeasurement(currentMeasurement);
     }
-  }, [isContinuousDrawing, activePoints, measurementType, currentMeasurement, completeContinuousLinearMeasurement, completeMeasurement, cutoutMode, currentCutout, completeCutout]);
+  }, [annotationTool, currentAnnotation, annotationColor, currentPage, onAnnotationToolChange, isContinuousDrawing, activePoints, measurementType, currentMeasurement, completeContinuousLinearMeasurement, completeMeasurement, cutoutMode, currentCutout, completeCutout]);
 
   // Cleanup continuous drawing state
   const cleanupContinuousDrawing = useCallback(() => {
@@ -2155,6 +2545,18 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Handle escape key to back out vertices one-by-one and delete key to delete selected markup
   const handleKeyDown = useCallback(async (event: KeyboardEvent) => {
+    // Handle escape for annotation mode
+    if (event.key === 'Escape' && annotationTool) {
+      event.preventDefault();
+      if (currentAnnotation.length > 0) {
+        // Cancel current annotation
+        setCurrentAnnotation([]);
+      }
+      // Exit annotation mode
+      onAnnotationToolChange?.(null);
+      return;
+    }
+    
     if (event.key === 'Escape' && (isMeasuring || isCalibrating)) {
       event.preventDefault();
       
@@ -2225,8 +2627,35 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     } else if ((event.key === 'Delete' || event.key === 'Backspace') && selectedMarkupId && isSelectionMode) {
       event.preventDefault();
       
-      // Delete the selected markup
-      if (currentProjectId && file?.id) {
+      // Check if it's an annotation or a measurement
+      const isAnnotation = localAnnotations.some(a => a.id === selectedMarkupId);
+      
+      if (isAnnotation) {
+        // Delete annotation from store
+        const { deleteAnnotation } = useTakeoffStore.getState();
+        deleteAnnotation(selectedMarkupId);
+        
+        // Get updated annotations from store after deletion
+        const { annotations: updatedAnnotations } = useTakeoffStore.getState();
+        
+        // Immediately update local annotations to reflect the deletion
+        const filteredAnnotations = updatedAnnotations.filter(
+          a => a.projectId === currentProjectId && a.sheetId === file.id
+        );
+        setLocalAnnotations(filteredAnnotations);
+        setSelectedMarkupId(null);
+        
+        // Immediately re-render the SVG overlay to show the deletion
+        if (currentViewport) {
+          renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+        }
+        
+        // Also re-render the PDF page
+        requestAnimationFrame(() => {
+          renderPDFPage(currentPage);
+        });
+      } else if (currentProjectId && file?.id) {
+        // Delete measurement
         const { deleteTakeoffMeasurement, getPageTakeoffMeasurements } = useTakeoffStore.getState();
         
         try {
@@ -2270,7 +2699,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       event.preventDefault();
       setIsOrthoSnapping(prev => !prev);
     }
-  }, [isMeasuring, isCalibrating, calibrationPoints.length, currentMeasurement.length, selectedMarkupId, isSelectionMode, currentProjectId, file?.id, currentPage, renderPDFPage, measurementType, isContinuousDrawing, activePoints.length, isOrthoSnapping]);
+  }, [annotationTool, currentAnnotation, onAnnotationToolChange, localAnnotations, isMeasuring, isCalibrating, calibrationPoints.length, currentMeasurement.length, selectedMarkupId, isSelectionMode, currentProjectId, file?.id, currentPage, renderPDFPage, measurementType, isContinuousDrawing, activePoints.length, isOrthoSnapping]);
 
   // Add keyboard event listener
   useEffect(() => {
@@ -2501,7 +2930,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               style={{
                 cursor: cutoutMode 
                   ? 'crosshair' 
-                  : (isCalibrating ? 'crosshair' : (isMeasuring ? 'crosshair' : (isSelectionMode ? 'pointer' : 'default'))),
+                  : (annotationTool ? 'crosshair' : (isCalibrating ? 'crosshair' : (isMeasuring ? 'crosshair' : (isSelectionMode ? 'pointer' : 'default')))),
                 display: 'block',
                 position: 'absolute',
                 top: 0,
@@ -2512,15 +2941,22 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 padding: 0,
                 border: 'none',
                 outline: 'none',
-                pointerEvents: (isSelectionMode || isCalibrating) ? 'auto' : 'none' // Allow clicks in selection mode or calibration mode
+                pointerEvents: (isSelectionMode || isCalibrating || annotationTool) ? 'auto' : 'none' // Allow clicks in selection, calibration, or annotation mode
               }}
               onMouseMove={handleMouseMove}
               onMouseLeave={() => setMousePosition(null)}
               onClick={(e) => {
-                // Handle clicks in selection mode or calibration mode
-                if (isSelectionMode || isCalibrating) {
+                // Handle clicks in selection mode, calibration mode, or annotation mode
+                if (isSelectionMode || isCalibrating || annotationTool) {
                   e.stopPropagation();
                   handleClick(e);
+                }
+              }}
+              onDoubleClick={(e) => {
+                // Handle double-click in annotation mode
+                if (annotationTool) {
+                  e.stopPropagation();
+                  handleDoubleClick(e);
                 }
               }}
             />
@@ -2547,6 +2983,53 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         currentPage={currentPage}
         totalPages={totalPages}
       />
+
+      {/* Text Annotation Input */}
+      {showTextInput && textInputPosition && (
+        <div
+          style={{
+            position: 'absolute',
+            left: textInputPosition.x + 'px',
+            top: textInputPosition.y + 'px',
+            zIndex: 1000,
+          }}
+        >
+          <input
+            type="text"
+            autoFocus
+            value={textInputValue}
+            onChange={(e) => setTextInputValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && textInputValue.trim() && currentProjectId && file?.id) {
+                // Save text annotation
+                addAnnotation({
+                  projectId: currentProjectId,
+                  sheetId: file.id,
+                  type: 'text',
+                  points: currentAnnotation,
+                  color: annotationColor,
+                  text: textInputValue,
+                  pageNumber: currentPage
+                });
+                setCurrentAnnotation([]);
+                setTextInputValue('');
+                setShowTextInput(false);
+                setTextInputPosition(null);
+                onAnnotationToolChange?.(null);
+              } else if (e.key === 'Escape') {
+                // Cancel text annotation
+                setCurrentAnnotation([]);
+                setTextInputValue('');
+                setShowTextInput(false);
+                setTextInputPosition(null);
+                onAnnotationToolChange?.(null);
+              }
+            }}
+            className="border-2 border-blue-500 rounded px-2 py-1 text-sm shadow-lg"
+            placeholder="Enter text..."
+          />
+        </div>
+      )}
     </div>
   );
 };

@@ -14,6 +14,14 @@ import type { TakeoffCondition, Sheet, ProjectFile, PDFDocument } from '../types
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Separator } from "./ui/separator";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 import { 
   ArrowLeft, 
   PanelLeftClose,
@@ -24,15 +32,27 @@ import {
   FileText,
   Search,
   MessageSquare,
-  BarChart3
+  BarChart3,
+  Pencil,
+  Type,
+  Square,
+  Circle,
+  ArrowRight,
+  Palette,
+  Trash2,
+  ChevronDown
 } from "lucide-react";
 import { fileService, sheetService } from '../services/apiService';
 
 // All interfaces now imported from shared types
 
 export function TakeoffWorkspace() {
-  const { jobId } = useParams<{ jobId: string }>();
+  const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
+  
+  // Debug logging
+  console.log('🔍 TakeoffWorkspace: projectId from useParams:', projectId);
+  console.log('🔍 TakeoffWorkspace: current URL:', window.location.href);
   
   
   const [selectedSheet, setSelectedSheet] = useState<Sheet | null>(null);
@@ -46,6 +66,10 @@ export function TakeoffWorkspace() {
   const [cutoutMode, setCutoutMode] = useState(false);
   const [cutoutTargetConditionId, setCutoutTargetConditionId] = useState<string | null>(null);
   
+  // Annotation states
+  const [annotationTool, setAnnotationTool] = useState<'text' | 'freehand' | 'arrow' | 'rectangle' | 'circle' | null>(null);
+  const [annotationColor, setAnnotationColor] = useState<string>('#FF0000');
+  
   // Store integration
   const { 
     setCurrentProject, 
@@ -56,7 +80,8 @@ export function TakeoffWorkspace() {
     loadProjectConditions,
     loadProjectTakeoffMeasurements,
     setCalibration,
-    getCalibration
+    getCalibration,
+    clearPageAnnotations
   } = useTakeoffStore();
   
   const selectedCondition = getSelectedCondition();
@@ -91,10 +116,10 @@ export function TakeoffWorkspace() {
   
   // Current calibration state for the active document/page
   const getCurrentCalibration = () => {
-    if (!currentPdfFile || !jobId) {
+    if (!currentPdfFile || !projectId) {
       return null;
     }
-    const calibration = getCalibration(jobId, currentPdfFile.id);
+    const calibration = getCalibration(projectId, currentPdfFile.id);
     return calibration;
   };
   
@@ -113,11 +138,11 @@ export function TakeoffWorkspace() {
 
   useEffect(() => {
     async function loadFiles() {
-      if (!jobId) {
+      if (!projectId) {
         return;
       }
       try {
-        const res = await fileService.getProjectFiles(jobId);
+        const res = await fileService.getProjectFiles(projectId);
         const files = res.files || [];
         setProjectFiles(files);
         
@@ -133,16 +158,16 @@ export function TakeoffWorkspace() {
       }
     }
     loadFiles();
-  }, [jobId]);
+  }, [projectId]);
 
   // Set current project in store and load its data
   useEffect(() => {
-    if (jobId) {
-      setCurrentProject(jobId);
+    if (projectId) {
+      setCurrentProject(projectId);
       // Load measurements for this project (conditions will be loaded by TakeoffSidebar)
-      loadProjectTakeoffMeasurements(jobId);
+      loadProjectTakeoffMeasurements(projectId);
     }
-  }, [jobId]); // Only depend on jobId to prevent infinite loops
+  }, [projectId]); // Only depend on projectId to prevent infinite loops
 
   // Listen for profit margin dialog open event
   useEffect(() => {
@@ -227,7 +252,7 @@ export function TakeoffWorkspace() {
   const handleOCRRequest = (documentId: string, pageNumbers?: number[]) => {
     // Find the document name
     const document = projectFiles.find(file => file.id === documentId);
-    const documentName = document?.name || 'Unknown Document';
+    const documentName = document?.originalName || 'Unknown Document';
     
     setOcrDocumentId(documentId);
     setOcrPageNumbers(pageNumbers || []);
@@ -256,10 +281,10 @@ export function TakeoffWorkspace() {
 
   // Load project documents directly
   const loadProjectDocuments = useCallback(async () => {
-    if (!jobId) return;
+    if (!projectId) return;
     
     try {
-      const filesRes = await fileService.getProjectFiles(jobId);
+      const filesRes = await fileService.getProjectFiles(projectId);
       const files = filesRes.files || [];
       
       const pdfFiles = files.filter((file: any) => file.mimetype === 'application/pdf');
@@ -269,7 +294,7 @@ export function TakeoffWorkspace() {
           try {
             // Check if document has OCR data
             const { serverOcrService } = await import('../services/serverOcrService');
-            const ocrData = await serverOcrService.getDocumentData(file.id, jobId);
+            const ocrData = await serverOcrService.getDocumentData(file.id, projectId);
             const hasOCRData = ocrData && ocrData.results.length > 0;
             
             return {
@@ -298,14 +323,14 @@ export function TakeoffWorkspace() {
     } catch (error) {
       console.error('Error loading project documents:', error);
     }
-  }, [jobId]);
+  }, [projectId]);
 
   // Load documents when project changes
   useEffect(() => {
-    if (jobId) {
+    if (projectId) {
       loadProjectDocuments();
     }
-  }, [jobId, loadProjectDocuments]);
+  }, [projectId, loadProjectDocuments]);
 
   const handleExportStatusUpdate = (type: 'excel' | 'pdf' | null, progress: number) => {
     setExportStatus({type, progress});
@@ -336,8 +361,8 @@ export function TakeoffWorkspace() {
   const handleCalibrateScale = () => {
     // Trigger the PDF viewer's calibration dialog
     // If already calibrated, clear the current calibration first
-    if (isPageCalibrated && currentPdfFile && jobId) {
-      setCalibration(jobId, currentPdfFile.id, 1, 'ft');
+    if (isPageCalibrated && currentPdfFile && projectId) {
+      setCalibration(projectId, currentPdfFile.id, 1, 'ft');
     }
     
     // Use the global trigger function set up by the PDF viewer
@@ -364,25 +389,25 @@ export function TakeoffWorkspace() {
   };
 
   const handleCalibrationComplete = (isCalibrated: boolean, scaleFactor: number, unit: string) => {
-    if (currentPdfFile && jobId) {
-      setCalibration(jobId, currentPdfFile.id, scaleFactor, unit);
+    if (currentPdfFile && projectId) {
+      setCalibration(projectId, currentPdfFile.id, scaleFactor, unit);
     }
   };
 
   const handlePdfUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     
-    if (!file || !jobId) {
+    if (!file || !projectId) {
       return;
     }
     
     try {
       setUploading(true);
       
-      const uploadRes = await fileService.uploadPDF(file, jobId);
+      const uploadRes = await fileService.uploadPDF(file, projectId);
       
       // Refresh project files
-      const filesRes = await fileService.getProjectFiles(jobId);
+      const filesRes = await fileService.getProjectFiles(projectId);
       const files = filesRes.files || [];
       setProjectFiles(files);
       
@@ -527,6 +552,102 @@ export function TakeoffWorkspace() {
                 </span>
               )}
             </div>
+
+            <Separator orientation="vertical" className="h-8" />
+
+            {/* Annotations Dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  variant={annotationTool ? "default" : "outline"}
+                  className={annotationTool ? "bg-blue-600 hover:bg-blue-700 text-white" : ""}
+                >
+                  <Pencil className="w-4 h-4 mr-1" />
+                  Annotations
+                  <ChevronDown className="w-3 h-3 ml-1" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuLabel>Annotation Tools</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                
+                <DropdownMenuItem
+                  onClick={() => setAnnotationTool(annotationTool === 'text' ? null : 'text')}
+                  className={annotationTool === 'text' ? 'bg-accent' : ''}
+                >
+                  <Type className="w-4 h-4 mr-2" />
+                  Text Annotation
+                </DropdownMenuItem>
+                
+                <DropdownMenuItem
+                  onClick={() => setAnnotationTool(annotationTool === 'freehand' ? null : 'freehand')}
+                  className={annotationTool === 'freehand' ? 'bg-accent' : ''}
+                >
+                  <Pencil className="w-4 h-4 mr-2" />
+                  Freehand Drawing
+                </DropdownMenuItem>
+                
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel className="text-xs">Shapes</DropdownMenuLabel>
+                
+                <DropdownMenuItem
+                  onClick={() => setAnnotationTool(annotationTool === 'arrow' ? null : 'arrow')}
+                  className={annotationTool === 'arrow' ? 'bg-accent' : ''}
+                >
+                  <ArrowRight className="w-4 h-4 mr-2" />
+                  Arrow
+                </DropdownMenuItem>
+                
+                <DropdownMenuItem
+                  onClick={() => setAnnotationTool(annotationTool === 'rectangle' ? null : 'rectangle')}
+                  className={annotationTool === 'rectangle' ? 'bg-accent' : ''}
+                >
+                  <Square className="w-4 h-4 mr-2" />
+                  Rectangle
+                </DropdownMenuItem>
+                
+                <DropdownMenuItem
+                  onClick={() => setAnnotationTool(annotationTool === 'circle' ? null : 'circle')}
+                  className={annotationTool === 'circle' ? 'bg-accent' : ''}
+                >
+                  <Circle className="w-4 h-4 mr-2" />
+                  Circle
+                </DropdownMenuItem>
+                
+                <DropdownMenuSeparator />
+                
+                <DropdownMenuItem className="flex items-center justify-between">
+                  <div className="flex items-center">
+                    <Palette className="w-4 h-4 mr-2" />
+                    Color
+                  </div>
+                  <input
+                    type="color"
+                    value={annotationColor}
+                    onChange={(e) => setAnnotationColor(e.target.value)}
+                    className="w-8 h-6 rounded cursor-pointer"
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </DropdownMenuItem>
+                
+                <DropdownMenuSeparator />
+                
+                <DropdownMenuItem 
+                  onClick={() => {
+                    setAnnotationTool(null);
+                    // Clear all annotations for current page
+                    if (projectId && currentPdfFile?.id && selectedPageNumber) {
+                      clearPageAnnotations(projectId, currentPdfFile.id, selectedPageNumber);
+                    }
+                  }}
+                  className="text-red-600 focus:text-red-600"
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Clear Annotations
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         )}
 
@@ -577,7 +698,7 @@ export function TakeoffWorkspace() {
         <div className="flex">
           {leftSidebarOpen && (
                         <TakeoffSidebar
-              projectId={storeCurrentProject?.id || jobId!}
+              projectId={storeCurrentProject?.id || projectId!}
               onConditionSelect={handleConditionSelect}
               onToolSelect={handleToolSelect}
               documents={documents}
@@ -629,6 +750,9 @@ export function TakeoffWorkspace() {
               cutoutTargetConditionId={cutoutTargetConditionId}
               onCutoutModeChange={handleCutoutMode}
               onMeasurementStateChange={handleMeasurementStateChange}
+              annotationTool={annotationTool}
+              annotationColor={annotationColor}
+              onAnnotationToolChange={setAnnotationTool}
             />
           ) : (
             <div className="flex items-center justify-center flex-1 bg-gray-100">
@@ -710,7 +834,7 @@ export function TakeoffWorkspace() {
               {/* Tab Content */}
               {rightSidebarTab === 'documents' && (
                 <SheetSidebar 
-                  projectId={storeCurrentProject?.id || jobId!}
+                  projectId={storeCurrentProject?.id || projectId!}
                   documents={documents}
                   onPageSelect={handlePageSelect}
                   selectedDocumentId={selectedDocumentId || undefined}
@@ -723,7 +847,7 @@ export function TakeoffWorkspace() {
               
               {rightSidebarTab === 'search' && (
                 <SearchTab
-                  projectId={storeCurrentProject?.id || jobId!}
+                  projectId={storeCurrentProject?.id || projectId!}
                   documents={documents}
                   onPageSelect={handlePageSelect}
                   selectedDocumentId={selectedDocumentId || undefined}
@@ -733,7 +857,7 @@ export function TakeoffWorkspace() {
               
               {rightSidebarTab === 'ai-chat' && (
                 <ChatTab
-                  projectId={storeCurrentProject?.id || jobId!}
+                  projectId={storeCurrentProject?.id || projectId!}
                   documents={documents}
                   onPageSelect={handlePageSelect}
                   onOCRRequest={handleOCRRequest}
@@ -862,7 +986,7 @@ export function TakeoffWorkspace() {
         documentId={ocrDocumentId}
         documentName={ocrDocumentName}
         pageNumbers={ocrPageNumbers}
-        projectId={jobId!}
+        projectId={projectId!}
         onOCRComplete={(results) => {
           console.log('OCR processing completed:', results);
           setShowOCRDialog(false);
@@ -873,11 +997,11 @@ export function TakeoffWorkspace() {
       />
 
       {/* Profit Margin Dialog */}
-      {jobId && (
+      {projectId && (
         <ProfitMarginDialog
           open={showProfitMarginDialog}
           onOpenChange={setShowProfitMarginDialog}
-          projectId={jobId}
+          projectId={projectId}
         />
       )}
 

@@ -5,12 +5,13 @@ import type {
   TakeoffCondition, 
   TakeoffMeasurement, 
   Calibration,
+  Annotation,
   ConditionCostBreakdown,
   ProjectCostBreakdown
 } from '../types';
 
 // Re-export types for backward compatibility
-export type { TakeoffCondition, TakeoffMeasurement, Calibration, Project };
+export type { TakeoffCondition, TakeoffMeasurement, Calibration, Project, Annotation };
 
 // Project and TakeoffCondition interfaces now imported from types
 
@@ -47,6 +48,9 @@ interface TakeoffStore {
   // Takeoff measurements - organized by page for better isolation
   takeoffMeasurements: TakeoffMeasurement[];
   markupsByPage: Record<string, TakeoffMeasurement[]>; // Key: `${projectId}-${sheetId}-${pageNumber}`
+  
+  // Annotations
+  annotations: Annotation[];
   
   // Actions
   addProject: (project: Omit<Project, 'id' | 'lastModified' | 'takeoffCount'>) => Promise<string>;
@@ -100,6 +104,12 @@ interface TakeoffStore {
   getConditionCostBreakdown: (conditionId: string) => ConditionCostBreakdown | null;
   getProjectCostBreakdown: (projectId: string) => ProjectCostBreakdown;
   
+  // Annotation actions
+  addAnnotation: (annotation: Omit<Annotation, 'id' | 'timestamp'>) => void;
+  deleteAnnotation: (id: string) => void;
+  getPageAnnotations: (projectId: string, sheetId: string, pageNumber: number) => Annotation[];
+  clearPageAnnotations: (projectId: string, sheetId: string, pageNumber: number) => void;
+  
   // Data loading
   loadInitialData: () => Promise<void>;
   loadProjectConditions: (projectId: string) => Promise<void>;
@@ -134,6 +144,8 @@ export const useTakeoffStore = create<TakeoffStore>()(
       
       takeoffMeasurements: [],
       markupsByPage: {},
+      
+      annotations: [],
       
       // Actions
       addProject: async (projectData) => {
@@ -611,25 +623,22 @@ export const useTakeoffStore = create<TakeoffStore>()(
         
         // Calculate costs
         const materialCostPerUnit = condition.materialCost || 0;
-        const laborCostPerUnit = condition.laborCost || 0;
         const equipmentCost = condition.equipmentCost || 0;
         
         const materialCost = adjustedQuantity * materialCostPerUnit;
-        const laborCost = adjustedQuantity * laborCostPerUnit;
         const wasteCost = (adjustedQuantity - quantity) * materialCostPerUnit; // Additional cost due to waste
         
-        const subtotal = materialCost + laborCost + equipmentCost + wasteCost;
+        const subtotal = materialCost + equipmentCost + wasteCost;
         
         return {
           condition,
           quantity,
           adjustedQuantity,
           materialCost,
-          laborCost,
           equipmentCost,
           wasteCost,
           subtotal,
-          hasCosts: materialCostPerUnit > 0 || laborCostPerUnit > 0 || equipmentCost > 0
+          hasCosts: materialCostPerUnit > 0 || equipmentCost > 0
         };
       },
       
@@ -648,14 +657,12 @@ export const useTakeoffStore = create<TakeoffStore>()(
         
         // Calculate project-level summary
         let totalMaterialCost = 0;
-        let totalLaborCost = 0;
         let totalEquipmentCost = 0;
         let totalWasteCost = 0;
         let conditionsWithCosts = 0;
         
         conditionBreakdowns.forEach(breakdown => {
           totalMaterialCost += breakdown.materialCost;
-          totalLaborCost += breakdown.laborCost;
           totalEquipmentCost += breakdown.equipmentCost;
           totalWasteCost += breakdown.wasteCost;
           
@@ -664,7 +671,7 @@ export const useTakeoffStore = create<TakeoffStore>()(
           }
         });
         
-        const subtotal = totalMaterialCost + totalLaborCost + totalEquipmentCost + totalWasteCost;
+        const subtotal = totalMaterialCost + totalEquipmentCost + totalWasteCost;
         
         // Get profit margin from project settings (default 15%)
         const profitMarginPercent = currentProject?.profitMarginPercent || 15;
@@ -675,7 +682,6 @@ export const useTakeoffStore = create<TakeoffStore>()(
           conditions: conditionBreakdowns,
           summary: {
             totalMaterialCost,
-            totalLaborCost,
             totalEquipmentCost,
             totalWasteCost,
             subtotal,
@@ -808,6 +814,40 @@ export const useTakeoffStore = create<TakeoffStore>()(
         await get().loadProjectConditions(projectId);
       },
 
+      // Annotation methods
+      addAnnotation: (annotationData) => {
+        const annotation: Annotation = {
+          ...annotationData,
+          id: `annotation-${Date.now()}`,
+          timestamp: new Date().toISOString()
+        };
+        
+        set(state => ({
+          annotations: [...state.annotations, annotation]
+        }));
+      },
+      
+      deleteAnnotation: (id) => {
+        set(state => ({
+          annotations: state.annotations.filter(a => a.id !== id)
+        }));
+      },
+      
+      getPageAnnotations: (projectId, sheetId, pageNumber) => {
+        const state = get();
+        return state.annotations.filter(
+          a => a.projectId === projectId && a.sheetId === sheetId && a.pageNumber === pageNumber
+        );
+      },
+      
+      clearPageAnnotations: (projectId, sheetId, pageNumber) => {
+        set(state => ({
+          annotations: state.annotations.filter(
+            a => !(a.projectId === projectId && a.sheetId === sheetId && a.pageNumber === pageNumber)
+          )
+        }));
+      },
+
       loadProjectTakeoffMeasurements: async (projectId: string) => {
         console.log('🔄 LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Starting to load measurements for project:', projectId);
         try {
@@ -852,7 +892,8 @@ export const useTakeoffStore = create<TakeoffStore>()(
         measurements: state.measurements,
         calibrations: state.calibrations,
         takeoffMeasurements: state.takeoffMeasurements,
-        markupsByPage: state.markupsByPage
+        markupsByPage: state.markupsByPage,
+        annotations: state.annotations
       })
     }
   )

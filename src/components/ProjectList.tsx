@@ -87,7 +87,7 @@ export function ProjectList() {
   );
 
   const handleProjectClick = (projectId: string) => {
-    navigate(`/job/${projectId}`);
+    navigate(`/project/${projectId}`);
   };
 
   const handleNewProject = () => setShowCreate(true);

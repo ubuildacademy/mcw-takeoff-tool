@@ -125,17 +125,6 @@ const FeaturesPage: React.FC = () => {
                     </svg>
                   </div>
                   <div>
-                    <h4 className="font-semibold text-slate-900">Multi-layer Support</h4>
-                    <p className="text-slate-600">Work with complex drawings that have multiple layers and overlays</p>
-                  </div>
-                </div>
-                <div className="flex items-start space-x-3">
-                  <div className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <svg className="w-3 h-3 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                    </svg>
-                  </div>
-                  <div>
                     <h4 className="font-semibold text-slate-900">Ortho Snapping</h4>
                     <p className="text-slate-600">Orthogonal snapping for precise, aligned measurements</p>
                   </div>
@@ -147,8 +136,19 @@ const FeaturesPage: React.FC = () => {
                     </svg>
                   </div>
                   <div>
-                    <h4 className="font-semibold text-slate-900">Batch Processing</h4>
-                    <p className="text-slate-600">Process multiple drawings and sheets simultaneously</p>
+                    <h4 className="font-semibold text-slate-900">Multiple Measurement Types</h4>
+                    <p className="text-slate-600">Linear, area, volume, and count measurements all in one tool</p>
+                  </div>
+                </div>
+                <div className="flex items-start space-x-3">
+                  <div className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <svg className="w-3 h-3 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-slate-900">Real-time Calculations</h4>
+                    <p className="text-slate-600">See measurements and totals update instantly as you draw</p>
                   </div>
                 </div>
               </div>
@@ -301,7 +301,7 @@ const FeaturesPage: React.FC = () => {
                 Smart Cost Calculations
               </h3>
               <p className="text-lg text-slate-600 mb-6">
-                Build accurate project budgets with labor rates, waste factors, and material costs. 
+                Build accurate project budgets with waste factors, material costs, and equipment costs. 
                 Our intelligent calculations help you price competitively while maintaining profitability.
               </p>
               <div className="space-y-4">
@@ -312,8 +312,8 @@ const FeaturesPage: React.FC = () => {
                     </svg>
                   </div>
                   <div>
-                    <h4 className="font-semibold text-slate-900">Labor Rate Management</h4>
-                    <p className="text-slate-600">Set and apply labor rates by trade and region</p>
+                    <h4 className="font-semibold text-slate-900">Material & Equipment Costs</h4>
+                    <p className="text-slate-600">Track material costs per unit and equipment costs for accurate budgeting</p>
                   </div>
                 </div>
                 <div className="flex items-start space-x-3">
@@ -410,20 +410,6 @@ const FeaturesPage: React.FC = () => {
             </div>
 
             <div className="bg-white rounded-xl p-8 shadow-sm border border-slate-200 hover:shadow-lg transition-shadow">
-              <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mb-6">
-                <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4" />
-                </svg>
-              </div>
-              <h3 className="text-xl font-semibold text-slate-900 mb-3">Custom Formulas</h3>
-              <p className="text-slate-600">
-                Create custom calculation formulas for your specific trade or project requirements. 
-                Save time with reusable templates and standardized calculations.
-              </p>
-            </div>
-
-
-            <div className="bg-white rounded-xl p-8 shadow-sm border border-slate-200 hover:shadow-lg transition-shadow">
               <div className="w-12 h-12 bg-indigo-100 rounded-lg flex items-center justify-center mb-6">
                 <svg className="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -474,6 +460,19 @@ const FeaturesPage: React.FC = () => {
                 encryption and automatic backups.
               </p>
             </div>
+
+            <div className="bg-white rounded-xl p-8 shadow-sm border border-slate-200 hover:shadow-lg transition-shadow">
+              <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mb-6">
+                <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                </svg>
+              </div>
+              <h3 className="text-xl font-semibold text-slate-900 mb-3">Custom Conditions</h3>
+              <p className="text-slate-600">
+                Create custom takeoff conditions with waste factors, material costs, and equipment costs. 
+                Build a comprehensive library for each project type.
+              </p>
+            </div>
           </div>
         </div>
       </section>
@@ -506,12 +505,12 @@ const FeaturesPage: React.FC = () => {
             <div className="text-center">
               <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
                 <svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
                 </svg>
               </div>
-              <h3 className="text-2xl font-bold text-slate-900 mb-4">99.5% Accurate</h3>
+              <h3 className="text-2xl font-bold text-slate-900 mb-4">Work Anywhere</h3>
               <p className="text-slate-600">
-                Reduce costly errors with intelligent validation and automated calculations.
+                Cloud-based platform with automatic saves. Access your projects from any device, anytime.
               </p>
             </div>
             

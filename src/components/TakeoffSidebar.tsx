@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Input } from './ui/input';
+import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { 
   Plus, 
   Calculator, 
@@ -29,7 +30,8 @@ import { CreateConditionDialog } from './CreateConditionDialog';
 import { formatFeetAndInches } from '../lib/utils';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
+import { PDFDocument as PDFLibDocument } from 'pdf-lib';
+import { exportPagesWithMeasurementsToPDF, downloadPDF } from '../utils/pdfExportUtils';
 
 // TakeoffCondition interface imported from shared types
 
@@ -283,15 +285,12 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       condition: TakeoffCondition;
       quantity: number;
       materialCostPerUnit: number;
-      laborCostPerUnit: number;
       totalMaterialCost: number;
-      totalLaborCost: number;
       totalCost: number;
       hasCosts: boolean;
     }> = {};
     
     let totalMaterialCost = 0;
-    let totalLaborCost = 0;
     let totalProjectCost = 0;
     let conditionsWithCosts = 0;
     
@@ -301,28 +300,23 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       const quantity = conditionData.grandTotal;
       
       const materialCostPerUnit = condition.materialCost || 0;
-      const laborCostPerUnit = condition.laborCost || 0;
       
       const totalMaterialCostForCondition = quantity * materialCostPerUnit;
-      const totalLaborCostForCondition = quantity * laborCostPerUnit;
-      const totalCostForCondition = totalMaterialCostForCondition + totalLaborCostForCondition;
+      const totalCostForCondition = totalMaterialCostForCondition;
       
-      const hasCosts = materialCostPerUnit > 0 || laborCostPerUnit > 0;
+      const hasCosts = materialCostPerUnit > 0;
       
       costData[conditionId] = {
         condition,
         quantity,
         materialCostPerUnit,
-        laborCostPerUnit,
         totalMaterialCost: totalMaterialCostForCondition,
-        totalLaborCost: totalLaborCostForCondition,
         totalCost: totalCostForCondition,
         hasCosts
       };
       
       if (hasCosts) {
         totalMaterialCost += totalMaterialCostForCondition;
-        totalLaborCost += totalLaborCostForCondition;
         totalProjectCost += totalCostForCondition;
         conditionsWithCosts++;
       }
@@ -332,7 +326,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       costData,
       summary: {
         totalMaterialCost,
-        totalLaborCost,
         totalProjectCost,
         conditionsWithCosts,
         totalConditions: conditionIds.length
@@ -399,7 +392,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         ['Cost Analysis Summary', ''],
         ['Total Project Cost', `$${getProjectCostBreakdown(projectId).summary.totalCost.toFixed(2)}`],
         ['Material Cost', `$${getProjectCostBreakdown(projectId).summary.totalMaterialCost.toFixed(2)}`],
-        ['Labor Cost', `$${getProjectCostBreakdown(projectId).summary.totalLaborCost.toFixed(2)}`],
         ['Equipment Cost', `$${getProjectCostBreakdown(projectId).summary.totalEquipmentCost.toFixed(2)}`],
         ['Waste Factor Cost', `$${getProjectCostBreakdown(projectId).summary.totalWasteCost.toFixed(2)}`],
         ['Subtotal', `$${getProjectCostBreakdown(projectId).summary.subtotal.toFixed(2)}`],
@@ -428,7 +420,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         }), 
         'Total Quantity', 
         'Material Cost/Unit', 
-        'Labor Cost/Unit', 
         'Total Cost',
         'Cost per Unit'
       ];
@@ -439,23 +430,27 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         const conditionData = reportData[conditionId];
         const costInfo = getCostAnalysisData().costData[conditionId];
         
+        if (!conditionData || !conditionData.condition) {
+          console.warn(`Missing condition data for ID: ${conditionId}`);
+          return;
+        }
+        
         const row = [
-          conditionData.condition.name,
-          conditionData.condition.type,
-          conditionData.condition.unit,
+          conditionData.condition.name || 'Unknown',
+          conditionData.condition.type || 'Unknown',
+          conditionData.condition.unit || 'Unknown',
           conditionData.condition.description || 'No description provided',
           ...sortedPages.map(page => {
-            const pageKey = Object.keys(conditionData.pages).find(key => 
+            const pageKey = Object.keys(conditionData.pages || {}).find(key => 
               conditionData.pages[key].pageNumber === page.pageNumber
             );
             const pageData = pageKey ? conditionData.pages[pageKey] : null;
             return pageData ? pageData.total.toFixed(2) : '';
           }),
-          conditionData.grandTotal.toFixed(2),
-          costInfo.materialCostPerUnit > 0 ? `$${costInfo.materialCostPerUnit.toFixed(2)}` : 'N/A',
-          costInfo.laborCostPerUnit > 0 ? `$${costInfo.laborCostPerUnit.toFixed(2)}` : 'N/A',
-          costInfo.hasCosts ? `$${costInfo.totalCost.toFixed(2)}` : 'N/A',
-          costInfo.hasCosts ? `$${(costInfo.totalCost / conditionData.grandTotal).toFixed(2)}` : 'N/A'
+          (conditionData.grandTotal || 0).toFixed(2),
+          costInfo?.materialCostPerUnit > 0 ? `$${costInfo.materialCostPerUnit.toFixed(2)}` : 'N/A',
+          costInfo?.hasCosts ? `$${costInfo.totalCost.toFixed(2)}` : 'N/A',
+          costInfo?.hasCosts && conditionData.grandTotal > 0 ? `$${(costInfo.totalCost / conditionData.grandTotal).toFixed(2)}` : 'N/A'
         ];
         summaryData.push(row);
       });
@@ -479,8 +474,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         }), 
         conditionIds.reduce((sum, id) => sum + reportData[id].grandTotal, 0).toFixed(2),
         '',
-        '',
-        `$${getCostAnalysisData().summary.totalProjectCost.toFixed(2)}`,
+        `$${getProjectCostBreakdown(projectId).summary.totalCost.toFixed(2)}`,
         ''
       ];
       summaryData.push(totalsRow);
@@ -496,7 +490,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         ...sortedPages.map(() => ({ wch: 15 })), // Page columns
         { wch: 15 }, // Total Quantity
         { wch: 18 }, // Material Cost/Unit
-        { wch: 16 }, // Labor Cost/Unit
         { wch: 12 }, // Total Cost
         { wch: 12 }  // Cost per Unit
       ];
@@ -517,6 +510,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         'Measurement #', 
         'Value', 
         'Net Value (after cutouts)',
+        'Perimeter (LF)',
         'Timestamp',
         'Measurement Type'
       ]);
@@ -535,6 +529,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
               idx + 1,
               measurement.calculatedValue.toFixed(2),
               (measurement.netCalculatedValue || measurement.calculatedValue).toFixed(2),
+              measurement.perimeterValue ? measurement.perimeterValue.toFixed(2) : 'N/A',
               new Date(measurement.timestamp).toLocaleString(),
               measurement.type
             ]);
@@ -554,6 +549,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         { wch: 12 }, // Measurement #
         { wch: 12 }, // Value
         { wch: 18 }, // Net Value
+        { wch: 15 }, // Perimeter
         { wch: 20 }, // Timestamp
         { wch: 15 }  // Measurement Type
       ];
@@ -563,14 +559,30 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
 
       onExportStatusUpdate?.('excel', 55);
 
-      // 4. ENHANCED COST ANALYSIS SHEET
+      // 4. COMPREHENSIVE COST ANALYSIS SHEET
       const { costData, summary } = getCostAnalysisData();
       const costConditionIds = Object.keys(costData);
+      const costBreakdown = getProjectCostBreakdown(projectId);
       
       if (summary.conditionsWithCosts > 0) {
         const costAnalysisData = [];
         
-        // Enhanced header row for cost analysis
+        // Project Cost Summary Section
+        costAnalysisData.push(['COMPREHENSIVE COST ANALYSIS', '']);
+        costAnalysisData.push(['', '']);
+        costAnalysisData.push(['PROJECT COST SUMMARY', '']);
+        costAnalysisData.push(['Total Material Cost', `$${costBreakdown.summary.totalMaterialCost.toFixed(2)}`]);
+        costAnalysisData.push(['Total Equipment Cost', `$${costBreakdown.summary.totalEquipmentCost.toFixed(2)}`]);
+        costAnalysisData.push(['Total Waste Factor Cost', `$${costBreakdown.summary.totalWasteCost.toFixed(2)}`]);
+        costAnalysisData.push(['Subtotal', `$${costBreakdown.summary.subtotal.toFixed(2)}`]);
+        costAnalysisData.push(['Profit Margin (%)', `${costBreakdown.summary.profitMarginPercent}%`]);
+        costAnalysisData.push(['Profit Margin Amount', `$${costBreakdown.summary.profitMarginAmount.toFixed(2)}`]);
+        costAnalysisData.push(['TOTAL PROJECT COST', `$${costBreakdown.summary.totalCost.toFixed(2)}`]);
+        costAnalysisData.push(['', '']);
+        
+        // Cost Breakdown by Condition Section
+        costAnalysisData.push(['COST BREAKDOWN BY CONDITION', '']);
+        costAnalysisData.push(['', '']);
         costAnalysisData.push([
           'Condition', 
           'Type', 
@@ -578,42 +590,45 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
           'Description',
           'Quantity', 
           'Material Cost/Unit', 
-          'Labor Cost/Unit', 
+          'Equipment Cost/Unit',
+          'Waste Factor %',
           'Total Material Cost', 
-          'Total Labor Cost', 
-          'Total Cost',
-          'Cost per Unit',
-          'Material %',
-          'Labor %'
+          'Total Equipment Cost',
+          'Total Waste Cost',
+          'Subtotal',
+          'Cost per Unit'
         ]);
         
         // Data rows for conditions with costs
         costConditionIds.forEach(conditionId => {
           const data = costData[conditionId];
           if (data.hasCosts) {
-            const materialPercent = ((data.totalMaterialCost / data.totalCost) * 100).toFixed(1);
-            const laborPercent = ((data.totalLaborCost / data.totalCost) * 100).toFixed(1);
-            
-            costAnalysisData.push([
-              data.condition.name,
-              data.condition.type,
-              data.condition.unit,
-              data.condition.description || 'No description provided',
-              data.quantity.toFixed(2),
-              data.materialCostPerUnit > 0 ? `$${data.materialCostPerUnit.toFixed(2)}` : 'N/A',
-              data.laborCostPerUnit > 0 ? `$${data.laborCostPerUnit.toFixed(2)}` : 'N/A',
-              data.totalMaterialCost > 0 ? `$${data.totalMaterialCost.toFixed(2)}` : '$0.00',
-              data.totalLaborCost > 0 ? `$${data.totalLaborCost.toFixed(2)}` : '$0.00',
-              `$${data.totalCost.toFixed(2)}`,
-              `$${(data.totalCost / data.quantity).toFixed(2)}`,
-              `${materialPercent}%`,
-              `${laborPercent}%`
-            ]);
+            const breakdown = getConditionCostBreakdown(conditionId);
+            if (breakdown) {
+              const equipmentCostPerUnit = breakdown.quantity > 0 ? (breakdown.equipmentCost || 0) / breakdown.quantity : 0;
+              const wasteFactor = breakdown.condition.wasteFactor || 0;
+              
+              costAnalysisData.push([
+                breakdown.condition.name,
+                breakdown.condition.type,
+                breakdown.condition.unit,
+                breakdown.condition.description || 'No description provided',
+                breakdown.quantity.toFixed(2),
+                data.materialCostPerUnit > 0 ? `$${data.materialCostPerUnit.toFixed(2)}` : 'N/A',
+                equipmentCostPerUnit > 0 ? `$${equipmentCostPerUnit.toFixed(2)}` : 'N/A',
+                `${wasteFactor}%`,
+                breakdown.materialCost > 0 ? `$${breakdown.materialCost.toFixed(2)}` : '$0.00',
+                breakdown.equipmentCost > 0 ? `$${breakdown.equipmentCost.toFixed(2)}` : '$0.00',
+                breakdown.wasteCost > 0 ? `$${breakdown.wasteCost.toFixed(2)}` : '$0.00',
+                `$${breakdown.subtotal.toFixed(2)}`,
+                `$${breakdown.quantity > 0 ? (breakdown.subtotal / breakdown.quantity).toFixed(2) : '0.00'}`
+              ]);
+            }
           }
         });
         
-        // Add summary section
-        costAnalysisData.push(['', '', '', '', '', '', '', '', '', '', '', '', '']);
+        // Add project totals row
+        costAnalysisData.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '']);
         costAnalysisData.push([
           'PROJECT TOTALS', 
           '', 
@@ -622,27 +637,27 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
           '', 
           '', 
           '', 
-          `$${summary.totalMaterialCost.toFixed(2)}`, 
-          `$${summary.totalLaborCost.toFixed(2)}`, 
-          `$${summary.totalProjectCost.toFixed(2)}`,
-          '',
-          `${((summary.totalMaterialCost / summary.totalProjectCost) * 100).toFixed(1)}%`,
-          `${((summary.totalLaborCost / summary.totalProjectCost) * 100).toFixed(1)}%`
+          '', 
+          `$${costBreakdown.summary.totalMaterialCost.toFixed(2)}`, 
+          `$${costBreakdown.summary.totalEquipmentCost.toFixed(2)}`,
+          `$${costBreakdown.summary.totalWasteCost.toFixed(2)}`,
+          `$${costBreakdown.summary.totalCost.toFixed(2)}`,
+          ''
         ]);
         
         // Add cost analysis metrics
-        costAnalysisData.push(['', '', '', '', '', '', '', '', '', '', '', '', '']);
-        costAnalysisData.push(['COST ANALYSIS SUMMARY', '', '', '', '', '', '', '', '', '', '', '', '']);
-        costAnalysisData.push(['Total Conditions with Costs', summary.conditionsWithCosts, '', '', '', '', '', '', '', '', '', '', '']);
-        costAnalysisData.push(['Total Conditions', summary.totalConditions, '', '', '', '', '', '', '', '', '', '', '']);
-        costAnalysisData.push(['Average Cost per Condition', `$${(summary.totalProjectCost / summary.conditionsWithCosts).toFixed(2)}`, '', '', '', '', '', '', '', '', '', '', '']);
+        costAnalysisData.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '']);
+        costAnalysisData.push(['COST ANALYSIS METRICS', '', '', '', '', '', '', '', '', '', '', '', '', '']);
+        costAnalysisData.push(['Total Conditions with Costs', costBreakdown.summary.conditionsWithCosts, '', '', '', '', '', '', '', '', '', '', '', '']);
+        costAnalysisData.push(['Total Conditions', costBreakdown.summary.totalConditions, '', '', '', '', '', '', '', '', '', '', '', '']);
+        costAnalysisData.push(['Average Cost per Condition', `$${costBreakdown.summary.conditionsWithCosts > 0 ? (costBreakdown.summary.totalCost / costBreakdown.summary.conditionsWithCosts).toFixed(2) : '0.00'}`, '', '', '', '', '', '', '', '', '', '', '', '']);
         costAnalysisData.push(['Highest Cost Condition', Object.values(costData).reduce((max, curr) => 
           curr.totalCost > max.totalCost ? curr : max, { totalCost: 0, condition: { name: 'N/A' } }
         ).condition.name, '', '', '', '', '', '', '', '', '', '', '', '']);
         
         const costAnalysisSheet = XLSX.utils.aoa_to_sheet(costAnalysisData);
         
-        // Set column widths for cost analysis sheet
+        // Set column widths for comprehensive cost analysis sheet
         const costColWidths = [
           { wch: 25 }, // Condition
           { wch: 10 }, // Type
@@ -650,13 +665,13 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
           { wch: 30 }, // Description
           { wch: 12 }, // Quantity
           { wch: 18 }, // Material Cost/Unit
-          { wch: 16 }, // Labor Cost/Unit
+          { wch: 18 }, // Equipment Cost/Unit
+          { wch: 12 }, // Waste Factor %
           { wch: 18 }, // Total Material Cost
-          { wch: 16 }, // Total Labor Cost
-          { wch: 12 }, // Total Cost
-          { wch: 12 }, // Cost per Unit
-          { wch: 10 }, // Material %
-          { wch: 10 }  // Labor %
+          { wch: 18 }, // Total Equipment Cost
+          { wch: 15 }, // Total Waste Cost
+          { wch: 12 }, // Subtotal
+          { wch: 12 }  // Cost per Unit
         ];
         costAnalysisSheet['!cols'] = costColWidths;
         
@@ -691,7 +706,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         ['', ''],
         ['Quality Assurance', ''],
         ['All measurements verified against calibrated scales', ''],
-        ['Cost calculations include material and labor components', ''],
+        ['Cost calculations include material and equipment components', ''],
         ['Report follows industry-standard formatting', ''],
         ['Data integrity verified through automated checks', ''],
         ['', ''],
@@ -701,43 +716,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         ['Cost estimates are based on provided rates and should be updated as needed.', '']
       ];
       
-      // 3. COST ANALYSIS SHEET
-      const costBreakdown = getProjectCostBreakdown(projectId);
-      const costAnalysisData = [
-        ['COST ANALYSIS BREAKDOWN', ''],
-        ['', ''],
-        ['Project Cost Summary', ''],
-        ['Total Material Cost', `$${costBreakdown.summary.totalMaterialCost.toFixed(2)}`],
-        ['Total Labor Cost', `$${costBreakdown.summary.totalLaborCost.toFixed(2)}`],
-        ['Total Equipment Cost', `$${costBreakdown.summary.totalEquipmentCost.toFixed(2)}`],
-        ['Total Waste Factor Cost', `$${costBreakdown.summary.totalWasteCost.toFixed(2)}`],
-        ['Subtotal', `$${costBreakdown.summary.subtotal.toFixed(2)}`],
-        ['Profit Margin (%)', `${costBreakdown.summary.profitMarginPercent}%`],
-        ['Profit Margin Amount', `$${costBreakdown.summary.profitMarginAmount.toFixed(2)}`],
-        ['TOTAL PROJECT COST', `$${costBreakdown.summary.totalCost.toFixed(2)}`],
-        ['', ''],
-        ['Cost Breakdown by Condition', ''],
-        ['Condition', 'Quantity', 'Material Cost', 'Labor Cost', 'Equipment Cost', 'Waste Cost', 'Subtotal']
-      ];
-      
-      // Add condition cost breakdown rows
-      costBreakdown.conditions.forEach(condition => {
-        if (condition.hasCosts) {
-          costAnalysisData.push([
-            condition.condition.name,
-            `${condition.quantity.toFixed(2)} ${condition.condition.unit}`,
-            `$${condition.materialCost.toFixed(2)}`,
-            `$${condition.laborCost.toFixed(2)}`,
-            `$${condition.equipmentCost.toFixed(2)}`,
-            `$${condition.wasteCost.toFixed(2)}`,
-            `$${condition.subtotal.toFixed(2)}`
-          ]);
-        }
-      });
-      
-      const costAnalysisSheet = XLSX.utils.aoa_to_sheet(costAnalysisData);
-      costAnalysisSheet['!cols'] = [{ wch: 25 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }];
-      XLSX.utils.book_append_sheet(workbook, costAnalysisSheet, 'Cost Analysis');
 
       const projectInfoSheet = XLSX.utils.aoa_to_sheet(projectInfoData);
       projectInfoSheet['!cols'] = [{ wch: 25 }, { wch: 40 }];
@@ -747,7 +725,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
 
       // Generate filename with enhanced naming
       const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
-      const projectName = currentProject?.name?.replace(/[^a-zA-Z0-9]/g, '-') || 'project';
+      const projectName = currentProject?.name?.replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '-') || 'project';
       const filename = `${projectName}-Professional-Takeoff-Report-${timestamp}.xlsx`;
       
       // Save file
@@ -779,7 +757,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       }
 
       // Start export progress
-      onExportStatusUpdate?.('pdf', 5);
+      onExportStatusUpdate?.('pdf', 10);
 
       // Get all unique pages that have measurements from the report data
       const pagesWithMeasurements = new Map<string, { pageNumber: number; sheetName: string; sheetId: string }>();
@@ -795,8 +773,27 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         });
       });
 
+      // Also get all unique pages that have annotations
+      const annotations = useTakeoffStore.getState().annotations;
+      const projectAnnotations = annotations.filter(a => a.projectId === projectId);
+      
+      projectAnnotations.forEach(annotation => {
+        const pageKey = `${annotation.sheetId}-${annotation.pageNumber}`;
+        if (!pagesWithMeasurements.has(pageKey)) {
+          // Find sheet name from documents
+          const doc = documents.find(d => d.id === annotation.sheetId);
+          const sheetName = doc?.sheets?.find(s => s.pageNumber === annotation.pageNumber)?.name || `Page ${annotation.pageNumber}`;
+          
+          pagesWithMeasurements.set(pageKey, {
+            pageNumber: annotation.pageNumber,
+            sheetName: sheetName,
+            sheetId: annotation.sheetId
+          });
+        }
+      });
+
       if (pagesWithMeasurements.size === 0) {
-        alert('No pages with measurements found');
+        alert('No pages with measurements or annotations found');
         return;
       }
 
@@ -812,6 +809,9 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                   pdf.setFont('helvetica', 'bold');
                   pdf.text('Takeoff Summary Report', 20, 30);
                   
+                  // Get cost breakdown for summary table
+                  const costBreakdown = getProjectCostBreakdown(projectId);
+                  
                   if (currentProject) {
                     pdf.setFontSize(12);
                     pdf.setFont('helvetica', 'normal');
@@ -821,7 +821,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                     pdf.text(`Pages with Measurements: ${pagesWithMeasurements.size}`, 20, 75);
                     
                     // Add cost summary
-                    const costBreakdown = getProjectCostBreakdown(projectId);
                     if (costBreakdown.summary.totalCost > 0) {
                       pdf.setFontSize(14);
                       pdf.setFont('helvetica', 'bold');
@@ -831,318 +830,208 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                       pdf.setFont('helvetica', 'normal');
                       pdf.text(`Total Project Cost: $${costBreakdown.summary.totalCost.toFixed(2)}`, 20, 105);
                       pdf.text(`Material Cost: $${costBreakdown.summary.totalMaterialCost.toFixed(2)}`, 20, 115);
-                      pdf.text(`Labor Cost: $${costBreakdown.summary.totalLaborCost.toFixed(2)}`, 20, 125);
-                      pdf.text(`Equipment Cost: $${costBreakdown.summary.totalEquipmentCost.toFixed(2)}`, 20, 135);
-                      pdf.text(`Waste Factor Cost: $${costBreakdown.summary.totalWasteCost.toFixed(2)}`, 20, 145);
+                      pdf.text(`Equipment Cost: $${costBreakdown.summary.totalEquipmentCost.toFixed(2)}`, 20, 125);
+                      pdf.text(`Waste Factor Cost: $${costBreakdown.summary.totalWasteCost.toFixed(2)}`, 20, 135);
                       pdf.text(`Profit Margin: ${costBreakdown.summary.profitMarginPercent}% ($${costBreakdown.summary.profitMarginAmount.toFixed(2)})`, 20, 155);
                     }
                   }
 
-                  // Create summary table
-                  const tableStartY = costBreakdown.summary.totalCost > 0 ? 170 : 90;
-                  const colWidths = [60, 20, 15, 25]; // Condition, Type, Unit, Total
-                  const rowHeight = 8;
-                  
-                  // Table headers
-                  pdf.setFontSize(10);
+                  // Create conditions legend with color swatches
+                  let legendY = costBreakdown.summary.totalCost > 0 ? 170 : 90;
+                  pdf.setFontSize(14);
                   pdf.setFont('helvetica', 'bold');
-                  pdf.text('Condition', 20, tableStartY);
-                  pdf.text('Type', 20 + colWidths[0], tableStartY);
-                  pdf.text('Unit', 20 + colWidths[0] + colWidths[1], tableStartY);
-                  pdf.text('Total', 20 + colWidths[0] + colWidths[1] + colWidths[2], tableStartY);
+                  pdf.text('Conditions Legend', 20, legendY);
+                  legendY += 10;
                   
-                  // Draw header line
-                  pdf.line(20, tableStartY + 2, 20 + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3], tableStartY + 2);
-                  
-                  // Table data
+                  pdf.setFontSize(9);
                   pdf.setFont('helvetica', 'normal');
-                  let currentY = tableStartY + rowHeight;
                   
-                  conditionIds.forEach((conditionId, index) => {
+                  conditionIds.forEach((conditionId) => {
                     const conditionData = reportData[conditionId];
                     
                     // Check if we need a new page
-                    if (currentY > 250) {
+                    if (legendY > 270) {
                       pdf.addPage();
-                      currentY = 20;
+                      legendY = 20;
                     }
                     
-                    // Truncate long condition names to fit
-                    const conditionName = conditionData.condition.name.length > 25 
-                      ? conditionData.condition.name.substring(0, 22) + '...' 
+                    // Draw color swatch (rectangle)
+                    const color = conditionData.condition.color;
+                    const r = parseInt(color.slice(1, 3), 16) / 255;
+                    const g = parseInt(color.slice(3, 5), 16) / 255;
+                    const b = parseInt(color.slice(5, 7), 16) / 255;
+                    pdf.setFillColor(r * 255, g * 255, b * 255);
+                    pdf.rect(20, legendY - 3, 5, 4, 'F');
+                    
+                    // Condition info
+                    const conditionName = conditionData.condition.name.length > 35 
+                      ? conditionData.condition.name.substring(0, 32) + '...' 
                       : conditionData.condition.name;
                     
-                    pdf.text(conditionName, 20, currentY);
-                    pdf.text(conditionData.condition.type, 20 + colWidths[0], currentY);
-                    pdf.text(conditionData.condition.unit, 20 + colWidths[0] + colWidths[1], currentY);
-                    pdf.text(conditionData.grandTotal.toFixed(2), 20 + colWidths[0] + colWidths[1] + colWidths[2], currentY);
+                    pdf.setTextColor(0, 0, 0);
+                    pdf.text(`${conditionName} - ${conditionData.condition.type.toUpperCase()} (${conditionData.grandTotal.toFixed(2)} ${conditionData.condition.unit})`, 28, legendY);
                     
-                    currentY += rowHeight;
+                    legendY += 6;
+                  });
+                  
+                  // Add page breakdown section
+                  legendY += 10;
+                  if (legendY > 250) {
+                    pdf.addPage();
+                    legendY = 20;
+                  }
+                  
+                  pdf.setFontSize(14);
+                  pdf.setFont('helvetica', 'bold');
+                  pdf.text('Page Breakdown', 20, legendY);
+                  legendY += 10;
+                  
+                  pdf.setFontSize(9);
+                  pdf.setFont('helvetica', 'normal');
+                  
+                  // Get page breakdown
+                  const pageBreakdown = new Map<string, Array<{condition: any, total: number}>>();
+                  conditionIds.forEach(conditionId => {
+                    const conditionData = reportData[conditionId];
+                    Object.entries(conditionData.pages).forEach(([pageKey, pageData]: [string, any]) => {
+                      if (!pageBreakdown.has(pageKey)) {
+                        pageBreakdown.set(pageKey, []);
+                      }
+                      pageBreakdown.get(pageKey)!.push({
+                        condition: conditionData.condition,
+                        total: pageData.total
+                      });
+                    });
+                  });
+                  
+                  // Sort pages
+                  const sortedPageKeys = Array.from(pageBreakdown.keys()).sort((a, b) => {
+                    const pageA = pagesWithMeasurements.get(a);
+                    const pageB = pagesWithMeasurements.get(b);
+                    if (!pageA || !pageB) return 0;
+                    return pageA.pageNumber - pageB.pageNumber;
+                  });
+                  
+                  sortedPageKeys.forEach(pageKey => {
+                    const pageInfo = pagesWithMeasurements.get(pageKey);
+                    const conditions = pageBreakdown.get(pageKey) || [];
+                    
+                    if (!pageInfo) return;
+                    
+                    // Check if we need a new page
+                    if (legendY > 260) {
+                      pdf.addPage();
+                      legendY = 20;
+                    }
+                    
+                    // Page header
+                    pdf.setFont('helvetica', 'bold');
+                    const hasCustomName = pageInfo.sheetName && pageInfo.sheetName !== `Page ${pageInfo.pageNumber}`;
+                    const pageLabel = hasCustomName ? `${pageInfo.sheetName} (P.${pageInfo.pageNumber})` : `Page ${pageInfo.pageNumber}`;
+                    pdf.text(pageLabel, 20, legendY);
+                    legendY += 5;
+                    
+                    // Conditions on this page
+                    pdf.setFont('helvetica', 'normal');
+                    conditions.forEach(item => {
+                      // Draw small color swatch
+                      const color = item.condition.color;
+                      const r = parseInt(color.slice(1, 3), 16) / 255;
+                      const g = parseInt(color.slice(3, 5), 16) / 255;
+                      const b = parseInt(color.slice(5, 7), 16) / 255;
+                      pdf.setFillColor(r * 255, g * 255, b * 255);
+                      pdf.rect(25, legendY - 2.5, 3, 3, 'F');
+                      
+                      pdf.setTextColor(0, 0, 0);
+                      const condName = item.condition.name.length > 30 
+                        ? item.condition.name.substring(0, 27) + '...' 
+                        : item.condition.name;
+                      pdf.text(`  ${condName}: ${item.total.toFixed(2)} ${item.condition.unit}`, 28, legendY);
+                      legendY += 5;
+                    });
+                    
+                    legendY += 3; // Space between pages
                   });
 
-      // Update progress
-      onExportStatusUpdate?.('pdf', 20);
+      // Update progress  
+      onExportStatusUpdate?.('pdf', 25);
 
-      // Process each page with measurements
-      const pageEntries = Array.from(pagesWithMeasurements.entries());
-      for (let i = 0; i < pageEntries.length; i++) {
-        const [pageKey, pageInfo] = pageEntries[i];
-        const progress = 20 + (i / pageEntries.length) * 70;
-        onExportStatusUpdate?.('pdf', Math.round(progress));
+      // Save the summary PDF
+      const summaryPdfBytes = new Uint8Array(pdf.output('arraybuffer'));
+      
+      // Prepare pages with measurements for PDF export
+      const { getConditionTakeoffMeasurements, annotations: storeAnnotations } = useTakeoffStore.getState();
+      const pagesForExport = Array.from(pagesWithMeasurements.values()).map(pageInfo => {
+        // Get all measurements for this page
+        const pageMeasurements: any[] = [];
+        conditionIds.forEach(conditionId => {
+          const conditionMeasurements = getConditionTakeoffMeasurements(projectId, conditionId);
+          const pageSpecificMeasurements = conditionMeasurements.filter(
+            m => m.sheetId === pageInfo.sheetId && m.pdfPage === pageInfo.pageNumber
+          );
+          pageMeasurements.push(...pageSpecificMeasurements);
+        });
 
-        // Add new page for each PDF page with measurements
-        if (i > 0) {
-          pdf.addPage();
+        // Get all annotations for this page
+        const pageAnnotations = storeAnnotations.filter(
+          a => a.projectId === projectId && 
+               a.sheetId === pageInfo.sheetId && 
+               a.pageNumber === pageInfo.pageNumber
+        );
+
+        return {
+          pageNumber: pageInfo.pageNumber,
+          sheetName: pageInfo.sheetName,
+          sheetId: pageInfo.sheetId,
+          measurements: pageMeasurements,
+          annotations: pageAnnotations
+        };
+      }).sort((a, b) => {
+        // Sort by sheet ID first, then by page number
+        if (a.sheetId !== b.sheetId) {
+          return a.sheetId.localeCompare(b.sheetId);
         }
+        return a.pageNumber - b.pageNumber;
+      });
 
-        // Add page header
-        pdf.setFontSize(12);
-        pdf.setFont('helvetica', 'bold');
-        // Use same page labeling logic as Excel export
-        const hasCustomName = pageInfo.sheetName && pageInfo.sheetName !== `Page ${pageInfo.pageNumber}`;
-        const pageLabel = hasCustomName ? `${pageInfo.sheetName} (P.${pageInfo.pageNumber})` : `Page ${pageInfo.pageNumber}`;
-        pdf.text(pageLabel, 20, 20);
-        
-        // Add a separator line
-        pdf.line(20, 25, 190, 25);
+      // Export pages with measurements using pdf-lib
+      onExportStatusUpdate?.('pdf', 30);
+      
+      const measurementsPdfBytes = await exportPagesWithMeasurementsToPDF(
+        pagesForExport,
+        currentProject?.name || 'Project',
+        (progress) => {
+          // Map pdf-lib progress (0-100) to our progress range (30-80)
+          const mappedProgress = 30 + (progress * 0.5);
+          onExportStatusUpdate?.('pdf', Math.round(mappedProgress));
+        }
+      );
 
-                    // Navigate to the page and capture it
-                    // Navigate to the page
-                    if (onPageSelect) {
-                      onPageSelect(pageInfo.sheetId, pageInfo.pageNumber);
-                    }
-
-                    // Wait for page to load and render
-                    await new Promise(resolve => setTimeout(resolve, 1500));
-                    
-                    // Fit the page to screen to ensure we capture the entire page
-                    
-                    // Try multiple approaches to fit the page
-                    let pageFitted = false;
-                    
-                    // Method 1: Look for "Reset View" button (common in PDF viewers)
-                    const resetViewButton = document.querySelector('button[title*="Reset"], button[title*="reset"], button[aria-label*="Reset"], button[aria-label*="reset"]') as HTMLButtonElement;
-                    if (resetViewButton) {
-                      resetViewButton.click();
-                      await new Promise(resolve => setTimeout(resolve, 2000)); // Wait longer for page to fit
-                      
-                      // Try to zoom out further to ensure full page is visible
-                      const zoomOutButton = document.querySelector('button[title*="Zoom out"], button[aria-label*="Zoom out"], button[title*="zoom out"], button[aria-label*="zoom out"]') as HTMLButtonElement;
-                      if (zoomOutButton) {
-                        // Click zoom out multiple times to ensure full page is visible
-                        for (let i = 0; i < 5; i++) {
-                          zoomOutButton.click();
-                          await new Promise(resolve => setTimeout(resolve, 300));
-                        }
-                      }
-                      pageFitted = true;
-                    }
-                    
-                    // Method 2: Look for zoom controls and try to fit
-                    if (!pageFitted) {
-                      const zoomControls = document.querySelector('.zoom-controls, [class*="zoom"], [class*="control"]');
-                      if (zoomControls) {
-                        const fitButton = zoomControls.querySelector('button[title*="fit"], button[aria-label*="fit"], button[title*="Fit"], button[aria-label*="Fit"]') as HTMLButtonElement;
-                        if (fitButton) {
-                          fitButton.click();
-                          pageFitted = true;
-                          await new Promise(resolve => setTimeout(resolve, 1500));
-                        }
-                      }
-                    }
-                    
-                    // Method 3: Try to find any button with "fit" in the text or title
-                    if (!pageFitted) {
-                      const allButtons = document.querySelectorAll('button');
-                      for (const button of allButtons) {
-                        const title = button.getAttribute('title') || '';
-                        const ariaLabel = button.getAttribute('aria-label') || '';
-                        const textContent = button.textContent || '';
-                        
-                        if (title.toLowerCase().includes('fit') || 
-                            ariaLabel.toLowerCase().includes('fit') || 
-                            textContent.toLowerCase().includes('fit') ||
-                            title.toLowerCase().includes('reset') ||
-                            ariaLabel.toLowerCase().includes('reset') ||
-                            textContent.toLowerCase().includes('reset')) {
-                          button.click();
-                          pageFitted = true;
-                          await new Promise(resolve => setTimeout(resolve, 1500));
-                          break;
-                        }
-                      }
-                    }
-                    
-                    // Method 4: Try to set zoom to a specific level that shows full page
-                    if (!pageFitted) {
-                      // Try to find zoom percentage and set it to a reasonable level
-                      const zoomDisplay = document.querySelector('[class*="zoom"], [class*="scale"], [class*="percentage"]');
-                      if (zoomDisplay) {
-                        // Look for zoom controls nearby
-                        const parent = zoomDisplay.closest('div');
-                        if (parent) {
-                          const zoomButtons = parent.querySelectorAll('button');
-                          // Try clicking the minus button a few times to zoom out
-                          for (let i = 0; i < 3; i++) {
-                            const minusButton = Array.from(zoomButtons).find(btn => 
-                              btn.textContent?.includes('-') || 
-                              btn.getAttribute('title')?.toLowerCase().includes('zoom out') ||
-                              btn.getAttribute('aria-label')?.toLowerCase().includes('zoom out')
-                            );
-                            if (minusButton) {
-                              minusButton.click();
-                              await new Promise(resolve => setTimeout(resolve, 500));
-                            }
-                          }
-                          pageFitted = true;
-                        }
-                      }
-                    }
-                    
-                    if (!pageFitted) {
-                      // Could not find fit/reset button, proceeding with current view
-                    }
-
-                    try {
-                      // Find the PDF viewer container - try multiple selectors to get the full page
-                      let pdfViewerContainer = document.querySelector('.canvas-container') as HTMLElement;
-                      
-                      // If canvas-container doesn't work, try the main PDF viewer
-                      if (!pdfViewerContainer) {
-                        pdfViewerContainer = document.querySelector('[data-testid="pdf-viewer"]') as HTMLElement;
-                      }
-                      
-                      // If still not found, try the main content area
-                      if (!pdfViewerContainer) {
-                        pdfViewerContainer = document.querySelector('.pdf-viewer') as HTMLElement;
-                      }
-                      
-                      // Try to find the main PDF container that includes the entire viewer
-                      if (!pdfViewerContainer) {
-                        pdfViewerContainer = document.querySelector('.pdf-container, .document-viewer, .viewer-container') as HTMLElement;
-                      }
-                      
-                      // Try to find the main content area that contains the PDF
-                      if (!pdfViewerContainer) {
-                        pdfViewerContainer = document.querySelector('main, .main-content, .content-area') as HTMLElement;
-                      }
-                      
-                      // Look for the actual PDF canvas element specifically
-                      if (!pdfViewerContainer) {
-                        const canvas = document.querySelector('canvas') as HTMLElement;
-                        if (canvas) {
-                          // Find the parent container that holds the canvas
-                          pdfViewerContainer = canvas.closest('div') as HTMLElement;
-                        }
-                      }
-                      
-                      // Last resort - try to find any canvas element
-                      if (!pdfViewerContainer) {
-                        pdfViewerContainer = document.querySelector('canvas') as HTMLElement;
-                      }
-                      
-                      // If we still don't have a good container, try to find the largest visible element
-                      if (!pdfViewerContainer || pdfViewerContainer.getBoundingClientRect().width < 500) {
-                        const allDivs = document.querySelectorAll('div');
-                        let largestDiv = null;
-                        let largestArea = 0;
-                        
-                        for (const div of allDivs) {
-                          const rect = div.getBoundingClientRect();
-                          const area = rect.width * rect.height;
-                          if (area > largestArea && rect.width > 800 && rect.height > 600) {
-                            largestArea = area;
-                            largestDiv = div;
-                          }
-                        }
-                        
-                        if (largestDiv) {
-                          pdfViewerContainer = largestDiv as HTMLElement;
-                        }
-                      }
-                      
-                      if (pdfViewerContainer) {
-                        // Get the full dimensions of the container
-                        const rect = pdfViewerContainer.getBoundingClientRect();
-                        
-                        // Capture the PDF viewer with markups at higher quality and preserve colors
-                        const canvas = await html2canvas(pdfViewerContainer, {
-                          backgroundColor: '#ffffff',
-                          scale: 3, // Even higher scale for better quality
-                          useCORS: true,
-                          allowTaint: true,
-                          logging: false,
-                          width: rect.width,
-                          height: rect.height,
-                          scrollX: 0,
-                          scrollY: 0,
-                          foreignObjectRendering: true, // Better rendering for complex elements
-                          removeContainer: false, // Keep container for better rendering
-                          imageTimeout: 30000, // Longer timeout for large images
-                          onclone: (clonedDoc) => {
-                            // Ensure colors are preserved in the cloned document
-                            const clonedContainer = clonedDoc.querySelector('.canvas-container') as HTMLElement;
-                            if (clonedContainer) {
-                              clonedContainer.style.color = 'inherit';
-                              clonedContainer.style.backgroundColor = 'white';
-                            }
-                          }
-                        });
-
-                        // Convert canvas to image data with high quality
-                        const imgData = canvas.toDataURL('image/png', 1.0);
-                        
-                        // Calculate dimensions to fit the page while maintaining aspect ratio
-                        const pageWidth = 210; // A4 width in mm
-                        const pageHeight = 297; // A4 height in mm
-                        const margin = 5; // Smaller margin for more content
-                        const availableWidth = pageWidth - (2 * margin);
-                        const availableHeight = pageHeight - (2 * margin) - 15; // Leave space for header
-                        
-                        const aspectRatio = canvas.width / canvas.height;
-                        let imgWidth = availableWidth;
-                        let imgHeight = imgWidth / aspectRatio;
-                        
-                        // If height exceeds available space, scale down
-                        if (imgHeight > availableHeight) {
-                          imgHeight = availableHeight;
-                          imgWidth = imgHeight * aspectRatio;
-                        }
-                        
-                        // Center the image on the page
-                        const xOffset = (pageWidth - imgWidth) / 2;
-                        const yOffset = 25; // Start below the header
-                        
-                        // Add the captured image to PDF with high quality
-                        pdf.addImage(imgData, 'PNG', xOffset, yOffset, imgWidth, imgHeight, undefined, 'FAST');
-                      } else {
-                        
-                        // Add placeholder text if container not found
-                        pdf.setFontSize(10);
-                        pdf.setFont('helvetica', 'normal');
-                        pdf.text('PDF page with measurements would be displayed here.', 20, 50);
-                        pdf.text('Please ensure the PDF viewer is visible and try again.', 20, 60);
-                      }
-                    } catch (captureError) {
-                      console.error('Error capturing page:', captureError);
-                      
-                      // Add error message to PDF
-                      pdf.setFontSize(10);
-                      pdf.setFont('helvetica', 'normal');
-                      pdf.text('Error capturing this page. Please try again.', 20, 50);
-                    }
-      }
-
-      // Update progress
+      // Merge summary PDF with measurements PDF
+      onExportStatusUpdate?.('pdf', 85);
+      const summaryPdfDoc = await PDFLibDocument.load(summaryPdfBytes);
+      const measurementsPdfDoc = await PDFLibDocument.load(measurementsPdfBytes);
+      
+      const finalPdf = await PDFLibDocument.create();
+      
+      // Copy all pages from summary
+      const summaryPages = await finalPdf.copyPages(summaryPdfDoc, summaryPdfDoc.getPageIndices());
+      summaryPages.forEach(page => finalPdf.addPage(page));
+      
+      // Copy all pages from measurements
+      const measurementPages = await finalPdf.copyPages(measurementsPdfDoc, measurementsPdfDoc.getPageIndices());
+      measurementPages.forEach(page => finalPdf.addPage(page));
+      
       onExportStatusUpdate?.('pdf', 90);
+      const finalPdfBytes = await finalPdf.save();
 
       // Generate filename
       const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
       const projectName = currentProject?.name?.replace(/[^a-zA-Z0-9]/g, '-') || 'project';
-      const filename = `${projectName}-takeoff-pages-${timestamp}.pdf`;
+      const filename = `${projectName}-takeoff-report-${timestamp}.pdf`;
 
-      // Save the PDF
-      pdf.save(filename);
+      // Download the PDF
+      downloadPDF(finalPdfBytes, filename);
       
       // Complete
       onExportStatusUpdate?.('pdf', 100);
@@ -1720,10 +1609,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                         <span className="text-sm font-medium text-slate-900">${summary.totalMaterialCost.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-sm text-slate-600">Labor Costs</span>
-                        <span className="text-sm font-medium text-slate-900">${summary.totalLaborCost.toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between items-center">
                         <span className="text-sm text-slate-600">Equipment Costs</span>
                         <span className="text-sm font-medium text-slate-900">${summary.totalEquipmentCost.toFixed(2)}</span>
                       </div>
@@ -1748,51 +1633,86 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                     </div>
                   </div>
 
+
                   {/* Condition Cost Breakdown */}
                   <div className="space-y-3">
                     <h4 className="font-semibold text-slate-900">Cost Breakdown by Condition</h4>
-                    {conditions.map(condition => {
-                      if (!condition.hasCosts) return null;
-                      
-                      return (
-                        <div key={condition.condition.id} className="border rounded-lg p-3 bg-white">
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-2">
+                    {costConditions.filter(c => c.hasCosts).length === 0 ? (
+                      <div className="text-center py-6 text-slate-500 bg-slate-50 rounded-lg">
+                        <DollarSign className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                        <p className="text-sm">No conditions with cost data</p>
+                        <p className="text-xs">Add material or equipment costs to conditions to see breakdown</p>
+                      </div>
+                    ) : (
+                      costConditions.map(condition => {
+                        if (!condition.hasCosts) return null;
+                        
+                        return (
+                        <div key={condition.condition.id} className="border rounded-lg p-4 bg-white shadow-sm hover:shadow-md transition-shadow">
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-3">
                               <div 
-                                className="w-4 h-4 rounded-full" 
+                                className="w-5 h-5 rounded-full border-2 border-white shadow-sm" 
                                 style={{ backgroundColor: condition.condition.color }}
                               />
-                              <span className="font-medium text-sm">{condition.condition.name}</span>
-                              <Badge variant="outline" className="text-xs">
-                                {condition.condition.unit}
-                              </Badge>
+                              <div>
+                                <span className="font-medium text-sm text-slate-900">{condition.condition.name}</span>
+                                <div className="flex items-center gap-2 mt-1">
+                                  <Badge variant="outline" className="text-xs">
+                                    {condition.condition.type}
+                                  </Badge>
+                                  <Badge variant="secondary" className="text-xs">
+                                    {condition.condition.unit}
+                                  </Badge>
+                                </div>
+                              </div>
                             </div>
-                            <span className="font-semibold text-blue-600">
-                              ${condition.subtotal.toFixed(2)}
-                            </span>
+                            <div className="text-right">
+                              <span className="font-bold text-lg text-blue-600">
+                                ${condition.subtotal.toFixed(2)}
+                              </span>
+                              <div className="text-xs text-slate-500">
+                                ${condition.quantity > 0 ? (condition.subtotal / condition.quantity).toFixed(2) : '0.00'}/unit
+                              </div>
+                            </div>
                           </div>
                           
-                          <div className="text-xs text-slate-500 space-y-1">
-                            <div className="flex justify-between">
-                              <span>Quantity: {condition.quantity.toFixed(2)} {condition.condition.unit}</span>
-                              {condition.condition.wasteFactor > 0 && (
-                                <span>+ {condition.condition.wasteFactor}% waste = {condition.adjustedQuantity.toFixed(2)} {condition.condition.unit}</span>
+                          <div className="space-y-2">
+                            <div className="flex justify-between items-center text-sm">
+                              <span className="text-slate-600">Quantity</span>
+                              <div className="text-right">
+                                <span className="font-medium">{condition.quantity.toFixed(2)} {condition.condition.unit}</span>
+                                {condition.condition.wasteFactor > 0 && (
+                                  <div className="text-xs text-slate-500">
+                                    + {condition.condition.wasteFactor}% waste = {condition.adjustedQuantity.toFixed(2)} {condition.condition.unit}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            
+                            <div className="grid grid-cols-2 gap-2 text-sm">
+                              <div className="flex justify-between">
+                                <span className="text-slate-600">Material</span>
+                                <span className="font-medium text-blue-600">${condition.materialCost.toFixed(2)}</span>
+                              </div>
+                              {condition.equipmentCost > 0 && (
+                                <div className="flex justify-between">
+                                  <span className="text-slate-600">Equipment</span>
+                                  <span className="font-medium text-green-600">${condition.equipmentCost.toFixed(2)}</span>
+                                </div>
+                              )}
+                              {condition.wasteCost > 0 && (
+                                <div className="flex justify-between">
+                                  <span className="text-slate-600">Waste</span>
+                                  <span className="font-medium text-orange-600">${condition.wasteCost.toFixed(2)}</span>
+                                </div>
                               )}
                             </div>
-                            <div className="flex justify-between">
-                              <span>Material: ${condition.materialCost.toFixed(2)}</span>
-                              <span>Labor: ${condition.laborCost.toFixed(2)}</span>
-                            </div>
-                            {condition.equipmentCost > 0 && (
-                              <div className="flex justify-between">
-                                <span>Equipment: ${condition.equipmentCost.toFixed(2)}</span>
-                                {condition.wasteCost > 0 && <span>Waste: ${condition.wasteCost.toFixed(2)}</span>}
-                              </div>
-                            )}
                           </div>
                         </div>
-                      );
-                    })}
+                        );
+                      })
+                    )}
                   </div>
                 </div>
               );
