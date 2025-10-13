@@ -19,6 +19,7 @@ Meridian Takeoff is a professional construction takeoff software with comprehens
 - **Persistent Measurements**: Takeoffs stay exactly where you place them
 - **Cutout Support**: Advanced cutout functionality for complex measurements
 - **Perimeter Calculations**: Optional perimeter calculations for area and volume measurements
+- **Visual Annotations**: Text, freehand, arrow, rectangle, and circle annotation tools for marking up drawings
 
 ### Condition Management
 - **Custom Conditions**: Create and manage takeoff conditions with custom properties
@@ -29,9 +30,9 @@ Meridian Takeoff is a professional construction takeoff software with comprehens
 
 ### Professional Reporting
 - **Excel Export**: Comprehensive Excel reports with multiple sheets
-- **PDF Export**: Professional PDF reports with visual takeoff overlays
+- **PDF Export**: Professional PDF reports with executive summary page and visual takeoff overlays on actual PDF pages
 - **Cost Analysis**: Detailed cost breakdowns by condition and project totals
-- **Executive Summary**: High-level project cost summaries
+- **Executive Summary**: High-level project cost summaries with totals and markup visualization
 
 ### AI & Document Processing
 - **OCR Text Extraction**: Complete OCR system with text extraction from PDF documents

@@ -22,10 +22,9 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
     name: editingCondition?.name || '',
     type: (editingCondition?.type || 'area') as 'area' | 'volume' | 'linear' | 'count',
     unit: editingCondition?.unit || 'SF', // Initialize with default unit for 'area' type
-    wasteFactor: editingCondition?.wasteFactor || 0,
+    wasteFactor: editingCondition?.wasteFactor?.toString() || '',
     color: editingCondition?.color || generateRandomColor(),
     description: editingCondition?.description || '',
-    laborCost: editingCondition?.laborCost?.toString() || '',
     materialCost: editingCondition?.materialCost?.toString() || '',
     equipmentCost: editingCondition?.equipmentCost?.toString() || '',
     includePerimeter: editingCondition?.includePerimeter || false,
@@ -67,10 +66,9 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
         name: formData.name,
         type: formData.type,
         unit: unit,
-        wasteFactor: formData.wasteFactor,
+        wasteFactor: formData.wasteFactor ? parseFloat(formData.wasteFactor) : 0,
         color: formData.color,
         description: formData.description,
-        laborCost: formData.laborCost ? parseFloat(formData.laborCost) : undefined,
         materialCost: formData.materialCost ? parseFloat(formData.materialCost) : undefined,
         equipmentCost: formData.equipmentCost ? parseFloat(formData.equipmentCost) : undefined,
         includePerimeter: formData.includePerimeter,
@@ -210,7 +208,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
             </div>
           </div>
 
-          {formData.type === 'area' && (
+          {(formData.type === 'area' || formData.type === 'volume') && (
             <div>
               <Label htmlFor="includePerimeter" className="flex items-center space-x-2">
                 <input
@@ -256,7 +254,8 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
                   max="100"
                   step="0.1"
                   value={formData.wasteFactor}
-                  onChange={(e) => handleInputChange('wasteFactor', parseFloat(e.target.value) || 0)}
+                  onChange={(e) => handleInputChange('wasteFactor', e.target.value)}
+                  placeholder="0"
                 />
               </div>
             )}
@@ -284,34 +283,19 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="laborCost">Labor Cost ($/hr)</Label>
-              <Input
-                id="laborCost"
-                type="number"
-                min="0"
-                step="0.01"
-                value={formData.laborCost}
-                onChange={(e) => handleInputChange('laborCost', e.target.value)}
-                placeholder="0.00"
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="materialCost">
-                Material Cost ({formData.type === 'count' ? '$/unit' : `$/${formData.unit || getDefaultUnit(formData.type)}`})
-              </Label>
-              <Input
-                id="materialCost"
-                type="number"
-                min="0"
-                step="0.01"
-                value={formData.materialCost}
-                onChange={(e) => handleInputChange('materialCost', e.target.value)}
-                placeholder="0.00"
-              />
-            </div>
+          <div>
+            <Label htmlFor="materialCost">
+              Material Cost ({formData.type === 'count' ? '$/unit' : `$/${formData.unit || getDefaultUnit(formData.type)}`})
+            </Label>
+            <Input
+              id="materialCost"
+              type="number"
+              min="0"
+              step="0.01"
+              value={formData.materialCost}
+              onChange={(e) => handleInputChange('materialCost', e.target.value)}
+              placeholder="0.00"
+            />
           </div>
 
           <div>

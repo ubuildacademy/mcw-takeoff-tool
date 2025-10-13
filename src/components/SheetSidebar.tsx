@@ -105,7 +105,7 @@ export function SheetSidebar({
     try {
       const { serverOcrService } = await import('../services/serverOcrService');
       const ocrData = await serverOcrService.getDocumentData(documentId, projectId);
-      return ocrData && ocrData.results.length > 0;
+      return !!(ocrData && ocrData.results.length > 0);
     } catch (error) {
       return false;
     }
@@ -183,7 +183,7 @@ export function SheetSidebar({
                 } catch (error) {
                   // Sheet doesn't exist in database yet, use defaults
                   // This is expected for new documents, so we don't log it as an error
-                  if (!error.isExpected404 && error.response?.status !== 404) {
+                  if (!(error as any).isExpected404 && (error as any).response?.status !== 404) {
                     console.warn(`Unexpected error loading sheet ${sheetId}:`, error);
                   }
                 }
@@ -284,7 +284,7 @@ export function SheetSidebar({
       const { serverOcrService } = await import('../services/serverOcrService');
       const result = await serverOcrService.processDocument(documentId, projectId);
       
-      if (result.success) {
+      if (result && result.results && result.results.length > 0) {
         // Update the page with OCR processing status
         if (onDocumentsUpdate) {
           const updatedDocuments = documents.map(doc => 

@@ -29,9 +29,8 @@ export interface TakeoffCondition {
   wasteFactor: number;
   color: string;
   description: string;
-  includePerimeter?: boolean; // For area measurements, include perimeter calculation
+  includePerimeter?: boolean; // For area and volume measurements, include perimeter calculation
   depth?: number; // For volume measurements, depth in feet
-  laborCost?: number; // Labor cost per hour
   materialCost?: number; // Material cost per unit
   equipmentCost?: number; // Fixed equipment cost for the condition
 }
@@ -87,6 +86,18 @@ export interface Calibration {
   scaleFactor: number;
   unit: string;
   calibratedAt: string;
+}
+
+export interface Annotation {
+  id: string;
+  projectId: string;
+  sheetId: string;
+  pageNumber: number;
+  type: 'text' | 'freehand' | 'arrow' | 'rectangle' | 'circle';
+  points: Array<{ x: number; y: number }>; // PDF coordinates (0-1 scale)
+  color: string;
+  text?: string; // For text annotations
+  timestamp: string;
 }
 
 export interface SearchResult {
@@ -151,7 +162,6 @@ export interface ConditionCostBreakdown {
   quantity: number;
   adjustedQuantity: number; // quantity with waste factor applied
   materialCost: number;
-  laborCost: number;
   equipmentCost: number;
   wasteCost: number; // additional cost due to waste factor
   subtotal: number;
@@ -162,7 +172,6 @@ export interface ProjectCostBreakdown {
   conditions: ConditionCostBreakdown[];
   summary: {
     totalMaterialCost: number;
-    totalLaborCost: number;
     totalEquipmentCost: number;
     totalWasteCost: number;
     subtotal: number;
