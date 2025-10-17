@@ -33,6 +33,7 @@ export function AdminPanel({ isOpen, onClose, projectId }: AdminPanelProps) {
   const [availableModels, setAvailableModels] = useState<OllamaModel[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>('gpt-oss:120b-cloud');
   const [fallbackModel, setFallbackModel] = useState<string>('llama3.1:8b');
+  // Using simple OCR + AI approach
   const [customPrompt, setCustomPrompt] = useState<string>('');
   const [chatPrompt, setChatPrompt] = useState<string>('');
   
@@ -241,6 +242,7 @@ When answering questions:
       loadChatPrompt();
     }
   }, [activeTab, isUnlocked]);
+
 
   // Load user management data
   useEffect(() => {
@@ -652,6 +654,19 @@ When answering questions:
                     </div>
 
                     <div className="border rounded-lg p-6">
+                      <h3 className="text-lg font-semibold mb-4">OCR & AI Analysis Settings</h3>
+                      <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                        <h4 className="font-medium text-green-800 mb-2">✅ Current Approach: Simple OCR + AI</h4>
+                        <ul className="text-sm text-green-700 space-y-1">
+                          <li>• Fast text extraction using pdf-parse (18 seconds for 80 pages)</li>
+                          <li>• AI analysis of extracted text for sheet labeling</li>
+                          <li>• Reliable processing of all pages</li>
+                          <li>• Cost-effective and maintainable</li>
+                        </ul>
+                      </div>
+                    </div>
+
+                    <div className="border rounded-lg p-6">
                       <h3 className="text-lg font-semibold mb-4">Response Parameters</h3>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
@@ -743,6 +758,11 @@ When answering questions:
                       <Button
                         onClick={() => {
                           ollamaService.setDefaultModel(selectedModel);
+                          
+                          // Save AI model settings to localStorage
+                          localStorage.setItem('ai-selected-model', selectedModel);
+                          localStorage.setItem('ai-fallback-model', fallbackModel);
+                          
                           alert('✅ AI settings saved successfully!');
                         }}
                       >

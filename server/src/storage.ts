@@ -36,7 +36,6 @@ export interface StoredSheet {
   sheetNumber?: string;
   sheetName?: string;
   extractedText?: string;
-  thumbnail?: string;
   hasTakeoffs: boolean;
   takeoffCount: number;
   isVisible: boolean;
@@ -651,7 +650,6 @@ class SupabaseStorage {
       sheetNumber: item.sheet_number,
       sheetName: item.sheet_name,
       extractedText: item.extracted_text,
-      thumbnail: item.thumbnail,
       hasTakeoffs: item.has_takeoffs,
       takeoffCount: item.takeoff_count,
       isVisible: item.is_visible,
@@ -681,7 +679,6 @@ class SupabaseStorage {
       sheetNumber: item.sheet_number,
       sheetName: item.sheet_name,
       extractedText: item.extracted_text,
-      thumbnail: item.thumbnail,
       hasTakeoffs: item.has_takeoffs,
       takeoffCount: item.takeoff_count,
       isVisible: item.is_visible,
@@ -720,7 +717,6 @@ class SupabaseStorage {
         sheetNumber: data.sheet_number,
         sheetName: data.sheet_name,
         extractedText: data.extracted_text,
-        thumbnail: data.thumbnail,
         hasTakeoffs: data.has_takeoffs,
         takeoffCount: data.takeoff_count,
         isVisible: data.is_visible,
@@ -749,7 +745,6 @@ class SupabaseStorage {
         sheet_number: sheet.sheetNumber,
         sheet_name: sheet.sheetName,
         extracted_text: sheet.extractedText,
-        thumbnail: sheet.thumbnail,
         has_takeoffs: sheet.hasTakeoffs,
         takeoff_count: sheet.takeoffCount,
         is_visible: sheet.isVisible,
@@ -783,7 +778,6 @@ class SupabaseStorage {
         sheetNumber: data.sheet_number,
         sheetName: data.sheet_name,
         extractedText: data.extracted_text,
-        thumbnail: data.thumbnail,
         hasTakeoffs: data.has_takeoffs,
         takeoffCount: data.takeoff_count,
         isVisible: data.is_visible,

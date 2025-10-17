@@ -4,44 +4,15 @@ import { supabase } from '../supabase';
 
 const router = express.Router();
 
-// Ollama Cloud API configuration
-const OLLAMA_BASE_URL = 'https://ollama.com';
-const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY;
+// Environment variables
+const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'https://ollama.com';
+const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || process.env.VITE_OLLAMA_API_KEY;
 
 // Get available models
 router.get('/models', async (req, res) => {
   try {
     if (!OLLAMA_API_KEY) {
-      return res.status(500).json({ 
-        error: 'Ollama API key not configured',
-        details: 'Set OLLAMA_API_KEY environment variable'
-      });
-    }
-
-    const response = await axios.get(`${OLLAMA_BASE_URL}/api/tags`, {
-      headers: {
-        'Authorization': `Bearer ${OLLAMA_API_KEY}`,
-        'Content-Type': 'application/json'
-      }
-    });
-    res.json(response.data);
-  } catch (error) {
-    console.error('Error fetching Ollama models:', error);
-    res.status(500).json({ 
-      error: 'Failed to fetch models',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-});
-
-// Check if Ollama is available
-router.get('/health', async (req, res) => {
-  try {
-    if (!OLLAMA_API_KEY) {
-      return res.json({ 
-        available: false, 
-        error: 'Ollama API key not configured'
-      });
+      return res.status(400).json({ error: 'Ollama API key not configured' });
     }
 
     const response = await axios.get(`${OLLAMA_BASE_URL}/api/tags`, {
@@ -49,236 +20,149 @@ router.get('/health', async (req, res) => {
         'Authorization': `Bearer ${OLLAMA_API_KEY}`,
         'Content-Type': 'application/json'
       },
-      timeout: 5000
+      timeout: 10000
     });
-    res.json({ 
-      available: true, 
-      models: response.data.models?.length || 0 
-    });
+
+    res.json(response.data);
   } catch (error) {
-    console.error('Ollama health check failed:', error);
-    res.json({ 
-      available: false, 
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
+    console.error('Error fetching models:', error);
+    if (axios.isAxiosError(error)) {
+      if (error.response) {
+        res.status(error.response.status).json({ error: `Ollama API error: ${error.response.data}` });
+      } else {
+        res.status(500).json({ error: `Network error: ${error.message}` });
+      }
+    } else {
+      res.status(500).json({ error: 'Internal server error' });
+    }
   }
 });
 
 // Chat endpoint
 router.post('/chat', async (req, res) => {
   try {
-    const { model, messages, stream = false, options = {} } = req.body;
-
-    if (!model || !messages || !Array.isArray(messages)) {
-      return res.status(400).json({ 
-        error: 'Missing required fields: model and messages' 
-      });
-    }
+    const { model, messages, stream, options } = req.body;
 
     if (!OLLAMA_API_KEY) {
-      return res.status(500).json({ 
-        error: 'Ollama API key not configured',
-        details: 'Set OLLAMA_API_KEY environment variable'
-      });
+      return res.status(400).json({ error: 'Ollama API key not configured' });
     }
 
-    const requestData = {
-      model,
-      messages,
-      stream,
-      options: {
-        temperature: 0.7,
-        top_p: 0.9,
-        ...options
-      }
-    };
+    if (!model || !messages) {
+      return res.status(400).json({ error: 'Missing required fields: model and messages' });
+    }
 
     if (stream) {
       // Handle streaming response
-      res.setHeader('Content-Type', 'text/plain');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
+      res.writeHead(200, {
+        'Content-Type': 'text/plain',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Cache-Control'
+      });
 
-      const response = await axios.post(
-        `${OLLAMA_BASE_URL}/api/chat`,
-        requestData,
-        {
-          headers: {
-            'Authorization': `Bearer ${OLLAMA_API_KEY}`,
-            'Content-Type': 'application/json'
+      try {
+        const response = await axios.post(
+          `${OLLAMA_BASE_URL}/api/chat`,
+          {
+            model,
+            messages,
+            stream: true,
+            options: options || {}
           },
-          responseType: 'stream',
-          timeout: 300000 // 5 minutes timeout for long responses
-        }
-      );
-
-      response.data.on('data', (chunk: Buffer) => {
-        const lines = chunk.toString().split('\n');
-        for (const line of lines) {
-          if (line.trim()) {
-            res.write(line + '\n');
+          {
+            headers: {
+              'Authorization': `Bearer ${OLLAMA_API_KEY}`,
+              'Content-Type': 'application/json'
+            },
+            responseType: 'stream',
+            timeout: 120000 // 2 minutes for streaming
           }
-        }
-      });
+        );
 
-      response.data.on('end', () => {
+        response.data.on('data', (chunk: Buffer) => {
+          res.write(chunk);
+        });
+
+        response.data.on('end', () => {
+          res.end();
+        });
+
+        response.data.on('error', (error: Error) => {
+          console.error('Streaming error:', error);
+          res.end();
+        });
+
+      } catch (streamError) {
+        console.error('Streaming request error:', streamError);
         res.end();
-      });
-
-      response.data.on('error', (error: Error) => {
-        console.error('Streaming error:', error);
-        res.status(500).json({ error: 'Streaming error occurred' });
-      });
-
+      }
     } else {
       // Handle non-streaming response
       const response = await axios.post(
         `${OLLAMA_BASE_URL}/api/chat`,
-        requestData,
+        {
+          model,
+          messages,
+          stream: false,
+          options: options || {}
+        },
         {
           headers: {
             'Authorization': `Bearer ${OLLAMA_API_KEY}`,
             'Content-Type': 'application/json'
           },
-          timeout: 300000 // 5 minutes timeout
+          timeout: 60000 // 1 minute for non-streaming
         }
       );
 
       res.json(response.data);
     }
-
   } catch (error) {
-    console.error('Error in Ollama chat:', error);
-    
+    console.error('Error in chat endpoint:', error);
     if (axios.isAxiosError(error)) {
-      if (error.code === 'ECONNREFUSED') {
-        res.status(503).json({ 
-          error: 'Ollama service unavailable',
-          details: 'Make sure Ollama is running on localhost:11434'
-        });
-      } else if (error.response) {
-        res.status(error.response.status).json({
-          error: 'Ollama API error',
-          details: error.response.data
-        });
+      if (error.response) {
+        res.status(error.response.status).json({ error: `Ollama API error: ${error.response.data}` });
       } else {
-        res.status(500).json({
-          error: 'Network error',
-          details: error.message
-        });
+        res.status(500).json({ error: `Network error: ${error.message}` });
       }
     } else {
-      res.status(500).json({
-        error: 'Internal server error',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      });
+      res.status(500).json({ error: 'Internal server error' });
     }
   }
 });
 
-// Generate embeddings
-router.post('/embeddings', async (req, res) => {
-  try {
-    const { model, prompt } = req.body;
-
-    if (!model || !prompt) {
-      return res.status(400).json({ 
-        error: 'Missing required fields: model and prompt' 
-      });
-    }
-
-    if (!OLLAMA_API_KEY) {
-      return res.status(500).json({ 
-        error: 'Ollama API key not configured',
-        details: 'Set OLLAMA_API_KEY environment variable'
-      });
-    }
-
-    const response = await axios.post(
-      `${OLLAMA_BASE_URL}/api/embeddings`,
-      { model, prompt },
-      {
-        headers: {
-          'Authorization': `Bearer ${OLLAMA_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 60000 // 1 minute timeout
-      }
-    );
-
-    res.json(response.data);
-  } catch (error) {
-    console.error('Error generating embeddings:', error);
-    res.status(500).json({ 
-      error: 'Failed to generate embeddings',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-});
-
-// Pull a model
-router.post('/pull', async (req, res) => {
-  try {
-    const { name, stream = false } = req.body;
-
-    if (!name) {
-      return res.status(400).json({ 
-        error: 'Missing required field: name' 
-      });
-    }
-
-    if (!OLLAMA_API_KEY) {
-      return res.status(500).json({ 
-        error: 'Ollama API key not configured',
-        details: 'Set OLLAMA_API_KEY environment variable'
-      });
-    }
-
-    const response = await axios.post(
-      `${OLLAMA_BASE_URL}/api/pull`,
-      { name, stream },
-      {
-        headers: {
-          'Authorization': `Bearer ${OLLAMA_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 1800000 // 30 minutes timeout for model downloads
-      }
-    );
-
-    res.json(response.data);
-  } catch (error) {
-    console.error('Error pulling model:', error);
-    res.status(500).json({ 
-      error: 'Failed to pull model',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-});
-
-// Filter OCR text to focus on titleblock information and remove detail callouts
+// Helper function to filter OCR text for titleblock information
 function filterTextForTitleblock(text: string): string {
-  if (!text || text.trim().length === 0) return text;
-  
-  // Split text into lines for processing
   const lines = text.split('\n');
-  const filteredLines: string[] = [];
-  
-  for (const line of lines) {
+  const filteredLines = lines.filter(line => {
     const trimmedLine = line.trim();
     
     // Skip empty lines
-    if (!trimmedLine) continue;
+    if (!trimmedLine) return false;
     
-    // Skip detail callouts and section labels
-    if (isDetailCallout(trimmedLine)) {
-      console.log(`Filtering out detail callout: "${trimmedLine}"`);
-      continue;
+    // Keep lines that contain titleblock keywords
+    if (isTitleblockKeyword(trimmedLine)) {
+      return true;
     }
     
-    // Keep titleblock-related content
-    filteredLines.push(line);
-  }
+    // Skip detail callouts
+    if (isDetailCallout(trimmedLine)) {
+      return false;
+    }
+    
+    // Keep lines that look like sheet numbers (A0.01, A1.02, etc.)
+    if (/^[A-Z]\d+\.\d+$/.test(trimmedLine)) {
+      return true;
+    }
+    
+    // Keep lines that look like drawing titles (longer descriptive text)
+    if (trimmedLine.length > 10 && !isDetailCallout(trimmedLine)) {
+      return true;
+    }
+    
+    return false;
+  });
   
   return filteredLines.join('\n');
 }
@@ -288,17 +172,19 @@ function isDetailCallout(line: string): boolean {
   const lowerLine = line.toLowerCase();
   
   // Skip lines that start with numbers followed by descriptions (detail callouts)
-  // This is the most reliable pattern for detail callouts
   if (/^\d+\s+.*\s+(detail|section|enlarged|typical|connection detail|section detail)/i.test(line)) {
     return true;
   }
   
-  // Skip lines that are clearly detail callouts (more specific patterns)
+  // Skip other common detail callout patterns
   const detailPatterns = [
-    /^\d+\s+.*\s+connection detail/i,
-    /^\d+\s+.*\s+section detail/i,
-    /^\d+\s+.*\s+enlarged.*detail/i,
-    /^\d+\s+.*\s+typical.*detail/i
+    /^\d+\s+.*\s+detail/i,
+    /^\d+\s+.*\s+section/i,
+    /^\d+\s+.*\s+enlarged/i,
+    /^\d+\s+.*\s+typical/i,
+    /^\d+\s+.*\s+connection/i,
+    /^\d+\s+.*\s+plan/i,
+    /^\d+\s+.*\s+elevation/i
   ];
   
   for (const pattern of detailPatterns) {
@@ -327,10 +213,10 @@ function isTitleblockKeyword(line: string): boolean {
   return titleblockKeywords.some(keyword => lowerLine.includes(keyword));
 }
 
-// Analyze document sheets using AI
+// Analyze document sheets using AI (restored from d5cdad4 with optimizations)
 router.post('/analyze-sheets', async (req, res) => {
   try {
-    const { documentId, projectId } = req.body;
+    const { documentId, projectId, customPrompt } = req.body;
     
     // Set up Server-Sent Events for progress updates
     res.writeHead(200, {
@@ -362,7 +248,7 @@ router.post('/analyze-sheets', async (req, res) => {
 
     sendProgress(5, 'Loading document OCR data...');
 
-    // Get OCR data for the document using the same service as chat functionality
+    // Get OCR data for the document using the simple OCR service
     const { simpleOcrService } = await import('../services/simpleOcrService');
     const ocrData = await simpleOcrService.getDocumentOCRResults(projectId, documentId);
 
@@ -373,20 +259,15 @@ router.post('/analyze-sheets', async (req, res) => {
     });
 
     if (!ocrData || ocrData.length === 0) {
-      res.write(`data: ${JSON.stringify({ error: 'No OCR data found for this document' })}\n\n`);
+      res.write(`data: ${JSON.stringify({ error: 'No OCR data found for this document. Please run OCR first.' })}\n\n`);
       res.end();
       return;
     }
 
     sendProgress(10, `Found ${ocrData.length} pages to analyze...`);
 
-    // Build context from OCR data - analyze multiple pages to find title block patterns
-    let context = `Analyze this construction document set and identify sheet numbers and names from title blocks.\n\n`;
-    context += `Document ID: ${documentId}\n`;
-    context += `Total Pages: ${ocrData.length}\n\n`;
-
     // Process all pages in batches to avoid token limits
-    const BATCH_SIZE = 10; // Process 10 pages at a time for better AI focus
+    const BATCH_SIZE = 8; // Optimized batch size for faster processing
     const totalPages = ocrData.length;
     console.log(`Processing ${totalPages} pages in batches of ${BATCH_SIZE}`);
     
@@ -414,19 +295,15 @@ router.post('/analyze-sheets', async (req, res) => {
           // Filter out detail callouts and section labels to focus on titleblock info
           const filteredText = filterTextForTitleblock(page.text);
           
-          // Limit to reasonable size to avoid token limits - increased to capture more titleblock info
-          const limitedText = filteredText.substring(0, 4000);
+          // Limit to reasonable size to avoid token limits
+          const limitedText = filteredText.substring(0, 3000);
           batchContext += `Page ${page.pageNumber}:\n${limitedText}\n\n`;
-          
-          // Debug: log what we're sending to AI
-          console.log(`Page ${page.pageNumber} filtered OCR text:`, limitedText.substring(0, 200) + '...');
         }
       });
       
       console.log(`Batch context length: ${batchContext.length} characters`);
 
-      // Get custom prompt from request or use default
-      const customPrompt = req.body.customPrompt;
+      // Use custom prompt from admin panel if provided, otherwise use default
       const systemPrompt = customPrompt || `You are an expert construction document analyst. Your task is to analyze construction drawings and identify sheet information from title blocks.
 
 CRITICAL INSTRUCTIONS:
@@ -444,11 +321,11 @@ For each page, identify ONLY:
 Look specifically for text near these title block labels:
 - "sheet number:" followed by the sheet number (use exactly as found)
 - "drawing data:" followed by the COMPLETE sheet title (capture the full title, not just the first part)
-- "drawing title:" followed by the COMPLETE sheet title (if "drawing data:" is not present)
+- "drawing title:" followed by the COMPLETE sheet title
 - "sheet name:" followed by the sheet name
 
 IMPORTANT: 
-- Do NOT reorder sheet numbers based on numerical patterns (A3.02 can come before A3.01)
+- Do NOT reorder sheet numbers based on numerical patterns (A3.02 can come before A3.01 if it appears that way in the document set)
 - Capture the COMPLETE drawing title from the "drawing data:" field, including all descriptive text
 - Use the page order exactly as provided in the input
 
@@ -458,6 +335,7 @@ Common sheet number patterns:
 - M0.01, M0.02 (Mechanical)
 - E0.01, E0.02 (Electrical)
 - P0.01, P0.02 (Plumbing)
+- Sheet numbers may be in formats not listed here; usually in easily identified patterns. 
 
 Common sheet names:
 - "Cover Sheet", "Title Sheet", "Index"
@@ -474,31 +352,7 @@ IMPORTANT:
 EXAMPLE: If you see "drawing data: Overall Reflected Ceiling Plans - Third thru Sixth & Int. Roof Level", 
 use the COMPLETE title "Overall Reflected Ceiling Plans - Third thru Sixth & Int. Roof Level", not just "Overall Reflected Ceiling Plans".
 
-Return your analysis as a JSON array with this exact format for the pages in this batch:
-[
-  {
-    "pageNumber": 1,
-    "sheetNumber": "A0.01",
-    "sheetName": "Cover Sheet"
-  },
-  {
-    "pageNumber": 2,
-    "sheetNumber": "A9.02", 
-    "sheetName": "Enlarged Patio Trellis"
-  },
-  {
-    "pageNumber": 13,
-    "sheetNumber": "A3.02",
-    "sheetName": "Overall Reflected Ceiling Plans - Third thru Sixth & Int. Roof Level"
-  },
-  {
-    "pageNumber": 14,
-    "sheetNumber": "A3.01",
-    "sheetName": "Overall Reflected Ceiling Plans - First & Second Level"
-  }
-]
-
-If you cannot determine a sheet number or name for a page, use "Unknown" as the value. Be as accurate as possible based ONLY on the title block information.`;
+Return your analysis as a JSON array with this exact format for the pages in this batch: [ { "pageNumber": 1, "sheetNumber": "A0.01", "sheetName": "Cover Sheet" }, { "pageNumber": 2, "sheetNumber": "A9.02", "sheetName": "Enlarged Patio Trellis" }, { "pageNumber": 13, "sheetNumber": "A3.02", "sheetName": "Overall Reflected Ceiling Plans - Third thru Sixth & Int. Roof Level" }, { "pageNumber": 14, "sheetNumber": "A3.01", "sheetName": "Overall Reflected Ceiling Plans - First & Second Level" } ] If you cannot determine a sheet number or name for a page, use "Unknown" as the value. Be as accurate as possible based ONLY on the title block information.`;
 
       // Create AI prompt for sheet analysis
       const messages = [
@@ -537,26 +391,21 @@ If you cannot determine a sheet number or name for a page, use "Unknown" as the 
             'Authorization': `Bearer ${OLLAMA_API_KEY}`,
             'Content-Type': 'application/json'
           },
-          timeout: 120000 // 2 minutes timeout
+          timeout: 60000 // 1 minute timeout per batch
         }
       );
 
-      const aiResponse = response.data;
-      let batchSheets = [];
+      const aiResponse = response.data.message?.content || '';
+      console.log(`Batch ${Math.floor(batchStart / BATCH_SIZE) + 1} AI response:`, aiResponse.substring(0, 500) + '...');
 
       try {
-        // Try to parse the AI response as JSON
-        const responseText = aiResponse.message?.content || '';
-        console.log(`AI Response for batch ${Math.floor(batchStart / BATCH_SIZE) + 1}:`, responseText);
-        
-        // Extract JSON from the response (in case there's extra text)
-        const jsonMatch = responseText.match(/\[[\s\S]*\]/);
-        if (jsonMatch) {
-          batchSheets = JSON.parse(jsonMatch[0]);
-        } else {
-          // Try to parse the entire response as JSON
-          batchSheets = JSON.parse(responseText);
+        // Parse the AI response as JSON
+        const jsonMatch = aiResponse.match(/\[[\s\S]*\]/);
+        if (!jsonMatch) {
+          throw new Error('No JSON array found in response');
         }
+
+        let batchSheets = JSON.parse(jsonMatch[0]);
 
         // Validate the response format
         if (!Array.isArray(batchSheets)) {
@@ -586,7 +435,7 @@ If you cannot determine a sheet number or name for a page, use "Unknown" as the 
       
       // Add a small delay between batches to avoid overwhelming the API
       if (batchStart + BATCH_SIZE < totalPages) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 500)); // Shorter delay for faster processing
       }
     }
 

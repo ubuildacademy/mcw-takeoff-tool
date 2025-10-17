@@ -267,17 +267,6 @@ export const sheetService = {
   },
 
 
-  async generateThumbnail(documentId: string, pageNumber: number) {
-    const response = await apiClient.post(`/sheets/${documentId}/thumbnail/${pageNumber}`);
-    return response.data;
-  },
-
-  async getThumbnail(documentId: string, pageNumber: number) {
-    const response = await apiClient.get(`/sheets/${documentId}/thumbnail/${pageNumber}`, {
-      responseType: 'blob'
-    });
-    return response.data;
-  },
 };
 
 // Takeoff Measurements service
@@ -360,6 +349,92 @@ export const ocrService = {
   async getDocumentResults(documentId: string, projectId: string) {
     const response = await apiClient.get(`/ocr/results/${documentId}?projectId=${projectId}`);
     return response.data;
+  },
+};
+
+// AI Analysis service
+export const aiAnalysisService = {
+
+  // Analyze sheets using text-based AI (fallback method)
+  async analyzeSheetsWithText(documentId: string, projectId: string, customPrompt?: string) {
+    const response = await fetch(`${API_BASE_URL}/ollama/analyze-sheets`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        documentId,
+        projectId,
+        customPrompt
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Text analysis failed: ${response.statusText}`);
+    }
+
+    return response;
+  },
+
+  // Analyze sheets using text-based AI
+  async analyzeSheets(documentId: string, projectId: string, customPrompt?: string) {
+    return await this.analyzeSheetsWithText(documentId, projectId, customPrompt);
+  },
+
+  // Unified document analysis - combines simple OCR + AI sheet labeling
+  async analyzeDocumentComplete(documentId: string, projectId: string) {
+    // Step 1: Run OCR processing first
+    const ocrResponse = await fetch(`${API_BASE_URL}/ocr/process-document/${documentId}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        projectId
+      })
+    });
+
+    if (!ocrResponse.ok) {
+      throw new Error(`OCR processing failed: ${ocrResponse.statusText}`);
+    }
+
+    const ocrResult = await ocrResponse.json();
+    const jobId = ocrResult.jobId;
+
+    // Step 2: Wait for OCR to complete
+    let ocrCompleted = false;
+    while (!ocrCompleted) {
+      await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
+      
+      const statusResponse = await fetch(`${API_BASE_URL}/ocr/status/${jobId}`);
+      const status = await statusResponse.json();
+      
+      if (status.status === 'completed') {
+        ocrCompleted = true;
+      } else if (status.status === 'failed') {
+        throw new Error(`OCR processing failed: ${status.error}`);
+      }
+    }
+
+    // Step 3: Run AI sheet analysis with custom prompt from admin panel
+    const customPrompt = localStorage.getItem('ai-page-labeling-prompt');
+    const response = await fetch(`${API_BASE_URL}/ollama/analyze-sheets`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        documentId,
+        projectId,
+        customPrompt
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`AI sheet analysis failed: ${response.statusText}`);
+    }
+
+    return response;
   },
 };
 
