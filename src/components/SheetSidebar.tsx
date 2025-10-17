@@ -24,7 +24,7 @@ import {
   Search,
   Brain
 } from 'lucide-react';
-import { fileService, sheetService } from '../services/apiService';
+import { fileService, sheetService, aiAnalysisService } from '../services/apiService';
 import { useTakeoffStore } from '../store/useTakeoffStore';
 import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFPage, PDFDocument } from '../types';
@@ -64,8 +64,14 @@ export function SheetSidebar({
   const [labelingProgress, setLabelingProgress] = useState('');
   const [labelingProgressPercent, setLabelingProgressPercent] = useState(0);
   
-  // Use documents from parent component
-  const currentDocuments = documents;
+  // Local expansion state to prevent parent from resetting it
+  const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set());
+  
+  // Use documents from parent component but with local expansion state
+  const currentDocuments = documents.map(doc => ({
+    ...doc,
+    isExpanded: expandedDocuments.has(doc.id)
+  }));
   
   // Sheet name editing state
   const [editingSheetId, setEditingSheetId] = useState<string | null>(null);
@@ -173,11 +179,8 @@ export function SheetSidebar({
                       hasTakeoffs: sheetData.sheet.hasTakeoffs || false,
                       takeoffCount: sheetData.sheet.takeoffCount || 0,
                       isVisible: sheetData.sheet.isVisible !== false,
-                      ocrProcessed: sheetData.sheet.ocrProcessed || false,
                       sheetName: sheetData.sheet.sheetName,
-                      sheetNumber: sheetData.sheet.sheetNumber,
-                      extractedText: sheetData.sheet.extractedText,
-                      thumbnail: sheetData.sheet.thumbnail
+                      sheetNumber: sheetData.sheet.sheetNumber
                     };
                   }
                 } catch (error) {
@@ -194,7 +197,6 @@ export function SheetSidebar({
                   hasTakeoffs: false,
                   takeoffCount: 0,
                   isVisible: true,
-                  ocrProcessed: false
                 };
               })
             );
@@ -207,7 +209,6 @@ export function SheetSidebar({
               name: file.originalName.replace('.pdf', ''),
               totalPages,
               pages,
-              isExpanded: false,
               ocrEnabled: hasOCRData
             };
           } catch (error) {
@@ -225,28 +226,19 @@ export function SheetSidebar({
                 hasTakeoffs: false,
                 takeoffCount: 0,
                 isVisible: true,
-                ocrProcessed: false
               }],
-              isExpanded: false,
               ocrEnabled: hasOCRData
             };
           }
         })
       );
       
-      // Update hasTakeoffs based on actual measurements and preserve expansion state
+      // Update hasTakeoffs based on actual measurements
       const finalDocuments = updateHasTakeoffs(documents);
       
-      // Update documents through parent callback
+      // Update documents through parent callback (without expansion state)
       if (onDocumentsUpdate) {
-        const documentsWithPreservedState = finalDocuments.map(newDoc => {
-          const existingDoc = documents.find(prevDoc => prevDoc.id === newDoc.id);
-          return {
-            ...newDoc,
-            isExpanded: existingDoc?.isExpanded || false
-          };
-        });
-        onDocumentsUpdate(documentsWithPreservedState);
+        onDocumentsUpdate(finalDocuments);
       }
       
     } catch (error) {
@@ -295,7 +287,6 @@ export function SheetSidebar({
                     page.pageNumber === pageNumber 
                       ? { 
                           ...page, 
-                          ocrProcessed: true 
                         }
                       : page
                   )
@@ -320,14 +311,15 @@ export function SheetSidebar({
 
   // Toggle document expansion
   const toggleDocumentExpansion = (documentId: string) => {
-    if (onDocumentsUpdate) {
-      const updatedDocuments = documents.map(doc => 
-        doc.id === documentId 
-          ? { ...doc, isExpanded: !doc.isExpanded }
-          : doc
-      );
-      onDocumentsUpdate(updatedDocuments);
-    }
+    setExpandedDocuments(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(documentId)) {
+        newSet.delete(documentId);
+      } else {
+        newSet.add(documentId);
+      }
+      return newSet;
+    });
   };
 
 
@@ -506,12 +498,12 @@ export function SheetSidebar({
 
   };
 
-  // Handle automatic sheet labeling using AI
-  const handleAutomaticSheetLabeling = async (documentId: string) => {
+  // Handle unified document analysis using AI
+  const handleAnalyzeDocument = async (documentId: string) => {
     try {
-      console.log('Starting automatic sheet labeling for document:', documentId);
+      console.log('Starting unified document analysis for document:', documentId);
       
-      // Check if document has OCR data
+      // Check if document exists
       const document = documents.find(doc => doc.id === documentId);
       if (!document) {
         console.error('Document not found:', documentId);
@@ -519,34 +511,14 @@ export function SheetSidebar({
         return;
       }
 
-      // Check if document has OCR data
-      if (!document.ocrEnabled && !document.pages?.some(page => page.ocrProcessed)) {
-        alert('This document needs OCR processing first. Please run OCR processing before using automatic sheet labeling.');
-        return;
-      }
-
       // Show loading state and dialog
       setProcessingOCR(prev => [...prev, documentId]);
       setShowLabelingDialog(true);
-      setLabelingProgress('Starting AI analysis...');
+      setLabelingProgress('Starting OCR and AI analysis...');
       setLabelingProgressPercent(0);
 
-      // Call the AI service with Server-Sent Events for real-time progress
-      const response = await fetch('http://localhost:4000/api/ollama/analyze-sheets', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          documentId: documentId,
-          projectId: projectId,
-          customPrompt: localStorage.getItem('ai-page-labeling-prompt')
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to analyze sheets: ${response.statusText}`);
-      }
+      // Call the unified document analysis service
+      const response = await aiAnalysisService.analyzeDocumentComplete(documentId, projectId);
 
       // Handle Server-Sent Events for real-time progress
       const reader = response.body?.getReader();
@@ -594,22 +566,46 @@ export function SheetSidebar({
         setLabelingProgress('Updating sheet labels...');
         setLabelingProgressPercent(95);
         
-        // Update the documents with the AI-extracted sheet information
-        const extractedData = result.sheets.map((sheet: any) => ({
-          pageNumber: sheet.pageNumber,
-          sheetNumber: sheet.sheetNumber,
-          sheetName: sheet.sheetName
-        }));
-
+        // Save each sheet's information to the database
+        let savedCount = 0;
+        for (const sheet of result.sheets) {
+          try {
+            const sheetId = `${documentId}-${sheet.pageNumber}`;
+            
+            // Only save if we have meaningful data (not "Unknown")
+            if (sheet.sheetNumber && sheet.sheetNumber !== 'Unknown' && 
+                sheet.sheetName && sheet.sheetName !== 'Unknown') {
+              
+              await sheetService.updateSheet(sheetId, {
+                documentId: documentId,
+                pageNumber: sheet.pageNumber,
+                sheetNumber: sheet.sheetNumber,
+                sheetName: sheet.sheetName
+              });
+              
+              savedCount++;
+            }
+          } catch (error) {
+            console.error(`Failed to save sheet ${sheet.pageNumber}:`, error);
+          }
+        }
         
         setLabelingProgress('Complete!');
         setLabelingProgressPercent(100);
-        console.log('Successfully applied automatic sheet labeling:', extractedData);
+        console.log(`Successfully saved ${savedCount} sheet labels to database`);
+        
+        // Reload documents to show updated labels
+        if (onDocumentsUpdate) {
+          // Trigger a reload of documents to show the new labels
+          setTimeout(() => {
+            window.location.reload(); // Simple reload to show updated data
+          }, 1000);
+        }
         
         // Wait a moment to show completion
         await new Promise(resolve => setTimeout(resolve, 1000));
         
-        alert(`Successfully labeled ${extractedData.length} out of ${result.totalPages} sheets automatically! The AI processed all pages in your document.`);
+        alert(`Successfully labeled ${savedCount} out of ${result.totalPages} sheets automatically! The AI processed all pages in your document.`);
       } else {
         console.warn('No sheet information could be extracted:', result);
         alert('Could not automatically extract sheet information. The AI may need more context or the document structure may be unclear.');
@@ -648,7 +644,7 @@ export function SheetSidebar({
           if (page.sheetNumber && page.sheetNumber.toLowerCase().includes(query)) return true;
           
           // Search in extracted text
-          if (page.extractedText && page.extractedText.toLowerCase().includes(query)) return true;
+          // OCR text search removed - keeping it simple and clean
           
           return false;
         })
@@ -798,7 +794,7 @@ export function SheetSidebar({
                             onClick={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
-                              onOCRRequest?.(document.id, document.pages.map(p => p.pageNumber));
+                              handleAnalyzeDocument(document.id);
                               setOpenDocumentMenu(null);
                             }}
                             disabled={processingOCR.includes(document.id)}
@@ -806,23 +802,10 @@ export function SheetSidebar({
                             {processingOCR.includes(document.id) ? (
                               <RefreshCw className="w-4 h-4 animate-spin" />
                             ) : (
-                              <Scan className="w-4 h-4" />
+                              <Brain className="w-4 h-4" />
                             )}
-                            <span className="font-medium">1.</span> Run OCR Processing
-                          </button>
-                          
-                          <button
-                            className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              handleAutomaticSheetLabeling(document.id);
-                              setOpenDocumentMenu(null);
-                            }}
-                            disabled={processingOCR.includes(document.id)}
-                          >
-                            <Brain className="w-4 h-4" />
-                            <span className="font-medium">2.</span> Automatic Sheet Labeling
+                            <span className="font-medium">Analyze Document</span>
+                            <span className="text-xs text-gray-500 ml-auto">AI Analysis</span>
                           </button>
                           
                           <div className="border-t border-gray-200"></div>
@@ -859,22 +842,6 @@ export function SheetSidebar({
                         onClick={() => handlePageClick(document.id, page.pageNumber)}
                       >
                         <div className="flex items-start gap-3">
-                          {/* Thumbnail */}
-                          <div className="w-12 h-16 bg-gray-100 rounded border flex-shrink-0 flex items-center justify-center">
-                            {page.thumbnail ? (
-                              <img
-                                src={page.thumbnail}
-                                alt={`Page ${page.pageNumber}`}
-                                className="w-full h-full object-cover rounded"
-                              />
-                            ) : (
-                              <div className="text-center">
-                                <FileText className="w-4 h-4 text-gray-400 mx-auto mb-1" />
-                                <span className="text-xs text-gray-400">{page.pageNumber}</span>
-                              </div>
-                            )}
-                          </div>
-
                           {/* Page Info */}
                           <div className="flex-1 min-w-0">
                             <div className="flex justify-between mb-1">
@@ -1006,19 +973,7 @@ export function SheetSidebar({
                                   {page.takeoffCount} takeoffs
                                 </Badge>
                               )}
-                              {page.ocrProcessed && (
-                                <Badge variant="outline" className="text-xs">
-                                  OCR
-                                </Badge>
-                              )}
                             </div>
-
-                            {/* Extracted Text Preview */}
-                            {page.extractedText && (
-                              <p className="text-xs text-gray-600 line-clamp-2">
-                                {page.extractedText.substring(0, 100)}...
-                              </p>
-                            )}
                           </div>
 
                         </div>
@@ -1044,7 +999,7 @@ export function SheetSidebar({
         </div>
       </div>
 
-      {/* Loading Dialog for Automatic Sheet Labeling */}
+      {/* Loading Dialog for AI Document Analysis */}
       {showLabelingDialog && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
@@ -1055,7 +1010,7 @@ export function SheetSidebar({
                   <Brain className="w-12 h-12 text-blue-300 animate-spin" style={{animationDuration: '2s'}} />
                 </div>
               </div>
-              <h3 className="text-lg font-semibold text-center">AI Analyzing Documents</h3>
+              <h3 className="text-lg font-semibold text-center">AI Analyzing Document</h3>
               <p className="text-gray-600 text-center text-sm">{labelingProgress}</p>
               <div className="flex items-center space-x-2 text-blue-600">
                 <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce"></div>
@@ -1063,7 +1018,7 @@ export function SheetSidebar({
                 <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
               </div>
             </div>
-            <p className="text-sm text-gray-500 mt-4 text-center">This may take a few moments...</p>
+            <p className="text-sm text-gray-500 mt-4 text-center">Extracting text and analyzing sheets with AI...</p>
           </div>
         </div>
       )}

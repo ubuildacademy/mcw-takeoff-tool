@@ -63,7 +63,6 @@ export interface Sheet {
   id: string;
   name: string;
   pageNumber: number;
-  thumbnail?: string;
   isVisible: boolean;
   hasTakeoffs: boolean;
   takeoffCount: number;
@@ -134,7 +133,6 @@ export interface TitleblockConfig {
 
 export interface PDFPage {
   pageNumber: number;
-  thumbnail?: string;
   extractedText?: string;
   sheetNumber?: string;
   sheetName?: string;

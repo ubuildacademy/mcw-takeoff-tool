@@ -66,7 +66,7 @@ export interface OllamaStreamResponse {
 class OllamaService {
   private baseUrl: string;
   private apiKey: string;
-  private defaultModel: string = 'gpt-oss:120b'; // Default to cloud model (without -cloud suffix for direct API calls)
+  private defaultModel: string = 'gpt-oss:120b'; // Default to largest GPT-OSS model available
   private isConnected: boolean = false;
   private connectionRetries: number = 0;
   private maxRetries: number = 3;
@@ -81,7 +81,8 @@ class OllamaService {
     console.log('OllamaService initialized with:', {
       baseUrl: this.baseUrl,
       hasApiKey: !!this.apiKey,
-      apiKeyLength: this.apiKey.length
+      apiKeyLength: this.apiKey.length,
+      note: 'API key is handled by backend'
     });
   }
 
@@ -114,12 +115,7 @@ class OllamaService {
   // Check if Ollama cloud API is accessible with retry logic
   async isAvailable(): Promise<boolean> {
     try {
-      if (!this.apiKey) {
-        console.warn('Ollama API key not configured');
-        this.isConnected = false;
-        return false;
-      }
-      
+      // Note: API key is handled by the backend, so we don't need to check it here
       const response = await this.makeRequest('/models', {
         method: 'GET',
         signal: AbortSignal.timeout(5000) // 5 second timeout
@@ -141,7 +137,6 @@ class OllamaService {
       const response = await fetch(`${this.baseUrl}${endpoint}`, {
         ...options,
         headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
           'Content-Type': 'application/json',
           ...options.headers,
         },

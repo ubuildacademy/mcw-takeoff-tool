@@ -1630,9 +1630,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Create crosshair lines with different styling for calibration
     const crosshairSize = isCalibrating ? 30 : 35;
-    const strokeColor = isCalibrating ? 'rgba(255, 0, 0, 0.9)' : 'rgba(255, 255, 255, 0.8)';
+    const strokeColor = isCalibrating ? 'rgba(255, 0, 0, 0.9)' : 'rgba(0, 0, 0, 0.8)';
     const strokeWidth = isCalibrating ? '2' : '1';
-    const dotColor = isCalibrating ? 'rgba(255, 0, 0, 1)' : 'rgba(255, 255, 255, 0.9)';
+    const dotColor = isCalibrating ? 'rgba(255, 0, 0, 1)' : 'rgba(0, 0, 0, 0.9)';
     const dotRadius = isCalibrating ? '3' : '2';
     
     // Horizontal line

@@ -14,7 +14,6 @@ interface SheetMetadata {
   sheetNumber?: string;
   sheetName?: string;
   extractedText?: string;
-  thumbnail?: string;
   hasTakeoffs: boolean;
   takeoffCount: number;
   isVisible: boolean;
@@ -190,45 +189,5 @@ router.post('/:sheetId/ocr', async (req, res) => {
 });
 
 
-// Generate thumbnail for a specific page
-router.post('/:documentId/thumbnail/:pageNumber', async (req, res) => {
-  try {
-    const { documentId, pageNumber } = req.params;
-    
-    console.log(`Generating thumbnail for document ${documentId}, page ${pageNumber}`);
-    
-    // In a real implementation, you'd:
-    // 1. Load the PDF file
-    // 2. Render the specified page to a canvas
-    // 3. Convert to a thumbnail image
-    // 4. Save the thumbnail and return the URL
-    
-    // For now, return a placeholder
-    const thumbnailUrl = `/api/sheets/${documentId}/thumbnail/${pageNumber}`;
-    
-    res.json({ 
-      success: true, 
-      thumbnailUrl,
-      message: 'Thumbnail generated successfully'
-    });
-  } catch (error) {
-    console.error('Error generating thumbnail:', error);
-    res.status(500).json({ error: 'Failed to generate thumbnail' });
-  }
-});
-
-// Get thumbnail for a specific page
-router.get('/:documentId/thumbnail/:pageNumber', (req, res) => {
-  try {
-    const { documentId, pageNumber } = req.params;
-    
-    // In a real implementation, you'd serve the actual thumbnail image
-    // For now, return a 404 or placeholder
-    res.status(404).json({ error: 'Thumbnail not found' });
-  } catch (error) {
-    console.error('Error serving thumbnail:', error);
-    res.status(500).json({ error: 'Failed to serve thumbnail' });
-  }
-});
 
 export { router as sheetRoutes };
