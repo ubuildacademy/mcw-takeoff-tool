@@ -175,7 +175,18 @@ class ServerOCRService {
   // Get OCR data for a document
   async getDocumentData(documentId: string, projectId: string): Promise<DocumentOCRData | null> {
     try {
+      console.log(`🔍 Getting OCR data for document ${documentId} in project ${projectId}`);
       const resultsResponse = await ocrService.getDocumentResults(documentId, projectId);
+      console.log(`📊 OCR data retrieved:`, {
+        documentId: resultsResponse.documentId,
+        totalPages: resultsResponse.totalPages,
+        resultsCount: resultsResponse.results?.length || 0,
+        sampleResults: resultsResponse.results?.slice(0, 3).map(r => ({
+          pageNumber: r.pageNumber,
+          textLength: r.text?.length || 0,
+          textPreview: r.text?.substring(0, 100) + '...'
+        }))
+      });
       return resultsResponse;
     } catch (error) {
       console.error(`❌ Failed to get OCR data for document ${documentId}:`, error);

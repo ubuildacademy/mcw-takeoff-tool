@@ -203,7 +203,19 @@ router.get('/results/:documentId', async (req, res) => {
   }
 
   try {
+    console.log(`🔍 Backend: Getting OCR results for document ${documentId} in project ${projectId}`);
     const results = await simpleOcrService.getDocumentOCRResults(projectId, documentId);
+    
+    console.log(`📊 Backend: OCR results retrieved:`, {
+      documentId,
+      projectId,
+      resultsCount: results.length,
+      sampleResults: results.slice(0, 3).map(r => ({
+        pageNumber: r.pageNumber,
+        textLength: r.text?.length || 0,
+        textPreview: r.text?.substring(0, 100) + '...'
+      }))
+    });
     
     res.json({
       documentId,

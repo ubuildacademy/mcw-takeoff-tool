@@ -32,14 +32,48 @@ export const supabaseService = {
       throw error
     }
     
-    // Transform data to include user info (simplified)
-    const projectsWithUser = (data || []).map(project => ({
+    // Transform data to include user info (simplified) and map snake_case to camelCase
+    const baseProjects = (data || []).map(project => ({
       ...project,
+      lastModified: project.last_modified, // Map snake_case to camelCase
+      createdAt: project.created_at, // Map snake_case to camelCase
       user_email: undefined, // We'll add this later if needed
       user_name: undefined
     }));
-    
-    return projectsWithUser;
+
+    // Attach takeoff counts for each project so the UI can display them
+    // We use a head-only count query per project to respect RLS and avoid large payloads
+    const projectsWithCounts = await Promise.all(
+      baseProjects.map(async (project) => {
+        try {
+          const { count: takeoffCount } = await supabase
+            .from('measurements')
+            .select('id', { count: 'exact', head: true })
+            .eq('project_id', project.id);
+          const { count: conditionCount } = await supabase
+            .from('takeoff_conditions')
+            .select('id', { count: 'exact', head: true })
+            .eq('project_id', project.id);
+          return {
+            ...project,
+            takeoff_count: undefined, // normalize if coming from a view
+            takeoffCount: takeoffCount || 0,
+            conditionCount: conditionCount || 0,
+            totalValue: project.totalValue ?? 0
+          } as any;
+        } catch (e) {
+          console.warn('Failed to load takeoff count for project', project.id, e);
+          return {
+            ...project,
+            takeoffCount: 0,
+            conditionCount: 0,
+            totalValue: project.totalValue ?? 0
+          } as any;
+        }
+      })
+    );
+
+    return projectsWithCounts;
   },
 
   async createProject(project: Omit<ProjectInsert, 'user_id'>): Promise<Project> {

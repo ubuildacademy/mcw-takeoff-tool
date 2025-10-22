@@ -33,6 +33,7 @@ export interface TakeoffCondition {
   depth?: number; // For volume measurements, depth in feet
   materialCost?: number; // Material cost per unit
   equipmentCost?: number; // Fixed equipment cost for the condition
+  aiGenerated?: boolean; // NEW: Flag for AI-generated conditions
 }
 
 export interface TakeoffMeasurement {
@@ -92,7 +93,7 @@ export interface Annotation {
   projectId: string;
   sheetId: string;
   pageNumber: number;
-  type: 'text' | 'freehand' | 'arrow' | 'rectangle' | 'circle';
+  type: 'text' | 'freehand' | 'arrow' | 'rectangle' | 'circle' | 'highlight';
   points: Array<{ x: number; y: number }>; // PDF coordinates (0-1 scale)
   color: string;
   text?: string; // For text annotations
@@ -179,4 +180,49 @@ export interface ProjectCostBreakdown {
     conditionsWithCosts: number;
     totalConditions: number;
   };
+}
+
+export interface AITakeoffScope {
+  scope: string;
+  projectId: string;
+  documentIds: string[];
+}
+
+export interface AIIdentifiedPage {
+  documentId: string;
+  pageNumber: number;
+  confidence: number;
+  reason: string;
+  selected: boolean;
+  pageType?: 'floor-plan' | 'finish-schedule' | 'other';
+}
+
+export interface AITakeoffResult {
+  pageNumber: number;
+  documentId: string;
+  conditions: Array<{
+    name: string;
+    type: 'area' | 'volume' | 'linear' | 'count';
+    unit: string;
+    description: string;
+    color: string;
+  }>;
+  measurements: Array<{
+    conditionIndex: number;
+    points: Array<{ x: number; y: number }>;
+    calculatedValue: number;
+  }>;
+  calibration?: {
+    scaleFactor: number;
+    unit: string;
+  };
+}
+
+export interface AITakeoffProgress {
+  stage: 'identifying' | 'processing' | 'complete' | 'error';
+  currentPage: number;
+  totalPages: number;
+  message: string;
+  result?: AITakeoffResult;
+  error?: string;
 }

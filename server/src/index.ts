@@ -13,6 +13,9 @@ import takeoffMeasurementRoutes from './routes/takeoffMeasurements';
 import { ocrRoutes } from './routes/ocr';
 import ollamaRoutes from './routes/ollama';
 import userRoutes from './routes/users';
+import aiTakeoffRoutes from './routes/aiTakeoff';
+import playwrightTakeoffRoutes from './routes/playwrightTakeoff';
+import { livePreviewService } from './services/livePreviewService';
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '4000', 10);
@@ -45,11 +48,17 @@ app.use('/api/takeoff-measurements', takeoffMeasurementRoutes);
 app.use('/api/ocr', ocrRoutes);
 app.use('/api/ollama', ollamaRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/ai-takeoff', aiTakeoffRoutes);
+app.use('/api/playwright-takeoff', playwrightTakeoffRoutes);
 
 // Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
-// Start server
-app.listen(PORT, '0.0.0.0', () => {
+// Start server with Socket.IO
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Takeoff API server running on port ${PORT}`);
 });
+
+// Initialize live preview service
+livePreviewService.initialize(server);
+console.log(`📡 Live preview service initialized`);

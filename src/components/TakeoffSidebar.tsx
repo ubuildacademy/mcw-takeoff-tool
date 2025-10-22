@@ -22,6 +22,7 @@ import {
   FileImage,
   Scissors,
   DollarSign,
+  Bot,
 } from 'lucide-react';
 import { useTakeoffStore } from '../store/useTakeoffStore';
 import { sheetService } from '../services/apiService';
@@ -1298,17 +1299,28 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                 className={`p-3 border rounded-lg cursor-pointer transition-colors ${
                   selectedConditionId === condition.id 
                     ? 'border-blue-500 bg-blue-50 shadow-sm' 
-                    : 'border-gray-200 hover:bg-accent/50'
+                    : condition.aiGenerated
+                      ? 'border-blue-400 bg-blue-100/50 hover:bg-blue-100/70 shadow-sm' // Enhanced AI condition styling
+                      : 'border-gray-200 hover:bg-accent/50'
                 }`}
                 onClick={() => handleConditionClick(condition)}
               >
                 <div className="flex items-start justify-between mb-2">
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <div className="flex items-start gap-2 min-w-0 flex-1">
                     {getTypeIcon(condition.type)}
-                    <span className="font-medium truncate">{condition.name}</span>
-                    <Badge variant="outline" className="text-xs flex-shrink-0">
-                      {condition.unit}
-                    </Badge>
+                    <div className="min-w-0 flex-1">
+                      <span className="font-medium break-words">{condition.name}</span>
+                      <div className="flex items-center gap-2 mt-1">
+                        <Badge variant="outline" className="text-xs flex-shrink-0">
+                          {condition.unit}
+                        </Badge>
+                        {condition.aiGenerated && (
+                          <div className="flex items-center gap-1">
+                            <Bot className="w-4 h-4 text-blue-600" />
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0 ml-2">
                     {/* Cut-out button - only show for area/volume conditions */}

@@ -43,6 +43,8 @@ interface SheetSidebarProps {
   onOCRRequest?: (documentId: string, pageNumbers: number[]) => void;
   onOcrSearchResults?: (results: any[], query: string) => void;
   onDocumentsUpdate?: (documents: PDFDocument[]) => void;
+  onPdfUpload?: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  uploading?: boolean;
 }
 
 export function SheetSidebar({ 
@@ -53,7 +55,9 @@ export function SheetSidebar({
   selectedPageNumber,
   onOCRRequest,
   onOcrSearchResults,
-  onDocumentsUpdate
+  onDocumentsUpdate,
+  onPdfUpload,
+  uploading
 }: SheetSidebarProps) {
   const [viewMode, setViewMode] = useState<'list'>('list');
   const [filterBy, setFilterBy] = useState<'all' | 'withTakeoffs' | 'withoutTakeoffs'>('all');
@@ -692,6 +696,21 @@ export function SheetSidebar({
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">Project Documents</h2>
           <div className="flex gap-2">
+            {onPdfUpload && (
+              <label htmlFor="pdf-upload" className="cursor-pointer">
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  asChild
+                  title="Upload new PDF document"
+                >
+                  <span className="flex items-center gap-2">
+                    <Upload className="w-4 h-4" />
+                    {uploading ? 'Uploading…' : 'Upload PDF'}
+                  </span>
+                </Button>
+              </label>
+            )}
             <Button 
               size="sm" 
               variant="outline" 
@@ -702,6 +721,17 @@ export function SheetSidebar({
             </Button>
           </div>
         </div>
+        
+        {/* Hidden file input for PDF upload */}
+        {onPdfUpload && (
+          <input
+            type="file"
+            accept=".pdf,application/pdf"
+            onChange={onPdfUpload}
+            className="hidden"
+            id="pdf-upload"
+          />
+        )}
         
 
         {/* Controls */}

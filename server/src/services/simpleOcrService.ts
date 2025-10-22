@@ -382,6 +382,8 @@ class SimpleOCRService {
   // Get OCR results for a document
   async getDocumentOCRResults(projectId: string, documentId: string): Promise<SimpleOCRResult[]> {
     try {
+      console.log(`🔍 Database: Querying OCR results for document ${documentId} in project ${projectId}`);
+      
       const { data, error } = await supabase
         .from('ocr_results')
         .select('*')
@@ -390,8 +392,18 @@ class SimpleOCRService {
         .order('page_number');
 
       if (error) {
-        console.error('❌ Failed to get OCR results:', error);
+        console.error('❌ Database query failed:', error);
         throw error;
+      }
+
+      console.log(`📊 Database: Found ${data?.length || 0} OCR results for document ${documentId}`);
+      if (data && data.length > 0) {
+        console.log(`📄 Sample OCR data:`, {
+          firstPage: data[0]?.page_number,
+          lastPage: data[data.length - 1]?.page_number,
+          totalRows: data.length,
+          sampleText: data[0]?.text_content?.substring(0, 100) + '...'
+        });
       }
 
       return (data || []).map(row => ({
