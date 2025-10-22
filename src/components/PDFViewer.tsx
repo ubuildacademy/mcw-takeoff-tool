@@ -36,6 +36,7 @@ interface PDFViewerProps {
   annotationTool?: 'text' | 'freehand' | 'arrow' | 'rectangle' | 'circle' | null;
   annotationColor?: string;
   onAnnotationToolChange?: (tool: 'text' | 'freehand' | 'arrow' | 'rectangle' | 'circle' | null) => void;
+  onLocationChange?: (x: number, y: number) => void;
 }
 
 interface Measurement {
@@ -75,7 +76,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   onMeasurementStateChange,
   annotationTool = null,
   annotationColor = '#FF0000',
-  onAnnotationToolChange
+  onAnnotationToolChange,
+  onLocationChange
 }) => {
   // Core PDF state
   const [pdfDocument, setPdfDocument] = useState<any>(null);
@@ -1377,6 +1379,34 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       }
       
       svg.appendChild(ellipse);
+    } else if (annotation.type === 'highlight' && points.length >= 2) {
+      // For highlight, we'll create a rectangle with semi-transparent fill
+      const x = Math.min(...points.map(p => p.x));
+      const y = Math.min(...points.map(p => p.y));
+      const width = Math.max(...points.map(p => p.x)) - x;
+      const height = Math.max(...points.map(p => p.y)) - y;
+      
+      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      rect.setAttribute('x', x.toString());
+      rect.setAttribute('y', y.toString());
+      rect.setAttribute('width', width.toString());
+      rect.setAttribute('height', height.toString());
+      rect.setAttribute('fill', annotation.color);
+      rect.setAttribute('fill-opacity', '0.3');
+      rect.setAttribute('stroke', annotation.color);
+      rect.setAttribute('stroke-width', '1');
+      rect.setAttribute('data-annotation-id', annotation.id);
+      
+      // Add click handler for selection
+      if (isSelectionMode) {
+        rect.style.cursor = 'pointer';
+        rect.addEventListener('click', (e) => {
+          e.stopPropagation();
+          setSelectedMarkupId(annotation.id);
+        });
+      }
+      
+      svg.appendChild(rect);
     }
   };
 
@@ -1418,7 +1448,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         rubberBand.setAttribute('opacity', '0.7');
         svg.appendChild(rubberBand);
       }
-    } else if (['arrow', 'rectangle', 'circle'].includes(annotationTool)) {
+    } else if (['arrow', 'rectangle', 'circle', 'highlight'].includes(annotationTool)) {
       if (points.length === 0 && mousePosition) {
         // Show a small dot at mouse position to indicate where first point will be
         const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
@@ -1485,6 +1515,23 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           ellipse.setAttribute('stroke-dasharray', '5,5');
           ellipse.setAttribute('opacity', '0.7');
           svg.appendChild(ellipse);
+        } else if (annotationTool === 'highlight') {
+          const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+          const x = Math.min(points[0].x, endPoint.x);
+          const y = Math.min(points[0].y, endPoint.y);
+          const width = Math.abs(endPoint.x - points[0].x);
+          const height = Math.abs(endPoint.y - points[0].y);
+          rect.setAttribute('x', x.toString());
+          rect.setAttribute('y', y.toString());
+          rect.setAttribute('width', width.toString());
+          rect.setAttribute('height', height.toString());
+          rect.setAttribute('fill', annotationColor);
+          rect.setAttribute('fill-opacity', '0.3');
+          rect.setAttribute('stroke', annotationColor);
+          rect.setAttribute('stroke-width', '1');
+          rect.setAttribute('stroke-dasharray', '5,5');
+          rect.setAttribute('opacity', '0.7');
+          svg.appendChild(rect);
         }
       }
     }
@@ -1906,7 +1953,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         // Add point to freehand drawing
         setCurrentAnnotation(prev => [...prev, pdfCoords]);
         return;
-      } else if (['arrow', 'rectangle', 'circle'].includes(annotationTool)) {
+      } else if (['arrow', 'rectangle', 'circle', 'highlight'].includes(annotationTool)) {
         // For shapes, we need 2 points (start and end)
         setCurrentAnnotation(prev => {
           const newPoints = [...prev, pdfCoords];
@@ -2533,6 +2580,36 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   }, [pdfDocument, viewState.rotation, onScaleChange]);
 
   // Handle rotation
+
+  // Add scroll position tracking
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      if (onLocationChange) {
+        onLocationChange(container.scrollLeft, container.scrollTop);
+      }
+    };
+
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [onLocationChange]);
+
+  // Add global function to restore scroll position
+  useEffect(() => {
+    (window as any).restoreScrollPosition = (x: number, y: number) => {
+      const container = containerRef.current;
+      if (container) {
+        container.scrollLeft = x;
+        container.scrollTop = y;
+      }
+    };
+
+    return () => {
+      delete (window as any).restoreScrollPosition;
+    };
+  }, []);
 
   // Add wheel event listener
   useEffect(() => {

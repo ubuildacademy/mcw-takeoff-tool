@@ -12,17 +12,21 @@ export default defineConfig({
   },
   server: {
     port: 3001,
-    strictPort: true,
-    open: true
+    strictPort: false,
+    open: true,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+        secure: false
+      }
+    }
   },
   preview: {
     port: 3001,
     strictPort: true
   },
   publicDir: 'public',
-  define: {
-    'process.env.NODE_ENV': JSON.stringify('development')
-  },
   build: {
     outDir: 'dist',
     assetsDir: 'assets',

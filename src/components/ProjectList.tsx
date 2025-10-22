@@ -14,6 +14,7 @@ import {
   User
 } from 'lucide-react';
 import { projectService } from '../services/apiService';
+import { supabase } from '../lib/supabase';
 import { ProjectCreationDialog } from './ProjectCreationDialog';
 import { ProjectSettingsDialog } from './ProjectSettingsDialog';
 import { BackupDialog } from './BackupDialog';
@@ -49,6 +50,7 @@ export function ProjectList() {
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [showUserProfile, setShowUserProfile] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [conditionCounts, setConditionCounts] = useState<Record<string, number>>({});
   
   // Use the store
   const { projects, loadInitialData, getProjectTotalCost } = useTakeoffStore();
@@ -80,11 +82,54 @@ export function ProjectList() {
     return () => { mounted = false; };
   }, [loadInitialData]);
 
+  // Fetch per-project condition counts so cards can show "X conditions"
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchCounts() {
+      if (!projects || projects.length === 0) return;
+      console.log('Fetching condition counts for projects:', projects.map(p => ({ id: p.id, name: p.name })));
+      
+      // Process all projects in parallel for better performance
+      const countPromises = projects.map(async (project) => {
+        try {
+          console.log(`Querying conditions for project ${project.id} (${project.name})`);
+          const { count, error } = await supabase
+            .from('takeoff_conditions')
+            .select('id', { count: 'exact', head: true })
+            .eq('project_id', project.id);
+          if (error) {
+            console.error(`Error querying conditions for project ${project.id}:`, error);
+            return [project.id, 0];
+          }
+          console.log(`Project ${project.id} has ${count || 0} conditions`);
+          return [project.id, count || 0];
+        } catch (e) {
+          console.error(`Failed to get condition count for project ${project.id}:`, e);
+          return [project.id, 0];
+        }
+      });
+      
+      const results = await Promise.all(countPromises);
+      if (!cancelled) {
+        const newCounts = Object.fromEntries(results);
+        console.log('Setting condition counts:', newCounts);
+        setConditionCounts(newCounts);
+      }
+    }
+    fetchCounts();
+    return () => { cancelled = true; };
+  }, [projects]);
+
   const filteredProjects = (projects || []).filter(project =>
     (project.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
     (project.client || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
     (project.location || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  // Debug: Log the projects being rendered
+  console.log('Projects being rendered:', filteredProjects.map(p => ({ id: p.id, name: p.name })));
+  console.log('Current conditionCounts state:', conditionCounts);
+  console.log('RENDER DEBUG - conditionCounts for project:', filteredProjects.map(p => ({ id: p.id, count: conditionCounts[p.id] })));
 
   const handleProjectClick = (projectId: string) => {
     navigate(`/project/${projectId}`);
@@ -263,17 +308,14 @@ export function ProjectList() {
               </div>
 
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <Badge variant="outline">
-                    {project.status || 'active'}
-                  </Badge>
+                <div className="flex items-center justify-end">
                   <span className="text-sm font-medium text-foreground">
                     ${getProjectTotalCost(project.id).toLocaleString()}
                   </span>
                 </div>
 
                 <div className="flex items-center justify-between text-sm text-muted-foreground">
-                  <span>{project.takeoffCount || 0} takeoffs</span>
+                  <span>{conditionCounts[project.id] || 0} conditions</span>
                   <div className="flex items-center gap-1">
                     <Calendar className="w-3 h-3" />
                     {project.lastModified ? new Date(project.lastModified).toLocaleDateString() : ''}
@@ -287,7 +329,7 @@ export function ProjectList() {
           <div className="space-y-4">
             {filteredProjects.map((project) => (
               <div
-                key={project.id}
+                key={`${project.id}-${conditionCounts[project.id] || 0}`}
                 className="bg-white border rounded-lg p-6 cursor-pointer hover:shadow-md transition-shadow"
                 onClick={() => handleProjectClick(project.id)}
               >
@@ -307,14 +349,11 @@ export function ProjectList() {
                         </div>
                       </div>
                       <div className="flex items-center gap-4">
-                        <Badge variant="outline">
-                          {project.status || 'active'}
-                        </Badge>
                         <span className="text-sm font-medium text-foreground">
                           ${getProjectTotalCost(project.id).toLocaleString()}
                         </span>
                         <span className="text-sm text-muted-foreground">
-                          {project.takeoffCount || 0} takeoffs
+                          {conditionCounts[project.id] ? `${conditionCounts[project.id]} conditions` : '0 takeoffs'}
                         </span>
                         <div className="flex items-center gap-1 text-sm text-muted-foreground">
                           <Calendar className="w-3 h-3" />

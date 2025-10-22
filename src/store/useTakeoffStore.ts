@@ -52,6 +52,12 @@ interface TakeoffStore {
   // Annotations
   annotations: Annotation[];
   
+  // Document view state
+  documentRotations: Record<string, number>; // Key: documentId, Value: rotation in degrees
+  documentPages: Record<string, number>; // Key: documentId, Value: last viewed page number
+  documentScales: Record<string, number>; // Key: documentId, Value: scale/zoom level
+  documentLocations: Record<string, { x: number; y: number }>; // Key: documentId, Value: scroll/pan position
+  
   // Actions
   addProject: (project: Omit<Project, 'id' | 'lastModified' | 'takeoffCount'>) => Promise<string>;
   importProject: (project: Project) => void;
@@ -110,6 +116,22 @@ interface TakeoffStore {
   getPageAnnotations: (projectId: string, sheetId: string, pageNumber: number) => Annotation[];
   clearPageAnnotations: (projectId: string, sheetId: string, pageNumber: number) => void;
   
+  // Document rotation actions
+  setDocumentRotation: (documentId: string, rotation: number) => void;
+  getDocumentRotation: (documentId: string) => number;
+  
+  // Document page actions
+  setDocumentPage: (documentId: string, page: number) => void;
+  getDocumentPage: (documentId: string) => number;
+  
+  // Document scale actions
+  setDocumentScale: (documentId: string, scale: number) => void;
+  getDocumentScale: (documentId: string) => number;
+  
+  // Document location actions
+  setDocumentLocation: (documentId: string, location: { x: number; y: number }) => void;
+  getDocumentLocation: (documentId: string) => { x: number; y: number };
+  
   // Data loading
   loadInitialData: () => Promise<void>;
   loadProjectConditions: (projectId: string) => Promise<void>;
@@ -146,6 +168,11 @@ export const useTakeoffStore = create<TakeoffStore>()(
       markupsByPage: {},
       
       annotations: [],
+      
+      documentRotations: {},
+      documentPages: {},
+      documentScales: {},
+      documentLocations: {},
       
       // Actions
       addProject: async (projectData) => {
@@ -848,6 +875,66 @@ export const useTakeoffStore = create<TakeoffStore>()(
         }));
       },
 
+      // Document rotation methods
+      setDocumentRotation: (documentId, rotation) => {
+        set(state => ({
+          documentRotations: {
+            ...state.documentRotations,
+            [documentId]: rotation
+          }
+        }));
+      },
+
+      getDocumentRotation: (documentId) => {
+        const state = get();
+        return state.documentRotations[documentId] || 0;
+      },
+
+      // Document page methods
+      setDocumentPage: (documentId, page) => {
+        set(state => ({
+          documentPages: {
+            ...state.documentPages,
+            [documentId]: page
+          }
+        }));
+      },
+
+      getDocumentPage: (documentId) => {
+        const state = get();
+        return state.documentPages[documentId] || 1;
+      },
+
+      // Document scale methods
+      setDocumentScale: (documentId, scale) => {
+        set(state => ({
+          documentScales: {
+            ...state.documentScales,
+            [documentId]: scale
+          }
+        }));
+      },
+
+      getDocumentScale: (documentId) => {
+        const state = get();
+        return state.documentScales[documentId] || 1;
+      },
+
+      // Document location methods
+      setDocumentLocation: (documentId, location) => {
+        set(state => ({
+          documentLocations: {
+            ...state.documentLocations,
+            [documentId]: location
+          }
+        }));
+      },
+
+      getDocumentLocation: (documentId) => {
+        const state = get();
+        return state.documentLocations[documentId] || { x: 0, y: 0 };
+      },
+
       loadProjectTakeoffMeasurements: async (projectId: string) => {
         console.log('🔄 LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Starting to load measurements for project:', projectId);
         try {
@@ -893,7 +980,11 @@ export const useTakeoffStore = create<TakeoffStore>()(
         calibrations: state.calibrations,
         takeoffMeasurements: state.takeoffMeasurements,
         markupsByPage: state.markupsByPage,
-        annotations: state.annotations
+        annotations: state.annotations,
+        documentRotations: state.documentRotations,
+        documentPages: state.documentPages,
+        documentScales: state.documentScales,
+        documentLocations: state.documentLocations
       })
     }
   )

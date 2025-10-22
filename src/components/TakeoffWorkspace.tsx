@@ -8,6 +8,8 @@ import { ChatTab } from './ChatTab';
 import { SearchTab } from './SearchTab';
 import { OCRProcessingDialog } from './OCRProcessingDialog';
 import { ProfitMarginDialog } from './ProfitMarginDialog';
+import { AITakeoffAgent } from './AITakeoffAgent';
+import { TrainingDialog } from './TrainingDialog';
 
 import { useTakeoffStore } from '../store/useTakeoffStore';
 import type { TakeoffCondition, Sheet, ProjectFile, PDFDocument } from '../types';
@@ -40,7 +42,9 @@ import {
   ArrowRight,
   Palette,
   Trash2,
-  ChevronDown
+  ChevronDown,
+  Bot,
+  Highlighter
 } from "lucide-react";
 import { fileService, sheetService } from '../services/apiService';
 
@@ -61,13 +65,15 @@ export function TakeoffWorkspace() {
   
   // Dialog states
   const [showProfitMarginDialog, setShowProfitMarginDialog] = useState(false);
+  const [showAITakeoffAgent, setShowAITakeoffAgent] = useState(false);
+  const [showTrainingDialog, setShowTrainingDialog] = useState(false);
   
   // Cut-out states
   const [cutoutMode, setCutoutMode] = useState(false);
   const [cutoutTargetConditionId, setCutoutTargetConditionId] = useState<string | null>(null);
   
   // Annotation states
-  const [annotationTool, setAnnotationTool] = useState<'text' | 'freehand' | 'arrow' | 'rectangle' | 'circle' | null>(null);
+  const [annotationTool, setAnnotationTool] = useState<'text' | 'freehand' | 'arrow' | 'rectangle' | 'circle' | 'highlight' | null>(null);
   const [annotationColor, setAnnotationColor] = useState<string>('#FF0000');
   
   // Store integration
@@ -81,7 +87,15 @@ export function TakeoffWorkspace() {
     loadProjectTakeoffMeasurements,
     setCalibration,
     getCalibration,
-    clearPageAnnotations
+    clearPageAnnotations,
+    setDocumentRotation,
+    getDocumentRotation,
+    setDocumentPage,
+    getDocumentPage,
+    setDocumentScale,
+    getDocumentScale,
+    setDocumentLocation,
+    getDocumentLocation
   } = useTakeoffStore();
   
   const selectedCondition = getSelectedCondition();
@@ -111,8 +125,7 @@ export function TakeoffWorkspace() {
   const [scale, setScale] = useState(1);
   const [rotation, setRotation] = useState(0);
   
-  // Store scale per document to preserve zoom when switching between files
-  const [documentScales, setDocumentScales] = useState<Record<string, number>>({});
+  // Scale is now managed by the store
   
   // Current calibration state for the active document/page
   const getCurrentCalibration = () => {
@@ -147,10 +160,12 @@ export function TakeoffWorkspace() {
         setProjectFiles(files);
         
         // Set the first PDF file as current if no current file is set
-        if (files.length > 0 && !currentPdfFile) {
+        if (files.length > 0) {
           const firstPdfFile = files.find((file: any) => file.mimetype === 'application/pdf');
           if (firstPdfFile) {
             setCurrentPdfFile(firstPdfFile);
+            setSelectedDocumentId(firstPdfFile.id);
+            // Don't set page here - let the useEffect handle it from store
           }
         }
       } catch (e: any) {
@@ -200,7 +215,7 @@ export function TakeoffWorkspace() {
   const rotatePage = (direction: 'clockwise' | 'counterclockwise') => {
     const rotationStep = direction === 'clockwise' ? 90 : -90;
     const newRotation = (rotation + rotationStep) % 360;
-    setRotation(newRotation);
+    handleRotationChange(newRotation);
   };
 
   const handleSheetSelect = (sheet: Sheet) => {
@@ -211,12 +226,22 @@ export function TakeoffWorkspace() {
     if (selectedFile) {
       setCurrentPdfFile(selectedFile);
       
-      // Restore scale for this document if it exists
-      const savedScale = documentScales[selectedFile.id];
-      if (savedScale) {
-        setScale(savedScale);
-      } else {
-        setScale(1);
+      // Restore scale, rotation, page, and location for this document if they exist
+      const savedScale = getDocumentScale(selectedFile.id);
+      const savedRotation = getDocumentRotation(selectedFile.id);
+      const savedPage = getDocumentPage(selectedFile.id);
+      const savedLocation = getDocumentLocation(selectedFile.id);
+      setScale(savedScale);
+      setRotation(savedRotation);
+      setCurrentPage(savedPage);
+      
+      // Restore scroll position after a short delay
+      if (savedLocation.x !== 0 || savedLocation.y !== 0) {
+        setTimeout(() => {
+          if ((window as any).restoreScrollPosition) {
+            (window as any).restoreScrollPosition(savedLocation.x, savedLocation.y);
+          }
+        }, 200);
       }
     }
   };
@@ -232,12 +257,20 @@ export function TakeoffWorkspace() {
       setCurrentPdfFile(selectedFile);
       setCurrentPage(pageNumber);
       
-      // Restore scale for this document if it exists
-      const savedScale = documentScales[selectedFile.id];
-      if (savedScale) {
-        setScale(savedScale);
-      } else {
-        setScale(1);
+      // Restore scale, rotation, and location for this document if they exist
+      const savedScale = getDocumentScale(selectedFile.id);
+      const savedRotation = getDocumentRotation(selectedFile.id);
+      const savedLocation = getDocumentLocation(selectedFile.id);
+      setScale(savedScale);
+      setRotation(savedRotation);
+      
+      // Restore scroll position after a short delay
+      if (savedLocation.x !== 0 || savedLocation.y !== 0) {
+        setTimeout(() => {
+          if ((window as any).restoreScrollPosition) {
+            (window as any).restoreScrollPosition(savedLocation.x, savedLocation.y);
+          }
+        }, 200);
       }
     }
   };
@@ -297,20 +330,48 @@ export function TakeoffWorkspace() {
             const ocrData = await serverOcrService.getDocumentData(file.id, projectId);
             const hasOCRData = ocrData && ocrData.results.length > 0;
             
+            // Get actual page count from OCR data or file metadata
+            let totalPages = 1;
+            if (ocrData && ocrData.results.length > 0) {
+              // Use the highest page number from OCR data
+              const pageNumbers = ocrData.results.map(r => r.pageNumber).filter(num => !isNaN(num) && num > 0);
+              console.log(`Document ${file.originalName} OCR data:`, {
+                resultsCount: ocrData.results.length,
+                pageNumbers: pageNumbers,
+                maxPage: pageNumbers.length > 0 ? Math.max(...pageNumbers) : 'none',
+                sampleResults: ocrData.results.slice(0, 3).map(r => ({ pageNumber: r.pageNumber, textLength: r.text?.length || 0 }))
+              });
+              if (pageNumbers.length > 0) {
+                totalPages = Math.max(...pageNumbers);
+              }
+            } else if (file.pageCount && !isNaN(file.pageCount) && file.pageCount > 0) {
+              // Use page count from file metadata if available
+              totalPages = file.pageCount;
+              console.log(`Document ${file.originalName} using file metadata page count:`, file.pageCount);
+            } else {
+              console.log(`Document ${file.originalName} using default page count: 1 (no OCR data or file metadata)`);
+            }
+            
+            // Ensure totalPages is always a valid number
+            const finalPageCount = isNaN(totalPages) || totalPages <= 0 ? 1 : totalPages;
+            
             return {
               id: file.id,
               name: file.originalName.replace('.pdf', ''),
-              totalPages: 1, // We don't need to load the full PDF here
+              totalPages: finalPageCount,
               pages: [], // We don't need the full page data here
               isExpanded: false,
               ocrEnabled: hasOCRData
             };
           } catch (error) {
             console.error(`Error checking OCR status for ${file.originalName}:`, error);
+            // Ensure page count is valid in error case too
+            const errorPageCount = (file.pageCount && !isNaN(file.pageCount) && file.pageCount > 0) ? file.pageCount : 1;
+            
             return {
               id: file.id,
               name: file.originalName.replace('.pdf', ''),
-              totalPages: 1,
+              totalPages: errorPageCount,
               pages: [],
               isExpanded: false,
               ocrEnabled: false
@@ -332,6 +393,38 @@ export function TakeoffWorkspace() {
     }
   }, [projectId, loadProjectDocuments]);
 
+  // Initialize rotation, page, scale, and location from store when currentPdfFile changes
+  useEffect(() => {
+    if (currentPdfFile) {
+      const savedRotation = getDocumentRotation(currentPdfFile.id);
+      const savedPage = getDocumentPage(currentPdfFile.id);
+      const savedScale = getDocumentScale(currentPdfFile.id);
+      const savedLocation = getDocumentLocation(currentPdfFile.id);
+      
+      console.log('🔄 Restoring document state:', {
+        documentId: currentPdfFile.id,
+        savedRotation,
+        savedPage,
+        savedScale,
+        savedLocation
+      });
+      
+      setRotation(savedRotation);
+      setCurrentPage(savedPage);
+      setScale(savedScale);
+      
+      // Restore scroll position after a short delay to ensure PDF is rendered
+      if (savedLocation.x !== 0 || savedLocation.y !== 0) {
+        setTimeout(() => {
+          // Trigger scroll position restoration in PDF viewer
+          if ((window as any).restoreScrollPosition) {
+            (window as any).restoreScrollPosition(savedLocation.x, savedLocation.y);
+          }
+        }, 200);
+      }
+    }
+  }, [currentPdfFile, getDocumentRotation, getDocumentPage, getDocumentScale, getDocumentLocation]);
+
   const handleExportStatusUpdate = (type: 'excel' | 'pdf' | null, progress: number) => {
     setExportStatus({type, progress});
   };
@@ -343,18 +436,36 @@ export function TakeoffWorkspace() {
 
   // PDF viewer control handlers
   const handlePageChange = (page: number) => {
+    console.log('📄 Page change:', { from: currentPage, to: page, documentId: currentPdfFile?.id });
     setCurrentPage(page);
+    // Save page to store for persistence
+    if (currentPdfFile) {
+      setDocumentPage(currentPdfFile.id, page);
+      console.log('💾 Saved page to store:', { documentId: currentPdfFile.id, page });
+    }
     // Calibration state is now managed per page, no need to reset
   };
 
   const handleScaleChange = (newScale: number) => {
     setScale(newScale);
-    // Store scale for current document
+    // Store scale for current document in the store
     if (currentPdfFile) {
-      setDocumentScales(prev => ({
-        ...prev,
-        [currentPdfFile.id]: newScale
-      }));
+      setDocumentScale(currentPdfFile.id, newScale);
+    }
+  };
+
+  const handleRotationChange = (newRotation: number) => {
+    setRotation(newRotation);
+    // Store rotation for current document in the store
+    if (currentPdfFile) {
+      setDocumentRotation(currentPdfFile.id, newRotation);
+    }
+  };
+
+  const handleLocationChange = (x: number, y: number) => {
+    // Store location for current document in the store
+    if (currentPdfFile) {
+      setDocumentLocation(currentPdfFile.id, { x, y });
     }
   };
 
@@ -385,7 +496,7 @@ export function TakeoffWorkspace() {
 
   const handlePDFLoaded = (totalPages: number) => {
     setTotalPages(totalPages);
-    setCurrentPage(1);
+    // Don't reset page here - let the useEffect handle it from store
   };
 
   const handleCalibrationComplete = (isCalibrated: boolean, scaleFactor: number, unit: string) => {
@@ -451,205 +562,241 @@ export function TakeoffWorkspace() {
         </div>
 
         {/* Center - PDF Controls */}
-        {currentPdfFile && (
-          <div className="flex items-center gap-4">
-            {/* Navigation Controls */}
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => handlePageChange(Math.max(1, currentPage - 1))}
-                disabled={currentPage <= 1}
-              >
-                Previous
-              </Button>
-              <span className="px-3 py-1 bg-gray-100 rounded text-sm">
-                {currentPage} / {totalPages}
-              </span>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => handlePageChange(Math.min(totalPages, currentPage + 1))}
-                disabled={currentPage >= totalPages}
-              >
-                Next
-              </Button>
-            </div>
+        <div className="flex items-center gap-4">
+          {/* Navigation Controls - always visible */}
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => handlePageChange(Math.max(1, currentPage - 1))}
+              disabled={currentPage <= 1 || !currentPdfFile}
+            >
+              Previous
+            </Button>
+            <span className="px-3 py-1 bg-gray-100 rounded text-sm">
+              {currentPdfFile ? `${currentPage} / ${totalPages}` : 'No PDF'}
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => handlePageChange(Math.min(totalPages, currentPage + 1))}
+              disabled={currentPage >= totalPages || !currentPdfFile}
+            >
+              Next
+            </Button>
+          </div>
 
-            <Separator orientation="vertical" className="h-8" />
+          <Separator orientation="vertical" className="h-8" />
 
-            {/* Scale Controls */}
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => handleScaleChange(Math.max(0.5, scale - 0.1))}
-              >
-                -
-              </Button>
-              <span className="px-3 py-1 bg-gray-100 rounded text-sm min-w-[60px] text-center">
-                {Math.round(scale * 100)}%
-              </span>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => handleScaleChange(Math.min(5, scale + 0.1))}
-              >
-                +
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleResetView}
-              >
-                Reset View
-              </Button>
-            </div>
-
-            <Separator orientation="vertical" className="h-8" />
-
-            {/* Rotation Controls */}
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => rotatePage('counterclockwise')}
-                title="Rotate counterclockwise"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-                  <path d="M3 3v5h5"/>
-                </svg>
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => rotatePage('clockwise')}
-                title="Rotate clockwise"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/>
-                  <path d="M21 3v5h-5"/>
-                </svg>
-              </Button>
-            </div>
-
-            <Separator orientation="vertical" className="h-8" />
-
-            {/* Calibration Controls */}
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant={isPageCalibrated ? "default" : "secondary"}
-                onClick={handleCalibrateScale}
-                className={isPageCalibrated ? "bg-green-600 hover:bg-green-700 text-white" : "bg-orange-600 hover:bg-orange-700 text-white"}
-              >
-                {isPageCalibrated ? 'Recalibrate' : 'Calibrate Scale'}
-              </Button>
-              {isPageCalibrated && (
-                <span className="text-xs text-gray-600">
-                  1px = {(scaleFactor * 0.0833).toFixed(4)} {unit}
-                </span>
-              )}
-            </div>
-
-            <Separator orientation="vertical" className="h-8" />
-
-            {/* Annotations Dropdown */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
+          {/* Scale Controls - only show when PDF is loaded */}
+          {currentPdfFile && (
+            <>
+              <div className="flex items-center gap-2">
                 <Button
                   size="sm"
-                  variant={annotationTool ? "default" : "outline"}
-                  className={annotationTool ? "bg-blue-600 hover:bg-blue-700 text-white" : ""}
+                  variant="outline"
+                  onClick={() => handleScaleChange(Math.max(0.5, scale - 0.1))}
                 >
-                  <Pencil className="w-4 h-4 mr-1" />
-                  Annotations
-                  <ChevronDown className="w-3 h-3 ml-1" />
+                  -
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                <DropdownMenuLabel>Annotation Tools</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                
-                <DropdownMenuItem
-                  onClick={() => setAnnotationTool(annotationTool === 'text' ? null : 'text')}
-                  className={annotationTool === 'text' ? 'bg-accent' : ''}
+                <span className="px-3 py-1 bg-gray-100 rounded text-sm min-w-[60px] text-center">
+                  {Math.round(scale * 100)}%
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleScaleChange(Math.min(5, scale + 0.1))}
                 >
-                  <Type className="w-4 h-4 mr-2" />
-                  Text Annotation
-                </DropdownMenuItem>
-                
-                <DropdownMenuItem
-                  onClick={() => setAnnotationTool(annotationTool === 'freehand' ? null : 'freehand')}
-                  className={annotationTool === 'freehand' ? 'bg-accent' : ''}
+                  +
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleResetView}
                 >
-                  <Pencil className="w-4 h-4 mr-2" />
-                  Freehand Drawing
-                </DropdownMenuItem>
-                
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel className="text-xs">Shapes</DropdownMenuLabel>
-                
-                <DropdownMenuItem
-                  onClick={() => setAnnotationTool(annotationTool === 'arrow' ? null : 'arrow')}
-                  className={annotationTool === 'arrow' ? 'bg-accent' : ''}
+                  Reset View
+                </Button>
+              </div>
+
+              <Separator orientation="vertical" className="h-8" />
+
+              {/* Rotation Controls */}
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => rotatePage('counterclockwise')}
+                  title="Rotate counterclockwise"
                 >
-                  <ArrowRight className="w-4 h-4 mr-2" />
-                  Arrow
-                </DropdownMenuItem>
-                
-                <DropdownMenuItem
-                  onClick={() => setAnnotationTool(annotationTool === 'rectangle' ? null : 'rectangle')}
-                  className={annotationTool === 'rectangle' ? 'bg-accent' : ''}
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                    <path d="M3 3v5h5"/>
+                  </svg>
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => rotatePage('clockwise')}
+                  title="Rotate clockwise"
                 >
-                  <Square className="w-4 h-4 mr-2" />
-                  Rectangle
-                </DropdownMenuItem>
-                
-                <DropdownMenuItem
-                  onClick={() => setAnnotationTool(annotationTool === 'circle' ? null : 'circle')}
-                  className={annotationTool === 'circle' ? 'bg-accent' : ''}
-                >
-                  <Circle className="w-4 h-4 mr-2" />
-                  Circle
-                </DropdownMenuItem>
-                
-                <DropdownMenuSeparator />
-                
-                <DropdownMenuItem className="flex items-center justify-between">
-                  <div className="flex items-center">
-                    <Palette className="w-4 h-4 mr-2" />
-                    Color
-                  </div>
-                  <input
-                    type="color"
-                    value={annotationColor}
-                    onChange={(e) => setAnnotationColor(e.target.value)}
-                    className="w-8 h-6 rounded cursor-pointer"
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                </DropdownMenuItem>
-                
-                <DropdownMenuSeparator />
-                
-                <DropdownMenuItem 
-                  onClick={() => {
-                    setAnnotationTool(null);
-                    // Clear all annotations for current page
-                    if (projectId && currentPdfFile?.id && selectedPageNumber) {
-                      clearPageAnnotations(projectId, currentPdfFile.id, selectedPageNumber);
-                    }
-                  }}
-                  className="text-red-600 focus:text-red-600"
-                >
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Clear Annotations
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/>
+                    <path d="M21 3v5h-5"/>
+                  </svg>
+                </Button>
+              </div>
+
+              <Separator orientation="vertical" className="h-8" />
+            </>
+          )}
+
+          {/* Calibration Controls - always visible */}
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant={isPageCalibrated ? "default" : "secondary"}
+              onClick={handleCalibrateScale}
+              className={isPageCalibrated ? "bg-green-600 hover:bg-green-700 text-white" : "bg-orange-600 hover:bg-orange-700 text-white"}
+            >
+              {isPageCalibrated ? 'Recalibrate' : 'Calibrate Scale'}
+            </Button>
           </div>
-        )}
+
+          <Separator orientation="vertical" className="h-8" />
+
+          {/* AI Takeoff Dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="sm"
+                variant="outline"
+                className="flex items-center gap-2"
+              >
+                <Bot className="w-4 h-4" />
+                AI Takeoff
+                <ChevronDown className="w-4 h-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-56">
+              <DropdownMenuLabel>AI Takeoff Options</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => setShowAITakeoffAgent(true)}>
+                <Bot className="w-4 h-4 mr-2" />
+                Perform Takeoff
+                <span className="ml-auto text-xs text-gray-500">AI Analysis</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setShowTrainingDialog(true)}>
+                <Search className="w-4 h-4 mr-2" />
+                Train Agent
+                <span className="ml-auto text-xs text-gray-500">Learning</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <Separator orientation="vertical" className="h-8" />
+
+          {/* Annotations Dropdown - always visible */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="sm"
+                variant={annotationTool ? "default" : "outline"}
+                className={annotationTool ? "bg-blue-600 hover:bg-blue-700 text-white" : ""}
+              >
+                <Pencil className="w-4 h-4 mr-1" />
+                Annotations
+                <ChevronDown className="w-3 h-3 ml-1" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuLabel>Annotation Tools</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              
+              <DropdownMenuItem
+                onClick={() => setAnnotationTool(annotationTool === 'text' ? null : 'text')}
+                className={annotationTool === 'text' ? 'bg-accent' : ''}
+              >
+                <Type className="w-4 h-4 mr-2" />
+                Text Annotation
+              </DropdownMenuItem>
+              
+              <DropdownMenuItem
+                onClick={() => setAnnotationTool(annotationTool === 'freehand' ? null : 'freehand')}
+                className={annotationTool === 'freehand' ? 'bg-accent' : ''}
+              >
+                <Pencil className="w-4 h-4 mr-2" />
+                Freehand Drawing
+              </DropdownMenuItem>
+              
+              <DropdownMenuItem
+                onClick={() => setAnnotationTool(annotationTool === 'highlight' ? null : 'highlight')}
+                className={annotationTool === 'highlight' ? 'bg-accent' : ''}
+              >
+                <Highlighter className="w-4 h-4 mr-2" />
+                Highlight
+              </DropdownMenuItem>
+              
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-xs">Shapes</DropdownMenuLabel>
+              
+              <DropdownMenuItem
+                onClick={() => setAnnotationTool(annotationTool === 'arrow' ? null : 'arrow')}
+                className={annotationTool === 'arrow' ? 'bg-accent' : ''}
+              >
+                <ArrowRight className="w-4 h-4 mr-2" />
+                Arrow
+              </DropdownMenuItem>
+              
+              <DropdownMenuItem
+                onClick={() => setAnnotationTool(annotationTool === 'rectangle' ? null : 'rectangle')}
+                className={annotationTool === 'rectangle' ? 'bg-accent' : ''}
+              >
+                <Square className="w-4 h-4 mr-2" />
+                Rectangle
+              </DropdownMenuItem>
+              
+              <DropdownMenuItem
+                onClick={() => setAnnotationTool(annotationTool === 'circle' ? null : 'circle')}
+                className={annotationTool === 'circle' ? 'bg-accent' : ''}
+              >
+                <Circle className="w-4 h-4 mr-2" />
+                Circle
+              </DropdownMenuItem>
+              
+              <DropdownMenuSeparator />
+              
+              <DropdownMenuItem className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <Palette className="w-4 h-4 mr-2" />
+                  Color
+                </div>
+                <input
+                  type="color"
+                  value={annotationColor}
+                  onChange={(e) => setAnnotationColor(e.target.value)}
+                  className="w-8 h-6 rounded cursor-pointer"
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </DropdownMenuItem>
+              
+              <DropdownMenuSeparator />
+              
+              <DropdownMenuItem 
+                onClick={() => {
+                  setAnnotationTool(null);
+                  // Clear all annotations for current page
+                  if (projectId && currentPdfFile?.id && selectedPageNumber) {
+                    clearPageAnnotations(projectId, currentPdfFile.id, selectedPageNumber);
+                  }
+                }}
+                className="text-red-600 focus:text-red-600"
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Clear Annotations
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
 
         {/* Ortho Snapping Indicator */}
         {((isOrthoSnapping && isMeasuring) || (isCalibrating && isOrthoSnapping)) && (
@@ -664,30 +811,9 @@ export function TakeoffWorkspace() {
 
         {/* Right side - Actions */}
         <div className="flex items-center gap-4">
-          {/* Action Buttons */}
-          <div className="flex items-center gap-2">
-            <label htmlFor="pdf-upload" className="cursor-pointer">
-              <Button variant="outline" size="sm" asChild>
-                <span className="flex items-center gap-2">
-                  <Upload className="w-4 h-4" />
-                  {uploading ? 'Uploading…' : 'Upload PDF'}
-                </span>
-              </Button>
-            </label>
-            
-            <input
-              type="file"
-              accept=".pdf,application/pdf"
-              onChange={handlePdfUpload}
-              className="hidden"
-              id="pdf-upload"
-            />
-            
-            <div className="flex items-center gap-2 text-sm text-gray-600">
-              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-              <span>All changes saved</span>
-            </div>
-            
+          <div className="flex items-center gap-2 text-sm text-gray-600">
+            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+            <span>All changes saved</span>
           </div>
         </div>
       </div>
@@ -750,6 +876,7 @@ export function TakeoffWorkspace() {
               cutoutTargetConditionId={cutoutTargetConditionId}
               onCutoutModeChange={handleCutoutMode}
               onMeasurementStateChange={handleMeasurementStateChange}
+              onLocationChange={handleLocationChange}
               annotationTool={annotationTool}
               annotationColor={annotationColor}
               onAnnotationToolChange={setAnnotationTool}
@@ -842,6 +969,8 @@ export function TakeoffWorkspace() {
                   onOCRRequest={handleOCRRequest}
                   onOcrSearchResults={handleOcrSearchResults}
                   onDocumentsUpdate={handleDocumentsUpdate}
+                  onPdfUpload={handlePdfUpload}
+                  uploading={uploading}
                 />
               )}
               
@@ -1004,6 +1133,24 @@ export function TakeoffWorkspace() {
           projectId={projectId}
         />
       )}
+
+      {/* AI Takeoff Agent */}
+      <AITakeoffAgent
+        isOpen={showAITakeoffAgent}
+        onClose={() => setShowAITakeoffAgent(false)}
+        projectId={projectId!}
+        documents={documents}
+        onPageSelect={handlePageSelect}
+      />
+
+      {/* Training Dialog */}
+      <TrainingDialog
+        isOpen={showTrainingDialog}
+        onClose={() => setShowTrainingDialog(false)}
+        projectId={projectId!}
+        documents={documents}
+        onPageSelect={handlePageSelect}
+      />
 
     </div>
   );

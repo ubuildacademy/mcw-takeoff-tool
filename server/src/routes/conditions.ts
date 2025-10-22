@@ -127,7 +127,8 @@ router.post('/', async (req, res) => {
       color = '#ff6b6b',
       description,
       laborCost,
-      materialCost
+      materialCost,
+      aiGenerated = false
     } = req.body;
 
     // Count conditions should not have waste factors
@@ -160,6 +161,7 @@ router.post('/', async (req, res) => {
       description,
       laborCost,
       materialCost,
+      aiGenerated,
       createdAt: now
     };
     
@@ -187,7 +189,8 @@ router.put('/:id', async (req, res) => {
       color,
       description,
       laborCost,
-      materialCost
+      materialCost,
+      aiGenerated
     } = req.body;
 
     // Validation
@@ -218,7 +221,8 @@ router.put('/:id', async (req, res) => {
       ...(color !== undefined && { color }),
       ...(description !== undefined && { description }),
       ...(laborCost !== undefined && { laborCost }),
-      ...(materialCost !== undefined && { materialCost })
+      ...(materialCost !== undefined && { materialCost }),
+      ...(aiGenerated !== undefined && { aiGenerated })
     };
     
     const savedCondition = await storage.saveCondition(updatedCondition);
