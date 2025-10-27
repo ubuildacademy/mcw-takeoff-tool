@@ -21,6 +21,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { aiTakeoffService } from '../services/aiTakeoffService';
+import { hybridDetectionService } from '../services/hybridDetectionService';
 import { playwrightTakeoffService } from '../services/playwrightTakeoffService';
 import { ollamaService } from '../services/ollamaService';
 // import { LivePreview } from './LivePreview'; // Removed to fix React errors
@@ -120,8 +121,9 @@ export function AITakeoffAgent({
     qwenVision: boolean; 
     chatAI: boolean; 
     playwright: boolean;
+    hybrid: boolean;
     fullAutomation: boolean;
-  }>({ qwenVision: false, chatAI: false, playwright: false, fullAutomation: false });
+  }>({ qwenVision: false, chatAI: false, playwright: false, hybrid: false, fullAutomation: false });
   
   // Store integration
   const { loadProjectConditions } = useTakeoffStore();
@@ -141,16 +143,20 @@ export function AITakeoffAgent({
       const backendStatus = await aiTakeoffService.checkStatus();
       // Check Playwright automation capabilities
       const automationStatus = await playwrightTakeoffService.checkAutomationStatus();
+      // Check hybrid detection availability
+      const hybridStatus = await hybridDetectionService.isAvailable();
       
       console.log('🔍 Service Status Check:');
       console.log('- Chat AI available:', isAvailable);
       console.log('- Backend status:', backendStatus);
       console.log('- Automation capabilities:', automationStatus.capabilities);
+      console.log('- Hybrid detection:', hybridStatus);
       
       setServiceStatus({
         qwenVision: backendStatus.qwenVision,
         chatAI: isAvailable, // Using the same model as chat agent
         playwright: automationStatus.capabilities.playwright,
+        hybrid: hybridStatus,
         fullAutomation: automationStatus.capabilities.fullAutomation
       });
     } catch (error) {
@@ -159,6 +165,7 @@ export function AITakeoffAgent({
         qwenVision: false,
         chatAI: false,
         playwright: false,
+        hybrid: false,
         fullAutomation: false
       });
     }
@@ -242,16 +249,67 @@ export function AITakeoffAgent({
       return [];
     }
 
-    const systemPrompt = `You are an AI assistant specialized in construction documents. Your task is to identify which pages within a set of documents are relevant to a given takeoff scope.
+    const systemPrompt = `You are a construction document analyst. Your task is to identify pages containing items matching a specific takeoff scope.
 
-For each document, analyze the provided OCR text and determine which pages likely contain information related to the scope.
-Provide a reason for each identified page.
+SCOPE: "${scope}"
 
-Scope: "${scope}"
+ANALYSIS REQUIREMENTS:
+1. Analyze each page's OCR text for scope-relevant content
+2. Identify page type and confidence level
+3. Provide specific evidence for your decision
+4. Return structured JSON only
 
-Return your response as a JSON array of objects, each with 'documentId', 'pageNumber', 'confidence' (0-1), and 'reason'.
-Example: [{"documentId": "doc1", "pageNumber": 1, "confidence": 0.9, "reason": "Contains 'door schedule' and 'window details'"}, ...]
-If no pages are relevant, return an empty array.`;
+PAGE TYPE CLASSIFICATION:
+- "floor-plan": Room layouts, dimensions, architectural drawings, scale information
+- "finish-schedule": Material specifications, room finish tables, material schedules
+- "detail-drawing": Enlarged views, construction details, cross-sections
+- "elevation": Building elevations, wall sections, exterior views
+- "other": General construction information, notes, specifications
+
+CONFIDENCE SCORING:
+- 0.9-1.0: Strong evidence, multiple indicators present
+- 0.7-0.8: Good evidence, clear indicators
+- 0.5-0.6: Moderate evidence, some indicators
+- 0.3-0.4: Weak evidence, few indicators
+- 0.0-0.2: No relevant evidence
+
+SCOPE-SPECIFIC INDICATORS:
+For flooring scopes (LVT, carpet, tile, etc.):
+- Floor plans: Room boundaries, area measurements, scale bars
+- Finish schedules: Material specifications, room finish tables
+- Details: Flooring installation details, transitions
+
+For door/window scopes:
+- Floor plans: Door/window symbols, schedules
+- Elevations: Door/window details, hardware specs
+- Details: Door/window installation details
+
+For electrical scopes:
+- Floor plans: Outlet symbols, electrical plans
+- Schedules: Electrical fixture schedules, panel schedules
+- Details: Electrical installation details
+
+OUTPUT FORMAT - Return ONLY this JSON structure:
+[
+  {
+    "documentId": "doc1",
+    "pageNumber": 1,
+    "confidence": 0.9,
+    "reason": "Specific evidence found: [list key indicators]",
+    "pageType": "floor-plan",
+    "indicators": ["room layouts", "scale bar", "dimensions"],
+    "relevanceScore": 0.95
+  }
+]
+
+CRITICAL RULES:
+1. Return ONLY valid JSON array
+2. Include specific evidence in reason field
+3. List key indicators found
+4. Provide relevance score (0-1)
+5. If no pages relevant, return: []
+
+RESPONSE FORMAT: Start with [ and end with ]. No other text.`;
 
     const userMessage = validDocumentContexts.map(doc => 
       `Document ${doc?.documentName} (ID: ${doc?.documentId}):\n${doc?.text}`
@@ -662,6 +720,10 @@ If no pages are relevant, return an empty array.`;
                     <div className={`w-2 h-2 rounded-full ${serviceStatus.playwright ? 'bg-green-500' : 'bg-red-500'}`} />
                     <span className="text-sm">Playwright</span>
                   </div>
+                  <div className="flex items-center gap-2">
+                    <div className={`w-2 h-2 rounded-full ${serviceStatus.hybrid ? 'bg-green-500' : 'bg-red-500'}`} />
+                    <span className="text-sm">Hybrid Detection</span>
+                  </div>
                   {serviceStatus.fullAutomation && (
                     <div className="flex items-center gap-2">
                       <div className="w-2 h-2 rounded-full bg-blue-500" />
@@ -758,10 +820,17 @@ If no pages are relevant, return an empty array.`;
                             </div>
                             <div className="text-sm text-gray-600">
                               Page {page.pageNumber} • Confidence: {Math.round(page.confidence * 100)}%
+                              {page.relevanceScore && (
+                                <span className="ml-2 text-blue-600">
+                                  • Relevance: {Math.round(page.relevanceScore * 100)}%
+                                </span>
+                              )}
                               {page.pageType && (
                                 <Badge variant="outline" className="ml-2 text-xs">
                                   {page.pageType === 'floor-plan' ? 'Floor Plan' : 
                                    page.pageType === 'finish-schedule' ? 'Finish Schedule' : 
+                                   page.pageType === 'detail-drawing' ? 'Detail Drawing' :
+                                   page.pageType === 'elevation' ? 'Elevation' :
                                    'Other'}
                                 </Badge>
                               )}
@@ -769,6 +838,11 @@ If no pages are relevant, return an empty array.`;
                             <div className="text-sm text-gray-500 mt-1">
                               {page.reason}
                             </div>
+                            {page.indicators && page.indicators.length > 0 && (
+                              <div className="text-xs text-gray-400 mt-1">
+                                Indicators: {page.indicators.join(', ')}
+                              </div>
+                            )}
                           </div>
                         </div>
                         <Badge variant={page.selected ? "default" : "outline"}>
@@ -809,6 +883,8 @@ If no pages are relevant, return an empty array.`;
                         • Qwen3-VL Vision: {serviceStatus.qwenVision ? '✅' : '❌'}
                         <br />
                         • Playwright: {serviceStatus.playwright ? '✅' : '❌'}
+                        <br />
+                        • Hybrid Detection: {serviceStatus.hybrid ? '✅' : '❌'}
                       </p>
                     </div>
                   )}

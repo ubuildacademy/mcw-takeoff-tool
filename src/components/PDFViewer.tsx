@@ -2104,60 +2104,57 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       y: point.y * viewport.height
     }));
     
+    // Import the enhanced measurement calculator
+    const { MeasurementCalculator } = await import('../utils/measurementCalculation');
+    
+    // Create scale info object
+    const scaleInfo = {
+      scaleFactor,
+      unit: 'ft',
+      scaleText: 'detected',
+      confidence: 0.9 // Default confidence, could be improved with better scale detection
+    };
+    
+    let measurementResult;
+    let perimeterValue: number | undefined;
+    
     switch (measurementType) {
       case 'linear':
-        if (viewportPoints.length >= 2) {
-          let totalDistance = 0;
-          for (let i = 1; i < viewportPoints.length; i++) {
-            const dx = viewportPoints[i].x - viewportPoints[i - 1].x;
-            const dy = viewportPoints[i].y - viewportPoints[i - 1].y;
-            totalDistance += Math.sqrt(dx * dx + dy * dy);
-          }
-          // Apply zoom-independent scale factor: scale factor is calibrated for base scale (1.0)
-          // Current viewport is scaled by viewState.scale, so we need to adjust accordingly
-          calculatedValue = totalDistance / (scaleFactor * viewState.scale);
-        }
+        measurementResult = MeasurementCalculator.calculateLinear(viewportPoints, scaleInfo, viewState.scale);
+        calculatedValue = measurementResult.calculatedValue;
+        unit = measurementResult.unit;
         break;
       case 'area':
-        if (viewportPoints.length >= 3) {
-          let area = 0;
-          for (let i = 0; i < viewportPoints.length; i++) {
-            const j = (i + 1) % viewportPoints.length;
-            area += viewportPoints[i].x * viewportPoints[j].y;
-            area -= viewportPoints[j].x * viewportPoints[i].y;
-          }
-          // Apply zoom-independent scale factor: scale factor is calibrated for base scale (1.0)
-          // Current viewport is scaled by viewState.scale, so we need to adjust accordingly
-          const adjustedScaleFactor = scaleFactor * viewState.scale;
-          calculatedValue = Math.abs(area) / (2 * adjustedScaleFactor * adjustedScaleFactor);
-        }
+        measurementResult = MeasurementCalculator.calculateArea(viewportPoints, scaleInfo, viewState.scale);
+        calculatedValue = measurementResult.calculatedValue;
+        unit = measurementResult.unit;
+        perimeterValue = measurementResult.perimeterValue;
         break;
       case 'volume':
-        if (viewportPoints.length >= 3) {
-          let area = 0;
-          for (let i = 0; i < viewportPoints.length; i++) {
-            const j = (i + 1) % viewportPoints.length;
-            area += viewportPoints[i].x * viewportPoints[j].y;
-            area -= viewportPoints[j].x * viewportPoints[i].y;
-          }
-          // Apply zoom-independent scale factor: scale factor is calibrated for base scale (1.0)
-          // Current viewport is scaled by viewState.scale, so we need to adjust accordingly
-          const adjustedScaleFactor = scaleFactor * viewState.scale;
-          // Calculate area in square feet
-          const areaInSquareFeet = Math.abs(area) / (2 * adjustedScaleFactor * adjustedScaleFactor);
-          // Volume calculation: area × depth
-          const depth = selectedCondition.depth || 1; // Default to 1 foot if no depth specified
-          calculatedValue = areaInSquareFeet * depth;
-        }
+        const depth = selectedCondition.depth || 1; // Default to 1 foot if no depth specified
+        measurementResult = MeasurementCalculator.calculateVolume(viewportPoints, scaleInfo, depth, viewState.scale);
+        calculatedValue = measurementResult.calculatedValue;
+        unit = measurementResult.unit;
+        perimeterValue = measurementResult.perimeterValue;
         break;
       case 'count':
-        calculatedValue = 1;
+        measurementResult = MeasurementCalculator.calculateCount();
+        calculatedValue = measurementResult.calculatedValue;
+        unit = measurementResult.unit;
         break;
     }
     
-    // Calculate perimeter for area and volume measurements
-    let perimeterValue: number | undefined;
-    if ((measurementType === 'area' || measurementType === 'volume') && selectedCondition.includePerimeter && viewportPoints.length >= 3) {
+    // Log validation warnings/errors for debugging
+    if (measurementResult && !measurementResult.validation.isValid) {
+      console.warn('Measurement validation failed:', measurementResult.validation.errors);
+    }
+    if (measurementResult && measurementResult.validation.warnings.length > 0) {
+      console.warn('Measurement warnings:', measurementResult.validation.warnings);
+    }
+    
+    // Override perimeter calculation if condition requires it
+    if ((measurementType === 'area' || measurementType === 'volume') && selectedCondition.includePerimeter && !perimeterValue) {
+      // Fallback to manual calculation if enhanced calculator didn't provide perimeter
       let perimeter = 0;
       for (let i = 0; i < viewportPoints.length; i++) {
         const j = (i + 1) % viewportPoints.length;
@@ -2165,8 +2162,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         const dy = viewportPoints[j].y - viewportPoints[i].y;
         perimeter += Math.sqrt(dx * dx + dy * dy);
       }
-      // Apply zoom-independent scale factor: scale factor is calibrated for base scale (1.0)
-      // Current viewport is scaled by viewState.scale, so we need to adjust accordingly
       perimeterValue = perimeter / (scaleFactor * viewState.scale);
     }
 
@@ -2240,7 +2235,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       return;
     }
 
-    // Calculate cut-out area/volume
+    // Calculate cut-out area/volume using enhanced calculator
     const viewport = currentViewport;
     if (!viewport) return;
 
@@ -2249,26 +2244,51 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       y: point.y * viewport.height
     }));
 
+    // Import the enhanced measurement calculator
+    const { MeasurementCalculator } = await import('../utils/measurementCalculation');
+    
+    // Create scale info object
+    const scaleInfo = {
+      scaleFactor,
+      unit: 'ft',
+      scaleText: 'detected',
+      confidence: 0.9
+    };
+    
     let cutoutValue = 0;
     
     // Calculate area for cut-out
-    let area = 0;
-    for (let i = 0; i < viewportPoints.length; i++) {
-      const j = (i + 1) % viewportPoints.length;
-      area += viewportPoints[i].x * viewportPoints[j].y;
-      area -= viewportPoints[j].x * viewportPoints[i].y;
-    }
+    const areaResult = MeasurementCalculator.calculateArea(viewportPoints, scaleInfo, viewState.scale);
     
-    const adjustedScaleFactor = scaleFactor * viewState.scale;
-    const areaInSquareFeet = Math.abs(area) / (2 * adjustedScaleFactor * adjustedScaleFactor);
-    
-    // For volume measurements, multiply by depth
-    if (targetMeasurement.type === 'volume') {
-      const selectedCondition = getSelectedCondition();
-      const depth = selectedCondition?.depth || 1;
-      cutoutValue = areaInSquareFeet * depth;
+    if (areaResult.validation.isValid) {
+      // For volume measurements, multiply by depth
+      if (targetMeasurement.type === 'volume') {
+        const selectedCondition = getSelectedCondition();
+        const depth = selectedCondition?.depth || 1;
+        cutoutValue = areaResult.calculatedValue * depth;
+      } else {
+        cutoutValue = areaResult.calculatedValue;
+      }
     } else {
-      cutoutValue = areaInSquareFeet;
+      console.warn('Cutout area calculation failed:', areaResult.validation.errors);
+      // Fallback to simple calculation
+      let area = 0;
+      for (let i = 0; i < viewportPoints.length; i++) {
+        const j = (i + 1) % viewportPoints.length;
+        area += viewportPoints[i].x * viewportPoints[j].y;
+        area -= viewportPoints[j].x * viewportPoints[i].y;
+      }
+      
+      const adjustedScaleFactor = scaleFactor * viewState.scale;
+      const areaInSquareFeet = Math.abs(area) / (2 * adjustedScaleFactor * adjustedScaleFactor);
+      
+      if (targetMeasurement.type === 'volume') {
+        const selectedCondition = getSelectedCondition();
+        const depth = selectedCondition?.depth || 1;
+        cutoutValue = areaInSquareFeet * depth;
+      } else {
+        cutoutValue = areaInSquareFeet;
+      }
     }
 
     // Create cut-out object

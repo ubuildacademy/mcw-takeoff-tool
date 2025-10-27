@@ -1,5 +1,6 @@
 import { qwenVisionService } from './qwenVisionService';
 import { simpleOcrService } from './simpleOcrService';
+import { hybridDetectionService } from './hybridDetectionService';
 import { storage } from '../storage';
 import { pdfToImage } from '../utils/pdfToImage';
 import { v4 as uuidv4 } from 'uuid';
@@ -12,7 +13,9 @@ interface AIIdentifiedPage {
   confidence: number;
   reason: string;
   selected: boolean;
-  pageType?: 'floor-plan' | 'finish-schedule' | 'other';
+  pageType?: 'floor-plan' | 'finish-schedule' | 'detail-drawing' | 'elevation' | 'other';
+  indicators?: string[];
+  relevanceScore?: number;
 }
 
 export interface AITakeoffResult {
@@ -110,14 +113,14 @@ class AITakeoffService {
   }
 
   /**
-   * Process a single page with Qwen3-VL for detailed takeoff analysis
+   * Process a single page with hybrid detection (YOLOv8 + Qwen3-VL) for detailed takeoff analysis
    */
   async processPage(request: PageProcessingRequest): Promise<AITakeoffResult> {
     const { documentId, pageNumber, scope, projectId } = request;
     
     try {
-      console.log(`Processing page ${pageNumber} of document ${documentId} for scope: ${scope}`);
-      console.log(`DEBUG: pageNumber type: ${typeof pageNumber}, value:`, pageNumber);
+      console.log(`🔍 Processing page ${pageNumber} of document ${documentId} for scope: ${scope}`);
+      console.log(`📊 Using hybrid detection pipeline (YOLOv8 + Qwen3-VL)`);
       
       // Get the PDF file path
       const filePath = await this.getPDFFilePath(documentId, projectId);
@@ -126,11 +129,11 @@ class AITakeoffService {
       }
       
       // Convert PDF page to image
-      console.log(`Converting PDF page ${pageNumber} to image from: ${filePath}`);
+      console.log(`📄 Converting PDF page ${pageNumber} to image from: ${filePath}`);
       const imageBuffer = await pdfToImage.convertPageToBuffer(filePath, pageNumber, {
         format: 'png',
-        scale: 1.0, // Reduced scale to avoid 502 errors from Ollama
-        quality: 75 // Reduced quality to avoid 502 errors from Ollama
+        scale: 1.0,
+        quality: 75
       });
       
       if (!imageBuffer) {
@@ -138,38 +141,58 @@ class AITakeoffService {
         throw new Error(`Failed to convert page ${pageNumber} to image`);
       }
       
-      console.log(`Successfully converted page ${pageNumber} to image, buffer size: ${imageBuffer.length} bytes`);
+      console.log(`✅ Successfully converted page ${pageNumber} to image, buffer size: ${imageBuffer.length} bytes`);
       
-      // Compress image for Qwen3-VL processing
+      // Compress image for processing
       const compressedImage = await qwenVisionService.compressImage(imageBuffer);
-      
-      // Convert to base64
       const imageData = qwenVisionService.imageToBase64(compressedImage);
       
-      // Analyze with Qwen3-VL (pass pageType if available from page identification)
+      // Use hybrid detection pipeline
       let analysis;
       try {
-        analysis = await qwenVisionService.analyzePageForTakeoff(imageData, scope, pageNumber, request.pageType);
-      } catch (qwenError) {
-        console.error(`❌ Qwen3-VL analysis failed for page ${pageNumber}:`, qwenError);
+        console.log(`🚀 Starting hybrid detection for page ${pageNumber}...`);
         
-        // Create a fallback result when Qwen3-VL fails
-        console.log(`🔧 Creating fallback result for page ${pageNumber} due to Qwen3-VL failure`);
-        analysis = {
-          conditions: [{
-            name: `${scope} (AI Analysis Failed)`,
-            type: 'area' as const,
-            unit: 'SF',
-            description: `AI analysis failed for ${scope}. Please manually review this page.`,
-            color: '#ff6b6b'
-          }],
-          measurements: [],
-          calibration: {
-            scaleFactor: 1,
-            unit: 'feet',
-            scaleText: 'Scale not detected'
-          }
-        };
+        const hybridResult = await hybridDetectionService.detectElements(imageData, scope, {
+          yoloConfidenceThreshold: 0.5,
+          qwenConfidenceThreshold: 0.7,
+          maxElementsToAnalyze: 20,
+          enableDetailedAnalysis: true
+        });
+        
+        console.log(`✅ Hybrid detection complete: ${hybridResult.elements.length} elements found`);
+        console.log(`⏱️ Processing times: YOLOv8=${hybridResult.processingTime.yolo}ms, Qwen3-VL=${hybridResult.processingTime.qwen}ms, Total=${hybridResult.processingTime.total}ms`);
+        
+        // Convert hybrid results to AITakeoffResult format
+        analysis = this.convertHybridResultToAnalysis(hybridResult, scope);
+        
+      } catch (hybridError) {
+        console.error(`❌ Hybrid detection failed for page ${pageNumber}:`, hybridError);
+        console.log(`🔧 Falling back to Qwen3-VL only...`);
+        
+        // Fallback to Qwen3-VL only
+        try {
+          analysis = await qwenVisionService.analyzePageForTakeoff(imageData, scope, pageNumber, request.pageType);
+        } catch (qwenError) {
+          console.error(`❌ Qwen3-VL fallback also failed for page ${pageNumber}:`, qwenError);
+          
+          // Create a fallback result when both methods fail
+          console.log(`🔧 Creating fallback result for page ${pageNumber} due to analysis failure`);
+          analysis = {
+            conditions: [{
+              name: `${scope} (Analysis Failed)`,
+              type: 'area' as const,
+              unit: 'SF',
+              description: `AI analysis failed for ${scope}. Please manually review this page.`,
+              color: '#ff6b6b'
+            }],
+            measurements: [],
+            calibration: {
+              scaleFactor: 1,
+              unit: 'feet',
+              scaleText: 'Scale not detected'
+            }
+          };
+        }
       }
       
       // Build result
@@ -181,10 +204,10 @@ class AITakeoffService {
         calibration: analysis.calibration
       };
       
-      console.log(`Page ${pageNumber} analysis complete: ${analysis.conditions.length} conditions, ${analysis.measurements.length} measurements`);
+      console.log(`✅ Page ${pageNumber} analysis complete: ${analysis.conditions.length} conditions, ${analysis.measurements.length} measurements`);
       return result;
     } catch (error) {
-      console.error(`Error processing page ${pageNumber}:`, error);
+      console.error(`❌ Error processing page ${pageNumber}:`, error);
       throw new Error(`Failed to process page: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -473,63 +496,67 @@ class AITakeoffService {
    */
   private async analyzePagesWithChatAI(context: string, scope: string, documentId: string): Promise<AIIdentifiedPage[]> {
     try {
-      // Enhanced prompt for better floor plan and finish schedule identification
-      const systemPrompt = `You are a construction document analyst specializing in flooring takeoffs. Your task is to identify which pages contain items related to a specific scope.
+      // STRUCTURED PROMPT: Construction Document Page Identification
+      const systemPrompt = `You are a construction document analyst. Your task is to identify pages containing items matching a specific takeoff scope.
 
-SCOPE: ${scope}
+SCOPE: "${scope}"
 
-IMPORTANT: For flooring-related scopes (like LVT, carpet, tile, etc.), you need to identify TWO types of pages:
-1. FLOOR PLANS - These show the actual layout and areas where flooring is installed
-2. FINISH SCHEDULES - These specify what type of flooring goes in each area
+ANALYSIS REQUIREMENTS:
+1. Analyze each page's OCR text for scope-relevant content
+2. Identify page type and confidence level
+3. Provide specific evidence for your decision
+4. Return structured JSON only
 
-For flooring takeoffs, you need BOTH types of pages:
-- Floor plans to measure the actual areas
-- Finish schedules to understand what flooring type goes where
+PAGE TYPE CLASSIFICATION:
+- "floor-plan": Room layouts, dimensions, architectural drawings, scale information
+- "finish-schedule": Material specifications, room finish tables, material schedules
+- "detail-drawing": Enlarged views, construction details, cross-sections
+- "elevation": Building elevations, wall sections, exterior views
+- "other": General construction information, notes, specifications
 
-Look for these indicators:
+CONFIDENCE SCORING:
+- 0.9-1.0: Strong evidence, multiple indicators present
+- 0.7-0.8: Good evidence, clear indicators
+- 0.5-0.6: Moderate evidence, some indicators
+- 0.3-0.4: Weak evidence, few indicators
+- 0.0-0.2: No relevant evidence
 
-FLOOR PLANS typically contain:
-- Room layouts and dimensions
-- Wall locations and room boundaries
-- Room names or numbers
-- Scale information
-- Architectural symbols
-- Text like "Floor Plan", "Plan", "Level", "Floor"
+SCOPE-SPECIFIC INDICATORS:
+For flooring scopes (LVT, carpet, tile, etc.):
+- Floor plans: Room boundaries, area measurements, scale bars
+- Finish schedules: Material specifications, room finish tables
+- Details: Flooring installation details, transitions
 
-FINISH SCHEDULES typically contain:
-- Tables or schedules
-- Flooring specifications
-- Material types (LVT, carpet, tile, etc.)
-- Room numbers with corresponding finishes
-- Text like "Finish Schedule", "Flooring Schedule", "Interior Finishes"
+For door/window scopes:
+- Floor plans: Door/window symbols, schedules
+- Elevations: Door/window details, hardware specs
+- Details: Door/window installation details
 
-Analyze the provided pages and return a JSON array of pages that contain items matching the scope. For each page, provide:
-- pageNumber: the page number
-- confidence: confidence score (0-1) that this page contains relevant items
-- reason: brief explanation of why this page is relevant
-- pageType: "floor-plan" or "finish-schedule" or "other"
+For electrical scopes:
+- Floor plans: Outlet symbols, electrical plans
+- Schedules: Electrical fixture schedules, panel schedules
+- Details: Electrical installation details
 
-CRITICAL: You MUST return ONLY valid JSON. Do not include any text before or after the JSON array.
-
-Return ONLY valid JSON in this exact format:
+OUTPUT FORMAT - Return ONLY this JSON structure:
 [
   {
     "pageNumber": 1,
     "confidence": 0.9,
-    "reason": "Contains LVT flooring specification in finish schedule",
-    "pageType": "finish-schedule"
-  },
-  {
-    "pageNumber": 3,
-    "confidence": 0.8,
-    "reason": "Shows floor plan with room layouts for area measurement",
-    "pageType": "floor-plan"
+    "reason": "Specific evidence found: [list key indicators]",
+    "pageType": "floor-plan",
+    "indicators": ["room layouts", "scale bar", "dimensions"],
+    "relevanceScore": 0.95
   }
 ]
 
-If no pages are relevant, return an empty array: []
+CRITICAL RULES:
+1. Return ONLY valid JSON array
+2. Include specific evidence in reason field
+3. List key indicators found
+4. Provide relevance score (0-1)
+5. If no pages relevant, return: []
 
-IMPORTANT: Start your response with [ and end with ]. No other text.`;
+RESPONSE FORMAT: Start with [ and end with ]. No other text.`;
 
       const messages = [
         {
@@ -739,12 +766,98 @@ IMPORTANT: Start your response with [ and end with ]. No other text.`;
   }
 
   /**
+   * Convert hybrid detection result to AITakeoffResult format
+   */
+  private convertHybridResultToAnalysis(hybridResult: any, scope: string): any {
+    // Convert elements to conditions
+    const conditions = hybridResult.elements.map((element: any, index: number) => ({
+      name: `${scope} - ${element.type}`,
+      type: this.mapElementTypeToMeasurementType(element.type),
+      unit: this.getUnitForElementType(element.type),
+      description: element.description || `Detected ${element.type} element`,
+      color: this.getColorForElementType(element.type)
+    }));
+
+    // Convert measurements
+    const measurements = hybridResult.measurements || [];
+
+    // Use scale info from hybrid result
+    const calibration = {
+      scaleFactor: hybridResult.scaleInfo.scaleFactor,
+      unit: hybridResult.scaleInfo.unit,
+      scaleText: hybridResult.scaleInfo.scaleText
+    };
+
+    return {
+      conditions,
+      measurements,
+      calibration
+    };
+  }
+
+  /**
+   * Map element type to measurement type
+   */
+  private mapElementTypeToMeasurementType(elementType: string): 'area' | 'linear' | 'count' | 'volume' {
+    const typeMap: { [key: string]: 'area' | 'linear' | 'count' | 'volume' } = {
+      'room': 'area',
+      'wall': 'linear',
+      'door': 'count',
+      'window': 'count',
+      'fixture': 'count',
+      'text': 'count',
+      'symbol': 'count',
+      'unknown': 'count'
+    };
+
+    return typeMap[elementType] || 'count';
+  }
+
+  /**
+   * Get unit for element type
+   */
+  private getUnitForElementType(elementType: string): string {
+    const unitMap: { [key: string]: string } = {
+      'room': 'SF',
+      'wall': 'LF',
+      'door': 'EA',
+      'window': 'EA',
+      'fixture': 'EA',
+      'text': 'EA',
+      'symbol': 'EA',
+      'unknown': 'EA'
+    };
+
+    return unitMap[elementType] || 'EA';
+  }
+
+  /**
+   * Get color for element type
+   */
+  private getColorForElementType(elementType: string): string {
+    const colorMap: { [key: string]: string } = {
+      'room': '#4CAF50',
+      'wall': '#2196F3',
+      'door': '#FF9800',
+      'window': '#9C27B0',
+      'fixture': '#F44336',
+      'text': '#607D8B',
+      'symbol': '#795548',
+      'unknown': '#9E9E9E'
+    };
+
+    return colorMap[elementType] || '#9E9E9E';
+  }
+
+  /**
    * Check if AI takeoff services are available
    */
-  async isAvailable(): Promise<{ qwenVision: boolean; chatAI: boolean }> {
+  async isAvailable(): Promise<{ qwenVision: boolean; chatAI: boolean; hybrid: boolean }> {
     console.log('Checking AI takeoff service availability...');
     const qwenVisionAvailable = await qwenVisionService.isAvailable();
+    const hybridAvailable = await hybridDetectionService.isAvailable();
     console.log('Qwen3-VL availability result:', qwenVisionAvailable);
+    console.log('Hybrid detection availability result:', hybridAvailable);
     
     // Check if chat AI is available (Ollama cloud)
     let chatAIAvailable = false;
@@ -769,7 +882,8 @@ IMPORTANT: Start your response with [ and end with ]. No other text.`;
     
     const result = {
       qwenVision: qwenVisionAvailable,
-      chatAI: chatAIAvailable
+      chatAI: chatAIAvailable,
+      hybrid: hybridAvailable
     };
     
     console.log('Final AI takeoff service availability:', result);

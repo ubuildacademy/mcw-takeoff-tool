@@ -9,7 +9,6 @@ import { SearchTab } from './SearchTab';
 import { OCRProcessingDialog } from './OCRProcessingDialog';
 import { ProfitMarginDialog } from './ProfitMarginDialog';
 import { AITakeoffAgent } from './AITakeoffAgent';
-import { TrainingDialog } from './TrainingDialog';
 
 import { useTakeoffStore } from '../store/useTakeoffStore';
 import type { TakeoffCondition, Sheet, ProjectFile, PDFDocument } from '../types';
@@ -66,7 +65,6 @@ export function TakeoffWorkspace() {
   // Dialog states
   const [showProfitMarginDialog, setShowProfitMarginDialog] = useState(false);
   const [showAITakeoffAgent, setShowAITakeoffAgent] = useState(false);
-  const [showTrainingDialog, setShowTrainingDialog] = useState(false);
   
   // Cut-out states
   const [cutoutMode, setCutoutMode] = useState(false);
@@ -685,11 +683,6 @@ export function TakeoffWorkspace() {
                 Perform Takeoff
                 <span className="ml-auto text-xs text-gray-500">AI Analysis</span>
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setShowTrainingDialog(true)}>
-                <Search className="w-4 h-4 mr-2" />
-                Train Agent
-                <span className="ml-auto text-xs text-gray-500">Learning</span>
-              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
 
@@ -1143,14 +1136,6 @@ export function TakeoffWorkspace() {
         onPageSelect={handlePageSelect}
       />
 
-      {/* Training Dialog */}
-      <TrainingDialog
-        isOpen={showTrainingDialog}
-        onClose={() => setShowTrainingDialog(false)}
-        projectId={projectId!}
-        documents={documents}
-        onPageSelect={handlePageSelect}
-      />
 
     </div>
   );

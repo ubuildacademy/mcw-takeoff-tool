@@ -194,7 +194,9 @@ export interface AIIdentifiedPage {
   confidence: number;
   reason: string;
   selected: boolean;
-  pageType?: 'floor-plan' | 'finish-schedule' | 'other';
+  pageType?: 'floor-plan' | 'finish-schedule' | 'detail-drawing' | 'elevation' | 'other';
+  indicators?: string[];
+  relevanceScore?: number;
 }
 
 export interface AITakeoffResult {
