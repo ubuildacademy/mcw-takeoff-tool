@@ -411,15 +411,7 @@ export function TakeoffWorkspace() {
       setCurrentPage(savedPage);
       setScale(savedScale);
       
-      // Restore scroll position after a short delay to ensure PDF is rendered
-      if (savedLocation.x !== 0 || savedLocation.y !== 0) {
-        setTimeout(() => {
-          // Trigger scroll position restoration in PDF viewer
-          if ((window as any).restoreScrollPosition) {
-            (window as any).restoreScrollPosition(savedLocation.x, savedLocation.y);
-          }
-        }, 200);
-      }
+      // Scroll position will be restored when PDF is fully rendered via handlePDFRendered
     }
   }, [currentPdfFile, getDocumentRotation, getDocumentPage, getDocumentScale, getDocumentLocation]);
 
@@ -464,6 +456,22 @@ export function TakeoffWorkspace() {
     // Store location for current document in the store
     if (currentPdfFile) {
       setDocumentLocation(currentPdfFile.id, { x, y });
+    }
+  };
+
+  const handlePDFRendered = () => {
+    // Restore scroll position after PDF is fully rendered
+    if (currentPdfFile) {
+      const savedLocation = getDocumentLocation(currentPdfFile.id);
+      if (savedLocation.x !== 0 || savedLocation.y !== 0) {
+        console.log('🔄 Restoring scroll position after PDF render:', savedLocation);
+        // Use a minimal delay to ensure the container is ready
+        setTimeout(() => {
+          if ((window as any).restoreScrollPosition) {
+            (window as any).restoreScrollPosition(savedLocation.x, savedLocation.y);
+          }
+        }, 25);
+      }
     }
   };
 
@@ -870,6 +878,7 @@ export function TakeoffWorkspace() {
               onCutoutModeChange={handleCutoutMode}
               onMeasurementStateChange={handleMeasurementStateChange}
               onLocationChange={handleLocationChange}
+              onPDFRendered={handlePDFRendered}
               annotationTool={annotationTool}
               annotationColor={annotationColor}
               onAnnotationToolChange={setAnnotationTool}

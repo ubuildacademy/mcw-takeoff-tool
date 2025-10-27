@@ -7,8 +7,11 @@ import ScaleApplicationDialog from './ScaleApplicationDialog';
 import { formatFeetAndInches } from '../lib/utils';
 import { calculateDistance } from '../utils/commonUtils';
 
-// Configure PDF.js worker
+// Configure PDF.js worker with performance optimizations
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+
+// Configure PDF.js for better performance
+pdfjsLib.GlobalWorkerOptions.workerPort = null; // Use default port
 
 interface PDFViewerProps {
   file: File | string | any;
@@ -37,6 +40,7 @@ interface PDFViewerProps {
   annotationColor?: string;
   onAnnotationToolChange?: (tool: 'text' | 'freehand' | 'arrow' | 'rectangle' | 'circle' | null) => void;
   onLocationChange?: (x: number, y: number) => void;
+  onPDFRendered?: () => void;
 }
 
 interface Measurement {
@@ -77,7 +81,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   annotationTool = null,
   annotationColor = '#FF0000',
   onAnnotationToolChange,
-  onLocationChange
+  onLocationChange,
+  onPDFRendered
 }) => {
   // Core PDF state
   const [pdfDocument, setPdfDocument] = useState<any>(null);
@@ -146,6 +151,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const unit = externalUnit ?? internalUnit;
   
   const [isCalibrating, setIsCalibrating] = useState(false);
+  const [isDeselecting, setIsDeselecting] = useState(false);
   const [calibrationPoints, setCalibrationPoints] = useState<{ x: number; y: number }[]>([]);
   const [showCalibrationDialog, setShowCalibrationDialog] = useState(false);
   const [showScaleApplicationDialog, setShowScaleApplicationDialog] = useState(false);
@@ -171,6 +177,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Page-specific viewport and transform state for proper isolation
   const [pageViewports, setPageViewports] = useState<Record<number, any>>({});
   const [pageOutputScales, setPageOutputScales] = useState<Record<number, number>>({});
+  
+  // Performance optimization: track if initial render is complete
+  const [isInitialRenderComplete, setIsInitialRenderComplete] = useState(false);
   
   // Current page viewport (computed from page-specific state)
   const currentViewport = useMemo(() => {
@@ -281,7 +290,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           throw new Error('Invalid file object provided');
         }
         
-        const pdf = await pdfjsLib.getDocument(pdfUrl).promise;
+        const pdf = await pdfjsLib.getDocument({
+          url: pdfUrl,
+          // Performance optimizations
+          disableAutoFetch: false,
+          disableStream: false,
+          disableRange: false,
+          // Enable caching for better performance
+          cMapUrl: 'https://unpkg.com/pdfjs-dist@3.11.174/cmaps/',
+          cMapPacked: true,
+          // Optimize for faster loading
+          maxImageSize: 1024 * 1024, // 1MB max image size
+          isEvalSupported: false, // Disable eval for security and performance
+        }).promise;
         setPdfDocument(pdf);
         
         if (externalTotalPages === undefined) {
@@ -546,21 +567,33 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // PDF render function with page-specific viewport isolation
   const renderPDFPage = useCallback(async (pageNum: number) => {
-    // Add a small delay to ensure DOM is fully mounted
-    await new Promise(resolve => setTimeout(resolve, 10));
-    
-    if (!isComponentMounted || !pdfDocument || !pdfCanvasRef.current || !containerRef.current) {
-      console.warn('PDF render skipped: missing dependencies', {
-        isComponentMounted,
-        pdfDocument: !!pdfDocument,
-        canvas: !!pdfCanvasRef.current,
-        container: !!containerRef.current,
-        pageNum
-      });
+    // ANTI-FLICKER: Block PDF renders during interactive operations or deselection cooldown
+    if (isMeasuring || isCalibrating || currentMeasurement.length > 0 || isDeselecting) {
+      console.log('🚫 PDF RENDER BLOCKED: Interactive/deselection mode detected in renderPDFPage');
       return;
     }
     
-    if (isRenderingRef.current) return;
+    // Reduced logging for better performance
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🔄 PDF RENDER TRIGGERED:', { pageNum, timestamp: Date.now() });
+    }
+    
+    // Reduced delay for better performance
+    await new Promise(resolve => setTimeout(resolve, 5));
+    
+    if (!isComponentMounted || !pdfDocument || !pdfCanvasRef.current || !containerRef.current) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('PDF render skipped: missing dependencies', { pageNum });
+      }
+      return;
+    }
+    
+    if (isRenderingRef.current) {
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🚫 PDF RENDER BLOCKED: Already rendering');
+      }
+      return;
+    }
     isRenderingRef.current = true;
 
     try {
@@ -605,11 +638,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         svgOverlayRef.current.innerHTML = '';
       }
       
-      // Render with page-specific transform for outputScale
+      // Render with page-specific transform for outputScale - optimized for performance
       const renderContext = {
         canvasContext: pdfContext,
         viewport: viewport,
-        transform: [outputScale, 0, 0, outputScale, 0, 0]
+        transform: [outputScale, 0, 0, outputScale, 0, 0],
+        // Performance optimizations
+        enableWebGL: false, // Disable WebGL for better compatibility and performance
+        renderInteractiveForms: false, // Disable interactive forms for better performance
       };
       
       const renderTask = page.render(renderContext);
@@ -619,6 +655,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // After PDF is rendered, ensure overlay is properly initialized and render takeoff annotations
       onPageShown(pageNum, viewport);
       
+      // Reduced logging for better performance
+      if (process.env.NODE_ENV === 'development') {
+        console.log('✅ PDF RENDER COMPLETE:', { pageNum, timestamp: Date.now() });
+      }
+      
+      // Mark initial render as complete and notify parent
+      if (pageNum === currentPage) {
+        setIsInitialRenderComplete(true);
+        if (onPDFRendered) {
+          onPDFRendered();
+        }
+      }
+      
     } catch (error: any) {
       if (error.name !== 'RenderingCancelledException') {
         console.error('Error rendering PDF page:', error);
@@ -626,7 +675,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     } finally {
       isRenderingRef.current = false;
     }
-  }, [pdfDocument, viewState, updateCanvasDimensions, onPageShown, isComponentMounted]);
+  }, [pdfDocument, viewState, updateCanvasDimensions, onPageShown, isComponentMounted, isMeasuring, isCalibrating, currentMeasurement, isDeselecting]);
 
   // No coordinate conversions needed - SVG viewBox matches viewport exactly
   // CSS pixels = SVG pixels = viewport pixels (1:1 mapping)
@@ -1758,6 +1807,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Handle mouse move - direct coordinate conversion
   const handleMouseMove = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
+    // ANTI-FLICKER: Clear deselection state on any user interaction
+    if (isDeselecting) {
+      console.log('✅ USER INTERACTION: Clearing deselection cooldown');
+      setIsDeselecting(false);
+    }
+    
     // Handle mouse move for calibration mode
     if (isCalibrating) {
       if (!pdfCanvasRef.current || !currentViewport) {
@@ -1867,10 +1922,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         setRunningLength(newLength);
       }
     }
-  }, [annotationTool, isCalibrating, calibrationPoints, isMeasuring, selectedConditionId, mousePosition, isContinuousDrawing, activePoints, rubberBandElement, currentViewport, calculateRunningLength]);
+  }, [annotationTool, isCalibrating, calibrationPoints, isMeasuring, selectedConditionId, mousePosition, isContinuousDrawing, activePoints, rubberBandElement, currentViewport, calculateRunningLength, isDeselecting]);
 
   // Handle click - direct coordinate conversion
   const handleClick = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
+    // ANTI-FLICKER: Clear deselection state on any user interaction
+    if (isDeselecting) {
+      console.log('✅ USER INTERACTION: Clearing deselection cooldown');
+      setIsDeselecting(false);
+    }
+    
     const currentStoreState = useTakeoffStore.getState();
     const currentSelectedConditionId = currentStoreState.selectedConditionId;
     
@@ -2204,6 +2265,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         setLocalTakeoffMeasurements(displayMeasurements);
         
         // Re-render the page using queued rendering
+        console.log('📝 PDF RENDER TRIGGER: Measurement completion');
         requestAnimationFrame(() => {
           renderPDFPage(currentPage);
         });
@@ -2329,6 +2391,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       setCurrentCutout([]);
       
       // Re-render the page
+      console.log('✂️ PDF RENDER TRIGGER: Cutout completion');
       requestAnimationFrame(() => {
         renderPDFPage(currentPage);
       });
@@ -2748,6 +2811,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
         
         // Also re-render the PDF page
+        console.log('🗑️ PDF RENDER TRIGGER: Cutout deletion');
         requestAnimationFrame(() => {
           renderPDFPage(currentPage);
         });
@@ -2784,6 +2848,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           }
           
           // Also re-render the PDF page
+          console.log('🗑️ PDF RENDER TRIGGER: Measurement deletion');
           requestAnimationFrame(() => {
             renderPDFPage(currentPage);
           });
@@ -2809,14 +2874,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (pdfDocument && isComponentMounted) {
       setMeasurements([]);
       
-      // Retry mechanism if canvas is not ready
+      // Optimized retry mechanism if canvas is not ready
       const attemptRender = async (retries = 3) => {
         if (pdfCanvasRef.current && containerRef.current) {
+          if (process.env.NODE_ENV === 'development') {
+            console.log('🔄 PDF RENDER TRIGGER: Initial render attempt');
+          }
           await renderPDFPage(currentPage);
         } else if (retries > 0) {
-          setTimeout(() => attemptRender(retries - 1), 100);
+          setTimeout(() => attemptRender(retries - 1), 50); // Reduced retry delay
         } else {
-          console.warn('Canvas not ready after retries, skipping render');
+          if (process.env.NODE_ENV === 'development') {
+            console.warn('Canvas not ready after retries, skipping render');
+          }
         }
       };
       
@@ -2839,12 +2909,44 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setMeasurements([]);
   }, [currentPage]);
 
-  // Re-render when view state changes (zoom/rotation)
+  // Optimized re-render when view state changes (zoom/rotation)
   useEffect(() => {
-    if (pdfDocument && isComponentMounted) {
-      renderPDFPage(currentPage);
+    if (pdfDocument && isComponentMounted && isInitialRenderComplete) {
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🔍 PDF RENDER TRIGGER: View state change (zoom/rotation)');
+      }
+      
+      // ANTI-FLICKER: Skip PDF re-render during interactive operations or deselection cooldown
+      if (isMeasuring || isCalibrating || currentMeasurement.length > 0 || isDeselecting) {
+        if (process.env.NODE_ENV === 'development') {
+          console.log('🚫 PDF RENDER BLOCKED: Interactive/deselection mode - NO PDF render calls');
+        }
+        // Only update SVG overlay, not PDF canvas
+        if (currentViewport) {
+          renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+        }
+        return;
+      }
+      
+      // ANTI-FLICKER: Block ALL renders during deselection period
+      if (isDeselecting) {
+        if (process.env.NODE_ENV === 'development') {
+          console.log('🚫 PDF RENDER BLOCKED: Deselection cooldown active');
+        }
+        return;
+      }
+      
+      // Optimized debounce for non-interactive mode
+      if (process.env.NODE_ENV === 'development') {
+        console.log('✅ PDF RENDER ALLOWED: Non-interactive mode');
+      }
+      const timeoutId = setTimeout(() => {
+        renderPDFPage(currentPage);
+      }, 30); // Further reduced debounce for better responsiveness
+      
+      return () => clearTimeout(timeoutId);
     }
-  }, [viewState, renderPDFPage, currentPage, isComponentMounted]);
+  }, [viewState, renderPDFPage, currentPage, isComponentMounted, isMeasuring, isCalibrating, currentMeasurement, currentViewport, renderTakeoffAnnotations, isDeselecting, isInitialRenderComplete]);
 
 
   // Set measurement type when condition is selected
@@ -2852,9 +2954,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (selectedConditionId) {
       const condition = getSelectedCondition();
       if (condition) {
+        console.log('📋 CONDITION SELECTED: Starting measurement mode');
         setIsMeasuring(true);
         setIsSelectionMode(false);
         setSelectedMarkupId(null);
+        setIsDeselecting(false); // Clear deselection state
         
         if (condition.unit === 'EA' || condition.unit === 'each') {
           setMeasurementType('count');
@@ -2867,11 +2971,28 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
       }
     } else {
+      console.log('📋 CONDITION DESELECTED: Switching to selection mode');
       setIsMeasuring(false);
       setIsSelectionMode(true);
       setCurrentMeasurement([]);
       setMousePosition(null);
       setMeasurements([]);
+      
+      // ANTI-FLICKER: Extended cooldown after deselection to prevent flicker storm
+      console.log('🚫 STARTING DESELECTION COOLDOWN: 5 seconds');
+      setIsDeselecting(true);
+      
+      // Store timeout ID so we can clear it if needed
+      const timeoutId = setTimeout(() => {
+        console.log('✅ DESELECTION COOLDOWN COMPLETE: Normal operation resumed');
+        setIsDeselecting(false);
+      }, 5000); // 5 second cooldown after deselection
+      
+      // Clear timeout if component unmounts or condition changes
+      return () => {
+        clearTimeout(timeoutId);
+        setIsDeselecting(false);
+      };
     }
   }, [selectedConditionId]);
 
