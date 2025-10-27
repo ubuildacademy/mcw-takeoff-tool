@@ -65,7 +65,8 @@ class QwenVisionService {
     imageData: string, 
     scope: string, 
     pageNumber: number,
-    pageType?: string
+    pageType?: string,
+    ocrContext?: any
   ): Promise<AITakeoffAnalysis> {
     // Check if API key is available
     if (!this.apiKey) {
@@ -221,9 +222,9 @@ class QwenVisionService {
   }
 
   /**
-   * Build adaptive prompt based on scope type
+   * Build adaptive prompt based on scope type - STRUCTURED VERSION
    */
-  private buildAdaptivePrompt(scope: string, pageNumber: number): string {
+  private buildAdaptivePrompt(scope: string, pageNumber: number, ocrContext?: any): string {
     const scopeLower = scope.toLowerCase();
     
     // Determine measurement type and strategy based on scope
@@ -231,37 +232,77 @@ class QwenVisionService {
     
     return `You are a construction takeoff expert. Analyze this architectural drawing to find and measure: "${scope}"
 
-CRITICAL: You must provide exact coordinates for each item found so that measurement points can be placed on the drawing.
+ANALYSIS REQUIREMENTS:
+1. Identify ALL items matching the scope
+2. Provide EXACT pixel coordinates for each item
+3. Calculate precise measurements using drawing scale
+4. Return structured JSON only
+
+${ocrContext ? `OCR CONTEXT INFORMATION:
+- Scale Information: ${ocrContext.scaleInfo ? JSON.stringify(ocrContext.scaleInfo) : 'Not detected'}
+- Room Names: ${ocrContext.roomNames?.join(', ') || 'None detected'}
+- Dimensions Found: ${ocrContext.dimensions?.map(d => d.text).join(', ') || 'None detected'}
+- Symbols: ${ocrContext.symbols?.join(', ') || 'None detected'}
+- Context: ${ocrContext.context || 'No additional context'}
+
+Use this OCR information to improve your analysis accuracy and scale detection.
+` : ''}
+
+DETECTION STRATEGY:
+1. **SCALE DETECTION**: Find scale bar, dimension lines, or text indicating scale (1/8"=1'-0", 1/4"=1'-0", etc.)
+2. **ELEMENT IDENTIFICATION**: Look for specific patterns and symbols
+3. **COORDINATE MAPPING**: Map each element to precise pixel coordinates
+4. **MEASUREMENT CALCULATION**: Calculate actual dimensions using scale
+
+COORDINATE SYSTEM:
+- Use 0-1 coordinate system where (0,0)=top-left, (1,1)=bottom-right
+- Provide coordinates as decimal values (e.g., 0.25, 0.75)
+- For areas: minimum 3 points to form polygon
+- For linear: 2+ points along the path
+- For counts: single point at center
 
 ${measurementConfig.instructions}
 
-Look for these specific patterns:
+SPECIFIC PATTERNS TO LOOK FOR:
 ${measurementConfig.patterns}
 
-For each item found, provide coordinates using 0-1 coordinate system where (0,0)=top-left, (1,1)=bottom-right.
+SCALE DETECTION PRIORITY:
+1. Look for scale bars with measurements
+2. Check dimension lines with actual measurements
+3. Look for text like "Scale: 1/4" = 1'-0""
+4. If no scale found, use estimated scale factor
 
-Return ONLY valid JSON with this exact structure:
-
+OUTPUT FORMAT - Return ONLY this JSON structure:
 {
-  "conditions": [{"name": "${scope}", "type": "${measurementConfig.type}", "unit": "${measurementConfig.unit}", "description": "${measurementConfig.description}", "color": "#4CAF50"}],
+  "conditions": [
+    {
+      "name": "${scope}",
+      "type": "${measurementConfig.type}",
+      "unit": "${measurementConfig.unit}",
+      "description": "${measurementConfig.description}",
+      "color": "#4CAF50"
+    }
+  ],
   "measurements": ${measurementConfig.exampleMeasurements},
-  "calibration": {"scaleFactor": 0.0833, "unit": "ft", "scaleText": "estimated"}
-}
-
-If you cannot find any items matching "${scope}", return:
-{
-  "conditions": [],
-  "measurements": [],
   "calibration": {
     "scaleFactor": 0.0833,
     "unit": "ft",
-    "scaleText": "estimated"
+    "scaleText": "1/8\\" = 1'-0\\""
   }
-}`;
+}
+
+CRITICAL RULES:
+1. Return ONLY valid JSON
+2. Provide exact coordinates for each element
+3. Calculate measurements using detected scale
+4. Group similar elements together
+5. If no items found, return empty arrays
+
+RESPONSE FORMAT: Start with { and end with }. No other text.`;
   }
 
   /**
-   * Determine measurement type and configuration based on scope
+   * Determine measurement type and configuration based on scope - STRUCTURED VERSION
    */
   private determineMeasurementType(scopeLower: string): {
     type: 'count' | 'linear' | 'area' | 'volume';
@@ -277,10 +318,24 @@ If you cannot find any items matching "${scope}", return:
         type: 'count',
         unit: 'EA',
         description: `${scopeLower} items found on drawings`,
-        instructions: 'For each individual item found, place a single point at its center.',
-        patterns: `- Room labels, unit designations, or symbols containing "${scopeLower}"
+        instructions: `COUNT DETECTION STRATEGY:
+1. Look for individual symbols, labels, or text containing "${scopeLower}"
+2. Identify each discrete item that can be counted
+3. Place a single point at the center of each item
+4. Group identical items together for efficiency
+5. Verify each item is actually present in the drawing`,
+        patterns: `SYMBOL PATTERNS:
+- Room labels, unit designations, or symbols containing "${scopeLower}"
 - Individual fixtures, equipment, or components
-- Any discrete items that can be counted`,
+- Text annotations or callouts
+- Architectural symbols (doors, windows, outlets, etc.)
+- Equipment symbols or labels
+
+DETECTION PRIORITY:
+1. Clear text labels and annotations
+2. Standard architectural symbols
+3. Equipment and fixture symbols
+4. Any discrete countable items`,
         exampleMeasurements: `[
           {"conditionIndex": 0, "points": [{"x": 0.25, "y": 0.35}], "calculatedValue": 1.0},
           {"conditionIndex": 0, "points": [{"x": 0.45, "y": 0.35}], "calculatedValue": 1.0}
@@ -294,10 +349,25 @@ If you cannot find any items matching "${scope}", return:
         type: 'linear',
         unit: 'LF',
         description: `${scopeLower} linear measurements`,
-        instructions: 'For each linear element, place points along its length to define the measurement path.',
-        patterns: `- Walls, rooflines, edges, or boundaries
-- Linear elements that need length measurement
-- Perimeter lines or continuous features`,
+        instructions: `LINEAR DETECTION STRATEGY:
+1. Identify continuous linear elements (walls, edges, boundaries)
+2. Place points along the length to define the measurement path
+3. Follow the exact path of the linear element
+4. Use multiple points for curved or complex paths
+5. Calculate actual length using drawing scale`,
+        patterns: `LINEAR ELEMENT PATTERNS:
+- Walls (thick lines, double lines, wall symbols)
+- Rooflines and roof edges
+- Boundaries and property lines
+- Trim, baseboards, and moldings
+- Pipes, conduits, and linear utilities
+- Edges of surfaces or materials
+
+DETECTION PRIORITY:
+1. Clear wall lines and boundaries
+2. Rooflines and structural elements
+3. Trim and finish elements
+4. Utility lines and conduits`,
         exampleMeasurements: `[
           {"conditionIndex": 0, "points": [{"x": 0.2, "y": 0.3}, {"x": 0.8, "y": 0.3}], "calculatedValue": 60.0},
           {"conditionIndex": 0, "points": [{"x": 0.1, "y": 0.5}, {"x": 0.9, "y": 0.5}], "calculatedValue": 80.0}
@@ -311,10 +381,24 @@ If you cannot find any items matching "${scope}", return:
         type: 'area',
         unit: 'SF',
         description: `${scopeLower} area measurements`,
-        instructions: 'For each area, place points to define the perimeter of the space (minimum 3 points to form a polygon).',
-        patterns: `- Rooms, spaces, or surface areas
-- Floor areas, ceiling areas, or wall surfaces
-- Any enclosed or defined areas`,
+        instructions: `AREA DETECTION STRATEGY:
+1. Identify enclosed spaces, rooms, or surface areas
+2. Place points to define the perimeter (minimum 3 points for polygon)
+3. Follow the exact boundaries of the space
+4. Include all corners and follow wall lines precisely
+5. Calculate area using drawing scale and polygon math`,
+        patterns: `AREA PATTERNS:
+- Rooms and enclosed spaces (bedrooms, living rooms, kitchens)
+- Floor areas with specific materials or finishes
+- Ceiling areas and wall surfaces
+- Outdoor spaces (patios, decks, driveways)
+- Material coverage areas (paint, flooring, roofing)
+
+DETECTION PRIORITY:
+1. Clear room boundaries and wall lines
+2. Floor plan areas with specific materials
+3. Ceiling and wall surface areas
+4. Outdoor and exterior spaces`,
         exampleMeasurements: `[
           {"conditionIndex": 0, "points": [{"x": 0.2, "y": 0.2}, {"x": 0.8, "y": 0.2}, {"x": 0.8, "y": 0.8}, {"x": 0.2, "y": 0.8}], "calculatedValue": 360.0},
           {"conditionIndex": 0, "points": [{"x": 0.1, "y": 0.1}, {"x": 0.6, "y": 0.1}, {"x": 0.6, "y": 0.6}, {"x": 0.1, "y": 0.6}], "calculatedValue": 250.0}
@@ -328,10 +412,24 @@ If you cannot find any items matching "${scope}", return:
         type: 'volume',
         unit: 'CF',
         description: `${scopeLower} volume measurements`,
-        instructions: 'For each volume, place points to define the base area and provide height information.',
-        patterns: `- 3D spaces, volumes, or cubic measurements
-- Areas with defined heights or depths
-- Excavation, concrete, or material volumes`,
+        instructions: `VOLUME DETECTION STRATEGY:
+1. Identify 3D spaces or areas with defined heights/depths
+2. Place points to define the base area (minimum 3 points for polygon)
+3. Look for height information in dimensions or notes
+4. Calculate volume using base area × height/depth
+5. Group similar volumes together for efficiency`,
+        patterns: `VOLUME PATTERNS:
+- 3D spaces with defined heights (rooms, basements)
+- Excavation areas with depth specifications
+- Concrete volumes (footings, slabs, walls)
+- Material volumes (backfill, gravel, soil)
+- Storage or utility spaces
+
+DETECTION PRIORITY:
+1. Clear height/depth dimensions on drawings
+2. Excavation and earthwork areas
+3. Concrete and structural volumes
+4. Material storage and utility spaces`,
         exampleMeasurements: `[
           {"conditionIndex": 0, "points": [{"x": 0.2, "y": 0.2}, {"x": 0.8, "y": 0.2}, {"x": 0.8, "y": 0.8}, {"x": 0.2, "y": 0.8}], "calculatedValue": 1800.0},
           {"conditionIndex": 0, "points": [{"x": 0.1, "y": 0.1}, {"x": 0.6, "y": 0.1}, {"x": 0.6, "y": 0.6}, {"x": 0.1, "y": 0.6}], "calculatedValue": 1250.0}
@@ -344,9 +442,24 @@ If you cannot find any items matching "${scope}", return:
       type: 'count',
       unit: 'EA',
       description: `${scopeLower} items found on drawings`,
-      instructions: 'For each item found, place a single point at its center.',
-      patterns: `- Any text, labels, or symbols related to "${scopeLower}"
-- Individual items that can be identified and counted`,
+      instructions: `GENERAL DETECTION STRATEGY:
+1. Look for any text, labels, or symbols related to "${scopeLower}"
+2. Identify individual items that can be counted
+3. Place a single point at the center of each item
+4. Group similar items together for efficiency
+5. Verify each item is actually present in the drawing`,
+      patterns: `GENERAL PATTERNS:
+- Any text, labels, or symbols related to "${scopeLower}"
+- Individual items that can be identified and counted
+- Architectural symbols and annotations
+- Equipment and fixture symbols
+- Any discrete countable elements
+
+DETECTION PRIORITY:
+1. Clear text labels and annotations
+2. Standard architectural symbols
+3. Equipment and fixture symbols
+4. Any discrete countable items`,
       exampleMeasurements: `[
         {"conditionIndex": 0, "points": [{"x": 0.25, "y": 0.35}], "calculatedValue": 1.0},
         {"conditionIndex": 0, "points": [{"x": 0.45, "y": 0.35}], "calculatedValue": 1.0}

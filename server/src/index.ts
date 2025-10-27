@@ -14,7 +14,11 @@ import { ocrRoutes } from './routes/ocr';
 import ollamaRoutes from './routes/ollama';
 import userRoutes from './routes/users';
 import aiTakeoffRoutes from './routes/aiTakeoff';
+import enhancedOcrRoutes from './routes/enhancedOcr';
+import hybridDetectionRoutes from './routes/hybridDetection';
 import playwrightTakeoffRoutes from './routes/playwrightTakeoff';
+import ruleValidationRoutes from './routes/ruleValidation';
+import testingRoutes from './routes/testing';
 import { livePreviewService } from './services/livePreviewService';
 
 const app = express();
@@ -49,7 +53,11 @@ app.use('/api/ocr', ocrRoutes);
 app.use('/api/ollama', ollamaRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/ai-takeoff', aiTakeoffRoutes);
+app.use('/api/enhanced-ocr', enhancedOcrRoutes);
+app.use('/api/hybrid-detection', hybridDetectionRoutes);
 app.use('/api/playwright-takeoff', playwrightTakeoffRoutes);
+app.use('/api/rule-validation', ruleValidationRoutes);
+app.use('/api/testing', testingRoutes);
 
 // Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
