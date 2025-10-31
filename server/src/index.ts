@@ -27,19 +27,26 @@ const PORT = parseInt(process.env.PORT || '4000', 10);
 
 // CRITICAL: Handle OPTIONS FIRST - before any other middleware is registered
 // Express processes middleware in order, so this MUST be first to catch preflight
+// Railway's Caddy edge intercepts OPTIONS, so this needs to be extremely early
 app.use((req, res, next) => {
   if (req.method === 'OPTIONS') {
-    console.log('🚨 OPTIONS CAUGHT FIRST:', req.path);
-    // Set CORS headers immediately
+    console.log('🚨 OPTIONS PREFLIGHT CAUGHT:', req.path, 'Origin:', req.headers.origin || 'none');
+    // Set CORS headers immediately - allow all origins temporarily for testing
     const origin = req.headers.origin;
+    
+    // Always set CORS headers for OPTIONS to allow preflight
     if (origin) {
       res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
-      res.setHeader('Access-Control-Max-Age', '86400');
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
     }
-    return res.status(204).send();
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Max-Age', '86400');
+    
+    console.log('✅ OPTIONS response sent with status 204');
+    return res.status(204).end(); // Use end() instead of send() for OPTIONS
   }
   next();
 });
@@ -223,6 +230,9 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 // Start server with Socket.IO
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Takeoff API server running on port ${PORT}`);
+  console.log(`🌐 Server accessible at http://0.0.0.0:${PORT}`);
+  console.log(`📝 NODE_ENV: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`📝 Allowed origins configured: ${isProduction ? 'Production mode' : 'Development mode (all allowed)'}`);
 });
 
 // Initialize live preview service
