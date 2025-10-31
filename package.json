@@ -51,7 +51,7 @@
   "scripts": {
     "dev": "vite",
     "dev:fixed": "bash -c 'lsof -ti:3001 | xargs -r kill -9 || true' && vite",
-    "build": "tsc && vite build",
+    "build": "npx tsc && vite build",
     "preview": "vite preview",
     "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
   },
