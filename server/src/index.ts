@@ -39,11 +39,22 @@ if (isProduction) {
 
 app.use(compression());
 
-// CORS configuration
+// CORS configuration - allow Vercel deployments
+const allowedOrigins = isProduction
+  ? [
+      'https://mcw-takeoff-tool.vercel.app',
+      'https://mcw-takeoff-tool-d31u2woku-johnny-raffios-projects-1cedccfd.vercel.app',
+      // Allow all *.vercel.app domains
+      /^https:\/\/.*\.vercel\.app$/,
+      // Allow custom origins from environment
+      ...(process.env.ALLOWED_ORIGINS?.split(',').map((origin: string) => origin.trim()) || []),
+      // Allow custom domain if set
+      ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : [])
+    ]
+  : true; // Allow all origins in development
+
 app.use(cors({
-  origin: isProduction
-    ? ['https://yourcompany.com'] 
-    : true, // Allow all origins in development
+  origin: allowedOrigins,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
