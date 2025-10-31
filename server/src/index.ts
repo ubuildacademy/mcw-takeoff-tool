@@ -25,21 +25,8 @@ import { livePreviewService } from './services/livePreviewService';
 const app = express();
 const PORT = parseInt(process.env.PORT || '4000', 10);
 
-// Configure helmet based on environment
+// CORS configuration - allow Vercel deployments (define before middleware)
 const isProduction = process.env.NODE_ENV === 'production';
-if (isProduction) {
-  app.use(helmet());
-} else {
-  // Less restrictive helmet for development
-  app.use(helmet({
-    contentSecurityPolicy: false,
-    crossOriginEmbedderPolicy: false,
-  }));
-}
-
-app.use(compression());
-
-// CORS configuration - allow Vercel deployments
 const allowedOrigins = isProduction
   ? [
       'https://mcw-takeoff-tool.vercel.app',
@@ -53,44 +40,63 @@ const allowedOrigins = isProduction
     ]
   : true; // Allow all origins in development
 
-// Handle OPTIONS requests FIRST, before CORS middleware
-app.options('*', (req, res) => {
-  const origin = req.headers.origin;
-  
-  // Check if origin is allowed
-  if (isProduction && typeof allowedOrigins !== 'boolean') {
-    const isAllowed = allowedOrigins.some(allowed => {
-      if (typeof allowed === 'string') {
-        return allowed === origin;
-      } else if (allowed instanceof RegExp) {
-        return allowed.test(origin || '');
-      }
-      return false;
-    });
+// Handle ALL OPTIONS requests FIRST, before any other middleware
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS') {
+    const origin = req.headers.origin;
     
-    if (origin && isAllowed) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
+    // Always allow OPTIONS in development
+    if (!isProduction) {
+      if (origin) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+      }
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
       res.setHeader('Access-Control-Allow-Credentials', 'true');
-      res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
+      res.setHeader('Access-Control-Max-Age', '86400');
       return res.status(204).send();
     }
-  } else {
-    // Development mode - allow all
-    if (origin) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
+    
+    // Production mode - check origin
+    if (typeof allowedOrigins !== 'boolean') {
+      const isAllowed = allowedOrigins.some(allowed => {
+        if (typeof allowed === 'string') {
+          return allowed === origin;
+        } else if (allowed instanceof RegExp) {
+          return origin ? allowed.test(origin) : false;
+        }
+        return false;
+      });
+      
+      if (origin && isAllowed) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader('Access-Control-Max-Age', '86400');
+        return res.status(204).send();
+      }
     }
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Max-Age', '86400');
-    return res.status(204).send();
+    
+    // Origin not allowed - reject but don't break
+    return res.status(403).json({ error: 'Origin not allowed' });
   }
-  
-  // If origin not allowed, return 403
-  res.status(403).send();
+  next();
 });
+
+// Configure helmet based on environment
+if (isProduction) {
+  app.use(helmet());
+} else {
+  // Less restrictive helmet for development
+  app.use(helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+  }));
+}
+
+app.use(compression());
+
 
 // CORS configuration with explicit OPTIONS handling
 app.use(cors({
