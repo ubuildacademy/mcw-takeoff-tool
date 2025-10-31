@@ -343,7 +343,13 @@ class SupabaseStorage {
       laborCost: item.labor_cost,
       materialCost: item.material_cost,
       equipmentCost: item.equipment_cost,
-      createdAt: item.created_at
+      includePerimeter: item.include_perimeter,
+      depth: item.depth,
+      searchImage: item.search_image,
+      searchImageId: item.search_image_id,
+      searchThreshold: item.search_threshold,
+      createdAt: item.created_at,
+      ...(item.ai_generated !== undefined && { aiGenerated: item.ai_generated })
     }));
   }
 
@@ -372,7 +378,13 @@ class SupabaseStorage {
       laborCost: item.labor_cost,
       materialCost: item.material_cost,
       equipmentCost: item.equipment_cost,
-      createdAt: item.created_at
+      includePerimeter: item.include_perimeter,
+      depth: item.depth,
+      searchImage: item.search_image,
+      searchImageId: item.search_image_id,
+      searchThreshold: item.search_threshold,
+      createdAt: item.created_at,
+      ...(item.ai_generated !== undefined && { aiGenerated: item.ai_generated })
     }));
   }
 
@@ -390,6 +402,12 @@ class SupabaseStorage {
       labor_cost: condition.laborCost,
       material_cost: condition.materialCost,
       equipment_cost: condition.equipmentCost,
+      include_perimeter: condition.includePerimeter,
+      depth: condition.depth,
+      search_image: condition.searchImage,
+      search_image_id: condition.searchImageId,
+      search_threshold: condition.searchThreshold,
+      ai_generated: (condition as any).aiGenerated,
       created_at: condition.createdAt
     };
     
@@ -417,7 +435,13 @@ class SupabaseStorage {
       laborCost: data.labor_cost,
       materialCost: data.material_cost,
       equipmentCost: data.equipment_cost,
-      createdAt: data.created_at
+      includePerimeter: data.include_perimeter,
+      depth: data.depth,
+      searchImage: data.search_image,
+      searchImageId: data.search_image_id,
+      searchThreshold: data.search_threshold,
+      createdAt: data.created_at,
+      ...(data.ai_generated !== undefined && { aiGenerated: data.ai_generated })
     };
   }
 

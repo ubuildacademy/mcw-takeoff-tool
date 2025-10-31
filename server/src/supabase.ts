@@ -30,5 +30,6 @@ export const TABLES = {
   FILES: 'takeoff_files',
   CONDITIONS: 'takeoff_conditions',
   SHEETS: 'takeoff_sheets',
-  TAKEOFF_MEASUREMENTS: 'takeoff_measurements'
+  TAKEOFF_MEASUREMENTS: 'takeoff_measurements',
+  APP_SETTINGS: 'app_settings'
 } as const;

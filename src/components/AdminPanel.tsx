@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { ollamaService, type OllamaModel } from '../services/ollamaService';
 import { authHelpers, UserMetadata, UserInvitation } from '../lib/supabase';
+import { settingsService } from '../services/apiService';
 
 interface AdminPanelProps {
   isOpen: boolean;
@@ -153,7 +154,7 @@ When answering questions:
 - Be concise but thorough in your responses`;
   };
 
-  // Save custom prompt to localStorage
+  // Save custom prompt to API (with localStorage fallback)
   const saveCustomPrompt = async () => {
     try {
       setIsLoading(true);
@@ -161,7 +162,16 @@ When answering questions:
       // Combine editable prompt with fixed JSON formatting
       const fullPrompt = customPrompt + '\n\n' + getJsonFormatting();
       
-      // Save to localStorage
+      try {
+        // Save to API (database)
+        await settingsService.updateSetting('ai-page-labeling-prompt', fullPrompt);
+      } catch (apiError) {
+        console.warn('Failed to save to API, using localStorage fallback:', apiError);
+        // Fallback to localStorage for backward compatibility
+        localStorage.setItem('ai-page-labeling-prompt', fullPrompt);
+      }
+      
+      // Also save to localStorage as backup
       localStorage.setItem('ai-page-labeling-prompt', fullPrompt);
       
       // Show success message
@@ -174,28 +184,61 @@ When answering questions:
     }
   };
 
-  // Load custom prompt from localStorage
-  const loadCustomPrompt = () => {
-    const saved = localStorage.getItem('ai-page-labeling-prompt');
-    if (saved) {
-      // Extract just the editable part (remove JSON formatting section)
-      const jsonStart = saved.indexOf('Return your analysis as a JSON array');
-      if (jsonStart !== -1) {
-        setCustomPrompt(saved.substring(0, jsonStart).trim());
-      } else {
-        setCustomPrompt(saved);
+  // Load custom prompt from API (with localStorage fallback)
+  const loadCustomPrompt = async () => {
+    try {
+      // Try to load from API first
+      try {
+        const response = await settingsService.getSetting('ai-page-labeling-prompt');
+        if (response?.value) {
+          const saved = response.value;
+          // Extract just the editable part (remove JSON formatting section)
+          const jsonStart = saved.indexOf('Return your analysis as a JSON array');
+          if (jsonStart !== -1) {
+            setCustomPrompt(saved.substring(0, jsonStart).trim());
+          } else {
+            setCustomPrompt(saved);
+          }
+          return;
+        }
+      } catch (apiError) {
+        console.warn('Failed to load from API, trying localStorage:', apiError);
       }
-    } else {
+      
+      // Fallback to localStorage
+      const saved = localStorage.getItem('ai-page-labeling-prompt');
+      if (saved) {
+        // Extract just the editable part (remove JSON formatting section)
+        const jsonStart = saved.indexOf('Return your analysis as a JSON array');
+        if (jsonStart !== -1) {
+          setCustomPrompt(saved.substring(0, jsonStart).trim());
+        } else {
+          setCustomPrompt(saved);
+        }
+      } else {
+        setCustomPrompt(getEditablePrompt());
+      }
+    } catch (error) {
+      console.error('Error loading prompt:', error);
       setCustomPrompt(getEditablePrompt());
     }
   };
 
-  // Save chat prompt to localStorage
+  // Save chat prompt to API (with localStorage fallback)
   const saveChatPrompt = async () => {
     try {
       setIsLoading(true);
       
-      // Save to localStorage
+      try {
+        // Save to API (database)
+        await settingsService.updateSetting('ai-chat-assistant-prompt', chatPrompt);
+      } catch (apiError) {
+        console.warn('Failed to save to API, using localStorage fallback:', apiError);
+        // Fallback to localStorage for backward compatibility
+        localStorage.setItem('ai-chat-assistant-prompt', chatPrompt);
+      }
+      
+      // Also save to localStorage as backup
       localStorage.setItem('ai-chat-assistant-prompt', chatPrompt);
       
       // Show success message
@@ -208,25 +251,71 @@ When answering questions:
     }
   };
 
-  // Load chat prompt from localStorage
-  const loadChatPrompt = () => {
-    const saved = localStorage.getItem('ai-chat-assistant-prompt');
-    if (saved) {
-      setChatPrompt(saved);
-    } else {
+  // Load chat prompt from API (with localStorage fallback)
+  const loadChatPrompt = async () => {
+    try {
+      // Try to load from API first
+      try {
+        const response = await settingsService.getSetting('ai-chat-assistant-prompt');
+        if (response?.value) {
+          setChatPrompt(response.value);
+          return;
+        }
+      } catch (apiError) {
+        console.warn('Failed to load from API, trying localStorage:', apiError);
+      }
+      
+      // Fallback to localStorage
+      const saved = localStorage.getItem('ai-chat-assistant-prompt');
+      if (saved) {
+        setChatPrompt(saved);
+      } else {
+        setChatPrompt(getDefaultChatPrompt());
+      }
+    } catch (error) {
+      console.error('Error loading chat prompt:', error);
       setChatPrompt(getDefaultChatPrompt());
     }
   };
 
-  // Load available models when AI settings tab is opened
+  // Load available models and saved settings when AI settings tab is opened
   const loadAvailableModels = async () => {
     try {
       const models = await ollamaService.getModels();
       setAvailableModels(models);
       
-      // Set current default model
-      const currentDefault = ollamaService.getDefaultModel();
-      setSelectedModel(currentDefault);
+      // Try to load saved settings from API
+      try {
+        const settings = await settingsService.getSettings();
+        if (settings?.settings) {
+          if (settings.settings['ai-selected-model']) {
+            setSelectedModel(settings.settings['ai-selected-model']);
+            ollamaService.setDefaultModel(settings.settings['ai-selected-model']);
+          }
+          if (settings.settings['ai-fallback-model']) {
+            setFallbackModel(settings.settings['ai-fallback-model']);
+          }
+          return;
+        }
+      } catch (apiError) {
+        console.warn('Failed to load settings from API, using localStorage:', apiError);
+      }
+      
+      // Fallback to localStorage
+      const savedModel = localStorage.getItem('ai-selected-model');
+      const savedFallback = localStorage.getItem('ai-fallback-model');
+      
+      if (savedModel) {
+        setSelectedModel(savedModel);
+        ollamaService.setDefaultModel(savedModel);
+      } else {
+        const currentDefault = ollamaService.getDefaultModel();
+        setSelectedModel(currentDefault);
+      }
+      
+      if (savedFallback) {
+        setFallbackModel(savedFallback);
+      }
     } catch (error) {
       console.error('Failed to load models:', error);
     }
@@ -241,6 +330,7 @@ When answering questions:
       loadCustomPrompt();
       loadChatPrompt();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, isUnlocked]);
 
 
@@ -275,14 +365,21 @@ When answering questions:
     
     setIsInviting(true);
     try {
-      await authHelpers.createInvitation(inviteEmail, inviteRole);
+      const result = await authHelpers.createInvitation(inviteEmail, inviteRole);
       setInviteEmail('');
       setInviteRole('user');
       await loadInvitations();
-      alert('Invitation sent successfully!');
-    } catch (error) {
+      
+      // Check if email was actually sent
+      if (result?.email_sent) {
+        alert('Invitation created and email sent successfully!');
+      } else {
+        alert(`Invitation created, but email was not sent.\n\nPlease configure SMTP settings in your backend environment variables.\n\nInvitation URL: ${result?.invite_url || 'N/A'}`);
+      }
+    } catch (error: any) {
       console.error('Error sending invitation:', error);
-      alert('Failed to send invitation');
+      const errorMessage = error?.response?.data?.error || error?.message || 'Failed to send invitation';
+      alert(`Failed to create invitation: ${errorMessage}`);
     } finally {
       setIsInviting(false);
     }
@@ -756,15 +853,37 @@ When answering questions:
 
                     <div className="flex gap-4">
                       <Button
-                        onClick={() => {
-                          ollamaService.setDefaultModel(selectedModel);
-                          
-                          // Save AI model settings to localStorage
-                          localStorage.setItem('ai-selected-model', selectedModel);
-                          localStorage.setItem('ai-fallback-model', fallbackModel);
-                          
-                          alert('✅ AI settings saved successfully!');
+                        onClick={async () => {
+                          try {
+                            setIsLoading(true);
+                            ollamaService.setDefaultModel(selectedModel);
+                            
+                            // Save AI model settings to API
+                            try {
+                              await settingsService.updateSettings({
+                                'ai-selected-model': selectedModel,
+                                'ai-fallback-model': fallbackModel
+                              });
+                            } catch (apiError) {
+                              console.warn('Failed to save to API, using localStorage fallback:', apiError);
+                              // Fallback to localStorage
+                              localStorage.setItem('ai-selected-model', selectedModel);
+                              localStorage.setItem('ai-fallback-model', fallbackModel);
+                            }
+                            
+                            // Also save to localStorage as backup
+                            localStorage.setItem('ai-selected-model', selectedModel);
+                            localStorage.setItem('ai-fallback-model', fallbackModel);
+                            
+                            alert('✅ AI settings saved successfully!');
+                          } catch (error) {
+                            console.error('Error saving AI settings:', error);
+                            alert('❌ Failed to save AI settings');
+                          } finally {
+                            setIsLoading(false);
+                          }
                         }}
+                        disabled={isLoading}
                       >
                         <CheckCircle className="w-4 h-4 mr-2" />
                         Save AI Settings

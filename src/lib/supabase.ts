@@ -1,8 +1,13 @@
 import { createClient, User, Session } from '@supabase/supabase-js'
 
-// Supabase project credentials
-const supabaseUrl = 'https://mxjyytwfhmoonkduvybr.supabase.co'
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im14anl5dHdmaG1vb25rZHV2eWJyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTgxMzE4NTksImV4cCI6MjA3MzcwNzg1OX0.nG28P04Gdg9hbwasEeYKL2ekoSkWoInoT6RwUwA0BJ8'
+// Supabase project credentials - use environment variables in production
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://mxjyytwfhmoonkduvybr.supabase.co'
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im14anl5dHdmaG1vb25rZHV2eWJyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTgxMzE4NTksImV4cCI6MjA3MzcwNzg1OX0.nG28P04Gdg9hbwasEeYKL2ekoSkWoInoT6RwUwA0BJ8'
+
+// Validate that we have the required values
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error('Missing Supabase configuration. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY environment variables.')
+}
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
@@ -127,24 +132,11 @@ export const authHelpers = {
     return data || []
   },
 
-  // Create user invitation
+  // Create user invitation (now uses backend API to send email)
   async createInvitation(email: string, role: 'admin' | 'user') {
-    const inviteToken = crypto.randomUUID()
-    const expiresAt = new Date()
-    expiresAt.setDate(expiresAt.getDate() + 7) // 7 days from now
-
-    const user = await this.getCurrentUser()
-    if (!user) throw new Error('No authenticated user')
-
-    return await supabase
-      .from('user_invitations')
-      .insert({
-        email,
-        role,
-        invite_token: inviteToken,
-        invited_by: user.id,
-        expires_at: expiresAt.toISOString()
-      })
+    // Use backend API which handles email sending
+    const { userService } = await import('../services/apiService')
+    return await userService.createInvitation(email, role)
   },
 
   // Get invitation by token
@@ -207,27 +199,22 @@ export const authHelpers = {
       .eq('id', invitation.id)
   },
 
-  // Get all invitations (admin only)
+  // Get all invitations (admin only) - uses backend API
   async getAllInvitations(): Promise<UserInvitation[]> {
-    const { data, error } = await supabase
-      .from('user_invitations')
-      .select('*')
-      .order('created_at', { ascending: false })
-
-    if (error) {
+    const { userService } = await import('../services/apiService')
+    try {
+      const data = await userService.getInvitations()
+      return data || []
+    } catch (error) {
       console.error('Error fetching invitations:', error)
       return []
     }
-
-    return data || []
   },
 
-  // Delete invitation
+  // Delete invitation - uses backend API
   async deleteInvitation(invitationId: string) {
-    return await supabase
-      .from('user_invitations')
-      .delete()
-      .eq('id', invitationId)
+    const { userService } = await import('../services/apiService')
+    return await userService.deleteInvitation(invitationId)
   },
 
   // Update user role (admin only)
