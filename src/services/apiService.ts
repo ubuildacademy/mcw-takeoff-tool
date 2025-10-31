@@ -7,8 +7,9 @@ const API_BASE_URL = RUNTIME_API_BASE
     ? '/api' // Use relative URLs - Vercel rewrites will proxy to Railway backend
     : 'http://localhost:4000/api'); // Development: use local backend
 
-// Note: In production, we use Vercel rewrites to proxy /api/* to Railway
-// This bypasses Railway Caddy edge layer CORS issues
+// Note: In production, we prefer VITE_API_BASE_URL to be set directly in Vercel
+// If not set, it falls back to '/api' which relies on vercel.json rewrites
+// For best results, set VITE_API_BASE_URL=https://your-railway-url.up.railway.app/api in Vercel
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
