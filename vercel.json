@@ -10,7 +10,7 @@
       "destination": "https://mcw-takeoff-tool-production.up.railway.app/api/$1"
     }
   ],
-  "_comment": "Using Vercel rewrites to proxy API requests to Railway backend. This bypasses Railway Caddy CORS issues."
+  "_comment": "Using Vercel rewrites to proxy API requests to Railway backend. This bypasses Railway Caddy CORS issues.",
   "cleanUrls": true,
   "trailingSlash": false
 }
