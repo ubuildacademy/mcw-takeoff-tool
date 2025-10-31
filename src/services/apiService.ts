@@ -3,9 +3,18 @@ import { supabase } from '../lib/supabase';
 
 const RUNTIME_API_BASE = import.meta.env.VITE_API_BASE_URL as string | undefined;
 const API_BASE_URL = RUNTIME_API_BASE
-  || (process.env.NODE_ENV === 'production'
-    ? 'https://mcw-takeoff-tool-backend.vercel.app/api'
+  || (import.meta.env.PROD
+    ? (() => {
+        console.error('❌ VITE_API_BASE_URL environment variable is not set in production!');
+        console.error('Please set VITE_API_BASE_URL in Vercel environment variables to your backend URL.');
+        return undefined;
+      })()
     : 'http://localhost:4000/api');
+
+if (!API_BASE_URL && import.meta.env.PROD) {
+  console.error('⚠️ Backend API URL is not configured. API calls will fail.');
+  console.error('Set VITE_API_BASE_URL in Vercel: Settings → Environment Variables');
+}
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
