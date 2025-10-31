@@ -52,10 +52,13 @@ import { fileService, sheetService } from '../services/apiService';
 export function TakeoffWorkspace() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
+  const isDev = import.meta.env.DEV;
   
-  // Debug logging
-  console.log('🔍 TakeoffWorkspace: projectId from useParams:', projectId);
-  console.log('🔍 TakeoffWorkspace: current URL:', window.location.href);
+  // Debug logging (dev only)
+  if (isDev) {
+    console.log('🔍 TakeoffWorkspace: projectId from useParams:', projectId);
+    console.log('🔍 TakeoffWorkspace: current URL:', window.location.href);
+  }
   
   
   const [selectedSheet, setSelectedSheet] = useState<Sheet | null>(null);
@@ -71,8 +74,13 @@ export function TakeoffWorkspace() {
   const [cutoutTargetConditionId, setCutoutTargetConditionId] = useState<string | null>(null);
   
   // Annotation states
-  const [annotationTool, setAnnotationTool] = useState<'text' | 'freehand' | 'arrow' | 'rectangle' | 'circle' | 'highlight' | null>(null);
+  const [annotationTool, setAnnotationTool] = useState<'text' | 'freehand' | 'arrow' | 'rectangle' | 'circle' | null>(null);
   const [annotationColor, setAnnotationColor] = useState<string>('#FF0000');
+  
+  // Visual search states
+  const [visualSearchMode, setVisualSearchMode] = useState(false);
+  const [visualSearchCondition, setVisualSearchCondition] = useState<TakeoffCondition | null>(null);
+  const [selectionBox, setSelectionBox] = useState<{x: number, y: number, width: number, height: number} | null>(null);
   
   // Store integration
   const { 
@@ -157,17 +165,23 @@ export function TakeoffWorkspace() {
         const files = res.files || [];
         setProjectFiles(files);
         
-        // Set the first PDF file as current if no current file is set
+        // Restore last viewed document if available
         if (files.length > 0) {
-          const firstPdfFile = files.find((file: any) => file.mimetype === 'application/pdf');
-          if (firstPdfFile) {
-            setCurrentPdfFile(firstPdfFile);
-            setSelectedDocumentId(firstPdfFile.id);
-            // Don't set page here - let the useEffect handle it from store
+          const pdfFiles = files.filter((file: any) => file.mimetype === 'application/pdf');
+          let target = pdfFiles[0];
+          const lastViewedId = getLastViewedDocumentId?.();
+          if (lastViewedId) {
+            const match = pdfFiles.find((f: any) => f.id === lastViewedId);
+            if (match) target = match;
+          }
+          if (target) {
+            setCurrentPdfFile(target);
+            setSelectedDocumentId(target.id);
+            // Page restored in downstream effect from store
           }
         }
       } catch (e: any) {
-        console.error('Error loading project files:', e);
+        if (isDev) console.error('Error loading project files:', e);
       }
     }
     loadFiles();
@@ -199,15 +213,82 @@ export function TakeoffWorkspace() {
       setSelectedCondition(null);
       // Also clear in the store
       useTakeoffStore.getState().setSelectedCondition(null);
+      setVisualSearchMode(false);
+      setVisualSearchCondition(null);
     } else {
       setSelectedCondition(condition.id);
       // Also set in the store
       useTakeoffStore.getState().setSelectedCondition(condition.id);
+      
+      // Check if this is a visual search condition
+      if (condition.type === 'visual-search') {
+        setVisualSearchMode(true);
+        setVisualSearchCondition(condition);
+      } else {
+        setVisualSearchMode(false);
+        setVisualSearchCondition(null);
+      }
     }
   };
 
+  // Global Spacebar handler to deselect current condition
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const isSpace = event.code === 'Space' || event.key === ' ';
+      if (!isSpace) return;
+
+      const currentlySelected = getSelectedCondition();
+      if (currentlySelected) {
+        event.preventDefault();
+        handleConditionSelect(null);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [getSelectedCondition]);
+
   const handleToolSelect = (tool: string) => {
     // Tool selection handled by PDF viewer
+  };
+
+  const handleVisualSearchComplete = async (selectionBox: {x: number, y: number, width: number, height: number}) => {
+    if (visualSearchCondition && currentPdfFile && selectedSheet && projectId) {
+      if (isDev) console.log('Visual search selection completed:', selectionBox);
+      
+      try {
+        // Import the visual search service
+        const { visualSearchService } = await import('../services/visualSearchService');
+        
+        // Complete the visual search workflow
+        const result = await visualSearchService.completeSearch(
+          visualSearchCondition.id,
+          currentPdfFile.id,
+          selectedSheet.pageNumber,
+          selectionBox,
+          projectId,
+          selectedSheet.id,
+          {
+            confidenceThreshold: visualSearchCondition.searchThreshold || 0.7,
+            maxMatches: 100
+          }
+        );
+        
+        if (isDev) console.log(`✅ Visual search complete: ${result.measurementsCreated} matches found and marked`);
+        
+        // Refresh the takeoff measurements to show the new count measurements
+        await loadProjectTakeoffMeasurements(projectId);
+        
+        // Exit visual search mode
+        setVisualSearchMode(false);
+        setVisualSearchCondition(null);
+        setSelectionBox(null);
+        
+      } catch (error) {
+        if (isDev) console.error('❌ Visual search failed:', error);
+        alert('Visual search failed. Please try again.');
+      }
+    }
   };
 
   const rotatePage = (direction: 'clockwise' | 'counterclockwise') => {
@@ -399,7 +480,7 @@ export function TakeoffWorkspace() {
       const savedScale = getDocumentScale(currentPdfFile.id);
       const savedLocation = getDocumentLocation(currentPdfFile.id);
       
-      console.log('🔄 Restoring document state:', {
+      if (isDev) console.log('🔄 Restoring document state:', {
         documentId: currentPdfFile.id,
         savedRotation,
         savedPage,
@@ -426,12 +507,13 @@ export function TakeoffWorkspace() {
 
   // PDF viewer control handlers
   const handlePageChange = (page: number) => {
-    console.log('📄 Page change:', { from: currentPage, to: page, documentId: currentPdfFile?.id });
+    if (isDev) console.log('📄 Page change:', { from: currentPage, to: page, documentId: currentPdfFile?.id });
     setCurrentPage(page);
     // Save page to store for persistence
     if (currentPdfFile) {
       setDocumentPage(currentPdfFile.id, page);
-      console.log('💾 Saved page to store:', { documentId: currentPdfFile.id, page });
+      setLastViewedDocumentId?.(currentPdfFile.id);
+      if (isDev) console.log('💾 Saved page to store:', { documentId: currentPdfFile.id, page });
     }
     // Calibration state is now managed per page, no need to reset
   };
@@ -464,7 +546,7 @@ export function TakeoffWorkspace() {
     if (currentPdfFile) {
       const savedLocation = getDocumentLocation(currentPdfFile.id);
       if (savedLocation.x !== 0 || savedLocation.y !== 0) {
-        console.log('🔄 Restoring scroll position after PDF render:', savedLocation);
+        if (isDev) console.log('🔄 Restoring scroll position after PDF render:', savedLocation);
         // Use a minimal delay to ensure the container is ready
         setTimeout(() => {
           if ((window as any).restoreScrollPosition) {
@@ -670,29 +752,16 @@ export function TakeoffWorkspace() {
 
           <Separator orientation="vertical" className="h-8" />
 
-          {/* AI Takeoff Dropdown */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                size="sm"
-                variant="outline"
-                className="flex items-center gap-2"
-              >
-                <Bot className="w-4 h-4" />
-                AI Takeoff
-                <ChevronDown className="w-4 h-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-56">
-              <DropdownMenuLabel>AI Takeoff Options</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => setShowAITakeoffAgent(true)}>
-                <Bot className="w-4 h-4 mr-2" />
-                Perform Takeoff
-                <span className="ml-auto text-xs text-gray-500">AI Analysis</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {/* AI Takeoff Button */}
+          <Button
+            size="sm"
+            variant="outline"
+            className="flex items-center gap-2"
+            onClick={() => setShowAITakeoffAgent(true)}
+          >
+            <Bot className="w-4 h-4" />
+            AI Takeoff
+          </Button>
 
           <Separator orientation="vertical" className="h-8" />
 
@@ -729,13 +798,6 @@ export function TakeoffWorkspace() {
                 Freehand Drawing
               </DropdownMenuItem>
               
-              <DropdownMenuItem
-                onClick={() => setAnnotationTool(annotationTool === 'highlight' ? null : 'highlight')}
-                className={annotationTool === 'highlight' ? 'bg-accent' : ''}
-              >
-                <Highlighter className="w-4 h-4 mr-2" />
-                Highlight
-              </DropdownMenuItem>
               
               <DropdownMenuSeparator />
               <DropdownMenuLabel className="text-xs">Shapes</DropdownMenuLabel>
@@ -852,12 +914,24 @@ export function TakeoffWorkspace() {
 
         {/* PDF Viewer - Fixed height container */}
         <div className="flex-1 flex flex-col h-full overflow-hidden">
+          {/* Visual Search Mode Indicator */}
+          {visualSearchMode && visualSearchCondition && (
+            <div className="bg-indigo-100 border-b border-indigo-200 p-3 flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></div>
+                <span className="text-sm font-medium text-indigo-900">
+                  Visual Search Mode: {visualSearchCondition.name}
+                </span>
+              </div>
+              <div className="text-xs text-indigo-700">
+                Draw a box around a symbol to find and count similar items
+              </div>
+            </div>
+          )}
+          
           {currentPdfFile ? (
             <PDFViewer 
               file={currentPdfFile}
-              onCalibrationRequest={() => {
-                // Calibration handled by PDF viewer
-              }}
               className="h-full"
               currentPage={currentPage}
               totalPages={totalPages}
@@ -865,7 +939,7 @@ export function TakeoffWorkspace() {
               scale={scale}
               onScaleChange={handleScaleChange}
               rotation={rotation}
-              onCalibrateScale={handleCalibrateScale}
+              onCalibrationRequest={handleCalibrateScale}
               isPageCalibrated={isPageCalibrated}
               scaleFactor={scaleFactor}
               unit={unit}
@@ -882,6 +956,9 @@ export function TakeoffWorkspace() {
               annotationTool={annotationTool}
               annotationColor={annotationColor}
               onAnnotationToolChange={setAnnotationTool}
+              visualSearchMode={visualSearchMode}
+              visualSearchCondition={visualSearchCondition}
+              onVisualSearchComplete={handleVisualSearchComplete}
             />
           ) : (
             <div className="flex items-center justify-center flex-1 bg-gray-100">

@@ -1,9 +1,11 @@
 import axios from 'axios';
 import { supabase } from '../lib/supabase';
 
-const API_BASE_URL = process.env.NODE_ENV === 'production'
-  ? 'https://mcw-takeoff-tool-backend.vercel.app/api' // We'll deploy backend separately
-  : 'http://localhost:4000/api';
+const RUNTIME_API_BASE = import.meta.env.VITE_API_BASE_URL as string | undefined;
+const API_BASE_URL = RUNTIME_API_BASE
+  || (process.env.NODE_ENV === 'production'
+    ? 'https://mcw-takeoff-tool-backend.vercel.app/api'
+    : 'http://localhost:4000/api');
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
@@ -22,7 +24,7 @@ apiClient.interceptors.request.use(
         config.headers.Authorization = `Bearer ${session.access_token}`;
       }
     } catch (error) {
-      console.error('Error getting session for API request:', error);
+      if (import.meta.env.DEV) console.error('Error getting session for API request:', error);
     }
     return config;
   },
@@ -49,7 +51,7 @@ apiClient.interceptors.response.use(
     }
     
     // Log other errors
-    console.warn('API Error:', error.message);
+    if (import.meta.env.DEV) console.warn('API Error:', error.message);
     
     // Return a mock response structure for failed requests
     if (error.code === 'ERR_NETWORK' || error.code === 'ECONNREFUSED') {
@@ -78,7 +80,7 @@ export const fileService = {
         const percentCompleted = Math.round(
           (progressEvent.loaded * 100) / (progressEvent.total || 1)
         );
-        console.log(`Upload progress: ${percentCompleted}%`);
+        if (import.meta.env.DEV) console.log(`Upload progress: ${percentCompleted}%`);
       },
     });
 
@@ -89,10 +91,10 @@ export const fileService = {
       // Start OCR processing in background (don't await)
       ocrService.processDocument(response.data.file.id, projectId)
         .then(() => {
-          console.log(`✅ OCR processing completed for ${response.data.file.originalName}`);
+          if (import.meta.env.DEV) console.log(`✅ OCR processing completed for ${response.data.file.originalName}`);
         })
         .catch((error) => {
-          console.error(`❌ OCR processing failed for ${response.data.file.originalName}:`, error);
+          if (import.meta.env.DEV) console.error(`❌ OCR processing failed for ${response.data.file.originalName}:`, error);
           // Don't throw the error, just log it since OCR is optional
         });
     }
@@ -172,7 +174,7 @@ export const conditionService = {
     console.log('🌐 API_GET_PROJECT_CONDITIONS: Making API call for project:', projectId);
     try {
       const response = await apiClient.get(`/conditions/project/${projectId}`);
-      console.log('✅ API_GET_PROJECT_CONDITIONS: API call successful:', response.data);
+      if (import.meta.env.DEV) console.log('✅ API_GET_PROJECT_CONDITIONS: API call successful:', response.data);
       
       // Transform field names from snake_case to camelCase
       const transformedConditions = response.data.conditions?.map((condition: any) => ({
@@ -188,7 +190,7 @@ export const conditionService = {
       
       return { conditions: transformedConditions };
     } catch (error) {
-      console.error('❌ API_GET_PROJECT_CONDITIONS: API call failed:', error);
+      if (import.meta.env.DEV) console.error('❌ API_GET_PROJECT_CONDITIONS: API call failed:', error);
       throw error;
     }
   },
@@ -199,13 +201,13 @@ export const conditionService = {
   },
 
   async createCondition(conditionData: any) {
-    console.log('🌐 API_CREATE_CONDITION: Making API call with data:', conditionData);
+    if (import.meta.env.DEV) console.log('🌐 API_CREATE_CONDITION: Making API call with data:', conditionData);
     try {
       const response = await apiClient.post('/conditions', conditionData);
-      console.log('✅ API_CREATE_CONDITION: API call successful:', response.data);
+      if (import.meta.env.DEV) console.log('✅ API_CREATE_CONDITION: API call successful:', response.data);
       return response.data;
     } catch (error) {
-      console.error('❌ API_CREATE_CONDITION: API call failed:', error);
+      if (import.meta.env.DEV) console.error('❌ API_CREATE_CONDITION: API call failed:', error);
       throw error;
     }
   },
@@ -304,13 +306,13 @@ export const takeoffMeasurementService = {
   },
 
   async createTakeoffMeasurement(measurementData: any) {
-    console.log('🌐 API_CREATE_TAKEOFF_MEASUREMENT: Making API call with data:', measurementData);
+    if (import.meta.env.DEV) console.log('🌐 API_CREATE_TAKEOFF_MEASUREMENT: Making API call with data:', measurementData);
     try {
       const response = await apiClient.post('/takeoff-measurements', measurementData);
-      console.log('✅ API_CREATE_TAKEOFF_MEASUREMENT: API call successful:', response.data);
+      if (import.meta.env.DEV) console.log('✅ API_CREATE_TAKEOFF_MEASUREMENT: API call successful:', response.data);
       return response.data;
     } catch (error) {
-      console.error('❌ API_CREATE_TAKEOFF_MEASUREMENT: API call failed:', error);
+      if (import.meta.env.DEV) console.error('❌ API_CREATE_TAKEOFF_MEASUREMENT: API call failed:', error);
       throw error;
     }
   },

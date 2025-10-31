@@ -128,11 +128,15 @@ router.post('/', async (req, res) => {
       description,
       laborCost,
       materialCost,
-      aiGenerated = false
+      aiGenerated = false,
+      // Visual search specific fields
+      searchImage,
+      searchImageId,
+      searchThreshold
     } = req.body;
 
-    // Count conditions should not have waste factors
-    const finalWasteFactor = type === 'count' ? 0 : wasteFactor;
+    // Count and visual-search conditions should not have waste factors
+    const finalWasteFactor = (type === 'count' || type === 'visual-search') ? 0 : wasteFactor;
 
     // Validation
     if (!projectId || !name || !type || !unit) {
@@ -141,9 +145,9 @@ router.post('/', async (req, res) => {
       });
     }
 
-    if (!['area', 'volume', 'linear', 'count'].includes(type)) {
+    if (!['area', 'volume', 'linear', 'count', 'visual-search'].includes(type)) {
       return res.status(400).json({ 
-        error: 'Invalid type. Must be one of: area, volume, linear, count' 
+        error: 'Invalid type. Must be one of: area, volume, linear, count, visual-search' 
       });
     }
 
@@ -162,6 +166,12 @@ router.post('/', async (req, res) => {
       laborCost,
       materialCost,
       aiGenerated,
+      // Visual search specific fields
+      ...(type === 'visual-search' && {
+        searchImage,
+        searchImageId,
+        searchThreshold: searchThreshold || 0.7
+      }),
       createdAt: now
     };
     
@@ -190,13 +200,17 @@ router.put('/:id', async (req, res) => {
       description,
       laborCost,
       materialCost,
-      aiGenerated
+      aiGenerated,
+      // Visual search specific fields
+      searchImage,
+      searchImageId,
+      searchThreshold
     } = req.body;
 
     // Validation
-    if (type && !['area', 'volume', 'linear', 'count'].includes(type)) {
+    if (type && !['area', 'volume', 'linear', 'count', 'visual-search'].includes(type)) {
       return res.status(400).json({ 
-        error: 'Invalid type. Must be one of: area, volume, linear, count' 
+        error: 'Invalid type. Must be one of: area, volume, linear, count, visual-search' 
       });
     }
 
@@ -207,8 +221,8 @@ router.put('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Condition not found' });
     }
     
-    // Count conditions should not have waste factors
-    const finalWasteFactor = (type !== undefined && type === 'count') ? 0 : 
+    // Count and visual-search conditions should not have waste factors
+    const finalWasteFactor = (type !== undefined && (type === 'count' || type === 'visual-search')) ? 0 : 
                             (wasteFactor !== undefined ? wasteFactor : existingCondition.wasteFactor);
 
     // Update the condition
@@ -222,7 +236,11 @@ router.put('/:id', async (req, res) => {
       ...(description !== undefined && { description }),
       ...(laborCost !== undefined && { laborCost }),
       ...(materialCost !== undefined && { materialCost }),
-      ...(aiGenerated !== undefined && { aiGenerated })
+      ...(aiGenerated !== undefined && { aiGenerated }),
+      // Visual search specific fields
+      ...(searchImage !== undefined && { searchImage }),
+      ...(searchImageId !== undefined && { searchImageId }),
+      ...(searchThreshold !== undefined && { searchThreshold })
     };
     
     const savedCondition = await storage.saveCondition(updatedCondition);

@@ -52,7 +52,7 @@ export interface StoredCondition {
   id: string;
   projectId: string;
   name: string;
-  type: 'area' | 'volume' | 'linear' | 'count';
+  type: 'area' | 'volume' | 'linear' | 'count' | 'visual-search';
   unit: string;
   wasteFactor: number;
   color: string;
@@ -62,6 +62,10 @@ export interface StoredCondition {
   equipmentCost?: number;
   includePerimeter?: boolean;
   depth?: number;
+  // Visual search specific fields
+  searchImage?: string;
+  searchImageId?: string;
+  searchThreshold?: number;
   createdAt: string;
 }
 

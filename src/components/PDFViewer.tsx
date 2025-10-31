@@ -41,18 +41,36 @@ interface PDFViewerProps {
   onAnnotationToolChange?: (tool: 'text' | 'freehand' | 'arrow' | 'rectangle' | 'circle' | null) => void;
   onLocationChange?: (x: number, y: number) => void;
   onPDFRendered?: () => void;
+  // Visual search props
+  visualSearchMode?: boolean;
+  visualSearchCondition?: any;
+  onVisualSearchComplete?: (selectionBox: {x: number, y: number, width: number, height: number}) => void;
 }
 
 interface Measurement {
   id: string;
+  projectId: string;
+  sheetId: string;
+  conditionId: string;
   type: 'linear' | 'area' | 'volume' | 'count';
   points: { x: number; y: number }[];
   calculatedValue: number;
   unit: string;
-  conditionId?: string;
-  color: string;
+  timestamp: string;
+  pdfPage: number;
+  pdfCoordinates: Array<{ x: number; y: number }>;
+  conditionColor: string;
   conditionName: string;
   perimeterValue?: number;
+  cutouts?: Array<{
+    id: string;
+    points: Array<{ x: number; y: number }>;
+    pdfCoordinates: Array<{ x: number; y: number }>;
+    calculatedValue: number;
+  }>;
+  netCalculatedValue?: number;
+  // Legacy support
+  color?: string;
 }
 
 const PDFViewer: React.FC<PDFViewerProps> = ({ 
@@ -82,7 +100,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   annotationColor = '#FF0000',
   onAnnotationToolChange,
   onLocationChange,
-  onPDFRendered
+  onPDFRendered,
+  // Visual search props
+  visualSearchMode = false,
+  visualSearchCondition = null,
+  onVisualSearchComplete
 }) => {
   // Core PDF state
   const [pdfDocument, setPdfDocument] = useState<any>(null);
@@ -108,6 +130,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Measurement state
   const [isMeasuring, setIsMeasuring] = useState(false);
+  const [isAnnotating, setIsAnnotating] = useState(false);
   const [measurementType, setMeasurementType] = useState<'linear' | 'area' | 'volume' | 'count'>('linear');
   const [currentMeasurement, setCurrentMeasurement] = useState<{ x: number; y: number }[]>([]);
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
@@ -121,8 +144,20 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const [mousePosition, setMousePosition] = useState<{ x: number; y: number } | null>(null);
   const [isCompletingMeasurement, setIsCompletingMeasurement] = useState(false);
   
+  // Double-click detection for freehand annotations
+  const [lastClickTime, setLastClickTime] = useState<number>(0);
+  const [lastClickPosition, setLastClickPosition] = useState<{ x: number; y: number } | null>(null);
+  
+  // PDF loading state
+  const [isPDFLoading, setIsPDFLoading] = useState(false);
+  
   // Cut-out state (using external props)
   const [currentCutout, setCurrentCutout] = useState<{ x: number; y: number }[]>([]);
+  
+  // Visual search state
+  const [isSelectingSymbol, setIsSelectingSymbol] = useState(false);
+  const [selectionBox, setSelectionBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const [selectionStart, setSelectionStart] = useState<{ x: number; y: number } | null>(null);
   
   // Selection state for deleting markups
   const [selectedMarkupId, setSelectedMarkupId] = useState<string | null>(null);
@@ -136,6 +171,34 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   
   // Ortho snapping state
   const [isOrthoSnapping, setIsOrthoSnapping] = useState(false);
+  
+  // Track last fully rendered PDF scale to support interactive CSS zoom while blocking renders
+  const lastRenderedScaleRef = useRef(1.0);
+  
+  // Helper to apply/remove interactive CSS zoom transforms when renders are blocked
+  const applyInteractiveZoomTransforms = useCallback(() => {
+    const canvas = pdfCanvasRef.current as HTMLCanvasElement | null;
+    const svg = svgOverlayRef.current as SVGSVGElement | null;
+    if (!canvas || !svg || !pdfPageRef.current) return;
+    
+    const renderedScale = lastRenderedScaleRef.current || 1.0;
+    const targetScale = (viewState.scale || 1.0) / renderedScale;
+    
+    // If targetScale is ~1, clear transforms
+    if (Math.abs(targetScale - 1) < 0.0001) {
+      canvas.style.transform = '';
+      svg.style.transform = '';
+      canvas.style.transformOrigin = '';
+      svg.style.transformOrigin = '';
+      return;
+    }
+    
+    // Apply transform to both canvas and overlay to keep them in sync visually
+    canvas.style.transformOrigin = '0 0';
+    svg.style.transformOrigin = '0 0';
+    canvas.style.transform = `scale(${targetScale})`;
+    svg.style.transform = `scale(${targetScale})`;
+  }, [viewState.scale]);
   
   // Page-scoped refs to prevent cross-page DOM issues
   const pageRubberBandRefs = useRef<Record<number, SVGLineElement | null>>({});
@@ -157,12 +220,38 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const [showScaleApplicationDialog, setShowScaleApplicationDialog] = useState(false);
   const [pendingScaleData, setPendingScaleData] = useState<{scaleFactor: number, unit: string} | null>(null);
   const [calibrationData, setCalibrationData] = useState<{knownDistance: number, unit: string} | null>(null);
+  // Temporary calibration validation overlay state
+  const [calibrationValidation, setCalibrationValidation] = useState<{
+    points: { x: number; y: number }[];
+    display: string;
+    page: number;
+  } | null>(null);
+  // Temporary measurement debug overlay (compare calc paths)
+  const [measurementDebug, setMeasurementDebug] = useState<{
+    page: number;
+    mid: { x: number; y: number };
+    dxNorm: number; dyNorm: number;
+    baseW: number; baseH: number;
+    pixelDistanceValidator: number;
+    pixelDistanceMeasure: number;
+    scaleFactorUsed: number;
+    distanceValidatorFt: number;
+    distanceMeasureFt: number;
+  } | null>(null);
   
   // Refs - Single Canvas + SVG Overlay System
   const containerRef = useRef<HTMLDivElement>(null);
   const pdfCanvasRef = useRef<HTMLCanvasElement>(null);
   const svgOverlayRef = useRef<SVGSVGElement>(null);
   const pdfPageRef = useRef<any>(null);
+  const calibrationViewportRef = useRef<{
+    scaleFactor: number;
+    unit: string;
+    viewportWidth: number;
+    viewportHeight: number;
+    scale: number;
+    rotation: number;
+  } | null>(null);
   const renderTaskRef = useRef<any>(null);
   const isRenderingRef = useRef<boolean>(false);
   const [isComponentMounted, setIsComponentMounted] = useState(false);
@@ -205,10 +294,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       totalDistance += Math.sqrt(dx * dx + dy * dy);
     }
     
-    // Apply zoom-independent scale factor: scale factor is calibrated for base scale (1.0)
-    // Current viewport is scaled by viewState.scale, so we need to adjust accordingly
-    return totalDistance / (scaleFactor * viewState.scale);
-  }, [currentViewport, scaleFactor, viewState.scale]);
+    // Convert pixels to real-world units. Scale factor is units per pixel.
+    return totalDistance * scaleFactor;
+  }, [currentViewport, scaleFactor]);
 
   // Ortho snapping function - snaps to horizontal or vertical lines
   const applyOrthoSnapping = useCallback((currentPos: { x: number; y: number }, referencePoints: { x: number; y: number }[]) => {
@@ -240,13 +328,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     currentProjectId, 
     selectedConditionId,
     getSelectedCondition,
-    takeoffMeasurements,
     annotations: storeAnnotations,
     addAnnotation,
     getPageAnnotations
   } = useTakeoffStore();
   
-  // Load existing takeoff measurements for the current sheet
+  // Get takeoff measurements with a specific selector to ensure proper subscription
+  const takeoffMeasurements = useTakeoffStore(state => state.takeoffMeasurements);
+  
+  // Load existing takeoff measurements for the current sheet - reactive to store changes
   const [localTakeoffMeasurements, setLocalTakeoffMeasurements] = useState<any[]>([]);
   
   // Load annotations for the entire sheet - reactive to store changes
@@ -262,11 +352,110 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
   }, [currentProjectId, file?.id, storeAnnotations]);
 
+  // Load measurements for current page using direct filtering (like annotations)
+  useEffect(() => {
+    if (!currentProjectId || !file?.id || !currentPage) {
+      setLocalTakeoffMeasurements([]);
+      return;
+    }
+    
+    // Filter measurements directly like annotations do - bypass the complex key system
+    const pageMeasurements = takeoffMeasurements.filter(measurement => 
+      measurement.projectId === currentProjectId && 
+      measurement.sheetId === file.id && 
+      measurement.pdfPage === currentPage
+    );
+    
+    // Debug logging to help troubleshoot
+    if (takeoffMeasurements.length > 0) {
+      console.log('🔍 PDFViewer: Measurement filtering debug', {
+        totalMeasurements: takeoffMeasurements.length,
+        currentProjectId,
+        fileId: file.id,
+        currentPage,
+        pageMeasurementsCount: pageMeasurements.length,
+        sampleMeasurement: takeoffMeasurements[0] ? {
+          projectId: takeoffMeasurements[0].projectId,
+          sheetId: takeoffMeasurements[0].sheetId,
+          pdfPage: takeoffMeasurements[0].pdfPage
+        } : null,
+        allMeasurements: takeoffMeasurements.map(m => ({
+          id: m.id,
+          projectId: m.projectId,
+          sheetId: m.sheetId,
+          pdfPage: m.pdfPage,
+          type: m.type
+        }))
+      });
+    }
+    
+    // Convert API measurements to display format
+    const displayMeasurements = pageMeasurements.map(apiMeasurement => {
+      try {
+        return {
+          id: apiMeasurement.id,
+          type: apiMeasurement.type,
+          points: apiMeasurement.points,
+          calculatedValue: apiMeasurement.calculatedValue,
+          unit: apiMeasurement.unit,
+          conditionId: apiMeasurement.conditionId,
+          conditionName: apiMeasurement.conditionName,
+          color: apiMeasurement.conditionColor,
+          timestamp: new Date(apiMeasurement.timestamp).getTime(),
+          pdfPage: apiMeasurement.pdfPage,
+          pdfCoordinates: apiMeasurement.pdfCoordinates,
+          perimeterValue: apiMeasurement.perimeterValue || null,
+          cutouts: apiMeasurement.cutouts || null,
+          netCalculatedValue: apiMeasurement.netCalculatedValue || null
+        };
+      } catch (error) {
+        console.error('Error processing measurement:', error, apiMeasurement);
+        return null;
+      }
+    }).filter(Boolean);
+    
+    setLocalTakeoffMeasurements(displayMeasurements);
+    
+    // If we have measurements and a viewport is available, trigger a re-render
+    if (displayMeasurements.length > 0 && currentViewport) {
+      // Use setTimeout to ensure state is updated before re-rendering
+      setTimeout(() => {
+        renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+      }, 0);
+    }
+  }, [currentProjectId, file?.id, currentPage, takeoffMeasurements, currentViewport]);
+
   // Ensure component is mounted before rendering
   useEffect(() => {
     setIsComponentMounted(true);
     return () => setIsComponentMounted(false);
   }, []);
+
+  // Additional effect to ensure measurements are rendered when added
+  useEffect(() => {
+    if (localTakeoffMeasurements.length > 0 && pdfDocument && currentViewport && !isRenderingRef.current) {
+      console.log('🔄 PDFViewer: Additional effect - rendering measurements', {
+        localTakeoffMeasurementsCount: localTakeoffMeasurements.length,
+        currentPage,
+        hasPdfDocument: !!pdfDocument,
+        hasCurrentViewport: !!currentViewport
+      });
+      // Note: renderTakeoffAnnotations will be called by the existing useEffect that watches localTakeoffMeasurements
+    }
+  }, [localTakeoffMeasurements, currentPage, pdfDocument, currentViewport]);
+
+  // Handle visual search mode
+  useEffect(() => {
+    if (visualSearchMode) {
+      setIsSelectingSymbol(true);
+      setSelectionBox(null);
+      setSelectionStart(null);
+    } else {
+      setIsSelectingSymbol(false);
+      setSelectionBox(null);
+      setSelectionStart(null);
+    }
+  }, [visualSearchMode]);
 
   // Load PDF document
   useEffect(() => {
@@ -327,56 +516,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     loadPDF();
   }, [file]);
 
-  // Load measurements for current page using new page-based system
-  useEffect(() => {
-    
-    if (!currentProjectId || !file?.id || !currentPage) {
-      setLocalTakeoffMeasurements([]);
-      return;
-    }
-    
-    const { getPageMarkups, updateMarkupsByPage } = useTakeoffStore.getState();
-    
-    // Ensure markupsByPage is up to date
-    updateMarkupsByPage();
-    
-    // Use the new page-based markup system
-    const pageMarkups = getPageMarkups(currentProjectId, file.id, currentPage);
-    
-    const displayMeasurements = pageMarkups.map(apiMeasurement => {
-      try {
-        return {
-          id: apiMeasurement.id,
-          type: apiMeasurement.type,
-          points: apiMeasurement.points || [],
-          calculatedValue: apiMeasurement.calculatedValue || 0,
-          unit: apiMeasurement.unit || 'SF',
-          conditionId: apiMeasurement.conditionId,
-          conditionName: apiMeasurement.conditionName || 'Unknown',
-          color: apiMeasurement.conditionColor || '#000000',
-          timestamp: new Date(apiMeasurement.timestamp).getTime(),
-          pdfPage: apiMeasurement.pdfPage || 1,
-          pdfCoordinates: apiMeasurement.pdfCoordinates || [],
-          perimeterValue: apiMeasurement.perimeterValue || null,
-          cutouts: apiMeasurement.cutouts || null,
-          netCalculatedValue: apiMeasurement.netCalculatedValue || null
-        };
-      } catch (error) {
-        console.error('Error processing measurement:', error, apiMeasurement);
-        return null;
-      }
-    }).filter(Boolean);
-    
-    setLocalTakeoffMeasurements(displayMeasurements);
-    
-    // If we have measurements and a viewport is available, trigger a re-render
-    if (displayMeasurements.length > 0 && currentViewport) {
-      // Use setTimeout to ensure state is updated before re-rendering
-      setTimeout(() => {
-        renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
-      }, 0);
-    }
-  }, [currentProjectId, file?.id, currentPage, takeoffMeasurements, currentViewport]);
 
   // Sync external cut-out state with internal state
   useEffect(() => {
@@ -460,18 +599,114 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     const svgOverlay = svgOverlayRef.current;
     
+    // Ensure SVG overlay coordinate system matches the provided viewport
+    // This prevents drift when re-rendering overlay without a full PDF re-render
+    if (
+      svgOverlay.getAttribute('width') !== String(viewport.width) ||
+      svgOverlay.getAttribute('height') !== String(viewport.height)
+    ) {
+      svgOverlay.setAttribute('width', viewport.width.toString());
+      svgOverlay.setAttribute('height', viewport.height.toString());
+      svgOverlay.setAttribute('viewBox', `0 0 ${viewport.width} ${viewport.height}`);
+    }
+    
+    console.log('🎨 PDFViewer: renderTakeoffAnnotations called', {
+      pageNum,
+      localTakeoffMeasurementsCount: localTakeoffMeasurements.length,
+      localTakeoffMeasurements: localTakeoffMeasurements
+    });
+    
     // Clear existing annotations completely - this ensures no cross-page contamination
     svgOverlay.innerHTML = '';
     
     // Only render measurements for the specific page being rendered
-    
     localTakeoffMeasurements.forEach((measurement) => {
       // Double-check that this measurement belongs to the page being rendered
       if (measurement.pdfPage === pageNum) {
+        console.log('🎨 PDFViewer: Rendering measurement for page', {
+          measurementId: measurement.id,
+          measurementType: measurement.type,
+          measurementPage: measurement.pdfPage,
+          currentPage: pageNum
+        });
         renderSVGMeasurement(svgOverlay, measurement, viewport, page);
-      } else {
       }
     });
+
+    // Draw calibration validator overlay if present for this page
+    if (calibrationValidation && calibrationValidation.page === pageNum && calibrationValidation.points.length === 2) {
+      const p1 = calibrationValidation.points[0];
+      const p2 = calibrationValidation.points[1];
+      const x1 = p1.x * viewport.width;
+      const y1 = p1.y * viewport.height;
+      const x2 = p2.x * viewport.width;
+      const y2 = p2.y * viewport.height;
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', x1.toString());
+      line.setAttribute('y1', y1.toString());
+      line.setAttribute('x2', x2.toString());
+      line.setAttribute('y2', y2.toString());
+      line.setAttribute('stroke', '#22c55e');
+      line.setAttribute('stroke-width', '2');
+      line.setAttribute('stroke-dasharray', '6,4');
+      line.setAttribute('vector-effect', 'non-scaling-stroke');
+      svgOverlay.appendChild(line);
+
+      const midX = (x1 + x2) / 2;
+      const midY = (y1 + y2) / 2;
+      const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      text.setAttribute('x', midX.toString());
+      text.setAttribute('y', (midY - 8).toString());
+      text.setAttribute('fill', '#16a34a');
+      text.setAttribute('font-size', '12');
+      text.setAttribute('font-family', 'Arial');
+      text.setAttribute('text-anchor', 'middle');
+      text.setAttribute('vector-effect', 'non-scaling-stroke');
+      text.textContent = calibrationValidation.display;
+      svgOverlay.appendChild(text);
+    }
+
+    // Draw measurement debug overlay if present
+    if (measurementDebug && measurementDebug.page === pageNum) {
+      const { mid, dxNorm, dyNorm, baseW, baseH, pixelDistanceValidator, pixelDistanceMeasure, scaleFactorUsed, distanceValidatorFt, distanceMeasureFt } = measurementDebug;
+      const midX = mid.x * viewport.width;
+      const midY = mid.y * viewport.height;
+      const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      bg.setAttribute('x', (midX - 140).toString());
+      bg.setAttribute('y', (midY - 60).toString());
+      bg.setAttribute('width', '280');
+      bg.setAttribute('height', '54');
+      bg.setAttribute('fill', 'rgba(0,0,0,0.65)');
+      bg.setAttribute('rx', '6');
+      svgOverlay.appendChild(bg);
+      const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      t.setAttribute('x', midX.toString());
+      t.setAttribute('y', (midY - 42).toString());
+      t.setAttribute('fill', '#fff');
+      t.setAttribute('font-size', '12');
+      t.setAttribute('font-family', 'Arial');
+      t.setAttribute('text-anchor', 'middle');
+      t.textContent = `dx=${dxNorm.toFixed(4)} dy=${dyNorm.toFixed(4)} base=(${baseW.toFixed(1)},${baseH.toFixed(1)})`;
+      svgOverlay.appendChild(t);
+      const t2 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      t2.setAttribute('x', midX.toString());
+      t2.setAttribute('y', (midY - 26).toString());
+      t2.setAttribute('fill', '#fff');
+      t2.setAttribute('font-size', '12');
+      t2.setAttribute('font-family', 'Arial');
+      t2.setAttribute('text-anchor', 'middle');
+      t2.textContent = `px(valid)=${pixelDistanceValidator.toFixed(2)} px(meas)=${pixelDistanceMeasure.toFixed(2)} sf=${scaleFactorUsed.toExponential(6)}`;
+      svgOverlay.appendChild(t2);
+      const t3 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      t3.setAttribute('x', midX.toString());
+      t3.setAttribute('y', (midY - 10).toString());
+      t3.setAttribute('fill', '#fff');
+      t3.setAttribute('font-size', '12');
+      t3.setAttribute('font-family', 'Arial');
+      t3.setAttribute('text-anchor', 'middle');
+      t3.textContent = `${formatFeetAndInches(distanceValidatorFt)} vs ${formatFeetAndInches(distanceMeasureFt)}`;
+      svgOverlay.appendChild(t3);
+    }
     
     // Draw current measurement being created (only if on the page being rendered)
     if (isMeasuring && pageNum === currentPage) {
@@ -493,6 +728,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Draw current cut-out being created (only if on the page being rendered)
     if (cutoutMode && currentCutout.length > 0 && pageNum === currentPage) {
       renderSVGCurrentCutout(svgOverlay, viewport);
+    }
+    
+    // Draw visual search selection box (only if on the page being rendered)
+    if (visualSearchMode && isSelectingSymbol && selectionBox && pageNum === currentPage) {
+      renderSVGSelectionBox(svgOverlay, selectionBox, viewport);
     }
     
     // Render completed annotations for this page
@@ -524,17 +764,72 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       renderRunningLengthDisplay(svgOverlay, viewport);
     }
     
-  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, selectedMarkupId, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation]);
+  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, selectedMarkupId, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, cutoutMode, currentCutout, visualSearchMode, isSelectingSymbol, selectionBox]);
 
   // Re-render annotations when measurements or interaction state changes
   useEffect(() => {
+    console.log('🔄 PDFViewer: Re-render useEffect triggered', {
+      pdfDocument: !!pdfDocument,
+      currentViewport: !!currentViewport,
+      isRendering: isRenderingRef.current,
+      localTakeoffMeasurementsCount: localTakeoffMeasurements.length,
+      isMeasuring,
+      isCalibrating,
+      currentMeasurementLength: currentMeasurement.length,
+      isAnnotating,
+      localAnnotationsLength: localAnnotations.length,
+      visualSearchMode,
+      isSelectingSymbol,
+      currentPage
+    });
+    
     if (pdfDocument && currentViewport && !isRenderingRef.current) {
-      // Only render if we have measurements, annotations, or if we're in measuring/annotation mode
-      if (localTakeoffMeasurements.length > 0 || isMeasuring || isCalibrating || currentMeasurement.length > 0 || annotationTool || localAnnotations.length > 0) {
+      // Only render if we have measurements, annotations, or if we're in measuring/annotation/visual search mode
+      if (localTakeoffMeasurements.length > 0 || isMeasuring || isCalibrating || currentMeasurement.length > 0 || isAnnotating || localAnnotations.length > 0 || (visualSearchMode && isSelectingSymbol)) {
+        console.log('🎨 PDFViewer: Triggering renderTakeoffAnnotations');
         renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+      } else {
+        console.log('🎨 PDFViewer: Skipping render - no measurements or active modes');
       }
     }
-  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, selectedMarkupId, isSelectionMode, renderTakeoffAnnotations, currentPage, currentViewport, annotationTool, localAnnotations]);
+  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, selectedMarkupId, isSelectionMode, renderTakeoffAnnotations, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, isSelectingSymbol, currentAnnotation]);
+
+  // Force immediate re-render of markups when viewport changes
+  const forceMarkupReRender = useCallback(() => {
+    if (pdfDocument && pdfPageRef.current && localTakeoffMeasurements.length > 0) {
+      // Create fresh viewport with current parameters
+      const freshViewport = pdfPageRef.current.getViewport({ 
+        scale: viewState.scale, 
+        rotation: viewState.rotation 
+      });
+      
+      // Update the page viewports to trigger re-render
+      setPageViewports(prev => ({
+        ...prev,
+        [currentPage]: freshViewport
+      }));
+      
+      // Immediately re-render all markups
+      requestAnimationFrame(() => {
+        renderTakeoffAnnotations(currentPage, freshViewport, pdfPageRef.current);
+      });
+    }
+  }, [pdfDocument, viewState.scale, viewState.rotation, localTakeoffMeasurements, currentPage, renderTakeoffAnnotations]);
+
+  // Force re-render measurements when viewport state changes (zoom, rotation)
+  useEffect(() => {
+    const rendersBlocked = (isMeasuring || isCalibrating || currentMeasurement.length > 0 || isDeselecting || (isAnnotating && !showTextInput));
+    if (rendersBlocked) {
+      // During interactive zoom/draw, rely solely on CSS transforms to keep overlay in sync
+      return;
+    }
+    if (pdfDocument && currentViewport && localTakeoffMeasurements.length > 0) {
+      // Use requestAnimationFrame to ensure the viewport state is fully updated
+      requestAnimationFrame(() => {
+        renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+      });
+    }
+  }, [viewState.scale, viewState.rotation, pdfDocument, currentViewport, localTakeoffMeasurements, currentPage, renderTakeoffAnnotations]);
 
   // Page visibility handler - ensures overlay is properly initialized when page becomes visible
   const onPageShown = useCallback((pageNum: number, viewport: any) => {
@@ -568,14 +863,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // PDF render function with page-specific viewport isolation
   const renderPDFPage = useCallback(async (pageNum: number) => {
     // ANTI-FLICKER: Block PDF renders during interactive operations or deselection cooldown
-    if (isMeasuring || isCalibrating || currentMeasurement.length > 0 || isDeselecting) {
-      console.log('🚫 PDF RENDER BLOCKED: Interactive/deselection mode detected in renderPDFPage');
+    // Allow PDF renders during text annotation input (showTextInput = true)
+    // Allow initial renders even if in deselection mode (for page loads)
+    // Block renders during interactive operations to prevent flicker
+    if (isMeasuring || isCalibrating || currentMeasurement.length > 0 || (isDeselecting && isInitialRenderComplete) || (isAnnotating && !showTextInput)) {
       return;
     }
     
-    // Reduced logging for better performance
-    if (process.env.NODE_ENV === 'development') {
-      console.log('🔄 PDF RENDER TRIGGERED:', { pageNum, timestamp: Date.now() });
+    // Show loading indicator for initial renders
+    if (!isInitialRenderComplete) {
+      setIsPDFLoading(true);
     }
     
     // Reduced delay for better performance
@@ -590,7 +887,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     if (isRenderingRef.current) {
       if (process.env.NODE_ENV === 'development') {
-        console.log('🚫 PDF RENDER BLOCKED: Already rendering');
+        // console.log('🚫 PDF RENDER BLOCKED: Already rendering');
       }
       return;
     }
@@ -655,6 +952,27 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // After PDF is rendered, ensure overlay is properly initialized and render takeoff annotations
       onPageShown(pageNum, viewport);
       
+      // Record the scale at which the PDF canvas was actually rendered
+      lastRenderedScaleRef.current = viewState.scale;
+      
+      // Clear any interactive CSS transforms (no longer needed after full render)
+      if (pdfCanvasRef.current) {
+        pdfCanvasRef.current.style.transform = '';
+        pdfCanvasRef.current.style.transformOrigin = '';
+      }
+      if (svgOverlayRef.current) {
+        svgOverlayRef.current.style.transform = '';
+        svgOverlayRef.current.style.transformOrigin = '';
+      }
+      // Post-zoom settle: ensure overlay is refreshed immediately after canvas render
+      try {
+        renderTakeoffAnnotations(pageNum, viewport, page);
+        // And one more pass on next frame to catch late layout
+        requestAnimationFrame(() => {
+          renderTakeoffAnnotations(pageNum, viewport, page);
+        });
+      } catch {}
+      
       // Reduced logging for better performance
       if (process.env.NODE_ENV === 'development') {
         console.log('✅ PDF RENDER COMPLETE:', { pageNum, timestamp: Date.now() });
@@ -663,6 +981,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Mark initial render as complete and notify parent
       if (pageNum === currentPage) {
         setIsInitialRenderComplete(true);
+        setIsPDFLoading(false); // Hide loading indicator
         if (onPDFRendered) {
           onPDFRendered();
         }
@@ -675,49 +994,117 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     } finally {
       isRenderingRef.current = false;
     }
-  }, [pdfDocument, viewState, updateCanvasDimensions, onPageShown, isComponentMounted, isMeasuring, isCalibrating, currentMeasurement, isDeselecting]);
+  }, [pdfDocument, viewState, updateCanvasDimensions, onPageShown, isComponentMounted, isMeasuring, isCalibrating, currentMeasurement, isDeselecting, isAnnotating]);
 
   // No coordinate conversions needed - SVG viewBox matches viewport exactly
   // CSS pixels = SVG pixels = viewport pixels (1:1 mapping)
 
   // Render individual measurement as SVG
   const renderSVGMeasurement = (svg: SVGSVGElement, measurement: Measurement, viewport: any, page?: any) => {
+    console.log('🎨 renderSVGMeasurement called', {
+      measurementId: measurement.id,
+      measurementType: measurement.type,
+      pointsCount: measurement.points?.length,
+      points: measurement.points,
+      viewport: viewport,
+      svgElement: svg
+    });
+    
     if (!measurement || !measurement.points || !viewport) {
+      console.log('❌ renderSVGMeasurement: Missing required data', {
+        hasMeasurement: !!measurement,
+        hasPoints: !!measurement?.points,
+        hasViewport: !!viewport
+      });
       return;
     }
     
     const points = measurement.points;
-    if (points.length < 1) return;
+    if (points.length < 1) {
+      console.log('❌ renderSVGMeasurement: Not enough points', { pointsLength: points.length });
+      return;
+    }
     
     // For count measurements, we only need 1 point
     if (measurement.type === 'count' && points.length < 1) return;
     // For other measurements, we need at least 2 points
-    if (measurement.type !== 'count' && points.length < 2) return;
+    if (measurement.type !== 'count' && points.length < 2) {
+      console.log('❌ renderSVGMeasurement: Not enough points for non-count measurement', { 
+        type: measurement.type, 
+        pointsLength: points.length 
+      });
+      return;
+    }
     
-    // Transform points to match current viewport if needed
-    // Points are stored in normalized coordinates (0-1) relative to the viewport they were created in
-    // We need to map them to the current viewport
-    const transformedPoints = points.map(point => {
-      // For now, use points as-is since we're storing them in the current viewport coordinate system
-      // This ensures that when the page is rotated, the markups stay in the same relative position
+    // Transform points to match current viewport
+    // Points are stored in PDF coordinates - convert to viewport coordinates for rendering
+    const pdfPage = pdfPageRef.current;
+    if (!pdfPage) return;
+    
+    // Use baseline scale during interactive zoom to avoid double scaling
+    const interactiveBlocked = (isMeasuring || isCalibrating || currentMeasurement.length > 0 || isDeselecting || (isAnnotating && !showTextInput));
+    const baselineScale = interactiveBlocked ? (lastRenderedScaleRef.current || viewState.scale) : viewState.scale;
+    const currentViewport = pdfPage.getViewport({ scale: baselineScale, rotation: viewState.rotation });
+    
+    // Debug logging for rendering
+    console.log('🎨 RENDERING:', {
+      measurementId: measurement.id,
+      currentScale: viewState.scale,
+      currentRotation: viewState.rotation,
+      viewport: { width: currentViewport.width, height: currentViewport.height, scale: currentViewport.scale, rotation: currentViewport.rotation },
+      originalPoints: points.slice(0, 2) // First 2 points for debugging
+    });
+    
+    // Convert normalized coordinates to current viewport coordinates for rendering
+    // Simple and reliable approach
+    const transformedPoints = points.map((point, index) => {
+      // Convert normalized coordinates to current viewport coordinates
+      const canvasX = point.x * currentViewport.width;
+      const canvasY = point.y * currentViewport.height;
+      
+      // Debug logging for first 2 points
+      if (index < 2) {
+        console.log(`🎨 POINT ${index}:`, {
+          normalizedPoint: { x: point.x, y: point.y },
+          canvasPoint: { x: canvasX, y: canvasY },
+          currentViewport: { width: currentViewport.width, height: currentViewport.height, scale: currentViewport.scale }
+        });
+      }
+      
       return {
-        x: point.x,
-        y: point.y
+        x: canvasX,
+        y: canvasY
       };
     });
     
     const isSelected = selectedMarkupId === measurement.id;
-    const strokeColor = isSelected ? '#ff0000' : measurement.color;
+    const strokeColor = isSelected ? '#ff0000' : (measurement.color || measurement.conditionColor || '#000000');
     const strokeWidth = isSelected ? '4' : '2';
     
     switch (measurement.type) {
       case 'linear':
+        console.log('🎨 Rendering linear measurement', {
+          measurementId: measurement.id,
+          transformedPoints: transformedPoints,
+          viewport: { width: viewport.width, height: viewport.height },
+          strokeColor,
+          strokeWidth
+        });
+        
         // Create polyline for linear measurement
         const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
         const pointString = transformedPoints.map(p => {
-          // Points are stored in PDF coordinates (0-1), convert to viewport pixels
-          return `${p.x * viewport.width},${p.y * viewport.height}`;
+          // Points are already in viewport pixels after scaling
+          return `${p.x},${p.y}`;
         }).join(' ');
+        
+        console.log('🎨 Linear measurement pointString', { 
+          pointString,
+          originalPoints: points,
+          transformedPoints: transformedPoints,
+          viewportDimensions: { width: viewport.width, height: viewport.height }
+        });
+        
         polyline.setAttribute('points', pointString);
         polyline.setAttribute('stroke', strokeColor);
         polyline.setAttribute('stroke-width', strokeWidth);
@@ -747,10 +1134,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
         
         svg.appendChild(polyline);
+        console.log('🎨 Linear measurement polyline appended to SVG', {
+          svgChildrenCount: svg.children.length,
+          polylineElement: polyline
+        });
         
         // Add measurement text
-        const startPoint = { x: transformedPoints[0].x * viewport.width, y: transformedPoints[0].y * viewport.height };
-        const endPoint = { x: transformedPoints[transformedPoints.length - 1].x * viewport.width, y: transformedPoints[transformedPoints.length - 1].y * viewport.height };
+        const startPoint = { x: transformedPoints[0].x, y: transformedPoints[0].y };
+        const endPoint = { x: transformedPoints[transformedPoints.length - 1].x, y: transformedPoints[transformedPoints.length - 1].y };
         const midPoint = {
           x: (startPoint.x + endPoint.x) / 2,
           y: (startPoint.y + endPoint.y) / 2
@@ -764,7 +1155,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         text.setAttribute('font-family', 'Arial');
         text.setAttribute('text-anchor', 'middle');
         
-        const displayValue = measurement.unit === 'ft' || measurement.unit === 'feet' 
+        const displayValue = (measurement.unit === 'ft' || measurement.unit === 'feet' || measurement.unit === 'LF' || measurement.unit === 'lf') 
           ? formatFeetAndInches(measurement.calculatedValue)
           : `${measurement.calculatedValue.toFixed(2)} ${measurement.unit}`;
         text.textContent = displayValue;
@@ -774,8 +1165,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       case 'area':
         if (transformedPoints.length >= 3) {
           const pointString = transformedPoints.map(p => {
-            // Points are stored in PDF coordinates (0-1), convert to viewport pixels
-            return `${p.x * viewport.width},${p.y * viewport.height}`;
+            // Points are already in viewport pixels after scaling
+            return `${p.x},${p.y}`;
           }).join(' ');
           
           // If there are cutouts, create a compound path to show holes
@@ -790,7 +1181,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             measurement.cutouts.forEach((cutout) => {
               if (cutout && cutout.points && Array.isArray(cutout.points) && cutout.points.length >= 3) {
                 const cutoutPointString = cutout.points.map(p => {
-                  return `${p.x * viewport.width},${p.y * viewport.height}`;
+                  const canvasX = p.x * currentViewport.width;
+                  const canvasY = p.y * currentViewport.height;
+                  return `${canvasX},${canvasY}`;
                 }).join(' ');
                 pathData += ` M ${cutoutPointString.split(' ')[0]} L ${cutoutPointString.split(' ').slice(1).join(' L ')} Z`;
               }
@@ -798,7 +1191,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             
             compoundPath.setAttribute('d', pathData);
             compoundPath.setAttribute('fill-rule', 'evenodd');
-            compoundPath.setAttribute('fill', measurement.color + '40');
+            compoundPath.setAttribute('fill', (measurement.color || measurement.conditionColor || '#000000') + '40');
             compoundPath.setAttribute('stroke', strokeColor);
             compoundPath.setAttribute('stroke-width', strokeWidth);
             
@@ -816,7 +1209,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             // Create polygon for area measurement without cutouts
             const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
             polygon.setAttribute('points', pointString);
-            polygon.setAttribute('fill', measurement.color + '40');
+            polygon.setAttribute('fill', (measurement.color || measurement.conditionColor || '#000000') + '40');
             polygon.setAttribute('stroke', strokeColor);
             polygon.setAttribute('stroke-width', strokeWidth);
             
@@ -846,8 +1239,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           }
           
           // Add area text
-          const centerX = transformedPoints.reduce((sum, p) => sum + p.x * viewport.width, 0) / transformedPoints.length;
-          const centerY = transformedPoints.reduce((sum, p) => sum + p.y * viewport.height, 0) / transformedPoints.length;
+          const centerX = transformedPoints.reduce((sum, p) => sum + p.x, 0) / transformedPoints.length;
+          const centerY = transformedPoints.reduce((sum, p) => sum + p.y, 0) / transformedPoints.length;
           
           const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
           text.setAttribute('x', centerX.toString());
@@ -865,7 +1258,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             : measurement.calculatedValue;
           const areaValue = `${displayValue.toFixed(0)} SF`;
           const finalDisplayValue = measurement.perimeterValue 
-            ? `${areaValue} / ${formatFeetAndInches(measurement.perimeterValue)}`
+            ? `${areaValue} / ${formatFeetAndInches(measurement.perimeterValue)} LF`
             : areaValue;
           text.textContent = finalDisplayValue;
           svg.appendChild(text);
@@ -877,8 +1270,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       case 'volume':
         if (transformedPoints.length >= 3) {
           const pointString = transformedPoints.map(p => {
-            // Points are stored in PDF coordinates (0-1), convert to viewport pixels
-            return `${p.x * viewport.width},${p.y * viewport.height}`;
+            // Points are already in viewport pixels after scaling
+            return `${p.x},${p.y}`;
           }).join(' ');
           
           // If there are cutouts, create a compound path to show holes
@@ -893,7 +1286,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             measurement.cutouts.forEach((cutout) => {
               if (cutout && cutout.points && Array.isArray(cutout.points) && cutout.points.length >= 3) {
                 const cutoutPointString = cutout.points.map(p => {
-                  return `${p.x * viewport.width},${p.y * viewport.height}`;
+                  // Convert normalized coordinates to current viewport coordinates
+                  const canvasX = p.x * currentViewport.width;
+                  const canvasY = p.y * currentViewport.height;
+                  return `${canvasX},${canvasY}`;
                 }).join(' ');
                 pathData += ` M ${cutoutPointString.split(' ')[0]} L ${cutoutPointString.split(' ').slice(1).join(' L ')} Z`;
               }
@@ -901,7 +1297,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             
             compoundPath.setAttribute('d', pathData);
             compoundPath.setAttribute('fill-rule', 'evenodd');
-            compoundPath.setAttribute('fill', measurement.color + '40');
+            compoundPath.setAttribute('fill', (measurement.color || measurement.conditionColor || '#000000') + '40');
             compoundPath.setAttribute('stroke', strokeColor);
             compoundPath.setAttribute('stroke-width', strokeWidth);
             
@@ -919,7 +1315,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             // Create polygon for volume measurement without cutouts
             const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
             polygon.setAttribute('points', pointString);
-            polygon.setAttribute('fill', measurement.color + '40');
+            polygon.setAttribute('fill', (measurement.color || measurement.conditionColor || '#000000') + '40');
             polygon.setAttribute('stroke', strokeColor);
             polygon.setAttribute('stroke-width', strokeWidth);
             
@@ -949,8 +1345,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           }
           
           // Add volume text
-          const centerX = transformedPoints.reduce((sum, p) => sum + p.x * viewport.width, 0) / transformedPoints.length;
-          const centerY = transformedPoints.reduce((sum, p) => sum + p.y * viewport.height, 0) / transformedPoints.length;
+          const centerX = transformedPoints.reduce((sum, p) => sum + p.x, 0) / transformedPoints.length;
+          const centerY = transformedPoints.reduce((sum, p) => sum + p.y, 0) / transformedPoints.length;
           
           const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
           text.setAttribute('x', centerX.toString());
@@ -968,7 +1364,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             : measurement.calculatedValue;
           const volumeValue = `${displayValue.toFixed(0)} CY`;
           const finalDisplayValue = measurement.perimeterValue 
-            ? `${volumeValue} / ${formatFeetAndInches(measurement.perimeterValue)}`
+            ? `${volumeValue} / ${formatFeetAndInches(measurement.perimeterValue)} LF`
             : volumeValue;
           text.textContent = finalDisplayValue;
           svg.appendChild(text);
@@ -978,14 +1374,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         break;
         
       case 'count':
-        const point = { x: transformedPoints[0].x * viewport.width, y: transformedPoints[0].y * viewport.height };
+        const point = { x: transformedPoints[0].x, y: transformedPoints[0].y };
         
         // Create circle for count measurement
         const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
         circle.setAttribute('cx', point.x.toString());
         circle.setAttribute('cy', point.y.toString());
         circle.setAttribute('r', '8');
-        circle.setAttribute('fill', measurement.color || '#74b9ff');
+        circle.setAttribute('fill', measurement.color || measurement.conditionColor || '#74b9ff');
         circle.setAttribute('stroke', isSelected ? '#ff0000' : '#ffffff');
         circle.setAttribute('stroke-width', isSelected ? '3' : '2');
         
@@ -1271,13 +1667,37 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
   };
 
+  // Render visual search selection box
+  const renderSVGSelectionBox = (svg: SVGSVGElement, selectionBox: {x: number, y: number, width: number, height: number}, viewport: any) => {
+    if (!viewport || !selectionBox) return;
+
+    // Create rectangle for the selection box
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', selectionBox.x.toString());
+    rect.setAttribute('y', selectionBox.y.toString());
+    rect.setAttribute('width', selectionBox.width.toString());
+    rect.setAttribute('height', selectionBox.height.toString());
+    rect.setAttribute('fill', 'rgba(59, 130, 246, 0.1)'); // Light blue fill
+    rect.setAttribute('stroke', '#3B82F6'); // Blue border
+    rect.setAttribute('stroke-width', '2');
+    rect.setAttribute('stroke-dasharray', '5,5'); // Dashed border
+    rect.setAttribute('vector-effect', 'non-scaling-stroke');
+    svg.appendChild(rect);
+  };
+
   // Render completed annotation
   const renderSVGAnnotation = (svg: SVGSVGElement, annotation: Annotation, viewport: any) => {
     if (!viewport || annotation.points.length === 0) return;
     
+    // Use baseline scale during interactive zoom to avoid double scaling
+    const interactiveBlocked = (isMeasuring || isCalibrating || currentMeasurement.length > 0 || isDeselecting || (isAnnotating && !showTextInput));
+    const baselineScale = interactiveBlocked ? (lastRenderedScaleRef.current || viewState.scale) : viewState.scale;
+    const page = pdfPageRef.current;
+    const vp = page ? page.getViewport({ scale: baselineScale, rotation: viewState.rotation }) : viewport;
+    
     const points = annotation.points.map(p => ({
-      x: p.x * viewport.width,
-      y: p.y * viewport.height
+      x: p.x * vp.width,
+      y: p.y * vp.height
     }));
     
     const isSelected = selectedMarkupId === annotation.id;
@@ -1497,7 +1917,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         rubberBand.setAttribute('opacity', '0.7');
         svg.appendChild(rubberBand);
       }
-    } else if (['arrow', 'rectangle', 'circle', 'highlight'].includes(annotationTool)) {
+    } else if (['arrow', 'rectangle', 'circle'].includes(annotationTool)) {
       if (points.length === 0 && mousePosition) {
         // Show a small dot at mouse position to indicate where first point will be
         const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
@@ -1564,23 +1984,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           ellipse.setAttribute('stroke-dasharray', '5,5');
           ellipse.setAttribute('opacity', '0.7');
           svg.appendChild(ellipse);
-        } else if (annotationTool === 'highlight') {
-          const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-          const x = Math.min(points[0].x, endPoint.x);
-          const y = Math.min(points[0].y, endPoint.y);
-          const width = Math.abs(endPoint.x - points[0].x);
-          const height = Math.abs(endPoint.y - points[0].y);
-          rect.setAttribute('x', x.toString());
-          rect.setAttribute('y', y.toString());
-          rect.setAttribute('width', width.toString());
-          rect.setAttribute('height', height.toString());
-          rect.setAttribute('fill', annotationColor);
-          rect.setAttribute('fill-opacity', '0.3');
-          rect.setAttribute('stroke', annotationColor);
-          rect.setAttribute('stroke-width', '1');
-          rect.setAttribute('stroke-dasharray', '5,5');
-          rect.setAttribute('opacity', '0.7');
-          svg.appendChild(rect);
         }
       }
     }
@@ -1798,7 +2201,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     text.setAttribute('font-family', 'Arial');
     text.setAttribute('font-weight', 'bold');
     
-    const displayValue = unit === 'ft' || unit === 'feet' 
+    const displayValue = (unit === 'ft' || unit === 'feet' || unit === 'LF' || unit === 'lf') 
       ? formatFeetAndInches(runningLength)
       : `${runningLength.toFixed(2)} ${unit}`;
     text.textContent = `Length: ${displayValue}`;
@@ -1813,6 +2216,29 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       setIsDeselecting(false);
     }
     
+    // Handle visual search selection box drawing
+    if (visualSearchMode && isSelectingSymbol && selectionStart) {
+      if (!pdfCanvasRef.current || !currentViewport) return;
+      
+      const rect = pdfCanvasRef.current.getBoundingClientRect();
+      let cssX = event.clientX - rect.left;
+      let cssY = event.clientY - rect.top;
+      // If interactive CSS zoom is active, adjust pointer coords back to rendered scale space
+      const interactiveScale = (viewState.scale || 1) / (lastRenderedScaleRef.current || 1);
+      if (Math.abs(interactiveScale - 1) > 0.0001) {
+        cssX = cssX / interactiveScale;
+        cssY = cssY / interactiveScale;
+      }
+      
+      const width = Math.abs(cssX - selectionStart.x);
+      const height = Math.abs(cssY - selectionStart.y);
+      const x = Math.min(cssX, selectionStart.x);
+      const y = Math.min(cssY, selectionStart.y);
+      
+      setSelectionBox({ x, y, width, height });
+      return;
+    }
+    
     // Handle mouse move for calibration mode
     if (isCalibrating) {
       if (!pdfCanvasRef.current || !currentViewport) {
@@ -1821,8 +2247,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       
       // Get CSS pixel coordinates relative to the canvas/SVG
       const rect = pdfCanvasRef.current.getBoundingClientRect();
-      const cssX = event.clientX - rect.left;
-      const cssY = event.clientY - rect.top;
+      let cssX = event.clientX - rect.left;
+      let cssY = event.clientY - rect.top;
+      const interactiveScale = (viewState.scale || 1) / (lastRenderedScaleRef.current || 1);
+      if (Math.abs(interactiveScale - 1) > 0.0001) {
+        cssX = cssX / interactiveScale;
+        cssY = cssY / interactiveScale;
+      }
       
       // Convert CSS coordinates to PDF coordinates (0-1)
       let pdfCoords = {
@@ -1877,8 +2308,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Get CSS pixel coordinates relative to the canvas/SVG
     const rect = pdfCanvasRef.current.getBoundingClientRect();
-    const cssX = event.clientX - rect.left;
-    const cssY = event.clientY - rect.top;
+    let cssX = event.clientX - rect.left;
+    let cssY = event.clientY - rect.top;
+    const interactiveScale = (viewState.scale || 1) / (lastRenderedScaleRef.current || 1);
+    if (Math.abs(interactiveScale - 1) > 0.0001) {
+      cssX = cssX / interactiveScale;
+      cssY = cssY / interactiveScale;
+    }
     
     // Convert CSS coordinates to PDF coordinates (0-1) for storage using current page viewport
     let pdfCoords = {
@@ -1899,27 +2335,29 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Hover detection removed - using manual cut-out toggle instead
     
     // Update rubber band preview for continuous linear drawing
-    if (isContinuousDrawing && activePoints.length > 0 && svgOverlayRef.current) {
-      const currentRubberBand = pageRubberBandRefs.current[currentPage];
-      if (currentRubberBand && currentRubberBand.parentNode === svgOverlayRef.current) {
-        const lastPoint = activePoints[activePoints.length - 1];
-        const lastPointPixels = {
-          x: lastPoint.x * currentViewport.width,
-          y: lastPoint.y * currentViewport.height
-        };
-        const currentPointPixels = {
-          x: pdfCoords.x * currentViewport.width,
-          y: pdfCoords.y * currentViewport.height
-        };
-        
-        currentRubberBand.setAttribute('x1', lastPointPixels.x.toString());
-        currentRubberBand.setAttribute('y1', lastPointPixels.y.toString());
-        currentRubberBand.setAttribute('x2', currentPointPixels.x.toString());
-        currentRubberBand.setAttribute('y2', currentPointPixels.y.toString());
-        
-        // Update running length calculation
-        const newLength = calculateRunningLength(activePoints, pdfCoords);
-        setRunningLength(newLength);
+    if (isContinuousDrawing && activePoints.length > 0) {
+      // Always compute running length from active points to current cursor
+      const newLength = calculateRunningLength(activePoints, pdfCoords);
+      setRunningLength(newLength);
+      
+      // Update on-screen rubber band line when present
+      if (svgOverlayRef.current) {
+        const currentRubberBand = pageRubberBandRefs.current[currentPage];
+        if (currentRubberBand && currentRubberBand.parentNode === svgOverlayRef.current) {
+          const lastPoint = activePoints[activePoints.length - 1];
+          const lastPointPixels = {
+            x: lastPoint.x * currentViewport.width,
+            y: lastPoint.y * currentViewport.height
+          };
+          const currentPointPixels = {
+            x: pdfCoords.x * currentViewport.width,
+            y: pdfCoords.y * currentViewport.height
+          };
+          currentRubberBand.setAttribute('x1', lastPointPixels.x.toString());
+          currentRubberBand.setAttribute('y1', lastPointPixels.y.toString());
+          currentRubberBand.setAttribute('x2', currentPointPixels.x.toString());
+          currentRubberBand.setAttribute('y2', currentPointPixels.y.toString());
+        }
       }
     }
   }, [annotationTool, isCalibrating, calibrationPoints, isMeasuring, selectedConditionId, mousePosition, isContinuousDrawing, activePoints, rubberBandElement, currentViewport, calculateRunningLength, isDeselecting]);
@@ -1939,8 +2377,46 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Get CSS pixel coordinates relative to the canvas/SVG
     const rect = pdfCanvasRef.current.getBoundingClientRect();
-    const cssX = event.clientX - rect.left;
-    const cssY = event.clientY - rect.top;
+    let cssX = event.clientX - rect.left;
+    let cssY = event.clientY - rect.top;
+    const interactiveScale = (viewState.scale || 1) / (lastRenderedScaleRef.current || 1);
+    if (Math.abs(interactiveScale - 1) > 0.0001) {
+      cssX = cssX / interactiveScale;
+      cssY = cssY / interactiveScale;
+    }
+
+    // Handle visual search symbol selection
+    if (visualSearchMode && isSelectingSymbol) {
+      if (!selectionStart) {
+        // Start selection
+        setSelectionStart({ x: cssX, y: cssY });
+        setSelectionBox(null);
+      } else {
+        // Complete selection
+        const width = Math.abs(cssX - selectionStart.x);
+        const height = Math.abs(cssY - selectionStart.y);
+        const x = Math.min(cssX, selectionStart.x);
+        const y = Math.min(cssY, selectionStart.y);
+        
+        const finalSelectionBox = { x, y, width, height };
+        setSelectionBox(finalSelectionBox);
+        setIsSelectingSymbol(false);
+        
+        // Convert to PDF coordinates (0-1 scale)
+        const pdfSelectionBox = {
+          x: x / currentViewport.width,
+          y: y / currentViewport.height,
+          width: width / currentViewport.width,
+          height: height / currentViewport.height
+        };
+        
+        // Call the completion handler
+        if (onVisualSearchComplete) {
+          onVisualSearchComplete(pdfSelectionBox);
+        }
+      }
+      return;
+    }
     
     // Handle deselection in selection mode when clicking on blank space
     if (isSelectionMode && selectedMarkupId) {
@@ -2008,13 +2484,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         // Show text input at clicked position
         setTextInputPosition({ x: cssX, y: cssY });
         setShowTextInput(true);
+        // Don't set currentAnnotation yet - wait until text is saved
+        // Store the position for when we save the annotation
         setCurrentAnnotation([pdfCoords]);
         return;
       } else if (annotationTool === 'freehand') {
         // Add point to freehand drawing
         setCurrentAnnotation(prev => [...prev, pdfCoords]);
         return;
-      } else if (['arrow', 'rectangle', 'circle', 'highlight'].includes(annotationTool)) {
+      } else if (['arrow', 'rectangle', 'circle'].includes(annotationTool)) {
         // For shapes, we need 2 points (start and end)
         setCurrentAnnotation(prev => {
           const newPoints = [...prev, pdfCoords];
@@ -2154,46 +2632,101 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       return;
     }
     
-    const viewport = currentViewport;
+    // Store measurements in normalized coordinates (0-1) - simple and reliable
+    const viewportPoints = points.map((point, index) => {
+      // Debug logging for first 2 points
+      if (index < 2) {
+        console.log(`💾 STORAGE POINT ${index}:`, {
+          normalizedPoint: { x: point.x, y: point.y }
+        });
+      }
+      
+      return {
+        x: point.x,
+        y: point.y
+      };
+    });
     
-    // Store points as-is in the current viewport coordinate system
-    // The rendering system will handle coordinate transformation when needed
-    const transformedPoints = points;
-    
-    const viewportPoints = transformedPoints.map(point => ({
-      x: point.x * viewport.width,
-      y: point.y * viewport.height
-    }));
-    
-    // Import the enhanced measurement calculator
+    // Import the measurement calculator
     const { MeasurementCalculator } = await import('../utils/measurementCalculation');
     
-    // Create scale info object
+    // Create scale info object using the calibration base viewport
+    const calibBase = calibrationViewportRef.current;
     const scaleInfo = {
       scaleFactor,
       unit: 'ft',
-      scaleText: 'detected',
-      confidence: 0.9 // Default confidence, could be improved with better scale detection
+      scaleText: 'calibrated',
+      confidence: 0.95, // High confidence for manual calibration
+      viewportWidth: (calibBase?.viewportWidth) || currentViewport.width,
+      viewportHeight: (calibBase?.viewportHeight) || currentViewport.height
     };
+    
+    // TEMP DEBUG: Compare validator path vs measurement path on the same span
+    if (points.length === 2 && calibBase) {
+      const dxNorm = points[1].x - points[0].x;
+      const dyNorm = points[1].y - points[0].y;
+      const pixelDistanceValidator = Math.hypot(dxNorm * calibBase.viewportWidth, dyNorm * calibBase.viewportHeight);
+      const pixelDistanceMeasure = Math.hypot(dxNorm * scaleInfo.viewportWidth!, dyNorm * scaleInfo.viewportHeight!);
+      const distanceValidatorFt = pixelDistanceValidator * scaleInfo.scaleFactor;
+      const distanceMeasureFt = pixelDistanceMeasure * scaleInfo.scaleFactor;
+      const mid = { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 };
+      console.log('📐 DEBUG MEASURE VS VALIDATOR', {
+        dxNorm, dyNorm,
+        calibBase,
+        scaleInfo,
+        pixelDistanceValidator,
+        pixelDistanceMeasure,
+        distanceValidatorFt,
+        distanceMeasureFt
+      });
+      setMeasurementDebug({
+        page: currentPage,
+        mid,
+        dxNorm, dyNorm,
+        baseW: calibBase.viewportWidth,
+        baseH: calibBase.viewportHeight,
+        pixelDistanceValidator,
+        pixelDistanceMeasure,
+        scaleFactorUsed: scaleInfo.scaleFactor,
+        distanceValidatorFt,
+        distanceMeasureFt
+      });
+      // Auto clear after a few seconds
+      setTimeout(() => setMeasurementDebug(null), 4000);
+    }
+    
+    // Debug logging
+    console.log('📏 MEASUREMENT CREATED:', {
+      measurementType: measurementType,
+      scaleFactor: scaleFactor,
+      unit: 'ft',
+      viewportWidth: currentViewport.width,
+      normalizedPoints: viewportPoints,
+      // Show the actual measurement points
+      firstPoint: viewportPoints[0],
+      lastPoint: viewportPoints[viewportPoints.length - 1],
+      // Calculate normalized distance for debugging
+      normalizedDistance: viewportPoints.length > 1 ? Math.sqrt((viewportPoints[1].x - viewportPoints[0].x) ** 2 + (viewportPoints[1].y - viewportPoints[0].y) ** 2) : 0
+    });
     
     let measurementResult;
     let perimeterValue: number | undefined;
     
     switch (measurementType) {
       case 'linear':
-        measurementResult = MeasurementCalculator.calculateLinear(viewportPoints, scaleInfo, viewState.scale);
+        measurementResult = MeasurementCalculator.calculateLinear(viewportPoints, scaleInfo, 1.0);
         calculatedValue = measurementResult.calculatedValue;
         unit = measurementResult.unit;
         break;
       case 'area':
-        measurementResult = MeasurementCalculator.calculateArea(viewportPoints, scaleInfo, viewState.scale);
+        measurementResult = MeasurementCalculator.calculateArea(viewportPoints, scaleInfo, 1.0);
         calculatedValue = measurementResult.calculatedValue;
         unit = measurementResult.unit;
         perimeterValue = measurementResult.perimeterValue;
         break;
       case 'volume':
         const depth = selectedCondition.depth || 1; // Default to 1 foot if no depth specified
-        measurementResult = MeasurementCalculator.calculateVolume(viewportPoints, scaleInfo, depth, viewState.scale);
+        measurementResult = MeasurementCalculator.calculateVolume(viewportPoints, scaleInfo, depth, 1.0);
         calculatedValue = measurementResult.calculatedValue;
         unit = measurementResult.unit;
         perimeterValue = measurementResult.perimeterValue;
@@ -2223,7 +2756,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         const dy = viewportPoints[j].y - viewportPoints[i].y;
         perimeter += Math.sqrt(dx * dx + dy * dy);
       }
-      perimeterValue = perimeter / (scaleFactor * viewState.scale);
+      perimeterValue = perimeter / scaleFactor;
     }
 
     // Save to API
@@ -2235,7 +2768,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         sheetId: file.id,
         conditionId: currentSelectedConditionId,
         type: measurementType,
-        points: transformedPoints,
+        points: viewportPoints,
         calculatedValue,
         unit,
         pdfPage: currentPage,
@@ -2244,31 +2777,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         conditionName: selectedCondition.name,
         perimeterValue
       }).then(savedMeasurementId => {
-        // Reload measurements from API
-        const updatedMeasurements = getPageTakeoffMeasurements(currentProjectId, file.id, currentPage);
-        
-        const displayMeasurements = updatedMeasurements.map(apiMeasurement => ({
-          id: apiMeasurement.id,
-          type: apiMeasurement.type,
-          points: apiMeasurement.points,
-          calculatedValue: apiMeasurement.calculatedValue,
-          unit: apiMeasurement.unit,
-          conditionId: apiMeasurement.conditionId,
-          conditionName: apiMeasurement.conditionName,
-          color: apiMeasurement.conditionColor,
-          timestamp: new Date(apiMeasurement.timestamp).getTime(),
-          pdfPage: apiMeasurement.pdfPage,
-          pdfCoordinates: apiMeasurement.pdfCoordinates,
-          perimeterValue: apiMeasurement.perimeterValue
-        }));
-        
-        setLocalTakeoffMeasurements(displayMeasurements);
-        
-        // Re-render the page using queued rendering
-        console.log('📝 PDF RENDER TRIGGER: Measurement completion');
-        requestAnimationFrame(() => {
-          renderPDFPage(currentPage);
-        });
+        // The new measurement will automatically appear via the useEffect that watches takeoffMeasurements
+        // No need for complex manual state management - just like annotations!
       }).catch(error => {
         console.error(`Failed to save ${measurementType.toUpperCase()} measurement:`, error);
       });
@@ -2289,6 +2799,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     const { getPageTakeoffMeasurements, updateTakeoffMeasurement } = currentStoreState;
     
     // Get existing measurements for the target condition
+    if (!file?.id || !currentProjectId) return;
     const existingMeasurements = getPageTakeoffMeasurements(currentProjectId, file.id, currentPage);
     const targetMeasurement = existingMeasurements.find(m => m.conditionId === cutoutTargetConditionId);
     
@@ -2301,20 +2812,24 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     const viewport = currentViewport;
     if (!viewport) return;
 
+    // Keep points in normalized coordinates for calculator consistency
     const viewportPoints = points.map(point => ({
-      x: point.x * viewport.width,
-      y: point.y * viewport.height
+      x: point.x,
+      y: point.y
     }));
 
     // Import the enhanced measurement calculator
     const { MeasurementCalculator } = await import('../utils/measurementCalculation');
     
-    // Create scale info object
+    // Create scale info object using calibration base viewport
+    const calibBase2 = calibrationViewportRef.current;
     const scaleInfo = {
       scaleFactor,
       unit: 'ft',
       scaleText: 'detected',
-      confidence: 0.9
+      confidence: 0.9,
+      viewportWidth: (calibBase2?.viewportWidth) || viewport.width,
+      viewportHeight: (calibBase2?.viewportHeight) || viewport.height
     };
     
     let cutoutValue = 0;
@@ -2341,8 +2856,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         area -= viewportPoints[j].x * viewportPoints[i].y;
       }
       
-      const adjustedScaleFactor = scaleFactor * viewState.scale;
-      const areaInSquareFeet = Math.abs(area) / (2 * adjustedScaleFactor * adjustedScaleFactor);
+      const baseW = (calibrationViewportRef.current?.viewportWidth) || viewport.width;
+      const baseH = (calibrationViewportRef.current?.viewportHeight) || viewport.height;
+      // Convert normalized polygon area to pixel area using base viewport, then to units
+      const pixelArea = Math.abs(area) * (baseW * baseH) / 2;
+      const areaInSquareFeet = pixelArea * (scaleFactor * scaleFactor);
       
       if (targetMeasurement.type === 'volume') {
         const selectedCondition = getSelectedCondition();
@@ -2426,19 +2944,26 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Handle double-click to complete measurements
   const handleDoubleClick = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
+    // Prevent default behavior
+    event.preventDefault();
+    event.stopPropagation();
     
     // Handle freehand annotation completion
-    if (annotationTool === 'freehand' && currentAnnotation.length >= 2 && currentProjectId && file?.id) {
-      addAnnotation({
-        projectId: currentProjectId,
-        sheetId: file.id,
-        type: 'freehand',
-        points: currentAnnotation,
-        color: annotationColor,
-        pageNumber: currentPage
-      });
-      setCurrentAnnotation([]);
-      onAnnotationToolChange?.(null);
+    if (annotationTool === 'freehand' && currentAnnotation.length >= 1 && currentProjectId && file?.id) {
+      try {
+        addAnnotation({
+          projectId: currentProjectId,
+          sheetId: file.id,
+          type: 'freehand',
+          points: currentAnnotation,
+          color: annotationColor,
+          pageNumber: currentPage
+        });
+        setCurrentAnnotation([]);
+        onAnnotationToolChange?.(null);
+      } catch (error) {
+        console.error('Failed to save freehand annotation:', error);
+      }
       return;
     }
     
@@ -2523,37 +3048,123 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const completeCalibration = useCallback((points: { x: number; y: number }[]) => {
     if (points.length !== 2 || !calibrationData || !currentViewport) return;
     
-    // Convert PDF coordinates (0-1) to viewport pixels for distance calculation
-    const point1 = {
-      x: points[0].x * currentViewport.width,
-      y: points[0].y * currentViewport.height
-    };
-    const point2 = {
-      x: points[1].x * currentViewport.width,
-      y: points[1].y * currentViewport.height
-    };
-    
-    const pixelDistance = calculateDistance(point1, point2);
     const knownDistance = calibrationData.knownDistance;
     const unit = calibrationData.unit;
     
-    // Calculate zoom-independent scale factor by normalizing to base scale (1.0)
-    // This ensures the scale factor remains consistent across all zoom levels
-    const baseViewport = pdfPageRef.current?.getViewport({ scale: 1.0, rotation: viewState.rotation });
-    if (!baseViewport) return;
+    // Get the PDF page dimensions for accurate scale calculations
+    const pdfPage = pdfPageRef.current;
+    if (!pdfPage) {
+      console.error('PDF page is not available for calibration');
+      return;
+    }
     
-    // Calculate the distance in base viewport coordinates (scale = 1.0)
-    const basePoint1 = {
-      x: points[0].x * baseViewport.width,
-      y: points[0].y * baseViewport.height
-    };
-    const basePoint2 = {
-      x: points[1].x * baseViewport.width,
-      y: points[1].y * baseViewport.height
+    // Use a base viewport for calibration (rotation applied, scale = 1)
+    const baseViewport = pdfPage.getViewport({ scale: 1, rotation: viewState.rotation });
+    
+    // Calculate distance in base viewport pixels (CSS space)
+    const dx = (points[1].x - points[0].x) * baseViewport.width;
+    const dy = (points[1].y - points[0].y) * baseViewport.height;
+    const pixelDistance = Math.sqrt(dx * dx + dy * dy);
+    
+    // Calculate scale: real-world distance / pixel distance
+    // This gives us the scale factor in units per pixel
+    const newScaleFactor = knownDistance / pixelDistance;
+    
+    // Store the calibration base viewport info for consistent measurements
+    const calibrationInfo = {
+      viewportWidth: baseViewport.width,
+      viewportHeight: baseViewport.height,
+      scale: 1,
+      rotation: baseViewport.rotation
     };
     
-    const basePixelDistance = calculateDistance(basePoint1, basePoint2);
-    const newScaleFactor = basePixelDistance / knownDistance;
+    // Validate the scale factor calculation
+    const testDistance = pixelDistance * newScaleFactor;
+    const accuracy = 1 - Math.abs(testDistance - knownDistance) / knownDistance;
+    
+    // Debug logging for calibration
+    console.log('🔧 CALIBRATION:', {
+      knownDistance: knownDistance,
+      pixelDistance: pixelDistance,
+      calculatedScaleFactor: newScaleFactor,
+      accuracy: (accuracy * 100).toFixed(2) + '%',
+      unit: unit,
+      viewport: { width: baseViewport.width, height: baseViewport.height, scale: 1, rotation: baseViewport.rotation },
+      normalizedPoints: points,
+      // Test calculation
+      testCalculation: pixelDistance * newScaleFactor,
+      expectedResult: knownDistance,
+      // Show the actual calculation step by step
+      step1_normalizedDistance: Math.sqrt((points[1].x - points[0].x) ** 2 + (points[1].y - points[0].y) ** 2),
+      step2_pixelDistance: pixelDistance,
+      step3_scaleFactor: newScaleFactor,
+      step4_finalResult: pixelDistance * newScaleFactor
+    });
+    
+    // Validate scale factor reasonableness with more comprehensive checks
+    const warnings: string[] = [];
+    const errors: string[] = [];
+    
+    // Check for extremely small scale factors (likely measurement error)
+    if (newScaleFactor < 0.0001) {
+      errors.push('Scale factor is extremely small - check if calibration points are too close together');
+    } else if (newScaleFactor < 0.001) {
+      warnings.push('Scale factor is very small - verify calibration points are far enough apart');
+    }
+    
+    // Check for extremely large scale factors (likely measurement error)
+    if (newScaleFactor > 10000) {
+      errors.push('Scale factor is extremely large - check if calibration points are too far apart');
+    } else if (newScaleFactor > 1000) {
+      warnings.push('Scale factor is very large - verify calibration points are close enough together');
+    }
+    
+    // Check calibration accuracy
+    if (accuracy < 0.90) {
+      errors.push('Calibration accuracy is very low - please re-calibrate with more precise points');
+    } else if (accuracy < 0.95) {
+      warnings.push('Calibration accuracy is low - consider re-calibrating for better precision');
+    }
+    
+    // Check if the known distance seems reasonable for the pixel distance
+    const pixelsPerFoot = 1 / newScaleFactor;
+    if (pixelsPerFoot < 1) {
+      warnings.push('Very high resolution detected - verify the known distance is correct');
+    } else if (pixelsPerFoot > 1000) {
+      warnings.push('Very low resolution detected - verify the known distance is correct');
+    }
+    
+    // Check for reasonable scale ranges based on typical architectural drawings
+    // Typical scales: 1/8" = 1', 1/4" = 1', 1/2" = 1', 1" = 1', etc.
+    // This translates to scale factors roughly between 0.01 and 0.1 feet per pixel
+    if (newScaleFactor < 0.005 || newScaleFactor > 0.2) {
+      warnings.push('Scale factor outside typical architectural drawing range - verify known distance');
+    }
+    
+    if (errors.length > 0) {
+      console.error('❌ CALIBRATION ERRORS:', errors);
+      // Don't proceed with calibration if there are errors
+      setCalibrationPoints([]);
+      setCalibrationData(null);
+      setIsCalibrating(false);
+      alert(`Calibration failed: ${errors.join(', ')}`);
+      return;
+    }
+    
+    if (warnings.length > 0) {
+      console.warn('⚠️ CALIBRATION WARNINGS:', warnings);
+      // Show warnings but allow calibration to proceed
+      const warningMessage = warnings.join('\n');
+      if (confirm(`Calibration warnings:\n\n${warningMessage}\n\nDo you want to proceed with this calibration?`)) {
+        // User confirmed, continue with calibration
+      } else {
+        // User cancelled, reset calibration
+        setCalibrationPoints([]);
+        setCalibrationData(null);
+        setIsCalibrating(false);
+        return;
+      }
+    }
     
     if (externalScaleFactor === undefined) {
       setInternalScaleFactor(newScaleFactor);
@@ -2566,6 +3177,26 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     setPendingScaleData({ scaleFactor: newScaleFactor, unit });
     setShowScaleApplicationDialog(true);
+    // Show a brief on-canvas validator with the computed distance
+    try {
+      const measured = pixelDistance * newScaleFactor; // in unit
+      const display = unit === 'ft' 
+        ? `${formatFeetAndInches(measured)}` 
+        : `${measured.toFixed(2)} ${unit}`;
+      setCalibrationValidation({ points, display, page: currentPage });
+      // Auto-clear after 3 seconds
+      setTimeout(() => setCalibrationValidation(null), 3000);
+    } catch {}
+    
+    // Store calibration viewport info for consistent measurements
+    calibrationViewportRef.current = {
+      scaleFactor: newScaleFactor,
+      unit: unit,
+      viewportWidth: viewport.width,
+      viewportHeight: viewport.height,
+      scale: viewport.scale,
+      rotation: viewport.rotation
+    };
     
     if (onCalibrationComplete) {
       onCalibrationComplete(true, newScaleFactor, unit);
@@ -2574,7 +3205,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setCalibrationPoints([]);
     setIsCalibrating(false);
     setCalibrationData(null);
-  }, [calibrationData, onCalibrationComplete, currentViewport]);
+  }, [calibrationData, onCalibrationComplete, currentViewport, viewState.rotation]);
 
   // Start calibration
   const startCalibration = useCallback((knownDistance: number, unit: string) => {
@@ -2616,13 +3247,46 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         viewState.scale * zoomFactor
       ));
       
-      if (onScaleChange) {
-        onScaleChange(newScale);
-      } else {
-        setInternalViewState(prev => ({ ...prev, scale: newScale }));
+      // Update internal state and notify parent
+      setInternalViewState(prev => ({ ...prev, scale: newScale }));
+      if (onScaleChange) onScaleChange(newScale);
+
+      // If renders are currently blocked (interactive drawing/calibration/etc),
+      // apply CSS transform to simulate zoom without re-rendering the PDF canvas.
+      const rendersBlocked = (isMeasuring || isCalibrating || currentMeasurement.length > 0 || isDeselecting || (isAnnotating && !showTextInput));
+      if (rendersBlocked) {
+        requestAnimationFrame(() => {
+          // Only apply synchronized CSS transform to both canvas and SVG.
+          // Do NOT re-render overlay during blocked zoom to avoid double-scaling drift.
+          applyInteractiveZoomTransforms();
+        });
+        // Zoom toward cursor by adjusting scroll to keep cursor-anchored point stable
+        const container = containerRef.current;
+        if (container) {
+          const rect = container.getBoundingClientRect();
+          const offsetX = event.clientX - rect.left;
+          const offsetY = event.clientY - rect.top;
+          const r = newScale / (viewState.scale || 1);
+          container.scrollLeft = (container.scrollLeft + offsetX) * r - offsetX;
+          container.scrollTop = (container.scrollTop + offsetY) * r - offsetY;
+        }
+        return;
+      }
+      
+      // Otherwise, do not redraw overlay immediately; wait for the debounced full PDF render
+      // to keep canvas and overlay perfectly in lockstep.
+      // Zoom toward cursor for normal renders as well
+      const container = containerRef.current;
+      if (container) {
+        const rect = container.getBoundingClientRect();
+        const offsetX = event.clientX - rect.left;
+        const offsetY = event.clientY - rect.top;
+        const r = newScale / (viewState.scale || 1);
+        container.scrollLeft = (container.scrollLeft + offsetX) * r - offsetX;
+        container.scrollTop = (container.scrollTop + offsetY) * r - offsetY;
       }
     }
-  }, [viewState.scale, onScaleChange]);
+  }, [viewState.scale, viewState.rotation, onScaleChange, pdfDocument, localTakeoffMeasurements, isMeasuring, isCalibrating, currentMeasurement.length, isDeselecting, isAnnotating, showTextInput, applyInteractiveZoomTransforms]);
 
   // Fit PDF to window function
   const fitToWindow = useCallback(async () => {
@@ -2657,10 +3321,23 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         setInternalViewState(prev => ({ ...prev, scale: optimalScale }));
       }
 
+      // Immediately re-render markups with new scale - bypass anti-flicker
+      if (localTakeoffMeasurements.length > 0) {
+        requestAnimationFrame(() => {
+          if (pdfPageRef.current) {
+            const freshViewport = pdfPageRef.current.getViewport({ 
+              scale: optimalScale, 
+              rotation: viewState.rotation 
+            });
+            renderTakeoffAnnotations(currentPage, freshViewport, pdfPageRef.current);
+          }
+        });
+      }
+
     } catch (error) {
       console.error('❌ FIT_TO_WINDOW: Error fitting to window', error);
     }
-  }, [pdfDocument, viewState.rotation, onScaleChange]);
+  }, [pdfDocument, viewState.rotation, onScaleChange, localTakeoffMeasurements, forceMarkupReRender]);
 
   // Handle rotation
 
@@ -2703,17 +3380,67 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     return () => container.removeEventListener('wheel', handleWheel);
   }, [handleWheel]);
 
+  // Apply or clear interactive CSS zoom when external scale changes while renders are blocked
+  useEffect(() => {
+    const rendersBlocked = (isMeasuring || isCalibrating || currentMeasurement.length > 0 || isDeselecting || (isAnnotating && !showTextInput));
+    if (rendersBlocked) {
+      applyInteractiveZoomTransforms();
+    } else {
+      // Clear transforms if any
+      if (pdfCanvasRef.current) {
+        pdfCanvasRef.current.style.transform = '';
+        pdfCanvasRef.current.style.transformOrigin = '';
+      }
+      if (svgOverlayRef.current) {
+        svgOverlayRef.current.style.transform = '';
+        svgOverlayRef.current.style.transformOrigin = '';
+      }
+    }
+  }, [viewState.scale, isMeasuring, isCalibrating, currentMeasurement.length, isDeselecting, isAnnotating, showTextInput, applyInteractiveZoomTransforms]);
+
   // Handle escape key to back out vertices one-by-one and delete key to delete selected markup
   const handleKeyDown = useCallback(async (event: KeyboardEvent) => {
     // Handle escape for annotation mode
     if (event.key === 'Escape' && annotationTool) {
       event.preventDefault();
+      
       if (currentAnnotation.length > 0) {
-        // Cancel current annotation
-        setCurrentAnnotation([]);
+        // Remove the last point (like linear measurements)
+        setCurrentAnnotation(prev => {
+          const newPoints = [...prev];
+          newPoints.pop(); // Remove the last vertex
+          
+          // If no vertices remain, exit annotation mode
+          if (newPoints.length === 0) {
+            onAnnotationToolChange?.(null);
+          }
+          return newPoints;
+        });
+      } else {
+        // Exit annotation mode if no points
+        onAnnotationToolChange?.(null);
       }
-      // Exit annotation mode
-      onAnnotationToolChange?.(null);
+      return;
+    }
+    
+    // Handle Enter key to complete freehand annotation (fallback for double-click)
+    if (event.key === 'Enter' && annotationTool === 'freehand' && currentAnnotation.length >= 1 && currentProjectId && file?.id) {
+      event.preventDefault();
+      
+      try {
+        addAnnotation({
+          projectId: currentProjectId,
+          sheetId: file.id,
+          type: 'freehand',
+          points: currentAnnotation,
+          color: annotationColor,
+          pageNumber: currentPage
+        });
+        setCurrentAnnotation([]);
+        onAnnotationToolChange?.(null);
+      } catch (error) {
+        console.error('Failed to save freehand annotation via Enter key:', error);
+      }
       return;
     }
     
@@ -2791,6 +3518,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const isAnnotation = localAnnotations.some(a => a.id === selectedMarkupId);
       
       if (isAnnotation) {
+        console.log('🗑️ DELETING ANNOTATION:', {
+          selectedMarkupId,
+          currentLocalAnnotations: localAnnotations.length,
+          annotationToDelete: localAnnotations.find(a => a.id === selectedMarkupId)
+        });
+        
         // Delete annotation from store
         const { deleteAnnotation } = useTakeoffStore.getState();
         deleteAnnotation(selectedMarkupId);
@@ -2805,16 +3538,26 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         setLocalAnnotations(filteredAnnotations);
         setSelectedMarkupId(null);
         
-        // Immediately re-render the SVG overlay to show the deletion
-        if (currentViewport) {
-          renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
-        }
-        
-        // Also re-render the PDF page
-        console.log('🗑️ PDF RENDER TRIGGER: Cutout deletion');
-        requestAnimationFrame(() => {
-          renderPDFPage(currentPage);
+        console.log('🗑️ ANNOTATION DELETED:', {
+          selectedMarkupId,
+          remainingAnnotations: filteredAnnotations.length,
+          allStoreAnnotations: updatedAnnotations.length,
+          deletedSuccessfully: !updatedAnnotations.some(a => a.id === selectedMarkupId)
         });
+        
+        // Force a re-render after a small delay to ensure state updates are processed
+        setTimeout(() => {
+          // Immediately re-render the SVG overlay to show the deletion
+          if (currentViewport) {
+            renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+          }
+          
+          // Also re-render the PDF page
+          console.log('🗑️ PDF RENDER TRIGGER: Annotation deletion');
+          requestAnimationFrame(() => {
+            renderPDFPage(currentPage);
+          });
+        }, 10);
       } else if (currentProjectId && file?.id) {
         // Delete measurement
         const { deleteTakeoffMeasurement, getPageTakeoffMeasurements } = useTakeoffStore.getState();
@@ -2842,16 +3585,24 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           setLocalTakeoffMeasurements(displayMeasurements);
           setSelectedMarkupId(null);
           
-          // Immediately re-render the SVG overlay to show the deletion
-          if (currentViewport) {
-            renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
-          }
-          
-          // Also re-render the PDF page
-          console.log('🗑️ PDF RENDER TRIGGER: Measurement deletion');
-          requestAnimationFrame(() => {
-            renderPDFPage(currentPage);
+          console.log('🗑️ MEASUREMENT DELETED:', {
+            selectedMarkupId,
+            remainingMeasurements: displayMeasurements.length
           });
+          
+          // Force a re-render after a small delay to ensure state updates are processed
+          setTimeout(() => {
+            // Immediately re-render the SVG overlay to show the deletion
+            if (currentViewport) {
+              renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+            }
+            
+            // Also re-render the PDF page
+            console.log('🗑️ PDF RENDER TRIGGER: Measurement deletion');
+            requestAnimationFrame(() => {
+              renderPDFPage(currentPage);
+            });
+          }, 10);
         } catch (error: any) {
           console.error(`Failed to delete markup:`, error);
         }
@@ -2878,7 +3629,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const attemptRender = async (retries = 3) => {
         if (pdfCanvasRef.current && containerRef.current) {
           if (process.env.NODE_ENV === 'development') {
-            console.log('🔄 PDF RENDER TRIGGER: Initial render attempt');
+            // console.log('🔄 PDF RENDER TRIGGER: Initial render attempt');
           }
           await renderPDFPage(currentPage);
         } else if (retries > 0) {
@@ -2913,25 +3664,26 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   useEffect(() => {
     if (pdfDocument && isComponentMounted && isInitialRenderComplete) {
       if (process.env.NODE_ENV === 'development') {
-        console.log('🔍 PDF RENDER TRIGGER: View state change (zoom/rotation)');
+        // console.log('🔍 PDF RENDER TRIGGER: View state change (zoom/rotation)');
       }
       
       // ANTI-FLICKER: Skip PDF re-render during interactive operations or deselection cooldown
-      if (isMeasuring || isCalibrating || currentMeasurement.length > 0 || isDeselecting) {
+      // Allow PDF renders during text annotation input (showTextInput = true)
+      // Allow initial renders even if in deselection mode (for page loads)
+      if (isMeasuring || isCalibrating || currentMeasurement.length > 0 || (isDeselecting && isInitialRenderComplete) || (isAnnotating && !showTextInput)) {
         if (process.env.NODE_ENV === 'development') {
-          console.log('🚫 PDF RENDER BLOCKED: Interactive/deselection mode - NO PDF render calls');
+          // console.log('🚫 PDF RENDER BLOCKED: Interactive/deselection mode - NO PDF render calls');
         }
-        // Only update SVG overlay, not PDF canvas
-        if (currentViewport) {
-          renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
-        }
+        // When blocked, simulate zoom via CSS transform so the user sees immediate zoom
+        // without re-rendering the PDF canvas (prevents flicker while drawing)
+        applyInteractiveZoomTransforms();
         return;
       }
       
       // ANTI-FLICKER: Block ALL renders during deselection period
       if (isDeselecting) {
         if (process.env.NODE_ENV === 'development') {
-          console.log('🚫 PDF RENDER BLOCKED: Deselection cooldown active');
+          // console.log('🚫 PDF RENDER BLOCKED: Deselection cooldown active');
         }
         return;
       }
@@ -2946,7 +3698,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       
       return () => clearTimeout(timeoutId);
     }
-  }, [viewState, renderPDFPage, currentPage, isComponentMounted, isMeasuring, isCalibrating, currentMeasurement, currentViewport, renderTakeoffAnnotations, isDeselecting, isInitialRenderComplete]);
+  }, [viewState, renderPDFPage, currentPage, isComponentMounted, isMeasuring, isCalibrating, currentMeasurement, currentViewport, renderTakeoffAnnotations, isDeselecting, isInitialRenderComplete, isAnnotating, showTextInput]);
 
 
   // Set measurement type when condition is selected
@@ -2996,6 +3748,22 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
   }, [selectedConditionId]);
 
+  // Set annotation mode when annotation tool is selected
+  useEffect(() => {
+    if (annotationTool) {
+      console.log('📝 ANNOTATION TOOL SELECTED: Starting annotation mode');
+      setIsAnnotating(true);
+      setIsSelectionMode(false);
+      setSelectedMarkupId(null);
+      setIsDeselecting(false); // Clear deselection state
+    } else {
+      console.log('📝 ANNOTATION TOOL DESELECTED: Switching to selection mode');
+      setIsAnnotating(false);
+      setIsSelectionMode(true);
+      setCurrentAnnotation([]);
+      setMousePosition(null);
+    }
+  }, [annotationTool]);
 
   // Listen for calibration requests
   useEffect(() => {
@@ -3092,6 +3860,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   return (
     <div className={`pdf-viewer-container h-full flex flex-col relative ${className}`}>
+      <style>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      `}</style>
 
 
       {/* Single Canvas + SVG Overlay Container */}
@@ -3134,7 +3908,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 outline: 'none'
               }}
               onClick={handleClick}
-              onDoubleClick={handleDoubleClick}
+              onDoubleClick={(e) => {
+                // Only handle double-click for non-annotation cases
+                if (!annotationTool) {
+                  handleDoubleClick(e);
+                } else {
+                  // For annotations, prevent the canvas from handling the event
+                  e.preventDefault();
+                  e.stopPropagation();
+                }
+              }}
               onMouseMove={handleMouseMove}
               onMouseLeave={() => setMousePosition(null)}
             />
@@ -3148,6 +3931,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               style={{
                 cursor: cutoutMode 
                   ? 'crosshair' 
+                  : (visualSearchMode && isSelectingSymbol)
+                  ? 'crosshair'
                   : (annotationTool ? 'crosshair' : (isCalibrating ? 'crosshair' : (isMeasuring ? 'crosshair' : (isSelectionMode ? 'pointer' : 'default')))),
                 display: 'block',
                 position: 'absolute',
@@ -3159,25 +3944,177 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 padding: 0,
                 border: 'none',
                 outline: 'none',
-                pointerEvents: (isSelectionMode || isCalibrating || annotationTool) ? 'auto' : 'none' // Allow clicks in selection, calibration, or annotation mode
+                pointerEvents: (isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol)) ? 'auto' : 'none' // Allow clicks in selection, calibration, annotation, or visual search mode
               }}
               onMouseMove={handleMouseMove}
               onMouseLeave={() => setMousePosition(null)}
               onClick={(e) => {
-                // Handle clicks in selection mode, calibration mode, or annotation mode
-                if (isSelectionMode || isCalibrating || annotationTool) {
+                // Handle clicks in selection mode, calibration mode, annotation mode, or visual search mode
+                if (isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol)) {
                   e.stopPropagation();
+                  
+                  // Check for double-click on freehand annotations
+                  if (annotationTool === 'freehand' && currentAnnotation.length >= 1) {
+                    const currentTime = Date.now();
+                    const timeDiff = currentTime - lastClickTime;
+                    const clickPosition = { x: e.clientX, y: e.clientY };
+                    
+                    // Check if this is a double-click (within 500ms and similar position)
+                    if (timeDiff < 500 && lastClickPosition && 
+                        Math.abs(clickPosition.x - lastClickPosition.x) < 10 && 
+                        Math.abs(clickPosition.y - lastClickPosition.y) < 10) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      
+                      // Complete the freehand annotation
+                      if (currentProjectId && file?.id) {
+                        try {
+                          addAnnotation({
+                            projectId: currentProjectId,
+                            sheetId: file.id,
+                            type: 'freehand',
+                            points: currentAnnotation,
+                            color: annotationColor,
+                            pageNumber: currentPage
+                          });
+                          setCurrentAnnotation([]);
+                          onAnnotationToolChange?.(null);
+                          setLastClickTime(0);
+                          setLastClickPosition(null);
+                          return;
+                        } catch (error) {
+                          console.error('Failed to save freehand annotation:', error);
+                        }
+                      }
+                    } else {
+                      // Store click info for double-click detection
+                      setLastClickTime(currentTime);
+                      setLastClickPosition(clickPosition);
+                    }
+                  }
+                  
                   handleClick(e);
+                }
+              }}
+              onContextMenu={(e) => {
+                // Handle right-click to complete freehand annotation (fallback)
+                if (annotationTool === 'freehand' && currentAnnotation.length >= 1 && currentProjectId && file?.id) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  
+                  try {
+                    addAnnotation({
+                      projectId: currentProjectId,
+                      sheetId: file.id,
+                      type: 'freehand',
+                      points: currentAnnotation,
+                      color: annotationColor,
+                      pageNumber: currentPage
+                    });
+                    setCurrentAnnotation([]);
+                    onAnnotationToolChange?.(null);
+                  } catch (error) {
+                    console.error('Failed to save freehand annotation via right-click:', error);
+                  }
                 }
               }}
               onDoubleClick={(e) => {
                 // Handle double-click in annotation mode
                 if (annotationTool) {
+                  e.preventDefault();
                   e.stopPropagation();
                   handleDoubleClick(e);
                 }
               }}
             />
+
+            {/* PDF Loading Indicator */}
+            {isPDFLoading && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  zIndex: 1000,
+                  background: 'rgba(255, 255, 255, 0.9)',
+                  padding: '20px',
+                  borderRadius: '8px',
+                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '12px',
+                }}
+              >
+                <div
+                  style={{
+                    width: '32px',
+                    height: '32px',
+                    border: '3px solid #f3f3f3',
+                    borderTop: '3px solid #3498db',
+                    borderRadius: '50%',
+                    animation: 'spin 1s linear infinite',
+                  }}
+                />
+                <div style={{ fontSize: '14px', color: '#666', fontWeight: '500' }}>
+                  Loading PDF...
+                </div>
+              </div>
+            )}
+
+            {/* Text Annotation Input - Positioned relative to canvas */}
+            {showTextInput && textInputPosition && (
+              <div
+                style={{
+                  position: 'absolute',
+                  left: textInputPosition.x + 'px',
+                  top: textInputPosition.y + 'px',
+                  zIndex: 1000,
+                  pointerEvents: 'auto',
+                }}
+              >
+                <input
+                  type="text"
+                  autoFocus
+                  value={textInputValue}
+                  onChange={(e) => setTextInputValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && textInputValue.trim() && currentProjectId && file?.id) {
+                      // Save text annotation
+                      addAnnotation({
+                        projectId: currentProjectId,
+                        sheetId: file.id,
+                        type: 'text',
+                        points: currentAnnotation,
+                        color: annotationColor,
+                        text: textInputValue,
+                        pageNumber: currentPage
+                      });
+                      setCurrentAnnotation([]);
+                      setTextInputValue('');
+                      setShowTextInput(false);
+                      setTextInputPosition(null);
+                      onAnnotationToolChange?.(null);
+                    } else if (e.key === 'Escape') {
+                      // Cancel text annotation
+                      setCurrentAnnotation([]);
+                      setTextInputValue('');
+                      setShowTextInput(false);
+                      setTextInputPosition(null);
+                      onAnnotationToolChange?.(null);
+                    }
+                  }}
+                  className="border-2 border-blue-500 rounded px-2 py-1 text-sm shadow-lg bg-white"
+                  placeholder="Enter text..."
+                  style={{
+                    minWidth: '120px',
+                    fontSize: '14px',
+                    fontFamily: 'Arial, sans-serif',
+                  }}
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -3202,52 +4139,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         totalPages={totalPages}
       />
 
-      {/* Text Annotation Input */}
-      {showTextInput && textInputPosition && (
-        <div
-          style={{
-            position: 'absolute',
-            left: textInputPosition.x + 'px',
-            top: textInputPosition.y + 'px',
-            zIndex: 1000,
-          }}
-        >
-          <input
-            type="text"
-            autoFocus
-            value={textInputValue}
-            onChange={(e) => setTextInputValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && textInputValue.trim() && currentProjectId && file?.id) {
-                // Save text annotation
-                addAnnotation({
-                  projectId: currentProjectId,
-                  sheetId: file.id,
-                  type: 'text',
-                  points: currentAnnotation,
-                  color: annotationColor,
-                  text: textInputValue,
-                  pageNumber: currentPage
-                });
-                setCurrentAnnotation([]);
-                setTextInputValue('');
-                setShowTextInput(false);
-                setTextInputPosition(null);
-                onAnnotationToolChange?.(null);
-              } else if (e.key === 'Escape') {
-                // Cancel text annotation
-                setCurrentAnnotation([]);
-                setTextInputValue('');
-                setShowTextInput(false);
-                setTextInputPosition(null);
-                onAnnotationToolChange?.(null);
-              }
-            }}
-            className="border-2 border-blue-500 rounded px-2 py-1 text-sm shadow-lg"
-            placeholder="Enter text..."
-          />
-        </div>
-      )}
     </div>
   );
 };
