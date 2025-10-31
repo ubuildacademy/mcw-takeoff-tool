@@ -78,17 +78,8 @@ router.get('/project/:projectId', async (req, res) => {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
     
-    // Get measurements for the project
-    const { data: measurements, error } = await supabase
-      .from(TABLES.TAKEOFF_MEASUREMENTS)
-      .select('*')
-      .eq('project_id', projectId)
-      .order('created_at', { ascending: false });
-    
-    if (error) {
-      console.error('Error fetching project takeoff measurements:', error);
-      return res.status(500).json({ error: 'Failed to fetch project takeoff measurements' });
-    }
+    // Get measurements for the project using storage service to ensure proper data conversion
+    const measurements = await storage.getTakeoffMeasurementsByProject(projectId);
     
     return res.json({ measurements: measurements || [] });
   } catch (error) {

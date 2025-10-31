@@ -57,6 +57,7 @@ interface TakeoffStore {
   documentPages: Record<string, number>; // Key: documentId, Value: last viewed page number
   documentScales: Record<string, number>; // Key: documentId, Value: scale/zoom level
   documentLocations: Record<string, { x: number; y: number }>; // Key: documentId, Value: scroll/pan position
+  lastViewedDocumentId: string | null;
   
   // Actions
   addProject: (project: Omit<Project, 'id' | 'lastModified' | 'takeoffCount'>) => Promise<string>;
@@ -131,6 +132,8 @@ interface TakeoffStore {
   // Document location actions
   setDocumentLocation: (documentId: string, location: { x: number; y: number }) => void;
   getDocumentLocation: (documentId: string) => { x: number; y: number };
+  setLastViewedDocumentId: (documentId: string) => void;
+  getLastViewedDocumentId: () => string | null;
   
   // Data loading
   loadInitialData: () => Promise<void>;
@@ -173,6 +176,7 @@ export const useTakeoffStore = create<TakeoffStore>()(
       documentPages: {},
       documentScales: {},
       documentLocations: {},
+      lastViewedDocumentId: null,
       
       // Actions
       addProject: async (projectData) => {
@@ -935,6 +939,14 @@ export const useTakeoffStore = create<TakeoffStore>()(
         return state.documentLocations[documentId] || { x: 0, y: 0 };
       },
 
+      setLastViewedDocumentId: (documentId: string) => {
+        set({ lastViewedDocumentId: documentId });
+      },
+
+      getLastViewedDocumentId: () => {
+        return get().lastViewedDocumentId;
+      },
+
       loadProjectTakeoffMeasurements: async (projectId: string) => {
         console.log('🔄 LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Starting to load measurements for project:', projectId);
         try {
@@ -984,7 +996,8 @@ export const useTakeoffStore = create<TakeoffStore>()(
         documentRotations: state.documentRotations,
         documentPages: state.documentPages,
         documentScales: state.documentScales,
-        documentLocations: state.documentLocations
+        documentLocations: state.documentLocations,
+        lastViewedDocumentId: state.lastViewedDocumentId
       })
     }
   )

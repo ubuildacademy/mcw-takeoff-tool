@@ -24,7 +24,7 @@ export interface TakeoffCondition {
   id: string;
   projectId: string;
   name: string;
-  type: 'area' | 'volume' | 'linear' | 'count';
+  type: 'area' | 'volume' | 'linear' | 'count' | 'visual-search';
   unit: string;
   wasteFactor: number;
   color: string;
@@ -34,6 +34,10 @@ export interface TakeoffCondition {
   materialCost?: number; // Material cost per unit
   equipmentCost?: number; // Fixed equipment cost for the condition
   aiGenerated?: boolean; // NEW: Flag for AI-generated conditions
+  // Visual search specific fields
+  searchImage?: string; // Base64 encoded image or image URL
+  searchImageId?: string; // Reference to uploaded image file
+  searchThreshold?: number; // Confidence threshold for matches (0-1)
 }
 
 export interface TakeoffMeasurement {
@@ -227,4 +231,33 @@ export interface AITakeoffProgress {
   message: string;
   result?: AITakeoffResult;
   error?: string;
+}
+
+export interface VisualSearchMatch {
+  id: string;
+  pageNumber: number;
+  documentId: string;
+  confidence: number;
+  boundingBox: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  pdfCoordinates: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  description?: string;
+}
+
+export interface VisualSearchResult {
+  conditionId: string;
+  matches: VisualSearchMatch[];
+  totalMatches: number;
+  searchImageId: string;
+  processingTime: number;
+  threshold: number;
 }

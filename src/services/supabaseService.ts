@@ -47,7 +47,7 @@ export const supabaseService = {
       baseProjects.map(async (project) => {
         try {
           const { count: takeoffCount } = await supabase
-            .from('measurements')
+            .from('takeoff_measurements')
             .select('id', { count: 'exact', head: true })
             .eq('project_id', project.id);
           const { count: conditionCount } = await supabase

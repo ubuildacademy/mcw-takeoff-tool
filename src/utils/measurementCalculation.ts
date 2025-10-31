@@ -27,6 +27,8 @@ export interface ScaleInfo {
   unit: string;
   scaleText: string;
   confidence: number;
+  viewportWidth?: number; // Optional viewport width for normalized coordinate conversion
+  viewportHeight?: number; // Optional viewport height for normalized coordinate conversion
 }
 
 export class MeasurementCalculator {
@@ -70,8 +72,48 @@ export class MeasurementCalculator {
     }
     
     // Apply scale conversion
-    const adjustedScaleFactor = scaleInfo.scaleFactor * viewportScale;
-    const calculatedValue = totalDistance / adjustedScaleFactor;
+    // scaleInfo.scaleFactor is units per pixel, so we multiply by it to get units
+    // Points are in normalized coordinates (0-1); convert each segment to pixels using width/height
+    if (!scaleInfo.viewportWidth || !scaleInfo.viewportHeight) {
+      errors.push('Viewport width and height are required for accurate measurement calculation');
+      return {
+        calculatedValue: 0,
+        unit: 'LF',
+        confidence: 0,
+        validation: {
+          isValid: false,
+          warnings,
+          errors
+        }
+      };
+    }
+    
+    // Sum pixel distances per segment with proper aspect handling
+    let pixelDistance = 0;
+    for (let i = 1; i < points.length; i++) {
+      const dxNorm = points[i].x - points[i - 1].x;
+      const dyNorm = points[i].y - points[i - 1].y;
+      const dxPx = dxNorm * scaleInfo.viewportWidth;
+      const dyPx = dyNorm * scaleInfo.viewportHeight;
+      pixelDistance += Math.sqrt(dxPx * dxPx + dyPx * dyPx);
+    }
+    const calculatedValue = pixelDistance * scaleInfo.scaleFactor;
+    
+    // Debug logging
+    console.warn('🧮 LINEAR CALCULATION DEBUG:', {
+      totalDistance: totalDistance,
+      scaleInfo: scaleInfo,
+      calculatedValue: calculatedValue,
+      pixelDistance: pixelDistance,
+      viewportWidth: scaleInfo.viewportWidth,
+      viewportHeight: scaleInfo.viewportHeight,
+      // Show the calculation step by step
+      calculation: `sum(distPx) * ${scaleInfo.scaleFactor} = ${calculatedValue}`,
+      // Show what the scale factor represents
+      scaleFactorMeaning: `${scaleInfo.scaleFactor} units per pixel`,
+      // Show that we're using normalized coordinates
+      coordinateSystem: 'normalized (0-1) to pixels'
+    });
     
     // Validation
     if (calculatedValue < 0.1) {
@@ -79,6 +121,24 @@ export class MeasurementCalculator {
     }
     if (calculatedValue > 10000) {
       warnings.push('Very large linear measurement detected - verify scale');
+    }
+    
+    // Validate scale factor reasonableness
+    if (scaleInfo.scaleFactor < 0.0001) {
+      warnings.push('Scale factor is extremely small - verify calibration');
+    }
+    if (scaleInfo.scaleFactor > 1000) {
+      warnings.push('Scale factor is very large - verify calibration');
+    }
+    
+    // Check for reasonable measurement ranges
+    if (calculatedValue > 0.1 && calculatedValue < 10000) {
+      // If measurement is in reasonable range, check if scale factor makes sense
+      const expectedScaleFactor = calculatedValue / pixelDistance;
+      const scaleFactorRatio = Math.abs(expectedScaleFactor - scaleInfo.scaleFactor) / scaleInfo.scaleFactor;
+      if (scaleFactorRatio > 0.1) {
+        warnings.push('Scale factor may be inconsistent with measurement - verify calibration');
+      }
     }
     
     return {
@@ -128,9 +188,25 @@ export class MeasurementCalculator {
     
     const absoluteArea = Math.abs(area) / 2;
     
+    // Validate viewport dimensions
+    if (!scaleInfo.viewportWidth || !scaleInfo.viewportHeight) {
+      errors.push('Viewport width and height are required for accurate area calculation');
+      return {
+        calculatedValue: 0,
+        unit: 'SF',
+        confidence: 0,
+        validation: {
+          isValid: false,
+          warnings,
+          errors
+        }
+      };
+    }
+    
     // Apply scale conversion
-    const adjustedScaleFactor = scaleInfo.scaleFactor * viewportScale;
-    const calculatedValue = absoluteArea / (adjustedScaleFactor * adjustedScaleFactor);
+    // For area, convert normalized area to pixel area using width*height
+    const pixelArea = absoluteArea * (scaleInfo.viewportWidth * scaleInfo.viewportHeight);
+    const calculatedValue = pixelArea * (scaleInfo.scaleFactor * scaleInfo.scaleFactor);
     
     // Calculate perimeter
     let perimeter = 0;
@@ -140,7 +216,15 @@ export class MeasurementCalculator {
       const dy = points[j].y - points[i].y;
       perimeter += Math.sqrt(dx * dx + dy * dy);
     }
-    const perimeterValue = perimeter / adjustedScaleFactor;
+    // Convert normalized perimeter to pixels using proper aspect handling
+    let pixelPerimeter = 0;
+    for (let i = 0; i < points.length; i++) {
+      const j = (i + 1) % points.length;
+      const dxPx = (points[j].x - points[i].x) * scaleInfo.viewportWidth;
+      const dyPx = (points[j].y - points[i].y) * scaleInfo.viewportHeight;
+      pixelPerimeter += Math.sqrt(dxPx * dxPx + dyPx * dyPx);
+    }
+    const perimeterValue = pixelPerimeter * scaleInfo.scaleFactor;
     
     // Validation
     if (calculatedValue < 1) {
@@ -148,6 +232,24 @@ export class MeasurementCalculator {
     }
     if (calculatedValue > 100000) {
       warnings.push('Very large area measurement detected - verify scale');
+    }
+    
+    // Validate scale factor reasonableness
+    if (scaleInfo.scaleFactor < 0.0001) {
+      warnings.push('Scale factor is extremely small - verify calibration');
+    }
+    if (scaleInfo.scaleFactor > 1000) {
+      warnings.push('Scale factor is very large - verify calibration');
+    }
+    
+    // Check for reasonable area ranges
+    if (calculatedValue > 1 && calculatedValue < 100000) {
+      // If area is in reasonable range, check if scale factor makes sense
+      const expectedScaleFactor = Math.sqrt(calculatedValue / pixelArea);
+      const scaleFactorRatio = Math.abs(expectedScaleFactor - scaleInfo.scaleFactor) / scaleInfo.scaleFactor;
+      if (scaleFactorRatio > 0.1) {
+        warnings.push('Scale factor may be inconsistent with area measurement - verify calibration');
+      }
     }
     
     // Check for self-intersecting polygon
@@ -347,38 +449,21 @@ export class MeasurementCalculator {
     const warnings: string[] = [];
     let confidence = scaleInfo.confidence;
     
-    // Check scale factor reasonableness
-    if (scaleInfo.scaleFactor < 0.001) {
-      warnings.push('Scale factor seems too small - verify scale detection');
+    // Check scale factor reasonableness for pixels per unit
+    if (scaleInfo.scaleFactor < 0.01) {
+      warnings.push('Scale factor seems too small - verify calibration');
       confidence *= 0.5;
     }
     
-    if (scaleInfo.scaleFactor > 1) {
-      warnings.push('Scale factor seems too large - verify scale detection');
+    if (scaleInfo.scaleFactor > 1000) {
+      warnings.push('Scale factor seems too large - verify calibration');
       confidence *= 0.5;
     }
     
-    // Check for common scale ratios
-    const commonScales = [
-      { ratio: 1/96, text: '1/8" = 1\'-0"', confidence: 1.0 },
-      { ratio: 1/48, text: '1/4" = 1\'-0"', confidence: 1.0 },
-      { ratio: 1/24, text: '1/2" = 1\'-0"', confidence: 1.0 },
-      { ratio: 1/12, text: '1" = 1\'-0"', confidence: 1.0 }
-    ];
-    
-    let bestMatch = null;
-    for (const scale of commonScales) {
-      if (Math.abs(scaleInfo.scaleFactor - scale.ratio) < 0.001) {
-        bestMatch = scale;
-        break;
-      }
-    }
-    
-    if (bestMatch) {
-      confidence = Math.max(confidence, bestMatch.confidence);
-    } else {
-      warnings.push('Scale factor does not match common architectural scales');
-      confidence *= 0.8;
+    // For manual calibration, we trust the user's input
+    // Only validate basic reasonableness
+    if (scaleInfo.scaleText === 'calibrated') {
+      confidence = Math.max(confidence, 0.9); // High confidence for manual calibration
     }
     
     return {

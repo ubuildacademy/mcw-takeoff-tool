@@ -91,7 +91,7 @@ const CalibrationDialog: React.FC<CalibrationDialogProps> = ({
           {currentScale && (
             <div className="p-3 bg-blue-50 border border-blue-200 rounded">
               <p className="text-sm text-blue-700">
-                Current scale: 1 pixel = {(currentScale.scaleFactor * 0.0833).toFixed(4)} {currentScale.unit}
+                Current scale: 1 pixel = {currentScale.scaleFactor.toFixed(6)} {currentScale.unit}
               </p>
             </div>
           )}

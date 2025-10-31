@@ -30,14 +30,12 @@ const ScaleApplicationDialog: React.FC<ScaleApplicationDialogProps> = ({
     onClose();
   };
 
-  const scaleInInches = (scaleFactor * 0.0833).toFixed(4);
-
   return (
     <BaseDialog
       open={isOpen}
       onOpenChange={onClose}
       title="Apply Scale Calibration"
-      description={`Choose how to apply the calibrated scale factor of ${scaleInInches} ${unit} per pixel.`}
+      description={`Choose how to apply the calibrated scale factor of ${scaleFactor.toFixed(6)} ${unit} per pixel.`}
       maxWidth="md"
       footer={
         <div className="flex justify-end space-x-2">
@@ -70,7 +68,7 @@ const ScaleApplicationDialog: React.FC<ScaleApplicationDialogProps> = ({
       <div className="bg-gray-50 p-3 rounded-md">
         <p className="text-sm text-gray-600">
           <strong>Current page:</strong> {currentPage} of {totalPages}<br/>
-          <strong>Scale factor:</strong> 1 pixel = {scaleInInches} {unit}<br/>
+          <strong>Scale factor:</strong> 1 pixel = {scaleFactor.toFixed(6)} {unit}<br/>
           <strong>Scope:</strong> {selectedScope === 'page' ? 'Current page only' : 'All pages in document'}
         </p>
       </div>

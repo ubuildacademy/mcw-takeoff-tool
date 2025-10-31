@@ -1,0 +1,145 @@
+/**
+ * Visual Search API Routes
+ * 
+ * Handles visual search operations for symbol detection and matching
+ */
+
+import { Router } from 'express';
+import { visualSearchService } from '../services/visualSearchService';
+import { storage } from '../storage';
+
+const router = Router();
+
+// Extract symbol template from selection box
+router.post('/extract-template', async (req, res) => {
+  try {
+    const { pdfFileId, pageNumber, selectionBox } = req.body;
+
+    if (!pdfFileId || !pageNumber || !selectionBox) {
+      return res.status(400).json({
+        error: 'Missing required fields: pdfFileId, pageNumber, and selectionBox are required'
+      });
+    }
+
+    const template = await visualSearchService.extractSymbolTemplate(
+      pdfFileId,
+      pageNumber,
+      selectionBox
+    );
+
+    return res.json({
+      success: true,
+      template
+    });
+  } catch (error) {
+    console.error('Error extracting symbol template:', error);
+    return res.status(500).json({ error: 'Failed to extract symbol template' });
+  }
+});
+
+// Search for symbols matching a template
+router.post('/search-symbols', async (req, res) => {
+  try {
+    const { conditionId, pdfFileId, template, options } = req.body;
+
+    if (!conditionId || !pdfFileId || !template) {
+      return res.status(400).json({
+        error: 'Missing required fields: conditionId, pdfFileId, and template are required'
+      });
+    }
+
+    const result = await visualSearchService.searchForSymbols(
+      conditionId,
+      pdfFileId,
+      template,
+      options
+    );
+
+    return res.json({
+      success: true,
+      result
+    });
+  } catch (error) {
+    console.error('Error searching for symbols:', error);
+    return res.status(500).json({ error: 'Failed to search for symbols' });
+  }
+});
+
+// Complete visual search workflow: extract template, search, and create measurements
+router.post('/complete-search', async (req, res) => {
+  try {
+    const { 
+      conditionId, 
+      pdfFileId, 
+      pageNumber, 
+      selectionBox, 
+      projectId, 
+      sheetId, 
+      options 
+    } = req.body;
+
+    if (!conditionId || !pdfFileId || !pageNumber || !selectionBox || !projectId || !sheetId) {
+      return res.status(400).json({
+        error: 'Missing required fields: conditionId, pdfFileId, pageNumber, selectionBox, projectId, and sheetId are required'
+      });
+    }
+
+    console.log('🔍 Starting complete visual search workflow...');
+
+    // Step 1: Extract symbol template
+    const template = await visualSearchService.extractSymbolTemplate(
+      pdfFileId,
+      pageNumber,
+      selectionBox
+    );
+
+    // Step 2: Search for matching symbols
+    const searchResult = await visualSearchService.searchForSymbols(
+      conditionId,
+      pdfFileId,
+      template,
+      options
+    );
+
+    // Step 3: Create count measurements
+    await visualSearchService.createCountMeasurements(
+      conditionId,
+      searchResult.matches,
+      projectId,
+      sheetId
+    );
+
+    console.log(`✅ Visual search workflow complete: ${searchResult.totalMatches} matches found`);
+
+    return res.json({
+      success: true,
+      result: searchResult,
+      measurementsCreated: searchResult.totalMatches
+    });
+  } catch (error) {
+    console.error('Error in complete visual search workflow:', error);
+    return res.status(500).json({ error: 'Visual search workflow failed' });
+  }
+});
+
+// Get visual search results for a condition
+router.get('/results/:conditionId', async (req, res) => {
+  try {
+    const { conditionId } = req.params;
+
+    // Get measurements for this condition
+    const measurements = await storage.getTakeoffMeasurements();
+    const conditionMeasurements = measurements.filter(m => m.conditionId === conditionId);
+
+    return res.json({
+      success: true,
+      measurements: conditionMeasurements,
+      count: conditionMeasurements.length
+    });
+  } catch (error) {
+    console.error('Error getting visual search results:', error);
+    return res.status(500).json({ error: 'Failed to get visual search results' });
+  }
+});
+
+export default router;

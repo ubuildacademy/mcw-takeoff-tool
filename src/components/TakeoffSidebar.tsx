@@ -23,6 +23,7 @@ import {
   Scissors,
   DollarSign,
   Bot,
+  Search,
 } from 'lucide-react';
 import { useTakeoffStore } from '../store/useTakeoffStore';
 import { sheetService } from '../services/apiService';
@@ -1125,6 +1126,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       case 'volume': return <Package className="w-4 h-4" />;
       case 'linear': return <Ruler className="w-4 h-4" />;
       case 'count': return <Hash className="w-4 h-4" />;
+      case 'visual-search': return <Search className="w-4 h-4" />;
       default: return <Calculator className="w-4 h-4" />;
     }
   };
@@ -1135,6 +1137,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       case 'volume': return 'bg-green-100 text-green-800';
       case 'linear': return 'bg-purple-100 text-purple-800';
       case 'count': return 'bg-orange-100 text-orange-800';
+      case 'visual-search': return 'bg-indigo-100 text-indigo-800';
       default: return 'bg-gray-100 text-gray-800';
     }
   };

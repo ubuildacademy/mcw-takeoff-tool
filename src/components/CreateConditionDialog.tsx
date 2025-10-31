@@ -20,7 +20,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
 
   const [formData, setFormData] = useState({
     name: editingCondition?.name || '',
-    type: (editingCondition?.type || 'area') as 'area' | 'volume' | 'linear' | 'count',
+    type: (editingCondition?.type || 'area') as 'area' | 'volume' | 'linear' | 'count' | 'visual-search',
     unit: editingCondition?.unit || 'SF', // Initialize with default unit for 'area' type
     wasteFactor: editingCondition?.wasteFactor?.toString() || '',
     color: editingCondition?.color || generateRandomColor(),
@@ -28,10 +28,16 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
     materialCost: editingCondition?.materialCost?.toString() || '',
     equipmentCost: editingCondition?.equipmentCost?.toString() || '',
     includePerimeter: editingCondition?.includePerimeter || false,
-    depth: editingCondition?.depth ? formatDepthOutput(editingCondition.depth) : ''
+    depth: editingCondition?.depth ? formatDepthOutput(editingCondition.depth) : '',
+    // Visual search specific fields
+    searchImage: editingCondition?.searchImage || '',
+    searchImageId: editingCondition?.searchImageId || '',
+    searchThreshold: editingCondition?.searchThreshold?.toString() || '0.7'
   });
   const [loading, setLoading] = useState(false);
   const [depthError, setDepthError] = useState<string>('');
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
 
 
   // Ensure unit is set when component mounts
@@ -73,6 +79,12 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
         equipmentCost: formData.equipmentCost ? parseFloat(formData.equipmentCost) : undefined,
         includePerimeter: formData.includePerimeter,
         depth: parsedDepth === null ? undefined : parsedDepth,
+        // Visual search specific fields
+        ...(formData.type === 'visual-search' && {
+          searchImage: formData.searchImage,
+          searchImageId: formData.searchImageId,
+          searchThreshold: formData.searchThreshold ? parseFloat(formData.searchThreshold) : 0.7
+        })
       };
       
       let result;
@@ -124,6 +136,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
       case 'volume': return 'CY';
       case 'linear': return 'LF';
       case 'count': return 'EA';
+      case 'visual-search': return 'EA';
       default: return '';
     }
   };
@@ -162,6 +175,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
                   <SelectItem value="volume">Volume</SelectItem>
                   <SelectItem value="linear">Linear</SelectItem>
                   <SelectItem value="count">Count</SelectItem>
+                  <SelectItem value="visual-search">Visual Search</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -197,6 +211,13 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
                     </>
                   )}
                   {formData.type === 'count' && (
+                    <>
+                      <SelectItem value="EA">EA (Each)</SelectItem>
+                      <SelectItem value="PC">PC (Piece)</SelectItem>
+                      <SelectItem value="LS">LS (Lump Sum)</SelectItem>
+                    </>
+                  )}
+                  {formData.type === 'visual-search' && (
                     <>
                       <SelectItem value="EA">EA (Each)</SelectItem>
                       <SelectItem value="PC">PC (Piece)</SelectItem>
@@ -282,6 +303,46 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
               rows={3}
             />
           </div>
+
+          {formData.type === 'visual-search' && (
+            <>
+              <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+                <div className="flex items-start space-x-2">
+                  <div className="flex-shrink-0">
+                    <div className="w-6 h-6 bg-indigo-100 rounded-full flex items-center justify-center">
+                      <span className="text-indigo-600 text-sm">🔍</span>
+                    </div>
+                  </div>
+                  <div className="flex-1">
+                    <h4 className="text-sm font-medium text-indigo-900 mb-1">Visual Search Condition</h4>
+                    <p className="text-sm text-indigo-700 mb-2">
+                      After creating this condition, you'll be able to draw a selection box around a symbol on the drawing to define what to search for.
+                    </p>
+                    <p className="text-xs text-indigo-600">
+                      The system will use AI to automatically find and count all similar symbols throughout the plans.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <Label htmlFor="searchThreshold">Detection Confidence</Label>
+                <Input
+                  id="searchThreshold"
+                  type="number"
+                  min="0.1"
+                  max="1.0"
+                  step="0.1"
+                  value={formData.searchThreshold}
+                  onChange={(e) => handleInputChange('searchThreshold', e.target.value)}
+                  placeholder="0.7"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  How confident the AI should be before counting a match (0.1 = very loose, 1.0 = very strict)
+                </p>
+              </div>
+            </>
+          )}
 
           <div>
             <Label htmlFor="materialCost">
