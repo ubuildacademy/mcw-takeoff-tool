@@ -18,6 +18,59 @@ export interface ProjectWithUser extends Project {
   user_name?: string;
 }
 
+// Helper function to convert camelCase project fields to snake_case for database
+function projectToDbFormat(project: any): any {
+  const dbProject: any = {};
+  
+  // Helper to convert empty strings to null for optional fields
+  const toNullIfEmpty = (value: any): any => {
+    if (value === null || value === undefined) {
+      return null;
+    }
+    // If it's a string, trim it and convert empty/whitespace-only strings to null
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      return trimmed === '' ? null : trimmed;
+    }
+    return value;
+  };
+  
+  // Map camelCase to snake_case for project fields
+  if (project.name !== undefined) dbProject.name = project.name;
+  if (project.client !== undefined) dbProject.client = project.client;
+  if (project.location !== undefined) dbProject.location = project.location;
+  if (project.status !== undefined) dbProject.status = project.status;
+  if (project.description !== undefined) dbProject.description = toNullIfEmpty(project.description);
+  if (project.projectType !== undefined) dbProject.project_type = toNullIfEmpty(project.projectType);
+  // Date fields: convert empty strings to null
+  if (project.startDate !== undefined) dbProject.start_date = toNullIfEmpty(project.startDate);
+  if (project.estimatedValue !== undefined) dbProject.estimated_value = project.estimatedValue ?? null;
+  if (project.contactPerson !== undefined) dbProject.contact_person = toNullIfEmpty(project.contactPerson);
+  if (project.contactEmail !== undefined) dbProject.contact_email = toNullIfEmpty(project.contactEmail);
+  if (project.contactPhone !== undefined) dbProject.contact_phone = toNullIfEmpty(project.contactPhone);
+  if (project.profitMarginPercent !== undefined) dbProject.profit_margin_percent = project.profitMarginPercent ?? null;
+  if (project.createdAt !== undefined) dbProject.created_at = project.createdAt;
+  if (project.lastModified !== undefined) dbProject.last_modified = project.lastModified;
+  
+  // Also handle fields that might already be in snake_case (for backwards compatibility)
+  Object.keys(project).forEach(key => {
+    if (!dbProject.hasOwnProperty(key) && !['id', 'user_id'].includes(key)) {
+      // If it's already in snake_case, include it as-is (but convert empty strings to null for date fields)
+      if (key.includes('_') || !isNaN(Number(key))) {
+        const value = project[key];
+        // Convert empty strings to null for date fields
+        if ((key === 'start_date' || key.endsWith('_date')) && value === '') {
+          dbProject[key] = null;
+        } else {
+          dbProject[key] = value;
+        }
+      }
+    }
+  });
+  
+  return dbProject;
+}
+
 export const supabaseService = {
   // Projects
   async getProjects(): Promise<ProjectWithUser[]> {
@@ -76,14 +129,17 @@ export const supabaseService = {
     return projectsWithCounts;
   },
 
-  async createProject(project: Omit<ProjectInsert, 'user_id'>): Promise<Project> {
+  async createProject(project: Omit<ProjectInsert, 'user_id'> | any): Promise<Project> {
     const user = await authHelpers.getCurrentUser();
     if (!user) throw new Error('No authenticated user');
+
+    // Convert camelCase to snake_case for database
+    const dbProject = projectToDbFormat(project);
 
     const { data, error } = await supabase
       .from('takeoff_projects')
       .insert({
-        ...project,
+        ...dbProject,
         user_id: user.id
       })
       .select()
@@ -97,10 +153,13 @@ export const supabaseService = {
     return data
   },
 
-  async updateProject(id: string, updates: ProjectUpdate): Promise<Project> {
+  async updateProject(id: string, updates: ProjectUpdate | any): Promise<Project> {
+    // Convert camelCase to snake_case for database
+    const dbUpdates = projectToDbFormat(updates);
+
     const { data, error } = await supabase
       .from('takeoff_projects')
-      .update({ ...updates, last_modified: new Date().toISOString() })
+      .update({ ...dbUpdates, last_modified: new Date().toISOString() })
       .eq('id', id)
       .select()
       .single()

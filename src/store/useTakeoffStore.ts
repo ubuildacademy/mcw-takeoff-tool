@@ -62,7 +62,7 @@ interface TakeoffStore {
   // Actions
   addProject: (project: Omit<Project, 'id' | 'lastModified' | 'takeoffCount'>) => Promise<string>;
   importProject: (project: Project) => void;
-  updateProject: (id: string, updates: Partial<Project>) => void;
+  updateProject: (id: string, updates: Partial<Project>) => Promise<void>;
   deleteProject: (id: string) => void;
   setCurrentProject: (id: string) => void;
   
@@ -227,14 +227,39 @@ export const useTakeoffStore = create<TakeoffStore>()(
         }));
       },
       
-      updateProject: (id, updates) => {
-        set(state => ({
-          projects: state.projects.map(project =>
-            project.id === id
-              ? { ...project, ...updates, lastModified: new Date().toISOString() }
-              : project
-          )
-        }));
+      updateProject: async (id, updates) => {
+        try {
+          // Import the Supabase service dynamically to avoid circular dependencies
+          const { supabaseService } = await import('../services/supabaseService');
+          
+          // Update project via Supabase
+          const updatedProject = await supabaseService.updateProject(id, updates);
+          
+          // Transform Supabase project to local Project type
+          const localProject: Project = {
+            ...updatedProject,
+            createdAt: updatedProject.created_at || new Date().toISOString(),
+            lastModified: updatedProject.last_modified || new Date().toISOString(),
+          } as Project;
+          
+          // Update local store
+          set(state => ({
+            projects: state.projects.map(project =>
+              project.id === id ? localProject : project
+            )
+          }));
+        } catch (error: any) {
+          console.warn('Failed to update project via API, updating locally:', error.message);
+          
+          // Fallback to local-only update
+          set(state => ({
+            projects: state.projects.map(project =>
+              project.id === id
+                ? { ...project, ...updates, lastModified: new Date().toISOString() }
+                : project
+            )
+          }));
+        }
       },
       
       deleteProject: (id) => {
