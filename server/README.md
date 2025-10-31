@@ -9,7 +9,35 @@ SUPABASE_URL=https://mxjyytwfhmoonkduvybr.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
 PORT=4000
 NODE_ENV=development
+FRONTEND_URL=http://localhost:3000
+
+# Email Configuration (Required for user invitations)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your-email@gmail.com
+SMTP_PASSWORD=your-app-password
+SMTP_FROM=noreply@meridiantakeoff.com
 ```
+
+### Email Configuration
+
+To enable email invitations, configure SMTP settings:
+
+**For Gmail:**
+1. Enable 2-factor authentication on your Google account
+2. Generate an App Password: https://myaccount.google.com/apppasswords
+3. Use the App Password as `SMTP_PASSWORD`
+4. Use `smtp.gmail.com` as `SMTP_HOST` and `587` as `SMTP_PORT`
+
+**For Other Email Providers:**
+- **Outlook/Hotmail**: `smtp-mail.outlook.com`, port `587`
+- **SendGrid**: Use SendGrid SMTP settings
+- **AWS SES**: Use AWS SES SMTP credentials
+- **Custom SMTP**: Configure with your provider's SMTP settings
+
+**Optional:**
+- `SMTP_FROM`: The "from" email address (defaults to `SMTP_USER`)
+- `FRONTEND_URL`: Base URL for invitation links (defaults to `http://localhost:3000`)
 
 ### Getting Your Supabase Service Role Key
 

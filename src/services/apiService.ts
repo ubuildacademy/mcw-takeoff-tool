@@ -179,16 +179,23 @@ export const conditionService = {
       const response = await apiClient.get(`/conditions/project/${projectId}`);
       if (import.meta.env.DEV) console.log('✅ API_GET_PROJECT_CONDITIONS: API call successful:', response.data);
       
-      // Transform field names from snake_case to camelCase
+      // Backend now returns camelCase fields, so just return as-is
+      // Transform field names from snake_case to camelCase (backward compatibility)
       const transformedConditions = response.data.conditions?.map((condition: any) => ({
         ...condition,
-        projectId: condition.project_id,
-        wasteFactor: condition.waste_factor,
-        laborCost: condition.labor_cost,
-        materialCost: condition.material_cost,
-        equipmentCost: condition.equipment_cost,
-        includePerimeter: condition.include_perimeter,
-        createdAt: condition.created_at
+        // Map snake_case fields if they exist (for backward compatibility)
+        projectId: condition.project_id || condition.projectId,
+        wasteFactor: condition.waste_factor || condition.wasteFactor,
+        laborCost: condition.labor_cost || condition.laborCost,
+        materialCost: condition.material_cost || condition.materialCost,
+        equipmentCost: condition.equipment_cost || condition.equipmentCost,
+        includePerimeter: condition.include_perimeter !== undefined ? condition.include_perimeter : condition.includePerimeter,
+        depth: condition.depth,
+        searchImage: condition.search_image || condition.searchImage,
+        searchImageId: condition.search_image_id || condition.searchImageId,
+        searchThreshold: condition.search_threshold || condition.searchThreshold,
+        aiGenerated: condition.ai_generated !== undefined ? condition.ai_generated : condition.aiGenerated,
+        createdAt: condition.created_at || condition.createdAt
       })) || [];
       
       return { conditions: transformedConditions };
@@ -249,6 +256,24 @@ export const authService = {
   },
 };
 
+// User management service (for admin functions)
+export const userService = {
+  async createInvitation(email: string, role: 'admin' | 'user') {
+    const response = await apiClient.post('/users/invitations', { email, role });
+    return response.data;
+  },
+
+  async getInvitations() {
+    const response = await apiClient.get('/users/invitations');
+    return response.data;
+  },
+
+  async deleteInvitation(invitationId: string) {
+    const response = await apiClient.delete(`/users/invitations/${invitationId}`);
+    return response.data;
+  },
+};
+
 // Sheets service
 export const sheetService = {
   async getProjectSheets(projectId: string) {
@@ -284,21 +309,54 @@ export const takeoffMeasurementService = {
   async getProjectTakeoffMeasurements(projectId: string) {
     const response = await apiClient.get(`/takeoff-measurements/project/${projectId}`);
     
-    // Transform field names from snake_case to camelCase
-    const transformedMeasurements = response.data.measurements?.map((measurement: any) => ({
-      ...measurement,
-      projectId: measurement.project_id,
-      sheetId: measurement.sheet_id,
-      conditionId: measurement.condition_id,
-      calculatedValue: measurement.calculated_value,
-      pdfPage: measurement.pdf_page,
-      pdfCoordinates: measurement.pdf_coordinates,
-      conditionColor: measurement.condition_color,
-      conditionName: measurement.condition_name,
-      perimeterValue: measurement.perimeter_value,
-      netCalculatedValue: measurement.net_calculated_value,
-      createdAt: measurement.created_at
-    })) || [];
+    if (import.meta.env.DEV) {
+      console.log('📥 API_GET_PROJECT_TAKEOFF_MEASUREMENTS: Raw response:', response.data);
+    }
+    
+    // Backend now returns camelCase fields, but support both formats for backward compatibility
+    const transformedMeasurements = (response.data.measurements || []).map((measurement: any) => {
+      // Prioritize camelCase (from backend storage service) but fall back to snake_case
+      const transformed = {
+        id: measurement.id,
+        projectId: measurement.project_id || measurement.projectId,
+        sheetId: measurement.sheet_id || measurement.sheetId,
+        conditionId: measurement.condition_id || measurement.conditionId,
+        type: measurement.type,
+        points: measurement.points || [],
+        calculatedValue: measurement.calculated_value !== undefined && measurement.calculated_value !== null 
+          ? measurement.calculated_value 
+          : (measurement.calculatedValue !== undefined && measurement.calculatedValue !== null 
+              ? measurement.calculatedValue 
+              : 0),
+        unit: measurement.unit || '',
+        timestamp: measurement.timestamp || new Date().toISOString(),
+        pdfPage: measurement.pdf_page !== undefined && measurement.pdf_page !== null 
+          ? measurement.pdf_page 
+          : (measurement.pdfPage !== undefined && measurement.pdfPage !== null ? measurement.pdfPage : 1),
+        pdfCoordinates: measurement.pdf_coordinates || measurement.pdfCoordinates || [],
+        conditionColor: measurement.condition_color || measurement.conditionColor || '#000000',
+        conditionName: measurement.condition_name || measurement.conditionName || 'Unknown',
+        ...(measurement.perimeter_value !== undefined || measurement.perimeterValue !== undefined) && {
+          perimeterValue: measurement.perimeter_value !== undefined ? measurement.perimeter_value : measurement.perimeterValue
+        },
+        ...(measurement.cutouts && { cutouts: measurement.cutouts }),
+        ...(measurement.net_calculated_value !== undefined || measurement.netCalculatedValue !== undefined) && {
+          netCalculatedValue: measurement.net_calculated_value !== undefined 
+            ? measurement.net_calculated_value 
+            : measurement.netCalculatedValue
+        }
+      };
+      
+      if (import.meta.env.DEV && !transformed.conditionId) {
+        console.warn('⚠️ Measurement missing conditionId:', transformed);
+      }
+      
+      return transformed;
+    });
+    
+    if (import.meta.env.DEV) {
+      console.log('📤 API_GET_PROJECT_TAKEOFF_MEASUREMENTS: Transformed measurements:', transformedMeasurements);
+    }
     
     return { measurements: transformedMeasurements };
   },
@@ -329,6 +387,29 @@ export const takeoffMeasurementService = {
     const response = await apiClient.delete(`/takeoff-measurements/${id}`);
     return response.data;
   },
+};
+
+// Settings service
+export const settingsService = {
+  async getSettings() {
+    const response = await apiClient.get('/settings');
+    return response.data;
+  },
+
+  async getSetting(key: string) {
+    const response = await apiClient.get(`/settings/${key}`);
+    return response.data;
+  },
+
+  async updateSetting(key: string, value: any) {
+    const response = await apiClient.put(`/settings/${key}`, { value });
+    return response.data;
+  },
+
+  async updateSettings(settings: Record<string, any>) {
+    const response = await apiClient.put('/settings', { settings });
+    return response.data;
+  }
 };
 
 // OCR service

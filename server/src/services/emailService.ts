@@ -1,5 +1,7 @@
-// Simple email service for sending invitations
-// In production, you would integrate with a service like SendGrid, AWS SES, or similar
+// Email service for sending invitations
+// Supports SMTP configuration via environment variables
+
+import nodemailer from 'nodemailer';
 
 export interface InvitationEmailData {
   email: string;
@@ -9,37 +11,95 @@ export interface InvitationEmailData {
   expiresAt: string;
 }
 
+// Create reusable transporter
+const getTransporter = () => {
+  // Check if SMTP is configured
+  const smtpHost = process.env.SMTP_HOST;
+  const smtpPort = process.env.SMTP_PORT;
+  const smtpUser = process.env.SMTP_USER;
+  const smtpPassword = process.env.SMTP_PASSWORD;
+  const smtpFrom = process.env.SMTP_FROM || smtpUser || 'noreply@meridiantakeoff.com';
+
+  // If SMTP is not configured, return null (will log instead)
+  if (!smtpHost || !smtpUser || !smtpPassword) {
+    return null;
+  }
+
+  return nodemailer.createTransport({
+    host: smtpHost,
+    port: parseInt(smtpPort || '587'),
+    secure: smtpPort === '465', // true for 465, false for other ports
+    auth: {
+      user: smtpUser,
+      pass: smtpPassword,
+    },
+    // Allow self-signed certificates (useful for some SMTP servers)
+    tls: {
+      rejectUnauthorized: false,
+    },
+  });
+};
+
 export const emailService = {
   async sendInvitation(data: InvitationEmailData): Promise<boolean> {
     try {
-      // For now, just log the invitation details
-      // In production, replace this with actual email sending logic
-      console.log('📧 INVITATION EMAIL TO SEND:');
-      console.log('=====================================');
-      console.log(`To: ${data.email}`);
-      console.log(`Role: ${data.role}`);
-      console.log(`Invite URL: ${data.inviteUrl}`);
-      console.log(`Invited by: ${data.invitedBy}`);
-      console.log(`Expires: ${data.expiresAt}`);
-      console.log('=====================================');
+      const transporter = getTransporter();
+      const smtpFrom = process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@meridiantakeoff.com';
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+
+      // If SMTP is not configured, log the email details instead
+      if (!transporter) {
+        console.log('📧 INVITATION EMAIL (SMTP not configured - email not sent):');
+        console.log('=====================================');
+        console.log(`To: ${data.email}`);
+        console.log(`Role: ${data.role}`);
+        console.log(`Invite URL: ${data.inviteUrl}`);
+        console.log(`Invited by: ${data.invitedBy}`);
+        console.log(`Expires: ${data.expiresAt}`);
+        console.log('=====================================');
+        console.log('⚠️  To enable email sending, configure SMTP environment variables:');
+        console.log('   - SMTP_HOST (e.g., smtp.gmail.com)');
+        console.log('   - SMTP_PORT (e.g., 587)');
+        console.log('   - SMTP_USER (your email address)');
+        console.log('   - SMTP_PASSWORD (your email password or app password)');
+        console.log('   - SMTP_FROM (optional, defaults to SMTP_USER)');
+        return false; // Return false since email wasn't actually sent
+      }
+
+      // Send the email
+      const htmlContent = this.generateInvitationEmailHTML(data);
+      const textContent = `You're invited to join Meridian Takeoff!
       
-      // TODO: Implement actual email sending
-      // Example with SendGrid:
-      // const sgMail = require('@sendgrid/mail');
-      // sgMail.setApiKey(process.env.SENDGRID_API_KEY);
-      // 
-      // const msg = {
-      //   to: data.email,
-      //   from: 'noreply@meridiantakeoff.com',
-      //   subject: 'You\'re invited to join Meridian Takeoff',
-      //   html: generateInvitationEmailHTML(data)
-      // };
-      // 
-      // await sgMail.send(msg);
+You've been invited to join Meridian Takeoff as a ${data.role}.
+
+Click the link below to accept your invitation:
+${data.inviteUrl}
+
+This invitation will expire on ${new Date(data.expiresAt).toLocaleDateString()}.
+
+Invited by: ${data.invitedBy}
+`;
+
+      const info = await transporter.sendMail({
+        from: `"Meridian Takeoff" <${smtpFrom}>`,
+        to: data.email,
+        subject: 'You\'re invited to join Meridian Takeoff',
+        text: textContent,
+        html: htmlContent,
+      });
+
+      console.log('✅ Invitation email sent successfully:', {
+        to: data.email,
+        messageId: info.messageId,
+      });
 
       return true;
     } catch (error) {
-      console.error('Error sending invitation email:', error);
+      console.error('❌ Error sending invitation email:', error);
+      // Log detailed error for debugging
+      if (error instanceof Error) {
+        console.error('Error details:', error.message);
+      }
       return false;
     }
   },

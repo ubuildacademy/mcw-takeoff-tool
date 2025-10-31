@@ -78,17 +78,8 @@ router.get('/project/:projectId', async (req, res) => {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
     
-    // Get conditions for the project
-    const { data: conditions, error } = await supabase
-      .from(TABLES.CONDITIONS)
-      .select('*')
-      .eq('project_id', projectId)
-      .order('created_at', { ascending: false });
-    
-    if (error) {
-      console.error('Error fetching conditions:', error);
-      return res.status(500).json({ error: 'Failed to fetch conditions' });
-    }
+    // Get conditions for the project using storage service to ensure proper data conversion
+    const conditions = await storage.getConditionsByProject(projectId);
     
     return res.json({ conditions: conditions || [] });
   } catch (error) {
