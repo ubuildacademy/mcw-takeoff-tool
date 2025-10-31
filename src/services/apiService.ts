@@ -4,17 +4,11 @@ import { supabase } from '../lib/supabase';
 const RUNTIME_API_BASE = import.meta.env.VITE_API_BASE_URL as string | undefined;
 const API_BASE_URL = RUNTIME_API_BASE
   || (import.meta.env.PROD
-    ? (() => {
-        console.error('❌ VITE_API_BASE_URL environment variable is not set in production!');
-        console.error('Please set VITE_API_BASE_URL in Vercel environment variables to your backend URL.');
-        return undefined;
-      })()
-    : 'http://localhost:4000/api');
+    ? '/api' // Use relative URLs - Vercel rewrites will proxy to Railway backend
+    : 'http://localhost:4000/api'); // Development: use local backend
 
-if (!API_BASE_URL && import.meta.env.PROD) {
-  console.error('⚠️ Backend API URL is not configured. API calls will fail.');
-  console.error('Set VITE_API_BASE_URL in Vercel: Settings → Environment Variables');
-}
+// Note: In production, we use Vercel rewrites to proxy /api/* to Railway
+// This bypasses Railway Caddy edge layer CORS issues
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
