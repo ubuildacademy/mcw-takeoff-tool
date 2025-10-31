@@ -43,6 +43,7 @@ const allowedOrigins = isProduction
 // Handle ALL OPTIONS requests FIRST, before any other middleware
 app.use((req, res, next) => {
   if (req.method === 'OPTIONS') {
+    console.log('🔄 OPTIONS request received:', req.path, 'Origin:', req.headers.origin);
     const origin = req.headers.origin;
     
     // Always allow OPTIONS in development
@@ -115,7 +116,19 @@ fs.ensureDirSync(path.join(__dirname, '../data'));
 
 // Health
 app.get('/api/health', (req, res) => {
+  console.log('✅ Health check hit');
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Debug endpoint to verify requests are reaching Express
+app.all('/api/debug', (req, res) => {
+  console.log('🔍 Debug endpoint hit:', req.method, req.path, req.headers);
+  res.json({ 
+    method: req.method,
+    path: req.path,
+    headers: req.headers,
+    timestamp: new Date().toISOString()
+  });
 });
 
 // API routes
