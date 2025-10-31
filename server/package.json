@@ -1,0 +1,45 @@
+{
+  "name": "meridian-takeoff-server",
+  "version": "1.0.0",
+  "description": "Backend API server for Meridian Takeoff",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "nodemon src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "ts-node src/scripts/runTests.ts",
+    "test:unit": "ts-node src/scripts/runTests.ts --unit --verbose",
+    "test:integration": "ts-node src/scripts/runTests.ts --integration --verbose",
+    "test:performance": "ts-node src/scripts/runTests.ts --performance --verbose",
+    "test:playwright": "ts-node src/scripts/runTests.ts --playwright --verbose",
+    "test:all": "ts-node src/scripts/runTests.ts --all --verbose --report"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.4",
+    "axios": "^1.6.2",
+    "compression": "^1.7.4",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^4.18.2",
+    "fs-extra": "^11.1.1",
+    "helmet": "^7.1.0",
+    "multer": "^1.4.5-lts.1",
+    "pdf-parse": "^1.1.1",
+    "pdf2pic": "^3.2.0",
+    "sharp": "^0.34.4",
+    "socket.io": "^4.8.1",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/compression": "^1.7.5",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/fs-extra": "^11.0.4",
+    "@types/multer": "^1.4.11",
+    "@types/node": "^20.10.0",
+    "@types/uuid": "^9.0.7",
+    "nodemon": "^3.0.2",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.3.0"
+  }
+}
