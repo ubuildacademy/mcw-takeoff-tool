@@ -25,6 +25,25 @@ import { livePreviewService } from './services/livePreviewService';
 const app = express();
 const PORT = parseInt(process.env.PORT || '4000', 10);
 
+// CRITICAL: Handle OPTIONS FIRST - before any other middleware is registered
+// Express processes middleware in order, so this MUST be first to catch preflight
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS') {
+    console.log('🚨 OPTIONS CAUGHT FIRST:', req.path);
+    // Set CORS headers immediately
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('Access-Control-Max-Age', '86400');
+    }
+    return res.status(204).send();
+  }
+  next();
+});
+
 // CORS configuration - allow Vercel deployments (define before middleware)
 const isProduction = process.env.NODE_ENV === 'production';
 const allowedOrigins = isProduction
@@ -40,10 +59,12 @@ const allowedOrigins = isProduction
     ]
   : true; // Allow all origins in development
 
-// Handle ALL OPTIONS requests FIRST, before any other middleware
+// CRITICAL: Handle ALL OPTIONS requests FIRST - before ANY other middleware
+// This MUST be the very first middleware to catch OPTIONS before CORS or routes
 app.use((req, res, next) => {
+  // Log all requests for debugging
   if (req.method === 'OPTIONS') {
-    console.log('🔄 OPTIONS request received:', req.path, 'Origin:', req.headers.origin);
+    console.log('🔄 OPTIONS PREFLIGHT:', req.method, req.path, 'Origin:', req.headers.origin);
     const origin = req.headers.origin;
     
     // Always allow OPTIONS in development
@@ -114,14 +135,62 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 fs.ensureDirSync(path.join(__dirname, '../uploads'));
 fs.ensureDirSync(path.join(__dirname, '../data'));
 
-// Health
-app.get('/api/health', (req, res) => {
+// Health - explicitly allow OPTIONS
+app.all('/api/health', (req, res) => {
+  if (req.method === 'OPTIONS') {
+    const origin = req.headers.origin;
+    if (isProduction && typeof allowedOrigins !== 'boolean') {
+      const isAllowed = allowedOrigins.some(allowed => {
+        if (typeof allowed === 'string') return allowed === origin;
+        if (allowed instanceof RegExp) return origin ? allowed.test(origin) : false;
+        return false;
+      });
+      if (origin && isAllowed) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        return res.status(204).send();
+      }
+    } else if (!isProduction) {
+      if (origin) res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      return res.status(204).send();
+    }
+    return res.status(403).send();
+  }
   console.log('✅ Health check hit');
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Debug endpoint to verify requests are reaching Express
+// Debug endpoint - explicitly allow OPTIONS
 app.all('/api/debug', (req, res) => {
+  if (req.method === 'OPTIONS') {
+    const origin = req.headers.origin;
+    if (isProduction && typeof allowedOrigins !== 'boolean') {
+      const isAllowed = allowedOrigins.some(allowed => {
+        if (typeof allowed === 'string') return allowed === origin;
+        if (allowed instanceof RegExp) return origin ? allowed.test(origin) : false;
+        return false;
+      });
+      if (origin && isAllowed) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        return res.status(204).send();
+      }
+    } else if (!isProduction) {
+      if (origin) res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      return res.status(204).send();
+    }
+    return res.status(403).send();
+  }
   console.log('🔍 Debug endpoint hit:', req.method, req.path, req.headers);
   res.json({ 
     method: req.method,
