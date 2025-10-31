@@ -41,8 +41,7 @@ Version 2.0 - Active Development
 
 ### Critical
 - [ ] **Page Rotation**: Takeoffs don't stay in correct position when page is rotated
-- [ ] **Markup Visibility**: Markups not immediately visible at all zoom levels
-- [ ] **PDF Flickering**: Flickering during zoom/pan interactions
+- [ ] **Scale Calibration Accuracy**: Scale calculations are not accurate
 
 *Priority: Fix before adding new features*
 
