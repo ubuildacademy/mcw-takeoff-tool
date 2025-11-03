@@ -287,10 +287,17 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     const allPoints = currentMousePos ? [...points, currentMousePos] : points;
     if (allPoints.length < 2) return 0;
     
+    // CRITICAL FIX: Use calibration base viewport dimensions for consistency with actual measurements
+    // The calibration viewport ref stores the base viewport (scale=1) dimensions used during calibration
+    const calibBase = calibrationViewportRef.current;
+    const viewportWidth = calibBase?.viewportWidth || currentViewport.width;
+    const viewportHeight = calibBase?.viewportHeight || currentViewport.height;
+    
     let totalDistance = 0;
     for (let i = 1; i < allPoints.length; i++) {
-      const dx = (allPoints[i].x - allPoints[i - 1].x) * currentViewport.width;
-      const dy = (allPoints[i].y - allPoints[i - 1].y) * currentViewport.height;
+      // Use base viewport dimensions to convert normalized coordinates to pixels
+      const dx = (allPoints[i].x - allPoints[i - 1].x) * viewportWidth;
+      const dy = (allPoints[i].y - allPoints[i - 1].y) * viewportHeight;
       totalDistance += Math.sqrt(dx * dx + dy * dy);
     }
     
