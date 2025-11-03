@@ -11,6 +11,10 @@ PORT=4000
 NODE_ENV=development
 FRONTEND_URL=http://localhost:3000
 
+# Ollama API Configuration (Optional - for AI features)
+OLLAMA_BASE_URL=https://ollama.com
+OLLAMA_API_KEY=your_ollama_api_key_here
+
 # Email Configuration (Required for user invitations)
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
@@ -35,7 +39,13 @@ To enable email invitations, configure SMTP settings:
 - **AWS SES**: Use AWS SES SMTP credentials
 - **Custom SMTP**: Configure with your provider's SMTP settings
 
-**Optional:**
+**Ollama API Configuration (Optional):**
+- `OLLAMA_BASE_URL`: Ollama API base URL (defaults to `https://ollama.com`)
+- `OLLAMA_API_KEY`: Your Ollama API key for AI features (chat, analysis, etc.)
+  - Required for: AI Takeoff, Chat features, Sheet analysis
+  - Get your API key from: https://ollama.com/account/api-keys
+
+**Other Optional:**
 - `SMTP_FROM`: The "from" email address (defaults to `SMTP_USER`)
 - `FRONTEND_URL`: Base URL for invitation links (defaults to `http://localhost:3000`)
 
