@@ -1090,10 +1090,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     const pdfPage = pdfPageRef.current;
     if (!pdfPage) return;
     
-    // Use baseline scale during interactive zoom to avoid double scaling
-    const interactiveBlocked = (isMeasuring || isCalibrating || currentMeasurement.length > 0 || isDeselecting || (isAnnotating && !showTextInput));
-    const baselineScale = interactiveBlocked ? (lastRenderedScaleRef.current || viewState.scale) : viewState.scale;
-    const currentViewport = pdfPage.getViewport({ scale: baselineScale, rotation: viewState.rotation });
+    // Use the passed viewport directly - caller already calculated the correct one
+    // This prevents drift by using the fresh viewport instead of recalculating with stale viewState.scale
+    const currentViewport = viewport;
     
     // Debug logging for rendering
     console.log('🎨 RENDERING:', {
@@ -1738,11 +1737,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const renderSVGAnnotation = (svg: SVGSVGElement, annotation: Annotation, viewport: any) => {
     if (!viewport || annotation.points.length === 0) return;
     
-    // Use baseline scale during interactive zoom to avoid double scaling
-    const interactiveBlocked = (isMeasuring || isCalibrating || currentMeasurement.length > 0 || isDeselecting || (isAnnotating && !showTextInput));
-    const baselineScale = interactiveBlocked ? (lastRenderedScaleRef.current || viewState.scale) : viewState.scale;
-    const page = pdfPageRef.current;
-    const vp = page ? page.getViewport({ scale: baselineScale, rotation: viewState.rotation }) : viewport;
+    // Use the passed viewport directly - caller already calculated the correct one
+    // This prevents drift by using the fresh viewport instead of recalculating with stale viewState.scale
+    const vp = viewport;
     
     const points = annotation.points.map(p => ({
       x: p.x * vp.width,
