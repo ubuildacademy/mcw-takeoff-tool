@@ -73,8 +73,15 @@ class OllamaService {
   private retryDelay: number = 1000; // 1 second
 
   constructor() {
-    // Use backend proxy to avoid CORS issues
-    this.baseUrl = 'http://localhost:4000/api/ollama';
+    // Use consistent API base URL logic - backend proxy avoids CORS issues
+    const RUNTIME_API_BASE = import.meta.env.VITE_API_BASE_URL as string | undefined;
+    const API_BASE_URL = RUNTIME_API_BASE
+      || (import.meta.env.PROD
+        ? '/api' // Use relative URLs - Vercel rewrites will proxy to Railway backend
+        : 'http://localhost:4000/api'); // Development: use local backend
+    
+    this.baseUrl = `${API_BASE_URL}/ollama`;
+    // Note: API key is handled by backend, this is just for reference
     this.apiKey = import.meta.env.VITE_OLLAMA_API_KEY || '';
     
     // Debug logging

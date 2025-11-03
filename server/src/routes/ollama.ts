@@ -5,8 +5,9 @@ import { supabase } from '../supabase';
 const router = express.Router();
 
 // Environment variables
+// Note: VITE_ prefixed vars are for frontend only - backend should use OLLAMA_API_KEY directly
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'https://ollama.com';
-const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || process.env.VITE_OLLAMA_API_KEY;
+const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY;
 
 // Get available models
 router.get('/models', async (req, res) => {
