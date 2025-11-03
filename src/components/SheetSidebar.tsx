@@ -163,8 +163,13 @@ export function SheetSidebar({
       const documents: PDFDocument[] = await Promise.all(
         pdfFiles.map(async (file: any) => {
           try {
-            // Load PDF to get page count
-            const pdfUrl = `http://localhost:4000/api/files/${file.id}`;
+            // Load PDF to get page count - use correct API base URL
+            const RUNTIME_API_BASE = import.meta.env.VITE_API_BASE_URL as string | undefined;
+            const API_BASE_URL = RUNTIME_API_BASE
+              || (import.meta.env.PROD
+                ? '/api' // Use relative URLs - Vercel rewrites will proxy to Railway backend
+                : 'http://localhost:4000/api'); // Development: use local backend
+            const pdfUrl = `${API_BASE_URL}/files/${file.id}`;
             const pdf = await pdfjsLib.getDocument(pdfUrl).promise;
             const totalPages = pdf.numPages;
             
