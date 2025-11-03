@@ -18,7 +18,6 @@ import enhancedOcrRoutes from './routes/enhancedOcr';
 import hybridDetectionRoutes from './routes/hybridDetection';
 import playwrightTakeoffRoutes from './routes/playwrightTakeoff';
 import ruleValidationRoutes from './routes/ruleValidation';
-import testingRoutes from './routes/testing';
 import visualSearchRoutes from './routes/visualSearch';
 import settingsRoutes from './routes/settings';
 import { livePreviewService } from './services/livePreviewService';
@@ -222,7 +221,6 @@ app.use('/api/enhanced-ocr', enhancedOcrRoutes);
 app.use('/api/hybrid-detection', hybridDetectionRoutes);
 app.use('/api/playwright-takeoff', playwrightTakeoffRoutes);
 app.use('/api/rule-validation', ruleValidationRoutes);
-app.use('/api/testing', testingRoutes);
 app.use('/api/visual-search', visualSearchRoutes);
 app.use('/api/settings', settingsRoutes);
 
