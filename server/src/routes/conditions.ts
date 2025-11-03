@@ -187,7 +187,8 @@ router.post('/', async (req, res) => {
       equipmentCost,
       includePerimeter: includePerimeter || false,
       depth,
-      aiGenerated,
+      // Note: aiGenerated is not included as the column doesn't exist in the database
+      // aiGenerated,
       // Visual search specific fields
       ...(type === 'visual-search' && {
         searchImage,
