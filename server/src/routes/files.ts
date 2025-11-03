@@ -56,9 +56,12 @@ const storageEngine = multer.diskStorage({
   }
 });
 
+// Supabase Storage file size limits (Free tier: 50MB, Pro tier: 5GB)
+const SUPABASE_MAX_FILE_SIZE = parseInt(process.env.SUPABASE_MAX_FILE_SIZE || '5368709120'); // 5GB default (Pro tier)
+
 const upload = multer({
   storage: storageEngine,
-  limits: { fileSize: parseInt(process.env.UPLOAD_MAX_SIZE || '500000000') },
+  limits: { fileSize: SUPABASE_MAX_FILE_SIZE },
   fileFilter: (req, file, cb) => {
     const allowed = ['.pdf', '.dwg', '.jpg', '.jpeg', '.png'];
     const ext = path.extname(file.originalname).toLowerCase();
@@ -67,7 +70,39 @@ const upload = multer({
   }
 });
 
-router.post('/upload', upload.single('file'), async (req, res) => {
+// Wrapper to handle multer errors
+const uploadHandler = upload.single('file');
+const handleUpload = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  return new Promise<void>((resolve) => {
+    uploadHandler(req, res, (err: any) => {
+      if (err) {
+        if (err instanceof multer.MulterError) {
+          if (err.code === 'LIMIT_FILE_SIZE') {
+            return res.status(413).json({ 
+              error: 'File too large', 
+              message: `File size exceeds the maximum allowed size of ${SUPABASE_MAX_FILE_SIZE / (1024 * 1024)}MB for Supabase Storage`,
+              maxSize: SUPABASE_MAX_FILE_SIZE
+            });
+          }
+          return res.status(400).json({ error: 'Upload error', details: err.message });
+        }
+        
+        // Handle fileFilter errors
+        if (err.message === 'Invalid file type') {
+          return res.status(400).json({ error: 'Invalid file type', message: 'Only PDF, DWG, JPG, JPEG, and PNG files are allowed' });
+        }
+        
+        return res.status(400).json({ error: 'Upload error', details: err.message });
+      }
+      
+      // No error, continue to route handler
+      resolve();
+      next();
+    });
+  });
+};
+
+router.post('/upload', handleUpload, async (req, res) => {
   try {
     console.log('=== FILE UPLOAD REQUEST ===');
     console.log('Request body:', req.body);
@@ -79,6 +114,20 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     if (!req.file) {
       console.log('ERROR: No file uploaded');
       return res.status(400).json({ error: 'No file uploaded' });
+    }
+    
+    // Check file size before processing (Supabase Storage limit)
+    const maxSizeMB = SUPABASE_MAX_FILE_SIZE / (1024 * 1024);
+    if (req.file.size > SUPABASE_MAX_FILE_SIZE) {
+      console.log(`ERROR: File size ${req.file.size} exceeds Supabase limit ${SUPABASE_MAX_FILE_SIZE}`);
+      // Clean up temp file
+      fs.removeSync(req.file.path);
+      return res.status(413).json({ 
+        error: 'File too large', 
+        message: `File size (${(req.file.size / (1024 * 1024)).toFixed(2)}MB) exceeds the maximum allowed size of ${maxSizeMB}MB for Supabase Storage`,
+        maxSize: SUPABASE_MAX_FILE_SIZE,
+        fileSize: req.file.size
+      });
     }
     
     const projectId = (req.body.projectId as string) || 'default';
@@ -129,7 +178,24 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     
     if (uploadError) {
       console.error('Supabase Storage upload error:', uploadError);
-      return res.status(500).json({ error: 'Failed to upload file to storage', details: uploadError.message });
+      
+      // Handle specific error cases - check both status and statusCode properties
+      const errorStatus = (uploadError as any).statusCode || (uploadError as any).status;
+      if (errorStatus === 413 || errorStatus === '413' || uploadError.message?.includes('maximum allowed size')) {
+        return res.status(413).json({ 
+          error: 'File too large', 
+          message: `File size (${(req.file.size / (1024 * 1024)).toFixed(2)}MB) exceeds Supabase Storage limits. Please check your Supabase plan limits.`,
+          maxSize: SUPABASE_MAX_FILE_SIZE,
+          fileSize: req.file.size,
+          details: uploadError.message
+        });
+      }
+      
+      return res.status(500).json({ 
+        error: 'Failed to upload file to storage', 
+        details: uploadError.message,
+        statusCode: errorStatus
+      });
     }
     
     console.log('File uploaded to Supabase Storage successfully');

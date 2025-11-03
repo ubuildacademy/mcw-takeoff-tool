@@ -136,8 +136,8 @@ app.use(cors({
   preflightContinue: false,
   optionsSuccessStatus: 204,
 }));
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(express.json({ limit: '5gb' }));
+app.use(express.urlencoded({ extended: true, limit: '5gb' }));
 
 fs.ensureDirSync(path.join(__dirname, '../uploads'));
 fs.ensureDirSync(path.join(__dirname, '../data'));
