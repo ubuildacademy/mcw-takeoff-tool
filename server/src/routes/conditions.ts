@@ -231,7 +231,7 @@ router.put('/:id', async (req, res) => {
       description,
       laborCost,
       materialCost,
-      aiGenerated,
+      // Note: aiGenerated column doesn't exist in database, so it's not included
       // Visual search specific fields
       searchImage,
       searchImageId,
@@ -267,7 +267,7 @@ router.put('/:id', async (req, res) => {
       ...(description !== undefined && { description }),
       ...(laborCost !== undefined && { laborCost }),
       ...(materialCost !== undefined && { materialCost }),
-      ...(aiGenerated !== undefined && { aiGenerated }),
+      // Note: aiGenerated not included as column doesn't exist in database
       // Visual search specific fields
       ...(searchImage !== undefined && { searchImage }),
       ...(searchImageId !== undefined && { searchImageId }),
