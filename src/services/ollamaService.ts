@@ -74,20 +74,40 @@ class OllamaService {
 
   constructor() {
     // Use consistent API base URL logic - backend proxy avoids CORS issues
-    const { getApiBaseUrl } = require('../lib/apiConfig');
-    const API_BASE_URL = getApiBaseUrl();
+    // Initialize baseUrl lazily to avoid require() issues in browser
+    this.baseUrl = '/api/ollama'; // Default, will be updated by _initializeBaseUrl()
+    this._initializeBaseUrl();
     
-    this.baseUrl = `${API_BASE_URL}/ollama`;
     // Note: API key is handled by backend, this is just for reference
     this.apiKey = import.meta.env.VITE_OLLAMA_API_KEY || '';
     
-    // Debug logging
-    console.log('OllamaService initialized with:', {
-      baseUrl: this.baseUrl,
-      hasApiKey: !!this.apiKey,
-      apiKeyLength: this.apiKey.length,
-      note: 'API key is handled by backend'
+    // Debug logging - will log after baseUrl is initialized
+    this._initializeBaseUrl().then(() => {
+      console.log('OllamaService initialized with:', {
+        baseUrl: this.baseUrl,
+        hasApiKey: !!this.apiKey,
+        apiKeyLength: this.apiKey.length,
+        note: 'API key is handled by backend'
+      });
     });
+  }
+
+  private async _initializeBaseUrl() {
+    try {
+      const { getApiBaseUrl } = await import('../lib/apiConfig');
+      const API_BASE_URL = getApiBaseUrl();
+      this.baseUrl = `${API_BASE_URL}/ollama`;
+    } catch {
+      // Fallback to default
+      this.baseUrl = '/api/ollama';
+    }
+  }
+
+  private async getBaseUrl(): Promise<string> {
+    if (this.baseUrl === '/api/ollama') {
+      await this._initializeBaseUrl();
+    }
+    return this.baseUrl;
   }
 
   // Get list of available models (cloud models)
@@ -138,7 +158,8 @@ class OllamaService {
   // Robust request method with retry logic
   private async makeRequest(endpoint: string, options: RequestInit = {}, retryCount: number = 0): Promise<Response> {
     try {
-      const response = await fetch(`${this.baseUrl}${endpoint}`, {
+      const baseUrl = await this.getBaseUrl();
+      const response = await fetch(`${baseUrl}${endpoint}`, {
         ...options,
         headers: {
           'Content-Type': 'application/json',
