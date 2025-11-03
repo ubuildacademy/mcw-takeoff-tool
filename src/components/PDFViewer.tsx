@@ -3307,6 +3307,24 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         viewState.scale * zoomFactor
       ));
       
+      // FIX: Update viewport IMMEDIATELY before any rendering to prevent drift
+      // This ensures currentViewport is fresh before state updates trigger re-renders
+      if (pdfPageRef.current) {
+        const freshViewport = pdfPageRef.current.getViewport({ 
+          scale: newScale, 
+          rotation: viewState.rotation 
+        });
+        
+        // Synchronously update pageViewports so currentViewport memo recalculates
+        setPageViewports(prev => ({
+          ...prev,
+          [currentPage]: freshViewport
+        }));
+        
+        // Update lastRenderedScaleRef so baseline scale logic uses correct value
+        lastRenderedScaleRef.current = newScale;
+      }
+      
       // Update internal state and notify parent
       setInternalViewState(prev => ({ ...prev, scale: newScale }));
       if (onScaleChange) onScaleChange(newScale);
@@ -3374,6 +3392,24 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const optimalScale = Math.min(scaleX, scaleY, 5); // Cap at 5x zoom
       
 
+      // FIX: Update viewport IMMEDIATELY before state changes to prevent drift
+      // This ensures currentViewport is fresh before state updates trigger re-renders
+      if (pdfPageRef.current) {
+        const freshViewport = pdfPageRef.current.getViewport({ 
+          scale: optimalScale, 
+          rotation: viewState.rotation 
+        });
+        
+        // Synchronously update pageViewports so currentViewport memo recalculates
+        setPageViewports(prev => ({
+          ...prev,
+          [currentPage]: freshViewport
+        }));
+        
+        // Update lastRenderedScaleRef so baseline scale logic uses correct value
+        lastRenderedScaleRef.current = optimalScale;
+      }
+
       // Apply the new scale
       if (onScaleChange) {
         onScaleChange(optimalScale);
@@ -3381,18 +3417,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         setInternalViewState(prev => ({ ...prev, scale: optimalScale }));
       }
 
-      // Immediately re-render markups with new scale - bypass anti-flicker
-      if (localTakeoffMeasurements.length > 0) {
-        requestAnimationFrame(() => {
-          if (pdfPageRef.current) {
-            const freshViewport = pdfPageRef.current.getViewport({ 
-              scale: optimalScale, 
-              rotation: viewState.rotation 
-            });
-            renderTakeoffAnnotations(currentPage, freshViewport, pdfPageRef.current);
-          }
-        });
-      }
+      // Note: No manual renderTakeoffAnnotations call needed - the useEffect
+      // watching viewState.scale will handle re-rendering with the fresh viewport
 
     } catch (error) {
       console.error('❌ FIT_TO_WINDOW: Error fitting to window', error);
