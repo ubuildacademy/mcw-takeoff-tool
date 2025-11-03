@@ -13,7 +13,7 @@ const API_BASE_URL = RUNTIME_API_BASE
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 10000, // Reduced timeout for better UX
+  timeout: 600000, // 10 minutes for large file uploads
   headers: {
     'Content-Type': 'application/json',
   },
@@ -80,6 +80,9 @@ export const fileService = {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
+      timeout: 600000, // 10 minutes for large file uploads
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
       onUploadProgress: (progressEvent) => {
         const percentCompleted = Math.round(
           (progressEvent.loaded * 100) / (progressEvent.total || 1)

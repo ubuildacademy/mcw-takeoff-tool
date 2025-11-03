@@ -602,6 +602,14 @@ export function TakeoffWorkspace() {
       return;
     }
     
+    // Check file size before uploading (50MB = 50 * 1024 * 1024 bytes)
+    const maxSizeMB = 50;
+    const maxSizeBytes = maxSizeMB * 1024 * 1024;
+    if (file.size > maxSizeBytes) {
+      alert(`File too large! Maximum size is ${maxSizeMB}MB. Your file is ${(file.size / (1024 * 1024)).toFixed(2)}MB.\n\nPlease contact your admin to increase the Supabase Storage file size limit.`);
+      return;
+    }
+    
     try {
       setUploading(true);
       
@@ -619,6 +627,24 @@ export function TakeoffWorkspace() {
       
     } catch (error: any) {
       console.error('Upload failed:', error);
+      
+      // Extract error message from API response
+      let errorMessage = 'Failed to upload PDF file.';
+      
+      if (error.response?.data) {
+        const errorData = error.response.data;
+        if (errorData.message) {
+          errorMessage = errorData.message;
+        } else if (errorData.error) {
+          errorMessage = errorData.error;
+        } else if (typeof errorData === 'string') {
+          errorMessage = errorData;
+        }
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      alert(`Upload Error: ${errorMessage}`);
     } finally {
       setUploading(false);
     }
