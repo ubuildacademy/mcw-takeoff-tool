@@ -21,7 +21,7 @@ router.post('/process-document/:documentId', async (req, res) => {
   }
 
   try {
-    // Get document info from database to find the actual file path
+    // Get document info from database to find the Supabase Storage path
     const { data: documentData, error: documentError } = await supabase
       .from('takeoff_files')
       .select('filename, path')
@@ -34,12 +34,28 @@ router.post('/process-document/:documentId', async (req, res) => {
       return res.status(404).json({ error: 'Document not found' });
     }
 
-    // Check if document file exists
-    const documentPath = documentData.path;
-    if (!fs.existsSync(documentPath)) {
-      console.error('Document file not found at path:', documentPath);
-      return res.status(404).json({ error: 'Document file not found' });
+    // Download PDF from Supabase Storage to temporary location for processing
+    const storagePath = documentData.path;
+    console.log('Downloading PDF from Supabase Storage:', storagePath);
+    
+    const { data: fileData, error: downloadError } = await supabase.storage
+      .from('project-files')
+      .download(storagePath);
+    
+    if (downloadError || !fileData) {
+      console.error('Document file not found in Supabase Storage:', downloadError);
+      return res.status(404).json({ error: 'Document file not found in storage' });
     }
+    
+    // Save to temporary file for OCR processing
+    const tempDir = path.join(process.cwd(), 'server', 'temp', 'pdf-processing');
+    await fs.ensureDir(tempDir);
+    const documentPath = path.join(tempDir, `${documentId}.pdf`);
+    
+    const arrayBuffer = await fileData.arrayBuffer();
+    await fs.writeFile(documentPath, Buffer.from(arrayBuffer));
+    
+    console.log('PDF downloaded to temporary location for OCR:', documentPath);
 
     // Check if document is already processed
     const isProcessed = await simpleOcrService.isDocumentProcessed(projectId, documentId);

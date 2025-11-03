@@ -2,9 +2,12 @@ import { qwenVisionService } from './qwenVisionService';
 import { simpleOcrService } from './simpleOcrService';
 import { hybridDetectionService } from './hybridDetectionService';
 import { storage } from '../storage';
+import { supabase } from '../supabase';
 import { pdfToImage } from '../utils/pdfToImage';
 import { v4 as uuidv4 } from 'uuid';
 import axios from 'axios';
+import path from 'path';
+import fs from 'fs-extra';
 
 // Type definitions for AI takeoff
 interface AIIdentifiedPage {
@@ -757,8 +760,27 @@ RESPONSE FORMAT: Start with [ and end with ]. No other text.`;
         return null;
       }
       
-      console.log(`Found PDF file: ${file.path}`);
-      return file.path;
+      // Download PDF from Supabase Storage to temporary location
+      console.log(`Downloading PDF from Supabase Storage: ${file.path}`);
+      const { data, error } = await supabase.storage
+        .from('project-files')
+        .download(file.path);
+      
+      if (error || !data) {
+        console.error(`Error downloading PDF from Supabase Storage:`, error);
+        return null;
+      }
+      
+      // Save to temporary file for processing
+      const tempDir = path.join(process.cwd(), 'server', 'temp', 'pdf-processing');
+      await fs.ensureDir(tempDir);
+      const tempPath = path.join(tempDir, `${documentId}.pdf`);
+      
+      const arrayBuffer = await data.arrayBuffer();
+      await fs.writeFile(tempPath, Buffer.from(arrayBuffer));
+      
+      console.log(`PDF downloaded to temporary location: ${tempPath}`);
+      return tempPath;
     } catch (error) {
       console.error(`Error getting PDF file path for document ${documentId}:`, error);
       return null;
