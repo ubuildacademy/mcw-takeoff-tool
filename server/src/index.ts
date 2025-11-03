@@ -20,6 +20,7 @@ import playwrightTakeoffRoutes from './routes/playwrightTakeoff';
 import ruleValidationRoutes from './routes/ruleValidation';
 import visualSearchRoutes from './routes/visualSearch';
 import settingsRoutes from './routes/settings';
+import calibrationRoutes from './routes/calibrations';
 import { livePreviewService } from './services/livePreviewService';
 
 const app = express();
@@ -223,6 +224,7 @@ app.use('/api/playwright-takeoff', playwrightTakeoffRoutes);
 app.use('/api/rule-validation', ruleValidationRoutes);
 app.use('/api/visual-search', visualSearchRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/calibrations', calibrationRoutes);
 
 // Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));

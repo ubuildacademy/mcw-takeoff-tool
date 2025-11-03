@@ -77,8 +77,8 @@ interface TakeoffStore {
   deleteMeasurement: (id: string) => void;
   
   // Calibration actions
-  setCalibration: (projectId: string, sheetId: string, scaleFactor: number, unit: string) => void;
-  getCalibration: (projectId: string, sheetId: string) => Calibration | null;
+  setCalibration: (projectId: string, sheetId: string, scaleFactor: number, unit: string, pageNumber?: number | null) => void;
+  getCalibration: (projectId: string, sheetId: string, pageNumber?: number) => Calibration | null;
   
   // Takeoff measurement actions
   addTakeoffMeasurement: (measurement: Omit<TakeoffMeasurement, 'id' | 'timestamp'>) => Promise<string>;
@@ -417,14 +417,17 @@ export const useTakeoffStore = create<TakeoffStore>()(
         });
       },
       
-             setCalibration: (projectId, sheetId, scaleFactor, unit) => {
-         console.log('💾 SET_CALIBRATION: Setting calibration', { projectId, sheetId, scaleFactor, unit });
+             setCalibration: (projectId, sheetId, scaleFactor, unit, pageNumber?: number | null) => {
+         console.log('💾 SET_CALIBRATION: Setting calibration', { projectId, sheetId, scaleFactor, unit, pageNumber });
          set(state => {
+           // Find existing calibration with same projectId, sheetId, and pageNumber
            const existingIndex = state.calibrations.findIndex(
-             c => c.projectId === projectId && c.sheetId === sheetId
+             c => c.projectId === projectId && 
+                  c.sheetId === sheetId && 
+                  (c.pageNumber ?? null) === (pageNumber ?? null)
            );
            
-           console.log('💾 SET_CALIBRATION: Existing calibration index', { existingIndex, totalCalibrations: state.calibrations.length });
+           console.log('💾 SET_CALIBRATION: Existing calibration index', { existingIndex, totalCalibrations: state.calibrations.length, pageNumber });
            
            if (existingIndex >= 0) {
              // Update existing calibration
@@ -432,6 +435,7 @@ export const useTakeoffStore = create<TakeoffStore>()(
              updatedCalibrations[existingIndex] = { 
                projectId, 
                sheetId, 
+               pageNumber: pageNumber ?? null,
                scaleFactor, 
                unit, 
                calibratedAt: new Date().toISOString() 
@@ -443,6 +447,7 @@ export const useTakeoffStore = create<TakeoffStore>()(
              const newCalibration = { 
                projectId, 
                sheetId, 
+               pageNumber: pageNumber ?? null,
                scaleFactor, 
                unit, 
                calibratedAt: new Date().toISOString() 
@@ -455,10 +460,24 @@ export const useTakeoffStore = create<TakeoffStore>()(
          });
        },
        
-       getCalibration: (projectId, sheetId) => {
+       getCalibration: (projectId, sheetId, pageNumber?: number) => {
          const { calibrations } = get();
-         const calibration = calibrations.find(c => c.projectId === projectId && c.sheetId === sheetId) || null;
-         return calibration;
+         // First try to get page-specific calibration
+         if (pageNumber !== undefined) {
+           const pageCalibration = calibrations.find(
+             c => c.projectId === projectId && 
+                  c.sheetId === sheetId && 
+                  c.pageNumber === pageNumber
+           );
+           if (pageCalibration) return pageCalibration;
+         }
+         // Fall back to document-level calibration (pageNumber is null/undefined)
+         const docCalibration = calibrations.find(
+           c => c.projectId === projectId && 
+                c.sheetId === sheetId && 
+                (c.pageNumber === null || c.pageNumber === undefined)
+         );
+         return docCalibration || null;
        },
       
       addTakeoffMeasurement: async (measurementData) => {

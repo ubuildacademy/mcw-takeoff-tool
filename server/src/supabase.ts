@@ -31,5 +31,6 @@ export const TABLES = {
   CONDITIONS: 'takeoff_conditions',
   SHEETS: 'takeoff_sheets',
   TAKEOFF_MEASUREMENTS: 'takeoff_measurements',
-  APP_SETTINGS: 'app_settings'
+  APP_SETTINGS: 'app_settings',
+  CALIBRATIONS: 'takeoff_calibrations'
 } as const;

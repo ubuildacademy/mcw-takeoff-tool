@@ -140,7 +140,8 @@ export function TakeoffWorkspace() {
     if (!currentPdfFile || !projectId) {
       return null;
     }
-    const calibration = getCalibration(projectId, currentPdfFile.id);
+    // Get calibration for current page (will fallback to document-level if page-specific doesn't exist)
+    const calibration = getCalibration(projectId, currentPdfFile.id, currentPage);
     return calibration;
   };
   
@@ -195,6 +196,28 @@ export function TakeoffWorkspace() {
       setCurrentProject(projectId);
       // Load measurements for this project (conditions will be loaded by TakeoffSidebar)
       loadProjectTakeoffMeasurements(projectId);
+      
+      // Load calibrations from database and sync to store
+      const loadCalibrations = async () => {
+        try {
+          const { calibrationService } = await import('../services/apiService');
+          const calibrations = await calibrationService.getCalibrationsByProject(projectId);
+          
+          // Sync each calibration to the Zustand store
+          calibrations.forEach(cal => {
+            setCalibration(cal.projectId, cal.sheetId, cal.scaleFactor, cal.unit, cal.pageNumber ?? null);
+          });
+          
+          if (calibrations.length > 0) {
+            console.log(`✅ Loaded ${calibrations.length} calibration(s) from database`);
+          }
+        } catch (error) {
+          console.warn('⚠️ Could not load calibrations from database (will use localStorage):', error);
+          // Fallback to localStorage is handled by Zustand persist middleware
+        }
+      };
+      
+      loadCalibrations();
     }
   }, [projectId]); // Only depend on projectId to prevent infinite loops
 
@@ -589,9 +612,38 @@ export function TakeoffWorkspace() {
     // Don't reset page here - let the useEffect handle it from store
   };
 
-  const handleCalibrationComplete = (isCalibrated: boolean, scaleFactor: number, unit: string) => {
+  const handleCalibrationComplete = async (
+    isCalibrated: boolean, 
+    scaleFactor: number, 
+    unit: string,
+    scope?: 'page' | 'document',
+    pageNumber?: number | null
+  ) => {
     if (currentPdfFile && projectId) {
-      setCalibration(projectId, currentPdfFile.id, scaleFactor, unit);
+      // Determine pageNumber based on scope
+      // scope = 'document' -> pageNumber = null (applies to all pages)
+      // scope = 'page' -> pageNumber = currentPage or provided pageNumber (page-specific)
+      const calibrationPageNumber = (scope === 'document') ? null : (pageNumber ?? currentPage);
+      
+      // Save to Zustand store (for immediate UI updates)
+      setCalibration(projectId, currentPdfFile.id, scaleFactor, unit, calibrationPageNumber);
+      
+      // Also save to database for persistence across sessions
+      try {
+        const { calibrationService } = await import('../services/apiService');
+        await calibrationService.saveCalibration(
+          projectId, 
+          currentPdfFile.id, 
+          scaleFactor, 
+          unit,
+          scope,
+          calibrationPageNumber
+        );
+        console.log('✅ Calibration saved to database', { scope, pageNumber: calibrationPageNumber });
+      } catch (error) {
+        console.error('❌ Failed to save calibration to database:', error);
+        // Don't block user - calibration is still saved in localStorage
+      }
     }
   };
 
