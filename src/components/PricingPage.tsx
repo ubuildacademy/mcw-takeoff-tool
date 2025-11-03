@@ -14,6 +14,11 @@ const PricingPage: React.FC = () => {
     navigate('/');
   };
 
+  const handleFeatures = () => {
+    navigate('/features');
+    window.scrollTo(0, 0);
+  };
+
   return (
     <div className="pricing-page min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
       {/* Navigation */}
@@ -31,7 +36,11 @@ const PricingPage: React.FC = () => {
               </div>
             </div>
             <div className="flex items-center space-x-4">
-              <Button variant="ghost" className="text-slate-600 hover:text-slate-900">
+              <Button 
+                onClick={handleFeatures}
+                variant="ghost" 
+                className="text-slate-600 hover:text-slate-900"
+              >
                 Features
               </Button>
               <Button variant="ghost" className="text-slate-600 hover:text-slate-900">
