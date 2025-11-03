@@ -45,69 +45,63 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ projectId, isVisible, 
   useEffect(() => {
     if (!isVisible || !projectId) return;
 
+    let newSocket: Socket | null = null;
+
     // Use consistent API base URL logic for Socket.IO connection
     // Socket.IO connects to the base server URL (without /api path)
-    const RUNTIME_API_BASE = import.meta.env.VITE_API_BASE_URL as string | undefined;
-    let socketUrl: string;
-    
-    if (RUNTIME_API_BASE) {
-      // Remove /api suffix if present, Socket.IO doesn't need it
-      socketUrl = RUNTIME_API_BASE.replace(/\/api$/, '');
-    } else if (import.meta.env.PROD) {
-      // In production, use same origin for Socket.IO (backend should handle this)
-      socketUrl = window.location.origin;
-    } else {
-      // Development: use local backend
-      socketUrl = 'http://localhost:4000';
-    }
+    import('../lib/apiConfig').then(({ getServerBaseUrl }) => {
+      const socketUrl = getServerBaseUrl();
 
-    // Connect to Socket.IO server
-    const newSocket = io(socketUrl, {
-      transports: ['websocket', 'polling'], // Add polling as fallback
-      withCredentials: true,
-      query: { projectId }
+      // Connect to Socket.IO server
+      newSocket = io(socketUrl, {
+        transports: ['websocket', 'polling'], // Add polling as fallback
+        withCredentials: true,
+        query: { projectId }
+      });
+
+      newSocket.on('connect', () => {
+        console.log('🔌 Connected to live preview service');
+        setIsConnected(true);
+        newSocket?.emit('join_project', projectId);
+      });
+
+      newSocket.on('disconnect', () => {
+        console.log('🔌 Disconnected from live preview service');
+        setIsConnected(false);
+      });
+
+      newSocket.on('takeoff_update', (update: LivePreviewUpdate) => {
+        console.log('📡 Received live preview update:', update);
+        setUpdates(prev => [...prev, update]);
+        
+        if (update.type === 'progress_update') {
+          setCurrentProgress(update.data.progress);
+          setCurrentMessage(update.data.message);
+        }
+        
+        if (update.type === 'page_analysis' && update.imageData) {
+          setCurrentPageImage(update.imageData);
+          setCurrentPageNumber(update.pageNumber || null);
+          setIsScanning(false);
+        }
+        
+        if (update.type === 'ai_processing') {
+          setCurrentMessage(update.data.message);
+          setIsScanning(true);
+        }
+        
+        if (update.type === 'progress_update') {
+          setIsScanning(update.data.message.includes('Analyzing') || update.data.message.includes('Processing'));
+        }
+      });
+
+      setSocket(newSocket);
     });
-
-    newSocket.on('connect', () => {
-      console.log('🔌 Connected to live preview service');
-      setIsConnected(true);
-      newSocket.emit('join_project', projectId);
-    });
-
-    newSocket.on('disconnect', () => {
-      console.log('🔌 Disconnected from live preview service');
-      setIsConnected(false);
-    });
-
-    newSocket.on('takeoff_update', (update: LivePreviewUpdate) => {
-      console.log('📡 Received live preview update:', update);
-      setUpdates(prev => [...prev, update]);
-      
-      if (update.type === 'progress_update') {
-        setCurrentProgress(update.data.progress);
-        setCurrentMessage(update.data.message);
-      }
-      
-      if (update.type === 'page_analysis' && update.imageData) {
-        setCurrentPageImage(update.imageData);
-        setCurrentPageNumber(update.pageNumber || null);
-        setIsScanning(false);
-      }
-      
-      if (update.type === 'ai_processing') {
-        setCurrentMessage(update.data.message);
-        setIsScanning(true);
-      }
-      
-      if (update.type === 'progress_update') {
-        setIsScanning(update.data.message.includes('Analyzing') || update.data.message.includes('Processing'));
-      }
-    });
-
-    setSocket(newSocket);
 
     return () => {
-      newSocket.disconnect();
+      if (newSocket) {
+        newSocket.disconnect();
+      }
       setSocket(null);
       setIsConnected(false);
     };
