@@ -56,8 +56,10 @@ const storageEngine = multer.diskStorage({
   }
 });
 
-// Supabase Storage file size limits (Free tier: 50MB, Pro tier: 5GB)
-const SUPABASE_MAX_FILE_SIZE = parseInt(process.env.SUPABASE_MAX_FILE_SIZE || '5368709120'); // 5GB default (Pro tier)
+// Supabase Storage file size limits - Currently set to 50MB in Supabase dashboard
+// Note: Can be increased by admin in Supabase Storage Settings
+// Pro tier with Spend Cap disabled allows up to 500GB
+const SUPABASE_MAX_FILE_SIZE = parseInt(process.env.SUPABASE_MAX_FILE_SIZE || '52428800'); // 50MB default (matches current Supabase setting)
 
 const upload = multer({
   storage: storageEngine,
