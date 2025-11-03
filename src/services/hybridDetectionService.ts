@@ -73,8 +73,26 @@ class HybridDetectionService {
 
   constructor() {
     // Use consistent API base URL logic across all services
-    const { getApiBaseUrl } = require('../lib/apiConfig');
-    this.baseUrl = getApiBaseUrl();
+    // Import synchronously since apiConfig is a simple module
+    this.baseUrl = '/api'; // Default, will be updated by getBaseUrl()
+    this._initializeBaseUrl();
+  }
+
+  private async _initializeBaseUrl() {
+    try {
+      const { getApiBaseUrl } = await import('../lib/apiConfig');
+      this.baseUrl = getApiBaseUrl();
+    } catch {
+      // Fallback to default
+      this.baseUrl = '/api';
+    }
+  }
+
+  private async getBaseUrl(): Promise<string> {
+    if (this.baseUrl === '/api') {
+      await this._initializeBaseUrl();
+    }
+    return this.baseUrl;
   }
 
   /**
@@ -88,7 +106,8 @@ class HybridDetectionService {
     try {
       console.log(`🔍 Starting hybrid detection for scope: ${scope}`);
       
-      const response = await fetch(`${this.baseUrl}/api/hybrid-detection/detect`, {
+      const baseUrl = await this.getBaseUrl();
+      const response = await fetch(`${baseUrl}/hybrid-detection/detect`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -126,7 +145,8 @@ class HybridDetectionService {
    */
   async getServiceStatus(): Promise<ServiceStatus> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/hybrid-detection/status`);
+      const baseUrl = await this.getBaseUrl();
+      const response = await fetch(`${baseUrl}/hybrid-detection/status`);
       
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -156,7 +176,8 @@ class HybridDetectionService {
     try {
       console.log('🔍 Starting YOLOv8-only detection...');
       
-      const response = await fetch(`${this.baseUrl}/api/hybrid-detection/yolo-only`, {
+      const baseUrl = await this.getBaseUrl();
+      const response = await fetch(`${baseUrl}/hybrid-detection/yolo-only`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -191,7 +212,8 @@ class HybridDetectionService {
    */
   async getYOLOStats(): Promise<any> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/hybrid-detection/yolo-stats`);
+      const baseUrl = await this.getBaseUrl();
+      const response = await fetch(`${baseUrl}/hybrid-detection/yolo-stats`);
       
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
