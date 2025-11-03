@@ -340,11 +340,17 @@ export const supabaseService = {
   async uploadPDF(file: File, projectId: string): Promise<any> {
     // For now, we'll use the existing backend API for file uploads
     // This is because file uploads are complex and the backend handles storage
+    const RUNTIME_API_BASE = import.meta.env.VITE_API_BASE_URL as string | undefined;
+    const API_BASE_URL = RUNTIME_API_BASE
+      || (import.meta.env.PROD
+        ? '/api' // Use relative URLs - Vercel rewrites will proxy to Railway backend
+        : 'http://localhost:4000/api'); // Development: use local backend
+    
     const formData = new FormData()
     formData.append('file', file)
     formData.append('projectId', projectId)
     
-    const response = await fetch(`http://localhost:4000/api/files/upload`, {
+    const response = await fetch(`${API_BASE_URL}/files/upload`, {
       method: 'POST',
       body: formData
     })
@@ -369,7 +375,12 @@ export const supabaseService = {
   },
 
   async getPDFUrl(fileId: string): Promise<string> {
-    // For now, use the backend API for file serving
-    return `http://localhost:4000/api/files/${fileId}`
+    // Use the correct API base URL instead of hardcoded localhost
+    const RUNTIME_API_BASE = import.meta.env.VITE_API_BASE_URL as string | undefined;
+    const API_BASE_URL = RUNTIME_API_BASE
+      || (import.meta.env.PROD
+        ? '/api' // Use relative URLs - Vercel rewrites will proxy to Railway backend
+        : 'http://localhost:4000/api'); // Development: use local backend
+    return `${API_BASE_URL}/files/${fileId}`
   }
 }
