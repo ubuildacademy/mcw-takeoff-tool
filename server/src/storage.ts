@@ -390,7 +390,7 @@ class SupabaseStorage {
 
   async saveCondition(condition: StoredCondition): Promise<StoredCondition> {
     // Map camelCase to snake_case for database
-    const dbCondition = {
+    const dbCondition: any = {
       id: condition.id,
       project_id: condition.projectId,
       name: condition.name,
@@ -407,9 +407,13 @@ class SupabaseStorage {
       search_image: condition.searchImage,
       search_image_id: condition.searchImageId,
       search_threshold: condition.searchThreshold,
-      ai_generated: (condition as any).aiGenerated,
       created_at: condition.createdAt
     };
+    
+    // Only include ai_generated if it exists (column might not exist in all database schemas)
+    if ((condition as any).aiGenerated !== undefined) {
+      dbCondition.ai_generated = (condition as any).aiGenerated;
+    }
     
     const { data, error } = await supabase
       .from(TABLES.CONDITIONS)
