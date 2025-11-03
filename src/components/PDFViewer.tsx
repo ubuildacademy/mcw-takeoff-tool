@@ -2258,7 +2258,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         cssY = cssY / interactiveScale;
       }
       
-      // Convert CSS coordinates to PDF coordinates (0-1)
+      // Convert CSS coordinates to normalized PDF coordinates (0-1)
+      // Normalized coordinates represent PDF-relative position, independent of zoom level
       let pdfCoords = {
         x: cssX / currentViewport.width,
         y: cssY / currentViewport.height
@@ -2431,7 +2432,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Handle calibration clicks
     if (isCalibrating) {
       setCalibrationPoints(prev => {
-        // Convert CSS coordinates to PDF coordinates (0-1) for consistency
+        // CRITICAL FIX: Normalize using currentViewport to get PDF-relative coordinates (0-1)
+        // Normalized coordinates represent position in PDF space, independent of zoom level
+        // The calibration calculation will use these normalized coords with baseViewport dimensions
         let pdfCoords = {
           x: cssX / currentViewport.width,
           y: cssY / currentViewport.height
@@ -2443,7 +2446,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           pdfCoords = applyOrthoSnapping(pdfCoords, prev);
         }
         
-        // Store points in PDF coordinates (0-1) for consistency with measurement system
+        // Store points in normalized PDF coordinates (0-1) - these represent PDF-relative position
         const newPoints = [...prev, pdfCoords];
         
         if (newPoints.length === 2) {
@@ -3062,9 +3065,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     
     // Use a base viewport for calibration (rotation applied, scale = 1)
+    // This ensures scale factor is calculated at PDF's native scale, independent of zoom level
     const baseViewport = pdfPage.getViewport({ scale: 1, rotation: viewState.rotation });
     
-    // Calculate distance in base viewport pixels (CSS space)
+    // Calculate distance in base viewport pixels
+    // Points are in normalized coordinates (0-1), representing PDF-relative position
+    // Normalized coordinates are independent of zoom level - they represent the same PDF position
+    // regardless of which viewport was used to normalize them
+    // Multiply normalized delta by baseViewport dimensions to get pixel distance
     const dx = (points[1].x - points[0].x) * baseViewport.width;
     const dy = (points[1].y - points[0].y) * baseViewport.height;
     const pixelDistance = Math.sqrt(dx * dx + dy * dy);
@@ -3192,16 +3200,17 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     } catch {}
     
     // Store calibration viewport info for consistent measurements
-    if (currentViewport) {
-      calibrationViewportRef.current = {
-        scaleFactor: newScaleFactor,
-        unit: unit,
-        viewportWidth: currentViewport.width,
-        viewportHeight: currentViewport.height,
-        scale: currentViewport.scale,
-        rotation: currentViewport.rotation
-      };
-    }
+    // CRITICAL FIX: Store baseViewport dimensions, not currentViewport dimensions
+    // The calibration was calculated using baseViewport (scale=1), so measurements
+    // must also use baseViewport dimensions for accurate calculations
+    calibrationViewportRef.current = {
+      scaleFactor: newScaleFactor,
+      unit: unit,
+      viewportWidth: baseViewport.width,
+      viewportHeight: baseViewport.height,
+      scale: baseViewport.scale, // This should be 1
+      rotation: baseViewport.rotation
+    };
     
     if (onCalibrationComplete) {
       onCalibrationComplete(true, newScaleFactor, unit);
