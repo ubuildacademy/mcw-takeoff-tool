@@ -804,6 +804,45 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
   }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, selectedMarkupId, isSelectionMode, renderTakeoffAnnotations, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, isSelectingSymbol, currentAnnotation]);
 
+  // Update pageViewports immediately when scale/rotation changes
+  // This ensures currentViewport is always current even when PDF rendering is blocked
+  useEffect(() => {
+    if (pdfDocument && pdfPageRef.current) {
+      // Create fresh viewport with current scale and rotation
+      const freshViewport = pdfPageRef.current.getViewport({ 
+        scale: viewState.scale, 
+        rotation: viewState.rotation 
+      });
+      
+      // Update pageViewports immediately so currentViewport memo recalculates
+      setPageViewports(prev => {
+        // Only update if the viewport actually changed to avoid unnecessary re-renders
+        const existing = prev[currentPage];
+        if (existing && 
+            existing.width === freshViewport.width && 
+            existing.height === freshViewport.height &&
+            existing.scale === freshViewport.scale &&
+            existing.rotation === freshViewport.rotation) {
+          return prev; // No change
+        }
+        
+        return {
+          ...prev,
+          [currentPage]: freshViewport
+        };
+      });
+      
+      // Trigger immediate re-render of markups with new viewport, even if PDF rendering is blocked
+      // This ensures annotations stay aligned during zoom
+      const hasMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0;
+      if (hasMarkups) {
+        requestAnimationFrame(() => {
+          renderTakeoffAnnotations(currentPage, freshViewport, pdfPageRef.current);
+        });
+      }
+    }
+  }, [pdfDocument, viewState.scale, viewState.rotation, currentPage, localTakeoffMeasurements, localAnnotations, renderTakeoffAnnotations]);
+
   // Force immediate re-render of markups when viewport changes
   const forceMarkupReRender = useCallback(() => {
     if (pdfDocument && pdfPageRef.current && localTakeoffMeasurements.length > 0) {
