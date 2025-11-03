@@ -109,6 +109,12 @@ router.get('/:id', async (req, res) => {
 // Create a new condition
 router.post('/', async (req, res) => {
   try {
+    // Get authenticated user
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
     const {
       projectId,
       name,
@@ -126,15 +132,34 @@ router.post('/', async (req, res) => {
       searchThreshold
     } = req.body;
 
-    // Count and visual-search conditions should not have waste factors
-    const finalWasteFactor = (type === 'count' || type === 'visual-search') ? 0 : wasteFactor;
-
     // Validation
     if (!projectId || !name || !type || !unit) {
       return res.status(400).json({ 
         error: 'Missing required fields: projectId, name, type, and unit are required' 
       });
     }
+
+    // Check if user is admin
+    const userIsAdmin = await isAdmin(user.id);
+    
+    // Verify the user has access to this project
+    let projectQuery = supabase
+      .from(TABLES.PROJECTS)
+      .select('id, user_id')
+      .eq('id', projectId);
+    
+    if (!userIsAdmin) {
+      projectQuery = projectQuery.eq('user_id', user.id);
+    }
+    
+    const { data: project, error: projectError } = await projectQuery.single();
+    
+    if (projectError || !project) {
+      return res.status(404).json({ error: 'Project not found or access denied' });
+    }
+
+    // Count and visual-search conditions should not have waste factors
+    const finalWasteFactor = (type === 'count' || type === 'visual-search') ? 0 : wasteFactor;
 
     if (!['area', 'volume', 'linear', 'count', 'visual-search'].includes(type)) {
       return res.status(400).json({ 
