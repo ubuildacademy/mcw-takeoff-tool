@@ -20,7 +20,7 @@ Version 2.0 - Production Deployment (November 2025)
 ### PDF Processing & Takeoff
 - PDF upload and OCR processing
 - Area, linear, volume, and count measurement tools
-- Scale calibration for accurate measurements
+- ✅ Scale calibration for accurate measurements (fixed: viewport dimension consistency issue)
 - Persistent measurements with cutout support
 - Perimeter calculations
 - Visual annotations (text, freehand, arrow, rectangle, circle)
@@ -48,6 +48,7 @@ Version 2.0 - Production Deployment (November 2025)
 ### Critical (Remaining)
 - [ ] **Page Rotation & Scaling**: When a page is rotated, scaling calculations are incorrect and takeoffs don't maintain proper position
 - [ ] **Markup Position on Rotation**: Markups/measurements placed before rotating a page move to incorrect positions after rotation
+- [ ] **Markup Drift on Zoom**: When zooming in/out, markups visually drift from their correct positions until selected (then they snap back). Measurements are stored correctly but rendering position is incorrect during zoom.
 
 *Priority: Fix before adding new features*
 
@@ -73,4 +74,4 @@ Version 2.0 - Production Deployment (November 2025)
 
 ---
 
-**Last Updated**: November 3, 2025 - Production deployment: Supabase Storage configured
+**Last Updated**: December 2024 - Scale calibration accuracy fixed; added markup zoom drift bug to tracking
