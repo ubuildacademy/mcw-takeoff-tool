@@ -197,7 +197,9 @@ router.post('/', async (req, res) => {
       createdAt: now
     };
     
+    console.log('Creating condition with data:', JSON.stringify(newCondition, null, 2));
     const savedCondition = await storage.saveCondition(newCondition);
+    console.log('Successfully created condition:', savedCondition.id);
     
     return res.status(201).json({ 
       success: true, 
@@ -205,7 +207,13 @@ router.post('/', async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating condition:', error);
-    return res.status(500).json({ error: 'Failed to create condition' });
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorDetails = error instanceof Error ? error.stack : undefined;
+    console.error('Error details:', errorDetails);
+    return res.status(500).json({ 
+      error: 'Failed to create condition',
+      details: errorMessage
+    });
   }
 });
 
