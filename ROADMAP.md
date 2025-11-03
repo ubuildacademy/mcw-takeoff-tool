@@ -46,9 +46,8 @@ Version 2.0 - Production Deployment (November 2025)
 ## 🚨 Known Issues & Bugs
 
 ### Critical (Remaining)
-- [ ] **Page Rotation & Scaling**: When a page is rotated, scaling calculations are incorrect and takeoffs don't maintain proper position
-- [ ] **Markup Position on Rotation**: Markups/measurements placed before rotating a page move to incorrect positions after rotation
-- [ ] **Markup Drift on Zoom**: When zooming in/out, markups visually drift from their correct positions until selected (then they snap back). Measurements are stored correctly but rendering position is incorrect during zoom.
+- [ ] **Page Rotation Issues**: When a page is rotated, both scaling calculations and markup positions become incorrect. Markups/measurements placed before rotating move to incorrect positions, and scale calculations don't maintain proper accuracy after rotation.
+- [x] **Markup Drift on Zoom**: When zooming in/out, markups visually drift from their correct positions until selected (then they snap back). Measurements are stored correctly but rendering position is incorrect during zoom. ✅ **FIXED** - Markups now snap back immediately after zoom completes
 
 *Priority: Fix before adding new features*
 
@@ -74,4 +73,4 @@ Version 2.0 - Production Deployment (November 2025)
 
 ---
 
-**Last Updated**: December 2024 - Scale calibration accuracy fixed; added markup zoom drift bug to tracking
+**Last Updated**: December 2024 - Markup zoom drift fixed (markups snap back immediately after zoom); rotation-related bugs remain
