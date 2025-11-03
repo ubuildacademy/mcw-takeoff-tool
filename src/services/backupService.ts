@@ -24,8 +24,15 @@ export class BackupService {
     try {
       console.log('🔄 BACKUP: Starting project export for:', projectId);
       
+      // Use consistent API base URL logic
+      const RUNTIME_API_BASE = import.meta.env.VITE_API_BASE_URL as string | undefined;
+      const API_BASE_URL = RUNTIME_API_BASE
+        || (import.meta.env.PROD
+          ? '/api' // Use relative URLs - Vercel rewrites will proxy to Railway backend
+          : 'http://localhost:4000/api'); // Development: use local backend
+      
       // Use the backend's export endpoint
-      const response = await fetch(`http://localhost:4000/api/projects/${projectId}/export`);
+      const response = await fetch(`${API_BASE_URL}/projects/${projectId}/export`);
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -67,11 +74,18 @@ export class BackupService {
     try {
       console.log('🔄 BACKUP: Starting project import for file:', file.name);
       
+      // Use consistent API base URL logic
+      const RUNTIME_API_BASE = import.meta.env.VITE_API_BASE_URL as string | undefined;
+      const API_BASE_URL = RUNTIME_API_BASE
+        || (import.meta.env.PROD
+          ? '/api' // Use relative URLs - Vercel rewrites will proxy to Railway backend
+          : 'http://localhost:4000/api'); // Development: use local backend
+      
       // Use the backend's import endpoint
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await fetch('http://localhost:4000/api/projects/import', {
+      const response = await fetch(`${API_BASE_URL}/projects/import`, {
         method: 'POST',
         body: formData
       });

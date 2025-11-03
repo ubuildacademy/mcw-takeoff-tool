@@ -6,7 +6,12 @@
 
 import type { VisualSearchMatch, VisualSearchResult } from '../types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+// Use consistent API base URL logic across all services
+const RUNTIME_API_BASE = import.meta.env.VITE_API_BASE_URL as string | undefined;
+const API_BASE_URL = RUNTIME_API_BASE
+  || (import.meta.env.PROD
+    ? '/api' // Use relative URLs - Vercel rewrites will proxy to Railway backend
+    : 'http://localhost:4000/api'); // Development: use local backend
 
 export interface SymbolTemplate {
   id: string;
@@ -37,7 +42,7 @@ export class VisualSearchService {
     pageNumber: number,
     selectionBox: { x: number; y: number; width: number; height: number }
   ): Promise<SymbolTemplate> {
-    const response = await fetch(`${API_BASE_URL}/api/visual-search/extract-template`, {
+    const response = await fetch(`${API_BASE_URL}/visual-search/extract-template`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -67,7 +72,7 @@ export class VisualSearchService {
     template: SymbolTemplate,
     options?: Partial<VisualSearchOptions>
   ): Promise<VisualSearchResult> {
-    const response = await fetch(`${API_BASE_URL}/api/visual-search/search-symbols`, {
+    const response = await fetch(`${API_BASE_URL}/visual-search/search-symbols`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -101,7 +106,7 @@ export class VisualSearchService {
     sheetId: string,
     options?: Partial<VisualSearchOptions>
   ): Promise<{ result: VisualSearchResult; measurementsCreated: number }> {
-    const response = await fetch(`${API_BASE_URL}/api/visual-search/complete-search`, {
+    const response = await fetch(`${API_BASE_URL}/visual-search/complete-search`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -133,7 +138,7 @@ export class VisualSearchService {
    * Get visual search results for a condition
    */
   async getResults(conditionId: string): Promise<{ measurements: any[]; count: number }> {
-    const response = await fetch(`${API_BASE_URL}/api/visual-search/results/${conditionId}`);
+    const response = await fetch(`${API_BASE_URL}/visual-search/results/${conditionId}`);
 
     if (!response.ok) {
       const error = await response.json();

@@ -45,8 +45,24 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ projectId, isVisible, 
   useEffect(() => {
     if (!isVisible || !projectId) return;
 
+    // Use consistent API base URL logic for Socket.IO connection
+    // Socket.IO connects to the base server URL (without /api path)
+    const RUNTIME_API_BASE = import.meta.env.VITE_API_BASE_URL as string | undefined;
+    let socketUrl: string;
+    
+    if (RUNTIME_API_BASE) {
+      // Remove /api suffix if present, Socket.IO doesn't need it
+      socketUrl = RUNTIME_API_BASE.replace(/\/api$/, '');
+    } else if (import.meta.env.PROD) {
+      // In production, use same origin for Socket.IO (backend should handle this)
+      socketUrl = window.location.origin;
+    } else {
+      // Development: use local backend
+      socketUrl = 'http://localhost:4000';
+    }
+
     // Connect to Socket.IO server
-    const newSocket = io('http://localhost:4000', {
+    const newSocket = io(socketUrl, {
       transports: ['websocket', 'polling'], // Add polling as fallback
       withCredentials: true,
       query: { projectId }
