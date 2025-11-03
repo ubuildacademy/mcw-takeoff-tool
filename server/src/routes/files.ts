@@ -81,48 +81,21 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: 'No file uploaded' });
     }
     
-    console.log('=== REQUEST BODY DEBUG ===');
-    console.log('req.body keys:', Object.keys(req.body));
-    console.log('req.body.projectId:', req.body.projectId);
-    console.log('req.body.projectId type:', typeof req.body.projectId);
-    console.log('req.body.projectId length:', req.body.projectId?.length);
-    
     const projectId = (req.body.projectId as string) || 'default';
-    console.log('Final Project ID:', projectId);
-    console.log('Final Project ID type:', typeof projectId);
-    console.log('Final Project ID length:', projectId.length);
+    console.log('Project ID:', projectId);
     
-    // Move file from temp location to project-specific folder
-    const projectDir = path.join(uploadRoot, projectId);
-    fs.ensureDirSync(projectDir);
-    const newPath = path.join(projectDir, req.file.filename);
-    
-    console.log('Moving file from:', req.file.path);
-    console.log('Moving file to:', newPath);
-    
-    try {
-      fs.moveSync(req.file.path, newPath);
-      console.log('File moved successfully');
-      // Update the file path for metadata
-      req.file.path = newPath;
-    } catch (moveError) {
-      console.error('Failed to move file:', moveError);
-      return res.status(500).json({ error: 'Failed to organize file' });
-    }
+    // Read file into buffer
+    const fileBuffer = fs.readFileSync(req.file.path);
     
     // Additional PDF validation
     if (req.file.mimetype === 'application/pdf') {
       console.log('PDF file detected, checking structure...');
-      
-      // Read first few bytes to check PDF header
-      const fs = require('fs');
-      const buffer = fs.readFileSync(req.file.path, { start: 0, end: 10 });
-      const header = buffer.toString('ascii');
-      console.log('PDF header bytes:', header);
-      console.log('PDF header hex:', buffer.toString('hex'));
+      const header = fileBuffer.toString('ascii', 0, 10);
       
       if (!header.startsWith('%PDF')) {
         console.log('ERROR: Invalid PDF header - file may be corrupted');
+        // Clean up temp file
+        fs.removeSync(req.file.path);
         return res.status(400).json({ 
           error: 'Invalid PDF structure - file may be corrupted or not a valid PDF',
           details: {
@@ -133,16 +106,40 @@ router.post('/upload', upload.single('file'), async (req, res) => {
           }
         });
       }
-      
       console.log('PDF header validation passed');
     }
 
+    // Generate unique filename for Supabase Storage
+    const fileId = uuidv4();
+    const fileExtension = path.extname(req.file.originalname);
+    const storagePath = `${projectId}/${fileId}${fileExtension}`;
+    
+    console.log('Uploading to Supabase Storage:', storagePath);
+    
+    // Upload to Supabase Storage bucket (assuming bucket name is 'project-files')
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from('project-files')
+      .upload(storagePath, fileBuffer, {
+        contentType: req.file.mimetype,
+        upsert: false
+      });
+    
+    // Clean up temp file
+    fs.removeSync(req.file.path);
+    
+    if (uploadError) {
+      console.error('Supabase Storage upload error:', uploadError);
+      return res.status(500).json({ error: 'Failed to upload file to storage', details: uploadError.message });
+    }
+    
+    console.log('File uploaded to Supabase Storage successfully');
+
     const fileMeta: StoredFileMeta = {
-      id: uuidv4(),
+      id: fileId,
       projectId,
       originalName: req.file.originalname,
-      filename: req.file.filename,
-      path: req.file.path,
+      filename: `${fileId}${fileExtension}`,
+      path: storagePath, // Store Supabase Storage path instead of local path
       size: req.file.size,
       mimetype: req.file.mimetype,
       uploadedAt: new Date().toISOString()
@@ -158,6 +155,14 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     return res.json({ success: true, file: savedFile });
   } catch (e) {
     console.error('Upload error:', e);
+    // Clean up temp file on error
+    if (req.file?.path) {
+      try {
+        fs.removeSync(req.file.path);
+      } catch (cleanupError) {
+        console.error('Error cleaning up temp file:', cleanupError);
+      }
+    }
     return res.status(500).json({ error: 'Upload failed', details: String(e) });
   }
 });
@@ -179,8 +184,28 @@ router.get('/:fileId', async (req, res) => {
     const files = await storage.getFiles();
     const meta = files.find(f => f.id === fileId);
     if (!meta) return res.status(404).json({ error: 'Not found' });
-    if (!fs.existsSync(meta.path)) return res.status(404).json({ error: 'File missing on disk' });
-    return res.sendFile(meta.path);
+    
+    // Get file from Supabase Storage
+    console.log('Fetching file from Supabase Storage:', meta.path);
+    const { data, error } = await supabase.storage
+      .from('project-files')
+      .download(meta.path);
+    
+    if (error || !data) {
+      console.error('Supabase Storage download error:', error);
+      return res.status(404).json({ error: 'File not found in storage' });
+    }
+    
+    // Convert blob to buffer
+    const arrayBuffer = await data.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    
+    // Set appropriate headers
+    res.setHeader('Content-Type', meta.mimetype);
+    res.setHeader('Content-Disposition', `inline; filename="${meta.originalName}"`);
+    res.setHeader('Content-Length', buffer.length);
+    
+    return res.send(buffer);
   } catch (error) {
     console.error('Error fetching file:', error);
     return res.status(500).json({ error: 'Failed to fetch file' });
@@ -255,16 +280,20 @@ router.delete('/:fileId', async (req, res) => {
       projectId: meta.projectId 
     });
 
-    try { 
-      fs.removeSync(meta.path); 
-      console.log('✅ File removed from disk:', meta.path);
-    } catch (error) {
-      console.error('❌ Error removing file from disk:', error);
+    // Delete from Supabase Storage
+    const { error: storageError } = await supabase.storage
+      .from('project-files')
+      .remove([meta.path]);
+    
+    if (storageError) {
+      console.error('❌ Error removing file from Supabase Storage:', storageError);
       // Continue with metadata removal even if file deletion fails
+    } else {
+      console.log('✅ File removed from Supabase Storage:', meta.path);
     }
     
     await storage.deleteFile(fileId);
-    console.log('✅ File metadata removed from storage');
+    console.log('✅ File metadata removed from database');
     
     return res.json({ success: true });
   } catch (error) {
