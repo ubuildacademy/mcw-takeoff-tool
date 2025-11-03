@@ -3276,6 +3276,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const applyScale = useCallback((scope: 'page' | 'document') => {
     if (!pendingScaleData) return;
     
+    // Ensure calibration is saved when user clicks Apply
+    // This is important because onCalibrationComplete is called before the dialog,
+    // but we want to make sure it's persisted when user explicitly clicks Apply
+    if (onCalibrationComplete && file?.id && currentProjectId) {
+      // For document scope, the calibration already applies to all pages since they share the same file.id
+      // But we should ensure it's saved properly
+      onCalibrationComplete(true, pendingScaleData.scaleFactor, pendingScaleData.unit);
+    }
+    
     if (externalScaleFactor === undefined) {
       setInternalScaleFactor(pendingScaleData.scaleFactor);
     }
@@ -3288,7 +3297,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     setPendingScaleData(null);
     setShowScaleApplicationDialog(false);
-  }, [pendingScaleData, externalScaleFactor, externalUnit, externalIsPageCalibrated]);
+  }, [pendingScaleData, externalScaleFactor, externalUnit, externalIsPageCalibrated, onCalibrationComplete, file?.id, currentProjectId]);
 
   // Handle wheel events for zoom
   const handleWheel = useCallback((event: WheelEvent) => {
