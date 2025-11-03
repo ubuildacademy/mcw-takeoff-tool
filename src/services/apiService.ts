@@ -257,6 +257,39 @@ export const authService = {
   },
 };
 
+// Calibration service
+export const calibrationService = {
+  async getCalibration(projectId: string, sheetId: string, pageNumber?: number) {
+    const params = pageNumber !== undefined ? `?pageNumber=${pageNumber}` : '';
+    const response = await apiClient.get(`/calibrations/project/${projectId}/sheet/${sheetId}${params}`);
+    return response.data.calibration;
+  },
+
+  async getCalibrationsByProject(projectId: string) {
+    const response = await apiClient.get(`/calibrations/project/${projectId}`);
+    return response.data.calibrations || [];
+  },
+
+  async saveCalibration(
+    projectId: string, 
+    sheetId: string, 
+    scaleFactor: number, 
+    unit: string,
+    scope?: 'page' | 'document',
+    pageNumber?: number | null
+  ) {
+    const response = await apiClient.post('/calibrations', {
+      projectId,
+      sheetId,
+      scaleFactor,
+      unit,
+      scope: scope || 'page',
+      pageNumber
+    });
+    return response.data.calibration;
+  }
+};
+
 // User management service (for admin functions)
 export const userService = {
   async createInvitation(email: string, role: 'admin' | 'user') {

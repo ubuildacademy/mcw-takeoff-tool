@@ -29,7 +29,7 @@ interface PDFViewerProps {
   unit?: string;
   onPDFLoaded?: (totalPages: number) => void;
   onCalibrationRequest?: () => void;
-  onCalibrationComplete?: (isCalibrated: boolean, scaleFactor: number, unit: string) => void;
+  onCalibrationComplete?: (isCalibrated: boolean, scaleFactor: number, unit: string, scope?: 'page' | 'document', pageNumber?: number | null) => void;
   searchResults?: SearchResult[];
   currentSearchQuery?: string;
   cutoutMode?: boolean;
@@ -3256,7 +3256,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     };
     
     if (onCalibrationComplete) {
-      onCalibrationComplete(true, newScaleFactor, unit);
+      // Default to 'page' scope for initial calibration (user will choose scope in dialog)
+      // pageNumber will be set when user clicks Apply in the dialog
+      onCalibrationComplete(true, newScaleFactor, unit, 'page', currentPage);
     }
     
     setCalibrationPoints([]);
@@ -3280,9 +3282,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // This is important because onCalibrationComplete is called before the dialog,
     // but we want to make sure it's persisted when user explicitly clicks Apply
     if (onCalibrationComplete && file?.id && currentProjectId) {
-      // For document scope, the calibration already applies to all pages since they share the same file.id
-      // But we should ensure it's saved properly
-      onCalibrationComplete(true, pendingScaleData.scaleFactor, pendingScaleData.unit);
+      // Pass scope and pageNumber so the handler can save with correct pageNumber
+      // scope = 'document' -> pageNumber = null (applies to all pages)
+      // scope = 'page' -> pageNumber = currentPage (page-specific, overwrites document-level for this page)
+      const pageNumber = scope === 'page' ? currentPage : null;
+      onCalibrationComplete(true, pendingScaleData.scaleFactor, pendingScaleData.unit, scope, pageNumber);
     }
     
     if (externalScaleFactor === undefined) {

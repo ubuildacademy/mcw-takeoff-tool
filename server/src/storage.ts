@@ -93,6 +93,18 @@ export interface StoredTakeoffMeasurement {
   netCalculatedValue?: number;
 }
 
+export interface StoredCalibration {
+  id?: string;
+  projectId: string;
+  sheetId: string;
+  pageNumber?: number | null; // null/undefined = document-level, number = page-specific
+  scaleFactor: number;
+  unit: string;
+  calibratedAt: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 class SupabaseStorage {
   // Projects
   async getProjects(): Promise<StoredProject[]> {
@@ -838,6 +850,134 @@ class SupabaseStorage {
       console.error('Error deleting sheet:', error);
       throw error;
     }
+  }
+
+  // Calibrations
+  // Get calibration for a specific page, with fallback to document-level
+  async getCalibration(projectId: string, sheetId: string, pageNumber?: number): Promise<StoredCalibration | null> {
+    // First try to get page-specific calibration
+    if (pageNumber !== undefined) {
+      const { data: pageData, error: pageError } = await supabase
+        .from(TABLES.CALIBRATIONS)
+        .select('*')
+        .eq('project_id', projectId)
+        .eq('sheet_id', sheetId)
+        .eq('page_number', pageNumber)
+        .single();
+
+      if (!pageError && pageData) {
+        return {
+          id: pageData.id,
+          projectId: pageData.project_id,
+          sheetId: pageData.sheet_id,
+          pageNumber: pageData.page_number,
+          scaleFactor: parseFloat(pageData.scale_factor),
+          unit: pageData.unit,
+          calibratedAt: pageData.calibrated_at,
+          createdAt: pageData.created_at,
+          updatedAt: pageData.updated_at
+        };
+      }
+    }
+
+    // Fall back to document-level calibration (page_number IS NULL)
+    const { data, error } = await supabase
+      .from(TABLES.CALIBRATIONS)
+      .select('*')
+      .eq('project_id', projectId)
+      .eq('sheet_id', sheetId)
+      .is('page_number', null)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        // No rows returned - calibration doesn't exist yet
+        return null;
+      }
+      console.error('Error fetching calibration:', error);
+      throw error;
+    }
+
+    if (!data) return null;
+
+    // Map snake_case to camelCase
+    return {
+      id: data.id,
+      projectId: data.project_id,
+      sheetId: data.sheet_id,
+      pageNumber: data.page_number,
+      scaleFactor: parseFloat(data.scale_factor),
+      unit: data.unit,
+      calibratedAt: data.calibrated_at,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at
+    };
+  }
+
+  async saveCalibration(calibration: StoredCalibration): Promise<StoredCalibration> {
+    // Map camelCase to snake_case for database
+    const dbCalibration = {
+      project_id: calibration.projectId,
+      sheet_id: calibration.sheetId,
+      page_number: calibration.pageNumber ?? null, // null for document-level
+      scale_factor: calibration.scaleFactor,
+      unit: calibration.unit,
+      calibrated_at: calibration.calibratedAt,
+      updated_at: new Date().toISOString()
+    };
+
+    const { data, error } = await supabase
+      .from(TABLES.CALIBRATIONS)
+      .upsert(dbCalibration, {
+        onConflict: 'project_id,sheet_id,page_number',
+        ignoreDuplicates: false
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error saving calibration:', error);
+      throw error;
+    }
+
+    // Map snake_case back to camelCase
+    return {
+      id: data.id,
+      projectId: data.project_id,
+      sheetId: data.sheet_id,
+      pageNumber: data.page_number,
+      scaleFactor: parseFloat(data.scale_factor),
+      unit: data.unit,
+      calibratedAt: data.calibrated_at,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at
+    };
+  }
+
+  async getCalibrationsByProject(projectId: string): Promise<StoredCalibration[]> {
+    const { data, error } = await supabase
+      .from(TABLES.CALIBRATIONS)
+      .select('*')
+      .eq('project_id', projectId);
+
+    if (error) {
+      console.error('Error fetching calibrations:', error);
+      throw error;
+    }
+
+    if (!data || data.length === 0) return [];
+
+    // Map snake_case to camelCase
+    return data.map(item => ({
+      id: item.id,
+      projectId: item.project_id,
+      sheetId: item.sheet_id,
+      scaleFactor: parseFloat(item.scale_factor),
+      unit: item.unit,
+      calibratedAt: item.calibrated_at,
+      createdAt: item.created_at,
+      updatedAt: item.updated_at
+    }));
   }
 
   // Seed initial data if empty

@@ -89,6 +89,7 @@ export interface ProjectFile {
 export interface Calibration {
   projectId: string;
   sheetId: string;
+  pageNumber?: number | null; // null/undefined = document-level, number = page-specific
   scaleFactor: number;
   unit: string;
   calibratedAt: string;
