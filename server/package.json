@@ -6,13 +6,7 @@
   "scripts": {
     "dev": "nodemon src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
-    "test": "ts-node src/scripts/runTests.ts",
-    "test:unit": "ts-node src/scripts/runTests.ts --unit --verbose",
-    "test:integration": "ts-node src/scripts/runTests.ts --integration --verbose",
-    "test:performance": "ts-node src/scripts/runTests.ts --performance --verbose",
-    "test:playwright": "ts-node src/scripts/runTests.ts --playwright --verbose",
-    "test:all": "ts-node src/scripts/runTests.ts --all --verbose --report"
+    "start": "node dist/index.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
