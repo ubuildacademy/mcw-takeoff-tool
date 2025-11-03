@@ -48,6 +48,7 @@ Version 2.0 - Production Deployment (November 2025)
 ### Critical (Remaining)
 - [ ] **Page Rotation Issues**: When a page is rotated, both scaling calculations and markup positions become incorrect. Markups/measurements placed before rotating move to incorrect positions, and scale calculations don't maintain proper accuracy after rotation.
 - [ ] **App Crashes with 404 Error After Sheet Labeling**: Application crashes with 404 error after completing sheet labeling process.
+- [ ] **Scale Persistence Issue**: Scale calibration is not properly persisted - when user sets scale and confirms it's correct, but after exiting and re-entering the project, the scale is incorrect and measurements are way off.
 - [x] **Markup Drift on Zoom**: When zooming in/out, markups visually drift from their correct positions until selected (then they snap back). Measurements are stored correctly but rendering position is incorrect during zoom. ✅ **FIXED** - Markups now snap back immediately after zoom completes
 
 *Priority: Fix before adding new features*
