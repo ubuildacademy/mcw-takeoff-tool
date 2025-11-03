@@ -375,26 +375,51 @@ Return your analysis as a JSON array with this exact format for the pages in thi
         userMessageLength: messages[1].content.length
       });
 
-      // Call Ollama API for this batch
-      const response = await axios.post(
-        `${OLLAMA_BASE_URL}/api/chat`,
-        {
-          model: 'gpt-oss:120b',
-          messages,
-          stream: false,
-          options: {
-            temperature: 0.3, // Lower temperature for more consistent results
-            top_p: 0.9
-          }
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${OLLAMA_API_KEY}`,
-            'Content-Type': 'application/json'
-          },
-          timeout: 60000 // 1 minute timeout per batch
+      // Call Ollama API for this batch - try multiple models for reliability
+      const models = [
+        process.env.OLLAMA_MODEL || 'gpt-oss:120b',
+        'gpt-oss:20b',
+        'gpt-oss:7b',
+        'llama3.1:8b'
+      ];
+      
+      let response;
+      let lastError;
+      
+      for (const model of models) {
+        try {
+          console.log(`Trying sheet analysis with model: ${model}`);
+          response = await axios.post(
+            `${OLLAMA_BASE_URL}/api/chat`,
+            {
+              model,
+              messages,
+              stream: false,
+              options: {
+                temperature: 0.3, // Lower temperature for more consistent results
+                top_p: 0.9
+              }
+            },
+            {
+              headers: {
+                'Authorization': `Bearer ${OLLAMA_API_KEY}`,
+                'Content-Type': 'application/json'
+              },
+              timeout: 60000 // 1 minute timeout per batch
+            }
+          );
+          console.log(`✅ Successfully got response from model: ${model}`);
+          break; // Success, exit the loop
+        } catch (error) {
+          console.error(`❌ Model ${model} failed:`, error instanceof Error ? error.message : 'Unknown error');
+          lastError = error;
+          continue; // Try next model
         }
-      );
+      }
+      
+      if (!response) {
+        throw new Error(`All models failed for sheet analysis. Last error: ${lastError instanceof Error ? lastError.message : 'Unknown error'}`);
+      }
 
       const aiResponse = response.data.message?.content || '';
       console.log(`Batch ${Math.floor(batchStart / BATCH_SIZE) + 1} AI response:`, aiResponse.substring(0, 500) + '...');
