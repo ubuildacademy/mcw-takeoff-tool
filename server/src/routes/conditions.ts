@@ -125,6 +125,9 @@ router.post('/', async (req, res) => {
       description,
       laborCost,
       materialCost,
+      equipmentCost,
+      includePerimeter,
+      depth,
       aiGenerated = false,
       // Visual search specific fields
       searchImage,
@@ -181,6 +184,9 @@ router.post('/', async (req, res) => {
       description,
       laborCost,
       materialCost,
+      equipmentCost,
+      includePerimeter: includePerimeter || false,
+      depth,
       aiGenerated,
       // Visual search specific fields
       ...(type === 'visual-search' && {
