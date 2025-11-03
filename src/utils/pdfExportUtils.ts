@@ -14,11 +14,8 @@ interface PageMeasurements {
  */
 async function fetchPDFBytes(fileId: string): Promise<Uint8Array> {
   // Use the correct API base URL instead of hardcoded localhost
-  const RUNTIME_API_BASE = import.meta.env.VITE_API_BASE_URL as string | undefined;
-  const API_BASE_URL = RUNTIME_API_BASE
-    || (import.meta.env.PROD
-      ? '/api' // Use relative URLs - Vercel rewrites will proxy to Railway backend
-      : 'http://localhost:4000/api'); // Development: use local backend
+  const { getApiBaseUrl } = await import('../lib/apiConfig');
+  const API_BASE_URL = getApiBaseUrl();
   
   const response = await fetch(`${API_BASE_URL}/files/${fileId}`);
   if (!response.ok) {

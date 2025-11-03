@@ -74,11 +74,8 @@ class OllamaService {
 
   constructor() {
     // Use consistent API base URL logic - backend proxy avoids CORS issues
-    const RUNTIME_API_BASE = import.meta.env.VITE_API_BASE_URL as string | undefined;
-    const API_BASE_URL = RUNTIME_API_BASE
-      || (import.meta.env.PROD
-        ? '/api' // Use relative URLs - Vercel rewrites will proxy to Railway backend
-        : 'http://localhost:4000/api'); // Development: use local backend
+    const { getApiBaseUrl } = require('../lib/apiConfig');
+    const API_BASE_URL = getApiBaseUrl();
     
     this.baseUrl = `${API_BASE_URL}/ollama`;
     // Note: API key is handled by backend, this is just for reference

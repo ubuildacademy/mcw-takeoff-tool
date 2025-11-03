@@ -1,11 +1,8 @@
 import axios from 'axios';
 import { supabase } from '../lib/supabase';
+import { getApiBaseUrl } from '../lib/apiConfig';
 
-const RUNTIME_API_BASE = import.meta.env.VITE_API_BASE_URL as string | undefined;
-const API_BASE_URL = RUNTIME_API_BASE
-  || (import.meta.env.PROD
-    ? '/api' // Use relative URLs - Vercel rewrites will proxy to Railway backend
-    : 'http://localhost:4000/api'); // Development: use local backend
+const API_BASE_URL = getApiBaseUrl();
 
 // Note: In production, we prefer VITE_API_BASE_URL to be set directly in Vercel
 // If not set, it falls back to '/api' which relies on vercel.json rewrites

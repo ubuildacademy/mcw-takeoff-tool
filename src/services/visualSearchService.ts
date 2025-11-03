@@ -6,12 +6,10 @@
 
 import type { VisualSearchMatch, VisualSearchResult } from '../types';
 
+import { getApiBaseUrl } from '../lib/apiConfig';
+
 // Use consistent API base URL logic across all services
-const RUNTIME_API_BASE = import.meta.env.VITE_API_BASE_URL as string | undefined;
-const API_BASE_URL = RUNTIME_API_BASE
-  || (import.meta.env.PROD
-    ? '/api' // Use relative URLs - Vercel rewrites will proxy to Railway backend
-    : 'http://localhost:4000/api'); // Development: use local backend
+const API_BASE_URL = getApiBaseUrl();
 
 export interface SymbolTemplate {
   id: string;
