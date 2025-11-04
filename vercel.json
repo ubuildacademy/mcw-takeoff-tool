@@ -6,11 +6,35 @@
   "framework": "vite",
   "rewrites": [
     {
-      "source": "/api/(.*)",
-      "destination": "https://mcw-takeoff-tool-production-28fb.up.railway.app/api/$1"
+      "source": "/api/:path*",
+      "destination": "https://mcw-takeoff-tool-production-28fb.up.railway.app/api/:path*"
     },
     {
-      "source": "/(.*)",
+      "source": "/project/:path*",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/app",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/login",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/signup/:path*",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/features",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/pricing",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/",
       "destination": "/index.html"
     }
   ],
