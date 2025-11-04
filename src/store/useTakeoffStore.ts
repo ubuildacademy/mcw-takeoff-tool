@@ -79,6 +79,7 @@ interface TakeoffStore {
   // Calibration actions
   setCalibration: (projectId: string, sheetId: string, scaleFactor: number, unit: string, pageNumber?: number | null) => void;
   getCalibration: (projectId: string, sheetId: string, pageNumber?: number) => Calibration | null;
+  clearProjectCalibrations: (projectId: string) => void;
   
   // Takeoff measurement actions
   addTakeoffMeasurement: (measurement: Omit<TakeoffMeasurement, 'id' | 'timestamp'>) => Promise<string>;
@@ -478,6 +479,17 @@ export const useTakeoffStore = create<TakeoffStore>()(
                 (c.pageNumber === null || c.pageNumber === undefined)
          );
          return docCalibration || null;
+       },
+       
+       clearProjectCalibrations: (projectId) => {
+         set(state => {
+           // Remove all calibrations for this project
+           const filteredCalibrations = state.calibrations.filter(
+             c => c.projectId !== projectId
+           );
+           console.log(`🗑️ CLEAR_PROJECT_CALIBRATIONS: Removed ${state.calibrations.length - filteredCalibrations.length} calibration(s) for project ${projectId}`);
+           return { calibrations: filteredCalibrations };
+         });
        },
       
       addTakeoffMeasurement: async (measurementData) => {

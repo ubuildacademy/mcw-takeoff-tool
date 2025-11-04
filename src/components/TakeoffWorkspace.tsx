@@ -93,6 +93,7 @@ export function TakeoffWorkspace() {
     loadProjectTakeoffMeasurements,
     setCalibration,
     getCalibration,
+    clearProjectCalibrations,
     clearPageAnnotations,
     setDocumentRotation,
     getDocumentRotation,
@@ -149,7 +150,10 @@ export function TakeoffWorkspace() {
            c.sheetId === currentPdfFile.id && 
            c.pageNumber === currentPage
     );
-    if (pageCalibration) return pageCalibration;
+    if (pageCalibration) {
+      if (isDev) console.log('📏 Using page-specific calibration:', { pageNumber: currentPage, scaleFactor: pageCalibration.scaleFactor, unit: pageCalibration.unit });
+      return pageCalibration;
+    }
     
     // Fall back to document-level calibration (pageNumber is null/undefined)
     const docCalibration = calibrations.find(
@@ -157,8 +161,13 @@ export function TakeoffWorkspace() {
            c.sheetId === currentPdfFile.id && 
            (c.pageNumber === null || c.pageNumber === undefined)
     );
+    if (docCalibration) {
+      if (isDev) console.log('📏 Using document-level calibration:', { scaleFactor: docCalibration.scaleFactor, unit: docCalibration.unit });
+    } else {
+      if (isDev) console.log('⚠️ No calibration found for:', { projectId, sheetId: currentPdfFile.id, pageNumber: currentPage, totalCalibrations: calibrations.length });
+    }
     return docCalibration || null;
-  }, [calibrations, projectId, currentPdfFile?.id, currentPage]);
+  }, [calibrations, projectId, currentPdfFile?.id, currentPage, isDev]);
   
   const isPageCalibrated = !!currentCalibration;
   const scaleFactor = currentCalibration?.scaleFactor || 1;
@@ -217,13 +226,18 @@ export function TakeoffWorkspace() {
           const { calibrationService } = await import('../services/apiService');
           const calibrations = await calibrationService.getCalibrationsByProject(projectId);
           
+          // Clear any existing calibrations for this project first to ensure database data is authoritative
+          clearProjectCalibrations(projectId);
+          
           // Sync each calibration to the Zustand store
           calibrations.forEach((cal: Calibration) => {
             setCalibration(cal.projectId, cal.sheetId, cal.scaleFactor, cal.unit, cal.pageNumber ?? null);
           });
           
           if (calibrations.length > 0) {
-            console.log(`✅ Loaded ${calibrations.length} calibration(s) from database`);
+            console.log(`✅ Loaded ${calibrations.length} calibration(s) from database for project ${projectId}`);
+          } else {
+            console.log(`ℹ️ No calibrations found in database for project ${projectId}`);
           }
         } catch (error) {
           console.warn('⚠️ Could not load calibrations from database (will use localStorage):', error);
