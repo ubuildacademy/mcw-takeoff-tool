@@ -574,8 +574,15 @@ export function SheetSidebar({
         setLabelingProgress('Updating sheet labels...');
         setLabelingProgressPercent(95);
         
+        // Type for sheet analysis result
+        interface SheetAnalysisResult {
+          pageNumber: number;
+          sheetNumber: string;
+          sheetName: string;
+        }
+        
         // Filter sheets to save (only those with meaningful data)
-        const sheetsToSave = result.sheets.filter(sheet => 
+        const sheetsToSave = (result.sheets as SheetAnalysisResult[]).filter((sheet: SheetAnalysisResult) => 
           sheet.sheetNumber && sheet.sheetNumber !== 'Unknown' && 
           sheet.sheetName && sheet.sheetName !== 'Unknown'
         );
@@ -595,7 +602,7 @@ export function SheetSidebar({
           setLabelingProgress(`Saving sheet labels (batch ${batchNumber}/${totalBatches})...`);
           
           // Process batch in parallel
-          const batchPromises = batch.map(async (sheet) => {
+          const batchPromises = batch.map(async (sheet: SheetAnalysisResult) => {
             try {
               const sheetId = `${documentId}-${sheet.pageNumber}`;
               await sheetService.updateSheet(sheetId, {
@@ -644,20 +651,19 @@ export function SheetSidebar({
         setLabelingProgressPercent(100);
         console.log(`Successfully saved ${savedCount} sheet labels to database${failedCount > 0 ? ` (${failedCount} failed)` : ''}`);
         
-        // Reload documents to show updated labels
-        if (onDocumentsUpdate) {
-          // Trigger a reload of documents to show the new labels
-          setTimeout(() => {
-            window.location.reload(); // Simple reload to show updated data
-          }, 1000);
-        }
-        
-        // Wait a moment to show completion
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
+        // Show success message first
         const successMessage = failedCount > 0 
           ? `Successfully labeled ${savedCount} out of ${result.totalPages} sheets (${failedCount} failed to save). The AI processed all pages in your document.`
           : `Successfully labeled ${savedCount} out of ${result.totalPages} sheets automatically! The AI processed all pages in your document.`;
+        
+        // Reload documents to show updated labels without full page reload
+        // This prevents the 404 error and keeps the user signed in
+        if (onDocumentsUpdate) {
+          // Reload project documents to get updated sheet labels
+          await loadProjectDocuments();
+        }
+        
+        // Show success message after data is reloaded
         alert(successMessage);
       } else {
         console.warn('No sheet information could be extracted:', result);
