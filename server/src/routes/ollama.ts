@@ -418,7 +418,9 @@ Return your analysis as a JSON array with this exact format for the pages in thi
       }
       
       if (!response) {
-        throw new Error(`All models failed for sheet analysis. Last error: ${lastError instanceof Error ? lastError.message : 'Unknown error'}`);
+        console.error(`❌ All models failed for batch ${Math.floor(batchStart / BATCH_SIZE) + 1}. Last error: ${lastError instanceof Error ? lastError.message : 'Unknown error'}`);
+        console.log(`Skipping batch ${Math.floor(batchStart / BATCH_SIZE) + 1} due to API failure, continuing with next batch...`);
+        continue; // Skip this batch and continue with next one
       }
 
       const aiResponse = response.data.message?.content || '';
