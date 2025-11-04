@@ -574,33 +574,75 @@ export function SheetSidebar({
         setLabelingProgress('Updating sheet labels...');
         setLabelingProgressPercent(95);
         
-        // Save each sheet's information to the database
+        // Filter sheets to save (only those with meaningful data)
+        const sheetsToSave = result.sheets.filter(sheet => 
+          sheet.sheetNumber && sheet.sheetNumber !== 'Unknown' && 
+          sheet.sheetName && sheet.sheetName !== 'Unknown'
+        );
+        
+        console.log(`Saving ${sheetsToSave.length} sheet labels to database...`);
+        
+        // Save sheets in batches to avoid overwhelming the API
+        const BATCH_SIZE = 10; // Save 10 sheets at a time
         let savedCount = 0;
-        for (const sheet of result.sheets) {
-          try {
-            const sheetId = `${documentId}-${sheet.pageNumber}`;
-            
-            // Only save if we have meaningful data (not "Unknown")
-            if (sheet.sheetNumber && sheet.sheetNumber !== 'Unknown' && 
-                sheet.sheetName && sheet.sheetName !== 'Unknown') {
-              
+        let failedCount = 0;
+        
+        for (let i = 0; i < sheetsToSave.length; i += BATCH_SIZE) {
+          const batch = sheetsToSave.slice(i, i + BATCH_SIZE);
+          const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+          const totalBatches = Math.ceil(sheetsToSave.length / BATCH_SIZE);
+          
+          setLabelingProgress(`Saving sheet labels (batch ${batchNumber}/${totalBatches})...`);
+          
+          // Process batch in parallel
+          const batchPromises = batch.map(async (sheet) => {
+            try {
+              const sheetId = `${documentId}-${sheet.pageNumber}`;
               await sheetService.updateSheet(sheetId, {
                 documentId: documentId,
                 pageNumber: sheet.pageNumber,
                 sheetNumber: sheet.sheetNumber,
                 sheetName: sheet.sheetName
               });
-              
-              savedCount++;
+              return { success: true, pageNumber: sheet.pageNumber };
+            } catch (error: any) {
+              // Handle expected 404s gracefully (they're normal for new sheets)
+              if (error.isExpected404) {
+                console.log(`Sheet ${sheet.pageNumber} not found (expected for new document), attempting to create...`);
+                // Try again - the PUT endpoint should create it
+                try {
+                  const sheetId = `${documentId}-${sheet.pageNumber}`;
+                  await sheetService.updateSheet(sheetId, {
+                    documentId: documentId,
+                    pageNumber: sheet.pageNumber,
+                    sheetNumber: sheet.sheetNumber,
+                    sheetName: sheet.sheetName
+                  });
+                  return { success: true, pageNumber: sheet.pageNumber };
+                } catch (retryError) {
+                  console.error(`Failed to save sheet ${sheet.pageNumber} after retry:`, retryError);
+                  return { success: false, pageNumber: sheet.pageNumber };
+                }
+              } else {
+                console.error(`Failed to save sheet ${sheet.pageNumber}:`, error);
+                return { success: false, pageNumber: sheet.pageNumber };
+              }
             }
-          } catch (error) {
-            console.error(`Failed to save sheet ${sheet.pageNumber}:`, error);
+          });
+          
+          const batchResults = await Promise.all(batchPromises);
+          savedCount += batchResults.filter(r => r.success).length;
+          failedCount += batchResults.filter(r => !r.success).length;
+          
+          // Small delay between batches to avoid overwhelming the API
+          if (i + BATCH_SIZE < sheetsToSave.length) {
+            await new Promise(resolve => setTimeout(resolve, 100));
           }
         }
         
         setLabelingProgress('Complete!');
         setLabelingProgressPercent(100);
-        console.log(`Successfully saved ${savedCount} sheet labels to database`);
+        console.log(`Successfully saved ${savedCount} sheet labels to database${failedCount > 0 ? ` (${failedCount} failed)` : ''}`);
         
         // Reload documents to show updated labels
         if (onDocumentsUpdate) {
@@ -613,7 +655,10 @@ export function SheetSidebar({
         // Wait a moment to show completion
         await new Promise(resolve => setTimeout(resolve, 1000));
         
-        alert(`Successfully labeled ${savedCount} out of ${result.totalPages} sheets automatically! The AI processed all pages in your document.`);
+        const successMessage = failedCount > 0 
+          ? `Successfully labeled ${savedCount} out of ${result.totalPages} sheets (${failedCount} failed to save). The AI processed all pages in your document.`
+          : `Successfully labeled ${savedCount} out of ${result.totalPages} sheets automatically! The AI processed all pages in your document.`;
+        alert(successMessage);
       } else {
         console.warn('No sheet information could be extracted:', result);
         alert('Could not automatically extract sheet information. The AI may need more context or the document structure may be unclear.');
