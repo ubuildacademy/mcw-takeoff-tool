@@ -56,10 +56,10 @@ const ScaleApplicationDialog: React.FC<ScaleApplicationDialogProps> = ({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="page">
-              Current page only (Page {currentPage} of {totalPages})
+              This sheet only (Page {currentPage} of {totalPages})
             </SelectItem>
             <SelectItem value="document">
-              Entire document ({totalPages} pages)
+              All sheets in project
             </SelectItem>
           </SelectContent>
         </Select>
@@ -69,7 +69,7 @@ const ScaleApplicationDialog: React.FC<ScaleApplicationDialogProps> = ({
         <p className="text-sm text-gray-600">
           <strong>Current page:</strong> {currentPage} of {totalPages}<br/>
           <strong>Scale factor:</strong> 1 pixel = {scaleFactor.toFixed(6)} {unit}<br/>
-          <strong>Scope:</strong> {selectedScope === 'page' ? 'Current page only' : 'All pages in document'}
+          <strong>Scope:</strong> {selectedScope === 'page' ? 'This sheet only (page-specific)' : 'All sheets in project (each sheet will use this scale)'}
         </p>
       </div>
     </BaseDialog>

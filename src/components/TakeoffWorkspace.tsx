@@ -651,29 +651,63 @@ export function TakeoffWorkspace() {
     pageNumber?: number | null
   ) => {
     if (currentPdfFile && projectId) {
-      // Determine pageNumber based on scope
-      // scope = 'document' -> pageNumber = null (applies to all pages)
-      // scope = 'page' -> pageNumber = currentPage or provided pageNumber (page-specific)
-      const calibrationPageNumber = (scope === 'document') ? null : (pageNumber ?? currentPage);
-      
-      // Save to Zustand store (for immediate UI updates)
-      setCalibration(projectId, currentPdfFile.id, scaleFactor, unit, calibrationPageNumber);
-      
-      // Also save to database for persistence across sessions
       try {
         const { calibrationService } = await import('../services/apiService');
-        await calibrationService.saveCalibration(
-          projectId, 
-          currentPdfFile.id, 
-          scaleFactor, 
-          unit,
-          scope,
-          calibrationPageNumber
-        );
-        console.log('✅ Calibration saved to database', { scope, pageNumber: calibrationPageNumber });
+        
+        if (scope === 'document') {
+          // "Entire document" = save calibration for ALL sheets/files in the project
+          // Get all PDF files in the project
+          const filesRes = await fileService.getProjectFiles(projectId);
+          const pdfFiles = (filesRes.files || []).filter((file: any) => file.mimetype === 'application/pdf');
+          
+          // Save calibration for each sheet with pageNumber = null (document-level for that sheet)
+          const savePromises = pdfFiles.map((file: any) => {
+            // Save to Zustand store (for immediate UI updates)
+            setCalibration(projectId, file.id, scaleFactor, unit, null);
+            
+            // Save to database
+            return calibrationService.saveCalibration(
+              projectId, 
+              file.id, 
+              scaleFactor, 
+              unit,
+              'document',
+              null
+            );
+          });
+          
+          await Promise.all(savePromises);
+          console.log(`✅ Calibration saved to database for entire project (${pdfFiles.length} sheet(s))`, { scope, scaleFactor, unit });
+        } else {
+          // "This sheet only" = save calibration for just the current sheet
+          // scope = 'page' -> pageNumber = currentPage or provided pageNumber (page-specific)
+          const calibrationPageNumber = pageNumber ?? currentPage;
+          
+          // Save to Zustand store (for immediate UI updates)
+          setCalibration(projectId, currentPdfFile.id, scaleFactor, unit, calibrationPageNumber);
+          
+          // Save to database
+          await calibrationService.saveCalibration(
+            projectId, 
+            currentPdfFile.id, 
+            scaleFactor, 
+            unit,
+            'page',
+            calibrationPageNumber
+          );
+          console.log('✅ Calibration saved to database for this sheet only', { scope, pageNumber: calibrationPageNumber, sheetId: currentPdfFile.id });
+        }
       } catch (error) {
         console.error('❌ Failed to save calibration to database:', error);
-        // Don't block user - calibration is still saved in localStorage
+        // If database save fails, still update the store for immediate UI feedback
+        // but user will need to recalibrate if they refresh
+        if (scope === 'document') {
+          // If document scope failed, at least save for current sheet
+          setCalibration(projectId, currentPdfFile.id, scaleFactor, unit, null);
+        } else {
+          const calibrationPageNumber = pageNumber ?? currentPage;
+          setCalibration(projectId, currentPdfFile.id, scaleFactor, unit, calibrationPageNumber);
+        }
       }
     }
   };
