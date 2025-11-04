@@ -3,7 +3,7 @@
   "outputDirectory": "dist",
   "devCommand": "npm run dev",
   "installCommand": "NODE_ENV=development npm install",
-  "framework": null,
+  "framework": "vite",
   "rewrites": [
     {
       "source": "/api/(.*)",
