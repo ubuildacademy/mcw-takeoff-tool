@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 
 import { useParams, useNavigate } from 'react-router-dom';
 import PDFViewer from './PDFViewer';
@@ -106,6 +106,9 @@ export function TakeoffWorkspace() {
     setLastViewedDocumentId
   } = useTakeoffStore();
   
+  // Subscribe to calibrations array to make calibration retrieval reactive
+  const calibrations = useTakeoffStore((state) => state.calibrations);
+  
   const selectedCondition = getSelectedCondition();
 
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
@@ -135,17 +138,28 @@ export function TakeoffWorkspace() {
   
   // Scale is now managed by the store
   
-  // Current calibration state for the active document/page
-  const getCurrentCalibration = () => {
+  // Current calibration state for the active document/page - reactive to calibrations array changes
+  const currentCalibration = useMemo(() => {
     if (!currentPdfFile || !projectId) {
       return null;
     }
-    // Get calibration for current page (will fallback to document-level if page-specific doesn't exist)
-    const calibration = getCalibration(projectId, currentPdfFile.id, currentPage);
-    return calibration;
-  };
+    // First try to get page-specific calibration
+    const pageCalibration = calibrations.find(
+      c => c.projectId === projectId && 
+           c.sheetId === currentPdfFile.id && 
+           c.pageNumber === currentPage
+    );
+    if (pageCalibration) return pageCalibration;
+    
+    // Fall back to document-level calibration (pageNumber is null/undefined)
+    const docCalibration = calibrations.find(
+      c => c.projectId === projectId && 
+           c.sheetId === currentPdfFile.id && 
+           (c.pageNumber === null || c.pageNumber === undefined)
+    );
+    return docCalibration || null;
+  }, [calibrations, projectId, currentPdfFile?.id, currentPage]);
   
-  const currentCalibration = getCurrentCalibration();
   const isPageCalibrated = !!currentCalibration;
   const scaleFactor = currentCalibration?.scaleFactor || 1;
   const unit = currentCalibration?.unit || 'ft';
