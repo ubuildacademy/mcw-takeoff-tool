@@ -1073,7 +1073,10 @@ export const useTakeoffStore = create<TakeoffStore>()(
         // Persist conditions to localStorage for better UX and faster loading
         conditions: state.conditions,
         measurements: state.measurements,
-        calibrations: state.calibrations,
+        // DO NOT persist calibrations to localStorage - they should ONLY be in the database
+        // Calibrations are loaded from database when project opens and synced to store for reactive UI
+        // This ensures database is the single source of truth
+        // calibrations: state.calibrations, // Removed - database only
         takeoffMeasurements: state.takeoffMeasurements,
         markupsByPage: state.markupsByPage,
         annotations: state.annotations,

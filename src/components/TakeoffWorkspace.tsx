@@ -226,10 +226,12 @@ export function TakeoffWorkspace() {
           const { calibrationService } = await import('../services/apiService');
           const calibrations = await calibrationService.getCalibrationsByProject(projectId);
           
-          // Clear any existing calibrations for this project first to ensure database data is authoritative
+          // Clear any existing calibrations for this project first (in case of stale localStorage data from before)
+          // Note: Going forward, calibrations are NOT persisted to localStorage - database is the only source of truth
           clearProjectCalibrations(projectId);
           
-          // Sync each calibration to the Zustand store
+          // Sync each calibration from database to the Zustand store (for reactive UI)
+          // The store is just a cache - database is authoritative
           calibrations.forEach((cal: Calibration) => {
             setCalibration(cal.projectId, cal.sheetId, cal.scaleFactor, cal.unit, cal.pageNumber ?? null);
           });
@@ -240,8 +242,9 @@ export function TakeoffWorkspace() {
             console.log(`ℹ️ No calibrations found in database for project ${projectId}`);
           }
         } catch (error) {
-          console.warn('⚠️ Could not load calibrations from database (will use localStorage):', error);
-          // Fallback to localStorage is handled by Zustand persist middleware
+          console.error('❌ Failed to load calibrations from database:', error);
+          // No localStorage fallback - calibrations must come from database
+          // If database fails, user will need to recalibrate
         }
       };
       
