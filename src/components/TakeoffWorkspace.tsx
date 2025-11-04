@@ -654,11 +654,11 @@ export function TakeoffWorkspace() {
       return;
     }
     
-    // Check file size before uploading (50MB = 50 * 1024 * 1024 bytes)
-    const maxSizeMB = 50;
+    // Check file size before uploading (1GB = 1024 * 1024 * 1024 bytes)
+    const maxSizeMB = 1024;
     const maxSizeBytes = maxSizeMB * 1024 * 1024;
     if (file.size > maxSizeBytes) {
-      alert(`File too large! Maximum size is ${maxSizeMB}MB. Your file is ${(file.size / (1024 * 1024)).toFixed(2)}MB.\n\nPlease contact your admin to increase the Supabase Storage file size limit.`);
+      alert(`File too large! Maximum size is ${maxSizeMB}MB (1GB). Your file is ${(file.size / (1024 * 1024)).toFixed(2)}MB.\n\nPlease contact your admin to increase the Supabase Storage file size limit.`);
       return;
     }
     

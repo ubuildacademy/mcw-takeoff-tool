@@ -298,7 +298,7 @@ export function ProjectCreationDialog({ open, onOpenChange, onCreated }: Project
             <FileUpload
               onFileSelect={handleFileUpload}
               acceptedTypes={['.pdf', '.dwg', '.jpg', '.jpeg', '.png']}
-              maxSize={50}
+              maxSize={1024}
               multiple={true}
             />
           </div>
