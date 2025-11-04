@@ -3,15 +3,32 @@
   "outputDirectory": "dist",
   "devCommand": "npm run dev",
   "installCommand": "NODE_ENV=development npm install",
-  "framework": "vite",
+  "framework": null,
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "https://mcw-takeoff-tool-production-28fb.up.railway.app/api/$1"
+    }
+  ],
   "routes": [
     {
       "src": "/api/(.*)",
       "dest": "https://mcw-takeoff-tool-production-28fb.up.railway.app/api/$1"
     },
     {
+      "src": "/assets/(.*)",
+      "dest": "/assets/$1"
+    },
+    {
+      "src": "/(.*\\.(js|css|ico|png|jpg|jpeg|gif|svg|woff|woff2|ttf|eot|mjs))",
+      "dest": "/$1"
+    },
+    {
       "src": "/(.*)",
-      "dest": "/index.html"
+      "dest": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache"
+      }
     }
   ],
   "cleanUrls": true,
