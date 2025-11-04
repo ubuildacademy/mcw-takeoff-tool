@@ -11,7 +11,7 @@ import { ProfitMarginDialog } from './ProfitMarginDialog';
 import { AITakeoffAgent } from './AITakeoffAgent';
 
 import { useTakeoffStore } from '../store/useTakeoffStore';
-import type { TakeoffCondition, Sheet, ProjectFile, PDFDocument } from '../types';
+import type { TakeoffCondition, Sheet, ProjectFile, PDFDocument, Calibration } from '../types';
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Separator } from "./ui/separator";
@@ -204,7 +204,7 @@ export function TakeoffWorkspace() {
           const calibrations = await calibrationService.getCalibrationsByProject(projectId);
           
           // Sync each calibration to the Zustand store
-          calibrations.forEach(cal => {
+          calibrations.forEach((cal: Calibration) => {
             setCalibration(cal.projectId, cal.sheetId, cal.scaleFactor, cal.unit, cal.pageNumber ?? null);
           });
           
