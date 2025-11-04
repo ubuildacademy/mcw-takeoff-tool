@@ -7,7 +7,7 @@ import { supabase, TABLES } from '../supabase';
 // Configure multer for file uploads
 const upload = multer({ 
   storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 } // 50MB limit
+  limits: { fileSize: 1024 * 1024 * 1024 } // 1GB limit
 });
 
 const router = express.Router();
