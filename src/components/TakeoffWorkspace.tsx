@@ -201,9 +201,37 @@ export function TakeoffWorkspace() {
             if (match) target = match;
           }
           if (target) {
+            // Restore page, scale, rotation, and location immediately before setting currentPdfFile
+            // This ensures the correct page is set before the PDF viewer initializes
+            const savedPage = getDocumentPage(target.id);
+            const savedScale = getDocumentScale(target.id);
+            const savedRotation = getDocumentRotation(target.id);
+            const savedLocation = getDocumentLocation(target.id);
+            
+            if (isDev) console.log('🔄 Restoring document state immediately:', {
+              documentId: target.id,
+              savedPage,
+              savedScale,
+              savedRotation,
+              savedLocation
+            });
+            
+            setCurrentPage(savedPage);
+            setSelectedPageNumber(savedPage); // Keep selectedPageNumber in sync
+            setScale(savedScale);
+            setRotation(savedRotation);
+            
             setCurrentPdfFile(target);
             setSelectedDocumentId(target.id);
-            // Page restored in downstream effect from store
+            
+            // Restore scroll position after a short delay (once PDF is rendered)
+            if (savedLocation.x !== 0 || savedLocation.y !== 0) {
+              setTimeout(() => {
+                if ((window as any).restoreScrollPosition) {
+                  (window as any).restoreScrollPosition(savedLocation.x, savedLocation.y);
+                }
+              }, 200);
+            }
           }
         }
       } catch (e: any) {
@@ -529,6 +557,8 @@ export function TakeoffWorkspace() {
   }, [projectId, loadProjectDocuments]);
 
   // Initialize rotation, page, scale, and location from store when currentPdfFile changes
+  // Note: This is a backup restoration - the main restoration happens in loadFiles() before setting currentPdfFile
+  // This ensures state is restored even if currentPdfFile is set from other sources (e.g., sheet selection)
   useEffect(() => {
     if (currentPdfFile) {
       const savedRotation = getDocumentRotation(currentPdfFile.id);
@@ -536,21 +566,32 @@ export function TakeoffWorkspace() {
       const savedScale = getDocumentScale(currentPdfFile.id);
       const savedLocation = getDocumentLocation(currentPdfFile.id);
       
-      if (isDev) console.log('🔄 Restoring document state:', {
+      if (isDev) console.log('🔄 Restoring document state (backup):', {
         documentId: currentPdfFile.id,
         savedRotation,
         savedPage,
         savedScale,
-        savedLocation
+        savedLocation,
+        currentPage, // Log current to see if it needs updating
+        currentRotation: rotation,
+        currentScale: scale
       });
       
-      setRotation(savedRotation);
-      setCurrentPage(savedPage);
-      setScale(savedScale);
+      // Only restore if values are different to avoid unnecessary updates
+      if (savedPage !== currentPage) {
+        setCurrentPage(savedPage);
+        setSelectedPageNumber(savedPage); // Keep selectedPageNumber in sync
+      }
+      if (savedRotation !== rotation) {
+        setRotation(savedRotation);
+      }
+      if (savedScale !== scale) {
+        setScale(savedScale);
+      }
       
       // Scroll position will be restored when PDF is fully rendered via handlePDFRendered
     }
-  }, [currentPdfFile, getDocumentRotation, getDocumentPage, getDocumentScale, getDocumentLocation]);
+  }, [currentPdfFile, getDocumentRotation, getDocumentPage, getDocumentScale, getDocumentLocation, currentPage, rotation, scale]);
 
   const handleExportStatusUpdate = (type: 'excel' | 'pdf' | null, progress: number) => {
     setExportStatus({type, progress});
