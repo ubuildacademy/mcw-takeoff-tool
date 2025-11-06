@@ -77,7 +77,7 @@ interface TakeoffStore {
   deleteMeasurement: (id: string) => void;
   
   // Calibration actions
-  setCalibration: (projectId: string, sheetId: string, scaleFactor: number, unit: string, pageNumber?: number | null) => void;
+  setCalibration: (projectId: string, sheetId: string, scaleFactor: number, unit: string, pageNumber?: number | null, viewportWidth?: number | null, viewportHeight?: number | null, rotation?: number | null) => void;
   getCalibration: (projectId: string, sheetId: string, pageNumber?: number) => Calibration | null;
   clearProjectCalibrations: (projectId: string) => void;
   
@@ -418,8 +418,8 @@ export const useTakeoffStore = create<TakeoffStore>()(
         });
       },
       
-             setCalibration: (projectId, sheetId, scaleFactor, unit, pageNumber?: number | null) => {
-         console.log('💾 SET_CALIBRATION: Setting calibration', { projectId, sheetId, scaleFactor, unit, pageNumber });
+             setCalibration: (projectId, sheetId, scaleFactor, unit, pageNumber?: number | null, viewportWidth?: number | null, viewportHeight?: number | null, rotation?: number | null) => {
+         console.log('💾 SET_CALIBRATION: Setting calibration', { projectId, sheetId, scaleFactor, unit, pageNumber, viewportWidth, viewportHeight, rotation });
          set(state => {
            // Find existing calibration with same projectId, sheetId, and pageNumber
            const existingIndex = state.calibrations.findIndex(
@@ -439,6 +439,9 @@ export const useTakeoffStore = create<TakeoffStore>()(
                pageNumber: pageNumber ?? null,
                scaleFactor, 
                unit, 
+               viewportWidth: viewportWidth ?? null,
+               viewportHeight: viewportHeight ?? null,
+               rotation: rotation ?? null,
                calibratedAt: new Date().toISOString() 
              };
              console.log('💾 SET_CALIBRATION: Updated existing calibration', updatedCalibrations[existingIndex]);
@@ -451,6 +454,9 @@ export const useTakeoffStore = create<TakeoffStore>()(
                pageNumber: pageNumber ?? null,
                scaleFactor, 
                unit, 
+               viewportWidth: viewportWidth ?? null,
+               viewportHeight: viewportHeight ?? null,
+               rotation: rotation ?? null,
                calibratedAt: new Date().toISOString() 
              };
              console.log('💾 SET_CALIBRATION: Added new calibration', newCalibration);
