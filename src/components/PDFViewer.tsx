@@ -261,6 +261,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const renderTaskRef = useRef<any>(null);
   const isRenderingRef = useRef<boolean>(false);
   const [isComponentMounted, setIsComponentMounted] = useState(false);
+  const prevCalibratingRef = useRef(false);
   
   // Notify parent component of measurement state changes
   useEffect(() => {
@@ -268,6 +269,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       onMeasurementStateChange(isMeasuring, isCalibrating, measurementType, isOrthoSnapping);
     }
   }, [isMeasuring, isCalibrating, measurementType, isOrthoSnapping, onMeasurementStateChange]);
+
+  // Enable ortho snapping by default when calibration mode starts
+  useEffect(() => {
+    // Only enable ortho snapping when entering calibration mode (transition from false to true)
+    if (isCalibrating && !prevCalibratingRef.current && !isOrthoSnapping) {
+      setIsOrthoSnapping(true);
+    }
+    prevCalibratingRef.current = isCalibrating;
+  }, [isCalibrating, isOrthoSnapping]);
 
   // Restore calibration viewport ref when calibration is loaded from database
   // This is critical for accurate measurements after re-entering a project
