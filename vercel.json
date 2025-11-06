@@ -6,29 +6,12 @@
   "framework": "vite",
   "rewrites": [
     {
-      "source": "/api/(.*)",
-      "destination": "https://mcw-takeoff-tool-production-28fb.up.railway.app/api/$1"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "https://mcw-takeoff-tool-production-28fb.up.railway.app/api/$1"
+      "source": "/api/:path*",
+      "destination": "https://mcw-takeoff-tool-production-28fb.up.railway.app/api/:path*"
     },
     {
-      "src": "/assets/(.*)",
-      "dest": "/assets/$1"
-    },
-    {
-      "src": "/(.*\\.(js|css|ico|png|jpg|jpeg|gif|svg|woff|woff2|ttf|eot|mjs))",
-      "dest": "/$1"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/index.html",
-      "headers": {
-        "Cache-Control": "no-cache"
-      }
+      "source": "/((?!api_next|assets.*\\..*).*)",
+      "destination": "/index.html"
     }
   ],
   "cleanUrls": true,
