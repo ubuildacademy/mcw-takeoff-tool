@@ -60,6 +60,14 @@ export function TakeoffWorkspace() {
     console.log('🔍 TakeoffWorkspace: current URL:', window.location.href);
   }
   
+  // Redirect if projectId is missing or invalid
+  useEffect(() => {
+    if (!projectId) {
+      console.error('❌ TakeoffWorkspace: projectId is missing, redirecting to /app');
+      navigate('/app', { replace: true });
+      return;
+    }
+  }, [projectId, navigate]);
   
   const [selectedSheet, setSelectedSheet] = useState<Sheet | null>(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);

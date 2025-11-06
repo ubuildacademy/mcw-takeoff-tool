@@ -185,7 +185,7 @@ router.post('/', async (req, res) => {
       laborCost,
       materialCost,
       equipmentCost,
-      includePerimeter: includePerimeter || false,
+      includePerimeter: includePerimeter !== undefined ? includePerimeter : false,
       depth,
       // Note: aiGenerated is not included as the column doesn't exist in the database
       // aiGenerated,
@@ -231,6 +231,8 @@ router.put('/:id', async (req, res) => {
       description,
       laborCost,
       materialCost,
+      includePerimeter,
+      depth,
       // Note: aiGenerated column doesn't exist in database, so it's not included
       // Visual search specific fields
       searchImage,
@@ -267,6 +269,8 @@ router.put('/:id', async (req, res) => {
       ...(description !== undefined && { description }),
       ...(laborCost !== undefined && { laborCost }),
       ...(materialCost !== undefined && { materialCost }),
+      ...(includePerimeter !== undefined && { includePerimeter }),
+      ...(depth !== undefined && { depth }),
       // Note: aiGenerated not included as column doesn't exist in database
       // Visual search specific fields
       ...(searchImage !== undefined && { searchImage }),
