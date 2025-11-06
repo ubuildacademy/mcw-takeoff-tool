@@ -103,6 +103,7 @@ export interface StoredCalibration {
   calibratedAt: string;
   viewportWidth?: number | null; // PDF viewport width at scale=1 when calibration was performed
   viewportHeight?: number | null; // PDF viewport height at scale=1 when calibration was performed
+  rotation?: number | null; // PDF page rotation (degrees: 0, 90, 180, 270) used during calibration
   createdAt?: string;
   updatedAt?: string;
 }
@@ -878,6 +879,7 @@ class SupabaseStorage {
           calibratedAt: pageData.calibrated_at,
           viewportWidth: pageData.viewport_width ? parseFloat(pageData.viewport_width) : null,
           viewportHeight: pageData.viewport_height ? parseFloat(pageData.viewport_height) : null,
+          rotation: pageData.rotation !== null && pageData.rotation !== undefined ? parseInt(pageData.rotation) : null,
           createdAt: pageData.created_at,
           updatedAt: pageData.updated_at
         };
@@ -915,6 +917,7 @@ class SupabaseStorage {
       calibratedAt: data.calibrated_at,
       viewportWidth: data.viewport_width ? parseFloat(data.viewport_width) : null,
       viewportHeight: data.viewport_height ? parseFloat(data.viewport_height) : null,
+      rotation: data.rotation !== null && data.rotation !== undefined ? parseInt(data.rotation) : null,
       createdAt: data.created_at,
       updatedAt: data.updated_at
     };
@@ -931,6 +934,7 @@ class SupabaseStorage {
       calibrated_at: calibration.calibratedAt,
       viewport_width: calibration.viewportWidth ?? null,
       viewport_height: calibration.viewportHeight ?? null,
+      rotation: calibration.rotation ?? null,
       updated_at: new Date().toISOString()
     };
 
@@ -959,6 +963,7 @@ class SupabaseStorage {
       calibratedAt: data.calibrated_at,
       viewportWidth: data.viewport_width ? parseFloat(data.viewport_width) : null,
       viewportHeight: data.viewport_height ? parseFloat(data.viewport_height) : null,
+      rotation: data.rotation !== null && data.rotation !== undefined ? parseInt(data.rotation) : null,
       createdAt: data.created_at,
       updatedAt: data.updated_at
     };
@@ -989,6 +994,7 @@ class SupabaseStorage {
       calibratedAt: item.calibrated_at,
       viewportWidth: item.viewport_width ? parseFloat(item.viewport_width) : null,
       viewportHeight: item.viewport_height ? parseFloat(item.viewport_height) : null,
+      rotation: item.rotation !== null && item.rotation !== undefined ? parseInt(item.rotation) : null,
       createdAt: item.created_at,
       updatedAt: item.updated_at
     }));

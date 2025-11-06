@@ -10,7 +10,7 @@
       "destination": "https://mcw-takeoff-tool-production-28fb.up.railway.app/api/:path*"
     },
     {
-      "source": "/((?!api_next|assets.*\\..*).*)",
+      "source": "/(.*)",
       "destination": "/index.html"
     }
   ],
