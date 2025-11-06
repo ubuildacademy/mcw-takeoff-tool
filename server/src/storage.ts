@@ -968,10 +968,12 @@ class SupabaseStorage {
     if (!data || data.length === 0) return [];
 
     // Map snake_case to camelCase
+    // CRITICAL: Include pageNumber - it's essential for distinguishing page-specific vs document-level calibrations
     return data.map(item => ({
       id: item.id,
       projectId: item.project_id,
       sheetId: item.sheet_id,
+      pageNumber: item.page_number, // null for document-level, number for page-specific
       scaleFactor: parseFloat(item.scale_factor),
       unit: item.unit,
       calibratedAt: item.calibrated_at,

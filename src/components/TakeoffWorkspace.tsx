@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 
 import { useParams, useNavigate } from 'react-router-dom';
 import PDFViewer from './PDFViewer';
@@ -140,15 +140,20 @@ export function TakeoffWorkspace() {
   // Scale is now managed by the store
   
   // Current calibration state for the active document/page - reactive to calibrations array changes
+  // CRITICAL: Page-specific calibrations take precedence over document-level calibrations
+  // This allows users to override document-level calibration for specific pages
   const currentCalibration = useMemo(() => {
     if (!currentPdfFile || !projectId) {
       return null;
     }
-    // First try to get page-specific calibration
+    // First try to get page-specific calibration (pageNumber is a number)
+    // This takes precedence over document-level calibration
     const pageCalibration = calibrations.find(
       c => c.projectId === projectId && 
            c.sheetId === currentPdfFile.id && 
-           c.pageNumber === currentPage
+           c.pageNumber === currentPage &&
+           c.pageNumber !== null &&
+           c.pageNumber !== undefined
     );
     if (pageCalibration) {
       if (isDev) console.log('📏 Using page-specific calibration:', { pageNumber: currentPage, scaleFactor: pageCalibration.scaleFactor, unit: pageCalibration.unit });
@@ -156,6 +161,7 @@ export function TakeoffWorkspace() {
     }
     
     // Fall back to document-level calibration (pageNumber is null/undefined)
+    // This applies to all pages of the sheet unless overridden by page-specific calibration
     const docCalibration = calibrations.find(
       c => c.projectId === projectId && 
            c.sheetId === currentPdfFile.id && 
@@ -556,11 +562,16 @@ export function TakeoffWorkspace() {
     }
   }, [projectId, loadProjectDocuments]);
 
+  // Track the last file ID we restored state for to prevent multiple restorations
+  const lastRestoredFileIdRef = useRef<string | null>(null);
+  
   // Initialize rotation, page, scale, and location from store when currentPdfFile changes
   // Note: This is a backup restoration - the main restoration happens in loadFiles() before setting currentPdfFile
   // This ensures state is restored even if currentPdfFile is set from other sources (e.g., sheet selection)
+  // CRITICAL: Only restore once per file change, and only if the file actually changed
+  // This prevents overriding user's current page/zoom/position during operations like calibration
   useEffect(() => {
-    if (currentPdfFile) {
+    if (currentPdfFile && currentPdfFile.id !== lastRestoredFileIdRef.current) {
       const savedRotation = getDocumentRotation(currentPdfFile.id);
       const savedPage = getDocumentPage(currentPdfFile.id);
       const savedScale = getDocumentScale(currentPdfFile.id);
@@ -577,21 +588,18 @@ export function TakeoffWorkspace() {
         currentScale: scale
       });
       
-      // Only restore if values are different to avoid unnecessary updates
-      if (savedPage !== currentPage) {
-        setCurrentPage(savedPage);
-        setSelectedPageNumber(savedPage); // Keep selectedPageNumber in sync
-      }
-      if (savedRotation !== rotation) {
-        setRotation(savedRotation);
-      }
-      if (savedScale !== scale) {
-        setScale(savedScale);
-      }
+      // Restore state only if file changed - don't override during operations
+      setCurrentPage(savedPage);
+      setSelectedPageNumber(savedPage); // Keep selectedPageNumber in sync
+      setRotation(savedRotation);
+      setScale(savedScale);
+      
+      // Mark this file as restored
+      lastRestoredFileIdRef.current = currentPdfFile.id;
       
       // Scroll position will be restored when PDF is fully rendered via handlePDFRendered
     }
-  }, [currentPdfFile, getDocumentRotation, getDocumentPage, getDocumentScale, getDocumentLocation, currentPage, rotation, scale]);
+  }, [currentPdfFile?.id, getDocumentRotation, getDocumentPage, getDocumentScale, getDocumentLocation]);
 
   const handleExportStatusUpdate = (type: 'excel' | 'pdf' | null, progress: number) => {
     setExportStatus({type, progress});
@@ -692,6 +700,14 @@ export function TakeoffWorkspace() {
     pageNumber?: number | null
   ) => {
     if (currentPdfFile && projectId) {
+      // CRITICAL: Save current page state before any calibration operations
+      // This ensures the page doesn't get reset during calibration save operations
+      const currentPageToPreserve = currentPage;
+      if (currentPdfFile) {
+        setDocumentPage(currentPdfFile.id, currentPageToPreserve);
+        if (isDev) console.log('💾 Preserving page state before calibration save:', { documentId: currentPdfFile.id, page: currentPageToPreserve });
+      }
+      
       try {
         const { calibrationService } = await import('../services/apiService');
         
@@ -749,6 +765,15 @@ export function TakeoffWorkspace() {
           const calibrationPageNumber = pageNumber ?? currentPage;
           setCalibration(projectId, currentPdfFile.id, scaleFactor, unit, calibrationPageNumber);
         }
+      }
+      
+      // CRITICAL: Ensure page state is preserved after calibration operations
+      // Restore the page if it somehow got changed during the operation
+      if (currentPdfFile && currentPage !== currentPageToPreserve) {
+        if (isDev) console.warn('⚠️ Page changed during calibration, restoring:', { from: currentPage, to: currentPageToPreserve });
+        setCurrentPage(currentPageToPreserve);
+        setSelectedPageNumber(currentPageToPreserve);
+        setDocumentPage(currentPdfFile.id, currentPageToPreserve);
       }
     }
   };
