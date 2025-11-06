@@ -1,18 +1,26 @@
-import { Project, TakeoffCondition, ProjectFile, TakeoffMeasurement } from '../types';
+import { Project, TakeoffCondition, ProjectFile, TakeoffMeasurement, Calibration } from '../types';
 
 export interface ProjectBackup {
   version: string;
   timestamp: string;
   project: Project;
   conditions: TakeoffCondition[];
-  files: ProjectFile[];
+  files: (ProjectFile & {
+    fileData?: string | null; // Base64 encoded PDF data
+    fileDataMimeType?: string;
+    fileDataError?: string; // Error message if file couldn't be downloaded
+  })[];
   sheets: any[]; // Sheet data from the API
   measurements: TakeoffMeasurement[];
+  calibrations?: Calibration[]; // Scale calibrations
   metadata: {
     totalFiles: number;
     totalConditions: number;
     totalMeasurements: number;
     totalSheets: number;
+    totalCalibrations?: number;
+    filesWithData?: number; // Number of files with actual PDF data
+    filesMissing?: number; // Number of files missing from backup
   };
 }
 
@@ -111,11 +119,21 @@ export class BackupService {
         return { valid: false, error: 'Invalid backup file format' };
       }
 
+      // Check backup version and provide helpful info
+      const isV2 = backup.version === '2.0' || parseFloat(backup.version) >= 2.0;
+      const filesWithData = backup.metadata?.filesWithData ?? 0;
+      const filesMissing = backup.metadata?.filesMissing ?? 0;
+      const hasCalibrations = backup.calibrations && backup.calibrations.length > 0;
+
       return { 
         valid: true, 
         metadata: {
           projectName: backup.project.name,
           timestamp: backup.timestamp,
+          version: backup.version,
+          isV2,
+          hasPDFs: isV2 && filesWithData > 0,
+          hasCalibrations,
           ...backup.metadata
         }
       };
