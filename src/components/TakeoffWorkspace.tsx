@@ -273,8 +273,18 @@ export function TakeoffWorkspace() {
           
           // Sync each calibration from database to the Zustand store (for reactive UI)
           // The store is just a cache - database is authoritative
+          // CRITICAL: Pass all calibration fields including viewport dimensions and rotation
           calibrations.forEach((cal: Calibration) => {
-            setCalibration(cal.projectId, cal.sheetId, cal.scaleFactor, cal.unit, cal.pageNumber ?? null);
+            setCalibration(
+              cal.projectId, 
+              cal.sheetId, 
+              cal.scaleFactor, 
+              cal.unit, 
+              cal.pageNumber ?? null,
+              cal.viewportWidth ?? null,
+              cal.viewportHeight ?? null,
+              cal.rotation ?? null
+            );
           });
           
           if (calibrations.length > 0) {
@@ -723,7 +733,7 @@ export function TakeoffWorkspace() {
     // Trigger the PDF viewer's calibration dialog
     // If already calibrated, clear the current calibration first
     if (isPageCalibrated && currentPdfFile && projectId) {
-      setCalibration(projectId, currentPdfFile.id, 1, 'ft');
+      setCalibration(projectId, currentPdfFile.id, 1, 'ft', null, null, null, null);
     }
     
     // Use the global trigger function set up by the PDF viewer
@@ -780,7 +790,7 @@ export function TakeoffWorkspace() {
           // Save calibration for each sheet with pageNumber = null (document-level for that sheet)
           const savePromises = pdfFiles.map((file: any) => {
             // Save to Zustand store (for immediate UI updates)
-            setCalibration(projectId, file.id, scaleFactor, unit, null);
+            setCalibration(projectId, file.id, scaleFactor, unit, null, viewportWidth, viewportHeight, rotation);
             
             // Save to database
             return calibrationService.saveCalibration(
@@ -804,7 +814,7 @@ export function TakeoffWorkspace() {
           const calibrationPageNumber = pageNumber ?? currentPage;
           
           // Save to Zustand store (for immediate UI updates)
-          setCalibration(projectId, currentPdfFile.id, scaleFactor, unit, calibrationPageNumber);
+          setCalibration(projectId, currentPdfFile.id, scaleFactor, unit, calibrationPageNumber, viewportWidth, viewportHeight, rotation);
           
           // Save to database
           await calibrationService.saveCalibration(
@@ -826,10 +836,10 @@ export function TakeoffWorkspace() {
         // but user will need to recalibrate if they refresh
         if (scope === 'document') {
           // If document scope failed, at least save for current sheet
-          setCalibration(projectId, currentPdfFile.id, scaleFactor, unit, null);
+          setCalibration(projectId, currentPdfFile.id, scaleFactor, unit, null, viewportWidth, viewportHeight, rotation);
         } else {
           const calibrationPageNumber = pageNumber ?? currentPage;
-          setCalibration(projectId, currentPdfFile.id, scaleFactor, unit, calibrationPageNumber);
+          setCalibration(projectId, currentPdfFile.id, scaleFactor, unit, calibrationPageNumber, viewportWidth, viewportHeight, rotation);
         }
       }
       
