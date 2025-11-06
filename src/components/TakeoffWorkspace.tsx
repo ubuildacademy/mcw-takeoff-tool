@@ -222,13 +222,17 @@ export function TakeoffWorkspace() {
               savedLocation
             });
             
-            setCurrentPage(savedPage);
-            setSelectedPageNumber(savedPage); // Keep selectedPageNumber in sync
-            setScale(savedScale);
-            setRotation(savedRotation);
-            
+            // Set file first, then restore state
             setCurrentPdfFile(target);
             setSelectedDocumentId(target.id);
+            
+            // Restore state - use handlePageChange for page to ensure proper validation
+            setScale(savedScale);
+            setRotation(savedRotation);
+            // Note: We'll set the page after currentPdfFile is set, but use direct setCurrentPage
+            // here since this is initial load and we want to ensure it's set before PDF viewer initializes
+            setCurrentPage(savedPage);
+            setSelectedPageNumber(savedPage); // Keep selectedPageNumber in sync
             
             // Restore scroll position after a short delay (once PDF is rendered)
             if (savedLocation.x !== 0 || savedLocation.y !== 0) {
@@ -402,7 +406,9 @@ export function TakeoffWorkspace() {
       const savedLocation = getDocumentLocation(selectedFile.id);
       setScale(savedScale);
       setRotation(savedRotation);
-      setCurrentPage(savedPage);
+      
+      // Use handlePageChange to ensure proper validation and persistence
+      handlePageChange(savedPage);
       
       // Restore scroll position after a short delay
       if (savedLocation.x !== 0 || savedLocation.y !== 0) {
@@ -416,6 +422,7 @@ export function TakeoffWorkspace() {
   };
 
   // Enhanced page selection handler
+  // CRITICAL: User-initiated page selection - use handlePageChange for consistency
   const handlePageSelect = (documentId: string, pageNumber: number) => {
     setSelectedDocumentId(documentId);
     setSelectedPageNumber(pageNumber);
@@ -424,7 +431,6 @@ export function TakeoffWorkspace() {
     const selectedFile = projectFiles.find(file => file.id === documentId);
     if (selectedFile) {
       setCurrentPdfFile(selectedFile);
-      setCurrentPage(pageNumber);
       
       // Restore scale, rotation, and location for this document if they exist
       const savedScale = getDocumentScale(selectedFile.id);
@@ -432,6 +438,9 @@ export function TakeoffWorkspace() {
       const savedLocation = getDocumentLocation(selectedFile.id);
       setScale(savedScale);
       setRotation(savedRotation);
+      
+      // Use handlePageChange to ensure proper validation and persistence
+      handlePageChange(pageNumber);
       
       // Restore scroll position after a short delay
       if (savedLocation.x !== 0 || savedLocation.y !== 0) {
@@ -569,8 +578,10 @@ export function TakeoffWorkspace() {
   // Note: This is a backup restoration - the main restoration happens in loadFiles() before setting currentPdfFile
   // This ensures state is restored even if currentPdfFile is set from other sources (e.g., sheet selection)
   // CRITICAL: Only restore once per file change, and only if the file actually changed
-  // This prevents overriding user's current page/zoom/position during operations like calibration
+  // This prevents overriding user's current page/zoom/position during operations like calibration or zoom
+  // Store getter functions are stable and don't need to be in dependencies
   useEffect(() => {
+    // Only restore if file actually changed (not just a re-render)
     if (currentPdfFile && currentPdfFile.id !== lastRestoredFileIdRef.current) {
       const savedRotation = getDocumentRotation(currentPdfFile.id);
       const savedPage = getDocumentPage(currentPdfFile.id);
@@ -588,18 +599,30 @@ export function TakeoffWorkspace() {
         currentScale: scale
       });
       
-      // Restore state only if file changed - don't override during operations
-      setCurrentPage(savedPage);
-      setSelectedPageNumber(savedPage); // Keep selectedPageNumber in sync
-      setRotation(savedRotation);
-      setScale(savedScale);
+      // CRITICAL: Only restore page if it's different from current to avoid unnecessary updates
+      // This prevents page resets during operations
+      if (savedPage !== currentPage) {
+        setCurrentPage(savedPage);
+        setSelectedPageNumber(savedPage); // Keep selectedPageNumber in sync
+      }
+      
+      // Only restore rotation/scale if different to avoid unnecessary updates
+      if (savedRotation !== rotation) {
+        setRotation(savedRotation);
+      }
+      if (savedScale !== scale) {
+        setScale(savedScale);
+      }
       
       // Mark this file as restored
       lastRestoredFileIdRef.current = currentPdfFile.id;
       
       // Scroll position will be restored when PDF is fully rendered via handlePDFRendered
     }
-  }, [currentPdfFile?.id, getDocumentRotation, getDocumentPage, getDocumentScale, getDocumentLocation]);
+    // CRITICAL: Only depend on currentPdfFile?.id - store getters are stable and don't need to be dependencies
+    // This prevents the effect from running on every render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPdfFile?.id]);
 
   const handleExportStatusUpdate = (type: 'excel' | 'pdf' | null, progress: number) => {
     setExportStatus({type, progress});
@@ -611,14 +634,29 @@ export function TakeoffWorkspace() {
   };
 
   // PDF viewer control handlers
+  // CRITICAL: This is the ONLY function that should change the page when called by the user
+  // All other page changes should go through this handler to ensure proper persistence
   const handlePageChange = (page: number) => {
-    if (isDev) console.log('📄 Page change:', { from: currentPage, to: page, documentId: currentPdfFile?.id });
-    setCurrentPage(page);
-    // Save page to store for persistence
-    if (currentPdfFile) {
-      setDocumentPage(currentPdfFile.id, page);
-      setLastViewedDocumentId?.(currentPdfFile.id);
-      if (isDev) console.log('💾 Saved page to store:', { documentId: currentPdfFile.id, page });
+    // Validate page number
+    if (page < 1 || (totalPages > 0 && page > totalPages)) {
+      if (isDev) console.warn('⚠️ Invalid page number requested:', { page, totalPages, currentPage });
+      return;
+    }
+    
+    // Only update if page actually changed
+    if (page !== currentPage) {
+      if (isDev) console.log('📄 Page change:', { from: currentPage, to: page, documentId: currentPdfFile?.id });
+      setCurrentPage(page);
+      setSelectedPageNumber(page); // Keep selectedPageNumber in sync
+      
+      // Save page to store for persistence
+      if (currentPdfFile) {
+        setDocumentPage(currentPdfFile.id, page);
+        setLastViewedDocumentId?.(currentPdfFile.id);
+        if (isDev) console.log('💾 Saved page to store:', { documentId: currentPdfFile.id, page });
+      }
+    } else if (isDev) {
+      console.log('⏭️ Page change skipped - already on page', page);
     }
     // Calibration state is now managed per page, no need to reset
   };
@@ -646,12 +684,16 @@ export function TakeoffWorkspace() {
     }
   };
 
+  // Track if this is the initial render to prevent scroll restoration during zoom
+  const isInitialRenderRef = useRef(true);
+  
   const handlePDFRendered = () => {
-    // Restore scroll position after PDF is fully rendered
-    if (currentPdfFile) {
+    // Only restore scroll position on initial render, not during zoom/scale changes
+    // During zoom, the scroll position should be maintained naturally by the browser
+    if (currentPdfFile && isInitialRenderRef.current) {
       const savedLocation = getDocumentLocation(currentPdfFile.id);
       if (savedLocation.x !== 0 || savedLocation.y !== 0) {
-        if (isDev) console.log('🔄 Restoring scroll position after PDF render:', savedLocation);
+        if (isDev) console.log('🔄 Restoring scroll position after initial PDF render:', savedLocation);
         // Use a minimal delay to ensure the container is ready
         setTimeout(() => {
           if ((window as any).restoreScrollPosition) {
@@ -659,8 +701,20 @@ export function TakeoffWorkspace() {
           }
         }, 25);
       }
+      // Mark initial render as complete
+      isInitialRenderRef.current = false;
+    } else if (isDev && !isInitialRenderRef.current) {
+      // Log that we're skipping scroll restoration during zoom
+      if (isDev) console.log('⏭️ Skipping scroll restoration - not initial render (likely zoom operation)');
     }
   };
+  
+  // Reset initial render flag when file changes
+  useEffect(() => {
+    if (currentPdfFile) {
+      isInitialRenderRef.current = true;
+    }
+  }, [currentPdfFile?.id]);
 
   const handleCalibrateScale = () => {
     // Trigger the PDF viewer's calibration dialog
