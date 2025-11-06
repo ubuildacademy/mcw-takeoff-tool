@@ -2533,9 +2533,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         };
         
         // Apply ortho snapping for calibration only if explicitly enabled
-        // For calibration, we want precise point placement without automatic snapping
+        // IMPORTANT: When ortho snapping is enabled, use mousePosition which already has the snapped coordinates
+        // that match the crosshair position. This ensures points are created exactly where the crosshair is.
         if (prev.length > 0 && isOrthoSnapping) {
-          pdfCoords = applyOrthoSnapping(pdfCoords, prev);
+          if (mousePosition) {
+            // Use the snapped position from mousePosition (which matches the crosshair)
+            pdfCoords = mousePosition;
+          } else {
+            // Fallback: recalculate snapping if mousePosition is not available
+            pdfCoords = applyOrthoSnapping(pdfCoords, prev);
+          }
         }
         
         // Store points in normalized PDF coordinates (0-1) - these represent PDF-relative position
@@ -2627,7 +2634,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Smart cut-out mode entry removed - using manual toggle instead
     
     // Apply ortho snapping if enabled and we have reference points
-    if (isOrthoSnapping) {
+    // IMPORTANT: When ortho snapping is enabled, use mousePosition which already has the snapped coordinates
+    // that match the crosshair position. This ensures points are created exactly where the crosshair is.
+    if (isOrthoSnapping && isMeasuring && mousePosition) {
+      // Use the snapped position from mousePosition (which matches the crosshair)
+      pdfCoords = mousePosition;
+    } else if (isOrthoSnapping) {
+      // Fallback: recalculate snapping if mousePosition is not available
       const referencePoints = cutoutMode ? currentCutout : (isContinuousDrawing ? activePoints : currentMeasurement);
       pdfCoords = applyOrthoSnapping(pdfCoords, referencePoints);
     }
@@ -2662,7 +2675,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       }
       // Area and volume measurements will be completed on double-click
     }
-  }, [isCalibrating, calibrationPoints, measurementType, currentMeasurement, isContinuousDrawing, activePoints, calculateRunningLength, currentViewport, isSelectionMode, selectedMarkupId]);
+  }, [isCalibrating, calibrationPoints, measurementType, currentMeasurement, isContinuousDrawing, activePoints, calculateRunningLength, currentViewport, isSelectionMode, selectedMarkupId, isOrthoSnapping, isMeasuring, mousePosition, cutoutMode, currentCutout]);
 
   // Create rubber band element for continuous linear drawing
   const createRubberBandElement = useCallback(() => {
@@ -2820,14 +2833,20 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         measurementResult = MeasurementCalculator.calculateArea(viewportPoints, scaleInfo, 1.0);
         calculatedValue = measurementResult.calculatedValue;
         unit = measurementResult.unit;
-        perimeterValue = measurementResult.perimeterValue;
+        // Only assign perimeter if the condition requires it
+        if (selectedCondition.includePerimeter) {
+          perimeterValue = measurementResult.perimeterValue;
+        }
         break;
       case 'volume':
         const depth = selectedCondition.depth || 1; // Default to 1 foot if no depth specified
         measurementResult = MeasurementCalculator.calculateVolume(viewportPoints, scaleInfo, depth, 1.0);
         calculatedValue = measurementResult.calculatedValue;
         unit = measurementResult.unit;
-        perimeterValue = measurementResult.perimeterValue;
+        // Only assign perimeter if the condition requires it
+        if (selectedCondition.includePerimeter) {
+          perimeterValue = measurementResult.perimeterValue;
+        }
         break;
       case 'count':
         measurementResult = MeasurementCalculator.calculateCount();
@@ -2844,7 +2863,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       console.warn('Measurement warnings:', measurementResult.validation.warnings);
     }
     
-    // Override perimeter calculation if condition requires it
+    // Override perimeter calculation if condition requires it and perimeter wasn't calculated
     if ((measurementType === 'area' || measurementType === 'volume') && selectedCondition.includePerimeter && !perimeterValue) {
       // Fallback to manual calculation if enhanced calculator didn't provide perimeter
       let perimeter = 0;
@@ -2873,7 +2892,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         pdfCoordinates: points,
         conditionColor: selectedCondition.color,
         conditionName: selectedCondition.name,
-        perimeterValue
+        // Only include perimeterValue if the condition requires it
+        ...(selectedCondition.includePerimeter && { perimeterValue })
       }).then(savedMeasurementId => {
         // The new measurement will automatically appear via the useEffect that watches takeoffMeasurements
         // No need for complex manual state management - just like annotations!
