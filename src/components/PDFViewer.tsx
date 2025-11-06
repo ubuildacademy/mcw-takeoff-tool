@@ -27,9 +27,11 @@ interface PDFViewerProps {
   isPageCalibrated?: boolean;
   scaleFactor?: number;
   unit?: string;
+  calibrationViewportWidth?: number | null;
+  calibrationViewportHeight?: number | null;
   onPDFLoaded?: (totalPages: number) => void;
   onCalibrationRequest?: () => void;
-  onCalibrationComplete?: (isCalibrated: boolean, scaleFactor: number, unit: string, scope?: 'page' | 'document', pageNumber?: number | null) => void;
+  onCalibrationComplete?: (isCalibrated: boolean, scaleFactor: number, unit: string, scope?: 'page' | 'document', pageNumber?: number | null, viewportWidth?: number | null, viewportHeight?: number | null) => void;
   searchResults?: SearchResult[];
   currentSearchQuery?: string;
   cutoutMode?: boolean;
@@ -87,6 +89,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   isPageCalibrated: externalIsPageCalibrated,
   scaleFactor: externalScaleFactor,
   unit: externalUnit,
+  calibrationViewportWidth: externalCalibrationViewportWidth,
+  calibrationViewportHeight: externalCalibrationViewportHeight,
   onPDFLoaded,
   onCalibrationRequest,
   onCalibrationComplete,
@@ -262,6 +266,32 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       onMeasurementStateChange(isMeasuring, isCalibrating, measurementType, isOrthoSnapping);
     }
   }, [isMeasuring, isCalibrating, measurementType, isOrthoSnapping, onMeasurementStateChange]);
+
+  // Restore calibration viewport ref when calibration is loaded from database
+  // This is critical for accurate measurements after re-entering a project
+  useEffect(() => {
+    if (externalIsPageCalibrated && externalScaleFactor && externalCalibrationViewportWidth && externalCalibrationViewportHeight) {
+      // Restore the calibration viewport ref with the stored dimensions
+      // This ensures measurements use the same viewport dimensions that were used during calibration
+      calibrationViewportRef.current = {
+        scaleFactor: externalScaleFactor,
+        unit: externalUnit || 'ft',
+        viewportWidth: externalCalibrationViewportWidth,
+        viewportHeight: externalCalibrationViewportHeight,
+        scale: 1, // Calibration viewport is always at scale=1
+        rotation: viewState.rotation
+      };
+      console.log('📏 Restored calibration viewport ref from database:', {
+        scaleFactor: externalScaleFactor,
+        unit: externalUnit,
+        viewportWidth: externalCalibrationViewportWidth,
+        viewportHeight: externalCalibrationViewportHeight
+      });
+    } else if (!externalIsPageCalibrated) {
+      // Clear the ref if calibration is removed
+      calibrationViewportRef.current = null;
+    }
+  }, [externalIsPageCalibrated, externalScaleFactor, externalUnit, externalCalibrationViewportWidth, externalCalibrationViewportHeight, viewState.rotation]);
 
   // Page-specific viewport and transform state for proper isolation
   const [pageViewports, setPageViewports] = useState<Record<number, any>>({});
@@ -3261,7 +3291,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (onCalibrationComplete) {
       // Default to 'page' scope for initial calibration (user will choose scope in dialog)
       // pageNumber will be set when user clicks Apply in the dialog
-      onCalibrationComplete(true, newScaleFactor, unit, 'page', currentPage);
+      // Pass viewport dimensions so they can be saved to the database
+      onCalibrationComplete(true, newScaleFactor, unit, 'page', currentPage, baseViewport.width, baseViewport.height);
     }
     
     setCalibrationPoints([]);
@@ -3288,8 +3319,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Pass scope and pageNumber so the handler can save with correct pageNumber
       // scope = 'document' -> pageNumber = null (applies to all pages)
       // scope = 'page' -> pageNumber = currentPage (page-specific, overwrites document-level for this page)
+      // Use viewport dimensions from calibrationViewportRef which was set during calibration
       const pageNumber = scope === 'page' ? currentPage : null;
-      onCalibrationComplete(true, pendingScaleData.scaleFactor, pendingScaleData.unit, scope, pageNumber);
+      const viewportWidth = calibrationViewportRef.current?.viewportWidth ?? null;
+      const viewportHeight = calibrationViewportRef.current?.viewportHeight ?? null;
+      onCalibrationComplete(true, pendingScaleData.scaleFactor, pendingScaleData.unit, scope, pageNumber, viewportWidth, viewportHeight);
     }
     
     if (externalScaleFactor === undefined) {

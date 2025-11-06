@@ -97,7 +97,7 @@ router.post('/', async (req, res) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const { projectId, sheetId, scaleFactor, unit, pageNumber, scope } = req.body;
+    const { projectId, sheetId, scaleFactor, unit, pageNumber, scope, viewportWidth, viewportHeight } = req.body;
 
     if (!projectId || !sheetId || scaleFactor === undefined || !unit) {
       return res.status(400).json({ error: 'Missing required fields: projectId, sheetId, scaleFactor, unit' });
@@ -126,7 +126,9 @@ router.post('/', async (req, res) => {
       pageNumber: calibrationPageNumber,
       scaleFactor,
       unit,
-      calibratedAt: new Date().toISOString()
+      calibratedAt: new Date().toISOString(),
+      viewportWidth: viewportWidth ?? null,
+      viewportHeight: viewportHeight ?? null
     });
 
     res.json({ calibration });

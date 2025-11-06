@@ -94,6 +94,8 @@ export interface Calibration {
   unit: string;
   calibratedAt: string;
   scaleText?: string; // Human-readable scale text (e.g., "1 inch = 10 feet")
+  viewportWidth?: number | null; // PDF viewport width at scale=1 when calibration was performed
+  viewportHeight?: number | null; // PDF viewport height at scale=1 when calibration was performed
 }
 
 export interface Annotation {
