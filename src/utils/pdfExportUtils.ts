@@ -10,17 +10,33 @@ interface PageMeasurements {
 }
 
 /**
- * Fetch PDF bytes from the server
+ * Fetch PDF bytes from the server with authentication
  */
 async function fetchPDFBytes(fileId: string): Promise<Uint8Array> {
   // Use the correct API base URL instead of hardcoded localhost
   const { getApiBaseUrl } = await import('../lib/apiConfig');
   const API_BASE_URL = getApiBaseUrl();
   
-  const response = await fetch(`${API_BASE_URL}/files/${fileId}`);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch PDF: ${response.statusText}`);
+  // Get authentication token from Supabase session
+  const { supabase } = await import('../lib/supabase');
+  const { data: { session } } = await supabase.auth.getSession();
+  const authToken = session?.access_token;
+  
+  // Build headers with authentication
+  const headers: HeadersInit = {};
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`;
   }
+  
+  const response = await fetch(`${API_BASE_URL}/files/${fileId}`, {
+    headers,
+  });
+  
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => response.statusText);
+    throw new Error(`Failed to fetch PDF: ${response.status} ${errorText}`);
+  }
+  
   const arrayBuffer = await response.arrayBuffer();
   return new Uint8Array(arrayBuffer);
 }

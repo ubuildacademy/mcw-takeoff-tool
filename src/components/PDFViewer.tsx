@@ -3551,13 +3551,31 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     };
   }, []);
 
-  // Add wheel event listener
+  // Add wheel event listener to container, canvas, and SVG to ensure zoom works during markup placement
   useEffect(() => {
     const container = containerRef.current;
+    const canvas = pdfCanvasRef.current;
+    const svg = svgOverlayRef.current;
+    
     if (!container) return;
 
     container.addEventListener('wheel', handleWheel, { passive: false });
-    return () => container.removeEventListener('wheel', handleWheel);
+    if (canvas) {
+      canvas.addEventListener('wheel', handleWheel, { passive: false });
+    }
+    if (svg) {
+      svg.addEventListener('wheel', handleWheel, { passive: false });
+    }
+    
+    return () => {
+      container.removeEventListener('wheel', handleWheel);
+      if (canvas) {
+        canvas.removeEventListener('wheel', handleWheel);
+      }
+      if (svg) {
+        svg.removeEventListener('wheel', handleWheel);
+      }
+    };
   }, [handleWheel]);
 
   // Apply or clear interactive CSS zoom when external scale changes while renders are blocked
