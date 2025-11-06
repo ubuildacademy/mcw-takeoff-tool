@@ -178,6 +178,8 @@ export function TakeoffWorkspace() {
   const isPageCalibrated = !!currentCalibration;
   const scaleFactor = currentCalibration?.scaleFactor || 1;
   const unit = currentCalibration?.unit || 'ft';
+  const calibrationViewportWidth = currentCalibration?.viewportWidth ?? null;
+  const calibrationViewportHeight = currentCalibration?.viewportHeight ?? null;
 
   // Handle measurement state changes from PDFViewer
   const handleMeasurementStateChange = (measuring: boolean, calibrating: boolean, type: string, orthoSnapping: boolean) => {
@@ -751,7 +753,9 @@ export function TakeoffWorkspace() {
     scaleFactor: number, 
     unit: string,
     scope?: 'page' | 'document',
-    pageNumber?: number | null
+    pageNumber?: number | null,
+    viewportWidth?: number | null,
+    viewportHeight?: number | null
   ) => {
     if (currentPdfFile && projectId) {
       // CRITICAL: Save current page state before any calibration operations
@@ -783,7 +787,9 @@ export function TakeoffWorkspace() {
               scaleFactor, 
               unit,
               'document',
-              null
+              null,
+              viewportWidth,
+              viewportHeight
             );
           });
           
@@ -804,7 +810,9 @@ export function TakeoffWorkspace() {
             scaleFactor, 
             unit,
             'page',
-            calibrationPageNumber
+            calibrationPageNumber,
+            viewportWidth,
+            viewportHeight
           );
           console.log('✅ Calibration saved to database for this sheet only', { scope, pageNumber: calibrationPageNumber, sheetId: currentPdfFile.id });
         }
@@ -1208,6 +1216,8 @@ export function TakeoffWorkspace() {
               isPageCalibrated={isPageCalibrated}
               scaleFactor={scaleFactor}
               unit={unit}
+              calibrationViewportWidth={calibrationViewportWidth}
+              calibrationViewportHeight={calibrationViewportHeight}
               onPDFLoaded={handlePDFLoaded}
               onCalibrationComplete={handleCalibrationComplete}
               searchResults={ocrSearchResults}

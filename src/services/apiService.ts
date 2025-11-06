@@ -276,7 +276,9 @@ export const calibrationService = {
     scaleFactor: number, 
     unit: string,
     scope?: 'page' | 'document',
-    pageNumber?: number | null
+    pageNumber?: number | null,
+    viewportWidth?: number | null,
+    viewportHeight?: number | null
   ) {
     const response = await apiClient.post('/calibrations', {
       projectId,
@@ -284,7 +286,9 @@ export const calibrationService = {
       scaleFactor,
       unit,
       scope: scope || 'page',
-      pageNumber
+      pageNumber,
+      viewportWidth,
+      viewportHeight
     });
     return response.data.calibration;
   }

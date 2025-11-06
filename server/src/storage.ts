@@ -101,6 +101,8 @@ export interface StoredCalibration {
   scaleFactor: number;
   unit: string;
   calibratedAt: string;
+  viewportWidth?: number | null; // PDF viewport width at scale=1 when calibration was performed
+  viewportHeight?: number | null; // PDF viewport height at scale=1 when calibration was performed
   createdAt?: string;
   updatedAt?: string;
 }
@@ -874,6 +876,8 @@ class SupabaseStorage {
           scaleFactor: parseFloat(pageData.scale_factor),
           unit: pageData.unit,
           calibratedAt: pageData.calibrated_at,
+          viewportWidth: pageData.viewport_width ? parseFloat(pageData.viewport_width) : null,
+          viewportHeight: pageData.viewport_height ? parseFloat(pageData.viewport_height) : null,
           createdAt: pageData.created_at,
           updatedAt: pageData.updated_at
         };
@@ -909,6 +913,8 @@ class SupabaseStorage {
       scaleFactor: parseFloat(data.scale_factor),
       unit: data.unit,
       calibratedAt: data.calibrated_at,
+      viewportWidth: data.viewport_width ? parseFloat(data.viewport_width) : null,
+      viewportHeight: data.viewport_height ? parseFloat(data.viewport_height) : null,
       createdAt: data.created_at,
       updatedAt: data.updated_at
     };
@@ -923,6 +929,8 @@ class SupabaseStorage {
       scale_factor: calibration.scaleFactor,
       unit: calibration.unit,
       calibrated_at: calibration.calibratedAt,
+      viewport_width: calibration.viewportWidth ?? null,
+      viewport_height: calibration.viewportHeight ?? null,
       updated_at: new Date().toISOString()
     };
 
@@ -949,6 +957,8 @@ class SupabaseStorage {
       scaleFactor: parseFloat(data.scale_factor),
       unit: data.unit,
       calibratedAt: data.calibrated_at,
+      viewportWidth: data.viewport_width ? parseFloat(data.viewport_width) : null,
+      viewportHeight: data.viewport_height ? parseFloat(data.viewport_height) : null,
       createdAt: data.created_at,
       updatedAt: data.updated_at
     };
@@ -977,6 +987,8 @@ class SupabaseStorage {
       scaleFactor: parseFloat(item.scale_factor),
       unit: item.unit,
       calibratedAt: item.calibrated_at,
+      viewportWidth: item.viewport_width ? parseFloat(item.viewport_width) : null,
+      viewportHeight: item.viewport_height ? parseFloat(item.viewport_height) : null,
       createdAt: item.created_at,
       updatedAt: item.updated_at
     }));
