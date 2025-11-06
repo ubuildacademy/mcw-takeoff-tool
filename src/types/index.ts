@@ -96,6 +96,7 @@ export interface Calibration {
   scaleText?: string; // Human-readable scale text (e.g., "1 inch = 10 feet")
   viewportWidth?: number | null; // PDF viewport width at scale=1 when calibration was performed
   viewportHeight?: number | null; // PDF viewport height at scale=1 when calibration was performed
+  rotation?: number | null; // PDF page rotation (degrees: 0, 90, 180, 270) used during calibration
 }
 
 export interface Annotation {

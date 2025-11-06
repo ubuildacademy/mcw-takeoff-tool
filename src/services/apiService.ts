@@ -278,7 +278,8 @@ export const calibrationService = {
     scope?: 'page' | 'document',
     pageNumber?: number | null,
     viewportWidth?: number | null,
-    viewportHeight?: number | null
+    viewportHeight?: number | null,
+    rotation?: number | null
   ) {
     const response = await apiClient.post('/calibrations', {
       projectId,
@@ -288,7 +289,8 @@ export const calibrationService = {
       scope: scope || 'page',
       pageNumber,
       viewportWidth,
-      viewportHeight
+      viewportHeight,
+      rotation
     });
     return response.data.calibration;
   }

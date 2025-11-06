@@ -180,6 +180,7 @@ export function TakeoffWorkspace() {
   const unit = currentCalibration?.unit || 'ft';
   const calibrationViewportWidth = currentCalibration?.viewportWidth ?? null;
   const calibrationViewportHeight = currentCalibration?.viewportHeight ?? null;
+  const calibrationRotation = currentCalibration?.rotation ?? null;
 
   // Handle measurement state changes from PDFViewer
   const handleMeasurementStateChange = (measuring: boolean, calibrating: boolean, type: string, orthoSnapping: boolean) => {
@@ -755,7 +756,8 @@ export function TakeoffWorkspace() {
     scope?: 'page' | 'document',
     pageNumber?: number | null,
     viewportWidth?: number | null,
-    viewportHeight?: number | null
+    viewportHeight?: number | null,
+    rotation?: number | null
   ) => {
     if (currentPdfFile && projectId) {
       // CRITICAL: Save current page state before any calibration operations
@@ -789,7 +791,8 @@ export function TakeoffWorkspace() {
               'document',
               null,
               viewportWidth,
-              viewportHeight
+              viewportHeight,
+              rotation
             );
           });
           
@@ -812,7 +815,8 @@ export function TakeoffWorkspace() {
             'page',
             calibrationPageNumber,
             viewportWidth,
-            viewportHeight
+            viewportHeight,
+            rotation
           );
           console.log('✅ Calibration saved to database for this sheet only', { scope, pageNumber: calibrationPageNumber, sheetId: currentPdfFile.id });
         }
@@ -1218,6 +1222,7 @@ export function TakeoffWorkspace() {
               unit={unit}
               calibrationViewportWidth={calibrationViewportWidth}
               calibrationViewportHeight={calibrationViewportHeight}
+              calibrationRotation={calibrationRotation}
               onPDFLoaded={handlePDFLoaded}
               onCalibrationComplete={handleCalibrationComplete}
               searchResults={ocrSearchResults}
