@@ -507,8 +507,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         if (externalTotalPages === undefined) {
           setInternalTotalPages(pdf.numPages);
         }
+        // CRITICAL: Only reset to page 1 if externalCurrentPage is undefined AND we don't have a saved page
+        // This prevents resetting the page when the PDF reloads if we have a saved state
         if (externalCurrentPage === undefined) {
-          setInternalCurrentPage(1);
+          // Only set to 1 if we don't already have a page set (preserve existing state)
+          setInternalCurrentPage(prev => prev || 1);
         }
         
         if (onPDFLoaded) {
