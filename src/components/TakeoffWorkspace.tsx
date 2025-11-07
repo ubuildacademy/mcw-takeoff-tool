@@ -265,9 +265,13 @@ export function TakeoffWorkspace() {
   // Set current project in store and load its data
   useEffect(() => {
     if (projectId) {
+      // Set current project first (this clears old measurements)
       setCurrentProject(projectId);
-      // Load measurements for this project (conditions will be loaded by TakeoffSidebar)
-      loadProjectTakeoffMeasurements(projectId);
+      // Load measurements for this project from Supabase (conditions will be loaded by TakeoffSidebar)
+      // Use a small delay to ensure setCurrentProject completes first and prevents race conditions
+      const loadTimer = setTimeout(() => {
+        loadProjectTakeoffMeasurements(projectId);
+      }, 0);
       
       // Load calibrations from database and sync to store
       const loadCalibrations = async () => {
@@ -308,6 +312,11 @@ export function TakeoffWorkspace() {
       };
       
       loadCalibrations();
+      
+      // Cleanup: cancel measurement load if component unmounts or project changes
+      return () => {
+        clearTimeout(loadTimer);
+      };
     }
   }, [projectId]); // Only depend on projectId to prevent infinite loops
 
