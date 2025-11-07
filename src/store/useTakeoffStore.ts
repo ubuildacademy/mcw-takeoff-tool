@@ -48,6 +48,8 @@ interface TakeoffStore {
   // Takeoff measurements - organized by page for better isolation
   takeoffMeasurements: TakeoffMeasurement[];
   markupsByPage: Record<string, TakeoffMeasurement[]>; // Key: `${projectId}-${sheetId}-${pageNumber}`
+  loadingMeasurements: boolean; // Track if measurements are currently being loaded
+  loadingMeasurementsProjectId: string | null; // Track which project is being loaded (prevents race conditions)
   
   // Annotations
   annotations: Annotation[];
@@ -170,6 +172,8 @@ export const useTakeoffStore = create<TakeoffStore>()(
       
       takeoffMeasurements: [],
       markupsByPage: {},
+      loadingMeasurements: false,
+      loadingMeasurementsProjectId: null,
       
       annotations: [],
       
@@ -272,7 +276,26 @@ export const useTakeoffStore = create<TakeoffStore>()(
       },
       
       setCurrentProject: (id) => {
-        set({ currentProjectId: id });
+        const state = get();
+        // Only clear measurements if we're switching to a different project
+        // AND we're not currently loading measurements for the new project
+        const isSwitchingProject = state.currentProjectId !== id;
+        const isNotLoadingNewProject = !state.loadingMeasurements || state.loadingMeasurementsProjectId !== id;
+        
+        if (isSwitchingProject && isNotLoadingNewProject) {
+          // Clear measurements when switching projects - they will be loaded from Supabase
+          // This prevents stale data from previous projects and ensures fresh load from database
+          set({ 
+            currentProjectId: id,
+            takeoffMeasurements: [],
+            markupsByPage: {},
+            loadingMeasurements: false,
+            loadingMeasurementsProjectId: null
+          });
+        } else {
+          // Just update the current project ID if we're already loading for this project
+          set({ currentProjectId: id });
+        }
       },
       
       addCondition: async (conditionData) => {
@@ -1038,37 +1061,93 @@ export const useTakeoffStore = create<TakeoffStore>()(
       },
 
       loadProjectTakeoffMeasurements: async (projectId: string) => {
+        const state = get();
+        
+        // RACE CONDITION PREVENTION: If already loading for this project, skip
+        if (state.loadingMeasurements && state.loadingMeasurementsProjectId === projectId) {
+          console.log('⏭️ LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Already loading measurements for project', projectId, '- skipping duplicate request');
+          return;
+        }
+        
+        // RACE CONDITION PREVENTION: If project changed while we were about to load, abort
+        if (state.currentProjectId !== projectId) {
+          console.log('⏭️ LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Project changed from', projectId, 'to', state.currentProjectId, '- aborting load');
+          return;
+        }
+        
         console.log('🔄 LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Starting to load measurements for project:', projectId);
+        
+        // Set loading state to prevent concurrent loads
+        set({ 
+          loadingMeasurements: true,
+          loadingMeasurementsProjectId: projectId
+        });
+        
         try {
           // Import the API service dynamically to avoid circular dependencies
           const { takeoffMeasurementService } = await import('../services/apiService');
           
-          console.log('🔄 LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Calling API to get project measurements...');
-          // Load measurements for specific project
+          console.log('🔄 LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Calling API to get project measurements from Supabase...');
+          // Load measurements for specific project from Supabase (single source of truth)
           const measurementsResponse = await takeoffMeasurementService.getProjectTakeoffMeasurements(projectId);
           console.log('✅ LOAD_PROJECT_TAKEOFF_MEASUREMENTS: API response received:', measurementsResponse);
+          
+          // RACE CONDITION PREVENTION: Double-check project hasn't changed during async operation
+          const currentState = get();
+          if (currentState.currentProjectId !== projectId) {
+            console.log('⏭️ LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Project changed during load from', projectId, 'to', currentState.currentProjectId, '- discarding results');
+            set({ 
+              loadingMeasurements: false,
+              loadingMeasurementsProjectId: null
+            });
+            return;
+          }
+          
           const projectMeasurements = measurementsResponse.measurements || [];
           
-          // Merge with existing measurements, avoiding duplicates
+          // Replace all measurements for this project (don't merge - Supabase is source of truth)
+          // This ensures we have the latest data and prevents stale localStorage data
           set(state => {
-            // Remove existing measurements for this project and add the new ones
-            const existingMeasurements = state.takeoffMeasurements.filter(m => m.projectId !== projectId);
-            const allMeasurements = [...existingMeasurements, ...projectMeasurements];
-            console.log(`💾 LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Merging measurements for project ${projectId}:`, {
-              existingCount: existingMeasurements.length,
+            // Remove existing measurements for this project and replace with fresh data from Supabase
+            const otherProjectMeasurements = state.takeoffMeasurements.filter(m => m.projectId !== projectId);
+            const allMeasurements = [...otherProjectMeasurements, ...projectMeasurements];
+            console.log(`💾 LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Loaded ${projectMeasurements.length} measurements from Supabase for project ${projectId}`, {
               projectMeasurementsCount: projectMeasurements.length,
-              totalCount: allMeasurements.length,
-              projectMeasurements: projectMeasurements
+              totalMeasurementsInStore: allMeasurements.length,
+              source: 'Supabase'
             });
-            return { takeoffMeasurements: allMeasurements };
+            return { 
+              takeoffMeasurements: allMeasurements,
+              loadingMeasurements: false,
+              loadingMeasurementsProjectId: null
+            };
           });
           
-          // Update markupsByPage structure
+          // Update markupsByPage structure (computed from takeoffMeasurements)
           get().updateMarkupsByPage();
           
-          console.log(`✅ LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Project measurements loaded for ${projectId}:`, projectMeasurements.length);
+          console.log(`✅ LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Project measurements loaded from Supabase for ${projectId}:`, projectMeasurements.length);
         } catch (error) {
-          console.error(`❌ LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Failed to load measurements for project ${projectId}:`, error);
+          console.error(`❌ LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Failed to load measurements for project ${projectId} from Supabase:`, error);
+          
+          // RACE CONDITION PREVENTION: Only clear if this is still the current project
+          const currentState = get();
+          if (currentState.currentProjectId === projectId) {
+            // On error, clear measurements for this project to prevent stale data
+            set(state => ({
+              takeoffMeasurements: state.takeoffMeasurements.filter(m => m.projectId !== projectId),
+              markupsByPage: {},
+              loadingMeasurements: false,
+              loadingMeasurementsProjectId: null
+            }));
+            get().updateMarkupsByPage();
+          } else {
+            // Project changed, just clear loading state
+            set({ 
+              loadingMeasurements: false,
+              loadingMeasurementsProjectId: null
+            });
+          }
         }
       }
     }),
@@ -1083,8 +1162,11 @@ export const useTakeoffStore = create<TakeoffStore>()(
         // Calibrations are loaded from database when project opens and synced to store for reactive UI
         // This ensures database is the single source of truth
         // calibrations: state.calibrations, // Removed - database only
-        takeoffMeasurements: state.takeoffMeasurements,
-        markupsByPage: state.markupsByPage,
+        // DO NOT persist takeoffMeasurements or markupsByPage - Supabase is the single source of truth
+        // Measurements are loaded from Supabase on project/sheet load to prevent localStorage bloat
+        // and ensure data consistency across devices
+        // takeoffMeasurements: state.takeoffMeasurements, // Removed - Supabase only
+        // markupsByPage: state.markupsByPage, // Removed - Supabase only (computed from takeoffMeasurements)
         annotations: state.annotations,
         documentRotations: state.documentRotations,
         documentPages: state.documentPages,

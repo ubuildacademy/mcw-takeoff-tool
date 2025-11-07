@@ -396,8 +396,52 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     getPageAnnotations
   } = useTakeoffStore();
   
-  // Get takeoff measurements with a specific selector to ensure proper subscription
-  const takeoffMeasurements = useTakeoffStore(state => state.takeoffMeasurements);
+  // PERFORMANCE FIX: Use ref to cache previous page measurements and only update when they actually change
+  // This prevents re-renders when measurements change on other pages (critical for large documents)
+  const allTakeoffMeasurements = useTakeoffStore(state => state.takeoffMeasurements);
+  const prevPageMeasurementsRef = useRef<{ pageKey: string; measurements: any[]; signature: string } | null>(null);
+  
+  // Memoize filtered measurements and only return new array when current page measurements actually change
+  const pageTakeoffMeasurements = useMemo(() => {
+    if (!currentProjectId || !file?.id || !currentPage) {
+      prevPageMeasurementsRef.current = null;
+      return [];
+    }
+    
+    const pageKey = `${currentProjectId}-${file.id}-${currentPage}`;
+    
+    // Get measurements for current page only
+    const pageMeasurements = allTakeoffMeasurements.filter(
+      (measurement) =>
+        measurement.projectId === currentProjectId &&
+        measurement.sheetId === file.id &&
+        measurement.pdfPage === currentPage
+    );
+    
+    // Create a signature to detect actual changes (sorted IDs + timestamps)
+    const signature = JSON.stringify(
+      pageMeasurements
+        .map((m) => `${m.id}-${m.timestamp}`)
+        .sort()
+    );
+    
+    // If same page and signature hasn't changed, return cached array to prevent re-render
+    if (
+      prevPageMeasurementsRef.current?.pageKey === pageKey &&
+      prevPageMeasurementsRef.current?.signature === signature
+    ) {
+      return prevPageMeasurementsRef.current.measurements;
+    }
+    
+    // Update cache and return new array
+    prevPageMeasurementsRef.current = {
+      pageKey,
+      measurements: pageMeasurements,
+      signature
+    };
+    
+    return pageMeasurements;
+  }, [allTakeoffMeasurements, currentProjectId, file?.id, currentPage]);
   
   // Load existing takeoff measurements for the current sheet - reactive to store changes
   const [localTakeoffMeasurements, setLocalTakeoffMeasurements] = useState<any[]>([]);
@@ -415,45 +459,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
   }, [currentProjectId, file?.id, storeAnnotations]);
 
-  // Load measurements for current page using direct filtering (like annotations)
+  // Load measurements for current page - now only triggers when current page measurements change
   useEffect(() => {
     if (!currentProjectId || !file?.id || !currentPage) {
       setLocalTakeoffMeasurements([]);
       return;
     }
     
-    // Filter measurements directly like annotations do - bypass the complex key system
-    const pageMeasurements = takeoffMeasurements.filter(measurement => 
-      measurement.projectId === currentProjectId && 
-      measurement.sheetId === file.id && 
-      measurement.pdfPage === currentPage
-    );
-    
-    // Debug logging to help troubleshoot
-    if (takeoffMeasurements.length > 0) {
-      console.log('🔍 PDFViewer: Measurement filtering debug', {
-        totalMeasurements: takeoffMeasurements.length,
-        currentProjectId,
-        fileId: file.id,
-        currentPage,
-        pageMeasurementsCount: pageMeasurements.length,
-        sampleMeasurement: takeoffMeasurements[0] ? {
-          projectId: takeoffMeasurements[0].projectId,
-          sheetId: takeoffMeasurements[0].sheetId,
-          pdfPage: takeoffMeasurements[0].pdfPage
-        } : null,
-        allMeasurements: takeoffMeasurements.map(m => ({
-          id: m.id,
-          projectId: m.projectId,
-          sheetId: m.sheetId,
-          pdfPage: m.pdfPage,
-          type: m.type
-        }))
-      });
-    }
-    
     // Convert API measurements to display format
-    const displayMeasurements = pageMeasurements.map(apiMeasurement => {
+    const displayMeasurements = pageTakeoffMeasurements.map(apiMeasurement => {
       try {
         return {
           id: apiMeasurement.id,
@@ -479,14 +493,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     setLocalTakeoffMeasurements(displayMeasurements);
     
-    // If we have measurements and a viewport is available, trigger a re-render
-    if (displayMeasurements.length > 0 && currentViewport) {
-      // Use setTimeout to ensure state is updated before re-rendering
-      setTimeout(() => {
-        renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
-      }, 0);
-    }
-  }, [currentProjectId, file?.id, currentPage, takeoffMeasurements, currentViewport]);
+    // Note: renderTakeoffAnnotations will be called by the effect that watches localTakeoffMeasurements
+    // No need to call it here to avoid the dependency issue
+  }, [currentProjectId, file?.id, currentPage, pageTakeoffMeasurements, currentViewport]);
 
   // Ensure component is mounted before rendering
   useEffect(() => {
@@ -858,7 +867,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         console.log('🎨 PDFViewer: Triggering renderTakeoffAnnotations');
         renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
       } else {
-        console.log('🎨 PDFViewer: Skipping render - no measurements or active modes');
+        // LAYER THRASH PREVENTION: Clear overlay when measurements are empty to prevent stale renderings
+        // This ensures clean state when switching projects or when measurements are cleared
+        if (svgOverlayRef.current) {
+          svgOverlayRef.current.innerHTML = '';
+          console.log('🎨 PDFViewer: Cleared overlay - no measurements or active modes');
+        }
       }
     }
   }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, selectedMarkupId, isSelectionMode, renderTakeoffAnnotations, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, isSelectingSymbol, currentAnnotation]);
