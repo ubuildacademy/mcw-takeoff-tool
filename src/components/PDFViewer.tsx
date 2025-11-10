@@ -3899,12 +3899,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         // Get updated annotations from store after deletion
         const { annotations: updatedAnnotations } = useTakeoffStore.getState();
         
+        // Clear selection immediately before state updates
+        setSelectedMarkupId(null);
+        
         // Immediately update local annotations to reflect the deletion
         const filteredAnnotations = updatedAnnotations.filter(
           a => a.projectId === currentProjectId && a.sheetId === file.id
         );
         setLocalAnnotations(filteredAnnotations);
-        setSelectedMarkupId(null);
         
         console.log('🗑️ ANNOTATION DELETED:', {
           selectedMarkupId,
@@ -3913,8 +3915,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           deletedSuccessfully: !updatedAnnotations.some(a => a.id === selectedMarkupId)
         });
         
-        // Force a re-render after a small delay to ensure state updates are processed
-        setTimeout(() => {
+        // Force immediate re-render using requestAnimationFrame to ensure state is processed
+        requestAnimationFrame(() => {
           // Immediately re-render the SVG overlay to show the deletion
           if (currentViewport) {
             renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
@@ -3925,7 +3927,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           requestAnimationFrame(() => {
             renderPDFPage(currentPage);
           });
-        }, 10);
+        });
       } else if (currentProjectId && file?.id) {
         // Delete measurement
         const { deleteTakeoffMeasurement, getPageTakeoffMeasurements } = useTakeoffStore.getState();
@@ -3950,16 +3952,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             perimeterValue: apiMeasurement.perimeterValue
           }));
           
-          setLocalTakeoffMeasurements(displayMeasurements);
+          // Clear selection immediately before state updates
           setSelectedMarkupId(null);
+          
+          // Update local measurements
+          setLocalTakeoffMeasurements(displayMeasurements);
           
           console.log('🗑️ MEASUREMENT DELETED:', {
             selectedMarkupId,
             remainingMeasurements: displayMeasurements.length
           });
           
-          // Force a re-render after a small delay to ensure state updates are processed
-          setTimeout(() => {
+          // Force immediate re-render using requestAnimationFrame to ensure state is processed
+          requestAnimationFrame(() => {
             // Immediately re-render the SVG overlay to show the deletion
             if (currentViewport) {
               renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
@@ -3970,7 +3975,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             requestAnimationFrame(() => {
               renderPDFPage(currentPage);
             });
-          }, 10);
+          });
         } catch (error: any) {
           console.error(`Failed to delete markup:`, error);
         }
@@ -4344,6 +4349,23 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               onClick={(e) => {
                 // Handle clicks in selection mode, calibration mode, annotation mode, measurement mode, or visual search mode
                 if (isSelectionMode || isCalibrating || annotationTool || isMeasuring || (visualSearchMode && isSelectingSymbol)) {
+                  // CRITICAL FIX: Don't stop propagation if clicking on a markup element
+                  // This allows markup click handlers to fire and select the markup
+                  const target = e.target as SVGElement;
+                  const isMarkupElement = target.hasAttribute('data-annotation-id') || 
+                                         target.hasAttribute('data-measurement-id') ||
+                                         target.closest('[data-annotation-id]') !== null ||
+                                         target.closest('[data-measurement-id]') !== null;
+                  
+                  // CRITICAL FIX: If clicking on a markup element, let its handler run and don't process further
+                  // The markup's click handler will call setSelectedMarkupId and stop propagation
+                  if (isMarkupElement) {
+                    // Don't stop propagation - let the markup's click handler process it
+                    // The markup handler will call e.stopPropagation() itself
+                    return;
+                  }
+                  
+                  // For non-markup clicks, stop propagation and process normally
                   e.stopPropagation();
                   
                   // Check for double-click on freehand annotations
