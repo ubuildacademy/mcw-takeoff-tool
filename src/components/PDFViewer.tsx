@@ -732,11 +732,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       svgOverlay.setAttribute('viewBox', `0 0 ${viewport.width} ${viewport.height}`);
     }
     
-    console.log('🎨 PDFViewer: renderTakeoffAnnotations called', {
-      pageNum,
-      localTakeoffMeasurementsCount: localTakeoffMeasurements.length,
-      localTakeoffMeasurements: localTakeoffMeasurements
-    });
     
     // Clear existing annotations completely - this ensures no cross-page contamination
     svgOverlay.innerHTML = '';
@@ -892,32 +887,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Re-render annotations when measurements or interaction state changes
   useEffect(() => {
-    console.log('🔄 PDFViewer: Re-render useEffect triggered', {
-      pdfDocument: !!pdfDocument,
-      currentViewport: !!currentViewport,
-      isRendering: isRenderingRef.current,
-      localTakeoffMeasurementsCount: localTakeoffMeasurements.length,
-      isMeasuring,
-      isCalibrating,
-      currentMeasurementLength: currentMeasurement.length,
-      isAnnotating,
-      localAnnotationsLength: localAnnotations.length,
-      visualSearchMode,
-      isSelectingSymbol,
-      currentPage
-    });
-    
     if (pdfDocument && currentViewport && !isRenderingRef.current) {
       // Only render if we have measurements, annotations, or if we're in measuring/annotation/visual search mode
       if (localTakeoffMeasurements.length > 0 || isMeasuring || isCalibrating || currentMeasurement.length > 0 || isAnnotating || localAnnotations.length > 0 || (visualSearchMode && isSelectingSymbol)) {
-        console.log('🎨 PDFViewer: Triggering renderTakeoffAnnotations');
         renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
       } else {
         // LAYER THRASH PREVENTION: Clear overlay when measurements are empty to prevent stale renderings
         // This ensures clean state when switching projects or when measurements are cleared
         if (svgOverlayRef.current) {
           svgOverlayRef.current.innerHTML = '';
-          console.log('🎨 PDFViewer: Cleared overlay - no measurements or active modes');
         }
       }
     }
@@ -1227,27 +1205,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Render individual measurement as SVG
   const renderSVGMeasurement = (svg: SVGSVGElement, measurement: Measurement, viewport: any, page?: any) => {
-    console.log('🎨 renderSVGMeasurement called', {
-      measurementId: measurement.id,
-      measurementType: measurement.type,
-      pointsCount: measurement.points?.length,
-      points: measurement.points,
-      viewport: viewport,
-      svgElement: svg
-    });
-    
     if (!measurement || !measurement.points || !viewport) {
-      console.log('❌ renderSVGMeasurement: Missing required data', {
-        hasMeasurement: !!measurement,
-        hasPoints: !!measurement?.points,
-        hasViewport: !!viewport
-      });
       return;
     }
     
     const points = measurement.points;
     if (points.length < 1) {
-      console.log('❌ renderSVGMeasurement: Not enough points', { pointsLength: points.length });
       return;
     }
     
@@ -1255,10 +1218,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (measurement.type === 'count' && points.length < 1) return;
     // For other measurements, we need at least 2 points
     if (measurement.type !== 'count' && points.length < 2) {
-      console.log('❌ renderSVGMeasurement: Not enough points for non-count measurement', { 
-        type: measurement.type, 
-        pointsLength: points.length 
-      });
       return;
     }
     
@@ -1271,30 +1230,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // This prevents drift by using the fresh viewport instead of recalculating with stale viewState.scale
     const currentViewport = viewport;
     
-    // Debug logging for rendering
-    console.log('🎨 RENDERING:', {
-      measurementId: measurement.id,
-      currentScale: viewState.scale,
-      currentRotation: viewState.rotation,
-      viewport: { width: currentViewport.width, height: currentViewport.height, scale: currentViewport.scale, rotation: currentViewport.rotation },
-      originalPoints: points.slice(0, 2) // First 2 points for debugging
-    });
-    
     // Convert normalized coordinates to current viewport coordinates for rendering
     // Simple and reliable approach
-    const transformedPoints = points.map((point, index) => {
+    const transformedPoints = points.map((point) => {
       // Convert normalized coordinates to current viewport coordinates
       const canvasX = point.x * currentViewport.width;
       const canvasY = point.y * currentViewport.height;
-      
-      // Debug logging for first 2 points
-      if (index < 2) {
-        console.log(`🎨 POINT ${index}:`, {
-          normalizedPoint: { x: point.x, y: point.y },
-          canvasPoint: { x: canvasX, y: canvasY },
-          currentViewport: { width: currentViewport.width, height: currentViewport.height, scale: currentViewport.scale }
-        });
-      }
       
       return {
         x: canvasX,
@@ -1308,27 +1249,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     switch (measurement.type) {
       case 'linear':
-        console.log('🎨 Rendering linear measurement', {
-          measurementId: measurement.id,
-          transformedPoints: transformedPoints,
-          viewport: { width: viewport.width, height: viewport.height },
-          strokeColor,
-          strokeWidth
-        });
-        
         // Create polyline for linear measurement
         const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
         const pointString = transformedPoints.map(p => {
           // Points are already in viewport pixels after scaling
           return `${p.x},${p.y}`;
         }).join(' ');
-        
-        console.log('🎨 Linear measurement pointString', { 
-          pointString,
-          originalPoints: points,
-          transformedPoints: transformedPoints,
-          viewportDimensions: { width: viewport.width, height: viewport.height }
-        });
         
         polyline.setAttribute('points', pointString);
         polyline.setAttribute('stroke', strokeColor);
@@ -1359,10 +1285,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
         
         svg.appendChild(polyline);
-        console.log('🎨 Linear measurement polyline appended to SVG', {
-          svgChildrenCount: svg.children.length,
-          polylineElement: polyline
-        });
         
         // Add measurement text
         const startPoint = { x: transformedPoints[0].x, y: transformedPoints[0].y };
@@ -2461,7 +2383,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // ANTI-FLICKER: Clear deselection state on any user interaction
     if (isDeselecting) {
-      console.log('✅ USER INTERACTION: Clearing deselection cooldown');
       setIsDeselecting(false);
     }
     
@@ -2642,7 +2563,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // ANTI-FLICKER: Clear deselection state on any user interaction
     if (isDeselecting) {
-      console.log('✅ USER INTERACTION: Clearing deselection cooldown');
       setIsDeselecting(false);
     }
     
@@ -4066,9 +3986,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       }
       
       // Optimized debounce for non-interactive mode
-      if (process.env.NODE_ENV === 'development') {
-        console.log('✅ PDF RENDER ALLOWED: Non-interactive mode');
-      }
       const timeoutId = setTimeout(() => {
         renderPDFPage(currentPage);
       }, 30); // Further reduced debounce for better responsiveness
@@ -4098,6 +4015,23 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         } else {
           setMeasurementType('linear');
         }
+      } else {
+        // VALIDATION FIX: Condition ID exists but condition object is missing
+        // This can happen during condition reload or if condition was deleted
+        // Clear measurement mode to prevent stale state and silent click failures
+        console.warn('⚠️ CONDITION NOT FOUND: selectedConditionId exists but condition object missing', {
+          selectedConditionId,
+          conditionsCount: useTakeoffStore.getState().conditions.length
+        });
+        
+        // Clear measurement state to prevent clicks from failing silently
+        // This doesn't trigger renders (just state updates) and respects guard logic
+        setIsMeasuring(false);
+        setIsSelectionMode(true);
+        setSelectedMarkupId(null);
+        // DON'T set isDeselecting here - that's only for explicit deselection
+        // DON'T clear selectedConditionId in store - let the UI handle that
+        // This prevents flicker while allowing the UI to show the selection state
       }
     } else {
       console.log('📋 CONDITION DESELECTED: Switching to selection mode');
@@ -4123,7 +4057,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         setIsDeselecting(false);
       };
     }
-  }, [selectedConditionId]);
+  }, [selectedConditionId, getSelectedCondition]);
 
   // Set annotation mode when annotation tool is selected
   useEffect(() => {
