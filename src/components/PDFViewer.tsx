@@ -550,12 +550,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Additional effect to ensure measurements are rendered when added
   useEffect(() => {
     if (localTakeoffMeasurements.length > 0 && pdfDocument && currentViewport && !isRenderingRef.current) {
-      console.log('🔄 PDFViewer: Additional effect - rendering measurements', {
-        localTakeoffMeasurementsCount: localTakeoffMeasurements.length,
-        currentPage,
-        hasPdfDocument: !!pdfDocument,
-        hasCurrentViewport: !!currentViewport
-      });
+      // Removed verbose logging - was causing console spam
       // Note: renderTakeoffAnnotations will be called by the existing useEffect that watches localTakeoffMeasurements
     }
   }, [localTakeoffMeasurements, currentPage, pdfDocument, currentViewport]);
@@ -743,12 +738,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     );
     
     pageMeasurements.forEach((measurement) => {
-      console.log('🎨 PDFViewer: Rendering measurement for page', {
-        measurementId: measurement.id,
-        measurementType: measurement.type,
-        measurementPage: measurement.pdfPage,
-        currentPage: pageNum
-      });
+      // Removed verbose logging - was causing console spam
       renderSVGMeasurement(svgOverlay, measurement, viewport, page);
     });
 
@@ -1179,10 +1169,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
       } catch {}
       
-      // Reduced logging for better performance
-      if (process.env.NODE_ENV === 'development') {
-        console.log('✅ PDF RENDER COMPLETE:', { pageNum, timestamp: Date.now() });
-      }
+      // Removed verbose logging - was causing console spam
       
       // Mark initial render as complete and notify parent
       if (pageNum === currentPage) {
@@ -2474,15 +2461,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Handle click - direct coordinate conversion
   const handleClick = useCallback(async (event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
-    console.log('🖱️ CLICK HANDLER CALLED', {
-      hasCanvas: !!pdfCanvasRef.current,
-      hasViewport: !!currentViewport,
-      hasPdfPage: !!pdfPageRef.current,
-      hasPdfDocument: !!pdfDocument,
-      currentPage,
-      isMeasuring,
-      isDeselecting
-    });
+    // Removed verbose logging - was causing console spam
     
     // Basic checks - allow interactions even during loading
     if (!pdfCanvasRef.current) {
@@ -2496,7 +2475,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (!viewport) {
       // Try to get viewport from cached page ref first
       if (pdfPageRef.current) {
-        console.log('📐 Computing viewport from cached page ref');
+        // Removed verbose logging
         viewport = pdfPageRef.current.getViewport({ 
           scale: viewState.scale, 
           rotation: viewState.rotation 
@@ -2508,7 +2487,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }));
       } else if (pdfDocument) {
         // For new documents, page might not be loaded yet - load it on-demand
-        console.log('📄 Loading PDF page on-demand for click handler');
+        // Removed verbose logging
         try {
           const page = await pdfDocument.getPage(currentPage);
           pdfPageRef.current = page; // Cache the page for future use
@@ -2521,7 +2500,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             ...prev,
             [currentPage]: viewport
           }));
-          console.log('✅ Viewport computed from loaded page', { width: viewport.width, height: viewport.height });
+          // Removed verbose logging
         } catch (error) {
           console.error('❌ Failed to load PDF page for click handler:', error);
           return;
@@ -2542,14 +2521,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     const currentStoreState = useTakeoffStore.getState();
     const currentSelectedConditionId = currentStoreState.selectedConditionId;
-    console.log('🔍 CLICK STATE CHECK', {
-      currentSelectedConditionId,
-      isMeasuring,
-      isCalibrating,
-      annotationTool,
-      cutoutMode,
-      visualSearchMode
-    });
+    // Removed verbose logging - was causing console spam
     
     // Get CSS pixel coordinates relative to the canvas/SVG
     const rect = pdfCanvasRef.current.getBoundingClientRect();
@@ -2714,7 +2686,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       return;
     }
     
-    console.log('✅ CLICK PROCESSING: Condition selected, processing measurement click');
+    // Removed verbose logging - was causing console spam
     
     // Convert CSS coordinates to PDF coordinates (0-1) for storage using current page viewport
     let pdfCoords = {
@@ -3153,16 +3125,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Handle double-click to complete measurements
   const handleDoubleClick = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
-    console.log('🖱️ DOUBLE-CLICK HANDLER CALLED', {
-      isMeasuring,
-      measurementType,
-      currentMeasurementLength: currentMeasurement.length,
-      isContinuousDrawing,
-      activePointsLength: activePoints.length,
-      cutoutMode,
-      currentCutoutLength: currentCutout.length,
-      annotationTool
-    });
+    // Removed verbose logging - was causing console spam
     
     // Prevent default behavior
     event.preventDefault();
@@ -3170,27 +3133,18 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Handle cut-out completion
     if (cutoutMode && currentCutout.length >= 3) {
-      console.log('✅ Completing cutout');
       completeCutout(currentCutout);
       return;
     }
     
     if (isContinuousDrawing && activePoints.length >= 2) {
       // Complete the continuous linear measurement
-      console.log('✅ Completing continuous linear measurement');
       completeContinuousLinearMeasurement();
     } else if ((measurementType === 'area' || measurementType === 'volume') && currentMeasurement.length >= 3) {
       // Complete area or volume measurement
-      console.log('✅ Completing area/volume measurement', { measurementType, points: currentMeasurement.length });
       completeMeasurement(currentMeasurement);
-    } else {
-      console.warn('⚠️ Double-click conditions not met', {
-        isContinuousDrawing,
-        activePointsLength: activePoints.length,
-        measurementType,
-        currentMeasurementLength: currentMeasurement.length
-      });
     }
+    // Removed verbose logging - was causing console spam
   }, [annotationTool, currentAnnotation, annotationColor, currentPage, onAnnotationToolChange, isContinuousDrawing, activePoints, measurementType, currentMeasurement, completeContinuousLinearMeasurement, completeMeasurement, cutoutMode, currentCutout, completeCutout, isMeasuring]);
 
   // Cleanup continuous drawing state
@@ -4270,7 +4224,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                       e.stopPropagation();
                       
                       // Complete the measurement via double-click
-                      console.log('🖱️ Double-click detected in onClick handler for measurement');
+                      // Removed verbose logging
                       handleDoubleClick(e);
                       setLastClickTime(0);
                       setLastClickPosition(null);
