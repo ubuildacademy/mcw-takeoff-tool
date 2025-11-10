@@ -88,18 +88,19 @@ export const fileService = {
       },
     });
 
-    // Automatically start OCR processing after successful upload
+    // Automatically start OCR processing after successful upload (server-side)
     if (response.data.success && response.data.file) {
-      const { ocrService } = await import('./ocrService');
+      const { serverOcrService } = await import('./serverOcrService');
       
       // Start OCR processing in background (don't await)
-      ocrService.processDocument(response.data.file.id, projectId)
+      serverOcrService.processDocument(response.data.file.id, projectId)
         .then(() => {
           if (import.meta.env.DEV) console.log(`✅ OCR processing completed for ${response.data.file.originalName}`);
         })
         .catch((error) => {
           if (import.meta.env.DEV) console.error(`❌ OCR processing failed for ${response.data.file.originalName}:`, error);
           // Don't throw the error, just log it since OCR is optional
+          // User can retry later via the analyze documents feature
         });
     }
 

@@ -865,33 +865,85 @@ export function TakeoffWorkspace() {
   };
 
   const handlePdfUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+    const files = event.target.files;
     
-    if (!file || !projectId) {
+    if (!files || files.length === 0 || !projectId) {
       return;
     }
     
-    // Check file size before uploading (1GB = 1024 * 1024 * 1024 bytes)
+    // Check file sizes before uploading (1GB = 1024 * 1024 * 1024 bytes)
     const maxSizeMB = 1024;
     const maxSizeBytes = maxSizeMB * 1024 * 1024;
-    if (file.size > maxSizeBytes) {
-      alert(`File too large! Maximum size is ${maxSizeMB}MB (1GB). Your file is ${(file.size / (1024 * 1024)).toFixed(2)}MB.\n\nPlease contact your admin to increase the Supabase Storage file size limit.`);
+    const invalidFiles: string[] = [];
+    
+    Array.from(files).forEach((file) => {
+      if (file.size > maxSizeBytes) {
+        invalidFiles.push(`${file.name} (${(file.size / (1024 * 1024)).toFixed(2)}MB)`);
+      }
+    });
+    
+    if (invalidFiles.length > 0) {
+      alert(`Some files are too large! Maximum size is ${maxSizeMB}MB (1GB).\n\nLarge files:\n${invalidFiles.join('\n')}\n\nPlease contact your admin to increase the Supabase Storage file size limit.`);
       return;
     }
     
     try {
       setUploading(true);
       
-      const uploadRes = await fileService.uploadPDF(file, projectId);
+      // Process files sequentially to avoid overwhelming the server
+      const uploadedFiles: any[] = [];
+      const failedFiles: Array<{name: string, error: string}> = [];
+      
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        try {
+          console.log(`Uploading file ${i + 1}/${files.length}: ${file.name}`);
+          const uploadRes = await fileService.uploadPDF(file, projectId);
+          
+          if (uploadRes.file) {
+            uploadedFiles.push(uploadRes.file);
+          }
+        } catch (error: any) {
+          console.error(`Upload failed for ${file.name}:`, error);
+          
+          // Extract error message from API response
+          let errorMessage = 'Failed to upload PDF file.';
+          
+          if (error.response?.data) {
+            const errorData = error.response.data;
+            if (errorData.message) {
+              errorMessage = errorData.message;
+            } else if (errorData.error) {
+              errorMessage = errorData.error;
+            } else if (typeof errorData === 'string') {
+              errorMessage = errorData;
+            }
+          } else if (error.message) {
+            errorMessage = error.message;
+          }
+          
+          failedFiles.push({ name: file.name, error: errorMessage });
+        }
+      }
       
       // Refresh project files
       const filesRes = await fileService.getProjectFiles(projectId);
       const files = filesRes.files || [];
       setProjectFiles(files);
       
-      // Set the newly uploaded file as current
-      if (uploadRes.file) {
-        setCurrentPdfFile(uploadRes.file);
+      // Set the first successfully uploaded file as current
+      if (uploadedFiles.length > 0) {
+        setCurrentPdfFile(uploadedFiles[0]);
+      }
+      
+      // Show summary if there were failures
+      if (failedFiles.length > 0) {
+        const successCount = uploadedFiles.length;
+        const failCount = failedFiles.length;
+        const failMessages = failedFiles.map(f => `  • ${f.name}: ${f.error}`).join('\n');
+        alert(`Upload Summary:\n\n✅ Successfully uploaded: ${successCount} file(s)\n❌ Failed: ${failCount} file(s)\n\nFailed files:\n${failMessages}`);
+      } else if (uploadedFiles.length > 1) {
+        alert(`Successfully uploaded ${uploadedFiles.length} files! OCR processing has started automatically in the background.`);
       }
       
     } catch (error: any) {
