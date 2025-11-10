@@ -310,11 +310,6 @@ export function TakeoffWorkspace() {
       };
       
       loadCalibrations();
-      
-      // Cleanup: cancel measurement load if component unmounts or project changes
-      return () => {
-        clearTimeout(loadTimer);
-      };
     }
   }, [projectId]); // Only depend on projectId to prevent infinite loops
 
