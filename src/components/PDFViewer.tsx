@@ -393,55 +393,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     getSelectedCondition,
     annotations: storeAnnotations,
     addAnnotation,
-    getPageAnnotations
+    getPageAnnotations,
+    loadPageTakeoffMeasurements,
+    getPageTakeoffMeasurements
   } = useTakeoffStore();
-  
-  // PERFORMANCE FIX: Use ref to cache previous page measurements and only update when they actually change
-  // This prevents re-renders when measurements change on other pages (critical for large documents)
-  const allTakeoffMeasurements = useTakeoffStore(state => state.takeoffMeasurements);
-  const prevPageMeasurementsRef = useRef<{ pageKey: string; measurements: any[]; signature: string } | null>(null);
-  
-  // Memoize filtered measurements and only return new array when current page measurements actually change
-  const pageTakeoffMeasurements = useMemo(() => {
-    if (!currentProjectId || !file?.id || !currentPage) {
-      prevPageMeasurementsRef.current = null;
-      return [];
-    }
-    
-    const pageKey = `${currentProjectId}-${file.id}-${currentPage}`;
-    
-    // Get measurements for current page only
-    const pageMeasurements = allTakeoffMeasurements.filter(
-      (measurement) =>
-        measurement.projectId === currentProjectId &&
-        measurement.sheetId === file.id &&
-        measurement.pdfPage === currentPage
-    );
-    
-    // Create a signature to detect actual changes (sorted IDs + timestamps)
-    const signature = JSON.stringify(
-      pageMeasurements
-        .map((m) => `${m.id}-${m.timestamp}`)
-        .sort()
-    );
-    
-    // If same page and signature hasn't changed, return cached array to prevent re-render
-    if (
-      prevPageMeasurementsRef.current?.pageKey === pageKey &&
-      prevPageMeasurementsRef.current?.signature === signature
-    ) {
-      return prevPageMeasurementsRef.current.measurements;
-    }
-    
-    // Update cache and return new array
-    prevPageMeasurementsRef.current = {
-      pageKey,
-      measurements: pageMeasurements,
-      signature
-    };
-    
-    return pageMeasurements;
-  }, [allTakeoffMeasurements, currentProjectId, file?.id, currentPage]);
   
   // Load existing takeoff measurements for the current sheet - reactive to store changes
   const [localTakeoffMeasurements, setLocalTakeoffMeasurements] = useState<any[]>([]);
@@ -459,43 +414,56 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
   }, [currentProjectId, file?.id, storeAnnotations]);
 
-  // Load measurements for current page - now only triggers when current page measurements change
+  // PER-PAGE LOADING: Load measurements for current page when page changes
   useEffect(() => {
     if (!currentProjectId || !file?.id || !currentPage) {
       setLocalTakeoffMeasurements([]);
       return;
     }
     
-    // Convert API measurements to display format
-    const displayMeasurements = pageTakeoffMeasurements.map(apiMeasurement => {
+    // Load measurements for this specific page from API
+    const loadPageMeasurements = async () => {
       try {
-        return {
-          id: apiMeasurement.id,
-          type: apiMeasurement.type,
-          points: apiMeasurement.points,
-          calculatedValue: apiMeasurement.calculatedValue,
-          unit: apiMeasurement.unit,
-          conditionId: apiMeasurement.conditionId,
-          conditionName: apiMeasurement.conditionName,
-          color: apiMeasurement.conditionColor,
-          timestamp: new Date(apiMeasurement.timestamp).getTime(),
-          pdfPage: apiMeasurement.pdfPage,
-          pdfCoordinates: apiMeasurement.pdfCoordinates,
-          perimeterValue: apiMeasurement.perimeterValue || null,
-          cutouts: apiMeasurement.cutouts || null,
-          netCalculatedValue: apiMeasurement.netCalculatedValue || null
-        };
+        // Load from API if not already loaded (method handles caching)
+        await loadPageTakeoffMeasurements(currentProjectId, file.id, currentPage);
+        
+        // Get from store (now guaranteed to be loaded)
+        const pageMeasurements = getPageTakeoffMeasurements(currentProjectId, file.id, currentPage);
+        
+        // Convert API measurements to display format
+        const displayMeasurements = pageMeasurements.map(apiMeasurement => {
+          try {
+            return {
+              id: apiMeasurement.id,
+              type: apiMeasurement.type,
+              points: apiMeasurement.points,
+              calculatedValue: apiMeasurement.calculatedValue,
+              unit: apiMeasurement.unit,
+              conditionId: apiMeasurement.conditionId,
+              conditionName: apiMeasurement.conditionName,
+              color: apiMeasurement.conditionColor,
+              timestamp: new Date(apiMeasurement.timestamp).getTime(),
+              pdfPage: apiMeasurement.pdfPage,
+              pdfCoordinates: apiMeasurement.pdfCoordinates,
+              perimeterValue: apiMeasurement.perimeterValue || null,
+              cutouts: apiMeasurement.cutouts || null,
+              netCalculatedValue: apiMeasurement.netCalculatedValue || null
+            };
+          } catch (error) {
+            console.error('Error processing measurement:', error, apiMeasurement);
+            return null;
+          }
+        }).filter(Boolean);
+        
+        setLocalTakeoffMeasurements(displayMeasurements);
       } catch (error) {
-        console.error('Error processing measurement:', error, apiMeasurement);
-        return null;
+        console.error('Error loading page measurements:', error);
+        setLocalTakeoffMeasurements([]);
       }
-    }).filter(Boolean);
+    };
     
-    setLocalTakeoffMeasurements(displayMeasurements);
-    
-    // Note: renderTakeoffAnnotations will be called by the effect that watches localTakeoffMeasurements
-    // No need to call it here to avoid the dependency issue
-  }, [currentProjectId, file?.id, currentPage, pageTakeoffMeasurements, currentViewport]);
+    loadPageMeasurements();
+  }, [currentProjectId, file?.id, currentPage, loadPageTakeoffMeasurements, getPageTakeoffMeasurements]);
 
   // Ensure component is mounted before rendering
   useEffect(() => {

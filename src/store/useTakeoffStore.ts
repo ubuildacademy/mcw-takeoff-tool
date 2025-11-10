@@ -50,6 +50,8 @@ interface TakeoffStore {
   markupsByPage: Record<string, TakeoffMeasurement[]>; // Key: `${projectId}-${sheetId}-${pageNumber}`
   loadingMeasurements: boolean; // Track if measurements are currently being loaded
   loadingMeasurementsProjectId: string | null; // Track which project is being loaded (prevents race conditions)
+  loadedPages: Set<string>; // Track which pages have been loaded: Key: `${projectId}-${sheetId}-${pageNumber}`
+  loadingPages: Set<string>; // Track which pages are currently loading: Key: `${projectId}-${sheetId}-${pageNumber}`
   
   // Annotations
   annotations: Annotation[];
@@ -142,6 +144,7 @@ interface TakeoffStore {
   loadInitialData: () => Promise<void>;
   loadProjectConditions: (projectId: string) => Promise<void>;
   loadProjectTakeoffMeasurements: (projectId: string) => Promise<void>;
+  loadPageTakeoffMeasurements: (projectId: string, sheetId: string, pageNumber: number) => Promise<void>;
   refreshProjectConditions: (projectId: string) => Promise<void>;
   ensureConditionsLoaded: (projectId: string) => Promise<void>;
 }
@@ -174,6 +177,8 @@ export const useTakeoffStore = create<TakeoffStore>()(
       markupsByPage: {},
       loadingMeasurements: false,
       loadingMeasurementsProjectId: null,
+      loadedPages: new Set<string>(),
+      loadingPages: new Set<string>(),
       
       annotations: [],
       
@@ -1148,6 +1153,84 @@ export const useTakeoffStore = create<TakeoffStore>()(
               loadingMeasurementsProjectId: null
             });
           }
+        }
+      },
+
+      loadPageTakeoffMeasurements: async (projectId: string, sheetId: string, pageNumber: number) => {
+        const pageKey = `${projectId}-${sheetId}-${pageNumber}`;
+        const state = get();
+        
+        // Skip if already loaded
+        if (state.loadedPages.has(pageKey)) {
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`⏭️ LOAD_PAGE_TAKEOFF_MEASUREMENTS: Page ${pageNumber} already loaded for sheet ${sheetId}, skipping`);
+          }
+          return;
+        }
+        
+        // Skip if currently loading (prevent race conditions from rapid page changes)
+        if (state.loadingPages.has(pageKey)) {
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`⏳ LOAD_PAGE_TAKEOFF_MEASUREMENTS: Page ${pageNumber} already loading for sheet ${sheetId}, skipping duplicate request`);
+          }
+          return;
+        }
+        
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`🔄 LOAD_PAGE_TAKEOFF_MEASUREMENTS: Loading measurements for page ${pageNumber} of sheet ${sheetId}`);
+        }
+        
+        // Mark as loading
+        set(state => {
+          const updatedLoadingPages = new Set(state.loadingPages);
+          updatedLoadingPages.add(pageKey);
+          return { loadingPages: updatedLoadingPages };
+        });
+        
+        try {
+          // Import the API service dynamically to avoid circular dependencies
+          const { takeoffMeasurementService } = await import('../services/apiService');
+          
+          // Load measurements for this specific page
+          const response = await takeoffMeasurementService.getPageTakeoffMeasurements(sheetId, pageNumber);
+          const pageMeasurements = response.measurements || [];
+          
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`✅ LOAD_PAGE_TAKEOFF_MEASUREMENTS: Loaded ${pageMeasurements.length} measurements for page ${pageNumber}`);
+          }
+          
+          set(state => {
+            // Merge new measurements (don't replace - support incremental loading)
+            // Use a Set to track existing IDs to avoid duplicates
+            const existingIds = new Set(state.takeoffMeasurements.map((m: TakeoffMeasurement) => m.id));
+            const newMeasurements = pageMeasurements.filter((m: TakeoffMeasurement) => !existingIds.has(m.id));
+            
+            // Update loadedPages set and remove from loadingPages
+            const updatedLoadedPages = new Set(state.loadedPages);
+            updatedLoadedPages.add(pageKey);
+            const updatedLoadingPages = new Set(state.loadingPages);
+            updatedLoadingPages.delete(pageKey);
+            
+            return {
+              takeoffMeasurements: [...state.takeoffMeasurements, ...newMeasurements],
+              loadedPages: updatedLoadedPages,
+              loadingPages: updatedLoadingPages
+            };
+          });
+          
+          // Update markupsByPage structure
+          get().updateMarkupsByPage();
+          
+        } catch (error) {
+          console.error(`❌ LOAD_PAGE_TAKEOFF_MEASUREMENTS: Failed to load measurements for page ${pageNumber} of sheet ${sheetId}:`, error);
+          
+          // Remove from loadingPages on error so it can be retried
+          set(state => {
+            const updatedLoadingPages = new Set(state.loadingPages);
+            updatedLoadingPages.delete(pageKey);
+            return { loadingPages: updatedLoadingPages };
+          });
+          // Don't mark as loaded on error so it can be retried
         }
       }
     }),

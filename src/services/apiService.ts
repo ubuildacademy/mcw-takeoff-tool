@@ -406,6 +406,61 @@ export const takeoffMeasurementService = {
     return response.data;
   },
 
+  async getPageTakeoffMeasurements(sheetId: string, pageNumber: number) {
+    const response = await apiClient.get(`/takeoff-measurements/sheet/${sheetId}/page/${pageNumber}`);
+    
+    if (import.meta.env.DEV) {
+      console.log('📥 API_GET_PAGE_TAKEOFF_MEASUREMENTS: Raw response:', response.data);
+    }
+    
+    // Backend now returns camelCase fields, but support both formats for backward compatibility
+    const transformedMeasurements = (response.data.measurements || []).map((measurement: any) => {
+      // Prioritize camelCase (from backend storage service) but fall back to snake_case
+      const transformed = {
+        id: measurement.id,
+        projectId: measurement.project_id || measurement.projectId,
+        sheetId: measurement.sheet_id || measurement.sheetId,
+        conditionId: measurement.condition_id || measurement.conditionId,
+        type: measurement.type,
+        points: measurement.points || [],
+        calculatedValue: measurement.calculated_value !== undefined && measurement.calculated_value !== null 
+          ? measurement.calculated_value 
+          : (measurement.calculatedValue !== undefined && measurement.calculatedValue !== null 
+              ? measurement.calculatedValue 
+              : 0),
+        unit: measurement.unit || '',
+        timestamp: measurement.timestamp || new Date().toISOString(),
+        pdfPage: measurement.pdf_page !== undefined && measurement.pdf_page !== null 
+          ? measurement.pdf_page 
+          : (measurement.pdfPage !== undefined && measurement.pdfPage !== null ? measurement.pdfPage : 1),
+        pdfCoordinates: measurement.pdf_coordinates || measurement.pdfCoordinates || [],
+        conditionColor: measurement.condition_color || measurement.conditionColor || '#000000',
+        conditionName: measurement.condition_name || measurement.conditionName || 'Unknown',
+        ...(measurement.perimeter_value !== undefined || measurement.perimeterValue !== undefined) && {
+          perimeterValue: measurement.perimeter_value !== undefined ? measurement.perimeter_value : measurement.perimeterValue
+        },
+        ...(measurement.cutouts && { cutouts: measurement.cutouts }),
+        ...(measurement.net_calculated_value !== undefined || measurement.netCalculatedValue !== undefined) && {
+          netCalculatedValue: measurement.net_calculated_value !== undefined 
+            ? measurement.net_calculated_value 
+            : measurement.netCalculatedValue
+        }
+      };
+      
+      if (import.meta.env.DEV && !transformed.conditionId) {
+        console.warn('⚠️ Measurement missing conditionId:', transformed);
+      }
+      
+      return transformed;
+    });
+    
+    if (import.meta.env.DEV) {
+      console.log('📤 API_GET_PAGE_TAKEOFF_MEASUREMENTS: Transformed measurements:', transformedMeasurements);
+    }
+    
+    return { measurements: transformedMeasurements };
+  },
+
   async createTakeoffMeasurement(measurementData: any) {
     if (import.meta.env.DEV) console.log('🌐 API_CREATE_TAKEOFF_MEASUREMENT: Making API call with data:', measurementData);
     try {
