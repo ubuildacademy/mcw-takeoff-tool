@@ -2433,6 +2433,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Handle mouse move - direct coordinate conversion
   const handleMouseMove = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
+    // Basic checks - allow interactions even during loading
+    if (!pdfCanvasRef.current || !currentViewport) {
+      return;
+    }
+    
     // ANTI-FLICKER: Clear deselection state on any user interaction
     if (isDeselecting) {
       console.log('✅ USER INTERACTION: Clearing deselection cooldown');
@@ -2584,10 +2589,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
       }
     }
-  }, [annotationTool, isCalibrating, calibrationPoints, isMeasuring, selectedConditionId, mousePosition, isContinuousDrawing, activePoints, rubberBandElement, currentViewport, calculateRunningLength, isDeselecting]);
+  }, [annotationTool, isCalibrating, calibrationPoints, isMeasuring, selectedConditionId, mousePosition, isContinuousDrawing, activePoints, rubberBandElement, currentViewport, calculateRunningLength, isDeselecting, visualSearchMode, isSelectingSymbol, selectionStart]);
 
   // Handle click - direct coordinate conversion
   const handleClick = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
+    // Basic checks - allow interactions even during loading
+    if (!pdfCanvasRef.current || !currentViewport) {
+      return;
+    }
+    
     // ANTI-FLICKER: Clear deselection state on any user interaction
     if (isDeselecting) {
       console.log('✅ USER INTERACTION: Clearing deselection cooldown');
@@ -2596,8 +2606,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     const currentStoreState = useTakeoffStore.getState();
     const currentSelectedConditionId = currentStoreState.selectedConditionId;
-    
-    if (!pdfCanvasRef.current || !currentViewport) return;
     
     // Get CSS pixel coordinates relative to the canvas/SVG
     const rect = pdfCanvasRef.current.getBoundingClientRect();
@@ -2803,7 +2811,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       }
       // Area and volume measurements will be completed on double-click
     }
-  }, [isCalibrating, calibrationPoints, measurementType, currentMeasurement, isContinuousDrawing, activePoints, calculateRunningLength, currentViewport, isSelectionMode, selectedMarkupId, isOrthoSnapping, isMeasuring, mousePosition, cutoutMode, currentCutout]);
+  }, [isCalibrating, calibrationPoints, measurementType, currentMeasurement, isContinuousDrawing, activePoints, calculateRunningLength, currentViewport, isSelectionMode, selectedMarkupId, isOrthoSnapping, isMeasuring, mousePosition, cutoutMode, currentCutout, isDeselecting, visualSearchMode, isSelectingSymbol, selectionStart, annotationTool, currentProjectId, file, currentPage, addAnnotation, annotationColor, onAnnotationToolChange]);
 
   // Create rubber band element for continuous linear drawing
   const createRubberBandElement = useCallback(() => {

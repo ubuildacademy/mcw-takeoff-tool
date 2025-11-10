@@ -1077,10 +1077,10 @@ export function SheetSidebar({
   return (
     <div className="w-96 bg-white border-l flex flex-col h-full">
       {/* Header */}
-      <div className="p-4 border-b">
+      <div className="p-4 border-b relative">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">Project Documents</h2>
-          <div className="flex gap-2">
+          <div className="flex gap-2 relative">
             {onPdfUpload && (
               <label htmlFor="pdf-upload" className="cursor-pointer">
                 <Button 
@@ -1214,15 +1214,122 @@ export function SheetSidebar({
                       <div className="flex-1 min-w-0">
                         <div className="flex justify-between mb-1">
                           <div className="flex-1 min-w-0 pr-2">
-                            <span className="font-medium text-sm break-words leading-tight">
-                              {page.sheetName || document.name || `Page ${page.pageNumber}`}
-                            </span>
+                            {editingSheetId === `${document.id}-${page.pageNumber}` ? (
+                              <div className="flex items-center gap-1">
+                                <Input
+                                  value={editingSheetName}
+                                  onChange={(e) => setEditingSheetName(e.target.value)}
+                                  onKeyDown={handleSheetNameKeyDown}
+                                  className="h-6 text-sm px-2 py-1"
+                                  autoFocus
+                                  onBlur={(e) => {
+                                    e.stopPropagation();
+                                    saveSheetName();
+                                  }}
+                                />
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    saveSheetName();
+                                  }}
+                                  className="h-6 w-6 p-0 text-green-600 hover:text-green-700"
+                                  title="Save"
+                                >
+                                  <Check className="w-3 h-3" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    cancelEditingSheetName();
+                                  }}
+                                  className="h-6 w-6 p-0 text-red-600 hover:text-red-700"
+                                  title="Cancel"
+                                >
+                                  <X className="w-3 h-3" />
+                                </Button>
+                              </div>
+                            ) : (
+                              <div className="flex items-start gap-2">
+                                <span className="font-medium text-sm break-words leading-tight">
+                                  {page.sheetName || document.name || `Page ${page.pageNumber}`}
+                                </span>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    startEditingSheetName(document.id, page.pageNumber, page.sheetName || '');
+                                  }}
+                                  className="h-6 w-6 p-0 text-gray-400 hover:text-gray-600 flex-shrink-0 mt-0.5"
+                                  title="Edit sheet name"
+                                >
+                                  <Edit2 className="w-3 h-3" />
+                                </Button>
+                              </div>
+                            )}
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">
-                            {page.sheetNumber && (
-                              <Badge variant="secondary" className="text-xs">
-                                {page.sheetNumber}
-                              </Badge>
+                            {editingSheetNumberId === `${document.id}-${page.pageNumber}` ? (
+                              <div className="flex items-center gap-1">
+                                <Input
+                                  value={editingSheetNumber}
+                                  onChange={(e) => setEditingSheetNumber(e.target.value)}
+                                  onKeyDown={handleSheetNumberKeyDown}
+                                  className="h-5 text-xs w-16"
+                                  autoFocus
+                                  placeholder="Sheet #"
+                                />
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    saveSheetNumber();
+                                  }}
+                                  className="h-5 w-5 p-0 text-green-600 hover:text-green-700"
+                                  title="Save sheet number"
+                                >
+                                  <Check className="w-3 h-3" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    cancelEditingSheetNumber();
+                                  }}
+                                  className="h-5 w-5 p-0 text-red-600 hover:text-red-700"
+                                  title="Cancel editing"
+                                >
+                                  <X className="w-3 h-3" />
+                                </Button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1">
+                                {page.sheetNumber ? (
+                                  <Badge variant="secondary" className="text-xs">
+                                    {page.sheetNumber}
+                                  </Badge>
+                                ) : (
+                                  <span className="text-xs text-gray-400 italic">No sheet #</span>
+                                )}
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    startEditingSheetNumber(document.id, page.pageNumber, page.sheetNumber || '');
+                                  }}
+                                  className="h-5 w-5 p-0 text-gray-400 hover:text-gray-600"
+                                  title={page.sheetNumber ? "Edit sheet number" : "Add sheet number"}
+                                >
+                                  <Edit2 className="w-3 h-3" />
+                                </Button>
+                              </div>
                             )}
                           </div>
                         </div>
