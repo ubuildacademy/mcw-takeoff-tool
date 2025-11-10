@@ -902,9 +902,20 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // This ensures markups appear immediately when returning to a page
   // Must be after renderTakeoffAnnotations is defined
   useEffect(() => {
-    if (localTakeoffMeasurements.length > 0 && pdfDocument && pdfPageRef.current && currentViewport && !isRenderingRef.current) {
+    if (localTakeoffMeasurements.length > 0 && pdfDocument && !isRenderingRef.current) {
+      // Wait for viewport to be ready, then render
+      const renderWhenReady = () => {
+        if (pdfPageRef.current && currentViewport) {
+          renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+        } else {
+          // If viewport not ready yet, try again after a short delay
+          setTimeout(renderWhenReady, 50);
+        }
+      };
+      
+      // Use requestAnimationFrame for immediate render, with fallback retry
       requestAnimationFrame(() => {
-        renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+        renderWhenReady();
       });
     }
   }, [localTakeoffMeasurements, pdfDocument, currentViewport, currentPage, renderTakeoffAnnotations]);
@@ -1011,8 +1022,39 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Always re-render all annotations for this page, regardless of current state
     // This ensures takeoffs are visible immediately when the page loads
-    renderTakeoffAnnotations(pageNum, viewport, pdfPageRef.current);
-  }, [renderTakeoffAnnotations, localTakeoffMeasurements]);
+    // Use current state values, not captured values
+    const currentMeasurements = useTakeoffStore.getState().takeoffMeasurements.filter(
+      (m) => m.projectId === currentProjectId && m.sheetId === file?.id && m.pdfPage === pageNum
+    );
+    
+    // Render immediately if we have measurements
+    if (currentMeasurements.length > 0 || localTakeoffMeasurements.length > 0) {
+      renderTakeoffAnnotations(pageNum, viewport, pdfPageRef.current);
+    } else {
+      // CRITICAL: No measurements yet, but they might load asynchronously
+      // Set up delayed checks to render when measurements arrive
+      let checkCount = 0;
+      const maxChecks = 10; // Check for up to 1 second (10 * 100ms)
+      
+      const checkForMeasurements = () => {
+        checkCount++;
+        const delayedMeasurements = useTakeoffStore.getState().takeoffMeasurements.filter(
+          (m) => m.projectId === currentProjectId && m.sheetId === file?.id && m.pdfPage === pageNum
+        );
+        
+        if (delayedMeasurements.length > 0 && svgOverlayRef.current && pdfPageRef.current) {
+          // Measurements loaded! Render them now
+          renderTakeoffAnnotations(pageNum, viewport, pdfPageRef.current);
+        } else if (checkCount < maxChecks) {
+          // Keep checking until measurements load or max checks reached
+          setTimeout(checkForMeasurements, 100);
+        }
+      };
+      
+      // Start checking after a short delay to allow async loading
+      setTimeout(checkForMeasurements, 100);
+    }
+  }, [renderTakeoffAnnotations, localTakeoffMeasurements, currentProjectId, file?.id]);
 
   // PDF render function with page-specific viewport isolation
   const renderPDFPage = useCallback(async (pageNum: number) => {
@@ -1119,12 +1161,21 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         svgOverlayRef.current.style.transformOrigin = '';
       }
       // Post-zoom settle: ensure overlay is refreshed immediately after canvas render
+      // CRITICAL: Also check if measurements are loaded and render them
+      // This handles the case where measurements load after the PDF renders
       try {
-        renderTakeoffAnnotations(pageNum, viewport, page);
-        // And one more pass on next frame to catch late layout
-        requestAnimationFrame(() => {
+        // Get current measurements for this page from store (may have loaded after PDF render started)
+        const currentMeasurements = useTakeoffStore.getState().takeoffMeasurements.filter(
+          (m) => m.projectId === currentProjectId && m.sheetId === file?.id && m.pdfPage === pageNum
+        );
+        
+        if (currentMeasurements.length > 0 || localTakeoffMeasurements.length > 0) {
           renderTakeoffAnnotations(pageNum, viewport, page);
-        });
+          // And one more pass on next frame to catch late layout and ensure measurements are visible
+          requestAnimationFrame(() => {
+            renderTakeoffAnnotations(pageNum, viewport, page);
+          });
+        }
       } catch {}
       
       // Reduced logging for better performance
@@ -3895,13 +3946,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Use the dedicated page shown handler to ensure proper overlay initialization
       onPageShown(currentPage, currentViewport);
       
-      // CRITICAL: Also render annotations after a short delay to ensure measurements are loaded
-      // This handles the case where we return to a page and measurements need to be rendered
-      if (localTakeoffMeasurements.length > 0) {
-        requestAnimationFrame(() => {
+      // CRITICAL: Also render annotations after measurements load
+      // This handles the case where we return to a page and measurements load asynchronously
+      // Use a small delay to allow measurements to load, then render
+      const renderTimer = setTimeout(() => {
+        if (localTakeoffMeasurements.length > 0 && pdfPageRef.current && currentViewport) {
           renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
-        });
-      }
+        }
+      }, 100); // Small delay to allow async measurement loading
+      
+      return () => clearTimeout(renderTimer);
     }
   }, [currentPage, currentViewport, onPageShown, localTakeoffMeasurements, renderTakeoffAnnotations, pdfDocument]);
 
