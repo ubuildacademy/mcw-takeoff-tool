@@ -928,8 +928,8 @@ export function TakeoffWorkspace() {
       
       // Refresh project files
       const filesRes = await fileService.getProjectFiles(projectId);
-      const files = filesRes.files || [];
-      setProjectFiles(files);
+      const projectFilesList = filesRes.files || [];
+      setProjectFiles(projectFilesList);
       
       // Set the first successfully uploaded file as current
       if (uploadedFiles.length > 0) {
