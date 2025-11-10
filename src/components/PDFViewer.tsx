@@ -897,6 +897,17 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       }
     }
   }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, selectedMarkupId, isSelectionMode, renderTakeoffAnnotations, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, isSelectingSymbol, currentAnnotation]);
+  
+  // CRITICAL: Trigger re-render of annotations after measurements are loaded
+  // This ensures markups appear immediately when returning to a page
+  // Must be after renderTakeoffAnnotations is defined
+  useEffect(() => {
+    if (localTakeoffMeasurements.length > 0 && pdfDocument && pdfPageRef.current && currentViewport && !isRenderingRef.current) {
+      requestAnimationFrame(() => {
+        renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+      });
+    }
+  }, [localTakeoffMeasurements, pdfDocument, currentViewport, currentPage, renderTakeoffAnnotations]);
 
   // Update pageViewports immediately when scale/rotation changes
   // This ensures currentViewport is always current even when PDF rendering is blocked
@@ -3883,8 +3894,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (pdfDocument && currentViewport && !isRenderingRef.current) {
       // Use the dedicated page shown handler to ensure proper overlay initialization
       onPageShown(currentPage, currentViewport);
+      
+      // CRITICAL: Also render annotations after a short delay to ensure measurements are loaded
+      // This handles the case where we return to a page and measurements need to be rendered
+      if (localTakeoffMeasurements.length > 0) {
+        requestAnimationFrame(() => {
+          renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+        });
+      }
     }
-  }, [currentPage, currentViewport, onPageShown]);
+  }, [currentPage, currentViewport, onPageShown, localTakeoffMeasurements, renderTakeoffAnnotations, pdfDocument]);
 
   // Clear current measurement state when page changes
   useEffect(() => {
