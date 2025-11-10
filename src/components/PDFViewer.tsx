@@ -426,14 +426,22 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       return;
     }
     
+    let isCancelled = false; // Flag to prevent state updates if page changes during async load
+    
     // Load measurements for this specific page from API
     const loadPageMeasurements = async () => {
       try {
         // Load from API if not already loaded (method handles caching)
         await loadPageTakeoffMeasurements(currentProjectId, file.id, currentPage);
         
+        // Check if page changed during async load
+        if (isCancelled) return;
+        
         // Get from store (now guaranteed to be loaded)
         const pageMeasurements = getPageTakeoffMeasurements(currentProjectId, file.id, currentPage);
+        
+        // Double-check page hasn't changed
+        if (isCancelled) return;
         
         // Convert API measurements to display format
         const displayMeasurements = pageMeasurements.map(apiMeasurement => {
@@ -460,18 +468,29 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           }
         }).filter(Boolean);
         
-        setLocalTakeoffMeasurements(displayMeasurements);
+        // Final check before setting state
+        if (!isCancelled) {
+          setLocalTakeoffMeasurements(displayMeasurements);
+        }
       } catch (error) {
-        console.error('Error loading page measurements:', error);
-        setLocalTakeoffMeasurements([]);
+        if (!isCancelled) {
+          console.error('Error loading page measurements:', error);
+          setLocalTakeoffMeasurements([]);
+        }
       }
     };
     
     loadPageMeasurements();
+    
+    // Cleanup: mark as cancelled if page changes
+    return () => {
+      isCancelled = true;
+    };
   }, [currentProjectId, file?.id, currentPage, loadPageTakeoffMeasurements, getPageTakeoffMeasurements]);
   
   // REACTIVE UPDATE: Update localTakeoffMeasurements when store changes (e.g., new measurement created)
   // This ensures newly created measurements appear immediately without page reload
+  // OPTIMIZATION: Only update if measurements actually changed to prevent unnecessary re-renders
   useEffect(() => {
     if (!currentProjectId || !file?.id || !currentPage) {
       setLocalTakeoffMeasurements([]);
@@ -479,16 +498,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     
     // Get current page measurements from store (reactively updates when store changes)
-    // CRITICAL: getPageTakeoffMeasurements already filters by page, but we double-check here
+    // getPageTakeoffMeasurements already filters by projectId, sheetId, and pageNumber
     const pageMeasurements = getPageTakeoffMeasurements(currentProjectId, file.id, currentPage);
     
-    // CRITICAL: Double-filter by page to ensure no cross-page contamination
-    const filteredPageMeasurements = pageMeasurements.filter(
-      (m) => m.pdfPage === currentPage && m.sheetId === file.id && m.projectId === currentProjectId
-    );
-    
     // Convert to display format
-    const displayMeasurements = filteredPageMeasurements.map(apiMeasurement => {
+    const displayMeasurements = pageMeasurements.map(apiMeasurement => {
       try {
         return {
           id: apiMeasurement.id,
@@ -512,8 +526,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       }
     }).filter(Boolean);
     
-    // Always update to ensure we have the latest measurements for this page
-    setLocalTakeoffMeasurements(displayMeasurements);
+    // OPTIMIZATION: Only update if measurements actually changed (by ID count and content)
+    setLocalTakeoffMeasurements(prev => {
+      const prevIds = new Set(prev.map((m: any) => m.id));
+      const newIds = new Set(displayMeasurements.map((m: any) => m.id));
+      
+      // Check if measurements changed
+      if (prev.length !== displayMeasurements.length || 
+          ![...prevIds].every(id => newIds.has(id)) ||
+          ![...newIds].every(id => prevIds.has(id))) {
+        return displayMeasurements;
+      }
+      return prev; // No change, return previous to prevent re-render
+    });
   }, [allTakeoffMeasurements, currentProjectId, file?.id, currentPage, getPageTakeoffMeasurements]);
 
   // Ensure component is mounted before rendering
@@ -904,12 +929,22 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   useEffect(() => {
     if (localTakeoffMeasurements.length > 0 && pdfDocument && !isRenderingRef.current) {
       // Wait for viewport to be ready, then render
+      let timeoutId: NodeJS.Timeout | null = null;
+      let retryCount = 0;
+      const maxRetries = 20; // Max 1 second of retries (20 * 50ms)
+      
       const renderWhenReady = () => {
+        // Check if we're still on the same page and viewport is ready
         if (pdfPageRef.current && currentViewport) {
           renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
-        } else {
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+            timeoutId = null;
+          }
+        } else if (retryCount < maxRetries) {
           // If viewport not ready yet, try again after a short delay
-          setTimeout(renderWhenReady, 50);
+          retryCount++;
+          timeoutId = setTimeout(renderWhenReady, 50);
         }
       };
       
@@ -917,6 +952,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       requestAnimationFrame(() => {
         renderWhenReady();
       });
+      
+      // Cleanup timeout on unmount or when dependencies change
+      return () => {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+      };
     }
   }, [localTakeoffMeasurements, pdfDocument, currentViewport, currentPage, renderTakeoffAnnotations]);
 
@@ -1030,30 +1072,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Render immediately if we have measurements
     if (currentMeasurements.length > 0 || localTakeoffMeasurements.length > 0) {
       renderTakeoffAnnotations(pageNum, viewport, pdfPageRef.current);
-    } else {
-      // CRITICAL: No measurements yet, but they might load asynchronously
-      // Set up delayed checks to render when measurements arrive
-      let checkCount = 0;
-      const maxChecks = 10; // Check for up to 1 second (10 * 100ms)
-      
-      const checkForMeasurements = () => {
-        checkCount++;
-        const delayedMeasurements = useTakeoffStore.getState().takeoffMeasurements.filter(
-          (m) => m.projectId === currentProjectId && m.sheetId === file?.id && m.pdfPage === pageNum
-        );
-        
-        if (delayedMeasurements.length > 0 && svgOverlayRef.current && pdfPageRef.current) {
-          // Measurements loaded! Render them now
-          renderTakeoffAnnotations(pageNum, viewport, pdfPageRef.current);
-        } else if (checkCount < maxChecks) {
-          // Keep checking until measurements load or max checks reached
-          setTimeout(checkForMeasurements, 100);
-        }
-      };
-      
-      // Start checking after a short delay to allow async loading
-      setTimeout(checkForMeasurements, 100);
     }
+    // Note: If no measurements, the reactive useEffect will handle rendering when they load
+    // The reactive useEffect watches allTakeoffMeasurements and will trigger render when measurements arrive
   }, [renderTakeoffAnnotations, localTakeoffMeasurements, currentProjectId, file?.id]);
 
   // PDF render function with page-specific viewport isolation
