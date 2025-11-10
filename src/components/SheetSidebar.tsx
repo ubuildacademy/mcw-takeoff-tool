@@ -63,6 +63,8 @@ export function SheetSidebar({
   
   // Bulk analysis state
   const [showBulkAnalysisDialog, setShowBulkAnalysisDialog] = useState(false);
+  const [showBulkAnalysisConfirmation, setShowBulkAnalysisConfirmation] = useState(false);
+  const [pendingBulkAnalysis, setPendingBulkAnalysis] = useState<{onlyUnlabeled: boolean} | null>(null);
   const [bulkAnalysisProgress, setBulkAnalysisProgress] = useState<{
     total: number;
     completed: number;
@@ -78,6 +80,23 @@ export function SheetSidebar({
     completedDocuments: []
   });
   const [showBulkAnalyzeDropdown, setShowBulkAnalyzeDropdown] = useState(false);
+  const bulkAnalyzeDropdownRef = useRef<HTMLDivElement>(null);
+  
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (bulkAnalyzeDropdownRef.current && !bulkAnalyzeDropdownRef.current.contains(event.target as Node)) {
+        setShowBulkAnalyzeDropdown(false);
+      }
+    };
+    
+    if (showBulkAnalyzeDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+      };
+    }
+  }, [showBulkAnalyzeDropdown]);
   
   // Local expansion state to prevent parent from resetting it
   const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set());
@@ -742,9 +761,32 @@ export function SheetSidebar({
     return document.pages.every(page => !page.sheetName && !page.sheetNumber);
   };
 
-  // Bulk analyze documents
-  const handleBulkAnalyzeDocuments = async (onlyUnlabeled: boolean = false) => {
+  // Bulk analyze documents - show confirmation first
+  const handleBulkAnalyzeDocumentsClick = (onlyUnlabeled: boolean = false) => {
     setShowBulkAnalyzeDropdown(false);
+    
+    // Filter documents based on option
+    let documentsToAnalyze = documents;
+    if (onlyUnlabeled) {
+      documentsToAnalyze = documents.filter(doc => isDocumentUnlabeled(doc));
+    }
+    
+    if (documentsToAnalyze.length === 0) {
+      alert(onlyUnlabeled 
+        ? 'No unlabeled documents found. All documents already have sheet names or numbers.'
+        : 'No documents found to analyze.');
+      return;
+    }
+    
+    // Show confirmation dialog
+    setPendingBulkAnalysis({ onlyUnlabeled });
+    setShowBulkAnalysisConfirmation(true);
+  };
+  
+  // Actually start the bulk analysis after confirmation
+  const handleBulkAnalyzeDocuments = async (onlyUnlabeled: boolean = false) => {
+    setShowBulkAnalysisConfirmation(false);
+    setPendingBulkAnalysis(null);
     
     // Filter documents based on option
     let documentsToAnalyze = documents;
@@ -1054,7 +1096,7 @@ export function SheetSidebar({
                 </Button>
               </label>
             )}
-            <div className="relative">
+            <div className="relative" ref={bulkAnalyzeDropdownRef}>
               <Button 
                 size="sm" 
                 variant="outline" 
@@ -1064,17 +1106,17 @@ export function SheetSidebar({
                 <Brain className="w-4 h-4" />
               </Button>
               {showBulkAnalyzeDropdown && (
-                <div className="absolute right-0 top-full mt-1 w-56 bg-white border rounded-lg shadow-lg z-50 py-1">
+                <div className="absolute right-0 top-full mt-1 w-56 bg-white border rounded-lg shadow-xl z-[100] py-1">
                   <button
                     className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
-                    onClick={() => handleBulkAnalyzeDocuments(false)}
+                    onClick={() => handleBulkAnalyzeDocumentsClick(false)}
                   >
                     <Brain className="w-4 h-4" />
                     <span>Analyze All Documents</span>
                   </button>
                   <button
                     className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
-                    onClick={() => handleBulkAnalyzeDocuments(true)}
+                    onClick={() => handleBulkAnalyzeDocumentsClick(true)}
                   >
                     <Tag className="w-4 h-4" />
                     <span>Analyze Unlabeled Only</span>
@@ -1556,6 +1598,78 @@ export function SheetSidebar({
               </div>
             </div>
             <p className="text-sm text-gray-500 mt-4 text-center">Extracting text and analyzing sheets with AI...</p>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Analysis Confirmation Dialog */}
+      {showBulkAnalysisConfirmation && pendingBulkAnalysis && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <div className="flex flex-col space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold">Confirm Document Analysis</h3>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setShowBulkAnalysisConfirmation(false);
+                    setPendingBulkAnalysis(null);
+                  }}
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+              
+              <div className="space-y-3">
+                <p className="text-sm text-gray-700">
+                  {pendingBulkAnalysis.onlyUnlabeled 
+                    ? 'This will analyze all unlabeled documents to extract sheet names and numbers using AI.'
+                    : 'This will analyze all documents to extract sheet names and numbers using AI.'}
+                </p>
+                
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <p className="text-sm font-medium text-blue-900 mb-2">What will happen:</p>
+                  <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
+                    <li>OCR processing will extract text from each document</li>
+                    <li>AI will analyze title blocks to identify sheet numbers and names</li>
+                    <li>Sheet information will be automatically saved</li>
+                    <li>This process may take several minutes for large documents</li>
+                  </ul>
+                </div>
+                
+                <div className="text-sm text-gray-600">
+                  <p className="font-medium mb-1">Documents to analyze:</p>
+                  <p>
+                    {pendingBulkAnalysis.onlyUnlabeled
+                      ? `${documents.filter(doc => isDocumentUnlabeled(doc)).length} unlabeled document(s)`
+                      : `${documents.length} document(s)`}
+                  </p>
+                </div>
+              </div>
+              
+              <div className="flex gap-2 justify-end pt-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowBulkAnalysisConfirmation(false);
+                    setPendingBulkAnalysis(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => {
+                    if (pendingBulkAnalysis) {
+                      handleBulkAnalyzeDocuments(pendingBulkAnalysis.onlyUnlabeled);
+                    }
+                  }}
+                >
+                  <Brain className="w-4 h-4 mr-2" />
+                  Start Analysis
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
       )}
