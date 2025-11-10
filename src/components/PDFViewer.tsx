@@ -3206,6 +3206,17 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Handle double-click to complete measurements
   const handleDoubleClick = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
+    console.log('🖱️ DOUBLE-CLICK HANDLER CALLED', {
+      isMeasuring,
+      measurementType,
+      currentMeasurementLength: currentMeasurement.length,
+      isContinuousDrawing,
+      activePointsLength: activePoints.length,
+      cutoutMode,
+      currentCutoutLength: currentCutout.length,
+      annotationTool
+    });
+    
     // Prevent default behavior
     event.preventDefault();
     event.stopPropagation();
@@ -3231,18 +3242,28 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Handle cut-out completion
     if (cutoutMode && currentCutout.length >= 3) {
+      console.log('✅ Completing cutout');
       completeCutout(currentCutout);
       return;
     }
     
     if (isContinuousDrawing && activePoints.length >= 2) {
       // Complete the continuous linear measurement
+      console.log('✅ Completing continuous linear measurement');
       completeContinuousLinearMeasurement();
     } else if ((measurementType === 'area' || measurementType === 'volume') && currentMeasurement.length >= 3) {
       // Complete area or volume measurement
+      console.log('✅ Completing area/volume measurement', { measurementType, points: currentMeasurement.length });
       completeMeasurement(currentMeasurement);
+    } else {
+      console.warn('⚠️ Double-click conditions not met', {
+        isContinuousDrawing,
+        activePointsLength: activePoints.length,
+        measurementType,
+        currentMeasurementLength: currentMeasurement.length
+      });
     }
-  }, [annotationTool, currentAnnotation, annotationColor, currentPage, onAnnotationToolChange, isContinuousDrawing, activePoints, measurementType, currentMeasurement, completeContinuousLinearMeasurement, completeMeasurement, cutoutMode, currentCutout, completeCutout]);
+  }, [annotationTool, currentAnnotation, annotationColor, currentPage, onAnnotationToolChange, isContinuousDrawing, activePoints, measurementType, currentMeasurement, completeContinuousLinearMeasurement, completeMeasurement, cutoutMode, currentCutout, completeCutout, isMeasuring]);
 
   // Cleanup continuous drawing state
   const cleanupContinuousDrawing = useCallback(() => {
@@ -4343,6 +4364,32 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                           console.error('Failed to save freehand annotation:', error);
                         }
                       }
+                    } else {
+                      // Store click info for double-click detection
+                      setLastClickTime(currentTime);
+                      setLastClickPosition(clickPosition);
+                    }
+                  }
+                  
+                  // Check for double-click on measurements (area/volume or continuous linear)
+                  if (isMeasuring && !annotationTool) {
+                    const currentTime = Date.now();
+                    const timeDiff = currentTime - lastClickTime;
+                    const clickPosition = { x: e.clientX, y: e.clientY };
+                    
+                    // Check if this is a double-click (within 500ms and similar position)
+                    if (timeDiff < 500 && lastClickPosition && 
+                        Math.abs(clickPosition.x - lastClickPosition.x) < 10 && 
+                        Math.abs(clickPosition.y - lastClickPosition.y) < 10) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      
+                      // Complete the measurement via double-click
+                      console.log('🖱️ Double-click detected in onClick handler for measurement');
+                      handleDoubleClick(e);
+                      setLastClickTime(0);
+                      setLastClickPosition(null);
+                      return;
                     } else {
                       // Store click info for double-click detection
                       setLastClickTime(currentTime);
