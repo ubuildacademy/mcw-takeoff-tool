@@ -2535,8 +2535,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Handle click - direct coordinate conversion
   const handleClick = useCallback(async (event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
+    console.log('🖱️ CLICK HANDLER CALLED', {
+      hasCanvas: !!pdfCanvasRef.current,
+      hasViewport: !!currentViewport,
+      hasPdfPage: !!pdfPageRef.current,
+      hasPdfDocument: !!pdfDocument,
+      currentPage,
+      isMeasuring,
+      isDeselecting
+    });
+    
     // Basic checks - allow interactions even during loading
     if (!pdfCanvasRef.current) {
+      console.log('❌ CLICK BLOCKED: No canvas ref');
       return;
     }
     
@@ -2546,6 +2557,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (!viewport) {
       // Try to get viewport from cached page ref first
       if (pdfPageRef.current) {
+        console.log('📐 Computing viewport from cached page ref');
         viewport = pdfPageRef.current.getViewport({ 
           scale: viewState.scale, 
           rotation: viewState.rotation 
@@ -2557,6 +2569,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }));
       } else if (pdfDocument) {
         // For new documents, page might not be loaded yet - load it on-demand
+        console.log('📄 Loading PDF page on-demand for click handler');
         try {
           const page = await pdfDocument.getPage(currentPage);
           pdfPageRef.current = page; // Cache the page for future use
@@ -2569,8 +2582,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             ...prev,
             [currentPage]: viewport
           }));
+          console.log('✅ Viewport computed from loaded page', { width: viewport.width, height: viewport.height });
         } catch (error) {
-          console.error('Failed to load PDF page for click handler:', error);
+          console.error('❌ Failed to load PDF page for click handler:', error);
           return;
         }
       }
@@ -2578,6 +2592,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     if (!viewport) {
       // Still no viewport - PDF page not ready yet
+      console.log('❌ CLICK BLOCKED: No viewport available');
       return;
     }
     
@@ -2588,6 +2603,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     const currentStoreState = useTakeoffStore.getState();
     const currentSelectedConditionId = currentStoreState.selectedConditionId;
+    console.log('🔍 CLICK STATE CHECK', {
+      currentSelectedConditionId,
+      isMeasuring,
+      isCalibrating,
+      annotationTool,
+      cutoutMode,
+      visualSearchMode
+    });
     
     // Get CSS pixel coordinates relative to the canvas/SVG
     const rect = pdfCanvasRef.current.getBoundingClientRect();
@@ -2740,8 +2763,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Handle measurement clicks
     if (!currentSelectedConditionId) {
+      console.log('❌ CLICK BLOCKED: No condition selected');
       return;
     }
+    
+    console.log('✅ CLICK PROCESSING: Condition selected, processing measurement click');
     
     // Convert CSS coordinates to PDF coordinates (0-1) for storage using current page viewport
     let pdfCoords = {
