@@ -2434,7 +2434,28 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Handle mouse move - direct coordinate conversion
   const handleMouseMove = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
     // Basic checks - allow interactions even during loading
-    if (!pdfCanvasRef.current || !currentViewport) {
+    if (!pdfCanvasRef.current) {
+      return;
+    }
+    
+    // CRITICAL FIX: Compute viewport on-the-fly if not cached (for newly uploaded PDFs)
+    // This allows interactions to work even before the page has fully rendered and cached the viewport
+    let viewport = currentViewport;
+    if (!viewport && pdfPageRef.current) {
+      // Compute viewport on-the-fly using current scale and rotation
+      viewport = pdfPageRef.current.getViewport({ 
+        scale: viewState.scale, 
+        rotation: viewState.rotation 
+      });
+      // Cache it for future use
+      setPageViewports(prev => ({
+        ...prev,
+        [currentPage]: viewport
+      }));
+    }
+    
+    if (!viewport) {
+      // Still no viewport - PDF page not ready yet
       return;
     }
     
@@ -2446,7 +2467,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Handle visual search selection box drawing
     if (visualSearchMode && isSelectingSymbol && selectionStart) {
-      if (!pdfCanvasRef.current || !currentViewport) return;
+      if (!pdfCanvasRef.current) return;
       
       const rect = pdfCanvasRef.current.getBoundingClientRect();
       let cssX = event.clientX - rect.left;
@@ -2486,8 +2507,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Convert CSS coordinates to normalized PDF coordinates (0-1)
       // Normalized coordinates represent PDF-relative position, independent of zoom level
       let pdfCoords = {
-        x: cssX / currentViewport.width,
-        y: cssY / currentViewport.height
+        x: cssX / viewport.width,
+        y: cssY / viewport.height
       };
       
       // Apply ortho snapping for calibration only if explicitly enabled
@@ -2503,7 +2524,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Handle mouse move for annotation mode
     if (annotationTool) {
-      if (!pdfCanvasRef.current || !currentViewport) {
+      if (!pdfCanvasRef.current) {
         return;
       }
       
@@ -2514,8 +2535,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       
       // Convert CSS coordinates to PDF coordinates (0-1)
       const pdfCoords = {
-        x: cssX / currentViewport.width,
-        y: cssY / currentViewport.height
+        x: cssX / viewport.width,
+        y: cssY / viewport.height
       };
       
       // Always update mouse position for annotation preview
@@ -2531,7 +2552,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       return;
     }
     
-    if (!pdfCanvasRef.current || !currentViewport) {
+    if (!pdfCanvasRef.current) {
       return;
     }
     
@@ -2547,8 +2568,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Convert CSS coordinates to PDF coordinates (0-1) for storage using current page viewport
     let pdfCoords = {
-      x: cssX / currentViewport.width,
-      y: cssY / currentViewport.height
+      x: cssX / viewport.width,
+      y: cssY / viewport.height
     };
     
     // Apply ortho snapping if enabled and we have reference points
@@ -2589,12 +2610,33 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
       }
     }
-  }, [annotationTool, isCalibrating, calibrationPoints, isMeasuring, selectedConditionId, mousePosition, isContinuousDrawing, activePoints, rubberBandElement, currentViewport, calculateRunningLength, isDeselecting, visualSearchMode, isSelectingSymbol, selectionStart]);
+  }, [annotationTool, isCalibrating, calibrationPoints, isMeasuring, selectedConditionId, mousePosition, isContinuousDrawing, activePoints, rubberBandElement, currentViewport, calculateRunningLength, isDeselecting, visualSearchMode, isSelectingSymbol, selectionStart, viewState, setPageViewports, currentPage]);
 
   // Handle click - direct coordinate conversion
   const handleClick = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
     // Basic checks - allow interactions even during loading
-    if (!pdfCanvasRef.current || !currentViewport) {
+    if (!pdfCanvasRef.current) {
+      return;
+    }
+    
+    // CRITICAL FIX: Compute viewport on-the-fly if not cached (for newly uploaded PDFs)
+    // This allows interactions to work even before the page has fully rendered and cached the viewport
+    let viewport = currentViewport;
+    if (!viewport && pdfPageRef.current) {
+      // Compute viewport on-the-fly using current scale and rotation
+      viewport = pdfPageRef.current.getViewport({ 
+        scale: viewState.scale, 
+        rotation: viewState.rotation 
+      });
+      // Cache it for future use
+      setPageViewports(prev => ({
+        ...prev,
+        [currentPage]: viewport
+      }));
+    }
+    
+    if (!viewport) {
+      // Still no viewport - PDF page not ready yet
       return;
     }
     
@@ -2636,10 +2678,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         
         // Convert to PDF coordinates (0-1 scale)
         const pdfSelectionBox = {
-          x: x / currentViewport.width,
-          y: y / currentViewport.height,
-          width: width / currentViewport.width,
-          height: height / currentViewport.height
+          x: x / viewport.width,
+          y: y / viewport.height,
+          width: width / viewport.width,
+          height: height / viewport.height
         };
         
         // Call the completion handler
@@ -2660,12 +2702,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Handle calibration clicks
     if (isCalibrating) {
       setCalibrationPoints(prev => {
-        // CRITICAL FIX: Normalize using currentViewport to get PDF-relative coordinates (0-1)
+        // CRITICAL FIX: Normalize using viewport to get PDF-relative coordinates (0-1)
         // Normalized coordinates represent position in PDF space, independent of zoom level
         // The calibration calculation will use these normalized coords with baseViewport dimensions
         let pdfCoords = {
-          x: cssX / currentViewport.width,
-          y: cssY / currentViewport.height
+          x: cssX / viewport.width,
+          y: cssY / viewport.height
         };
         
         // Apply ortho snapping for calibration only if explicitly enabled
@@ -2697,8 +2739,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (cutoutMode) {
       // Convert CSS coordinates to PDF coordinates (0-1) for storage using current page viewport
       let pdfCoords = {
-        x: cssX / currentViewport.width,
-        y: cssY / currentViewport.height
+        x: cssX / viewport.width,
+        y: cssY / viewport.height
       };
       
       // Disable ortho snapping for cut-outs to avoid interference
@@ -2717,8 +2759,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Handle annotation tool clicks
     if (annotationTool) {
       const pdfCoords = {
-        x: cssX / currentViewport.width,
-        y: cssY / currentViewport.height
+        x: cssX / viewport.width,
+        y: cssY / viewport.height
       };
       
       if (annotationTool === 'text') {
@@ -2763,8 +2805,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Convert CSS coordinates to PDF coordinates (0-1) for storage using current page viewport
     let pdfCoords = {
-      x: cssX / currentViewport.width,
-      y: cssY / currentViewport.height
+      x: cssX / viewport.width,
+      y: cssY / viewport.height
     };
     
     // Smart cut-out mode entry removed - using manual toggle instead
@@ -2811,7 +2853,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       }
       // Area and volume measurements will be completed on double-click
     }
-  }, [isCalibrating, calibrationPoints, measurementType, currentMeasurement, isContinuousDrawing, activePoints, calculateRunningLength, currentViewport, isSelectionMode, selectedMarkupId, isOrthoSnapping, isMeasuring, mousePosition, cutoutMode, currentCutout, isDeselecting, visualSearchMode, isSelectingSymbol, selectionStart, annotationTool, currentProjectId, file, currentPage, addAnnotation, annotationColor, onAnnotationToolChange]);
+  }, [isCalibrating, calibrationPoints, measurementType, currentMeasurement, isContinuousDrawing, activePoints, calculateRunningLength, currentViewport, isSelectionMode, selectedMarkupId, isOrthoSnapping, isMeasuring, mousePosition, cutoutMode, currentCutout, isDeselecting, visualSearchMode, isSelectingSymbol, selectionStart, annotationTool, currentProjectId, file, currentPage, addAnnotation, annotationColor, onAnnotationToolChange, viewState, setPageViewports]);
 
   // Create rubber band element for continuous linear drawing
   const createRubberBandElement = useCallback(() => {
