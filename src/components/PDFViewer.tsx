@@ -39,9 +39,9 @@ interface PDFViewerProps {
   cutoutTargetConditionId?: string | null;
   onCutoutModeChange?: (conditionId: string | null) => void;
   onMeasurementStateChange?: (isMeasuring: boolean, isCalibrating: boolean, measurementType: string, isOrthoSnapping: boolean) => void;
-  annotationTool?: 'text' | 'freehand' | 'arrow' | 'rectangle' | 'circle' | null;
+  annotationTool?: 'text' | 'arrow' | 'rectangle' | 'circle' | null;
   annotationColor?: string;
-  onAnnotationToolChange?: (tool: 'text' | 'freehand' | 'arrow' | 'rectangle' | 'circle' | null) => void;
+  onAnnotationToolChange?: (tool: 'text' | 'arrow' | 'rectangle' | 'circle' | null) => void;
   onLocationChange?: (x: number, y: number) => void;
   onPDFRendered?: () => void;
   // Visual search props
@@ -150,7 +150,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const [mousePosition, setMousePosition] = useState<{ x: number; y: number } | null>(null);
   const [isCompletingMeasurement, setIsCompletingMeasurement] = useState(false);
   
-  // Double-click detection for freehand annotations
+  // Double-click detection for measurements
   const [lastClickTime, setLastClickTime] = useState<number>(0);
   const [lastClickPosition, setLastClickPosition] = useState<{ x: number; y: number } | null>(null);
   
@@ -1872,40 +1872,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       }
       
       svg.appendChild(text);
-    } else if (annotation.type === 'freehand') {
-      const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-      const pointString = points.map(p => `${p.x},${p.y}`).join(' ');
-      polyline.setAttribute('points', pointString);
-      polyline.setAttribute('stroke', strokeColor);
-      polyline.setAttribute('stroke-width', strokeWidth);
-      polyline.setAttribute('fill', 'none');
-      polyline.setAttribute('stroke-linecap', 'round');
-      polyline.setAttribute('stroke-linejoin', 'round');
-      polyline.setAttribute('data-annotation-id', annotation.id);
-      
-      // Add click handler for selection
-      if (isSelectionMode) {
-        polyline.style.cursor = 'pointer';
-        polyline.addEventListener('click', (e) => {
-          e.stopPropagation();
-          setSelectedMarkupId(annotation.id);
-        });
-        
-        // Add invisible hit area for easier selection
-        const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-        hitArea.setAttribute('points', pointString);
-        hitArea.setAttribute('stroke', 'transparent');
-        hitArea.setAttribute('stroke-width', '20');
-        hitArea.setAttribute('fill', 'none');
-        hitArea.style.cursor = 'pointer';
-        hitArea.addEventListener('click', (e) => {
-          e.stopPropagation();
-          setSelectedMarkupId(annotation.id);
-        });
-        svg.appendChild(hitArea);
-      }
-      
-      svg.appendChild(polyline);
     } else if (annotation.type === 'arrow' && points.length === 2) {
       const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
       line.setAttribute('x1', points[0].x.toString());
@@ -2035,36 +2001,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       y: p.y * viewport.height
     }));
     
-    if (annotationTool === 'freehand') {
-      // Draw completed segments
-      if (points.length > 0) {
-        const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-        let pointString = points.map(p => `${p.x},${p.y}`).join(' ');
-        polyline.setAttribute('points', pointString);
-        polyline.setAttribute('stroke', annotationColor);
-        polyline.setAttribute('stroke-width', '3');
-        polyline.setAttribute('fill', 'none');
-        polyline.setAttribute('stroke-linecap', 'round');
-        polyline.setAttribute('stroke-linejoin', 'round');
-        svg.appendChild(polyline);
-      }
-      
-      // Draw rubber band line from last point to mouse (preview)
-      if (points.length > 0 && mousePosition) {
-        const rubberBand = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-        const lastPoint = points[points.length - 1];
-        rubberBand.setAttribute('x1', lastPoint.x.toString());
-        rubberBand.setAttribute('y1', lastPoint.y.toString());
-        rubberBand.setAttribute('x2', (mousePosition.x * viewport.width).toString());
-        rubberBand.setAttribute('y2', (mousePosition.y * viewport.height).toString());
-        rubberBand.setAttribute('stroke', annotationColor);
-        rubberBand.setAttribute('stroke-width', '3');
-        rubberBand.setAttribute('stroke-dasharray', '5,5');
-        rubberBand.setAttribute('stroke-linecap', 'round');
-        rubberBand.setAttribute('opacity', '0.7');
-        svg.appendChild(rubberBand);
-      }
-    } else if (['arrow', 'rectangle', 'circle'].includes(annotationTool)) {
+    if (['arrow', 'rectangle', 'circle'].includes(annotationTool)) {
       if (points.length === 0 && mousePosition) {
         // Show a small dot at mouse position to indicate where first point will be
         const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
@@ -2658,8 +2595,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     
     // Handle deselection in selection mode when clicking on blank space
-    if (isSelectionMode && selectedMarkupId) {
-      // If we're in selection mode and have a selected markup, deselect it
+    // NOTE: This only applies to blank space clicks, not markup clicks
+    // Markup clicks are handled by their own click handlers and won't reach here
+    if (isSelectionMode && selectedMarkupId && !isMeasuring && !isCalibrating && !annotationTool) {
+      // If we're in selection mode and have a selected markup, deselect it when clicking blank space
       setSelectedMarkupId(null);
       return;
     }
@@ -2736,10 +2675,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         // Store the position for when we save the annotation
         setCurrentAnnotation([pdfCoords]);
         return;
-      } else if (annotationTool === 'freehand') {
-        // Add point to freehand drawing
-        setCurrentAnnotation(prev => [...prev, pdfCoords]);
-        return;
       } else if (['arrow', 'rectangle', 'circle'].includes(annotationTool)) {
         // For shapes, we need 2 points (start and end)
         setCurrentAnnotation(prev => {
@@ -2764,8 +2699,18 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     
     // Handle measurement clicks
-    if (!currentSelectedConditionId) {
+    // CRITICAL FIX: Allow clicks in selection mode even without a condition selected
+    // This allows users to select existing markups for deletion without needing a condition
+    if (!currentSelectedConditionId && !isSelectionMode) {
       console.log('❌ CLICK BLOCKED: No condition selected');
+      return;
+    }
+    
+    // If we're in selection mode without a condition, we're just selecting markups, not creating measurements
+    // The markup click handlers will handle selection, so we can return early here
+    if (isSelectionMode && !currentSelectedConditionId) {
+      // Allow the click to pass through - markup handlers will process it
+      // If it's a blank space click, the deselection logic above already handled it
       return;
     }
     
@@ -3222,25 +3167,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Prevent default behavior
     event.preventDefault();
     event.stopPropagation();
-    
-    // Handle freehand annotation completion
-    if (annotationTool === 'freehand' && currentAnnotation.length >= 1 && currentProjectId && file?.id) {
-      try {
-        addAnnotation({
-          projectId: currentProjectId,
-          sheetId: file.id,
-          type: 'freehand',
-          points: currentAnnotation,
-          color: annotationColor,
-          pageNumber: currentPage
-        });
-        setCurrentAnnotation([]);
-        onAnnotationToolChange?.(null);
-      } catch (error) {
-        console.error('Failed to save freehand annotation:', error);
-      }
-      return;
-    }
     
     // Handle cut-out completion
     if (cutoutMode && currentCutout.length >= 3) {
@@ -3791,27 +3717,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       return;
     }
     
-    // Handle Enter key to complete freehand annotation (fallback for double-click)
-    if (event.key === 'Enter' && annotationTool === 'freehand' && currentAnnotation.length >= 1 && currentProjectId && file?.id) {
-      event.preventDefault();
-      
-      try {
-        addAnnotation({
-          projectId: currentProjectId,
-          sheetId: file.id,
-          type: 'freehand',
-          points: currentAnnotation,
-          color: annotationColor,
-          pageNumber: currentPage
-        });
-        setCurrentAnnotation([]);
-        onAnnotationToolChange?.(null);
-      } catch (error) {
-        console.error('Failed to save freehand annotation via Enter key:', error);
-      }
-      return;
-    }
-    
     if (event.key === 'Escape' && (isMeasuring || isCalibrating)) {
       event.preventDefault();
       
@@ -3892,15 +3797,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           annotationToDelete: localAnnotations.find(a => a.id === selectedMarkupId)
         });
         
+        // Clear selection immediately
+        const deletedId = selectedMarkupId;
+        setSelectedMarkupId(null);
+        
         // Delete annotation from store
         const { deleteAnnotation } = useTakeoffStore.getState();
-        deleteAnnotation(selectedMarkupId);
+        deleteAnnotation(deletedId);
         
         // Get updated annotations from store after deletion
         const { annotations: updatedAnnotations } = useTakeoffStore.getState();
-        
-        // Clear selection immediately before state updates
-        setSelectedMarkupId(null);
         
         // Immediately update local annotations to reflect the deletion
         const filteredAnnotations = updatedAnnotations.filter(
@@ -3909,71 +3815,46 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         setLocalAnnotations(filteredAnnotations);
         
         console.log('🗑️ ANNOTATION DELETED:', {
-          selectedMarkupId,
+          deletedId,
           remainingAnnotations: filteredAnnotations.length,
           allStoreAnnotations: updatedAnnotations.length,
-          deletedSuccessfully: !updatedAnnotations.some(a => a.id === selectedMarkupId)
+          deletedSuccessfully: !updatedAnnotations.some(a => a.id === deletedId)
         });
         
         // Force immediate re-render using requestAnimationFrame to ensure state is processed
         requestAnimationFrame(() => {
-          // Immediately re-render the SVG overlay to show the deletion
-          if (currentViewport) {
-            renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
-          }
-          
-          // Also re-render the PDF page
-          console.log('🗑️ PDF RENDER TRIGGER: Annotation deletion');
-          requestAnimationFrame(() => {
-            renderPDFPage(currentPage);
-          });
-        });
-      } else if (currentProjectId && file?.id) {
-        // Delete measurement
-        const { deleteTakeoffMeasurement, getPageTakeoffMeasurements } = useTakeoffStore.getState();
-        
-        try {
-          await deleteTakeoffMeasurement(selectedMarkupId);
-          // Reload measurements from API
-          const updatedMeasurements = getPageTakeoffMeasurements(currentProjectId, file.id, currentPage);
-          
-          const displayMeasurements = updatedMeasurements.map(apiMeasurement => ({
-            id: apiMeasurement.id,
-            type: apiMeasurement.type,
-            points: apiMeasurement.points,
-            calculatedValue: apiMeasurement.calculatedValue,
-            unit: apiMeasurement.unit,
-            conditionId: apiMeasurement.conditionId,
-            conditionName: apiMeasurement.conditionName,
-            color: apiMeasurement.conditionColor,
-            timestamp: new Date(apiMeasurement.timestamp).getTime(),
-            pdfPage: apiMeasurement.pdfPage,
-            pdfCoordinates: apiMeasurement.pdfCoordinates,
-            perimeterValue: apiMeasurement.perimeterValue
-          }));
-          
-          // Clear selection immediately before state updates
-          setSelectedMarkupId(null);
-          
-          // Update local measurements
-          setLocalTakeoffMeasurements(displayMeasurements);
-          
-          console.log('🗑️ MEASUREMENT DELETED:', {
-            selectedMarkupId,
-            remainingMeasurements: displayMeasurements.length
-          });
-          
-          // Force immediate re-render using requestAnimationFrame to ensure state is processed
           requestAnimationFrame(() => {
             // Immediately re-render the SVG overlay to show the deletion
             if (currentViewport) {
               renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
             }
             
-            // Also re-render the PDF page
-            console.log('🗑️ PDF RENDER TRIGGER: Measurement deletion');
+            console.log('🗑️ PDF RENDER TRIGGER: Annotation deletion');
+          });
+        });
+      } else if (currentProjectId && file?.id) {
+        // Delete measurement
+        const { deleteTakeoffMeasurement } = useTakeoffStore.getState();
+        
+        try {
+          // Clear selection immediately
+          const deletedId = selectedMarkupId;
+          setSelectedMarkupId(null);
+          
+          // Delete from store (async operation)
+          await deleteTakeoffMeasurement(deletedId);
+          
+          // The reactive useEffect (line 493) will automatically update localTakeoffMeasurements
+          // when allTakeoffMeasurements changes, so we don't need to manually update here
+          // Just force a re-render after a brief delay to ensure store state has updated
+          requestAnimationFrame(() => {
             requestAnimationFrame(() => {
-              renderPDFPage(currentPage);
+              // Re-render the SVG overlay to show the deletion
+              if (currentViewport) {
+                renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+              }
+              
+              console.log('🗑️ PDF RENDER TRIGGER: Measurement deletion');
             });
           });
         } catch (error: any) {
@@ -4352,10 +4233,17 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                   // CRITICAL FIX: Don't stop propagation if clicking on a markup element
                   // This allows markup click handlers to fire and select the markup
                   const target = e.target as SVGElement;
+                  // Check if target or any parent has markup data attributes
+                  // Also check if target is part of a markup (hit areas, text, etc.)
                   const isMarkupElement = target.hasAttribute('data-annotation-id') || 
                                          target.hasAttribute('data-measurement-id') ||
                                          target.closest('[data-annotation-id]') !== null ||
-                                         target.closest('[data-measurement-id]') !== null;
+                                         target.closest('[data-measurement-id]') !== null ||
+                                         // Check if parent element is a markup (for hit areas and nested elements)
+                                         (target.parentElement && (
+                                           target.parentElement.hasAttribute('data-annotation-id') ||
+                                           target.parentElement.hasAttribute('data-measurement-id')
+                                         ));
                   
                   // CRITICAL FIX: If clicking on a markup element, let its handler run and don't process further
                   // The markup's click handler will call setSelectedMarkupId and stop propagation
@@ -4367,46 +4255,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                   
                   // For non-markup clicks, stop propagation and process normally
                   e.stopPropagation();
-                  
-                  // Check for double-click on freehand annotations
-                  if (annotationTool === 'freehand' && currentAnnotation.length >= 1) {
-                    const currentTime = Date.now();
-                    const timeDiff = currentTime - lastClickTime;
-                    const clickPosition = { x: e.clientX, y: e.clientY };
-                    
-                    // Check if this is a double-click (within 500ms and similar position)
-                    if (timeDiff < 500 && lastClickPosition && 
-                        Math.abs(clickPosition.x - lastClickPosition.x) < 10 && 
-                        Math.abs(clickPosition.y - lastClickPosition.y) < 10) {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      
-                      // Complete the freehand annotation
-                      if (currentProjectId && file?.id) {
-                        try {
-                          addAnnotation({
-                            projectId: currentProjectId,
-                            sheetId: file.id,
-                            type: 'freehand',
-                            points: currentAnnotation,
-                            color: annotationColor,
-                            pageNumber: currentPage
-                          });
-                          setCurrentAnnotation([]);
-                          onAnnotationToolChange?.(null);
-                          setLastClickTime(0);
-                          setLastClickPosition(null);
-                          return;
-                        } catch (error) {
-                          console.error('Failed to save freehand annotation:', error);
-                        }
-                      }
-                    } else {
-                      // Store click info for double-click detection
-                      setLastClickTime(currentTime);
-                      setLastClickPosition(clickPosition);
-                    }
-                  }
                   
                   // Check for double-click on measurements (area/volume or continuous linear)
                   if (isMeasuring && !annotationTool) {
@@ -4438,26 +4286,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 }
               }}
               onContextMenu={(e) => {
-                // Handle right-click to complete freehand annotation (fallback)
-                if (annotationTool === 'freehand' && currentAnnotation.length >= 1 && currentProjectId && file?.id) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  
-                  try {
-                    addAnnotation({
-                      projectId: currentProjectId,
-                      sheetId: file.id,
-                      type: 'freehand',
-                      points: currentAnnotation,
-                      color: annotationColor,
-                      pageNumber: currentPage
-                    });
-                    setCurrentAnnotation([]);
-                    onAnnotationToolChange?.(null);
-                  } catch (error) {
-                    console.error('Failed to save freehand annotation via right-click:', error);
-                  }
-                }
+                // Right-click context menu (currently unused)
               }}
               onDoubleClick={(e) => {
                 // Handle double-click in annotation mode, measurement mode, or cutout mode
