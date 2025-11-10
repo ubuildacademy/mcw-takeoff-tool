@@ -605,6 +605,40 @@ class SupabaseStorage {
     }));
   }
 
+  async getTakeoffMeasurementsByPage(sheetId: string, pageNumber: number): Promise<StoredTakeoffMeasurement[]> {
+    const { data, error } = await supabase
+      .from(TABLES.TAKEOFF_MEASUREMENTS)
+      .select('*')
+      .eq('sheet_id', sheetId)
+      .eq('pdf_page', pageNumber)
+      .order('created_at', { ascending: false });
+    
+    if (error) {
+      console.error('Error fetching takeoff measurements by page:', error);
+      return [];
+    }
+    
+    // Map snake_case to camelCase
+    return (data || []).map((item: any) => ({
+      id: item.id,
+      projectId: item.project_id,
+      sheetId: item.sheet_id,
+      conditionId: item.condition_id,
+      type: item.type,
+      points: item.points,
+      calculatedValue: item.calculated_value,
+      unit: item.unit,
+      timestamp: item.timestamp,
+      pdfPage: item.pdf_page,
+      pdfCoordinates: item.pdf_coordinates,
+      conditionColor: item.condition_color,
+      conditionName: item.condition_name,
+      perimeterValue: item.perimeter_value,
+      cutouts: item.cutouts,
+      netCalculatedValue: item.net_calculated_value
+    }));
+  }
+
   async saveTakeoffMeasurement(measurement: StoredTakeoffMeasurement): Promise<StoredTakeoffMeasurement> {
     // Map camelCase to snake_case for database
     const dbMeasurement = {

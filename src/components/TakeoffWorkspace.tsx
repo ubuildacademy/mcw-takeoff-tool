@@ -267,11 +267,9 @@ export function TakeoffWorkspace() {
     if (projectId) {
       // Set current project first (this clears old measurements)
       setCurrentProject(projectId);
-      // Load measurements for this project from Supabase (conditions will be loaded by TakeoffSidebar)
-      // Use a small delay to ensure setCurrentProject completes first and prevents race conditions
-      const loadTimer = setTimeout(() => {
-        loadProjectTakeoffMeasurements(projectId);
-      }, 0);
+      // NOTE: Measurements are now loaded per-page on-demand in PDFViewer for better performance
+      // Full project loading is only needed for reports/aggregations, which will load on-demand when needed
+      // This prevents loading all measurements upfront for large documents (e.g., 80-page PDFs)
       
       // Load calibrations from database and sync to store
       const loadCalibrations = async () => {

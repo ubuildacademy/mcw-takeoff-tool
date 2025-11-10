@@ -100,6 +100,24 @@ router.get('/sheet/:sheetId', async (req, res) => {
   }
 });
 
+// Get takeoff measurements for a specific page
+router.get('/sheet/:sheetId/page/:pageNumber', async (req, res) => {
+  try {
+    const { sheetId, pageNumber } = req.params;
+    const pageNum = parseInt(pageNumber, 10);
+    
+    if (isNaN(pageNum) || pageNum < 1) {
+      return res.status(400).json({ error: 'Invalid page number' });
+    }
+    
+    const measurements = await storage.getTakeoffMeasurementsByPage(sheetId, pageNum);
+    return res.json({ measurements });
+  } catch (error) {
+    console.error('Error fetching page takeoff measurements:', error);
+    return res.status(500).json({ error: 'Failed to fetch page takeoff measurements' });
+  }
+});
+
 // Create a new takeoff measurement
 router.post('/', async (req, res) => {
   try {
