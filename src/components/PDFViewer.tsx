@@ -4301,13 +4301,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 padding: 0,
                 border: 'none',
                 outline: 'none',
-                pointerEvents: (isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol)) ? 'auto' : 'none' // Allow clicks in selection, calibration, annotation, or visual search mode
+                pointerEvents: (isSelectionMode || isCalibrating || annotationTool || isMeasuring || (visualSearchMode && isSelectingSymbol)) ? 'auto' : 'none' // Allow clicks in selection, calibration, annotation, measurement, or visual search mode
               }}
               onMouseMove={handleMouseMove}
               onMouseLeave={() => setMousePosition(null)}
               onClick={(e) => {
-                // Handle clicks in selection mode, calibration mode, annotation mode, or visual search mode
-                if (isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol)) {
+                // Handle clicks in selection mode, calibration mode, annotation mode, measurement mode, or visual search mode
+                if (isSelectionMode || isCalibrating || annotationTool || isMeasuring || (visualSearchMode && isSelectingSymbol)) {
                   e.stopPropagation();
                   
                   // Check for double-click on freehand annotations
