@@ -89,6 +89,7 @@ export const fileService = {
     });
 
     // Automatically start OCR processing after successful upload (server-side)
+    // OCR runs in background for all PDF uploads to enable AI features
     if (response.data.success && response.data.file) {
       const { serverOcrService } = await import('./serverOcrService');
       
