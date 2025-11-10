@@ -68,8 +68,34 @@ export function SheetSidebar({
   const [labelingProgress, setLabelingProgress] = useState('');
   const [labelingProgressPercent, setLabelingProgressPercent] = useState(0);
   
+  // Bulk analysis state
+  const [showBulkAnalysisDialog, setShowBulkAnalysisDialog] = useState(false);
+  const [bulkAnalysisProgress, setBulkAnalysisProgress] = useState<{
+    total: number;
+    completed: number;
+    failed: number;
+    current?: string;
+    status: string;
+    completedDocuments: Array<{id: string, name: string, success: boolean}>;
+  }>({
+    total: 0,
+    completed: 0,
+    failed: 0,
+    status: '',
+    completedDocuments: []
+  });
+  const [showBulkAnalyzeDropdown, setShowBulkAnalyzeDropdown] = useState(false);
+  
   // Local expansion state to prevent parent from resetting it
   const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set());
+  
+  // Page menu state (for gear icon on pages)
+  const [openPageMenu, setOpenPageMenu] = useState<string | null>(null);
+  
+  // Rename dialog state
+  const [showRenameDialog, setShowRenameDialog] = useState(false);
+  const [renamingPage, setRenamingPage] = useState<{documentId: string, pageNumber: number, currentName: string} | null>(null);
+  const [renameInput, setRenameInput] = useState('');
   
   // Use documents from parent component but with local expansion state
   const currentDocuments = documents.map(doc => ({
@@ -93,19 +119,25 @@ export function SheetSidebar({
   // Ref to track if we're currently updating documents to prevent infinite loops
   const isUpdatingDocuments = useRef(false);
 
-  // Close dropdown when clicking outside
+  // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (openDocumentMenu) {
         setOpenDocumentMenu(null);
       }
+      if (openPageMenu) {
+        setOpenPageMenu(null);
+      }
+      if (showBulkAnalyzeDropdown) {
+        setShowBulkAnalyzeDropdown(false);
+      }
     };
 
-    if (openDocumentMenu) {
+    if (openDocumentMenu || openPageMenu || showBulkAnalyzeDropdown) {
       document.addEventListener('click', handleClickOutside);
       return () => document.removeEventListener('click', handleClickOutside);
     }
-  }, [openDocumentMenu]);
+  }, [openDocumentMenu, openPageMenu, showBulkAnalyzeDropdown]);
 
   // Store integration
   const { getProjectTakeoffMeasurements } = useTakeoffStore();
@@ -605,11 +637,26 @@ export function SheetSidebar({
           const batchPromises = batch.map(async (sheet: SheetAnalysisResult) => {
             try {
               const sheetId = `${documentId}-${sheet.pageNumber}`;
+              
+              // Check if sheet already exists to preserve existing sheetName
+              let existingSheetName: string | undefined = undefined;
+              try {
+                const existingSheet = await sheetService.getSheet(sheetId);
+                if (existingSheet?.sheet?.sheetName) {
+                  existingSheetName = existingSheet.sheet.sheetName;
+                }
+              } catch (error) {
+                // Sheet doesn't exist yet, which is fine
+              }
+              
+              // Preserve existing sheetName if it exists, otherwise use AI-generated name
+              const finalSheetName = existingSheetName || sheet.sheetName;
+              
               await sheetService.updateSheet(sheetId, {
                 documentId: documentId,
                 pageNumber: sheet.pageNumber,
                 sheetNumber: sheet.sheetNumber,
-                sheetName: sheet.sheetName
+                sheetName: finalSheetName
               });
               return { success: true, pageNumber: sheet.pageNumber };
             } catch (error: any) {
@@ -619,11 +666,26 @@ export function SheetSidebar({
                 // Try again - the PUT endpoint should create it
                 try {
                   const sheetId = `${documentId}-${sheet.pageNumber}`;
+                  
+                  // Check if sheet already exists to preserve existing sheetName
+                  let existingSheetName: string | undefined = undefined;
+                  try {
+                    const existingSheet = await sheetService.getSheet(sheetId);
+                    if (existingSheet?.sheet?.sheetName) {
+                      existingSheetName = existingSheet.sheet.sheetName;
+                    }
+                  } catch (error) {
+                    // Sheet doesn't exist yet, which is fine
+                  }
+                  
+                  // Preserve existing sheetName if it exists, otherwise use AI-generated name
+                  const finalSheetName = existingSheetName || sheet.sheetName;
+                  
                   await sheetService.updateSheet(sheetId, {
                     documentId: documentId,
                     pageNumber: sheet.pageNumber,
                     sheetNumber: sheet.sheetNumber,
-                    sheetName: sheet.sheetName
+                    sheetName: finalSheetName
                   });
                   return { success: true, pageNumber: sheet.pageNumber };
                 } catch (retryError) {
@@ -682,6 +744,239 @@ export function SheetSidebar({
     }
   };
 
+  // Check if a document is unlabeled (no pages have sheetName or sheetNumber)
+  const isDocumentUnlabeled = (document: PDFDocument): boolean => {
+    return document.pages.every(page => !page.sheetName && !page.sheetNumber);
+  };
+
+  // Bulk analyze documents
+  const handleBulkAnalyzeDocuments = async (onlyUnlabeled: boolean = false) => {
+    setShowBulkAnalyzeDropdown(false);
+    
+    // Filter documents based on option
+    let documentsToAnalyze = documents;
+    if (onlyUnlabeled) {
+      documentsToAnalyze = documents.filter(doc => isDocumentUnlabeled(doc));
+    }
+    
+    if (documentsToAnalyze.length === 0) {
+      alert(onlyUnlabeled 
+        ? 'No unlabeled documents found. All documents already have sheet names or numbers.'
+        : 'No documents found to analyze.');
+      return;
+    }
+    
+    // Initialize progress
+    setBulkAnalysisProgress({
+      total: documentsToAnalyze.length,
+      completed: 0,
+      failed: 0,
+      status: 'Starting bulk analysis...',
+      completedDocuments: []
+    });
+    setShowBulkAnalysisDialog(true);
+    
+    // Process documents in parallel batches of 5
+    const PARALLEL_LIMIT = 5;
+    const completedDocs: Array<{id: string, name: string, success: boolean}> = [];
+    
+    for (let i = 0; i < documentsToAnalyze.length; i += PARALLEL_LIMIT) {
+      const batch = documentsToAnalyze.slice(i, i + PARALLEL_LIMIT);
+      
+      setBulkAnalysisProgress(prev => ({
+        ...prev,
+        status: `Processing batch ${Math.floor(i / PARALLEL_LIMIT) + 1} of ${Math.ceil(documentsToAnalyze.length / PARALLEL_LIMIT)}...`
+      }));
+      
+      // Process batch in parallel
+      const batchPromises = batch.map(async (document) => {
+        try {
+          setBulkAnalysisProgress(prev => ({
+            ...prev,
+            current: document.name
+          }));
+          
+          // Use the existing handleAnalyzeDocument logic but without the dialog
+          const response = await aiAnalysisService.analyzeDocumentComplete(document.id, projectId);
+          
+          // Handle Server-Sent Events
+          const reader = response.body?.getReader();
+          const decoder = new TextDecoder();
+          let result: any = null;
+          
+          if (reader) {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              
+              const chunk = decoder.decode(value);
+              const lines = chunk.split('\n');
+              
+              for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                  try {
+                    const data = JSON.parse(line.slice(6));
+                    if (data.error) {
+                      throw new Error(data.error);
+                    }
+                    if (data.success) {
+                      result = data;
+                    }
+                  } catch (parseError) {
+                    // Ignore parse errors
+                  }
+                }
+              }
+            }
+          }
+          
+          if (result && result.success && result.sheets && result.sheets.length > 0) {
+            // Save sheets (reuse logic from handleAnalyzeDocument)
+            interface SheetAnalysisResult {
+              pageNumber: number;
+              sheetNumber: string;
+              sheetName: string;
+            }
+            
+            const sheetsToSave = (result.sheets as SheetAnalysisResult[]).filter((sheet: SheetAnalysisResult) => 
+              sheet.sheetNumber && sheet.sheetNumber !== 'Unknown' && 
+              sheet.sheetName && sheet.sheetName !== 'Unknown'
+            );
+            
+            // Save sheets in parallel
+            await Promise.all(sheetsToSave.map(async (sheet: SheetAnalysisResult) => {
+              try {
+                const sheetId = `${document.id}-${sheet.pageNumber}`;
+                
+                // Check if sheet already exists to preserve existing sheetName
+                let existingSheetName: string | undefined = undefined;
+                try {
+                  const existingSheet = await sheetService.getSheet(sheetId);
+                  if (existingSheet?.sheet?.sheetName) {
+                    existingSheetName = existingSheet.sheet.sheetName;
+                  }
+                } catch (error) {
+                  // Sheet doesn't exist yet
+                }
+                
+                const finalSheetName = existingSheetName || sheet.sheetName;
+                
+                await sheetService.updateSheet(sheetId, {
+                  documentId: document.id,
+                  pageNumber: sheet.pageNumber,
+                  sheetNumber: sheet.sheetNumber,
+                  sheetName: finalSheetName
+                });
+              } catch (error) {
+                console.error(`Failed to save sheet ${sheet.pageNumber} for ${document.name}:`, error);
+              }
+            }));
+          }
+          
+          return { id: document.id, name: document.name, success: true };
+        } catch (error) {
+          console.error(`Failed to analyze document ${document.name}:`, error);
+          return { id: document.id, name: document.name, success: false };
+        }
+      });
+      
+      const batchResults = await Promise.all(batchPromises);
+      completedDocs.push(...batchResults);
+      
+      // Update progress
+      const successCount = batchResults.filter(r => r.success).length;
+      const failCount = batchResults.filter(r => !r.success).length;
+      
+      setBulkAnalysisProgress(prev => ({
+        ...prev,
+        completed: prev.completed + successCount,
+        failed: prev.failed + failCount,
+        completedDocuments: [...prev.completedDocuments, ...batchResults],
+        current: undefined
+      }));
+    }
+    
+    // Reload documents
+    await loadProjectDocuments();
+    
+    // Show completion message
+    const successCount = completedDocs.filter(d => d.success).length;
+    const failCount = completedDocs.filter(d => !d.success).length;
+    
+    setBulkAnalysisProgress(prev => ({
+      ...prev,
+      status: `Complete! ${successCount} succeeded, ${failCount} failed.`
+    }));
+    
+    // Auto-close after 3 seconds
+    setTimeout(() => {
+      setShowBulkAnalysisDialog(false);
+      if (successCount > 0) {
+        alert(`Bulk analysis complete!\n\n✅ Successfully analyzed: ${successCount} document(s)\n${failCount > 0 ? `❌ Failed: ${failCount} document(s)` : ''}`);
+      }
+    }, 3000);
+  };
+
+  // Handle rename page
+  const handleRenamePage = async () => {
+    if (!renamingPage || !renameInput.trim()) {
+      setShowRenameDialog(false);
+      setRenamingPage(null);
+      setRenameInput('');
+      return;
+    }
+    
+    try {
+      const sheetId = `${renamingPage.documentId}-${renamingPage.pageNumber}`;
+      await sheetService.updateSheet(sheetId, {
+        documentId: renamingPage.documentId,
+        pageNumber: renamingPage.pageNumber,
+        sheetName: renameInput.trim()
+      });
+      
+      // Update local state
+      if (onDocumentsUpdate) {
+        const updatedDocuments = documents.map(doc => 
+          doc.id === renamingPage.documentId 
+            ? {
+                ...doc,
+                pages: doc.pages.map(page => 
+                  page.pageNumber === renamingPage.pageNumber 
+                    ? { ...page, sheetName: renameInput.trim() }
+                    : page
+                )
+              }
+            : doc
+        );
+        onDocumentsUpdate(updatedDocuments);
+      }
+      
+      setShowRenameDialog(false);
+      setRenamingPage(null);
+      setRenameInput('');
+    } catch (error) {
+      console.error('Error renaming page:', error);
+      alert('Failed to rename page. Please try again.');
+    }
+  };
+
+  // Handle delete page (for single-page documents)
+  const handleDeletePage = async (documentId: string) => {
+    if (!confirm('Are you sure you want to delete this document? This action cannot be undone.')) {
+      return;
+    }
+    
+    try {
+      await fileService.deletePDF(documentId);
+      if (onDocumentsUpdate) {
+        const updatedDocuments = documents.filter(doc => doc.id !== documentId);
+        onDocumentsUpdate(updatedDocuments);
+      }
+    } catch (error) {
+      console.error('Error deleting document:', error);
+      alert('Failed to delete document. Please try again.');
+    }
+  };
 
   // Filter and sort documents
   const getFilteredAndSortedDocuments = () => {
@@ -757,7 +1052,7 @@ export function SheetSidebar({
                   size="sm" 
                   variant="outline" 
                   asChild
-                  title="Upload new PDF document"
+                  title="Upload new PDF document(s)"
                 >
                   <span className="flex items-center gap-2">
                     <Upload className="w-4 h-4" />
@@ -766,6 +1061,34 @@ export function SheetSidebar({
                 </Button>
               </label>
             )}
+            <div className="relative">
+              <Button 
+                size="sm" 
+                variant="outline" 
+                onClick={() => setShowBulkAnalyzeDropdown(!showBulkAnalyzeDropdown)}
+                title="Analyze documents"
+              >
+                <Brain className="w-4 h-4" />
+              </Button>
+              {showBulkAnalyzeDropdown && (
+                <div className="absolute right-0 top-full mt-1 w-56 bg-white border rounded-lg shadow-lg z-50 py-1">
+                  <button
+                    className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                    onClick={() => handleBulkAnalyzeDocuments(false)}
+                  >
+                    <Brain className="w-4 h-4" />
+                    <span>Analyze All Documents</span>
+                  </button>
+                  <button
+                    className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                    onClick={() => handleBulkAnalyzeDocuments(true)}
+                  >
+                    <Tag className="w-4 h-4" />
+                    <span>Analyze Unlabeled Only</span>
+                  </button>
+                </div>
+              )}
+            </div>
             <Button 
               size="sm" 
               variant="outline" 
@@ -785,6 +1108,7 @@ export function SheetSidebar({
             onChange={onPdfUpload}
             className="hidden"
             id="pdf-upload"
+            multiple
           />
         )}
         
@@ -836,85 +1160,161 @@ export function SheetSidebar({
           </div>
         ) : (
           <div className="p-4 space-y-2">
-            {filteredDocuments.map((document) => (
-              <div key={document.id} className="border rounded-lg">
-                {/* Document Header */}
-                <div
-                  className="p-3 cursor-pointer hover:bg-accent/50 transition-colors"
-                  onClick={() => toggleDocumentExpansion(document.id)}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="flex items-center justify-center w-6 h-6 rounded hover:bg-gray-200 transition-colors">
-                        {document.isExpanded ? (
-                          <ChevronDown className="w-4 h-4 text-gray-600" />
-                        ) : (
-                          <ChevronRight className="w-4 h-4 text-gray-600" />
+            {filteredDocuments.map((document) => {
+              // Single-page PDFs: show as flat item without expansion
+              if (document.totalPages === 1) {
+                const page = document.pages[0];
+                return (
+                  <div
+                    key={document.id}
+                    className={`border rounded-lg p-3 cursor-pointer transition-colors ${
+                      selectedDocumentId === document.id && selectedPageNumber === page.pageNumber
+                        ? 'bg-primary/10 border-l-4 border-primary'
+                        : 'hover:bg-accent/30'
+                    }`}
+                    onClick={() => handlePageClick(document.id, page.pageNumber)}
+                  >
+                    <div className="flex items-start gap-3">
+                      <FileText className="w-4 h-4 text-muted-foreground mt-0.5" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex justify-between mb-1">
+                          <div className="flex-1 min-w-0 pr-2">
+                            <span className="font-medium text-sm break-words leading-tight">
+                              {page.sheetName || document.name || `Page ${page.pageNumber}`}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            {page.sheetNumber && (
+                              <Badge variant="secondary" className="text-xs">
+                                {page.sheetNumber}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <span>{document.name}</span>
+                          {page.hasTakeoffs && (
+                            <Badge variant="outline" className="text-xs">
+                              {page.takeoffCount} takeoffs
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                      <div className="relative">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const menuKey = `${document.id}-${page.pageNumber}`;
+                            setOpenPageMenu(openPageMenu === menuKey ? null : menuKey);
+                          }}
+                          className="h-6 w-6 p-0"
+                          title="Page Options"
+                        >
+                          <Settings className="w-3 h-3" />
+                        </Button>
+                        
+                        {openPageMenu === `${document.id}-${page.pageNumber}` && (
+                          <div className="absolute right-0 top-full mt-1 w-48 bg-white border rounded-lg shadow-lg z-50 py-1">
+                            <button
+                              className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setRenamingPage({
+                                  documentId: document.id,
+                                  pageNumber: page.pageNumber,
+                                  currentName: page.sheetName || document.name || `Page ${page.pageNumber}`
+                                });
+                                setRenameInput(page.sheetName || document.name || `Page ${page.pageNumber}`);
+                                setShowRenameDialog(true);
+                                setOpenPageMenu(null);
+                              }}
+                            >
+                              <Edit2 className="w-4 h-4" />
+                              Rename
+                            </button>
+                            <div className="border-t border-gray-200"></div>
+                            <button
+                              className="w-full px-3 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center gap-2"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleDeletePage(document.id);
+                                setOpenPageMenu(null);
+                              }}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                              Delete
+                            </button>
+                          </div>
                         )}
                       </div>
-                      <FileText className="w-4 h-4 text-muted-foreground" />
-                      <span className="font-medium text-sm">{document.name}</span>
-                      <Badge variant="outline" className="text-xs">
-                        {document.totalPages} pages
-                      </Badge>
-                    </div>
-                    <div className="relative">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setOpenDocumentMenu(openDocumentMenu === document.id ? null : document.id);
-                        }}
-                        className="h-6 w-6 p-0"
-                        title="Document Options"
-                      >
-                        <Settings className="w-3 h-3" />
-                      </Button>
-                      
-                      {openDocumentMenu === document.id && (
-                        <div className="absolute right-0 top-full mt-1 w-56 bg-white border rounded-lg shadow-lg z-50 py-1">
-                          <button
-                            className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              handleAnalyzeDocument(document.id);
-                              setOpenDocumentMenu(null);
-                            }}
-                            disabled={processingOCR.includes(document.id)}
-                          >
-                            {processingOCR.includes(document.id) ? (
-                              <RefreshCw className="w-4 h-4 animate-spin" />
-                            ) : (
-                              <Brain className="w-4 h-4" />
-                            )}
-                            <span className="font-medium">Analyze Document</span>
-                            <span className="text-xs text-gray-500 ml-auto">AI Analysis</span>
-                          </button>
-                          
-                          <div className="border-t border-gray-200"></div>
-                          
-                          <button
-                            className="w-full px-3 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center gap-2"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              handleDeleteDocument(document.id);
-                              setOpenDocumentMenu(null);
-                            }}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                            Delete Document
-                          </button>
-                        </div>
-                      )}
                     </div>
                   </div>
-                </div>
+                );
+              }
+              
+              // Multi-page PDFs: show with expandable structure
+              return (
+                <div key={document.id} className="border rounded-lg">
+                  {/* Document Header */}
+                  <div
+                    className="p-3 cursor-pointer hover:bg-accent/50 transition-colors"
+                    onClick={() => toggleDocumentExpansion(document.id)}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center justify-center w-6 h-6 rounded hover:bg-gray-200 transition-colors">
+                          {document.isExpanded ? (
+                            <ChevronDown className="w-4 h-4 text-gray-600" />
+                          ) : (
+                            <ChevronRight className="w-4 h-4 text-gray-600" />
+                          )}
+                        </div>
+                        <FileText className="w-4 h-4 text-muted-foreground" />
+                        <span className="font-medium text-sm">{document.name}</span>
+                        <Badge variant="outline" className="text-xs">
+                          {document.totalPages} pages
+                        </Badge>
+                      </div>
+                      <div className="relative">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenDocumentMenu(openDocumentMenu === document.id ? null : document.id);
+                          }}
+                          className="h-6 w-6 p-0"
+                          title="Document Options"
+                        >
+                          <Settings className="w-3 h-3" />
+                        </Button>
+                        
+                        {openDocumentMenu === document.id && (
+                          <div className="absolute right-0 top-full mt-1 w-56 bg-white border rounded-lg shadow-lg z-50 py-1">
+                            <button
+                              className="w-full px-3 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center gap-2"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleDeleteDocument(document.id);
+                                setOpenDocumentMenu(null);
+                              }}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                              Delete Document
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
 
-                {/* Pages List */}
-                {document.isExpanded && (
+                  {/* Pages List */}
+                  {document.isExpanded && (
                   <div className="border-t">
                     {document.pages.map((page) => (
                       <div
@@ -1060,7 +1460,65 @@ export function SheetSidebar({
                               )}
                             </div>
                           </div>
-
+                          
+                          {/* Page Gear Icon */}
+                          <div className="relative">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const menuKey = `${document.id}-${page.pageNumber}`;
+                                setOpenPageMenu(openPageMenu === menuKey ? null : menuKey);
+                              }}
+                              className="h-6 w-6 p-0"
+                              title="Page Options"
+                            >
+                              <Settings className="w-3 h-3" />
+                            </Button>
+                            
+                            {openPageMenu === `${document.id}-${page.pageNumber}` && (
+                              <div className="absolute right-0 top-full mt-1 w-48 bg-white border rounded-lg shadow-lg z-50 py-1">
+                                <button
+                                  className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setRenamingPage({
+                                      documentId: document.id,
+                                      pageNumber: page.pageNumber,
+                                      currentName: page.sheetName || `Page ${page.pageNumber}`
+                                    });
+                                    setRenameInput(page.sheetName || `Page ${page.pageNumber}`);
+                                    setShowRenameDialog(true);
+                                    setOpenPageMenu(null);
+                                  }}
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                  Rename
+                                </button>
+                                <div className="border-t border-gray-200"></div>
+                                <button
+                                  className="w-full px-3 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center gap-2"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    if (document.totalPages === 1) {
+                                      handleDeletePage(document.id);
+                                    } else {
+                                      // For multi-page documents, we'd need a different delete handler
+                                      // For now, just show a message
+                                      alert('To delete a page from a multi-page document, please delete the entire document.');
+                                    }
+                                    setOpenPageMenu(null);
+                                  }}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                  Delete
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -1104,6 +1562,120 @@ export function SheetSidebar({
               </div>
             </div>
             <p className="text-sm text-gray-500 mt-4 text-center">Extracting text and analyzing sheets with AI...</p>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Analysis Progress Modal */}
+      {showBulkAnalysisDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+            <div className="flex flex-col space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold">Bulk Document Analysis</h3>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowBulkAnalysisDialog(false)}
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+              
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span>Progress:</span>
+                  <span className="font-medium">
+                    {bulkAnalysisProgress.completed + bulkAnalysisProgress.failed} / {bulkAnalysisProgress.total}
+                  </span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div
+                    className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                    style={{
+                      width: `${((bulkAnalysisProgress.completed + bulkAnalysisProgress.failed) / bulkAnalysisProgress.total) * 100}%`
+                    }}
+                  />
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-gray-700">{bulkAnalysisProgress.status}</p>
+                {bulkAnalysisProgress.current && (
+                  <p className="text-sm text-gray-600">Currently processing: {bulkAnalysisProgress.current}</p>
+                )}
+              </div>
+              
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Completed Documents:</p>
+                <div className="max-h-48 overflow-y-auto space-y-1">
+                  {bulkAnalysisProgress.completedDocuments.map((doc, idx) => (
+                    <div
+                      key={idx}
+                      className={`flex items-center gap-2 text-sm p-2 rounded ${
+                        doc.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
+                      }`}
+                    >
+                      {doc.success ? (
+                        <Check className="w-4 h-4" />
+                      ) : (
+                        <X className="w-4 h-4" />
+                      )}
+                      <span>{doc.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rename Dialog */}
+      {showRenameDialog && renamingPage && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold mb-4">Rename Page</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-2 block">
+                  Page Name
+                </label>
+                <Input
+                  value={renameInput}
+                  onChange={(e) => setRenameInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleRenamePage();
+                    } else if (e.key === 'Escape') {
+                      setShowRenameDialog(false);
+                      setRenamingPage(null);
+                      setRenameInput('');
+                    }
+                  }}
+                  autoFocus
+                  placeholder="Enter page name"
+                />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowRenameDialog(false);
+                    setRenamingPage(null);
+                    setRenameInput('');
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleRenamePage}
+                  disabled={!renameInput.trim()}
+                >
+                  Save
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
       )}
