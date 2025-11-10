@@ -2534,7 +2534,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   }, [annotationTool, isCalibrating, calibrationPoints, isMeasuring, selectedConditionId, mousePosition, isContinuousDrawing, activePoints, rubberBandElement, currentViewport, calculateRunningLength, isDeselecting, visualSearchMode, isSelectingSymbol, selectionStart, viewState, setPageViewports, currentPage]);
 
   // Handle click - direct coordinate conversion
-  const handleClick = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
+  const handleClick = useCallback(async (event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
     // Basic checks - allow interactions even during loading
     if (!pdfCanvasRef.current) {
       return;
@@ -2543,17 +2543,37 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // CRITICAL FIX: Compute viewport on-the-fly if not cached (for newly uploaded PDFs)
     // This allows interactions to work even before the page has fully rendered and cached the viewport
     let viewport = currentViewport;
-    if (!viewport && pdfPageRef.current) {
-      // Compute viewport on-the-fly using current scale and rotation
-      viewport = pdfPageRef.current.getViewport({ 
-        scale: viewState.scale, 
-        rotation: viewState.rotation 
-      });
-      // Cache it for future use
-      setPageViewports(prev => ({
-        ...prev,
-        [currentPage]: viewport
-      }));
+    if (!viewport) {
+      // Try to get viewport from cached page ref first
+      if (pdfPageRef.current) {
+        viewport = pdfPageRef.current.getViewport({ 
+          scale: viewState.scale, 
+          rotation: viewState.rotation 
+        });
+        // Cache it for future use
+        setPageViewports(prev => ({
+          ...prev,
+          [currentPage]: viewport
+        }));
+      } else if (pdfDocument) {
+        // For new documents, page might not be loaded yet - load it on-demand
+        try {
+          const page = await pdfDocument.getPage(currentPage);
+          pdfPageRef.current = page; // Cache the page for future use
+          viewport = page.getViewport({ 
+            scale: viewState.scale, 
+            rotation: viewState.rotation 
+          });
+          // Cache viewport for future use
+          setPageViewports(prev => ({
+            ...prev,
+            [currentPage]: viewport
+          }));
+        } catch (error) {
+          console.error('Failed to load PDF page for click handler:', error);
+          return;
+        }
+      }
     }
     
     if (!viewport) {
@@ -2773,7 +2793,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       }
       // Area and volume measurements will be completed on double-click
     }
-  }, [isCalibrating, calibrationPoints, measurementType, currentMeasurement, isContinuousDrawing, activePoints, calculateRunningLength, currentViewport, isSelectionMode, selectedMarkupId, isOrthoSnapping, isMeasuring, mousePosition, cutoutMode, currentCutout, isDeselecting, visualSearchMode, isSelectingSymbol, selectionStart, annotationTool, currentProjectId, file, currentPage, addAnnotation, annotationColor, onAnnotationToolChange, viewState, setPageViewports]);
+  }, [isCalibrating, calibrationPoints, measurementType, currentMeasurement, isContinuousDrawing, activePoints, calculateRunningLength, currentViewport, isSelectionMode, selectedMarkupId, isOrthoSnapping, isMeasuring, mousePosition, cutoutMode, currentCutout, isDeselecting, visualSearchMode, isSelectingSymbol, selectionStart, annotationTool, currentProjectId, file, currentPage, addAnnotation, annotationColor, onAnnotationToolChange, viewState, setPageViewports, pdfDocument]);
 
   // Create rubber band element for continuous linear drawing
   const createRubberBandElement = useCallback(() => {
