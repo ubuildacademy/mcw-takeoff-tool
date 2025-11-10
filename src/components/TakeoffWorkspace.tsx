@@ -1043,6 +1043,11 @@ export function TakeoffWorkspace() {
       const projectFilesList = filesRes.files || [];
       setProjectFiles(projectFilesList);
       
+      // Refresh documents list to show newly uploaded files in sidebar
+      if (uploadedFiles.length > 0) {
+        await loadProjectDocuments();
+      }
+      
       // Set the first successfully uploaded file as current
       if (uploadedFiles.length > 0) {
         setCurrentPdfFile(uploadedFiles[0]);
