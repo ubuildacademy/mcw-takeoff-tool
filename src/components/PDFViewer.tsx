@@ -4376,8 +4376,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 }
               }}
               onDoubleClick={(e) => {
-                // Handle double-click in annotation mode
-                if (annotationTool) {
+                // Handle double-click in annotation mode, measurement mode, or cutout mode
+                if (annotationTool || isMeasuring || cutoutMode) {
                   e.preventDefault();
                   e.stopPropagation();
                   handleDoubleClick(e);
