@@ -4,13 +4,9 @@ import { Badge } from './ui/badge';
 import { Input } from './ui/input';
 import { 
   FileText, 
-  Plus, 
   Upload, 
-  Download,
   Trash2,
-  MoreVertical,
   Settings,
-  Scan,
   ChevronDown,
   ChevronRight,
   Filter,
@@ -19,8 +15,6 @@ import {
   Check,
   X,
   Tag,
-  ChevronDown as ChevronDownIcon,
-  BarChart3,
   Search,
   Brain
 } from 'lucide-react';
@@ -59,7 +53,6 @@ export function SheetSidebar({
   onPdfUpload,
   uploading
 }: SheetSidebarProps) {
-  const [viewMode, setViewMode] = useState<'list'>('list');
   const [filterBy, setFilterBy] = useState<'all' | 'withTakeoffs' | 'withoutTakeoffs'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [loading, setLoading] = useState(true);
@@ -1315,7 +1308,7 @@ export function SheetSidebar({
 
                   {/* Pages List */}
                   {document.isExpanded && (
-                  <div className="border-t">
+                    <div className="border-t">
                     {document.pages.map((page) => (
                       <div
                         key={page.pageNumber}
@@ -1522,10 +1515,11 @@ export function SheetSidebar({
                         </div>
                       </div>
                     ))}
-                  </div>
-                )}
-              </div>
-            ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
