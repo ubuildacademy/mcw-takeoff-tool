@@ -82,7 +82,7 @@ export function TakeoffWorkspace() {
   const [cutoutTargetConditionId, setCutoutTargetConditionId] = useState<string | null>(null);
   
   // Annotation states
-  const [annotationTool, setAnnotationTool] = useState<'text' | 'freehand' | 'arrow' | 'rectangle' | 'circle' | null>(null);
+  const [annotationTool, setAnnotationTool] = useState<'text' | 'arrow' | 'rectangle' | 'circle' | null>(null);
   const [annotationColor, setAnnotationColor] = useState<string>('#FF0000');
   
   // Visual search states
@@ -1254,14 +1254,6 @@ export function TakeoffWorkspace() {
               >
                 <Type className="w-4 h-4 mr-2" />
                 Text Annotation
-              </DropdownMenuItem>
-              
-              <DropdownMenuItem
-                onClick={() => setAnnotationTool(annotationTool === 'freehand' ? null : 'freehand')}
-                className={annotationTool === 'freehand' ? 'bg-accent' : ''}
-              >
-                <Pencil className="w-4 h-4 mr-2" />
-                Freehand Drawing
               </DropdownMenuItem>
               
               
