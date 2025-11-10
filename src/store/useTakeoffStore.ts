@@ -548,8 +548,15 @@ export const useTakeoffStore = create<TakeoffStore>()(
           // Add to local store with the backend response
           set(state => {
             console.log('💾 ADD_TAKEOFF_MEASUREMENT: Adding measurement to store from backend:', measurement);
+            
+            // Mark the page as loaded since we just added a measurement to it
+            const pageKey = `${measurement.projectId}-${measurement.sheetId}-${measurement.pdfPage}`;
+            const updatedLoadedPages = new Set(state.loadedPages);
+            updatedLoadedPages.add(pageKey);
+            
             return {
-              takeoffMeasurements: [...state.takeoffMeasurements, measurement]
+              takeoffMeasurements: [...state.takeoffMeasurements, measurement],
+              loadedPages: updatedLoadedPages
             };
           });
           

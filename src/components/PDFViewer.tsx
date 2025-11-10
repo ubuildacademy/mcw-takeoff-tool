@@ -414,10 +414,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
   }, [currentProjectId, file?.id, storeAnnotations]);
 
+  // Subscribe to store changes for takeoffMeasurements to reactively update when measurements are added/updated
+  const allTakeoffMeasurements = useTakeoffStore(state => state.takeoffMeasurements);
+  
   // PER-PAGE LOADING: Load measurements for current page when page changes
   useEffect(() => {
+    // CRITICAL: Clear measurements immediately when page changes to prevent cross-page contamination
+    setLocalTakeoffMeasurements([]);
+    
     if (!currentProjectId || !file?.id || !currentPage) {
-      setLocalTakeoffMeasurements([]);
       return;
     }
     
@@ -464,6 +469,52 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     loadPageMeasurements();
   }, [currentProjectId, file?.id, currentPage, loadPageTakeoffMeasurements, getPageTakeoffMeasurements]);
+  
+  // REACTIVE UPDATE: Update localTakeoffMeasurements when store changes (e.g., new measurement created)
+  // This ensures newly created measurements appear immediately without page reload
+  useEffect(() => {
+    if (!currentProjectId || !file?.id || !currentPage) {
+      setLocalTakeoffMeasurements([]);
+      return;
+    }
+    
+    // Get current page measurements from store (reactively updates when store changes)
+    // CRITICAL: getPageTakeoffMeasurements already filters by page, but we double-check here
+    const pageMeasurements = getPageTakeoffMeasurements(currentProjectId, file.id, currentPage);
+    
+    // CRITICAL: Double-filter by page to ensure no cross-page contamination
+    const filteredPageMeasurements = pageMeasurements.filter(
+      (m) => m.pdfPage === currentPage && m.sheetId === file.id && m.projectId === currentProjectId
+    );
+    
+    // Convert to display format
+    const displayMeasurements = filteredPageMeasurements.map(apiMeasurement => {
+      try {
+        return {
+          id: apiMeasurement.id,
+          type: apiMeasurement.type,
+          points: apiMeasurement.points,
+          calculatedValue: apiMeasurement.calculatedValue,
+          unit: apiMeasurement.unit,
+          conditionId: apiMeasurement.conditionId,
+          conditionName: apiMeasurement.conditionName,
+          color: apiMeasurement.conditionColor,
+          timestamp: new Date(apiMeasurement.timestamp).getTime(),
+          pdfPage: apiMeasurement.pdfPage,
+          pdfCoordinates: apiMeasurement.pdfCoordinates,
+          perimeterValue: apiMeasurement.perimeterValue || null,
+          cutouts: apiMeasurement.cutouts || null,
+          netCalculatedValue: apiMeasurement.netCalculatedValue || null
+        };
+      } catch (error) {
+        console.error('Error processing measurement:', error, apiMeasurement);
+        return null;
+      }
+    }).filter(Boolean);
+    
+    // Always update to ensure we have the latest measurements for this page
+    setLocalTakeoffMeasurements(displayMeasurements);
+  }, [allTakeoffMeasurements, currentProjectId, file?.id, currentPage, getPageTakeoffMeasurements]);
 
   // Ensure component is mounted before rendering
   useEffect(() => {
@@ -665,18 +716,20 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Clear existing annotations completely - this ensures no cross-page contamination
     svgOverlay.innerHTML = '';
     
-    // Only render measurements for the specific page being rendered
-    localTakeoffMeasurements.forEach((measurement) => {
-      // Double-check that this measurement belongs to the page being rendered
-      if (measurement.pdfPage === pageNum) {
-        console.log('🎨 PDFViewer: Rendering measurement for page', {
-          measurementId: measurement.id,
-          measurementType: measurement.type,
-          measurementPage: measurement.pdfPage,
-          currentPage: pageNum
-        });
-        renderSVGMeasurement(svgOverlay, measurement, viewport, page);
-      }
+    // CRITICAL: Only render measurements for the specific page being rendered
+    // Filter by page BEFORE iterating to prevent any cross-page contamination
+    const pageMeasurements = localTakeoffMeasurements.filter(
+      (measurement) => measurement.pdfPage === pageNum
+    );
+    
+    pageMeasurements.forEach((measurement) => {
+      console.log('🎨 PDFViewer: Rendering measurement for page', {
+        measurementId: measurement.id,
+        measurementType: measurement.type,
+        measurementPage: measurement.pdfPage,
+        currentPage: pageNum
+      });
+      renderSVGMeasurement(svgOverlay, measurement, viewport, page);
     });
 
     // Draw calibration validator overlay if present for this page
