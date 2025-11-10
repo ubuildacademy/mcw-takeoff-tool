@@ -981,7 +981,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Force immediate re-render of markups when viewport changes
   const forceMarkupReRender = useCallback(() => {
-    if (pdfDocument && pdfPageRef.current && localTakeoffMeasurements.length > 0) {
+    const hasMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0;
+    if (pdfDocument && pdfPageRef.current && hasMarkups) {
       // Create fresh viewport with current parameters
       const freshViewport = pdfPageRef.current.getViewport({ 
         scale: viewState.scale, 
@@ -999,22 +1000,23 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         renderTakeoffAnnotations(currentPage, freshViewport, pdfPageRef.current);
       });
     }
-  }, [pdfDocument, viewState.scale, viewState.rotation, localTakeoffMeasurements, currentPage, renderTakeoffAnnotations]);
+  }, [pdfDocument, viewState.scale, viewState.rotation, localTakeoffMeasurements, localAnnotations, currentPage, renderTakeoffAnnotations]);
 
-  // Force re-render measurements when viewport state changes (zoom, rotation)
+  // Force re-render measurements and annotations when viewport state changes (zoom, rotation)
   useEffect(() => {
     const rendersBlocked = (isMeasuring || isCalibrating || currentMeasurement.length > 0 || isDeselecting || (isAnnotating && !showTextInput));
     if (rendersBlocked) {
       // During interactive zoom/draw, rely solely on CSS transforms to keep overlay in sync
       return;
     }
-    if (pdfDocument && currentViewport && localTakeoffMeasurements.length > 0) {
+    const hasMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0;
+    if (pdfDocument && currentViewport && hasMarkups) {
       // Use requestAnimationFrame to ensure the viewport state is fully updated
       requestAnimationFrame(() => {
         renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
       });
     }
-  }, [viewState.scale, viewState.rotation, pdfDocument, currentViewport, localTakeoffMeasurements, currentPage, renderTakeoffAnnotations]);
+  }, [viewState.scale, viewState.rotation, pdfDocument, currentViewport, localTakeoffMeasurements, localAnnotations, currentPage, renderTakeoffAnnotations]);
 
   // Page visibility handler - ensures overlay is properly initialized when page becomes visible
   const onPageShown = useCallback((pageNum: number, viewport: any) => {
@@ -3748,8 +3750,21 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         svgOverlayRef.current.style.transform = '';
         svgOverlayRef.current.style.transformOrigin = '';
       }
+      
+      // CRITICAL: After clearing CSS transforms, re-render annotations with correct viewport
+      // This fixes the issue where annotations disappear after zoom completes
+      const hasMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0;
+      if (pdfDocument && pdfPageRef.current && hasMarkups) {
+        const freshViewport = pdfPageRef.current.getViewport({ 
+          scale: viewState.scale, 
+          rotation: viewState.rotation 
+        });
+        requestAnimationFrame(() => {
+          renderTakeoffAnnotations(currentPage, freshViewport, pdfPageRef.current);
+        });
+      }
     }
-  }, [viewState.scale, isMeasuring, isCalibrating, currentMeasurement.length, isDeselecting, isAnnotating, showTextInput, applyInteractiveZoomTransforms]);
+  }, [viewState.scale, isMeasuring, isCalibrating, currentMeasurement.length, isDeselecting, isAnnotating, showTextInput, applyInteractiveZoomTransforms, pdfDocument, localTakeoffMeasurements, localAnnotations, currentPage, renderTakeoffAnnotations]);
 
   // Handle escape key to back out vertices one-by-one and delete key to delete selected markup
   const handleKeyDown = useCallback(async (event: KeyboardEvent) => {
