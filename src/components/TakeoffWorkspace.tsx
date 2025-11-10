@@ -45,7 +45,7 @@ import {
   Bot,
   Highlighter
 } from "lucide-react";
-import { fileService, sheetService } from '../services/apiService';
+import { fileService, sheetService, ocrService } from '../services/apiService';
 
 // All interfaces now imported from shared types
 
@@ -139,6 +139,16 @@ export function TakeoffWorkspace() {
   const [documents, setDocuments] = useState<PDFDocument[]>([]);
   const [exportStatus, setExportStatus] = useState<{type: 'excel' | 'pdf' | null, progress: number}>({type: null, progress: 0});
   
+  // OCR processing state - track active OCR jobs
+  const [ocrJobs, setOcrJobs] = useState<Map<string, {
+    documentId: string;
+    documentName: string;
+    progress: number;
+    status: 'pending' | 'processing' | 'completed' | 'failed';
+    processedPages?: number;
+    totalPages?: number;
+  }>>(new Map());
+  
   // PDF viewer controls state
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
@@ -197,6 +207,90 @@ export function TakeoffWorkspace() {
     setMeasurementType(type);
     setIsOrthoSnapping(orthoSnapping);
   };
+
+  // Poll OCR status for a document
+  const pollOcrStatus = useCallback(async (documentId: string, documentName: string) => {
+    // Wait a moment for OCR job to be created
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    let attempts = 0;
+    const maxAttempts = 300; // 5 minutes max (1 second intervals)
+    
+    const pollInterval = setInterval(async () => {
+      try {
+        // Try to get OCR job status - we need to find the job ID first
+        // For now, we'll check if OCR results exist, which indicates completion
+        const results = await ocrService.getDocumentResults(documentId, projectId!);
+        
+        if (results && results.results && results.results.length > 0) {
+          // OCR completed
+          setOcrJobs(prev => {
+            const newMap = new Map(prev);
+            const job = newMap.get(documentId);
+            if (job) {
+              newMap.set(documentId, {
+                ...job,
+                status: 'completed',
+                progress: 100,
+                processedPages: results.totalPages,
+                totalPages: results.totalPages
+              });
+            }
+            return newMap;
+          });
+          clearInterval(pollInterval);
+          
+          // Remove from tracking after 3 seconds
+          setTimeout(() => {
+            setOcrJobs(prev => {
+              const newMap = new Map(prev);
+              newMap.delete(documentId);
+              return newMap;
+            });
+          }, 3000);
+          return;
+        }
+        
+        // Update progress (simulate progress since we don't have job ID)
+        attempts++;
+        if (attempts < maxAttempts) {
+          setOcrJobs(prev => {
+            const newMap = new Map(prev);
+            const job = newMap.get(documentId);
+            if (job) {
+              // Estimate progress based on time (rough approximation)
+              const estimatedProgress = Math.min(95, Math.floor((attempts / maxAttempts) * 100));
+              newMap.set(documentId, {
+                ...job,
+                status: 'processing',
+                progress: estimatedProgress
+              });
+            }
+            return newMap;
+          });
+        } else {
+          // Timeout - mark as failed or remove
+          setOcrJobs(prev => {
+            const newMap = new Map(prev);
+            newMap.delete(documentId);
+            return newMap;
+          });
+          clearInterval(pollInterval);
+        }
+      } catch (error) {
+        // OCR might not be started yet or job doesn't exist - continue polling
+        attempts++;
+        if (attempts >= maxAttempts) {
+          setOcrJobs(prev => {
+            const newMap = new Map(prev);
+            newMap.delete(documentId);
+            return newMap;
+          });
+          clearInterval(pollInterval);
+        }
+      }
+    }, 1000); // Poll every second
+  }, [projectId]);
 
   useEffect(() => {
     async function loadFiles() {
@@ -902,6 +996,24 @@ export function TakeoffWorkspace() {
           
           if (uploadRes.file) {
             uploadedFiles.push(uploadRes.file);
+            
+            // Track OCR job for this document
+            // OCR starts automatically after upload, so we'll poll for status
+            setOcrJobs(prev => {
+              const newMap = new Map(prev);
+              newMap.set(uploadRes.file.id, {
+                documentId: uploadRes.file.id,
+                documentName: uploadRes.file.originalName || file.name,
+                progress: 0,
+                status: 'pending',
+                processedPages: 0,
+                totalPages: 0
+              });
+              return newMap;
+            });
+            
+            // Start polling for OCR status
+            pollOcrStatus(uploadRes.file.id, uploadRes.file.originalName || file.name);
           }
         } catch (error: any) {
           console.error(`Upload failed for ${file.name}:`, error);
@@ -1478,6 +1590,34 @@ export function TakeoffWorkspace() {
                     {exportStatus.progress}%
                   </span>
                 </div>
+              </div>
+            </div>
+          ) : ocrJobs.size > 0 ? (
+            <div className="flex items-center gap-3 bg-purple-50 px-3 py-2 rounded-lg border border-purple-200">
+              <div className="animate-spin w-5 h-5 border-2 border-purple-500 border-t-transparent rounded-full"></div>
+              <div className="flex flex-col">
+                <span className="text-sm font-medium text-purple-700">
+                  {ocrJobs.size === 1 
+                    ? `OCR Processing: ${Array.from(ocrJobs.values())[0].documentName}`
+                    : `OCR Processing ${ocrJobs.size} documents...`}
+                </span>
+                {ocrJobs.size === 1 && (() => {
+                  const job = Array.from(ocrJobs.values())[0];
+                  return (
+                    <div className="flex items-center gap-2 mt-1">
+                      <div className="w-32 h-2 bg-purple-200 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-purple-500 transition-all duration-300 ease-out rounded-full"
+                          style={{ width: `${job.progress}%` }}
+                        ></div>
+                      </div>
+                      <span className="text-xs text-purple-600 font-medium">
+                        {job.progress}%
+                        {job.processedPages && job.totalPages ? ` (${job.processedPages}/${job.totalPages})` : ''}
+                      </span>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           ) : (
