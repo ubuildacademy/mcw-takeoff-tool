@@ -10,7 +10,6 @@ import {
   ChevronDown,
   ChevronRight,
   Filter,
-  RefreshCw,
   Edit2,
   Check,
   X,
@@ -379,9 +378,9 @@ export function SheetSidebar({
   const handleDeleteDocument = async (documentId: string) => {
     try {
       await fileService.deletePDF(documentId);
+      // Reload documents from server to ensure list is up to date
       if (onDocumentsUpdate) {
-        const updatedDocuments = documents.filter(doc => doc.id !== documentId);
-        onDocumentsUpdate(updatedDocuments);
+        await loadProjectDocuments();
       }
     } catch (error) {
       console.error('Error deleting document:', error);
@@ -1003,9 +1002,9 @@ export function SheetSidebar({
     
     try {
       await fileService.deletePDF(documentId);
+      // Reload documents from server to ensure list is up to date
       if (onDocumentsUpdate) {
-        const updatedDocuments = documents.filter(doc => doc.id !== documentId);
-        onDocumentsUpdate(updatedDocuments);
+        await loadProjectDocuments();
       }
     } catch (error) {
       console.error('Error deleting document:', error);
@@ -1124,14 +1123,6 @@ export function SheetSidebar({
                 </div>
               )}
             </div>
-            <Button 
-              size="sm" 
-              variant="outline" 
-              onClick={() => loadProjectDocuments()}
-              title="Refresh documents list"
-            >
-              <RefreshCw className="w-4 h-4" />
-            </Button>
           </div>
         </div>
         
@@ -1359,25 +1350,6 @@ export function SheetSidebar({
                         
                         {openPageMenu === `${document.id}-${page.pageNumber}` && (
                           <div className="absolute right-0 top-full mt-1 w-48 bg-white border rounded-lg shadow-lg z-50 py-1">
-                            <button
-                              className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                setRenamingPage({
-                                  documentId: document.id,
-                                  pageNumber: page.pageNumber,
-                                  currentName: page.sheetName || document.name || `Page ${page.pageNumber}`
-                                });
-                                setRenameInput(page.sheetName || document.name || `Page ${page.pageNumber}`);
-                                setShowRenameDialog(true);
-                                setOpenPageMenu(null);
-                              }}
-                            >
-                              <Edit2 className="w-4 h-4" />
-                              Rename
-                            </button>
-                            <div className="border-t border-gray-200"></div>
                             <button
                               className="w-full px-3 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center gap-2"
                               onClick={(e) => {
@@ -1621,25 +1593,6 @@ export function SheetSidebar({
                             
                             {openPageMenu === `${document.id}-${page.pageNumber}` && (
                               <div className="absolute right-0 top-full mt-1 w-48 bg-white border rounded-lg shadow-lg z-50 py-1">
-                                <button
-                                  className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    setRenamingPage({
-                                      documentId: document.id,
-                                      pageNumber: page.pageNumber,
-                                      currentName: page.sheetName || `Page ${page.pageNumber}`
-                                    });
-                                    setRenameInput(page.sheetName || `Page ${page.pageNumber}`);
-                                    setShowRenameDialog(true);
-                                    setOpenPageMenu(null);
-                                  }}
-                                >
-                                  <Edit2 className="w-4 h-4" />
-                                  Rename
-                                </button>
-                                <div className="border-t border-gray-200"></div>
                                 <button
                                   className="w-full px-3 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center gap-2"
                                   onClick={(e) => {
