@@ -3163,12 +3163,28 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       return;
     }
     
-    if (isContinuousDrawing && activePoints.length >= 2) {
-      // Complete the continuous linear measurement
-      completeContinuousLinearMeasurement();
-    } else if ((measurementType === 'area' || measurementType === 'volume') && currentMeasurement.length >= 3) {
-      // Complete area or volume measurement
-      completeMeasurement(currentMeasurement);
+    // Handle measurement completion when in measurement mode
+    if (isMeasuring) {
+      // Handle continuous linear measurements
+      if (isContinuousDrawing && activePoints.length >= 2) {
+        // Complete the continuous linear measurement
+        completeContinuousLinearMeasurement();
+        return;
+      }
+      
+      // Handle non-continuous linear measurements (at least 2 points required)
+      if (measurementType === 'linear' && !isContinuousDrawing && currentMeasurement.length >= 2) {
+        // Complete non-continuous linear measurement
+        completeMeasurement(currentMeasurement);
+        return;
+      }
+      
+      // For area or volume measurements, require at least 3 points (as required by the calculator)
+      if ((measurementType === 'area' || measurementType === 'volume') && currentMeasurement.length >= 3) {
+        // Complete area or volume measurement
+        completeMeasurement(currentMeasurement);
+        return;
+      }
     }
   }, [annotationTool, currentAnnotation, annotationColor, currentPage, onAnnotationToolChange, isContinuousDrawing, activePoints, measurementType, currentMeasurement, completeContinuousLinearMeasurement, completeMeasurement, cutoutMode, currentCutout, completeCutout, isMeasuring]);
 
