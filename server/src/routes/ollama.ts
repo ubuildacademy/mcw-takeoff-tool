@@ -134,31 +134,49 @@ router.post('/chat', async (req, res) => {
 });
 
 // Helper function to filter OCR text for titleblock information
+// Less aggressive filtering - keeps context around title block keywords
 function filterTextForTitleblock(text: string): string {
   const lines = text.split('\n');
-  const filteredLines = lines.filter(line => {
+  const contextWindow = 15; // Keep 15 lines before and after title block keywords
+  const keepLines = new Set<number>();
+  
+  // First pass: identify lines with title block keywords
+  lines.forEach((line, index) => {
+    const trimmedLine = line.trim();
+    if (isTitleblockKeyword(trimmedLine)) {
+      // Keep this line and context around it
+      const start = Math.max(0, index - contextWindow);
+      const end = Math.min(lines.length - 1, index + contextWindow);
+      for (let i = start; i <= end; i++) {
+        keepLines.add(i);
+      }
+    }
+    
+    // Also keep lines that look like sheet numbers
+    if (/^[A-Z]\d+\.\d+$/.test(trimmedLine)) {
+      keepLines.add(index);
+      // Keep context around sheet numbers too
+      const start = Math.max(0, index - 5);
+      const end = Math.min(lines.length - 1, index + 5);
+      for (let i = start; i <= end; i++) {
+        keepLines.add(i);
+      }
+    }
+  });
+  
+  // Second pass: filter lines, keeping those in our set and filtering out detail callouts
+  const filteredLines = lines.filter((line, index) => {
     const trimmedLine = line.trim();
     
     // Skip empty lines
     if (!trimmedLine) return false;
     
-    // Keep lines that contain titleblock keywords
-    if (isTitleblockKeyword(trimmedLine)) {
-      return true;
-    }
-    
-    // Skip detail callouts
-    if (isDetailCallout(trimmedLine)) {
-      return false;
-    }
-    
-    // Keep lines that look like sheet numbers (A0.01, A1.02, etc.)
-    if (/^[A-Z]\d+\.\d+$/.test(trimmedLine)) {
-      return true;
-    }
-    
-    // Keep lines that look like drawing titles (longer descriptive text)
-    if (trimmedLine.length > 10 && !isDetailCallout(trimmedLine)) {
+    // Keep lines in our context window
+    if (keepLines.has(index)) {
+      // But still filter out detail callouts even in context window
+      if (isDetailCallout(trimmedLine)) {
+        return false;
+      }
       return true;
     }
     
@@ -268,7 +286,7 @@ router.post('/analyze-sheets', async (req, res) => {
     sendProgress(10, `Found ${ocrData.length} pages to analyze...`);
 
     // Process all pages in batches to avoid token limits
-    const BATCH_SIZE = 8; // Optimized batch size for faster processing
+    const BATCH_SIZE = 5; // Reduced batch size for better context preservation
     const totalPages = ocrData.length;
     console.log(`Processing ${totalPages} pages in batches of ${BATCH_SIZE}`);
     
@@ -296,8 +314,8 @@ router.post('/analyze-sheets', async (req, res) => {
           // Filter out detail callouts and section labels to focus on titleblock info
           const filteredText = filterTextForTitleblock(page.text);
           
-          // Limit to reasonable size to avoid token limits
-          const limitedText = filteredText.substring(0, 3000);
+          // Limit to reasonable size to avoid token limits (increased for longer sheet names)
+          const limitedText = filteredText.substring(0, 6000);
           batchContext += `Page ${page.pageNumber}:\n${limitedText}\n\n`;
         }
       });
@@ -305,55 +323,37 @@ router.post('/analyze-sheets', async (req, res) => {
       console.log(`Batch context length: ${batchContext.length} characters`);
 
       // Use custom prompt from admin panel if provided, otherwise use default
-      const systemPrompt = customPrompt || `You are an expert construction document analyst. Your task is to analyze construction drawings and identify sheet information from title blocks.
+      const systemPrompt = customPrompt || `You are an expert construction document analyst. Extract sheet information from title blocks located on the RIGHT BORDER of each page.
 
-CRITICAL INSTRUCTIONS:
-- Focus EXCLUSIVELY on title block information
-- IGNORE detail callouts that start with numbers (like "01 Patio Trellis - Enlarged Floor Plan" or "25 Sun Shade - Connection Detail")
-- IGNORE drawing annotations and labels that are clearly detail references
-- ONLY look for the main sheet title and sheet number from the title block
-- IMPORTANT: Use the EXACT page order as provided - do not reorder sheet numbers based on numerical patterns
-- IMPORTANT: Do NOT ignore legitimate sheet titles that contain words like "details", "sections", "typical", etc.
+TITLE BLOCK LOCATION:
+- Title blocks are ALWAYS on the far right border of construction documents (industry standard)
+- Look for text containing "drawing data:" and "sheet number:" labels
+- The text may be rotated or in different orientations, but always on the right side
 
-For each page, identify ONLY:
-1. Sheet number (e.g., A0.01, A0.02, A1.01, A9.02, etc.) - use the EXACT sheet number found in the title block
-2. Sheet name/description - capture the COMPLETE title from the drawing data field
+YOUR TASK:
+Extract EXACT text from title block fields. Your job is to clean up minor OCR errors (like O→0, I→1) but DO NOT change the actual names or numbers.
 
-Look specifically for text near these title block labels:
-- "sheet number:" followed by the sheet number (use exactly as found)
-- "drawing data:" followed by the COMPLETE sheet title (capture the full title, not just the first part)
-- "drawing title:" followed by the COMPLETE sheet title
-- "sheet name:" followed by the sheet name
+For each page, find:
+1. Sheet number: Look for "sheet number:" followed by alphanumeric code (e.g., A4.21, A0.01, S0.02)
+2. Sheet name: Look for "drawing data:" followed by the COMPLETE title (can be 7-8+ words long)
 
-IMPORTANT: 
-- Do NOT reorder sheet numbers based on numerical patterns (A3.02 can come before A3.01 if it appears that way in the document set)
-- Capture the COMPLETE drawing title from the "drawing data:" field, including all descriptive text
-- Use the page order exactly as provided in the input
+CRITICAL RULES:
+- Use EXACT text from title block - only fix obvious OCR errors (O→0, I→1, l→1, etc.)
+- DO NOT reword, shorten, or change sheet names
+- DO NOT reorder sheet numbers based on patterns
+- Capture COMPLETE sheet names including all words after "drawing data:"
+- IGNORE detail callouts (lines starting with numbers like "01 Detail" or "25 Section")
 
-Common sheet number patterns:
-- A0.01, A0.02, A1.01, A1.02, A9.02 (Architectural)
-- S0.01, S0.02 (Structural) 
-- M0.01, M0.02 (Mechanical)
-- E0.01, E0.02 (Electrical)
-- P0.01, P0.02 (Plumbing)
-- Sheet numbers may be in formats not listed here; usually in easily identified patterns. 
+EXAMPLES:
+- "drawing data: Enlarged Floor Plan - Ground Floor - East Side" → sheetName: "Enlarged Floor Plan - Ground Floor - East Side"
+- "drawing data: Overall Reflected Ceiling Plans - Third thru Sixth & Int. Roof Level" → sheetName: "Overall Reflected Ceiling Plans - Third thru Sixth & Int. Roof Level"
+- "sheet number: A4.21" → sheetNumber: "A4.21"
+- If OCR shows "A4.2l" (lowercase L), correct to "A4.21" (number one)
 
-Common sheet names:
-- "Cover Sheet", "Title Sheet", "Index"
-- "Ground Floor Plan", "First Floor Plan", "Second Floor Plan"
-- "Roof Plan", "Elevations", "Exterior Elevations"
-- "Enlarged Patio Trellis", "Details", "Schedules"
-- "Specifications", "Wall Types", "Finishes"
+OUTPUT FORMAT (JSON array):
+[ { "pageNumber": 1, "sheetNumber": "A0.01", "sheetName": "Cover Sheet" }, { "pageNumber": 2, "sheetNumber": "A4.21", "sheetName": "Enlarged Floor Plan - Ground Floor - East Side" } ]
 
-IMPORTANT: 
-- Do NOT use detail callout titles like "01 Patio Trellis - Enlarged Floor Plan" as the sheet name
-- DO use legitimate sheet titles like "Typical Wall Details", "Section Details", "Enlarged Plans", etc.
-- Look for the main sheet title in the title block, such as "Enlarged Patio Trellis" or "Typical Details"
-
-EXAMPLE: If you see "drawing data: Overall Reflected Ceiling Plans - Third thru Sixth & Int. Roof Level", 
-use the COMPLETE title "Overall Reflected Ceiling Plans - Third thru Sixth & Int. Roof Level", not just "Overall Reflected Ceiling Plans".
-
-Return your analysis as a JSON array with this exact format for the pages in this batch: [ { "pageNumber": 1, "sheetNumber": "A0.01", "sheetName": "Cover Sheet" }, { "pageNumber": 2, "sheetNumber": "A9.02", "sheetName": "Enlarged Patio Trellis" }, { "pageNumber": 13, "sheetNumber": "A3.02", "sheetName": "Overall Reflected Ceiling Plans - Third thru Sixth & Int. Roof Level" }, { "pageNumber": 14, "sheetNumber": "A3.01", "sheetName": "Overall Reflected Ceiling Plans - First & Second Level" } ] If you cannot determine a sheet number or name for a page, use "Unknown" as the value. Be as accurate as possible based ONLY on the title block information.`;
+If you cannot find a sheet number or name, use "Unknown". Extract exactly what you see, only fixing minor OCR character errors.`;
 
       // Create AI prompt for sheet analysis
       const messages = [
