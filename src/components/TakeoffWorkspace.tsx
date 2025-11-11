@@ -1608,8 +1608,13 @@ export function TakeoffWorkspace() {
               <div className="animate-spin w-5 h-5 border-2 border-green-500 border-t-transparent rounded-full"></div>
               <div className="flex flex-col">
                 <span className="text-sm font-medium text-green-700">
-                  Labeling Pages: {labelingJob.completedDocuments}/{labelingJob.totalDocuments} documents
-                  {labelingJob.currentDocument && ` (${labelingJob.currentDocument})`}
+                  Labeling Pages
+                  {labelingJob.currentDocument && `: ${labelingJob.currentDocument}`}
+                  {labelingJob.processedPages !== undefined && labelingJob.totalPages !== undefined 
+                    ? ` (${labelingJob.processedPages}/${labelingJob.totalPages} pages)`
+                    : labelingJob.totalPages !== undefined 
+                      ? ` (0/${labelingJob.totalPages} pages)`
+                      : ''}
                 </span>
                 <div className="flex items-center gap-2 mt-1">
                   <div className="w-32 h-2 bg-green-200 rounded-full overflow-hidden">
@@ -1620,7 +1625,6 @@ export function TakeoffWorkspace() {
                   </div>
                   <span className="text-xs text-green-600 font-medium">
                     {labelingJob.progress}%
-                    {labelingJob.processedPages && labelingJob.totalPages ? ` (${labelingJob.processedPages}/${labelingJob.totalPages} pages)` : ''}
                   </span>
                 </div>
               </div>
