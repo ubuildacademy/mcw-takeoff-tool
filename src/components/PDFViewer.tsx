@@ -1854,13 +1854,28 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Add click handler for selection
       if (isSelectionMode) {
         text.style.cursor = 'pointer';
-        text.addEventListener('click', (e) => {
-          e.stopPropagation();
-          setSelectedMarkupId(annotation.id);
-        });
+        text.style.pointerEvents = 'auto';
       }
       
       svg.appendChild(text);
+      
+      // Add invisible hit area for text annotations (rectangle around text)
+      if (isSelectionMode) {
+        // Estimate text bounds (approximate)
+        const textWidth = annotation.text ? annotation.text.length * 8 : 50;
+        const textHeight = 16;
+        const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        hitArea.setAttribute('x', (point.x - 5).toString());
+        hitArea.setAttribute('y', (point.y - textHeight - 5).toString());
+        hitArea.setAttribute('width', (textWidth + 10).toString());
+        hitArea.setAttribute('height', (textHeight + 10).toString());
+        hitArea.setAttribute('fill', 'transparent');
+        hitArea.setAttribute('stroke', 'transparent');
+        hitArea.setAttribute('data-annotation-id', annotation.id);
+        hitArea.style.cursor = 'pointer';
+        hitArea.style.pointerEvents = 'auto';
+        svg.appendChild(hitArea);
+      }
     } else if (annotation.type === 'arrow' && points.length === 2) {
       const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
       line.setAttribute('x1', points[0].x.toString());
@@ -1875,13 +1890,26 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Add click handler for selection
       if (isSelectionMode) {
         line.style.cursor = 'pointer';
-        line.addEventListener('click', (e) => {
-          e.stopPropagation();
-          setSelectedMarkupId(annotation.id);
-        });
+        line.style.pointerEvents = 'auto';
       }
       
       svg.appendChild(line);
+      
+      // Add invisible hit area for easier selection (like measurements have)
+      if (isSelectionMode) {
+        const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        hitArea.setAttribute('x1', points[0].x.toString());
+        hitArea.setAttribute('y1', points[0].y.toString());
+        hitArea.setAttribute('x2', points[1].x.toString());
+        hitArea.setAttribute('y2', points[1].y.toString());
+        hitArea.setAttribute('stroke', 'transparent');
+        hitArea.setAttribute('stroke-width', '20'); // Much larger hit area
+        hitArea.setAttribute('fill', 'none');
+        hitArea.setAttribute('data-annotation-id', annotation.id);
+        hitArea.style.cursor = 'pointer';
+        hitArea.style.pointerEvents = 'auto';
+        svg.appendChild(hitArea);
+      }
       
       // Create arrowhead marker if it doesn't exist
       if (!svg.querySelector('#arrowhead')) {
@@ -1918,13 +1946,25 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Add click handler for selection
       if (isSelectionMode) {
         rect.style.cursor = 'pointer';
-        rect.addEventListener('click', (e) => {
-          e.stopPropagation();
-          setSelectedMarkupId(annotation.id);
-        });
+        rect.style.pointerEvents = 'auto';
       }
       
       svg.appendChild(rect);
+      
+      // Add invisible hit area for easier selection (extends beyond stroke)
+      if (isSelectionMode) {
+        const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        hitArea.setAttribute('x', (x - 5).toString()); // Extend hit area
+        hitArea.setAttribute('y', (y - 5).toString());
+        hitArea.setAttribute('width', (width + 10).toString());
+        hitArea.setAttribute('height', (height + 10).toString());
+        hitArea.setAttribute('fill', 'transparent');
+        hitArea.setAttribute('stroke', 'transparent');
+        hitArea.setAttribute('data-annotation-id', annotation.id);
+        hitArea.style.cursor = 'pointer';
+        hitArea.style.pointerEvents = 'auto';
+        svg.appendChild(hitArea);
+      }
     } else if (annotation.type === 'circle' && points.length === 2) {
       const cx = (points[0].x + points[1].x) / 2;
       const cy = (points[0].y + points[1].y) / 2;
@@ -1943,13 +1983,25 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Add click handler for selection
       if (isSelectionMode) {
         ellipse.style.cursor = 'pointer';
-        ellipse.addEventListener('click', (e) => {
-          e.stopPropagation();
-          setSelectedMarkupId(annotation.id);
-        });
+        ellipse.style.pointerEvents = 'auto';
       }
       
       svg.appendChild(ellipse);
+      
+      // Add invisible hit area for easier selection
+      if (isSelectionMode) {
+        const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
+        hitArea.setAttribute('cx', cx.toString());
+        hitArea.setAttribute('cy', cy.toString());
+        hitArea.setAttribute('rx', (rx + 10).toString()); // Extend hit area
+        hitArea.setAttribute('ry', (ry + 10).toString());
+        hitArea.setAttribute('fill', 'transparent');
+        hitArea.setAttribute('stroke', 'transparent');
+        hitArea.setAttribute('data-annotation-id', annotation.id);
+        hitArea.style.cursor = 'pointer';
+        hitArea.style.pointerEvents = 'auto';
+        svg.appendChild(hitArea);
+      }
     } else if (annotation.type === 'highlight' && points.length >= 2) {
       // For highlight, we'll create a rectangle with semi-transparent fill
       const x = Math.min(...points.map(p => p.x));
@@ -1971,10 +2023,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Add click handler for selection
       if (isSelectionMode) {
         rect.style.cursor = 'pointer';
-        rect.addEventListener('click', (e) => {
-          e.stopPropagation();
-          setSelectedMarkupId(annotation.id);
-        });
+        rect.style.pointerEvents = 'auto';
       }
       
       svg.appendChild(rect);
@@ -4218,33 +4267,57 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 padding: 0,
                 border: 'none',
                 outline: 'none',
-                pointerEvents: (isSelectionMode || isCalibrating || annotationTool || isMeasuring || (visualSearchMode && isSelectingSymbol)) ? 'auto' : 'none' // Allow clicks in selection, calibration, annotation, measurement, or visual search mode
+                pointerEvents: (isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol)) ? 'auto' : 'none' // Allow clicks in selection, calibration, annotation, or visual search mode (measurements handled by canvas)
               }}
               onMouseMove={handleMouseMove}
               onMouseLeave={() => setMousePosition(null)}
               onClick={(e) => {
-                // Handle clicks in selection mode, calibration mode, annotation mode, measurement mode, or visual search mode
-                if (isSelectionMode || isCalibrating || annotationTool || isMeasuring || (visualSearchMode && isSelectingSymbol)) {
-                  // CRITICAL FIX: Don't stop propagation if clicking on a markup element
-                  // This allows markup click handlers to fire and select the markup
+                // Handle clicks in selection mode, calibration mode, annotation mode, or visual search mode
+                // Note: Measurement clicks pass through to canvas for proper double-click handling
+                if (isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol)) {
                   const target = e.target as SVGElement;
+                  
                   // Check if target or any parent has markup data attributes
                   // Also check if target is part of a markup (hit areas, text, etc.)
-                  const isMarkupElement = target.hasAttribute('data-annotation-id') || 
-                                         target.hasAttribute('data-measurement-id') ||
-                                         target.closest('[data-annotation-id]') !== null ||
-                                         target.closest('[data-measurement-id]') !== null ||
-                                         // Check if parent element is a markup (for hit areas and nested elements)
-                                         (target.parentElement && (
-                                           target.parentElement.hasAttribute('data-annotation-id') ||
-                                           target.parentElement.hasAttribute('data-measurement-id')
-                                         ));
+                  let annotationId: string | null = null;
+                  let measurementId: string | null = null;
                   
-                  // CRITICAL FIX: If clicking on a markup element, let its handler run and don't process further
-                  // The markup's click handler will call setSelectedMarkupId and stop propagation
-                  if (isMarkupElement) {
-                    // Don't stop propagation - let the markup's click handler process it
-                    // The markup handler will call e.stopPropagation() itself
+                  // Try to get annotation ID from target or closest parent
+                  if (target.hasAttribute('data-annotation-id')) {
+                    annotationId = target.getAttribute('data-annotation-id');
+                  } else {
+                    const annotationParent = target.closest('[data-annotation-id]');
+                    if (annotationParent) {
+                      annotationId = annotationParent.getAttribute('data-annotation-id');
+                    } else if (target.parentElement?.hasAttribute('data-annotation-id')) {
+                      annotationId = target.parentElement.getAttribute('data-annotation-id');
+                    }
+                  }
+                  
+                  // Try to get measurement ID from target or closest parent
+                  if (target.hasAttribute('data-measurement-id')) {
+                    measurementId = target.getAttribute('data-measurement-id');
+                  } else {
+                    const measurementParent = target.closest('[data-measurement-id]');
+                    if (measurementParent) {
+                      measurementId = measurementParent.getAttribute('data-measurement-id');
+                    } else if (target.parentElement?.hasAttribute('data-measurement-id')) {
+                      measurementId = target.parentElement.getAttribute('data-measurement-id');
+                    }
+                  }
+                  
+                  // Handle annotation selection
+                  if (annotationId && isSelectionMode) {
+                    e.stopPropagation();
+                    setSelectedMarkupId(annotationId);
+                    return;
+                  }
+                  
+                  // Handle measurement selection (measurements have their own click handlers via addEventListener)
+                  // But we can also handle it here as a fallback
+                  if (measurementId && isSelectionMode) {
+                    e.stopPropagation();
+                    setSelectedMarkupId(measurementId);
                     return;
                   }
                   
@@ -4261,8 +4334,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 // Right-click context menu (currently unused)
               }}
               onDoubleClick={(e) => {
-                // Handle double-click in annotation mode, measurement mode, or cutout mode
-                if (annotationTool || isMeasuring || cutoutMode) {
+                // Handle double-click in annotation mode or cutout mode
+                // Note: Measurement double-clicks are handled by canvas for proper event flow
+                if (annotationTool || cutoutMode) {
                   e.preventDefault();
                   e.stopPropagation();
                   handleDoubleClick(e);
