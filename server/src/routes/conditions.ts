@@ -236,18 +236,41 @@ router.post('/', async (req, res) => {
     };
     
     console.log('Creating condition with data:', JSON.stringify(newCondition, null, 2));
-    const savedCondition = await storage.saveCondition(newCondition);
-    console.log('Successfully created condition:', savedCondition.id);
+    console.log('Depth value being saved:', { depth: newCondition.depth, depthType: typeof newCondition.depth });
     
-    return res.status(201).json({ 
-      success: true, 
-      condition: savedCondition 
-    });
+    try {
+      const savedCondition = await storage.saveCondition(newCondition);
+      console.log('Successfully created condition:', savedCondition.id);
+      
+      return res.status(201).json({ 
+        success: true, 
+        condition: savedCondition 
+      });
+    } catch (saveError) {
+      console.error('❌ Error saving condition to database:', saveError);
+      const saveErrorMessage = saveError instanceof Error ? saveError.message : String(saveError);
+      const saveErrorDetails = saveError instanceof Error ? saveError.stack : undefined;
+      console.error('❌ Save error details:', saveErrorDetails);
+      
+      // If it's a database error, provide more details
+      if (saveError && typeof saveError === 'object' && 'code' in saveError) {
+        console.error('❌ Database error code:', (saveError as any).code);
+        console.error('❌ Database error details:', (saveError as any).details);
+        console.error('❌ Database error hint:', (saveError as any).hint);
+      }
+      
+      return res.status(500).json({ 
+        error: 'Failed to save condition to database',
+        details: saveErrorMessage,
+        code: (saveError as any)?.code,
+        hint: (saveError as any)?.hint
+      });
+    }
   } catch (error) {
-    console.error('Error creating condition:', error);
+    console.error('❌ Error creating condition (outer catch):', error);
     const errorMessage = error instanceof Error ? error.message : String(error);
     const errorDetails = error instanceof Error ? error.stack : undefined;
-    console.error('Error details:', errorDetails);
+    console.error('❌ Error details:', errorDetails);
     return res.status(500).json({ 
       error: 'Failed to create condition',
       details: errorMessage
