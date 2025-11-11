@@ -153,6 +153,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Double-click detection for measurements
   const [lastClickTime, setLastClickTime] = useState<number>(0);
   const [lastClickPosition, setLastClickPosition] = useState<{ x: number; y: number } | null>(null);
+  const isCompletingMeasurementRef = useRef(false);
   
   // PDF loading state
   const [isPDFLoading, setIsPDFLoading] = useState(false);
@@ -2787,6 +2788,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   }, [currentViewport, currentPage]);
   // Complete current measurement
   const completeMeasurement = useCallback(async (points: { x: number; y: number }[]) => {
+    // Prevent duplicate calls - if already completing, return early
+    if (isCompletingMeasurementRef.current) {
+      console.log('⚠️ BLOCKED: Measurement completion already in progress');
+      return;
+    }
+    
     const currentStoreState = useTakeoffStore.getState();
     const currentSelectedConditionId = currentStoreState.selectedConditionId;
     
@@ -2794,8 +2801,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       return;
     }
     
+    // Set flag to prevent duplicate calls
+    isCompletingMeasurementRef.current = true;
+    
     const selectedCondition = getSelectedCondition();
     if (!selectedCondition) {
+      // Reset flag if condition not found
+      isCompletingMeasurementRef.current = false;
       return;
     }
     
@@ -2962,12 +2974,23 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         // No need for complex manual state management - just like annotations!
       }).catch(error => {
         console.error(`Failed to save ${measurementType.toUpperCase()} measurement:`, error);
+        // Reset flag on error
+        isCompletingMeasurementRef.current = false;
       });
+    } else {
+      // Reset flag if no project/file
+      isCompletingMeasurementRef.current = false;
     }
     
     // Clear current measurement
     setCurrentMeasurement([]);
     setMousePosition(null);
+    
+    // Reset flag after a short delay to allow the measurement to be saved
+    // Only reset if we haven't already reset due to error
+    setTimeout(() => {
+      isCompletingMeasurementRef.current = false;
+    }, 500);
   }, [getSelectedCondition, measurementType, scaleFactor, currentProjectId, currentPage, file.id, renderPDFPage]);
 
   // Complete cut-out measurement
@@ -4210,31 +4233,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                   // For non-markup clicks, stop propagation and process normally
                   e.stopPropagation();
                   
-                  // Check for double-click on measurements (area/volume or continuous linear)
-                  if (isMeasuring && !annotationTool) {
-                    const currentTime = Date.now();
-                    const timeDiff = currentTime - lastClickTime;
-                    const clickPosition = { x: e.clientX, y: e.clientY };
-                    
-                    // Check if this is a double-click (within 500ms and similar position)
-                    if (timeDiff < 500 && lastClickPosition && 
-                        Math.abs(clickPosition.x - lastClickPosition.x) < 10 && 
-                        Math.abs(clickPosition.y - lastClickPosition.y) < 10) {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      
-                      // Complete the measurement via double-click
-                      // Removed verbose logging
-                      handleDoubleClick(e);
-                      setLastClickTime(0);
-                      setLastClickPosition(null);
-                      return;
-                    } else {
-                      // Store click info for double-click detection
-                      setLastClickTime(currentTime);
-                      setLastClickPosition(clickPosition);
-                    }
-                  }
+                  // Note: Double-click detection removed - using native onDoubleClick handler instead
+                  // This prevents duplicate calls to handleDoubleClick
                   
                   handleClick(e);
                 }
@@ -4247,7 +4247,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 if (annotationTool || isMeasuring || cutoutMode) {
                   e.preventDefault();
                   e.stopPropagation();
-                  handleDoubleClick(e);
+                  // Only handle if not already processing (prevent duplicate calls)
+                  if (!isCompletingMeasurementRef.current) {
+                    handleDoubleClick(e);
+                  }
                 }
               }}
             />

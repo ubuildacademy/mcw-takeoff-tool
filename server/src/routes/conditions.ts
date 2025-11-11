@@ -170,6 +170,15 @@ router.post('/', async (req, res) => {
       });
     }
 
+    // Validate depth for volume conditions
+    if (type === 'volume') {
+      if (!depth || depth <= 0) {
+        return res.status(400).json({ 
+          error: 'Depth is required for volume conditions and must be greater than 0' 
+        });
+      }
+    }
+
     const id = uuidv4();
     const now = new Date().toISOString();
     

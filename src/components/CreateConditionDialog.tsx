@@ -57,8 +57,26 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
       const unit = formData.unit || getDefaultUnit(formData.type);
       
       // Parse depth value (supports both decimal feet and feet/inches format)
+      // Depth is required for volume conditions
       let parsedDepth: number | null | undefined;
-      if (formData.depth && formData.depth.trim() !== '') {
+      if (formData.type === 'volume') {
+        if (!formData.depth || formData.depth.trim() === '') {
+          setDepthError('Depth is required for volume conditions');
+          setLoading(false);
+          return;
+        }
+        parsedDepth = parseDepthInput(formData.depth);
+        if (parsedDepth === null) {
+          setDepthError('Invalid depth format. Use decimal feet (e.g., 1.5) or feet/inches (e.g., 1\'6")');
+          setLoading(false);
+          return;
+        }
+        if (parsedDepth <= 0) {
+          setDepthError('Depth must be greater than 0');
+          setLoading(false);
+          return;
+        }
+      } else if (formData.depth && formData.depth.trim() !== '') {
         parsedDepth = parseDepthInput(formData.depth);
         if (parsedDepth === null) {
           setDepthError('Invalid depth format. Use decimal feet (e.g., 1.5) or feet/inches (e.g., 1\'6")');
