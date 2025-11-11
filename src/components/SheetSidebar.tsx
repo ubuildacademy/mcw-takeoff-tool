@@ -782,19 +782,44 @@ export function SheetSidebar({
       totalPages += doc.totalPages;
     }
 
+    // Helper function to update labeling job state
+    const updateLabelingJob = (updates: Partial<{
+      completedDocuments: number;
+      failedDocuments: number;
+      progress: number;
+      currentDocument?: string;
+      processedPages?: number;
+      status: 'idle' | 'processing' | 'completed' | 'failed';
+    }>) => {
+      if (onLabelingJobUpdate) {
+        onLabelingJobUpdate({
+          totalDocuments: unlabeledDocuments.length,
+          completedDocuments: updates.completedDocuments ?? 0,
+          failedDocuments: updates.failedDocuments ?? failedDocumentsList.length,
+          progress: updates.progress ?? 0,
+          status: updates.status ?? 'processing',
+          currentDocument: updates.currentDocument,
+          processedPages: updates.processedPages ?? totalPagesProcessed,
+          totalPages: totalPages,
+          failedDocumentsList: failedDocumentsList
+        });
+      }
+    };
+
     // Process documents sequentially
     for (let i = 0; i < unlabeledDocuments.length; i++) {
       const document = unlabeledDocuments[i];
       
       try {
         // Update current document
-        if (onLabelingJobUpdate) {
-          onLabelingJobUpdate(prev => prev ? {
-            ...prev,
-            currentDocument: document.name,
-            progress: Math.round((i / unlabeledDocuments.length) * 100)
-          } : null);
-        }
+        updateLabelingJob({
+          completedDocuments: i,
+          failedDocuments: failedDocumentsList.length,
+          progress: Math.round((i / unlabeledDocuments.length) * 100),
+          currentDocument: document.name,
+          processedPages: totalPagesProcessed,
+          status: 'processing'
+        });
 
         // Call analyze-sheets endpoint directly (skip OCR)
         const response = await aiAnalysisService.analyzeSheetsOnly(document.id, projectId);
@@ -830,14 +855,11 @@ export function SheetSidebar({
                     const completedProgress = (i / unlabeledDocuments.length) * 100;
                     const overallProgress = completedProgress + documentProgress;
                     
-                    if (onLabelingJobUpdate) {
-                      onLabelingJobUpdate(prev => prev ? {
-                        ...prev,
-                        progress: Math.round(overallProgress),
-                        processedPages: totalPagesProcessed + Math.round((lastProgress / 100) * document.totalPages),
-                        totalPages: totalPages
-                      } : null);
-                    }
+                    updateLabelingJob({
+                      progress: Math.round(overallProgress),
+                      processedPages: totalPagesProcessed + Math.round((lastProgress / 100) * document.totalPages),
+                      status: 'processing'
+                    });
                   }
                   
                   if (data.success) {
@@ -883,13 +905,11 @@ export function SheetSidebar({
 
               // Update progress
               totalPagesProcessed++;
-              if (onLabelingJobUpdate) {
-                onLabelingJobUpdate(prev => prev ? {
-                  ...prev,
-                  processedPages: totalPagesProcessed,
-                  progress: Math.round(((i + 1) / unlabeledDocuments.length) * 100)
-                } : null);
-              }
+              updateLabelingJob({
+                processedPages: totalPagesProcessed,
+                progress: Math.round(((i + 1) / unlabeledDocuments.length) * 100),
+                status: 'processing'
+              });
 
               // Debounce document reload to batch updates (reload every 500ms max)
               if (onDocumentsUpdate) {
@@ -913,29 +933,24 @@ export function SheetSidebar({
         }
 
         // Mark document as completed
-        if (onLabelingJobUpdate) {
-          onLabelingJobUpdate(prev => prev ? {
-            ...prev,
-            completedDocuments: prev.completedDocuments + 1,
-            progress: Math.round(((i + 1) / unlabeledDocuments.length) * 100),
-            currentDocument: undefined
-          } : null);
-        }
+        updateLabelingJob({
+          completedDocuments: i + 1,
+          progress: Math.round(((i + 1) / unlabeledDocuments.length) * 100),
+          currentDocument: undefined,
+          status: 'processing'
+        });
 
       } catch (error) {
         console.error(`Failed to label pages for document ${document.name}:`, error);
         failedDocumentsList.push({ id: document.id, name: document.name });
         
-        if (onLabelingJobUpdate) {
-          onLabelingJobUpdate(prev => prev ? {
-            ...prev,
-            failedDocuments: prev.failedDocuments + 1,
-            completedDocuments: prev.completedDocuments + 1,
-            failedDocumentsList: failedDocumentsList,
-            progress: Math.round(((i + 1) / unlabeledDocuments.length) * 100),
-            currentDocument: undefined
-          } : null);
-        }
+        updateLabelingJob({
+          failedDocuments: failedDocumentsList.length,
+          completedDocuments: i + 1,
+          progress: Math.round(((i + 1) / unlabeledDocuments.length) * 100),
+          currentDocument: undefined,
+          status: 'processing'
+        });
       }
     }
 
@@ -946,11 +961,16 @@ export function SheetSidebar({
 
     // Mark as completed and show report
     if (onLabelingJobUpdate) {
-      onLabelingJobUpdate(prev => prev ? {
-        ...prev,
+      onLabelingJobUpdate({
+        totalDocuments: unlabeledDocuments.length,
+        completedDocuments: unlabeledDocuments.length,
+        failedDocuments: failedDocumentsList.length,
+        progress: 100,
         status: 'completed',
-        progress: 100
-      } : null);
+        processedPages: totalPagesProcessed,
+        totalPages: totalPages,
+        failedDocumentsList: failedDocumentsList
+      });
     }
 
     // Show completion report
@@ -974,8 +994,6 @@ export function SheetSidebar({
 
   // Bulk analyze documents - show confirmation first
   const handleBulkAnalyzeDocumentsClick = (onlyUnlabeled: boolean = false) => {
-    setShowBulkAnalyzeDropdown(false);
-    
     // Filter documents based on option
     let documentsToAnalyze = documents;
     if (onlyUnlabeled) {
