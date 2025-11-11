@@ -746,9 +746,39 @@ export function SheetSidebar({
     }
   };
 
-  // Check if a document is unlabeled (no pages have sheetName or sheetNumber)
+  // Check if a page has a meaningful label (not just default names like "Page X" or "Sheet X")
+  const hasMeaningfulLabel = (page: PDFPage): boolean => {
+    // Check if sheetNumber exists (always meaningful if present)
+    if (page.sheetNumber) {
+      return true;
+    }
+    
+    // Check if sheetName exists and is not a default pattern
+    if (page.sheetName) {
+      const name = page.sheetName.trim();
+      // Exclude default patterns like "Page X", "Sheet X", "Page X of Y", etc.
+      const defaultPatterns = [
+        /^Page\s+\d+$/i,           // "Page 1", "Page 2", etc.
+        /^Sheet\s+\d+$/i,          // "Sheet 1", "Sheet 2", etc.
+        /^Page\s+\d+\s+of\s+\d+$/i, // "Page 1 of 10"
+        /^Sheet\s+\d+\s+of\s+\d+$/i // "Sheet 1 of 10"
+      ];
+      
+      // If it matches a default pattern, it's not meaningful
+      if (defaultPatterns.some(pattern => pattern.test(name))) {
+        return false;
+      }
+      
+      // Otherwise, it's a meaningful label
+      return true;
+    }
+    
+    return false;
+  };
+
+  // Check if a document is unlabeled (no pages have meaningful sheetName or sheetNumber)
   const isDocumentUnlabeled = (document: PDFDocument): boolean => {
-    return document.pages.every(page => !page.sheetName && !page.sheetNumber);
+    return document.pages.every(page => !hasMeaningfulLabel(page));
   };
 
   // Process all unlabeled documents for page labeling (skip OCR, use existing OCR data)
