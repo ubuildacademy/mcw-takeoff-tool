@@ -96,7 +96,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
         materialCost: formData.materialCost ? parseFloat(formData.materialCost) : undefined,
         equipmentCost: formData.equipmentCost ? parseFloat(formData.equipmentCost) : undefined,
         includePerimeter: formData.includePerimeter,
-        depth: parsedDepth === null ? undefined : parsedDepth,
+        depth: parsedDepth === null || parsedDepth === undefined ? undefined : parsedDepth,
         // Visual search specific fields
         ...(formData.type === 'visual-search' && {
           searchImage: formData.searchImage,

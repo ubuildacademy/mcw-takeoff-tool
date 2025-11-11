@@ -152,28 +152,42 @@ export const deepClone = <T>(obj: T): T => {
 };
 
 /**
- * Parse feet and inches format (e.g., "1'2"", "1'2½"", "2'") to decimal feet
- * Also handles decimal feet format (e.g., "1.5")
+ * Parse feet and inches format (e.g., "1'2"", "1'2½"", "2'", "1'") to decimal feet
+ * Also handles decimal feet format (e.g., "1.5", "1")
+ * Very accepting - handles: "1", "1'", "1.5", "1'6"", "2'", etc.
  */
 export const parseDepthInput = (input: string): number | null => {
   if (!input || input.trim() === '') return null;
   
   const trimmedInput = input.trim();
   
-  // Handle decimal feet format (e.g., "1.5", "2.25")
-  if (/^\d*\.?\d+$/.test(trimmedInput)) {
+  // First, try to handle simple decimal format (e.g., "1", "1.5", "2.25")
+  // This regex matches: digits, optional decimal point, more digits
+  if (/^\d+(\.\d+)?$/.test(trimmedInput)) {
     const decimalValue = parseFloat(trimmedInput);
-    return isNaN(decimalValue) ? null : decimalValue;
+    return isNaN(decimalValue) || decimalValue <= 0 ? null : decimalValue;
   }
   
-  // Handle feet and inches format (e.g., "1'2"", "1'2½"", "2'", "6"")
+  // Handle feet and inches format with various patterns:
+  // Pattern 1: "1'" - just feet with apostrophe
+  if (/^\d+'$/.test(trimmedInput)) {
+    const feet = parseInt(trimmedInput.replace("'", ''), 10);
+    return isNaN(feet) || feet <= 0 ? null : feet;
+  }
+  
+  // Pattern 2: "1'6"" - feet and inches
+  // Pattern 3: "1'6½"" - feet and inches with half
+  // Pattern 4: "6"" - just inches
   const feetInchesMatch = trimmedInput.match(/^(?:(\d+)')?(?:(\d+(?:\.\d+)?)(?:½)?")?$/);
   if (feetInchesMatch) {
-    const feet = feetInchesMatch[1] ? parseInt(feetInchesMatch[1], 10) : 0;
+    const feetStr = feetInchesMatch[1];
+    const inchesStr = feetInchesMatch[2];
+    
+    const feet = feetStr ? parseInt(feetStr, 10) : 0;
     let inches = 0;
     
-    if (feetInchesMatch[2]) {
-      inches = parseFloat(feetInchesMatch[2]);
+    if (inchesStr) {
+      inches = parseFloat(inchesStr);
       // Handle ½ inch notation
       if (trimmedInput.includes('½')) {
         inches += 0.5;
@@ -181,7 +195,14 @@ export const parseDepthInput = (input: string): number | null => {
     }
     
     // Convert to decimal feet
-    return feet + (inches / 12);
+    const totalFeet = feet + (inches / 12);
+    return totalFeet > 0 ? totalFeet : null;
+  }
+  
+  // Last resort: try to parse as a plain number (handles edge cases like "1.0")
+  const plainNumber = parseFloat(trimmedInput);
+  if (!isNaN(plainNumber) && plainNumber > 0) {
+    return plainNumber;
   }
   
   return null;

@@ -173,13 +173,36 @@ router.post('/', async (req, res) => {
     // Validate depth for volume conditions
     let validatedDepth = depth;
     if (type === 'volume') {
-      // Convert depth to number if it's a string
-      const depthValue = typeof depth === 'string' ? parseFloat(depth) : depth;
-      if (!depthValue || isNaN(depthValue) || depthValue <= 0) {
+      console.log('🔍 Validating depth for volume condition:', { depth, depthType: typeof depth });
+      
+      // Handle depth - it should already be a number from frontend, but handle string case
+      let depthValue: number;
+      if (typeof depth === 'string') {
+        // Try to parse as number
+        depthValue = parseFloat(depth);
+        if (isNaN(depthValue)) {
+          console.error('❌ Depth is not a valid number:', depth);
+          return res.status(400).json({ 
+            error: 'Depth must be a valid number greater than 0' 
+          });
+        }
+      } else if (typeof depth === 'number') {
+        depthValue = depth;
+      } else {
+        console.error('❌ Depth is missing or invalid type:', depth);
         return res.status(400).json({ 
           error: 'Depth is required for volume conditions and must be greater than 0' 
         });
       }
+      
+      if (!depthValue || isNaN(depthValue) || depthValue <= 0) {
+        console.error('❌ Depth validation failed:', { depthValue, isNaN: isNaN(depthValue), isPositive: depthValue > 0 });
+        return res.status(400).json({ 
+          error: 'Depth is required for volume conditions and must be greater than 0' 
+        });
+      }
+      
+      console.log('✅ Depth validation passed:', depthValue);
       // Use the numeric value
       validatedDepth = depthValue;
     }
