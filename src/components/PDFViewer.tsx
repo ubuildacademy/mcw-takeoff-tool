@@ -3153,7 +3153,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Handle double-click to complete measurements
   const handleDoubleClick = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
-    // Removed verbose logging - was causing console spam
+    console.log('🖱️ DOUBLE-CLICK: handleDoubleClick called', {
+      cutoutMode,
+      currentCutoutLength: currentCutout.length,
+      isContinuousDrawing,
+      activePointsLength: activePoints.length,
+      measurementType,
+      currentMeasurementLength: currentMeasurement.length,
+      isMeasuring
+    });
     
     // Prevent default behavior
     event.preventDefault();
@@ -3161,18 +3169,30 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Handle cut-out completion
     if (cutoutMode && currentCutout.length >= 3) {
+      console.log('✅ DOUBLE-CLICK: Completing cutout');
       completeCutout(currentCutout);
       return;
     }
     
     if (isContinuousDrawing && activePoints.length >= 2) {
       // Complete the continuous linear measurement
+      console.log('✅ DOUBLE-CLICK: Completing continuous linear measurement');
       completeContinuousLinearMeasurement();
     } else if ((measurementType === 'area' || measurementType === 'volume') && currentMeasurement.length >= 3) {
       // Complete area or volume measurement
+      console.log('✅ DOUBLE-CLICK: Completing area/volume measurement', {
+        measurementType,
+        pointsCount: currentMeasurement.length
+      });
       completeMeasurement(currentMeasurement);
+    } else {
+      console.log('⚠️ DOUBLE-CLICK: No action taken - conditions not met', {
+        measurementType,
+        currentMeasurementLength: currentMeasurement.length,
+        isContinuousDrawing,
+        activePointsLength: activePoints.length
+      });
     }
-    // Removed verbose logging - was causing console spam
   }, [annotationTool, currentAnnotation, annotationColor, currentPage, onAnnotationToolChange, isContinuousDrawing, activePoints, measurementType, currentMeasurement, completeContinuousLinearMeasurement, completeMeasurement, cutoutMode, currentCutout, completeCutout, isMeasuring]);
 
   // Cleanup continuous drawing state
@@ -4170,10 +4190,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               }}
               onClick={handleClick}
               onDoubleClick={(e) => {
-                // Only handle double-click for non-annotation cases
-                if (!annotationTool) {
+                // Handle double-click for measurements (not annotations)
+                if (!annotationTool && (isMeasuring || cutoutMode)) {
+                  console.log('🖱️ CANVAS DOUBLE-CLICK: Handling measurement double-click');
                   handleDoubleClick(e);
-                } else {
+                } else if (annotationTool) {
                   // For annotations, prevent the canvas from handling the event
                   e.preventDefault();
                   e.stopPropagation();
@@ -4250,6 +4271,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               onDoubleClick={(e) => {
                 // Handle double-click in annotation mode, measurement mode, or cutout mode
                 if (annotationTool || isMeasuring || cutoutMode) {
+                  console.log('🖱️ SVG DOUBLE-CLICK: Handling', { annotationTool, isMeasuring, cutoutMode });
                   e.preventDefault();
                   e.stopPropagation();
                   // Allow double-click - the guard in completeMeasurement will prevent true duplicates
