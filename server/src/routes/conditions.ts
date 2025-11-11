@@ -171,6 +171,7 @@ router.post('/', async (req, res) => {
     }
 
     // Validate depth for volume conditions
+    let validatedDepth = depth;
     if (type === 'volume') {
       // Convert depth to number if it's a string
       const depthValue = typeof depth === 'string' ? parseFloat(depth) : depth;
@@ -180,7 +181,7 @@ router.post('/', async (req, res) => {
         });
       }
       // Use the numeric value
-      depth = depthValue;
+      validatedDepth = depthValue;
     }
 
     const id = uuidv4();
@@ -199,7 +200,7 @@ router.post('/', async (req, res) => {
       materialCost,
       equipmentCost,
       includePerimeter: includePerimeter !== undefined ? includePerimeter : false,
-      depth,
+      depth: validatedDepth,
       // Note: aiGenerated is not included as the column doesn't exist in the database
       // aiGenerated,
       // Visual search specific fields
