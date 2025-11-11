@@ -154,6 +154,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const [lastClickTime, setLastClickTime] = useState<number>(0);
   const [lastClickPosition, setLastClickPosition] = useState<{ x: number; y: number } | null>(null);
   const isCompletingMeasurementRef = useRef(false);
+  const lastCompletionTimeRef = useRef<number>(0);
   
   // PDF loading state
   const [isPDFLoading, setIsPDFLoading] = useState(false);
@@ -2788,9 +2789,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   }, [currentViewport, currentPage]);
   // Complete current measurement
   const completeMeasurement = useCallback(async (points: { x: number; y: number }[]) => {
-    // Prevent duplicate calls - if already completing, return early
-    if (isCompletingMeasurementRef.current) {
-      console.log('⚠️ BLOCKED: Measurement completion already in progress');
+    // Prevent duplicate calls within a very short window (100ms) - allows legitimate double-clicks
+    const now = Date.now();
+    if (isCompletingMeasurementRef.current && (now - lastCompletionTimeRef.current) < 100) {
+      console.log('⚠️ BLOCKED: Measurement completion already in progress (duplicate call prevented)');
       return;
     }
     
@@ -2801,8 +2803,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       return;
     }
     
-    // Set flag to prevent duplicate calls
+    // Set flag and timestamp to prevent duplicate calls
     isCompletingMeasurementRef.current = true;
+    lastCompletionTimeRef.current = now;
     
     const selectedCondition = getSelectedCondition();
     if (!selectedCondition) {
@@ -2815,6 +2818,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     let unit = selectedCondition.unit;
     
     if (!currentViewport) {
+      // Reset flag if no viewport
+      isCompletingMeasurementRef.current = false;
       return;
     }
     
@@ -4247,10 +4252,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 if (annotationTool || isMeasuring || cutoutMode) {
                   e.preventDefault();
                   e.stopPropagation();
-                  // Only handle if not already processing (prevent duplicate calls)
-                  if (!isCompletingMeasurementRef.current) {
-                    handleDoubleClick(e);
-                  }
+                  // Allow double-click - the guard in completeMeasurement will prevent true duplicates
+                  handleDoubleClick(e);
                 }
               }}
             />

@@ -172,11 +172,15 @@ router.post('/', async (req, res) => {
 
     // Validate depth for volume conditions
     if (type === 'volume') {
-      if (!depth || depth <= 0) {
+      // Convert depth to number if it's a string
+      const depthValue = typeof depth === 'string' ? parseFloat(depth) : depth;
+      if (!depthValue || isNaN(depthValue) || depthValue <= 0) {
         return res.status(400).json({ 
           error: 'Depth is required for volume conditions and must be greater than 0' 
         });
       }
+      // Use the numeric value
+      depth = depthValue;
     }
 
     const id = uuidv4();
