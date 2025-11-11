@@ -148,6 +148,19 @@ export function TakeoffWorkspace() {
     processedPages?: number;
     totalPages?: number;
   }>>(new Map());
+
+  // Labeling job state - track active page labeling jobs
+  const [labelingJob, setLabelingJob] = useState<{
+    totalDocuments: number;
+    completedDocuments: number;
+    failedDocuments: number;
+    progress: number;
+    status: 'idle' | 'processing' | 'completed' | 'failed';
+    currentDocument?: string;
+    processedPages?: number;
+    totalPages?: number;
+    failedDocumentsList?: Array<{id: string, name: string}>;
+  } | null>(null);
   
   // PDF viewer controls state
   const [currentPage, setCurrentPage] = useState(1);
@@ -1511,6 +1524,7 @@ export function TakeoffWorkspace() {
                   onDocumentsUpdate={handleDocumentsUpdate}
                   onPdfUpload={handlePdfUpload}
                   uploading={uploading}
+                  onLabelingJobUpdate={setLabelingJob}
                 />
               )}
               
@@ -1585,6 +1599,28 @@ export function TakeoffWorkspace() {
                   </div>
                   <span className="text-xs text-blue-600 font-medium">
                     {exportStatus.progress}%
+                  </span>
+                </div>
+              </div>
+            </div>
+          ) : labelingJob && labelingJob.status === 'processing' ? (
+            <div className="flex items-center gap-3 bg-green-50 px-3 py-2 rounded-lg border border-green-200">
+              <div className="animate-spin w-5 h-5 border-2 border-green-500 border-t-transparent rounded-full"></div>
+              <div className="flex flex-col">
+                <span className="text-sm font-medium text-green-700">
+                  Labeling Pages: {labelingJob.completedDocuments}/{labelingJob.totalDocuments} documents
+                  {labelingJob.currentDocument && ` (${labelingJob.currentDocument})`}
+                </span>
+                <div className="flex items-center gap-2 mt-1">
+                  <div className="w-32 h-2 bg-green-200 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-green-500 transition-all duration-300 ease-out rounded-full"
+                      style={{ width: `${labelingJob.progress}%` }}
+                    ></div>
+                  </div>
+                  <span className="text-xs text-green-600 font-medium">
+                    {labelingJob.progress}%
+                    {labelingJob.processedPages && labelingJob.totalPages ? ` (${labelingJob.processedPages}/${labelingJob.totalPages} pages)` : ''}
                   </span>
                 </div>
               </div>

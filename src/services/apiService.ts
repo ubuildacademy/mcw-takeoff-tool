@@ -619,6 +619,28 @@ export const aiAnalysisService = {
 
     return response;
   },
+
+  // Analyze sheets directly using existing OCR data (skip OCR step)
+  async analyzeSheetsOnly(documentId: string, projectId: string) {
+    const customPrompt = localStorage.getItem('ai-page-labeling-prompt');
+    const response = await fetch(`${API_BASE_URL}/ollama/analyze-sheets`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        documentId,
+        projectId,
+        customPrompt
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`AI sheet analysis failed: ${response.statusText}`);
+    }
+
+    return response;
+  },
 };
 
 // Health check
