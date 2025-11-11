@@ -38,6 +38,17 @@ interface SheetSidebarProps {
   onDocumentsUpdate?: (documents: PDFDocument[]) => void;
   onPdfUpload?: (event: React.ChangeEvent<HTMLInputElement>) => void;
   uploading?: boolean;
+  onLabelingJobUpdate?: (job: {
+    totalDocuments: number;
+    completedDocuments: number;
+    failedDocuments: number;
+    progress: number;
+    status: 'idle' | 'processing' | 'completed' | 'failed';
+    currentDocument?: string;
+    processedPages?: number;
+    totalPages?: number;
+    failedDocumentsList?: Array<{id: string, name: string}>;
+  } | null) => void;
 }
 
 export function SheetSidebar({ 
@@ -50,7 +61,8 @@ export function SheetSidebar({
   onOcrSearchResults,
   onDocumentsUpdate,
   onPdfUpload,
-  uploading
+  uploading,
+  onLabelingJobUpdate
 }: SheetSidebarProps) {
   const [filterBy, setFilterBy] = useState<'all' | 'withTakeoffs' | 'withoutTakeoffs'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -78,24 +90,6 @@ export function SheetSidebar({
     status: '',
     completedDocuments: []
   });
-  const [showBulkAnalyzeDropdown, setShowBulkAnalyzeDropdown] = useState(false);
-  const bulkAnalyzeDropdownRef = useRef<HTMLDivElement>(null);
-  
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (bulkAnalyzeDropdownRef.current && !bulkAnalyzeDropdownRef.current.contains(event.target as Node)) {
-        setShowBulkAnalyzeDropdown(false);
-      }
-    };
-    
-    if (showBulkAnalyzeDropdown) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => {
-        document.removeEventListener('mousedown', handleClickOutside);
-      };
-    }
-  }, [showBulkAnalyzeDropdown]);
   
   // Local expansion state to prevent parent from resetting it
   const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set());
@@ -139,16 +133,13 @@ export function SheetSidebar({
       if (openPageMenu) {
         setOpenPageMenu(null);
       }
-      if (showBulkAnalyzeDropdown) {
-        setShowBulkAnalyzeDropdown(false);
-      }
     };
 
-    if (openDocumentMenu || openPageMenu || showBulkAnalyzeDropdown) {
+    if (openDocumentMenu || openPageMenu) {
       document.addEventListener('click', handleClickOutside);
       return () => document.removeEventListener('click', handleClickOutside);
     }
-  }, [openDocumentMenu, openPageMenu, showBulkAnalyzeDropdown]);
+  }, [openDocumentMenu, openPageMenu]);
 
   // Store integration
   const { getProjectTakeoffMeasurements } = useTakeoffStore();
@@ -760,6 +751,227 @@ export function SheetSidebar({
     return document.pages.every(page => !page.sheetName && !page.sheetNumber);
   };
 
+  // Process all unlabeled documents for page labeling (skip OCR, use existing OCR data)
+  const handleLabelAllUnlabeledPages = async () => {
+    // Find all unlabeled documents
+    const unlabeledDocuments = documents.filter(doc => isDocumentUnlabeled(doc));
+    
+    if (unlabeledDocuments.length === 0) {
+      alert('No unlabeled documents found. All documents already have sheet names or numbers.');
+      return;
+    }
+
+    // Initialize labeling job
+    if (onLabelingJobUpdate) {
+      onLabelingJobUpdate({
+        totalDocuments: unlabeledDocuments.length,
+        completedDocuments: 0,
+        failedDocuments: 0,
+        progress: 0,
+        status: 'processing',
+        failedDocumentsList: []
+      });
+    }
+
+    const failedDocumentsList: Array<{id: string, name: string}> = [];
+    let totalPagesProcessed = 0;
+    let totalPages = 0;
+
+    // Calculate total pages first
+    for (const doc of unlabeledDocuments) {
+      totalPages += doc.totalPages;
+    }
+
+    // Process documents sequentially
+    for (let i = 0; i < unlabeledDocuments.length; i++) {
+      const document = unlabeledDocuments[i];
+      
+      try {
+        // Update current document
+        if (onLabelingJobUpdate) {
+          onLabelingJobUpdate(prev => prev ? {
+            ...prev,
+            currentDocument: document.name,
+            progress: Math.round((i / unlabeledDocuments.length) * 100)
+          } : null);
+        }
+
+        // Call analyze-sheets endpoint directly (skip OCR)
+        const response = await aiAnalysisService.analyzeSheetsOnly(document.id, projectId);
+
+        // Handle Server-Sent Events for real-time progress
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+        let result: any = null;
+        let lastProgress = 0;
+
+        if (reader) {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value);
+            const lines = chunk.split('\n');
+
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const data = JSON.parse(line.slice(6));
+                  
+                  if (data.error) {
+                    throw new Error(data.error);
+                  }
+                  
+                  // Update progress from SSE
+                  if (data.progress !== undefined && data.message) {
+                    lastProgress = data.progress;
+                    // Calculate overall progress: document progress + completed documents
+                    const documentProgress = (lastProgress / 100) * (1 / unlabeledDocuments.length) * 100;
+                    const completedProgress = (i / unlabeledDocuments.length) * 100;
+                    const overallProgress = completedProgress + documentProgress;
+                    
+                    if (onLabelingJobUpdate) {
+                      onLabelingJobUpdate(prev => prev ? {
+                        ...prev,
+                        progress: Math.round(overallProgress),
+                        processedPages: totalPagesProcessed + Math.round((lastProgress / 100) * document.totalPages),
+                        totalPages: totalPages
+                      } : null);
+                    }
+                  }
+                  
+                  if (data.success) {
+                    result = data;
+                  }
+                } catch (parseError) {
+                  console.warn('Failed to parse SSE data:', parseError);
+                }
+              }
+            }
+          }
+        }
+
+        if (!result || !result.success) {
+          throw new Error('No result received from AI analysis');
+        }
+
+        if (result.sheets && result.sheets.length > 0) {
+          // Save sheets per page as they're processed
+          interface SheetAnalysisResult {
+            pageNumber: number;
+            sheetNumber: string;
+            sheetName: string;
+          }
+
+          const sheetsToSave = (result.sheets as SheetAnalysisResult[]).filter((sheet: SheetAnalysisResult) => 
+            sheet.sheetNumber && sheet.sheetNumber !== 'Unknown' && 
+            sheet.sheetName && sheet.sheetName !== 'Unknown'
+          );
+
+          // Save sheets and update UI per page
+          let reloadTimeout: NodeJS.Timeout | null = null;
+          for (const sheet of sheetsToSave) {
+            try {
+              const sheetId = `${document.id}-${sheet.pageNumber}`;
+              
+              await sheetService.updateSheet(sheetId, {
+                documentId: document.id,
+                pageNumber: sheet.pageNumber,
+                sheetNumber: sheet.sheetNumber,
+                sheetName: sheet.sheetName
+              });
+
+              // Update progress
+              totalPagesProcessed++;
+              if (onLabelingJobUpdate) {
+                onLabelingJobUpdate(prev => prev ? {
+                  ...prev,
+                  processedPages: totalPagesProcessed,
+                  progress: Math.round(((i + 1) / unlabeledDocuments.length) * 100)
+                } : null);
+              }
+
+              // Debounce document reload to batch updates (reload every 500ms max)
+              if (onDocumentsUpdate) {
+                if (reloadTimeout) {
+                  clearTimeout(reloadTimeout);
+                }
+                reloadTimeout = setTimeout(async () => {
+                  await loadProjectDocuments();
+                }, 500);
+              }
+            } catch (error) {
+              console.error(`Failed to save sheet ${sheet.pageNumber} for ${document.name}:`, error);
+            }
+          }
+          
+          // Ensure final reload happens
+          if (reloadTimeout && onDocumentsUpdate) {
+            clearTimeout(reloadTimeout);
+            await loadProjectDocuments();
+          }
+        }
+
+        // Mark document as completed
+        if (onLabelingJobUpdate) {
+          onLabelingJobUpdate(prev => prev ? {
+            ...prev,
+            completedDocuments: prev.completedDocuments + 1,
+            progress: Math.round(((i + 1) / unlabeledDocuments.length) * 100),
+            currentDocument: undefined
+          } : null);
+        }
+
+      } catch (error) {
+        console.error(`Failed to label pages for document ${document.name}:`, error);
+        failedDocumentsList.push({ id: document.id, name: document.name });
+        
+        if (onLabelingJobUpdate) {
+          onLabelingJobUpdate(prev => prev ? {
+            ...prev,
+            failedDocuments: prev.failedDocuments + 1,
+            completedDocuments: prev.completedDocuments + 1,
+            failedDocumentsList: failedDocumentsList,
+            progress: Math.round(((i + 1) / unlabeledDocuments.length) * 100),
+            currentDocument: undefined
+          } : null);
+        }
+      }
+    }
+
+    // Final reload
+    if (onDocumentsUpdate) {
+      await loadProjectDocuments();
+    }
+
+    // Mark as completed and show report
+    if (onLabelingJobUpdate) {
+      onLabelingJobUpdate(prev => prev ? {
+        ...prev,
+        status: 'completed',
+        progress: 100
+      } : null);
+    }
+
+    // Show completion report
+    const successCount = unlabeledDocuments.length - failedDocumentsList.length;
+    const failCount = failedDocumentsList.length;
+    
+    let reportMessage = `Page labeling complete!\n\n✅ Successfully labeled: ${successCount} document(s)`;
+    if (failCount > 0) {
+      reportMessage += `\n❌ Failed: ${failCount} document(s)`;
+      reportMessage += `\n\nFailed documents:\n${failedDocumentsList.map(d => `- ${d.name}`).join('\n')}`;
+    }
+    alert(reportMessage);
+
+    // Clear job after 3 seconds
+    setTimeout(() => {
+      if (onLabelingJobUpdate) {
+        onLabelingJobUpdate(null);
+      }
+    }, 3000);
+  };
+
   // Bulk analyze documents - show confirmation first
   const handleBulkAnalyzeDocumentsClick = (onlyUnlabeled: boolean = false) => {
     setShowBulkAnalyzeDropdown(false);
@@ -1095,34 +1307,14 @@ export function SheetSidebar({
                 </Button>
               </label>
             )}
-            <div className="relative" ref={bulkAnalyzeDropdownRef}>
-              <Button 
-                size="sm" 
-                variant="outline" 
-                onClick={() => setShowBulkAnalyzeDropdown(!showBulkAnalyzeDropdown)}
-                title="Analyze documents"
-              >
-                <Brain className="w-4 h-4" />
-              </Button>
-              {showBulkAnalyzeDropdown && (
-                <div className="absolute right-0 top-full mt-1 w-56 bg-white border rounded-lg shadow-xl z-[100] py-1">
-                  <button
-                    className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
-                    onClick={() => handleBulkAnalyzeDocumentsClick(false)}
-                  >
-                    <Brain className="w-4 h-4" />
-                    <span>Analyze All Documents</span>
-                  </button>
-                  <button
-                    className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
-                    onClick={() => handleBulkAnalyzeDocumentsClick(true)}
-                  >
-                    <Tag className="w-4 h-4" />
-                    <span>Analyze Unlabeled Only</span>
-                  </button>
-                </div>
-              )}
-            </div>
+            <Button 
+              size="sm" 
+              variant="outline" 
+              onClick={handleLabelAllUnlabeledPages}
+              title="Label all unlabeled pages"
+            >
+              <Brain className="w-4 h-4" />
+            </Button>
           </div>
         </div>
         
