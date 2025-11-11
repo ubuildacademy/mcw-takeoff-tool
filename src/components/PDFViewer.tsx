@@ -4190,6 +4190,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               }}
               onClick={handleClick}
               onDoubleClick={(e) => {
+                console.log('🖱️ CANVAS DOUBLE-CLICK EVENT:', {
+                  annotationTool,
+                  isMeasuring,
+                  cutoutMode,
+                  measurementType,
+                  currentMeasurementLength: currentMeasurement.length
+                });
                 // Handle double-click for measurements (not annotations)
                 if (!annotationTool && (isMeasuring || cutoutMode)) {
                   console.log('🖱️ CANVAS DOUBLE-CLICK: Handling measurement double-click');
@@ -4198,6 +4205,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                   // For annotations, prevent the canvas from handling the event
                   e.preventDefault();
                   e.stopPropagation();
+                } else {
+                  console.log('⚠️ CANVAS DOUBLE-CLICK: Not handling - conditions not met');
                 }
               }}
               onMouseMove={handleMouseMove}
@@ -4269,6 +4278,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 // Right-click context menu (currently unused)
               }}
               onDoubleClick={(e) => {
+                console.log('🖱️ SVG DOUBLE-CLICK EVENT:', {
+                  annotationTool,
+                  isMeasuring,
+                  cutoutMode,
+                  measurementType,
+                  currentMeasurementLength: currentMeasurement.length
+                });
                 // Handle double-click in annotation mode, measurement mode, or cutout mode
                 if (annotationTool || isMeasuring || cutoutMode) {
                   console.log('🖱️ SVG DOUBLE-CLICK: Handling', { annotationTool, isMeasuring, cutoutMode });
@@ -4276,6 +4292,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                   e.stopPropagation();
                   // Allow double-click - the guard in completeMeasurement will prevent true duplicates
                   handleDoubleClick(e);
+                } else {
+                  console.log('⚠️ SVG DOUBLE-CLICK: Not handling - conditions not met');
                 }
               }}
             />
