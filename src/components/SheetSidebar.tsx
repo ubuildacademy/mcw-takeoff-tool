@@ -781,12 +781,17 @@ export function SheetSidebar({
     return document.pages.every(page => !hasMeaningfulLabel(page));
   };
 
+  // Check if a document has any unlabeled pages
+  const hasUnlabeledPages = (document: PDFDocument): boolean => {
+    return document.pages.some(page => !hasMeaningfulLabel(page));
+  };
+
   // Process all unlabeled documents for page labeling (skip OCR, use existing OCR data)
   const handleLabelAllUnlabeledPages = async () => {
-    // Find all unlabeled documents
-    const unlabeledDocuments = documents.filter(doc => isDocumentUnlabeled(doc));
+    // Find documents that have at least one unlabeled page
+    const documentsWithUnlabeledPages = documents.filter(doc => hasUnlabeledPages(doc));
     
-    if (unlabeledDocuments.length === 0) {
+    if (documentsWithUnlabeledPages.length === 0) {
       alert('No unlabeled documents found. All documents already have sheet names or numbers.');
       return;
     }
@@ -794,7 +799,7 @@ export function SheetSidebar({
     // Initialize labeling job
     if (onLabelingJobUpdate) {
       onLabelingJobUpdate({
-        totalDocuments: unlabeledDocuments.length,
+        totalDocuments: documentsWithUnlabeledPages.length,
         completedDocuments: 0,
         failedDocuments: 0,
         progress: 0,
@@ -807,9 +812,10 @@ export function SheetSidebar({
     let totalPagesProcessed = 0;
     let totalPages = 0;
 
-    // Calculate total pages first
-    for (const doc of unlabeledDocuments) {
-      totalPages += doc.totalPages;
+    // Calculate total unlabeled pages across all documents
+    for (const doc of documentsWithUnlabeledPages) {
+      const unlabeledCount = doc.pages.filter(page => !hasMeaningfulLabel(page)).length;
+      totalPages += unlabeledCount;
     }
 
     // Helper function to update labeling job state
@@ -823,7 +829,7 @@ export function SheetSidebar({
     }>) => {
       if (onLabelingJobUpdate) {
         onLabelingJobUpdate({
-          totalDocuments: unlabeledDocuments.length,
+          totalDocuments: documentsWithUnlabeledPages.length,
           completedDocuments: updates.completedDocuments ?? 0,
           failedDocuments: updates.failedDocuments ?? failedDocumentsList.length,
           progress: updates.progress ?? 0,
@@ -837,15 +843,15 @@ export function SheetSidebar({
     };
 
     // Process documents sequentially
-    for (let i = 0; i < unlabeledDocuments.length; i++) {
-      const document = unlabeledDocuments[i];
+    for (let i = 0; i < documentsWithUnlabeledPages.length; i++) {
+      const document = documentsWithUnlabeledPages[i];
       
       try {
         // Update current document
         updateLabelingJob({
           completedDocuments: i,
           failedDocuments: failedDocumentsList.length,
-          progress: Math.round((i / unlabeledDocuments.length) * 100),
+          progress: Math.round((i / documentsWithUnlabeledPages.length) * 100),
           currentDocument: document.name,
           processedPages: totalPagesProcessed,
           status: 'processing'
@@ -881,8 +887,8 @@ export function SheetSidebar({
                   if (data.progress !== undefined && data.message) {
                     lastProgress = data.progress;
                     // Calculate overall progress: document progress + completed documents
-                    const documentProgress = (lastProgress / 100) * (1 / unlabeledDocuments.length) * 100;
-                    const completedProgress = (i / unlabeledDocuments.length) * 100;
+                    const documentProgress = (lastProgress / 100) * (1 / documentsWithUnlabeledPages.length) * 100;
+                    const completedProgress = (i / documentsWithUnlabeledPages.length) * 100;
                     const overallProgress = completedProgress + documentProgress;
                     
                     updateLabelingJob({
@@ -920,10 +926,17 @@ export function SheetSidebar({
             sheet.sheetName && sheet.sheetName !== 'Unknown'
           );
 
-          // Save sheets and update UI per page
+          // Save sheets and update UI per page (only update pages that don't already have meaningful labels)
           let reloadTimeout: NodeJS.Timeout | null = null;
           for (const sheet of sheetsToSave) {
             try {
+              // Check if this page already has a meaningful label - if so, skip it
+              const page = document.pages.find(p => p.pageNumber === sheet.pageNumber);
+              if (page && hasMeaningfulLabel(page)) {
+                // Skip pages that already have meaningful labels
+                continue;
+              }
+              
               const sheetId = `${document.id}-${sheet.pageNumber}`;
               
               await sheetService.updateSheet(sheetId, {
@@ -937,7 +950,7 @@ export function SheetSidebar({
               totalPagesProcessed++;
               updateLabelingJob({
                 processedPages: totalPagesProcessed,
-                progress: Math.round(((i + 1) / unlabeledDocuments.length) * 100),
+                progress: Math.round(((i + 1) / documentsWithUnlabeledPages.length) * 100),
                 status: 'processing'
               });
 
@@ -965,7 +978,7 @@ export function SheetSidebar({
         // Mark document as completed
         updateLabelingJob({
           completedDocuments: i + 1,
-          progress: Math.round(((i + 1) / unlabeledDocuments.length) * 100),
+          progress: Math.round(((i + 1) / documentsWithUnlabeledPages.length) * 100),
           currentDocument: undefined,
           status: 'processing'
         });
@@ -977,7 +990,7 @@ export function SheetSidebar({
         updateLabelingJob({
           failedDocuments: failedDocumentsList.length,
           completedDocuments: i + 1,
-          progress: Math.round(((i + 1) / unlabeledDocuments.length) * 100),
+          progress: Math.round(((i + 1) / documentsWithUnlabeledPages.length) * 100),
           currentDocument: undefined,
           status: 'processing'
         });
@@ -992,8 +1005,8 @@ export function SheetSidebar({
     // Mark as completed and show report
     if (onLabelingJobUpdate) {
       onLabelingJobUpdate({
-        totalDocuments: unlabeledDocuments.length,
-        completedDocuments: unlabeledDocuments.length,
+        totalDocuments: documentsWithUnlabeledPages.length,
+        completedDocuments: documentsWithUnlabeledPages.length,
         failedDocuments: failedDocumentsList.length,
         progress: 100,
         status: 'completed',
@@ -1004,7 +1017,7 @@ export function SheetSidebar({
     }
 
     // Show completion report
-    const successCount = unlabeledDocuments.length - failedDocumentsList.length;
+    const successCount = documentsWithUnlabeledPages.length - failedDocumentsList.length;
     const failCount = failedDocumentsList.length;
     
     let reportMessage = `Page labeling complete!\n\n✅ Successfully labeled: ${successCount} document(s)`;
