@@ -651,14 +651,21 @@ export function TakeoffWorkspace() {
                 .filter(r => r != null && r.pageNumber != null)
                 .map(r => r.pageNumber)
                 .filter(num => !isNaN(num) && num > 0);
+              // CRITICAL FIX: Safely build sampleResults with comprehensive null checks
+              // This prevents errors even if the array contains unexpected entries
+              const safeSampleResults = ocrData.results
+                .slice(0, 3)
+                .filter(r => r != null && r.pageNumber != null)
+                .map(r => ({ 
+                  pageNumber: r.pageNumber, 
+                  textLength: r.text?.length || 0 
+                }));
+              
               console.log(`Document ${file.originalName} OCR data:`, {
                 resultsCount: ocrData.results.length,
                 pageNumbers: pageNumbers,
                 maxPage: pageNumbers.length > 0 ? Math.max(...pageNumbers) : 'none',
-                sampleResults: ocrData.results
-                  .slice(0, 3)
-                  .filter(r => r != null)
-                  .map(r => ({ pageNumber: r.pageNumber, textLength: r.text?.length || 0 }))
+                sampleResults: safeSampleResults
               });
               if (pageNumbers.length > 0) {
                 totalPages = Math.max(...pageNumbers);
