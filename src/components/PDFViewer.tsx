@@ -595,6 +595,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           throw new Error('Invalid file object provided');
         }
         
+        console.log('📥 Loading PDF document:', { pdfUrl, fileId: file?.id, fileName: file?.name || file?.originalName });
         const pdf = await pdfjsLib.getDocument({
           url: pdfUrl,
           // Performance optimizations
@@ -608,6 +609,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           maxImageSize: 1024 * 1024, // 1MB max image size
           isEvalSupported: false, // Disable eval for security and performance
         }).promise;
+        console.log('✅ PDF document loaded:', { numPages: pdf.numPages, fileId: file?.id });
         setPdfDocument(pdf);
         
         if (externalTotalPages === undefined) {
@@ -1140,6 +1142,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const renderTask = page.render(renderContext);
       renderTaskRef.current = renderTask;
       await renderTask.promise;
+      
+      console.log('✅ PDF page rendered:', {
+        pageNum,
+        viewport: { width: viewport.width, height: viewport.height },
+        fileId: file?.id,
+        isInitialRender: !isInitialRenderComplete
+      });
       
       // After PDF is rendered, ensure overlay is properly initialized and render takeoff annotations
       onPageShown(pageNum, viewport);
@@ -2515,7 +2524,18 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Handle click - direct coordinate conversion
   const handleClick = useCallback(async (event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
-    // Removed verbose logging - was causing console spam
+    // DIAGNOSTIC LOGGING: Track click handling for newly uploaded PDFs
+    console.log('🖱️ CLICK HANDLER CALLED:', {
+      hasCanvas: !!pdfCanvasRef.current,
+      hasPdfDocument: !!pdfDocument,
+      hasPdfPageRef: !!pdfPageRef.current,
+      hasCurrentViewport: !!currentViewport,
+      currentPage,
+      fileId: file?.id,
+      fileName: file?.name || file?.originalName,
+      isInitialRenderComplete,
+      pageViewportsKeys: Object.keys(pageViewports)
+    });
     
     // Basic checks - allow interactions even during loading
     if (!pdfCanvasRef.current) {
@@ -2526,14 +2546,22 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // CRITICAL FIX: Compute viewport on-the-fly if not cached (for newly uploaded PDFs)
     // This allows interactions to work even before the page has fully rendered and cached the viewport
     let viewport = currentViewport;
+    console.log('🔍 Viewport check:', {
+      hasCurrentViewport: !!currentViewport,
+      currentViewportValue: currentViewport ? { width: currentViewport.width, height: currentViewport.height } : null,
+      cachedViewports: Object.keys(pageViewports),
+      hasCachedViewportForPage: !!pageViewports[currentPage]
+    });
+    
     if (!viewport) {
       // Try to get viewport from cached page ref first
       if (pdfPageRef.current) {
-        // Removed verbose logging
+        console.log('📄 Using pdfPageRef.current to compute viewport');
         viewport = pdfPageRef.current.getViewport({ 
           scale: viewState.scale, 
           rotation: viewState.rotation 
         });
+        console.log('✅ Viewport computed from pdfPageRef:', { width: viewport.width, height: viewport.height });
         // Cache it for future use
         setPageViewports(prev => ({
           ...prev,
@@ -2541,30 +2569,40 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }));
       } else if (pdfDocument) {
         // For new documents, page might not be loaded yet - load it on-demand
-        // Removed verbose logging
+        console.log('📥 Loading page on-demand from pdfDocument, page:', currentPage);
         try {
           const page = await pdfDocument.getPage(currentPage);
+          console.log('✅ Page loaded successfully, computing viewport');
           pdfPageRef.current = page; // Cache the page for future use
           viewport = page.getViewport({ 
             scale: viewState.scale, 
             rotation: viewState.rotation 
           });
+          console.log('✅ Viewport computed from on-demand page load:', { width: viewport.width, height: viewport.height });
           // Cache viewport for future use
           setPageViewports(prev => ({
             ...prev,
             [currentPage]: viewport
           }));
-          // Removed verbose logging
         } catch (error) {
           console.error('❌ Failed to load PDF page for click handler:', error);
           return;
         }
+      } else {
+        console.log('⚠️ pdfDocument is null - cannot load page on-demand');
       }
+    } else {
+      console.log('✅ Using cached currentViewport:', { width: viewport.width, height: viewport.height });
     }
     
     if (!viewport) {
       // Still no viewport - PDF page not ready yet
-      console.log('❌ CLICK BLOCKED: No viewport available');
+      console.log('❌ CLICK BLOCKED: No viewport available after all attempts', {
+        hasPdfDocument: !!pdfDocument,
+        hasPdfPageRef: !!pdfPageRef.current,
+        currentPage,
+        fileId: file?.id
+      });
       return;
     }
     
@@ -2727,10 +2765,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Handle measurement clicks
     // CRITICAL FIX: Allow clicks in selection mode even without a condition selected
     // This allows users to select existing markups for deletion without needing a condition
+    console.log('🔍 Condition check:', {
+      hasSelectedCondition: !!currentSelectedConditionId,
+      selectedConditionId: currentSelectedConditionId,
+      isSelectionMode,
+      willBlock: !currentSelectedConditionId && !isSelectionMode
+    });
+    
     if (!currentSelectedConditionId && !isSelectionMode) {
       console.log('❌ CLICK BLOCKED: No condition selected');
       return;
     }
+    
+    console.log('✅ Click proceeding - viewport and condition checks passed');
     
     // If we're in selection mode without a condition, we're just selecting markups, not creating measurements
     // The markup click handlers will handle selection, so we can return early here
