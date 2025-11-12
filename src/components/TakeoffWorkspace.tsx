@@ -11,7 +11,11 @@ import { ProfitMarginDialog } from './ProfitMarginDialog';
 import { AITakeoffAgent } from './AITakeoffAgent';
 
 import { useTakeoffStore } from '../store/useTakeoffStore';
-import type { TakeoffCondition, Sheet, ProjectFile, PDFDocument, Calibration } from '../types';
+import type { TakeoffCondition, Sheet, ProjectFile, PDFDocument, Calibration, PDFPage } from '../types';
+import * as pdfjsLib from 'pdfjs-dist';
+
+// Configure PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Separator } from "./ui/separator";
@@ -635,73 +639,128 @@ export function TakeoffWorkspace() {
       const documentResults = await Promise.allSettled(
         pdfFiles.map(async (file: any) => {
           try {
+            // Load PDF to get actual page count - use correct API base URL
+            const { getApiBaseUrl } = await import('../lib/apiConfig');
+            const API_BASE_URL = getApiBaseUrl();
+            const pdfUrl = `${API_BASE_URL}/files/${file.id}`;
+            const pdf = await pdfjsLib.getDocument(pdfUrl).promise;
+            const totalPages = pdf.numPages;
+            
+            // CRITICAL FIX: Create pages array and load existing sheet data from database
+            // This ensures documents have proper page data from the start, preventing null page errors
+            // Use Promise.allSettled to handle individual page loading failures gracefully
+            const pageResults = await Promise.allSettled(
+              Array.from({ length: totalPages }, async (_, index) => {
+                const pageNumber = index + 1;
+                const sheetId = `${file.id}-${pageNumber}`;
+                
+                try {
+                  // Try to load existing sheet data from database
+                  const { sheetService } = await import('../services/apiService');
+                  const sheetData = await sheetService.getSheet(sheetId);
+                  if (sheetData && sheetData.sheet) {
+                    return {
+                      pageNumber,
+                      hasTakeoffs: sheetData.sheet.hasTakeoffs || false,
+                      takeoffCount: sheetData.sheet.takeoffCount || 0,
+                      isVisible: sheetData.sheet.isVisible !== false,
+                      sheetName: sheetData.sheet.sheetName,
+                      sheetNumber: sheetData.sheet.sheetNumber,
+                      ocrProcessed: false
+                    };
+                  }
+                } catch (error) {
+                  // Sheet doesn't exist in database yet, use defaults
+                  // This is expected for new documents, so we don't log it as an error
+                  if (!(error as any).isExpected404 && (error as any).response?.status !== 404) {
+                    console.warn(`Unexpected error loading sheet ${sheetId}:`, error);
+                  }
+                }
+                
+                // Default page data - always return a valid page object
+                return {
+                  ocrProcessed: false,
+                  pageNumber,
+                  hasTakeoffs: false,
+                  takeoffCount: 0,
+                  isVisible: true,
+                };
+              })
+            );
+            
+            // CRITICAL FIX: Filter out failed page results and ensure all pages are valid
+            // This prevents null/undefined entries in the pages array
+            const pages = pageResults
+              .map((result, index) => {
+                if (result.status === 'fulfilled' && result.value != null) {
+                  return result.value;
+                } else {
+                  // If page loading failed, return a default page structure
+                  console.warn(`Failed to load page ${index + 1} for ${file.originalName}, using defaults`);
+                  return {
+                    ocrProcessed: false,
+                    pageNumber: index + 1,
+                    hasTakeoffs: false,
+                    takeoffCount: 0,
+                    isVisible: true,
+                  };
+                }
+              })
+              .filter((page): page is PDFPage => page != null && page.pageNumber != null);
+            
             // Check if document has OCR data
             const { serverOcrService } = await import('../services/serverOcrService');
             const ocrData = await serverOcrService.getDocumentData(file.id, projectId);
             // CRITICAL FIX: Ensure results array exists and is valid before checking length
             const hasOCRData = ocrData && Array.isArray(ocrData.results) && ocrData.results.length > 0;
             
-            // Get actual page count from OCR data or file metadata
-            let totalPages = 1;
-            if (ocrData && Array.isArray(ocrData.results) && ocrData.results.length > 0) {
-              // Use the highest page number from OCR data
-              // CRITICAL FIX: Filter out null/undefined results before accessing pageNumber
-              // This prevents "Cannot read properties of undefined (reading 'pageNumber')" errors
-              const pageNumbers = ocrData.results
-                .filter(r => r != null && r.pageNumber != null)
-                .map(r => r.pageNumber)
-                .filter(num => !isNaN(num) && num > 0);
-              // CRITICAL FIX: Safely build sampleResults with comprehensive null checks
-              // This prevents errors even if the array contains unexpected entries
-              const safeSampleResults = ocrData.results
-                .slice(0, 3)
-                .filter(r => r != null && r.pageNumber != null)
-                .map(r => ({ 
-                  pageNumber: r.pageNumber, 
-                  textLength: r.text?.length || 0 
-                }));
-              
-              console.log(`Document ${file.originalName} OCR data:`, {
-                resultsCount: ocrData.results.length,
-                pageNumbers: pageNumbers,
-                maxPage: pageNumbers.length > 0 ? Math.max(...pageNumbers) : 'none',
-                sampleResults: safeSampleResults
-              });
-              if (pageNumbers.length > 0) {
-                totalPages = Math.max(...pageNumbers);
-              }
-            } else if (file.pageCount && !isNaN(file.pageCount) && file.pageCount > 0) {
-              // Use page count from file metadata if available
-              totalPages = file.pageCount;
-              console.log(`Document ${file.originalName} using file metadata page count:`, file.pageCount);
-            } else {
-              console.log(`Document ${file.originalName} using default page count: 1 (no OCR data or file metadata)`);
-            }
-            
-            // Ensure totalPages is always a valid number
-            const finalPageCount = isNaN(totalPages) || totalPages <= 0 ? 1 : totalPages;
-            
             return {
               id: file.id,
               name: file.originalName.replace('.pdf', ''),
-              totalPages: finalPageCount,
-              pages: [], // We don't need the full page data here
+              totalPages,
+              pages, // Now includes actual page data
               isExpanded: false,
               ocrEnabled: hasOCRData
             };
           } catch (error) {
-            console.error(`Error checking OCR status for ${file.originalName}:`, error);
-            // Ensure page count is valid in error case too
-            const errorPageCount = (file.pageCount && !isNaN(file.pageCount) && file.pageCount > 0) ? file.pageCount : 1;
-            
-            return {
-              id: file.id,
-              name: file.originalName.replace('.pdf', ''),
-              totalPages: errorPageCount,
-              pages: [],
-              isExpanded: false,
-              ocrEnabled: false
-            };
+            console.error(`Error loading PDF ${file.originalName}:`, error);
+            // Return a basic document structure even if PDF loading fails
+            // Check if document has OCR data even if PDF loading failed
+            try {
+              const { serverOcrService } = await import('../services/serverOcrService');
+              const ocrData = await serverOcrService.getDocumentData(file.id, projectId);
+              const hasOCRData = ocrData && Array.isArray(ocrData.results) && ocrData.results.length > 0;
+              
+              return {
+                id: file.id,
+                name: file.originalName.replace('.pdf', ''),
+                totalPages: 1,
+                pages: [{
+                  pageNumber: 1,
+                  hasTakeoffs: false,
+                  takeoffCount: 0,
+                  isVisible: true,
+                  ocrProcessed: false,
+                }],
+                isExpanded: false,
+                ocrEnabled: hasOCRData
+              };
+            } catch (ocrError) {
+              return {
+                id: file.id,
+                name: file.originalName.replace('.pdf', ''),
+                totalPages: 1,
+                pages: [{
+                  pageNumber: 1,
+                  hasTakeoffs: false,
+                  takeoffCount: 0,
+                  isVisible: true,
+                  ocrProcessed: false,
+                }],
+                isExpanded: false,
+                ocrEnabled: false
+              };
+            }
           }
         })
       );
@@ -720,7 +779,13 @@ export function TakeoffWorkspace() {
               id: file?.id || `error-${index}`,
               name: (file?.originalName || 'Unknown').replace('.pdf', ''),
               totalPages: 1,
-              pages: [],
+              pages: [{
+                pageNumber: 1,
+                hasTakeoffs: false,
+                takeoffCount: 0,
+                isVisible: true,
+                ocrProcessed: false,
+              }],
               isExpanded: false,
               ocrEnabled: false
             };
@@ -1562,6 +1627,7 @@ export function TakeoffWorkspace() {
                   onOCRRequest={handleOCRRequest}
                   onOcrSearchResults={handleOcrSearchResults}
                   onDocumentsUpdate={handleDocumentsUpdate}
+                  onReloadDocuments={loadProjectDocuments}
                   onPdfUpload={handlePdfUpload}
                   uploading={uploading}
                   onLabelingJobUpdate={setLabelingJob}
