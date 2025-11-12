@@ -141,6 +141,7 @@ export function TakeoffWorkspace() {
   const [uploading, setUploading] = useState<boolean>(false);
   const [loading, setLoading] = useState(true);
   const [documents, setDocuments] = useState<PDFDocument[]>([]);
+  const [documentsLoading, setDocumentsLoading] = useState<boolean>(true);
   const [exportStatus, setExportStatus] = useState<{type: 'excel' | 'pdf' | null, progress: number}>({type: null, progress: 0});
   
   // OCR processing state - track active OCR jobs
@@ -629,6 +630,7 @@ export function TakeoffWorkspace() {
     if (!projectId) return;
     
     try {
+      setDocumentsLoading(true);
       const filesRes = await fileService.getProjectFiles(projectId);
       const files = filesRes.files || [];
       
@@ -794,8 +796,10 @@ export function TakeoffWorkspace() {
         .filter((doc): doc is PDFDocument => doc !== null && doc !== undefined);
       
       setDocuments(documents);
+      setDocumentsLoading(false);
     } catch (error) {
       console.error('Error loading project documents:', error);
+      setDocumentsLoading(false);
     }
   }, [projectId]);
 
@@ -1621,6 +1625,7 @@ export function TakeoffWorkspace() {
                 <SheetSidebar 
                   projectId={storeCurrentProject?.id || projectId!}
                   documents={documents}
+                  documentsLoading={documentsLoading}
                   onPageSelect={handlePageSelect}
                   selectedDocumentId={selectedDocumentId || undefined}
                   selectedPageNumber={selectedPageNumber || undefined}
