@@ -329,13 +329,15 @@ export function SheetSidebar({
             doc.id === documentId 
               ? {
                   ...doc,
-                  pages: doc.pages.map(page => 
-                    page.pageNumber === pageNumber 
-                      ? { 
-                          ...page, 
-                        }
-                      : page
-                  )
+                  pages: (Array.isArray(doc.pages) ? doc.pages : [])
+                    .filter(page => page != null)
+                    .map(page => 
+                      page.pageNumber === pageNumber 
+                        ? { 
+                            ...page, 
+                          }
+                        : page
+                    )
                 }
               : doc
           );
@@ -421,11 +423,13 @@ export function SheetSidebar({
         doc.id === documentId 
           ? {
               ...doc,
-              pages: doc.pages.map(page => 
-                page.pageNumber === editingPageNumber 
-                  ? { ...page, sheetName: editingSheetName.trim() }
-                  : page
-              )
+              pages: (Array.isArray(doc.pages) ? doc.pages : [])
+                .filter(page => page != null)
+                .map(page => 
+                  page.pageNumber === editingPageNumber 
+                    ? { ...page, sheetName: editingSheetName.trim() }
+                    : page
+                )
             }
           : doc
       );
@@ -504,11 +508,13 @@ export function SheetSidebar({
         doc.id === documentId 
           ? {
               ...doc,
-              pages: doc.pages.map(page => 
-                page.pageNumber === editingSheetNumberPageNumber 
-                  ? { ...page, sheetNumber: editingSheetNumber.trim() || undefined }
-                  : page
-              )
+              pages: (Array.isArray(doc.pages) ? doc.pages : [])
+                .filter(page => page != null)
+                .map(page => 
+                  page.pageNumber === editingSheetNumberPageNumber 
+                    ? { ...page, sheetNumber: editingSheetNumber.trim() || undefined }
+                    : page
+                )
             }
           : doc
       );
@@ -1251,11 +1257,13 @@ export function SheetSidebar({
           doc.id === renamingPage.documentId 
             ? {
                 ...doc,
-                pages: doc.pages.map(page => 
-                  page.pageNumber === renamingPage.pageNumber 
-                    ? { ...page, sheetName: renameInput.trim() }
-                    : page
-                )
+                pages: (Array.isArray(doc.pages) ? doc.pages : [])
+                  .filter(page => page != null)
+                  .map(page => 
+                    page.pageNumber === renamingPage.pageNumber 
+                      ? { ...page, sheetName: renameInput.trim() }
+                      : page
+                  )
               }
             : doc
         );
@@ -1687,7 +1695,9 @@ export function SheetSidebar({
                   {/* Pages List */}
                   {document.isExpanded && (
                     <div className="border-t">
-                    {document.pages.map((page) => (
+                    {(Array.isArray(document.pages) ? document.pages : [])
+                      .filter(page => page != null && page.pageNumber != null)
+                      .map((page) => (
                       <div
                         key={page.pageNumber}
                         className={`p-3 cursor-pointer transition-colors ${
