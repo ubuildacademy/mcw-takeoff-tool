@@ -3253,23 +3253,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Handle double-click to complete measurements
   const handleDoubleClick = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
-    console.log('🖱️🖱️ DOUBLE-CLICK HANDLER:', {
-      isMeasuring,
-      measurementType,
-      points: currentMeasurement.length,
-      isContinuous: isContinuousDrawing,
-      activePoints: activePoints.length,
-      cutoutMode,
-      cutoutPoints: currentCutout.length
-    });
-    
     // Prevent default behavior
     event.preventDefault();
     event.stopPropagation();
     
     // Handle cut-out completion
     if (cutoutMode && currentCutout.length >= 3) {
-      console.log('✅ Completing cutout');
       completeCutout(currentCutout);
       return;
     }
@@ -3278,30 +3267,24 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (isMeasuring) {
       // Handle continuous linear measurements
       if (isContinuousDrawing && activePoints.length >= 2) {
-        console.log('✅ Completing continuous linear measurement');
+        // Complete the continuous linear measurement
         completeContinuousLinearMeasurement();
         return;
       }
       
       // Handle non-continuous linear measurements (at least 2 points required)
       if (measurementType === 'linear' && !isContinuousDrawing && currentMeasurement.length >= 2) {
-        console.log('✅ Completing linear measurement');
+        // Complete non-continuous linear measurement
         completeMeasurement(currentMeasurement);
         return;
       }
       
       // For area or volume measurements, require at least 3 points (as required by the calculator)
       if ((measurementType === 'area' || measurementType === 'volume') && currentMeasurement.length >= 3) {
-        console.log('✅ Completing area/volume measurement');
+        // Complete area or volume measurement
         completeMeasurement(currentMeasurement);
         return;
       }
-      
-      console.log('⚠️ Double-click: conditions not met', {
-        type: measurementType,
-        points: currentMeasurement.length,
-        needs: measurementType === 'linear' ? '2' : '3'
-      });
     }
   }, [annotationTool, currentAnnotation, annotationColor, currentPage, onAnnotationToolChange, isContinuousDrawing, activePoints, measurementType, currentMeasurement, completeContinuousLinearMeasurement, completeMeasurement, cutoutMode, currentCutout, completeCutout, isMeasuring]);
 
