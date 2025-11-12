@@ -297,12 +297,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         scale: 1, // Calibration viewport is always at scale=1
         rotation: storedRotation // Use stored rotation, not current rotation
       };
-      // Restored calibration viewport ref from database
-        scaleFactor: externalScaleFactor,
-        unit: externalUnit,
-        viewportWidth: externalCalibrationViewportWidth,
-        viewportHeight: externalCalibrationViewportHeight,
-        rotation: storedRotation,
+      // Restored calibration viewport ref from database,
         currentRotation: viewState.rotation,
         rotationMatch: storedRotation === viewState.rotation
       });
