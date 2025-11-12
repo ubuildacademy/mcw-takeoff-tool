@@ -1055,6 +1055,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     });
     
     // Add a transparent hit area for pointer events
+    // CRITICAL FIX: Only add hit-area when SVG needs to capture clicks (selection, calibration, annotation, visual search)
+    // For measurement mode, we want clicks to pass through to canvas, so we don't need the hit-area
+    // However, we'll keep it for other modes and handle measurement clicks in the onClick handler
     const existingHitArea = svgOverlay.querySelector('#hit-area');
     if (!existingHitArea) {
       const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -1062,6 +1065,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       hitArea.setAttribute('width', '100%');
       hitArea.setAttribute('height', '100%');
       hitArea.setAttribute('fill', 'transparent');
+      // Set pointer-events based on whether SVG should capture clicks
+      // When measuring, SVG has pointerEvents: 'none', but hit-area might still capture
+      // So we'll handle measurement clicks in the onClick handler instead
       hitArea.setAttribute('pointer-events', 'all');
       svgOverlay.appendChild(hitArea);
       console.log('✅ Hit area added to SVG overlay');
@@ -4372,6 +4378,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                   clientX: e.clientX,
                   clientY: e.clientY,
                   fileId: file?.id,
+                  isMeasuring,
                   isSelectionMode,
                   isCalibrating,
                   annotationTool,
@@ -4379,6 +4386,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                   isSelectingSymbol,
                   pointerEvents: (isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol)) ? 'auto' : 'none'
                 });
+                
+                // CRITICAL FIX: If we're in measurement mode, forward the click to handleClick
+                // The SVG hit-area is capturing clicks even when pointerEvents is 'none' for newly uploaded PDFs
+                // This ensures measurement clicks are properly handled
+                if (isMeasuring && !isSelectionMode && !isCalibrating && !annotationTool && !(visualSearchMode && isSelectingSymbol)) {
+                  console.log('✅ Forwarding measurement click from SVG to handleClick');
+                  handleClick(e);
+                  return;
+                }
+                
                 // Handle clicks in selection mode, calibration mode, annotation mode, or visual search mode
                 // Note: Measurement clicks pass through to canvas for proper double-click handling
                 if (isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol)) {
