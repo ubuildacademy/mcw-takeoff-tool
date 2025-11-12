@@ -165,14 +165,17 @@ export function SheetSidebar({
       // Preserve isExpanded and other document-level properties
       isExpanded: doc.isExpanded,
       ocrEnabled: doc.ocrEnabled,
-      pages: doc.pages.map(page => {
-        const pageKey = `${projectId}-${doc.id}-${page.pageNumber}`;
-        const hasMeasurements = takeoffMeasurements.some(measurement => 
-          measurement.sheetId === doc.id && measurement.pdfPage === page.pageNumber
-        );
-        const measurementCount = takeoffMeasurements.filter(measurement => 
-          measurement.sheetId === doc.id && measurement.pdfPage === page.pageNumber
-        ).length;
+      // CRITICAL FIX: Filter out null/undefined pages before mapping to prevent TypeError
+      pages: (Array.isArray(doc.pages) ? doc.pages : [])
+        .filter(page => page != null && page.pageNumber != null)
+        .map(page => {
+          const pageKey = `${projectId}-${doc.id}-${page.pageNumber}`;
+          const hasMeasurements = takeoffMeasurements.some(measurement => 
+            measurement.sheetId === doc.id && measurement.pdfPage === page.pageNumber
+          );
+          const measurementCount = takeoffMeasurements.filter(measurement => 
+            measurement.sheetId === doc.id && measurement.pdfPage === page.pageNumber
+          ).length;
         
         return {
           ...page,
