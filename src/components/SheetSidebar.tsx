@@ -36,6 +36,7 @@ interface SheetSidebarProps {
   onOCRRequest?: (documentId: string, pageNumbers: number[]) => void;
   onOcrSearchResults?: (results: any[], query: string) => void;
   onDocumentsUpdate?: (documents: PDFDocument[]) => void;
+  onReloadDocuments?: () => Promise<void>;
   onPdfUpload?: (event: React.ChangeEvent<HTMLInputElement>) => void;
   uploading?: boolean;
   onLabelingJobUpdate?: (job: {
@@ -60,6 +61,7 @@ export function SheetSidebar({
   onOCRRequest,
   onOcrSearchResults,
   onDocumentsUpdate,
+  onReloadDocuments,
   onPdfUpload,
   uploading,
   onLabelingJobUpdate
@@ -186,117 +188,10 @@ export function SheetSidebar({
     }));
   }, [projectId]); // Remove getProjectTakeoffMeasurements from dependencies to prevent unnecessary recreations
 
-  // Load project files and convert to enhanced document structure
-  const loadProjectDocuments = useCallback(async () => {
-    if (!projectId) return;
-    
-    try {
-      setLoading(true);
-      
-      const filesRes = await fileService.getProjectFiles(projectId);
-      const files = filesRes.files || [];
-      
-      const pdfFiles = files.filter((file: any) => file.mimetype === 'application/pdf');
-      
-      const documents: PDFDocument[] = await Promise.all(
-        pdfFiles.map(async (file: any) => {
-          try {
-            // Load PDF to get page count - use correct API base URL
-            const { getApiBaseUrl } = await import('../lib/apiConfig');
-            const API_BASE_URL = getApiBaseUrl();
-            const pdfUrl = `${API_BASE_URL}/files/${file.id}`;
-            const pdf = await pdfjsLib.getDocument(pdfUrl).promise;
-            const totalPages = pdf.numPages;
-            
-            // Create pages array and load existing sheet data from database
-            const pages: PDFPage[] = await Promise.all(
-              Array.from({ length: totalPages }, async (_, index) => {
-                const pageNumber = index + 1;
-                const sheetId = `${file.id}-${pageNumber}`;
-                
-                try {
-                  // Try to load existing sheet data from database
-                  const sheetData = await sheetService.getSheet(sheetId);
-                  if (sheetData && sheetData.sheet) {
-                    return {
-                      pageNumber,
-                      hasTakeoffs: sheetData.sheet.hasTakeoffs || false,
-                      takeoffCount: sheetData.sheet.takeoffCount || 0,
-                      isVisible: sheetData.sheet.isVisible !== false,
-                      sheetName: sheetData.sheet.sheetName,
-                      sheetNumber: sheetData.sheet.sheetNumber,
-                      ocrProcessed: false // Default to false, will be updated when OCR is processed
-                    };
-                  }
-                } catch (error) {
-                  // Sheet doesn't exist in database yet, use defaults
-                  // This is expected for new documents, so we don't log it as an error
-                  if (!(error as any).isExpected404 && (error as any).response?.status !== 404) {
-                    console.warn(`Unexpected error loading sheet ${sheetId}:`, error);
-                  }
-                }
-                
-                // Default page data
-                return {
-                  ocrProcessed: false, // Default to false
-                  pageNumber,
-                  hasTakeoffs: false,
-                  takeoffCount: 0,
-                  isVisible: true,
-                };
-              })
-            );
-            
-            // Check if document has OCR data
-            const hasOCRData = await checkDocumentOCRStatus(file.id);
-            
-            return {
-              id: file.id,
-              name: file.originalName.replace('.pdf', ''),
-              totalPages,
-              pages,
-              ocrEnabled: hasOCRData
-            };
-          } catch (error) {
-            console.error(`Error loading PDF ${file.originalName}:`, error);
-            // Return a basic document structure even if PDF loading fails
-            // Check if document has OCR data even if PDF loading failed
-            const hasOCRData = await checkDocumentOCRStatus(file.id);
-            
-            return {
-              id: file.id,
-              name: file.originalName.replace('.pdf', ''),
-              totalPages: 1,
-              pages: [{
-                pageNumber: 1,
-                hasTakeoffs: false,
-                takeoffCount: 0,
-                isVisible: true,
-              }],
-              ocrEnabled: hasOCRData
-            };
-          }
-        })
-      );
-      
-      // Update hasTakeoffs based on actual measurements
-      const finalDocuments = updateHasTakeoffs(documents);
-      
-      // Update documents through parent callback (without expansion state)
-      if (onDocumentsUpdate) {
-        onDocumentsUpdate(finalDocuments);
-      }
-      
-    } catch (error) {
-      console.error('Error loading project documents:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId]); // Remove updateHasTakeoffs from dependencies to prevent unnecessary recreations
-
-  useEffect(() => {
-    loadProjectDocuments();
-  }, [projectId, loadProjectDocuments]); // Include loadProjectDocuments in dependencies
+  // CRITICAL FIX: Removed independent document loading to prevent race conditions
+  // TakeoffWorkspace is now the single source of truth for document loading
+  // Documents are passed as props and should already have full page data
+  // The loadProjectDocuments function has been removed - use onReloadDocuments callback instead
 
   // Update hasTakeoffs when takeoff measurements change (but preserve expansion state)
   // This effect only runs when the takeoff measurements actually change, not on every render
@@ -376,8 +271,8 @@ export function SheetSidebar({
     try {
       await fileService.deletePDF(documentId);
       // Reload documents from server to ensure list is up to date
-      if (onDocumentsUpdate) {
-        await loadProjectDocuments();
+      if (onReloadDocuments) {
+        await onReloadDocuments();
       }
     } catch (error) {
       console.error('Error deleting document:', error);
@@ -732,9 +627,9 @@ export function SheetSidebar({
         
         // Reload documents to show updated labels without full page reload
         // This prevents the 404 error and keeps the user signed in
-        if (onDocumentsUpdate) {
+        if (onReloadDocuments) {
           // Reload project documents to get updated sheet labels
-          await loadProjectDocuments();
+          await onReloadDocuments();
         }
         
         // Show success message after data is reloaded
@@ -965,12 +860,12 @@ export function SheetSidebar({
               });
 
               // Debounce document reload to batch updates (reload every 500ms max)
-              if (onDocumentsUpdate) {
+              if (onReloadDocuments) {
                 if (reloadTimeout) {
                   clearTimeout(reloadTimeout);
                 }
                 reloadTimeout = setTimeout(async () => {
-                  await loadProjectDocuments();
+                  await onReloadDocuments();
                 }, 500);
               }
             } catch (error) {
@@ -979,9 +874,9 @@ export function SheetSidebar({
           }
           
           // Ensure final reload happens
-          if (reloadTimeout && onDocumentsUpdate) {
+          if (reloadTimeout && onReloadDocuments) {
             clearTimeout(reloadTimeout);
-            await loadProjectDocuments();
+            await onReloadDocuments();
           }
         }
 
@@ -1008,8 +903,8 @@ export function SheetSidebar({
     }
 
     // Final reload
-    if (onDocumentsUpdate) {
-      await loadProjectDocuments();
+    if (onReloadDocuments) {
+      await onReloadDocuments();
     }
 
     // Mark as completed and show report
@@ -1214,7 +1109,9 @@ export function SheetSidebar({
     }
     
     // Reload documents
-    await loadProjectDocuments();
+    if (onReloadDocuments) {
+      await onReloadDocuments();
+    }
     
     // Show completion message
     const successCount = completedDocs.filter(d => d.success).length;
@@ -1288,8 +1185,8 @@ export function SheetSidebar({
     try {
       await fileService.deletePDF(documentId);
       // Reload documents from server to ensure list is up to date
-      if (onDocumentsUpdate) {
-        await loadProjectDocuments();
+      if (onReloadDocuments) {
+        await onReloadDocuments();
       }
     } catch (error) {
       console.error('Error deleting document:', error);
