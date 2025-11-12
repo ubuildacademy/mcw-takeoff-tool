@@ -636,11 +636,12 @@ export function TakeoffWorkspace() {
             // Check if document has OCR data
             const { serverOcrService } = await import('../services/serverOcrService');
             const ocrData = await serverOcrService.getDocumentData(file.id, projectId);
-            const hasOCRData = ocrData && ocrData.results.length > 0;
+            // CRITICAL FIX: Ensure results array exists and is valid before checking length
+            const hasOCRData = ocrData && Array.isArray(ocrData.results) && ocrData.results.length > 0;
             
             // Get actual page count from OCR data or file metadata
             let totalPages = 1;
-            if (ocrData && ocrData.results.length > 0) {
+            if (ocrData && Array.isArray(ocrData.results) && ocrData.results.length > 0) {
               // Use the highest page number from OCR data
               // CRITICAL FIX: Filter out null/undefined results before accessing pageNumber
               // This prevents "Cannot read properties of undefined (reading 'pageNumber')" errors

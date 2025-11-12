@@ -374,7 +374,9 @@ When answering questions:
             const ocrData = await serverOcrService.getDocumentData(doc.id, projectId);
             if (ocrData && ocrData.results.length > 0) {
               // Include full text content from all pages for comprehensive AI analysis
+              // CRITICAL FIX: Filter out null/undefined results before accessing pageNumber
               const fullText = ocrData.results
+                .filter((result: any) => result != null && result.pageNumber != null)
                 .map((result: any) => `    Page ${result.pageNumber}:\n${result.text}`)
                 .join('\n\n');
               if (fullText) {

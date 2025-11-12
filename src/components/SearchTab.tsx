@@ -112,8 +112,10 @@ export function SearchTab({
             console.log(`📊 Search response for ${doc.id}:`, response);
             if (response.results && response.results.length > 0) {
               // Debug: Log page numbers from backend
-              console.log(`🔍 Page numbers from backend:`, response.results.map((r: any) => r.pageNumber));
-              results[doc.id] = response.results;
+              // CRITICAL FIX: Filter out null/undefined results before accessing pageNumber
+              const validResults = response.results.filter((r: any) => r != null && r.pageNumber != null);
+              console.log(`🔍 Page numbers from backend:`, validResults.map((r: any) => r.pageNumber));
+              results[doc.id] = validResults;
               console.log(`✅ Found ${response.results.length} results in document ${doc.id}`);
             } else {
               console.log(`❌ No results found in document ${doc.id}`);
