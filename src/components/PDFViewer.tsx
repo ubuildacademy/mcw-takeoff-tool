@@ -1088,9 +1088,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     
     if (isRenderingRef.current) {
-      if (process.env.NODE_ENV === 'development') {
-        // console.log('🚫 PDF RENDER BLOCKED: Already rendering');
-      }
       return;
     }
     isRenderingRef.current = true;
@@ -2525,44 +2522,22 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Handle click - direct coordinate conversion
   const handleClick = useCallback(async (event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
-    // DIAGNOSTIC LOGGING: Track click handling for newly uploaded PDFs
-    console.log('🖱️ CLICK HANDLER CALLED:', {
-      hasCanvas: !!pdfCanvasRef.current,
-      hasPdfDocument: !!pdfDocument,
-      hasPdfPageRef: !!pdfPageRef.current,
-      hasCurrentViewport: !!currentViewport,
-      currentPage,
-      fileId: file?.id,
-      fileName: file?.name || file?.originalName,
-      isInitialRenderComplete,
-      pageViewportsKeys: Object.keys(pageViewports)
-    });
-    
     // Basic checks - allow interactions even during loading
     if (!pdfCanvasRef.current) {
-      console.log('❌ CLICK BLOCKED: No canvas ref');
       return;
     }
     
     // CRITICAL FIX: Compute viewport on-the-fly if not cached (for newly uploaded PDFs)
     // This allows interactions to work even before the page has fully rendered and cached the viewport
     let viewport = currentViewport;
-    console.log('🔍 Viewport check:', {
-      hasCurrentViewport: !!currentViewport,
-      currentViewportValue: currentViewport ? { width: currentViewport.width, height: currentViewport.height } : null,
-      cachedViewports: Object.keys(pageViewports),
-      hasCachedViewportForPage: !!pageViewports[currentPage]
-    });
     
     if (!viewport) {
       // Try to get viewport from cached page ref first
       if (pdfPageRef.current) {
-        console.log('📄 Using pdfPageRef.current to compute viewport');
         viewport = pdfPageRef.current.getViewport({ 
           scale: viewState.scale, 
           rotation: viewState.rotation 
         });
-        console.log('✅ Viewport computed from pdfPageRef:', { width: viewport.width, height: viewport.height });
         // Cache it for future use
         setPageViewports(prev => ({
           ...prev,
@@ -2570,40 +2545,27 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }));
       } else if (pdfDocument) {
         // For new documents, page might not be loaded yet - load it on-demand
-        console.log('📥 Loading page on-demand from pdfDocument, page:', currentPage);
         try {
           const page = await pdfDocument.getPage(currentPage);
-          console.log('✅ Page loaded successfully, computing viewport');
           pdfPageRef.current = page; // Cache the page for future use
           viewport = page.getViewport({ 
             scale: viewState.scale, 
             rotation: viewState.rotation 
           });
-          console.log('✅ Viewport computed from on-demand page load:', { width: viewport.width, height: viewport.height });
           // Cache viewport for future use
           setPageViewports(prev => ({
             ...prev,
             [currentPage]: viewport
           }));
         } catch (error) {
-          console.error('❌ Failed to load PDF page for click handler:', error);
+          console.error('Failed to load PDF page for click handler:', error);
           return;
         }
-      } else {
-        console.log('⚠️ pdfDocument is null - cannot load page on-demand');
       }
-    } else {
-      console.log('✅ Using cached currentViewport:', { width: viewport.width, height: viewport.height });
     }
     
     if (!viewport) {
       // Still no viewport - PDF page not ready yet
-      console.log('❌ CLICK BLOCKED: No viewport available after all attempts', {
-        hasPdfDocument: !!pdfDocument,
-        hasPdfPageRef: !!pdfPageRef.current,
-        currentPage,
-        fileId: file?.id
-      });
       return;
     }
     
@@ -2766,19 +2728,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Handle measurement clicks
     // CRITICAL FIX: Allow clicks in selection mode even without a condition selected
     // This allows users to select existing markups for deletion without needing a condition
-    console.log('🔍 Condition check:', {
-      hasSelectedCondition: !!currentSelectedConditionId,
-      selectedConditionId: currentSelectedConditionId,
-      isSelectionMode,
-      willBlock: !currentSelectedConditionId && !isSelectionMode
-    });
-    
     if (!currentSelectedConditionId && !isSelectionMode) {
-      console.log('❌ CLICK BLOCKED: No condition selected');
       return;
     }
-    
-    console.log('✅ Click proceeding - viewport and condition checks passed');
     
     // If we're in selection mode without a condition, we're just selecting markups, not creating measurements
     // The markup click handlers will handle selection, so we can return early here
@@ -2924,19 +2876,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     
     // Store measurements in normalized coordinates (0-1) - simple and reliable
-    const viewportPoints = points.map((point, index) => {
-      // Debug logging for first 2 points
-      if (index < 2) {
-        console.log(`💾 STORAGE POINT ${index}:`, {
-          normalizedPoint: { x: point.x, y: point.y }
-        });
-      }
-      
-      return {
-        x: point.x,
-        y: point.y
-      };
-    });
+    const viewportPoints = points.map((point) => ({
+      x: point.x,
+      y: point.y
+    }));
     
     // Import the measurement calculator
     const { MeasurementCalculator } = await import('../utils/measurementCalculation');
@@ -2961,15 +2904,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const distanceValidatorFt = pixelDistanceValidator * scaleInfo.scaleFactor;
       const distanceMeasureFt = pixelDistanceMeasure * scaleInfo.scaleFactor;
       const mid = { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 };
-      console.log('📐 DEBUG MEASURE VS VALIDATOR', {
-        dxNorm, dyNorm,
-        calibBase,
-        scaleInfo,
-        pixelDistanceValidator,
-        pixelDistanceMeasure,
-        distanceValidatorFt,
-        distanceMeasureFt
-      });
       setMeasurementDebug({
         page: currentPage,
         mid,
@@ -2985,20 +2919,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Auto clear after a few seconds
       setTimeout(() => setMeasurementDebug(null), 4000);
     }
-    
-    // Debug logging
-    console.log('📏 MEASUREMENT CREATED:', {
-      measurementType: measurementType,
-      scaleFactor: scaleFactor,
-      unit: 'ft',
-      viewportWidth: currentViewport.width,
-      normalizedPoints: viewportPoints,
-      // Show the actual measurement points
-      firstPoint: viewportPoints[0],
-      lastPoint: viewportPoints[viewportPoints.length - 1],
-      // Calculate normalized distance for debugging
-      normalizedDistance: viewportPoints.length > 1 ? Math.sqrt((viewportPoints[1].x - viewportPoints[0].x) ** 2 + (viewportPoints[1].y - viewportPoints[0].y) ** 2) : 0
-    });
     
     let measurementResult;
     let perimeterValue: number | undefined;
@@ -3392,25 +3312,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Validate the scale factor calculation
     const testDistance = pixelDistance * newScaleFactor;
     const accuracy = 1 - Math.abs(testDistance - knownDistance) / knownDistance;
-    
-    // Debug logging for calibration
-    console.log('🔧 CALIBRATION:', {
-      knownDistance: knownDistance,
-      pixelDistance: pixelDistance,
-      calculatedScaleFactor: newScaleFactor,
-      accuracy: (accuracy * 100).toFixed(2) + '%',
-      unit: unit,
-      viewport: { width: baseViewport.width, height: baseViewport.height, scale: 1, rotation: baseViewport.rotation },
-      normalizedPoints: points,
-      // Test calculation
-      testCalculation: pixelDistance * newScaleFactor,
-      expectedResult: knownDistance,
-      // Show the actual calculation step by step
-      step1_normalizedDistance: Math.sqrt((points[1].x - points[0].x) ** 2 + (points[1].y - points[0].y) ** 2),
-      step2_pixelDistance: pixelDistance,
-      step3_scaleFactor: newScaleFactor,
-      step4_finalResult: pixelDistance * newScaleFactor
-    });
     
     // Validate scale factor reasonableness with more comprehensive checks
     const warnings: string[] = [];
@@ -3886,11 +3787,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const isAnnotation = localAnnotations.some(a => a.id === selectedMarkupId);
       
       if (isAnnotation) {
-        console.log('🗑️ DELETING ANNOTATION:', {
-          selectedMarkupId,
-          currentLocalAnnotations: localAnnotations.length,
-          annotationToDelete: localAnnotations.find(a => a.id === selectedMarkupId)
-        });
+        // Delete annotation
         
         // Clear selection immediately
         const deletedId = selectedMarkupId;
@@ -3909,13 +3806,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         );
         setLocalAnnotations(filteredAnnotations);
         
-        console.log('🗑️ ANNOTATION DELETED:', {
-          deletedId,
-          remainingAnnotations: filteredAnnotations.length,
-          allStoreAnnotations: updatedAnnotations.length,
-          deletedSuccessfully: !updatedAnnotations.some(a => a.id === deletedId)
-        });
-        
         // Force immediate re-render using requestAnimationFrame to ensure state is processed
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
@@ -3924,7 +3814,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
             }
             
-            console.log('🗑️ PDF RENDER TRIGGER: Annotation deletion');
+            // Trigger PDF render after annotation deletion
           });
         });
       } else if (currentProjectId && file?.id) {
@@ -3949,7 +3839,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
               }
               
-              console.log('🗑️ PDF RENDER TRIGGER: Measurement deletion');
+              // Trigger PDF render after measurement deletion
             });
           });
         } catch (error: any) {
@@ -3977,9 +3867,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Optimized retry mechanism if canvas is not ready
       const attemptRender = async (retries = 3) => {
         if (pdfCanvasRef.current && containerRef.current) {
-          if (process.env.NODE_ENV === 'development') {
-            // console.log('🔄 PDF RENDER TRIGGER: Initial render attempt');
-          }
           await renderPDFPage(currentPage);
         } else if (retries > 0) {
           setTimeout(() => attemptRender(retries - 1), 50); // Reduced retry delay
@@ -4023,17 +3910,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Optimized re-render when view state changes (zoom/rotation)
   useEffect(() => {
     if (pdfDocument && isComponentMounted && isInitialRenderComplete) {
-      if (process.env.NODE_ENV === 'development') {
-        // console.log('🔍 PDF RENDER TRIGGER: View state change (zoom/rotation)');
-      }
-      
       // ANTI-FLICKER: Skip PDF re-render during interactive operations or deselection cooldown
       // Allow PDF renders during text annotation input (showTextInput = true)
       // Allow initial renders even if in deselection mode (for page loads)
       if (isMeasuring || isCalibrating || currentMeasurement.length > 0 || (isDeselecting && isInitialRenderComplete) || (isAnnotating && !showTextInput)) {
-        if (process.env.NODE_ENV === 'development') {
-          // console.log('🚫 PDF RENDER BLOCKED: Interactive/deselection mode - NO PDF render calls');
-        }
         // When blocked, simulate zoom via CSS transform so the user sees immediate zoom
         // without re-rendering the PDF canvas (prevents flicker while drawing)
         applyInteractiveZoomTransforms();
@@ -4042,9 +3922,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       
       // ANTI-FLICKER: Block ALL renders during deselection period
       if (isDeselecting) {
-        if (process.env.NODE_ENV === 'development') {
-          // console.log('🚫 PDF RENDER BLOCKED: Deselection cooldown active');
-        }
         return;
       }
       
@@ -4063,7 +3940,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (selectedConditionId) {
       const condition = getSelectedCondition();
       if (condition) {
-        console.log('📋 CONDITION SELECTED: Starting measurement mode');
         setIsMeasuring(true);
         setIsSelectionMode(false);
         setSelectedMarkupId(null);
@@ -4082,7 +3958,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         // VALIDATION FIX: Condition ID exists but condition object is missing
         // This can happen during condition reload or if condition was deleted
         // Clear measurement mode to prevent stale state and silent click failures
-        console.warn('⚠️ CONDITION NOT FOUND: selectedConditionId exists but condition object missing', {
+        console.warn('Condition not found: selectedConditionId exists but condition object missing', {
           selectedConditionId,
           conditionsCount: useTakeoffStore.getState().conditions.length
         });
@@ -4097,7 +3973,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         // This prevents flicker while allowing the UI to show the selection state
       }
     } else {
-      console.log('📋 CONDITION DESELECTED: Switching to selection mode');
       setIsMeasuring(false);
       setIsSelectionMode(true);
       setCurrentMeasurement([]);
@@ -4105,12 +3980,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       setMeasurements([]);
       
       // ANTI-FLICKER: Extended cooldown after deselection to prevent flicker storm
-      console.log('🚫 STARTING DESELECTION COOLDOWN: 5 seconds');
       setIsDeselecting(true);
       
       // Store timeout ID so we can clear it if needed
       const timeoutId = setTimeout(() => {
-        console.log('✅ DESELECTION COOLDOWN COMPLETE: Normal operation resumed');
         setIsDeselecting(false);
       }, 5000); // 5 second cooldown after deselection
       
@@ -4125,13 +3998,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Set annotation mode when annotation tool is selected
   useEffect(() => {
     if (annotationTool) {
-      console.log('📝 ANNOTATION TOOL SELECTED: Starting annotation mode');
       setIsAnnotating(true);
       setIsSelectionMode(false);
       setSelectedMarkupId(null);
       setIsDeselecting(false); // Clear deselection state
     } else {
-      console.log('📝 ANNOTATION TOOL DESELECTED: Switching to selection mode');
       setIsAnnotating(false);
       setIsSelectionMode(true);
       setCurrentAnnotation([]);
