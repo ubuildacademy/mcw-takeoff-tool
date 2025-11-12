@@ -215,7 +215,12 @@ export function AITakeoffAgent({
         const documentName = document?.name || docId;
         
         if (ocrData && ocrData.results.length > 0) {
-          const pagesText = ocrData.results.map(p => `Page ${p.pageNumber}: ${p.text}`).join('\n\n');
+          // CRITICAL FIX: Filter out null/undefined results before accessing pageNumber
+          // This prevents "Cannot read properties of undefined (reading 'pageNumber')" errors
+          const pagesText = ocrData.results
+            .filter(p => p != null && p.pageNumber != null)
+            .map(p => `Page ${p.pageNumber}: ${p.text}`)
+            .join('\n\n');
           return {
             documentId: docId,
             documentName,

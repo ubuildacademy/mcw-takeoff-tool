@@ -642,12 +642,20 @@ export function TakeoffWorkspace() {
             let totalPages = 1;
             if (ocrData && ocrData.results.length > 0) {
               // Use the highest page number from OCR data
-              const pageNumbers = ocrData.results.map(r => r.pageNumber).filter(num => !isNaN(num) && num > 0);
+              // CRITICAL FIX: Filter out null/undefined results before accessing pageNumber
+              // This prevents "Cannot read properties of undefined (reading 'pageNumber')" errors
+              const pageNumbers = ocrData.results
+                .filter(r => r != null && r.pageNumber != null)
+                .map(r => r.pageNumber)
+                .filter(num => !isNaN(num) && num > 0);
               console.log(`Document ${file.originalName} OCR data:`, {
                 resultsCount: ocrData.results.length,
                 pageNumbers: pageNumbers,
                 maxPage: pageNumbers.length > 0 ? Math.max(...pageNumbers) : 'none',
-                sampleResults: ocrData.results.slice(0, 3).map(r => ({ pageNumber: r.pageNumber, textLength: r.text?.length || 0 }))
+                sampleResults: ocrData.results
+                  .slice(0, 3)
+                  .filter(r => r != null)
+                  .map(r => ({ pageNumber: r.pageNumber, textLength: r.text?.length || 0 }))
               });
               if (pageNumbers.length > 0) {
                 totalPages = Math.max(...pageNumbers);

@@ -1054,8 +1054,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // ANTI-FLICKER: Block PDF renders during interactive operations or deselection cooldown
     // Allow PDF renders during text annotation input (showTextInput = true)
     // Allow initial renders even if in deselection mode (for page loads)
+    // CRITICAL FIX: Allow initial render even if isMeasuring is true - this ensures the viewport
+    // is set so clicks can work. Only block re-renders during measurement to prevent flicker.
     // Block renders during interactive operations to prevent flicker
-    if (isMeasuring || isCalibrating || currentMeasurement.length > 0 || (isDeselecting && isInitialRenderComplete) || (isAnnotating && !showTextInput)) {
+    const isInitialRender = !isInitialRenderComplete;
+    if (!isInitialRender && (isMeasuring || isCalibrating || currentMeasurement.length > 0 || (isDeselecting && isInitialRenderComplete) || (isAnnotating && !showTextInput))) {
       return;
     }
     
