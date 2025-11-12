@@ -1012,6 +1012,20 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
   }, [viewState.scale, viewState.rotation, pdfDocument, currentViewport, localTakeoffMeasurements, localAnnotations, currentPage, renderTakeoffAnnotations]);
 
+  // Update hit-area pointer-events when mode changes
+  useEffect(() => {
+    if (!svgOverlayRef.current) return;
+    
+    const hitArea = svgOverlayRef.current.querySelector('#hit-area') as SVGRectElement;
+    if (hitArea) {
+      // When measuring, set pointer-events to 'none' so clicks pass through to canvas
+      // This allows proper double-click detection on the canvas
+      // For other modes, set to 'all' to capture clicks for selection/annotation/etc.
+      const shouldCaptureClicks = isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol);
+      hitArea.setAttribute('pointer-events', shouldCaptureClicks ? 'all' : 'none');
+    }
+  }, [isMeasuring, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, isSelectingSymbol]);
+
   // Page visibility handler - ensures overlay is properly initialized when page becomes visible
   const onPageShown = useCallback((pageNum: number, viewport: any) => {
     if (!viewport || !svgOverlayRef.current) {
@@ -1027,9 +1041,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     svgOverlay.setAttribute('overflow', 'visible');
     
     // Add a transparent hit area for pointer events
-    // CRITICAL FIX: Only add hit-area when SVG needs to capture clicks (selection, calibration, annotation, visual search)
-    // For measurement mode, we want clicks to pass through to canvas, so we don't need the hit-area
-    // However, we'll keep it for other modes and handle measurement clicks in the onClick handler
+    // CRITICAL FIX: Set hit-area pointer-events based on current mode
+    // When measuring, set to 'none' so clicks pass through to canvas for proper double-click handling
+    // For other modes (selection, calibration, annotation, visual search), set to 'all' to capture clicks
     const existingHitArea = svgOverlay.querySelector('#hit-area');
     if (!existingHitArea) {
       const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -1037,11 +1051,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       hitArea.setAttribute('width', '100%');
       hitArea.setAttribute('height', '100%');
       hitArea.setAttribute('fill', 'transparent');
-      // Set pointer-events based on whether SVG should capture clicks
-      // When measuring, SVG has pointerEvents: 'none', but hit-area might still capture
-      // So we'll handle measurement clicks in the onClick handler instead
-      hitArea.setAttribute('pointer-events', 'all');
       svgOverlay.appendChild(hitArea);
+    }
+    
+    // Update hit-area pointer-events based on current mode
+    // This ensures clicks pass through to canvas when measuring (for double-click support)
+    const hitArea = svgOverlay.querySelector('#hit-area') as SVGRectElement;
+    if (hitArea) {
+      const shouldCaptureClicks = isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol);
+      hitArea.setAttribute('pointer-events', shouldCaptureClicks ? 'all' : 'none');
     }
     
     // Always re-render all annotations for this page, regardless of current state
@@ -1057,7 +1075,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     // Note: If no measurements, the reactive useEffect will handle rendering when they load
     // The reactive useEffect watches allTakeoffMeasurements and will trigger render when measurements arrive
-  }, [renderTakeoffAnnotations, localTakeoffMeasurements, currentProjectId, file?.id]);
+  }, [renderTakeoffAnnotations, localTakeoffMeasurements, currentProjectId, file?.id, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, isSelectingSymbol]);
 
   // PDF render function with page-specific viewport isolation
   const renderPDFPage = useCallback(async (pageNum: number) => {
@@ -4194,16 +4212,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               onMouseMove={handleMouseMove}
               onMouseLeave={() => setMousePosition(null)}
               onClick={(e) => {
-                // CRITICAL FIX: If we're in measurement mode, forward the click to handleClick
-                // The SVG hit-area is capturing clicks even when pointerEvents is 'none' for newly uploaded PDFs
-                // This ensures measurement clicks are properly handled
-                if (isMeasuring && !isSelectionMode && !isCalibrating && !annotationTool && !(visualSearchMode && isSelectingSymbol)) {
-                  handleClick(e);
-                  return;
-                }
-                
                 // Handle clicks in selection mode, calibration mode, annotation mode, or visual search mode
-                // Note: Measurement clicks pass through to canvas for proper double-click handling
+                // Note: Measurement clicks pass through to canvas (hit-area has pointer-events: 'none')
+                // This allows proper double-click detection on the canvas
                 if (isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol)) {
                   const target = e.target as SVGElement;
                   
