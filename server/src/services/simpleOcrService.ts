@@ -406,13 +406,17 @@ class SimpleOCRService {
         });
       }
 
-      return (data || []).map(row => ({
-        pageNumber: row.page_number,
-        text: row.text_content,
-        confidence: row.confidence_score,
-        processingTime: row.processing_time_ms,
-        method: 'direct_extraction' as const
-      }));
+      // CRITICAL FIX: Filter out null/undefined rows and ensure page_number exists
+      // This prevents "Cannot read properties of undefined (reading 'pageNumber')" errors
+      return (data || [])
+        .filter(row => row != null && row.page_number != null)
+        .map(row => ({
+          pageNumber: row.page_number,
+          text: row.text_content || '',
+          confidence: row.confidence_score || 0,
+          processingTime: row.processing_time_ms || 0,
+          method: 'direct_extraction' as const
+        }));
     } catch (error) {
       console.error('❌ Failed to get document OCR results:', error);
       throw error;
