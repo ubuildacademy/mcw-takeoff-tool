@@ -297,7 +297,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         scale: 1, // Calibration viewport is always at scale=1
         rotation: storedRotation // Use stored rotation, not current rotation
       };
-      console.log('📏 Restored calibration viewport ref from database:', {
+      // Restored calibration viewport ref from database
         scaleFactor: externalScaleFactor,
         unit: externalUnit,
         viewportWidth: externalCalibrationViewportWidth,
@@ -2869,7 +2869,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Prevent duplicate calls within a very short window (100ms) - allows legitimate double-clicks
     const now = Date.now();
     if (isCompletingMeasurementRef.current && (now - lastCompletionTimeRef.current) < 100) {
-      console.log('⚠️ BLOCKED: Measurement completion already in progress (duplicate call prevented)');
+      // Block duplicate measurement completion calls
       return;
     }
     
@@ -3163,7 +3163,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       setCurrentCutout([]);
       
       // Re-render the page
-      console.log('✂️ PDF RENDER TRIGGER: Cutout completion');
       requestAnimationFrame(() => {
         renderPDFPage(currentPage);
       });

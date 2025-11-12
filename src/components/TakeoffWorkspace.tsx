@@ -60,8 +60,6 @@ export function TakeoffWorkspace() {
   
   // Debug logging (dev only)
   if (isDev) {
-    console.log('🔍 TakeoffWorkspace: projectId from useParams:', projectId);
-    console.log('🔍 TakeoffWorkspace: current URL:', window.location.href);
   }
   
   // Redirect if projectId is missing or invalid
@@ -1120,7 +1118,6 @@ export function TakeoffWorkspace() {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         try {
-          console.log(`Uploading file ${i + 1}/${files.length}: ${file.name}`);
           const uploadRes = await fileService.uploadPDF(file, projectId);
           
           if (uploadRes.file) {
@@ -1843,7 +1840,6 @@ export function TakeoffWorkspace() {
         pageNumbers={ocrPageNumbers}
         projectId={projectId!}
         onOCRComplete={(results) => {
-          console.log('OCR processing completed:', results);
           setShowOCRDialog(false);
           
           // Reload documents to get updated OCR status
