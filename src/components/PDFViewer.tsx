@@ -4358,13 +4358,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               onMouseMove={handleMouseMove}
               onMouseLeave={() => setMousePosition(null)}
               onClick={(e) => {
-                // CRITICAL FIX: If we're in measurement mode, forward the click to handleClick
+                // CRITICAL FIX: If we're in measurement mode, delay single click to allow double-click detection
                 // The SVG hit-area is capturing clicks even when pointerEvents is 'none' for newly uploaded PDFs
-                // This ensures measurement clicks are properly handled
-                // IMPORTANT: Don't stop propagation for measurement clicks to allow double-clicks to work
+                // We need to delay single clicks so double-clicks can fire first
                 if (isMeasuring && !isSelectionMode && !isCalibrating && !annotationTool && !(visualSearchMode && isSelectingSymbol)) {
-                  // Don't stop propagation - let double-clicks bubble through
-                  handleClick(e);
+                  // Delay single click handling to allow double-click to fire first
+                  // If double-click fires within 300ms, it will cancel this timeout
+                  const clickTimeout = setTimeout(() => {
+                    console.log('⏱️ Processing delayed single click (no double-click detected)');
+                    handleClick(e);
+                  }, 300);
+                  
+                  // Store timeout so double-click can cancel it
+                  (e.target as any).__clickTimeout = clickTimeout;
                   return;
                 }
                 
@@ -4441,7 +4447,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 
                 // CRITICAL FIX: Forward measurement double-clicks from SVG to handleDoubleClick
                 // Similar to single clicks, the SVG hit-area may be capturing double-clicks
+                // Cancel any pending single-click timeout to prevent duplicate point addition
                 if (isMeasuring && !isSelectionMode && !isCalibrating && !annotationTool && !(visualSearchMode && isSelectingSymbol)) {
+                  // Cancel the delayed single click that was scheduled
+                  const target = e.target as any;
+                  if (target?.__clickTimeout) {
+                    console.log('✅ Cancelling pending single click - double-click detected');
+                    clearTimeout(target.__clickTimeout);
+                    delete target.__clickTimeout;
+                  }
+                  
                   console.log('✅ Forwarding measurement double-click from SVG to handleDoubleClick');
                   // Don't prevent default or stop propagation - let it bubble to canvas too as backup
                   handleDoubleClick(e);
