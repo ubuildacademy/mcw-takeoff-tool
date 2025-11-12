@@ -4269,17 +4269,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             : (isCalibrating ? 'crosshair' : (isMeasuring ? 'crosshair' : (isSelectionMode ? 'pointer' : 'default')))
         }}
       >
-        <div 
-          className="flex justify-start p-6 relative"
-          onDoubleClick={(e) => {
-            console.log('🖱️🖱️ CONTAINER DOUBLE-CLICK DETECTED:', {
-              target: e.target,
-              currentTarget: e.currentTarget,
-              detail: e.detail,
-              fileId: file?.id
-            });
-          }}
-        >
+        <div className="flex justify-start p-6 relative">
           {/* Canvas Container - Ensures perfect alignment */}
           <div 
             className="relative inline-block"
@@ -4289,13 +4279,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               padding: 0,
               border: 'none',
               outline: 'none'
-            }}
-            onDoubleClick={(e) => {
-              console.log('🖱️🖱️ CANVAS CONTAINER DOUBLE-CLICK:', {
-                target: e.target,
-                detail: e.detail,
-                fileId: file?.id
-              });
             }}
           >
             {/* PDF Canvas (Background Layer) */}
@@ -4315,38 +4298,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 border: 'none',
                 outline: 'none'
               }}
-              onClick={(e) => {
-                // CRITICAL FIX: Delay single clicks when measuring to allow double-clicks to fire first
-                if (isMeasuring && !isSelectionMode && !isCalibrating && !annotationTool) {
-                  // Delay single click handling to allow double-click to fire first
-                  const clickTimeout = setTimeout(() => {
-                    console.log('⏱️ Processing delayed canvas single click (no double-click detected)');
-                    handleClick(e);
-                  }, 300);
-                  
-                  // Store timeout so double-click can cancel it
-                  (e.target as any).__clickTimeout = clickTimeout;
-                } else {
-                  // For non-measurement modes, handle immediately
-                  handleClick(e);
-                }
-              }}
+              onClick={handleClick}
               onDoubleClick={(e) => {
-                console.log('🖱️🖱️ CANVAS DOUBLE-CLICK DETECTED:', { 
-                  isMeasuring, 
-                  annotationTool, 
-                  fileId: file?.id,
-                  detail: e.detail
-                });
-                
-                // Cancel any pending single-click timeout
-                const target = e.target as any;
-                if (target?.__clickTimeout) {
-                  console.log('✅ Cancelling pending canvas single click - double-click detected');
-                  clearTimeout(target.__clickTimeout);
-                  delete target.__clickTimeout;
-                }
-                
                 // Only handle double-click for non-annotation cases
                 if (!annotationTool) {
                   handleDoubleClick(e);
@@ -4387,19 +4340,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               onMouseMove={handleMouseMove}
               onMouseLeave={() => setMousePosition(null)}
               onClick={(e) => {
-                // CRITICAL FIX: If we're in measurement mode, delay single click to allow double-click detection
+                // CRITICAL FIX: If we're in measurement mode, forward the click to handleClick
                 // The SVG hit-area is capturing clicks even when pointerEvents is 'none' for newly uploaded PDFs
-                // We need to delay single clicks so double-clicks can fire first
+                // This ensures measurement clicks are properly handled
                 if (isMeasuring && !isSelectionMode && !isCalibrating && !annotationTool && !(visualSearchMode && isSelectingSymbol)) {
-                  // Delay single click handling to allow double-click to fire first
-                  // If double-click fires within 300ms, it will cancel this timeout
-                  const clickTimeout = setTimeout(() => {
-                    console.log('⏱️ Processing delayed single click (no double-click detected)');
-                    handleClick(e);
-                  }, 300);
-                  
-                  // Store timeout so double-click can cancel it
-                  (e.target as any).__clickTimeout = clickTimeout;
+                  handleClick(e);
                   return;
                 }
                 
@@ -4465,36 +4410,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 // Right-click context menu (currently unused)
               }}
               onDoubleClick={(e) => {
-                console.log('🖱️🖱️ SVG DOUBLE-CLICK DETECTED:', { 
-                  isMeasuring, 
-                  annotationTool, 
-                  cutoutMode,
-                  fileId: file?.id,
-                  target: e.target?.constructor?.name,
-                  detail: e.detail // Shows click count
-                });
-                
-                // CRITICAL FIX: Forward measurement double-clicks from SVG to handleDoubleClick
-                // Similar to single clicks, the SVG hit-area may be capturing double-clicks
-                // Cancel any pending single-click timeout to prevent duplicate point addition
-                if (isMeasuring && !isSelectionMode && !isCalibrating && !annotationTool && !(visualSearchMode && isSelectingSymbol)) {
-                  // Cancel the delayed single click that was scheduled
-                  const target = e.target as any;
-                  if (target?.__clickTimeout) {
-                    console.log('✅ Cancelling pending single click - double-click detected');
-                    clearTimeout(target.__clickTimeout);
-                    delete target.__clickTimeout;
-                  }
-                  
-                  console.log('✅ Forwarding measurement double-click from SVG to handleDoubleClick');
-                  // Don't prevent default or stop propagation - let it bubble to canvas too as backup
-                  handleDoubleClick(e);
-                  return;
-                }
-                
-                // Handle double-click in annotation mode or cutout mode
-                // Note: Measurement double-clicks are handled by canvas for proper event flow
-                if (annotationTool || cutoutMode) {
+                // Handle double-click in annotation mode, measurement mode, or cutout mode
+                if (annotationTool || isMeasuring || cutoutMode) {
                   e.preventDefault();
                   e.stopPropagation();
                   handleDoubleClick(e);
