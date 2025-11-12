@@ -149,7 +149,8 @@ export function SheetSidebar({
     try {
       const { serverOcrService } = await import('../services/serverOcrService');
       const ocrData = await serverOcrService.getDocumentData(documentId, projectId);
-      return !!(ocrData && ocrData.results.length > 0);
+      // CRITICAL FIX: Ensure results is an array before accessing length
+      return !!(ocrData && Array.isArray(ocrData.results) && ocrData.results.length > 0);
     } catch (error) {
       return false;
     }

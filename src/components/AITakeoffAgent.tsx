@@ -214,7 +214,8 @@ export function AITakeoffAgent({
         const document = documents.find(d => d.id === docId);
         const documentName = document?.name || docId;
         
-        if (ocrData && ocrData.results.length > 0) {
+        // CRITICAL FIX: Ensure results is an array before accessing it
+        if (ocrData && Array.isArray(ocrData.results) && ocrData.results.length > 0) {
           // CRITICAL FIX: Filter out null/undefined results before accessing pageNumber
           // This prevents "Cannot read properties of undefined (reading 'pageNumber')" errors
           const pagesText = ocrData.results

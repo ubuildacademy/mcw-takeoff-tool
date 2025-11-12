@@ -372,7 +372,8 @@ When answering questions:
           // Try to get OCR data from server
           try {
             const ocrData = await serverOcrService.getDocumentData(doc.id, projectId);
-            if (ocrData && ocrData.results.length > 0) {
+            // CRITICAL FIX: Ensure results is an array before accessing length
+            if (ocrData && Array.isArray(ocrData.results) && ocrData.results.length > 0) {
               // Include full text content from all pages for comprehensive AI analysis
               // CRITICAL FIX: Filter out null/undefined results before accessing pageNumber
               const fullText = ocrData.results
