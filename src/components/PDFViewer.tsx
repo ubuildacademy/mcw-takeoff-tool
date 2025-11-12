@@ -595,7 +595,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           throw new Error('Invalid file object provided');
         }
         
-        console.log('📥 Loading PDF document:', { pdfUrl, fileId: file?.id, fileName: file?.name || file?.originalName });
         const pdf = await pdfjsLib.getDocument({
           url: pdfUrl,
           // Performance optimizations
@@ -609,7 +608,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           maxImageSize: 1024 * 1024, // 1MB max image size
           isEvalSupported: false, // Disable eval for security and performance
         }).promise;
-        console.log('✅ PDF document loaded:', { numPages: pdf.numPages, fileId: file?.id });
         setPdfDocument(pdf);
         
         if (externalTotalPages === undefined) {
@@ -687,12 +685,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Page-specific canvas sizing with outputScale for crisp rendering
   const updateCanvasDimensions = useCallback((pageNum: number, viewport: any, outputScale: number, page?: any) => {
     if (!pdfCanvasRef.current || !svgOverlayRef.current) {
-      console.log('⚠️ updateCanvasDimensions: Missing refs', { 
-        hasCanvas: !!pdfCanvasRef.current, 
-        hasSvg: !!svgOverlayRef.current,
-        pageNum,
-        fileId: file?.id
-      });
       return;
     }
     
@@ -713,17 +705,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     svgOverlay.setAttribute('width', viewport.width.toString());
     svgOverlay.setAttribute('height', viewport.height.toString());
     svgOverlay.setAttribute('viewBox', `0 0 ${viewport.width} ${viewport.height}`);
-    
-    console.log('✅ Canvas dimensions updated:', {
-      pageNum,
-      canvasWidth,
-      canvasHeight,
-      cssWidth: viewport.width,
-      cssHeight: viewport.height,
-      svgWidth: viewport.width,
-      svgHeight: viewport.height,
-      fileId: file?.id
-    });
     
     // Store page-specific viewport and output scale
     setPageViewports(prev => ({ ...prev, [pageNum]: viewport }));
@@ -1034,7 +1015,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Page visibility handler - ensures overlay is properly initialized when page becomes visible
   const onPageShown = useCallback((pageNum: number, viewport: any) => {
     if (!viewport || !svgOverlayRef.current) {
-      console.log('⚠️ onPageShown: Missing viewport or SVG overlay', { hasViewport: !!viewport, hasSvgOverlay: !!svgOverlayRef.current });
       return;
     }
     
@@ -1045,14 +1025,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     svgOverlay.setAttribute('height', viewport.height.toString());
     svgOverlay.setAttribute('viewBox', `0 0 ${viewport.width} ${viewport.height}`);
     svgOverlay.setAttribute('overflow', 'visible');
-    
-    console.log('✅ SVG overlay initialized:', {
-      pageNum,
-      width: viewport.width,
-      height: viewport.height,
-      fileId: file?.id,
-      hasHitArea: !!svgOverlay.querySelector('#hit-area')
-    });
     
     // Add a transparent hit area for pointer events
     // CRITICAL FIX: Only add hit-area when SVG needs to capture clicks (selection, calibration, annotation, visual search)
@@ -1070,7 +1042,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // So we'll handle measurement clicks in the onClick handler instead
       hitArea.setAttribute('pointer-events', 'all');
       svgOverlay.appendChild(hitArea);
-      console.log('✅ Hit area added to SVG overlay');
     }
     
     // Always re-render all annotations for this page, regardless of current state
@@ -1179,13 +1150,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const renderTask = page.render(renderContext);
       renderTaskRef.current = renderTask;
       await renderTask.promise;
-      
-      console.log('✅ PDF page rendered:', {
-        pageNum,
-        viewport: { width: viewport.width, height: viewport.height },
-        fileId: file?.id,
-        isInitialRender: !isInitialRenderComplete
-      });
       
       // After PDF is rendered, ensure overlay is properly initialized and render takeoff annotations
       onPageShown(pageNum, viewport);
@@ -3289,17 +3253,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Handle double-click to complete measurements
   const handleDoubleClick = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
-    console.log('🖱️🖱️ DOUBLE-CLICK HANDLER CALLED:', {
-      target: event.target,
-      currentTarget: event.currentTarget,
+    console.log('🖱️🖱️ DOUBLE-CLICK HANDLER:', {
       isMeasuring,
       measurementType,
-      currentMeasurementLength: currentMeasurement.length,
-      isContinuousDrawing,
-      activePointsLength: activePoints.length,
+      points: currentMeasurement.length,
+      isContinuous: isContinuousDrawing,
+      activePoints: activePoints.length,
       cutoutMode,
-      currentCutoutLength: currentCutout.length,
-      fileId: file?.id
+      cutoutPoints: currentCutout.length
     });
     
     // Prevent default behavior
@@ -3315,24 +3276,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Handle measurement completion when in measurement mode
     if (isMeasuring) {
-      console.log('🔍 Processing double-click for measurement:', {
-        measurementType,
-        currentMeasurementLength: currentMeasurement.length,
-        isContinuousDrawing,
-        activePointsLength: activePoints.length
-      });
       // Handle continuous linear measurements
       if (isContinuousDrawing && activePoints.length >= 2) {
         console.log('✅ Completing continuous linear measurement');
-        // Complete the continuous linear measurement
         completeContinuousLinearMeasurement();
         return;
       }
       
       // Handle non-continuous linear measurements (at least 2 points required)
       if (measurementType === 'linear' && !isContinuousDrawing && currentMeasurement.length >= 2) {
-        console.log('✅ Completing non-continuous linear measurement');
-        // Complete non-continuous linear measurement
+        console.log('✅ Completing linear measurement');
         completeMeasurement(currentMeasurement);
         return;
       }
@@ -3340,22 +3293,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // For area or volume measurements, require at least 3 points (as required by the calculator)
       if ((measurementType === 'area' || measurementType === 'volume') && currentMeasurement.length >= 3) {
         console.log('✅ Completing area/volume measurement');
-        // Complete area or volume measurement
         completeMeasurement(currentMeasurement);
         return;
       }
       
-      console.log('⚠️ Double-click conditions not met:', {
-        measurementType,
-        currentMeasurementLength: currentMeasurement.length,
-        isContinuousDrawing,
-        activePointsLength: activePoints.length,
-        requirements: {
-          linear: '>= 2 points',
-          area: '>= 3 points',
-          volume: '>= 3 points',
-          continuous: '>= 2 activePoints'
-        }
+      console.log('⚠️ Double-click: conditions not met', {
+        type: measurementType,
+        points: currentMeasurement.length,
+        needs: measurementType === 'linear' ? '2' : '3'
       });
     }
   }, [annotationTool, currentAnnotation, annotationColor, currentPage, onAnnotationToolChange, isContinuousDrawing, activePoints, measurementType, currentMeasurement, completeContinuousLinearMeasurement, completeMeasurement, cutoutMode, currentCutout, completeCutout, isMeasuring]);
@@ -4353,28 +4298,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 border: 'none',
                 outline: 'none'
               }}
-              onClick={(e) => {
-                console.log('🎯 CANVAS CLICK RECEIVED:', {
-                  target: e.target,
-                  currentTarget: e.currentTarget,
-                  clientX: e.clientX,
-                  clientY: e.clientY,
-                  fileId: file?.id,
-                  isMeasuring,
-                  isSelectionMode,
-                  isCalibrating,
-                  annotationTool
-                });
-                handleClick(e);
-              }}
+              onClick={handleClick}
               onDoubleClick={(e) => {
-                console.log('🎯 CANVAS DOUBLE-CLICK RECEIVED:', {
-                  target: e.target,
-                  currentTarget: e.currentTarget,
-                  fileId: file?.id,
-                  isMeasuring,
-                  annotationTool
-                });
+                console.log('🖱️🖱️ CANVAS DOUBLE-CLICK:', { isMeasuring, annotationTool, fileId: file?.id });
                 // Only handle double-click for non-annotation cases
                 if (!annotationTool) {
                   handleDoubleClick(e);
@@ -4415,26 +4341,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               onMouseMove={handleMouseMove}
               onMouseLeave={() => setMousePosition(null)}
               onClick={(e) => {
-                console.log('🎯 SVG CLICK RECEIVED:', {
-                  target: e.target,
-                  currentTarget: e.currentTarget,
-                  clientX: e.clientX,
-                  clientY: e.clientY,
-                  fileId: file?.id,
-                  isMeasuring,
-                  isSelectionMode,
-                  isCalibrating,
-                  annotationTool,
-                  visualSearchMode,
-                  isSelectingSymbol,
-                  pointerEvents: (isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol)) ? 'auto' : 'none'
-                });
-                
                 // CRITICAL FIX: If we're in measurement mode, forward the click to handleClick
                 // The SVG hit-area is capturing clicks even when pointerEvents is 'none' for newly uploaded PDFs
                 // This ensures measurement clicks are properly handled
                 if (isMeasuring && !isSelectionMode && !isCalibrating && !annotationTool && !(visualSearchMode && isSelectingSymbol)) {
-                  console.log('✅ Forwarding measurement click from SVG to handleClick');
                   handleClick(e);
                   return;
                 }
@@ -4501,20 +4411,18 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 // Right-click context menu (currently unused)
               }}
               onDoubleClick={(e) => {
-                console.log('🎯 SVG DOUBLE-CLICK RECEIVED:', {
-                  target: e.target,
-                  currentTarget: e.currentTarget,
-                  fileId: file?.id,
-                  isMeasuring,
-                  annotationTool,
+                console.log('🖱️🖱️ SVG DOUBLE-CLICK:', { 
+                  isMeasuring, 
+                  annotationTool, 
                   cutoutMode,
-                  pointerEvents: (isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol)) ? 'auto' : 'none'
+                  fileId: file?.id,
+                  target: e.target?.constructor?.name
                 });
                 
                 // CRITICAL FIX: Forward measurement double-clicks from SVG to handleDoubleClick
                 // Similar to single clicks, the SVG hit-area may be capturing double-clicks
                 if (isMeasuring && !isSelectionMode && !isCalibrating && !annotationTool && !(visualSearchMode && isSelectingSymbol)) {
-                  console.log('✅ Forwarding measurement double-click from SVG to handleDoubleClick');
+                  console.log('✅ Forwarding measurement double-click from SVG');
                   handleDoubleClick(e);
                   return;
                 }
