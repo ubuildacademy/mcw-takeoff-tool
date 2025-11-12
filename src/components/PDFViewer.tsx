@@ -686,7 +686,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Page-specific canvas sizing with outputScale for crisp rendering
   const updateCanvasDimensions = useCallback((pageNum: number, viewport: any, outputScale: number, page?: any) => {
-    if (!pdfCanvasRef.current || !svgOverlayRef.current) return;
+    if (!pdfCanvasRef.current || !svgOverlayRef.current) {
+      console.log('⚠️ updateCanvasDimensions: Missing refs', { 
+        hasCanvas: !!pdfCanvasRef.current, 
+        hasSvg: !!svgOverlayRef.current,
+        pageNum,
+        fileId: file?.id
+      });
+      return;
+    }
     
     const pdfCanvas = pdfCanvasRef.current;
     const svgOverlay = svgOverlayRef.current;
@@ -706,12 +714,23 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     svgOverlay.setAttribute('height', viewport.height.toString());
     svgOverlay.setAttribute('viewBox', `0 0 ${viewport.width} ${viewport.height}`);
     
+    console.log('✅ Canvas dimensions updated:', {
+      pageNum,
+      canvasWidth,
+      canvasHeight,
+      cssWidth: viewport.width,
+      cssHeight: viewport.height,
+      svgWidth: viewport.width,
+      svgHeight: viewport.height,
+      fileId: file?.id
+    });
+    
     // Store page-specific viewport and output scale
     setPageViewports(prev => ({ ...prev, [pageNum]: viewport }));
     setPageOutputScales(prev => ({ ...prev, [pageNum]: outputScale }));
     
     
-  }, []);
+  }, [file?.id]);
 
 
   // SVG-based takeoff annotation renderer - Page-specific with viewport isolation
@@ -1014,7 +1033,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Page visibility handler - ensures overlay is properly initialized when page becomes visible
   const onPageShown = useCallback((pageNum: number, viewport: any) => {
-    if (!viewport || !svgOverlayRef.current) return;
+    if (!viewport || !svgOverlayRef.current) {
+      console.log('⚠️ onPageShown: Missing viewport or SVG overlay', { hasViewport: !!viewport, hasSvgOverlay: !!svgOverlayRef.current });
+      return;
+    }
     
     const svgOverlay = svgOverlayRef.current;
     
@@ -1023,6 +1045,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     svgOverlay.setAttribute('height', viewport.height.toString());
     svgOverlay.setAttribute('viewBox', `0 0 ${viewport.width} ${viewport.height}`);
     svgOverlay.setAttribute('overflow', 'visible');
+    
+    console.log('✅ SVG overlay initialized:', {
+      pageNum,
+      width: viewport.width,
+      height: viewport.height,
+      fileId: file?.id,
+      hasHitArea: !!svgOverlay.querySelector('#hit-area')
+    });
     
     // Add a transparent hit area for pointer events
     const existingHitArea = svgOverlay.querySelector('#hit-area');
@@ -1034,6 +1064,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       hitArea.setAttribute('fill', 'transparent');
       hitArea.setAttribute('pointer-events', 'all');
       svgOverlay.appendChild(hitArea);
+      console.log('✅ Hit area added to SVG overlay');
     }
     
     // Always re-render all annotations for this page, regardless of current state
@@ -4280,7 +4311,20 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 border: 'none',
                 outline: 'none'
               }}
-              onClick={handleClick}
+              onClick={(e) => {
+                console.log('🎯 CANVAS CLICK RECEIVED:', {
+                  target: e.target,
+                  currentTarget: e.currentTarget,
+                  clientX: e.clientX,
+                  clientY: e.clientY,
+                  fileId: file?.id,
+                  isMeasuring,
+                  isSelectionMode,
+                  isCalibrating,
+                  annotationTool
+                });
+                handleClick(e);
+              }}
               onDoubleClick={(e) => {
                 // Only handle double-click for non-annotation cases
                 if (!annotationTool) {
@@ -4322,6 +4366,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               onMouseMove={handleMouseMove}
               onMouseLeave={() => setMousePosition(null)}
               onClick={(e) => {
+                console.log('🎯 SVG CLICK RECEIVED:', {
+                  target: e.target,
+                  currentTarget: e.currentTarget,
+                  clientX: e.clientX,
+                  clientY: e.clientY,
+                  fileId: file?.id,
+                  isSelectionMode,
+                  isCalibrating,
+                  annotationTool,
+                  visualSearchMode,
+                  isSelectingSymbol,
+                  pointerEvents: (isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol)) ? 'auto' : 'none'
+                });
                 // Handle clicks in selection mode, calibration mode, annotation mode, or visual search mode
                 // Note: Measurement clicks pass through to canvas for proper double-click handling
                 if (isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol)) {
