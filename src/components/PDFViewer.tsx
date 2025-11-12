@@ -4269,7 +4269,17 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             : (isCalibrating ? 'crosshair' : (isMeasuring ? 'crosshair' : (isSelectionMode ? 'pointer' : 'default')))
         }}
       >
-        <div className="flex justify-start p-6 relative">
+        <div 
+          className="flex justify-start p-6 relative"
+          onDoubleClick={(e) => {
+            console.log('🖱️🖱️ CONTAINER DOUBLE-CLICK DETECTED:', {
+              target: e.target,
+              currentTarget: e.currentTarget,
+              detail: e.detail,
+              fileId: file?.id
+            });
+          }}
+        >
           {/* Canvas Container - Ensures perfect alignment */}
           <div 
             className="relative inline-block"
@@ -4279,6 +4289,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               padding: 0,
               border: 'none',
               outline: 'none'
+            }}
+            onDoubleClick={(e) => {
+              console.log('🖱️🖱️ CANVAS CONTAINER DOUBLE-CLICK:', {
+                target: e.target,
+                detail: e.detail,
+                fileId: file?.id
+              });
             }}
           >
             {/* PDF Canvas (Background Layer) */}
@@ -4344,7 +4361,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 // CRITICAL FIX: If we're in measurement mode, forward the click to handleClick
                 // The SVG hit-area is capturing clicks even when pointerEvents is 'none' for newly uploaded PDFs
                 // This ensures measurement clicks are properly handled
+                // IMPORTANT: Don't stop propagation for measurement clicks to allow double-clicks to work
                 if (isMeasuring && !isSelectionMode && !isCalibrating && !annotationTool && !(visualSearchMode && isSelectingSymbol)) {
+                  // Don't stop propagation - let double-clicks bubble through
                   handleClick(e);
                   return;
                 }
@@ -4411,18 +4430,20 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 // Right-click context menu (currently unused)
               }}
               onDoubleClick={(e) => {
-                console.log('🖱️🖱️ SVG DOUBLE-CLICK:', { 
+                console.log('🖱️🖱️ SVG DOUBLE-CLICK DETECTED:', { 
                   isMeasuring, 
                   annotationTool, 
                   cutoutMode,
                   fileId: file?.id,
-                  target: e.target?.constructor?.name
+                  target: e.target?.constructor?.name,
+                  detail: e.detail // Shows click count
                 });
                 
                 // CRITICAL FIX: Forward measurement double-clicks from SVG to handleDoubleClick
                 // Similar to single clicks, the SVG hit-area may be capturing double-clicks
                 if (isMeasuring && !isSelectionMode && !isCalibrating && !annotationTool && !(visualSearchMode && isSelectingSymbol)) {
-                  console.log('✅ Forwarding measurement double-click from SVG');
+                  console.log('✅ Forwarding measurement double-click from SVG to handleDoubleClick');
+                  // Don't prevent default or stop propagation - let it bubble to canvas too as backup
                   handleDoubleClick(e);
                   return;
                 }
