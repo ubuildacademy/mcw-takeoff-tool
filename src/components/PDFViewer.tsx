@@ -4315,9 +4315,38 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 border: 'none',
                 outline: 'none'
               }}
-              onClick={handleClick}
+              onClick={(e) => {
+                // CRITICAL FIX: Delay single clicks when measuring to allow double-clicks to fire first
+                if (isMeasuring && !isSelectionMode && !isCalibrating && !annotationTool) {
+                  // Delay single click handling to allow double-click to fire first
+                  const clickTimeout = setTimeout(() => {
+                    console.log('⏱️ Processing delayed canvas single click (no double-click detected)');
+                    handleClick(e);
+                  }, 300);
+                  
+                  // Store timeout so double-click can cancel it
+                  (e.target as any).__clickTimeout = clickTimeout;
+                } else {
+                  // For non-measurement modes, handle immediately
+                  handleClick(e);
+                }
+              }}
               onDoubleClick={(e) => {
-                console.log('🖱️🖱️ CANVAS DOUBLE-CLICK:', { isMeasuring, annotationTool, fileId: file?.id });
+                console.log('🖱️🖱️ CANVAS DOUBLE-CLICK DETECTED:', { 
+                  isMeasuring, 
+                  annotationTool, 
+                  fileId: file?.id,
+                  detail: e.detail
+                });
+                
+                // Cancel any pending single-click timeout
+                const target = e.target as any;
+                if (target?.__clickTimeout) {
+                  console.log('✅ Cancelling pending canvas single click - double-click detected');
+                  clearTimeout(target.__clickTimeout);
+                  delete target.__clickTimeout;
+                }
+                
                 // Only handle double-click for non-annotation cases
                 if (!annotationTool) {
                   handleDoubleClick(e);
