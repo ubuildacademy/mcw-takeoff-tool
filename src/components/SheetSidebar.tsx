@@ -30,6 +30,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 interface SheetSidebarProps {
   projectId: string;
   documents: PDFDocument[];
+  documentsLoading?: boolean;
   onPageSelect: (documentId: string, pageNumber: number) => void;
   selectedDocumentId?: string;
   selectedPageNumber?: number;
@@ -55,6 +56,7 @@ interface SheetSidebarProps {
 export function SheetSidebar({ 
   projectId, 
   documents,
+  documentsLoading = false,
   onPageSelect, 
   selectedDocumentId,
   selectedPageNumber,
@@ -68,7 +70,9 @@ export function SheetSidebar({
 }: SheetSidebarProps) {
   const [filterBy, setFilterBy] = useState<'all' | 'withTakeoffs' | 'withoutTakeoffs'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [loading, setLoading] = useState(true);
+  // Use documentsLoading from parent if provided, otherwise use local loading state
+  const [localLoading, setLocalLoading] = useState(true);
+  const loading = documentsLoading !== undefined ? documentsLoading : localLoading;
   const [processingOCR, setProcessingOCR] = useState<string[]>([]);
   const [showLabelingDialog, setShowLabelingDialog] = useState(false);
   const [labelingProgress, setLabelingProgress] = useState('');
@@ -193,17 +197,18 @@ export function SheetSidebar({
   // Documents are passed as props and should already have full page data
   // The loadProjectDocuments function has been removed - use onReloadDocuments callback instead
 
-  // CRITICAL FIX: Clear loading state when documents are received from parent
-  // Since TakeoffWorkspace now handles loading, we just need to clear the loading state
-  // when documents are available (even if empty - that means loading is complete)
+  // CRITICAL FIX: Clear local loading state when documentsLoading prop is false
+  // If documentsLoading is not provided, fall back to clearing when documents are available
   useEffect(() => {
-    // Clear loading state once we have a projectId and documents prop is available
-    // The documents array will be empty initially, then populated by TakeoffWorkspace
-    // This ensures the component is responsive and doesn't hang
-    if (projectId && Array.isArray(documents)) {
-      setLoading(false);
+    if (documentsLoading !== undefined) {
+      // Parent is managing loading state, no need to manage locally
+      return;
     }
-  }, [projectId, documents]);
+    // Fallback: clear local loading state once we have a projectId and documents prop is available
+    if (projectId && Array.isArray(documents)) {
+      setLocalLoading(false);
+    }
+  }, [projectId, documents, documentsLoading]);
 
   // Update hasTakeoffs when takeoff measurements change (but preserve expansion state)
   // This effect only runs when the takeoff measurements actually change, not on every render
