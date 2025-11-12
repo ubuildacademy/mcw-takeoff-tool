@@ -1024,7 +1024,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const shouldCaptureClicks = isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol);
       hitArea.setAttribute('pointer-events', shouldCaptureClicks ? 'all' : 'none');
     }
-  }, [isMeasuring, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, isSelectingSymbol]);
+    
+    // CRITICAL FIX: Re-render markups when selection mode changes
+    // This ensures markups get click handlers when entering selection mode
+    // Markups rendered while isSelectionMode was false won't have click handlers
+    if (isSelectionMode && currentViewport && pdfPageRef.current) {
+      renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+    }
+  }, [isMeasuring, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, isSelectingSymbol, currentViewport, currentPage, renderTakeoffAnnotations]);
 
   // Page visibility handler - ensures overlay is properly initialized when page becomes visible
   const onPageShown = useCallback((pageNum: number, viewport: any) => {
