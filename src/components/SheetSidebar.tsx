@@ -193,6 +193,18 @@ export function SheetSidebar({
   // Documents are passed as props and should already have full page data
   // The loadProjectDocuments function has been removed - use onReloadDocuments callback instead
 
+  // CRITICAL FIX: Clear loading state when documents are received from parent
+  // Since TakeoffWorkspace now handles loading, we just need to clear the loading state
+  // when documents are available (even if empty - that means loading is complete)
+  useEffect(() => {
+    // Clear loading state once we have a projectId and documents prop is available
+    // The documents array will be empty initially, then populated by TakeoffWorkspace
+    // This ensures the component is responsive and doesn't hang
+    if (projectId && Array.isArray(documents)) {
+      setLoading(false);
+    }
+  }, [projectId, documents]);
+
   // Update hasTakeoffs when takeoff measurements change (but preserve expansion state)
   // This effect only runs when the takeoff measurements actually change, not on every render
   useEffect(() => {
