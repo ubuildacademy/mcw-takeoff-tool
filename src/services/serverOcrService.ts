@@ -180,17 +180,40 @@ class ServerOCRService {
     try {
       console.log(`🔍 Getting OCR data for document ${documentId} in project ${projectId}`);
       const resultsResponse = await ocrService.getDocumentResults(documentId, projectId);
-      console.log(`📊 OCR data retrieved:`, {
-        documentId: resultsResponse.documentId,
-        totalPages: resultsResponse.totalPages,
-        resultsCount: resultsResponse.results?.length || 0,
-        sampleResults: resultsResponse.results?.slice(0, 3).map((r: any) => ({
+      
+      // CRITICAL FIX: Ensure resultsResponse is valid and has a results array
+      if (!resultsResponse) {
+        console.warn(`⚠️ OCR data response is null for document ${documentId}`);
+        return null;
+      }
+      
+      // CRITICAL FIX: Safely handle results array - filter out null/undefined before mapping
+      // This prevents "Cannot read properties of undefined (reading 'pageNumber')" errors
+      const safeResults = Array.isArray(resultsResponse.results) 
+        ? resultsResponse.results.filter((r: any) => r != null) 
+        : [];
+      
+      const sampleResults = safeResults
+        .filter((r: any) => r.pageNumber != null)
+        .slice(0, 3)
+        .map((r: any) => ({
           pageNumber: r.pageNumber,
           textLength: r.text?.length || 0,
           textPreview: r.text?.substring(0, 100) + '...'
-        }))
+        }));
+      
+      console.log(`📊 OCR data retrieved:`, {
+        documentId: resultsResponse.documentId,
+        totalPages: resultsResponse.totalPages,
+        resultsCount: safeResults.length,
+        sampleResults: sampleResults
       });
-      return resultsResponse;
+      
+      // Ensure we return a valid structure with a safe results array
+      return {
+        ...resultsResponse,
+        results: safeResults
+      };
     } catch (error) {
       console.error(`❌ Failed to get OCR data for document ${documentId}:`, error);
       return null;
