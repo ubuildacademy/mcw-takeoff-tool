@@ -258,6 +258,10 @@ export function TakeoffWorkspace() {
           });
           clearInterval(pollInterval);
           
+          // CRITICAL FIX: Reload documents to update OCR status
+          // This ensures ChatTab and other components see the updated OCR status
+          loadProjectDocuments();
+          
           // Remove from tracking after 3 seconds
           setTimeout(() => {
             setOcrJobs(prev => {
