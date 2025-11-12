@@ -161,15 +161,18 @@ class ServerOCRService {
       return [];
     }
 
-    return searchResponse.results.map((result: any) => ({
-      documentId,
-      pageNumber: result.pageNumber,
-      matches: result.matches.map((match: any) => ({
-        text: match.snippet,
-        context: match.snippet, // Using snippet as context for now
-        confidence: match.confidence
-      }))
-    }));
+    // CRITICAL FIX: Filter out null/undefined results before accessing pageNumber
+    return searchResponse.results
+      .filter((result: any) => result != null && result.pageNumber != null)
+      .map((result: any) => ({
+        documentId,
+        pageNumber: result.pageNumber,
+        matches: (result.matches || []).filter((match: any) => match != null).map((match: any) => ({
+          text: match.snippet,
+          context: match.snippet, // Using snippet as context for now
+          confidence: match.confidence
+        }))
+      }));
   }
 
   // Get OCR data for a document
