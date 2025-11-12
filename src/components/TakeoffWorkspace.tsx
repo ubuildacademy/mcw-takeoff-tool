@@ -260,7 +260,10 @@ export function TakeoffWorkspace() {
           
           // CRITICAL FIX: Reload documents to update OCR status
           // This ensures ChatTab and other components see the updated OCR status
-          loadProjectDocuments();
+          // Use a small delay to ensure OCR results are fully saved to database
+          setTimeout(() => {
+            loadProjectDocuments();
+          }, 500);
           
           // Remove from tracking after 3 seconds
           setTimeout(() => {
