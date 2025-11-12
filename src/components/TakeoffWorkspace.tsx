@@ -630,7 +630,9 @@ export function TakeoffWorkspace() {
       
       const pdfFiles = files.filter((file: any) => file.mimetype === 'application/pdf');
       
-      const documents: PDFDocument[] = await Promise.all(
+      // CRITICAL FIX: Use Promise.allSettled instead of Promise.all to prevent one failure from breaking everything
+      // This ensures that even if one document fails to load, others can still load successfully
+      const documentResults = await Promise.allSettled(
         pdfFiles.map(async (file: any) => {
           try {
             // Check if document has OCR data
@@ -696,6 +698,28 @@ export function TakeoffWorkspace() {
           }
         })
       );
+      
+      // CRITICAL FIX: Process Promise.allSettled results - extract successful documents and log failures
+      // This prevents one document failure from causing a blank screen
+      const documents: PDFDocument[] = documentResults
+        .map((result, index) => {
+          if (result.status === 'fulfilled') {
+            return result.value;
+          } else {
+            // Log the error but don't crash - return a basic document structure
+            const file = pdfFiles[index];
+            console.error(`Failed to load document ${file?.originalName || 'unknown'}:`, result.reason);
+            return {
+              id: file?.id || `error-${index}`,
+              name: (file?.originalName || 'Unknown').replace('.pdf', ''),
+              totalPages: 1,
+              pages: [],
+              isExpanded: false,
+              ocrEnabled: false
+            };
+          }
+        })
+        .filter((doc): doc is PDFDocument => doc !== null && doc !== undefined);
       
       setDocuments(documents);
     } catch (error) {
