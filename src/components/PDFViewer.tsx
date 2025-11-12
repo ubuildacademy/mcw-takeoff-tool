@@ -3289,20 +3289,41 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Handle double-click to complete measurements
   const handleDoubleClick = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
+    console.log('🖱️🖱️ DOUBLE-CLICK HANDLER CALLED:', {
+      target: event.target,
+      currentTarget: event.currentTarget,
+      isMeasuring,
+      measurementType,
+      currentMeasurementLength: currentMeasurement.length,
+      isContinuousDrawing,
+      activePointsLength: activePoints.length,
+      cutoutMode,
+      currentCutoutLength: currentCutout.length,
+      fileId: file?.id
+    });
+    
     // Prevent default behavior
     event.preventDefault();
     event.stopPropagation();
     
     // Handle cut-out completion
     if (cutoutMode && currentCutout.length >= 3) {
+      console.log('✅ Completing cutout');
       completeCutout(currentCutout);
       return;
     }
     
     // Handle measurement completion when in measurement mode
     if (isMeasuring) {
+      console.log('🔍 Processing double-click for measurement:', {
+        measurementType,
+        currentMeasurementLength: currentMeasurement.length,
+        isContinuousDrawing,
+        activePointsLength: activePoints.length
+      });
       // Handle continuous linear measurements
       if (isContinuousDrawing && activePoints.length >= 2) {
+        console.log('✅ Completing continuous linear measurement');
         // Complete the continuous linear measurement
         completeContinuousLinearMeasurement();
         return;
@@ -3310,6 +3331,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       
       // Handle non-continuous linear measurements (at least 2 points required)
       if (measurementType === 'linear' && !isContinuousDrawing && currentMeasurement.length >= 2) {
+        console.log('✅ Completing non-continuous linear measurement');
         // Complete non-continuous linear measurement
         completeMeasurement(currentMeasurement);
         return;
@@ -3317,10 +3339,24 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       
       // For area or volume measurements, require at least 3 points (as required by the calculator)
       if ((measurementType === 'area' || measurementType === 'volume') && currentMeasurement.length >= 3) {
+        console.log('✅ Completing area/volume measurement');
         // Complete area or volume measurement
         completeMeasurement(currentMeasurement);
         return;
       }
+      
+      console.log('⚠️ Double-click conditions not met:', {
+        measurementType,
+        currentMeasurementLength: currentMeasurement.length,
+        isContinuousDrawing,
+        activePointsLength: activePoints.length,
+        requirements: {
+          linear: '>= 2 points',
+          area: '>= 3 points',
+          volume: '>= 3 points',
+          continuous: '>= 2 activePoints'
+        }
+      });
     }
   }, [annotationTool, currentAnnotation, annotationColor, currentPage, onAnnotationToolChange, isContinuousDrawing, activePoints, measurementType, currentMeasurement, completeContinuousLinearMeasurement, completeMeasurement, cutoutMode, currentCutout, completeCutout, isMeasuring]);
 
@@ -4332,6 +4368,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 handleClick(e);
               }}
               onDoubleClick={(e) => {
+                console.log('🎯 CANVAS DOUBLE-CLICK RECEIVED:', {
+                  target: e.target,
+                  currentTarget: e.currentTarget,
+                  fileId: file?.id,
+                  isMeasuring,
+                  annotationTool
+                });
                 // Only handle double-click for non-annotation cases
                 if (!annotationTool) {
                   handleDoubleClick(e);
@@ -4458,6 +4501,24 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 // Right-click context menu (currently unused)
               }}
               onDoubleClick={(e) => {
+                console.log('🎯 SVG DOUBLE-CLICK RECEIVED:', {
+                  target: e.target,
+                  currentTarget: e.currentTarget,
+                  fileId: file?.id,
+                  isMeasuring,
+                  annotationTool,
+                  cutoutMode,
+                  pointerEvents: (isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol)) ? 'auto' : 'none'
+                });
+                
+                // CRITICAL FIX: Forward measurement double-clicks from SVG to handleDoubleClick
+                // Similar to single clicks, the SVG hit-area may be capturing double-clicks
+                if (isMeasuring && !isSelectionMode && !isCalibrating && !annotationTool && !(visualSearchMode && isSelectingSymbol)) {
+                  console.log('✅ Forwarding measurement double-click from SVG to handleDoubleClick');
+                  handleDoubleClick(e);
+                  return;
+                }
+                
                 // Handle double-click in annotation mode or cutout mode
                 // Note: Measurement double-clicks are handled by canvas for proper event flow
                 if (annotationTool || cutoutMode) {
