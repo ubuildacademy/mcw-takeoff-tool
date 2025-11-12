@@ -182,37 +182,66 @@ class ServerOCRService {
       const resultsResponse = await ocrService.getDocumentResults(documentId, projectId);
       
       // CRITICAL FIX: Ensure resultsResponse is valid and has a results array
-      if (!resultsResponse) {
-        console.warn(`⚠️ OCR data response is null for document ${documentId}`);
+      if (!resultsResponse || typeof resultsResponse !== 'object') {
+        console.warn(`⚠️ OCR data response is invalid for document ${documentId}:`, resultsResponse);
         return null;
       }
       
       // CRITICAL FIX: Safely handle results array - filter out null/undefined before mapping
       // This prevents "Cannot read properties of undefined (reading 'pageNumber')" errors
-      const safeResults = Array.isArray(resultsResponse.results) 
-        ? resultsResponse.results.filter((r: any) => r != null) 
-        : [];
+      // Handle case where results might be null, undefined, or not an array
+      let safeResults: any[] = [];
+      try {
+        if (Array.isArray(resultsResponse.results)) {
+          safeResults = resultsResponse.results.filter((r: any) => {
+            // Comprehensive check: ensure r is an object and has pageNumber
+            return r != null && typeof r === 'object' && r.pageNumber != null;
+          });
+        } else if (resultsResponse.results != null) {
+          console.warn(`⚠️ OCR results is not an array for document ${documentId}:`, typeof resultsResponse.results);
+        }
+      } catch (error) {
+        console.error(`❌ Error processing OCR results array for document ${documentId}:`, error);
+        safeResults = [];
+      }
       
-      const sampleResults = safeResults
-        .filter((r: any) => r.pageNumber != null)
-        .slice(0, 3)
-        .map((r: any) => ({
-          pageNumber: r.pageNumber,
-          textLength: r.text?.length || 0,
-          textPreview: r.text?.substring(0, 100) + '...'
-        }));
+      // Safely build sampleResults with comprehensive error handling
+      let sampleResults: any[] = [];
+      try {
+        sampleResults = safeResults
+          .slice(0, 3)
+          .map((r: any) => {
+            // Double-check pageNumber exists before accessing
+            if (r && typeof r === 'object' && r.pageNumber != null) {
+              return {
+                pageNumber: r.pageNumber,
+                textLength: r.text?.length || 0,
+                textPreview: r.text?.substring(0, 100) + '...'
+              };
+            }
+            return null;
+          })
+          .filter((item: any) => item != null);
+      } catch (error) {
+        console.error(`❌ Error building sample results for document ${documentId}:`, error);
+        sampleResults = [];
+      }
       
       console.log(`📊 OCR data retrieved:`, {
-        documentId: resultsResponse.documentId,
-        totalPages: resultsResponse.totalPages,
+        documentId: resultsResponse.documentId || documentId,
+        totalPages: resultsResponse.totalPages || 0,
         resultsCount: safeResults.length,
         sampleResults: sampleResults
       });
       
       // Ensure we return a valid structure with a safe results array
+      // Don't spread resultsResponse to avoid any potential issues with its structure
       return {
-        ...resultsResponse,
-        results: safeResults
+        documentId: resultsResponse.documentId || documentId,
+        projectId: resultsResponse.projectId || projectId,
+        totalPages: resultsResponse.totalPages || safeResults.length || 0,
+        results: safeResults,
+        processedAt: resultsResponse.processedAt || new Date().toISOString()
       };
     } catch (error) {
       console.error(`❌ Failed to get OCR data for document ${documentId}:`, error);
