@@ -6,8 +6,7 @@
   "scripts": {
     "dev": "nodemon src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
-    "cleanup-orphaned": "ts-node src/scripts/cleanupOrphanedMeasurements.ts"
+    "start": "node dist/index.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
