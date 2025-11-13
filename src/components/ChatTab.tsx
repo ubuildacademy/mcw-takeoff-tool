@@ -150,48 +150,20 @@ export function ChatTab({
     }
   }, [messages, projectId]);
 
-  // Add initial system message with OCR status
+  // Add initial system message
   useEffect(() => {
     if (messages.length === 0 && isOllamaAvailable) {
-      const getOCRStatus = () => {
-        if (documents.length === 0) {
-          return "No documents uploaded yet.";
-        }
-        
-        let processedCount = 0;
-        let unprocessedCount = 0;
-        
-        documents.forEach(doc => {
-          // Check if document has OCR processing enabled or completed
-          if (doc.ocrEnabled || doc.pages?.some(page => page.ocrProcessed)) {
-            processedCount++;
-          } else {
-            unprocessedCount++;
-          }
-        });
-        
-        if (unprocessedCount === 0) {
-          return `All ${processedCount} documents are OCR processed and ready for analysis.`;
-        } else if (processedCount === 0) {
-          return `${unprocessedCount} documents need OCR processing for full analysis.`;
-        } else {
-          return `${processedCount} documents processed, ${unprocessedCount} need OCR processing.`;
-        }
-      };
-
       const systemMessage: ChatMessage = {
         id: 'system-welcome',
         role: 'assistant',
         content: `Hello! I'm your AI assistant for this takeoff project. I can help you analyze documents, answer questions about the project, and assist with measurements.
-
-**Document Status:** ${getOCRStatus()}
 
 What would you like to know about this project?`,
         timestamp: new Date()
       };
       setMessages([systemMessage]);
     }
-  }, [isOllamaAvailable, messages.length, documents]);
+  }, [isOllamaAvailable, messages.length]);
 
   // Handle sending a message
   const handleSendMessage = async () => {
