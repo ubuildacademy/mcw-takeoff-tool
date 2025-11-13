@@ -1971,20 +1971,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       }
       
       // Transform from base coordinates to rotated viewport coordinates
-      const rawRotation = viewState.rotation || 0;
-      const rotation = normalizeRotation(rawRotation);
+      const normalizedRotation = normalizeRotation(rotation);
       let canvasX: number, canvasY: number;
       
-      if (rotation === 0) {
+      if (normalizedRotation === 0) {
         canvasX = normalizedX * currentViewport.width;
         canvasY = normalizedY * currentViewport.height;
-      } else if (rotation === 90) {
+      } else if (normalizedRotation === 90) {
         canvasX = currentViewport.width * (1 - normalizedY);
         canvasY = currentViewport.height * normalizedX;
-      } else if (rotation === 180) {
+      } else if (normalizedRotation === 180) {
         canvasX = currentViewport.width * (1 - normalizedX);
         canvasY = currentViewport.height * (1 - normalizedY);
-      } else if (rotation === 270) {
+      } else if (normalizedRotation === 270) {
         canvasX = currentViewport.width * normalizedY;
         canvasY = currentViewport.height * (1 - normalizedX);
       } else {
