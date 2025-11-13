@@ -5,11 +5,12 @@
  * This can happen if files were deleted before we implemented cascade deletion.
  * 
  * Usage:
- *   npm run cleanup-orphaned-measurements [--dry-run]
+ *   npm run cleanup-orphaned [--dry-run]
  * 
  * If --dry-run is specified, it will only report orphaned measurements without deleting them.
  */
 
+import 'dotenv/config';
 import { supabase, TABLES } from '../supabase';
 
 interface OrphanedMeasurement {
