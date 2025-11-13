@@ -650,7 +650,21 @@ export function TakeoffWorkspace() {
             const { getApiBaseUrl } = await import('../lib/apiConfig');
             const API_BASE_URL = getApiBaseUrl();
             const pdfUrl = `${API_BASE_URL}/files/${file.id}`;
-            const pdf = await pdfjsLib.getDocument(pdfUrl).promise;
+            
+            // Get authentication token for PDF requests
+            const { supabase } = await import('../lib/supabase');
+            const { data: { session } } = await supabase.auth.getSession();
+            const httpHeaders: Record<string, string> = {
+              'Accept': 'application/pdf'
+            };
+            if (session?.access_token) {
+              httpHeaders['Authorization'] = `Bearer ${session.access_token}`;
+            }
+            
+            const pdf = await pdfjsLib.getDocument({
+              url: pdfUrl,
+              httpHeaders
+            }).promise;
             const totalPages = pdf.numPages;
             
             // CRITICAL FIX: Create pages array and load existing sheet data from database

@@ -586,8 +586,23 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           throw new Error('Invalid file object provided');
         }
         
+        // Get authentication token for PDF requests
+        let httpHeaders: Record<string, string> | undefined;
+        if (file && file.id) {
+          // Only add auth headers for API requests (not File objects or direct URLs)
+          const { supabase } = await import('../lib/supabase');
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.access_token) {
+            httpHeaders = {
+              'Authorization': `Bearer ${session.access_token}`,
+              'Accept': 'application/pdf'
+            };
+          }
+        }
+        
         const pdf = await pdfjsLib.getDocument({
           url: pdfUrl,
+          httpHeaders, // Include auth headers for authenticated requests
           // Performance optimizations
           disableAutoFetch: false,
           disableStream: false,
