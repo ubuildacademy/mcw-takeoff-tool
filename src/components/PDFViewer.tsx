@@ -1898,13 +1898,42 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (!viewport || annotation.points.length === 0) return;
     
     // Use the passed viewport directly - caller already calculated the correct one
-    // This prevents drift by using the fresh viewport instead of recalculating with stale viewState.scale
-    const vp = viewport;
+    const currentViewport = viewport;
     
-    const points = annotation.points.map(p => ({
-      x: p.x * vp.width,
-      y: p.y * vp.height
-    }));
+    // Get base viewport (rotation 0) to transform coordinates correctly
+    const pdfPage = pdfPageRef.current;
+    if (!pdfPage) return;
+    const baseViewport = pdfPage.getViewport({ scale: 1, rotation: 0 });
+    const rotation = viewState.rotation || 0;
+    
+    // Transform coordinates from base viewport to rotated viewport (same as measurements)
+    const points = annotation.points.map(p => {
+      // Coordinates are normalized to base viewport (rotation 0)
+      const baseX = p.x * baseViewport.width;
+      const baseY = p.y * baseViewport.height;
+      
+      // Transform from base coordinates to rotated viewport coordinates
+      let canvasX: number, canvasY: number;
+      
+      if (rotation === 0) {
+        canvasX = (baseX / baseViewport.width) * currentViewport.width;
+        canvasY = (baseY / baseViewport.height) * currentViewport.height;
+      } else if (rotation === 90) {
+        canvasX = (baseY / baseViewport.height) * currentViewport.width;
+        canvasY = (1 - baseX / baseViewport.width) * currentViewport.height;
+      } else if (rotation === 180) {
+        canvasX = (1 - baseX / baseViewport.width) * currentViewport.width;
+        canvasY = (1 - baseY / baseViewport.height) * currentViewport.height;
+      } else if (rotation === 270) {
+        canvasX = (1 - baseY / baseViewport.height) * currentViewport.width;
+        canvasY = (baseX / baseViewport.width) * currentViewport.height;
+      } else {
+        canvasX = (baseX / baseViewport.width) * currentViewport.width;
+        canvasY = (baseY / baseViewport.height) * currentViewport.height;
+      }
+      
+      return { x: canvasX, y: canvasY };
+    });
     
     const isSelected = selectedMarkupId === annotation.id;
     const strokeWidth = isSelected ? '5' : '3';
