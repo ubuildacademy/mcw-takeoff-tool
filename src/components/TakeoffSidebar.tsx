@@ -963,38 +963,42 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       
       // Prepare pages with measurements for PDF export
       const { getConditionTakeoffMeasurements, annotations: storeAnnotations } = useTakeoffStore.getState();
-      const pagesForExport = Array.from(pagesWithMeasurements.values()).map(pageInfo => {
-        // Get all measurements for this page
-        const pageMeasurements: any[] = [];
-        conditionIds.forEach(conditionId => {
-          const conditionMeasurements = getConditionTakeoffMeasurements(projectId, conditionId);
-          const pageSpecificMeasurements = conditionMeasurements.filter(
-            m => m.sheetId === pageInfo.sheetId && m.pdfPage === pageInfo.pageNumber
+      const pagesForExport = Array.from(pagesWithMeasurements.values())
+        .map(pageInfo => {
+          // Get all measurements for this page
+          const pageMeasurements: any[] = [];
+          conditionIds.forEach(conditionId => {
+            const conditionMeasurements = getConditionTakeoffMeasurements(projectId, conditionId);
+            const pageSpecificMeasurements = conditionMeasurements.filter(
+              m => m.sheetId === pageInfo.sheetId && m.pdfPage === pageInfo.pageNumber
+            );
+            pageMeasurements.push(...pageSpecificMeasurements);
+          });
+
+          // Get all annotations for this page
+          const pageAnnotations = storeAnnotations.filter(
+            a => a.projectId === projectId && 
+                 a.sheetId === pageInfo.sheetId && 
+                 a.pageNumber === pageInfo.pageNumber
           );
-          pageMeasurements.push(...pageSpecificMeasurements);
+
+          return {
+            pageNumber: pageInfo.pageNumber,
+            sheetName: pageInfo.sheetName,
+            sheetId: pageInfo.sheetId,
+            measurements: pageMeasurements,
+            annotations: pageAnnotations
+          };
+        })
+        // Filter out pages that have no measurements AND no annotations
+        .filter(page => page.measurements.length > 0 || page.annotations.length > 0)
+        .sort((a, b) => {
+          // Sort by sheet ID first, then by page number
+          if (a.sheetId !== b.sheetId) {
+            return a.sheetId.localeCompare(b.sheetId);
+          }
+          return a.pageNumber - b.pageNumber;
         });
-
-        // Get all annotations for this page
-        const pageAnnotations = storeAnnotations.filter(
-          a => a.projectId === projectId && 
-               a.sheetId === pageInfo.sheetId && 
-               a.pageNumber === pageInfo.pageNumber
-        );
-
-        return {
-          pageNumber: pageInfo.pageNumber,
-          sheetName: pageInfo.sheetName,
-          sheetId: pageInfo.sheetId,
-          measurements: pageMeasurements,
-          annotations: pageAnnotations
-        };
-      }).sort((a, b) => {
-        // Sort by sheet ID first, then by page number
-        if (a.sheetId !== b.sheetId) {
-          return a.sheetId.localeCompare(b.sheetId);
-        }
-        return a.pageNumber - b.pageNumber;
-      });
 
       // Export pages with measurements using pdf-lib
       onExportStatusUpdate?.('pdf', 30);

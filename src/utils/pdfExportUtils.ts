@@ -1,6 +1,10 @@
 import { PDFDocument, rgb, degrees, StandardFonts } from 'pdf-lib';
+import * as pdfjsLib from 'pdfjs-dist';
 import type { TakeoffMeasurement, Annotation } from '../types';
 import { formatFeetAndInches } from '../lib/utils';
+
+// Configure PDF.js worker for viewport calculations
+pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
 interface PageMeasurements {
   pageNumber: number;
@@ -58,7 +62,9 @@ async function fetchPDFBytes(fileId: string): Promise<Uint8Array> {
 async function drawMeasurement(
   page: any,
   measurement: TakeoffMeasurement,
-  pageHeight: number
+  pageHeight: number,
+  viewportWidth: number,
+  viewportHeight: number
 ) {
   // Convert RGB hex color to pdf-lib rgb values
   const hexToRgb = (hex: string) => {
@@ -75,14 +81,17 @@ async function drawMeasurement(
   const color = hexToRgb(measurement.conditionColor);
   const colorRgb = rgb(color.r, color.g, color.b);
 
-  // Get page dimensions
-  const { width } = page.getSize();
+  // Get page dimensions from pdf-lib
+  const { width: pageWidth } = page.getSize();
 
-  // Convert PDF coordinates (0-1 scale) to actual page coordinates
-  // PDF coordinates are bottom-up, so we need to flip Y
+  // Convert PDF coordinates (0-1 normalized scale) to actual page coordinates
+  // Coordinates are stored normalized based on viewport at rotation 0, scale 1
+  // pdf-lib uses bottom-left origin, so we need to flip Y
+  // Use viewport dimensions to match the coordinate system used when storing measurements
   const toPageCoords = (point: { x: number; y: number }) => ({
-    x: point.x * width,
-    y: pageHeight - point.y * pageHeight,
+    x: point.x * viewportWidth,
+    // Y flip: pdf-lib Y=0 is bottom, normalized Y=0 is top (from viewport)
+    y: pageHeight - (point.y * viewportHeight),
   });
 
   const points = measurement.pdfCoordinates.map(toPageCoords);
@@ -303,7 +312,9 @@ async function drawMeasurement(
 async function drawAnnotation(
   page: any,
   annotation: Annotation,
-  pageHeight: number
+  pageHeight: number,
+  viewportWidth: number,
+  viewportHeight: number
 ) {
   // Convert RGB hex color to pdf-lib rgb values
   const hexToRgb = (hex: string) => {
@@ -320,14 +331,17 @@ async function drawAnnotation(
   const color = hexToRgb(annotation.color);
   const colorRgb = rgb(color.r, color.g, color.b);
 
-  // Get page dimensions
-  const { width } = page.getSize();
+  // Get page dimensions from pdf-lib
+  const { width: pageWidth } = page.getSize();
 
-  // Convert PDF coordinates (0-1 scale) to actual page coordinates
+  // Convert PDF coordinates (0-1 normalized scale) to actual page coordinates
+  // Coordinates are stored normalized based on viewport at rotation 0, scale 1
+  // pdf-lib uses bottom-left origin, so we need to flip Y
+  // Use viewport dimensions to match the coordinate system used when storing annotations
   const toPageCoords = (point: { x: number; y: number }) => ({
-    x: point.x * width,
-    // PDF coordinates are bottom-up, so we need to flip Y
-    y: pageHeight - point.y * pageHeight,
+    x: point.x * viewportWidth,
+    // Y flip: pdf-lib Y=0 is bottom, normalized Y=0 is top (from viewport)
+    y: pageHeight - (point.y * viewportHeight),
   });
 
   const points = annotation.points.map(toPageCoords);
@@ -476,26 +490,36 @@ export async function exportPagesWithMeasurementsToPDF(
         const pdfBytes = await fetchPDFBytes(sheetId);
         const sourcePdf = await PDFDocument.load(pdfBytes);
 
+        // Load PDF with pdf.js to get accurate viewport dimensions (matches viewer)
+        const pdfJsDoc = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
+
         // Process each page
         for (const pageMeasurement of pages) {
           const pageIndex = pageMeasurement.pageNumber - 1; // Convert to 0-based index
+
+          // Get viewport dimensions for this specific page (matches viewer coordinate system)
+          const pdfJsPage = await pdfJsDoc.getPage(pageMeasurement.pageNumber);
+          // Get viewport at rotation 0, scale 1 (matches how coordinates are stored)
+          const baseViewport = pdfJsPage.getViewport({ scale: 1, rotation: 0 });
+          const viewportWidth = baseViewport.width;
+          const viewportHeight = baseViewport.height;
 
           // Copy the page from source PDF
           const [copiedPage] = await outputPdf.copyPages(sourcePdf, [pageIndex]);
           const addedPage = outputPdf.addPage(copiedPage);
 
-          // Get page dimensions
-          const { height } = addedPage.getSize();
+          // Get page dimensions from pdf-lib (should match viewport at rotation 0)
+          const { width: pageWidth, height: pageHeight } = addedPage.getSize();
 
           // Draw measurements on the page
           for (const measurement of pageMeasurement.measurements) {
-            await drawMeasurement(addedPage, measurement, height);
+            await drawMeasurement(addedPage, measurement, pageHeight, viewportWidth, viewportHeight);
           }
 
           // Draw annotations on the page
           if (pageMeasurement.annotations && pageMeasurement.annotations.length > 0) {
             for (const annotation of pageMeasurement.annotations) {
-              await drawAnnotation(addedPage, annotation, height);
+              await drawAnnotation(addedPage, annotation, pageHeight, viewportWidth, viewportHeight);
             }
           }
 
