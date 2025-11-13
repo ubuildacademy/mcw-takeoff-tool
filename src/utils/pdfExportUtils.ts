@@ -465,9 +465,10 @@ export async function exportPagesWithMeasurementsToPDF(
 
       console.log('📄 Processing sheet:', { sheetId, pageCount: pages.length, pages: pages.map(p => p.pageNumber) });
       
-      // Fetch the source PDF
-      const pdfBytes = await fetchPDFBytes(sheetId);
-      const sourcePdf = await PDFDocument.load(pdfBytes);
+      try {
+        // Fetch the source PDF
+        const pdfBytes = await fetchPDFBytes(sheetId);
+        const sourcePdf = await PDFDocument.load(pdfBytes);
 
       // Process each page
       for (const pageMeasurement of pages) {
@@ -494,6 +495,17 @@ export async function exportPagesWithMeasurementsToPDF(
 
         processedPages++;
         onProgress?.(10 + (processedPages / totalPages) * 70);
+      } catch (error: any) {
+        // If file not found, log and skip this sheet but continue with others
+        console.error(`⚠️ Failed to process sheet ${sheetId}:`, error);
+        if (error.message?.includes('404') || error.message?.includes('File not found')) {
+          console.warn(`⏭️ Skipping sheet ${sheetId} - file not found. This may indicate the file was deleted.`);
+          // Still increment processed pages to maintain progress
+          processedPages += pages.length;
+          continue;
+        }
+        // Re-throw other errors
+        throw error;
       }
     }
 
