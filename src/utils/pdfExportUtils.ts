@@ -498,56 +498,36 @@ export async function exportPagesWithMeasurementsToPDF(
         for (const pageMeasurement of pages) {
           const pageIndex = pageMeasurement.pageNumber - 1; // Convert to 0-based index
 
-          // Copy the page from source PDF first to get actual page dimensions
+          // Copy the page from source PDF first
           const [copiedPage] = await outputPdf.copyPages(sourcePdf, [pageIndex]);
           const addedPage = outputPdf.addPage(copiedPage);
 
-          // Get document rotation if available
-          const documentRotation = documentRotations?.get(sheetId) || 0;
-          
-          // CRITICAL: Rotate the page FIRST to match what the user saw in the viewer
-          // This ensures the page orientation matches, then we'll transform coordinates accordingly
-          if (documentRotation !== 0) {
-            addedPage.setRotation(degrees(documentRotation));
-            console.log(`🔄 Rotated exported page ${pageMeasurement.pageNumber} by ${documentRotation}° to match viewer`);
-          }
-
-          // Get actual PDF page dimensions AFTER rotation (pdf-lib adjusts dimensions when rotated)
-          const { width: pageWidth, height: pageHeight } = addedPage.getSize();
+          // Get ORIGINAL page dimensions BEFORE rotation (these match base viewport)
+          const { width: originalWidth, height: originalHeight } = addedPage.getSize();
 
           // Get viewport from pdf.js at rotation 0, scale 1 (matches how coordinates are normalized)
           const pdfJsPage = await pdfJsDoc.getPage(pageMeasurement.pageNumber);
           const baseViewport = pdfJsPage.getViewport({ scale: 1, rotation: 0 });
           
-          // Use pdf-lib's actual page dimensions for coordinate transformation
-          // After rotation, dimensions may be swapped (e.g., 90° rotation swaps width/height)
-          const viewportWidth = pageWidth;
-          const viewportHeight = pageHeight;
+          // Get document rotation if available
+          const documentRotation = documentRotations?.get(sheetId) || 0;
           
-          // Debug logging
+          // CRITICAL: Use ORIGINAL (unrotated) dimensions for coordinate transformation
+          // Coordinates are normalized to rotation 0, so we must use base dimensions
+          const baseViewportWidth = baseViewport.width;
+          const baseViewportHeight = baseViewport.height;
+          
+          // Debug logging BEFORE rotation
           console.log(`📐 Exporting page ${pageMeasurement.pageNumber} from sheet ${sheetId}:`, {
-            pdfLibDimensions: { width: pageWidth, height: pageHeight },
-            pdfJsBaseViewport: { width: baseViewport.width, height: baseViewport.height },
+            originalDimensions: { width: originalWidth, height: originalHeight },
+            pdfJsBaseViewport: { width: baseViewportWidth, height: baseViewportHeight },
             documentRotation,
             measurementCount: pageMeasurement.measurements.length,
             firstMeasurementCoords: pageMeasurement.measurements[0]?.pdfCoordinates?.[0]
           });
           
-          // Verify dimensions match (should be very close)
-          if (Math.abs(pageWidth - baseViewport.width) > 0.1 || Math.abs(pageHeight - baseViewport.height) > 0.1) {
-            console.warn(`⚠️ Page dimension mismatch for page ${pageMeasurement.pageNumber}:`, {
-              pdfLib: { width: pageWidth, height: pageHeight },
-              pdfJs: { width: baseViewport.width, height: baseViewport.height }
-            });
-          }
-
-          // Draw measurements on the rotated page
-          // Coordinates are normalized to rotation 0 base viewport, but page is now rotated
-          // We need to use the base viewport dimensions (unrotated) for coordinate transformation
-          // because coordinates were normalized based on those dimensions
-          const baseViewportWidth = baseViewport.width;
-          const baseViewportHeight = baseViewport.height;
-          
+          // Draw measurements on UNROTATED page using base viewport dimensions
+          // Coordinates are normalized to rotation 0, so use base dimensions
           for (const measurement of pageMeasurement.measurements) {
             await drawMeasurement(addedPage, measurement, baseViewportHeight, baseViewportWidth, baseViewportHeight);
           }
@@ -557,6 +537,14 @@ export async function exportPagesWithMeasurementsToPDF(
             for (const annotation of pageMeasurement.annotations) {
               await drawAnnotation(addedPage, annotation, baseViewportHeight, baseViewportWidth, baseViewportHeight);
             }
+          }
+
+          // CRITICAL: Rotate the page LAST (after drawing) to match what the user saw in the viewer
+          // pdf-lib rotates the entire page including all drawn content
+          // This ensures measurements rotate WITH the page content
+          if (documentRotation !== 0) {
+            addedPage.setRotation(degrees(documentRotation));
+            console.log(`🔄 Rotated exported page ${pageMeasurement.pageNumber} by ${documentRotation}° to match viewer`);
           }
 
           processedPages++;
