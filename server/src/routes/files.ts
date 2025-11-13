@@ -255,9 +255,29 @@ router.get('/:fileId', async (req, res) => {
     }
     
     const { fileId } = req.params;
-    const files = await storage.getFiles();
-    const meta = files.find(f => f.id === fileId);
-    if (!meta) return res.status(404).json({ error: 'Not found' });
+    
+    // Query file directly by ID instead of getting all files
+    const { data: fileData, error: fileError } = await supabase
+      .from(TABLES.FILES)
+      .select('*')
+      .eq('id', fileId)
+      .single();
+    
+    if (fileError || !fileData) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+    
+    // Map to StoredFileMeta format
+    const meta: StoredFileMeta = {
+      id: fileData.id,
+      projectId: fileData.project_id,
+      originalName: fileData.original_name,
+      filename: fileData.filename,
+      path: fileData.path,
+      size: fileData.size,
+      mimetype: fileData.mimetype,
+      uploadedAt: fileData.uploaded_at
+    };
     
     // Check if user is admin
     const userIsAdmin = await isAdmin(user.id);
