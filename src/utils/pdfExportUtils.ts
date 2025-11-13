@@ -450,6 +450,12 @@ export async function exportPagesWithMeasurementsToPDF(
       pagesBySheet.set(pageMeasurement.sheetId, existing);
     });
 
+    console.log('📊 PDF Export - Pages grouped by sheet:', {
+      totalSheets: pagesBySheet.size,
+      sheetIds: Array.from(pagesBySheet.keys()),
+      totalPages: pagesWithMeasurements.length
+    });
+
     let processedPages = 0;
     const totalPages = pagesWithMeasurements.length;
 
@@ -457,6 +463,8 @@ export async function exportPagesWithMeasurementsToPDF(
     for (const [sheetId, pages] of pagesBySheet.entries()) {
       onProgress?.(10 + (processedPages / totalPages) * 70);
 
+      console.log('📄 Processing sheet:', { sheetId, pageCount: pages.length, pages: pages.map(p => p.pageNumber) });
+      
       // Fetch the source PDF
       const pdfBytes = await fetchPDFBytes(sheetId);
       const sourcePdf = await PDFDocument.load(pdfBytes);
