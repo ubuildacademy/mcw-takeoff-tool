@@ -999,7 +999,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       // Export pages with measurements using pdf-lib
       onExportStatusUpdate?.('pdf', 30);
       
-      const measurementsPdfBytes = await exportPagesWithMeasurementsToPDF(
+      const exportResult = await exportPagesWithMeasurementsToPDF(
         pagesForExport,
         currentProject?.name || 'Project',
         (progress) => {
@@ -1009,10 +1009,20 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         }
       );
 
+      // Warn user if any sheets were skipped
+      if (exportResult.skippedSheets.length > 0) {
+        const skippedCount = exportResult.skippedSheets.length;
+        const warningMessage = `Warning: ${skippedCount} sheet(s) were skipped because the files were not found. ` +
+          `This may indicate files were deleted but measurements still reference them. ` +
+          `Your export may be incomplete. Please check your project files.`;
+        console.warn('⚠️ PDF Export Warning:', warningMessage, exportResult.skippedSheets);
+        alert(warningMessage);
+      }
+
       // Merge summary PDF with measurements PDF
       onExportStatusUpdate?.('pdf', 85);
       const summaryPdfDoc = await PDFLibDocument.load(summaryPdfBytes);
-      const measurementsPdfDoc = await PDFLibDocument.load(measurementsPdfBytes);
+      const measurementsPdfDoc = await PDFLibDocument.load(exportResult.pdfBytes);
       
       const finalPdf = await PDFLibDocument.create();
       

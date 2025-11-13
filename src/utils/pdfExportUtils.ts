@@ -433,11 +433,16 @@ async function drawAnnotation(
 /**
  * Export pages with measurements to PDF
  */
+export interface ExportResult {
+  pdfBytes: Uint8Array;
+  skippedSheets: Array<{ sheetId: string; reason: string }>;
+}
+
 export async function exportPagesWithMeasurementsToPDF(
   pagesWithMeasurements: PageMeasurements[],
   projectName: string,
   onProgress?: (progress: number) => void
-): Promise<Uint8Array> {
+): Promise<ExportResult> {
   try {
     // Create a new PDF document
     const outputPdf = await PDFDocument.create();
@@ -458,6 +463,7 @@ export async function exportPagesWithMeasurementsToPDF(
 
     let processedPages = 0;
     const totalPages = pagesWithMeasurements.length;
+    const skippedSheets: Array<{ sheetId: string; reason: string }> = [];
 
     // Process each sheet
     for (const [sheetId, pages] of pagesBySheet.entries()) {
@@ -470,36 +476,39 @@ export async function exportPagesWithMeasurementsToPDF(
         const pdfBytes = await fetchPDFBytes(sheetId);
         const sourcePdf = await PDFDocument.load(pdfBytes);
 
-      // Process each page
-      for (const pageMeasurement of pages) {
-        const pageIndex = pageMeasurement.pageNumber - 1; // Convert to 0-based index
+        // Process each page
+        for (const pageMeasurement of pages) {
+          const pageIndex = pageMeasurement.pageNumber - 1; // Convert to 0-based index
 
-        // Copy the page from source PDF
-        const [copiedPage] = await outputPdf.copyPages(sourcePdf, [pageIndex]);
-        const addedPage = outputPdf.addPage(copiedPage);
+          // Copy the page from source PDF
+          const [copiedPage] = await outputPdf.copyPages(sourcePdf, [pageIndex]);
+          const addedPage = outputPdf.addPage(copiedPage);
 
-        // Get page dimensions
-        const { height } = addedPage.getSize();
+          // Get page dimensions
+          const { height } = addedPage.getSize();
 
-        // Draw measurements on the page
-        for (const measurement of pageMeasurement.measurements) {
-          await drawMeasurement(addedPage, measurement, height);
-        }
-
-        // Draw annotations on the page
-        if (pageMeasurement.annotations && pageMeasurement.annotations.length > 0) {
-          for (const annotation of pageMeasurement.annotations) {
-            await drawAnnotation(addedPage, annotation, height);
+          // Draw measurements on the page
+          for (const measurement of pageMeasurement.measurements) {
+            await drawMeasurement(addedPage, measurement, height);
           }
-        }
 
-        processedPages++;
-        onProgress?.(10 + (processedPages / totalPages) * 70);
+          // Draw annotations on the page
+          if (pageMeasurement.annotations && pageMeasurement.annotations.length > 0) {
+            for (const annotation of pageMeasurement.annotations) {
+              await drawAnnotation(addedPage, annotation, height);
+            }
+          }
+
+          processedPages++;
+          onProgress?.(10 + (processedPages / totalPages) * 70);
+        }
       } catch (error: any) {
         // If file not found, log and skip this sheet but continue with others
         console.error(`⚠️ Failed to process sheet ${sheetId}:`, error);
         if (error.message?.includes('404') || error.message?.includes('File not found')) {
-          console.warn(`⏭️ Skipping sheet ${sheetId} - file not found. This may indicate the file was deleted.`);
+          const reason = 'File not found - may have been deleted';
+          console.warn(`⏭️ Skipping sheet ${sheetId} - ${reason}`);
+          skippedSheets.push({ sheetId, reason });
           // Still increment processed pages to maintain progress
           processedPages += pages.length;
           continue;
@@ -514,7 +523,7 @@ export async function exportPagesWithMeasurementsToPDF(
     const pdfBytes = await outputPdf.save();
     onProgress?.(95);
 
-    return pdfBytes;
+    return { pdfBytes, skippedSheets };
   } catch (error) {
     console.error('Error exporting PDF with measurements:', error);
     throw error;
