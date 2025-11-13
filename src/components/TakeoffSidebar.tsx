@@ -1010,9 +1010,19 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       // Export pages with measurements using pdf-lib
       onExportStatusUpdate?.('pdf', 30);
       
+      // Get document rotations for coordinate transformation
+      const { getDocumentRotation } = useTakeoffStore.getState();
+      const documentRotations = new Map<string, number>();
+      pagesForExport.forEach(page => {
+        if (!documentRotations.has(page.sheetId)) {
+          documentRotations.set(page.sheetId, getDocumentRotation(page.sheetId));
+        }
+      });
+      
       const exportResult = await exportPagesWithMeasurementsToPDF(
         pagesForExport,
         currentProject?.name || 'Project',
+        documentRotations,
         (progress) => {
           // Map pdf-lib progress (0-100) to our progress range (30-80)
           const mappedProgress = 30 + (progress * 0.5);
