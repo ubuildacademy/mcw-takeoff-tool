@@ -389,40 +389,163 @@ router.get('/project/:projectId', async (req, res) => {
 
 router.delete('/:fileId', async (req, res) => {
   try {
+    // Get authenticated user
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    
     const { fileId } = req.params;
-    console.log('🗑️ DELETE FILE REQUEST:', { fileId });
+    console.log('🗑️ DELETE FILE REQUEST:', { fileId, userId: user.id });
     
-    const files = await storage.getFiles();
-    const meta = files.find(f => f.id === fileId);
+    // Query file directly by ID
+    const { data: fileData, error: fileError } = await supabase
+      .from(TABLES.FILES)
+      .select('*')
+      .eq('id', fileId)
+      .single();
     
-    if (!meta) {
-      console.log('❌ File not found in storage:', fileId);
-      return res.status(404).json({ error: 'Not found' });
+    if (fileError || !fileData) {
+      console.log('❌ File not found:', fileId);
+      return res.status(404).json({ error: 'File not found' });
+    }
+    
+    // Check if user has access to this file's project
+    const userIsAdmin = await isAdmin(user.id);
+    let projectQuery = supabase
+      .from(TABLES.PROJECTS)
+      .select('id, user_id')
+      .eq('id', fileData.project_id);
+    
+    if (!userIsAdmin) {
+      projectQuery = projectQuery.eq('user_id', user.id);
+    }
+    
+    const { data: project, error: projectError } = await projectQuery.single();
+    
+    if (projectError || !project) {
+      return res.status(404).json({ error: 'File not found or access denied' });
     }
     
     console.log('🗑️ Deleting file:', { 
-      id: meta.id, 
-      name: meta.originalName, 
-      path: meta.path,
-      projectId: meta.projectId 
+      id: fileData.id, 
+      name: fileData.original_name, 
+      path: fileData.path,
+      projectId: fileData.project_id 
     });
+
+    // Check for associated measurements
+    const { data: measurements, error: measurementsError } = await supabase
+      .from(TABLES.TAKEOFF_MEASUREMENTS)
+      .select('id')
+      .eq('sheet_id', fileId);
+    
+    if (measurementsError) {
+      console.error('❌ Error checking measurements:', measurementsError);
+      return res.status(500).json({ error: 'Failed to check associated data' });
+    }
+    
+    const measurementCount = measurements?.length || 0;
+    console.log(`📊 Found ${measurementCount} measurements associated with file ${fileId}`);
+    
+    // Check for associated annotations (if annotations table exists)
+    // Note: Adjust table name if different
+    const { data: annotations } = await supabase
+      .from('takeoff_annotations')
+      .select('id')
+      .eq('sheet_id', fileId)
+      .limit(1);
+    
+    const annotationCount = annotations?.length || 0;
+    
+    // Check for associated calibrations
+    const { data: calibrations } = await supabase
+      .from(TABLES.CALIBRATIONS)
+      .select('id')
+      .eq('sheet_id', fileId)
+      .limit(1);
+    
+    const calibrationCount = calibrations?.length || 0;
+    
+    // If there's associated data, delete it first (cascade delete)
+    if (measurementCount > 0 || annotationCount > 0 || calibrationCount > 0) {
+      console.log(`🗑️ Cascading delete: ${measurementCount} measurements, ${annotationCount} annotations, ${calibrationCount} calibrations`);
+      
+      // Delete measurements
+      if (measurementCount > 0) {
+        const { error: deleteMeasurementsError } = await supabase
+          .from(TABLES.TAKEOFF_MEASUREMENTS)
+          .delete()
+          .eq('sheet_id', fileId);
+        
+        if (deleteMeasurementsError) {
+          console.error('❌ Error deleting measurements:', deleteMeasurementsError);
+          return res.status(500).json({ error: 'Failed to delete associated measurements' });
+        }
+        console.log(`✅ Deleted ${measurementCount} measurements`);
+      }
+      
+      // Delete annotations
+      if (annotationCount > 0) {
+        const { error: deleteAnnotationsError } = await supabase
+          .from('takeoff_annotations')
+          .delete()
+          .eq('sheet_id', fileId);
+        
+        if (deleteAnnotationsError) {
+          console.warn('⚠️ Error deleting annotations (may not exist):', deleteAnnotationsError);
+          // Don't fail if annotations table doesn't exist
+        } else {
+          console.log(`✅ Deleted ${annotationCount} annotations`);
+        }
+      }
+      
+      // Delete calibrations
+      if (calibrationCount > 0) {
+        const { error: deleteCalibrationsError } = await supabase
+          .from(TABLES.CALIBRATIONS)
+          .delete()
+          .eq('sheet_id', fileId);
+        
+        if (deleteCalibrationsError) {
+          console.error('❌ Error deleting calibrations:', deleteCalibrationsError);
+          return res.status(500).json({ error: 'Failed to delete associated calibrations' });
+        }
+        console.log(`✅ Deleted ${calibrationCount} calibrations`);
+      }
+    }
 
     // Delete from Supabase Storage
     const { error: storageError } = await supabase.storage
       .from('project-files')
-      .remove([meta.path]);
+      .remove([fileData.path]);
     
     if (storageError) {
       console.error('❌ Error removing file from Supabase Storage:', storageError);
       // Continue with metadata removal even if file deletion fails
     } else {
-      console.log('✅ File removed from Supabase Storage:', meta.path);
+      console.log('✅ File removed from Supabase Storage:', fileData.path);
     }
     
-    await storage.deleteFile(fileId);
-    console.log('✅ File metadata removed from database');
+    // Delete file metadata
+    const { error: deleteError } = await supabase
+      .from(TABLES.FILES)
+      .delete()
+      .eq('id', fileId);
     
-    return res.json({ success: true });
+    if (deleteError) {
+      console.error('❌ Error deleting file metadata:', deleteError);
+      return res.status(500).json({ error: 'Failed to delete file metadata' });
+    }
+    
+    console.log('✅ File and all associated data deleted successfully');
+    
+    return res.json({ 
+      success: true,
+      deletedMeasurements: measurementCount,
+      deletedAnnotations: annotationCount,
+      deletedCalibrations: calibrationCount
+    });
   } catch (error) {
     console.error('Error deleting file:', error);
     return res.status(500).json({ error: 'Failed to delete file' });
