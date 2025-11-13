@@ -762,10 +762,14 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       onExportStatusUpdate?.('pdf', 10);
 
       // Get all unique pages that have measurements from the report data
+      // Only include pages where the file actually exists in the documents list
       const pagesWithMeasurements = new Map<string, { pageNumber: number; sheetName: string; sheetId: string }>();
+      const existingFileIds = new Set(documents.map(d => d.id));
+      
       conditionIds.forEach(conditionId => {
         Object.entries(reportData[conditionId].pages).forEach(([pageKey, pageData]) => {
-          if (!pagesWithMeasurements.has(pageKey)) {
+          // Only add if file exists and not already added
+          if (existingFileIds.has(pageData.sheetId) && !pagesWithMeasurements.has(pageKey)) {
             pagesWithMeasurements.set(pageKey, {
               pageNumber: pageData.pageNumber,
               sheetName: pageData.sheetName,
@@ -775,22 +779,25 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         });
       });
 
-      // Also get all unique pages that have annotations
+      // Also get all unique pages that have annotations (only if file exists)
       const annotations = useTakeoffStore.getState().annotations;
       const projectAnnotations = annotations.filter(a => a.projectId === projectId);
       
       projectAnnotations.forEach(annotation => {
-        const pageKey = `${annotation.sheetId}-${annotation.pageNumber}`;
-        if (!pagesWithMeasurements.has(pageKey)) {
-          // Find sheet name from documents
-          const doc = documents.find(d => d.id === annotation.sheetId);
-          const sheetName = doc?.sheets?.find((s: Sheet) => s.pageNumber === annotation.pageNumber)?.name || `Page ${annotation.pageNumber}`;
-          
-          pagesWithMeasurements.set(pageKey, {
-            pageNumber: annotation.pageNumber,
-            sheetName: sheetName,
-            sheetId: annotation.sheetId
-          });
+        // Only add if file exists
+        if (existingFileIds.has(annotation.sheetId)) {
+          const pageKey = `${annotation.sheetId}-${annotation.pageNumber}`;
+          if (!pagesWithMeasurements.has(pageKey)) {
+            // Find sheet name from documents
+            const doc = documents.find(d => d.id === annotation.sheetId);
+            const sheetName = doc?.sheets?.find((s: Sheet) => s.pageNumber === annotation.pageNumber)?.name || `Page ${annotation.pageNumber}`;
+            
+            pagesWithMeasurements.set(pageKey, {
+              pageNumber: annotation.pageNumber,
+              sheetName: sheetName,
+              sheetId: annotation.sheetId
+            });
+          }
         }
       });
 

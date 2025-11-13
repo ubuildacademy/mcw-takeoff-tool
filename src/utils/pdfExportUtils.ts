@@ -497,19 +497,32 @@ export async function exportPagesWithMeasurementsToPDF(
         for (const pageMeasurement of pages) {
           const pageIndex = pageMeasurement.pageNumber - 1; // Convert to 0-based index
 
-          // Get viewport dimensions for this specific page (matches viewer coordinate system)
-          const pdfJsPage = await pdfJsDoc.getPage(pageMeasurement.pageNumber);
-          // Get viewport at rotation 0, scale 1 (matches how coordinates are stored)
-          const baseViewport = pdfJsPage.getViewport({ scale: 1, rotation: 0 });
-          const viewportWidth = baseViewport.width;
-          const viewportHeight = baseViewport.height;
-
-          // Copy the page from source PDF
+          // Copy the page from source PDF first to get actual page dimensions
           const [copiedPage] = await outputPdf.copyPages(sourcePdf, [pageIndex]);
           const addedPage = outputPdf.addPage(copiedPage);
 
-          // Get page dimensions from pdf-lib (should match viewport at rotation 0)
+          // Get actual PDF page dimensions from pdf-lib (these are the true page dimensions)
+          // These should match the viewport at rotation 0, scale 1 from pdf.js
           const { width: pageWidth, height: pageHeight } = addedPage.getSize();
+
+          // Get viewport from pdf.js at rotation 0, scale 1 to verify dimensions match
+          // Coordinates are normalized based on this viewport (or should be)
+          const pdfJsPage = await pdfJsDoc.getPage(pageMeasurement.pageNumber);
+          const baseViewport = pdfJsPage.getViewport({ scale: 1, rotation: 0 });
+          
+          // Use pdf-lib's actual page dimensions for coordinate transformation
+          // These should match baseViewport dimensions, but use pdf-lib's values for consistency
+          // pdf-lib uses bottom-left origin, so we need to account for Y-axis flip
+          const viewportWidth = pageWidth;
+          const viewportHeight = pageHeight;
+          
+          // Debug: Log if dimensions don't match (should be very close)
+          if (Math.abs(pageWidth - baseViewport.width) > 0.1 || Math.abs(pageHeight - baseViewport.height) > 0.1) {
+            console.warn(`⚠️ Page dimension mismatch for page ${pageMeasurement.pageNumber}:`, {
+              pdfLib: { width: pageWidth, height: pageHeight },
+              pdfJs: { width: baseViewport.width, height: baseViewport.height }
+            });
+          }
 
           // Draw measurements on the page
           for (const measurement of pageMeasurement.measurements) {

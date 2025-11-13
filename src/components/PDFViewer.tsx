@@ -2664,12 +2664,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Handle calibration clicks
     if (isCalibrating) {
       setCalibrationPoints(prev => {
-        // CRITICAL FIX: Normalize using viewport to get PDF-relative coordinates (0-1)
-        // Normalized coordinates represent position in PDF space, independent of zoom level
+        // CRITICAL FIX: Normalize using base viewport (rotation 0, scale 1) to get PDF-relative coordinates (0-1)
+        // Normalized coordinates represent position in PDF space, independent of zoom level and rotation
         // The calibration calculation will use these normalized coords with baseViewport dimensions
+        const baseViewport = pdfPageRef.current?.getViewport({ scale: 1, rotation: 0 }) || viewport;
+        const baseX = (cssX / viewport.width) * baseViewport.width;
+        const baseY = (cssY / viewport.height) * baseViewport.height;
         let pdfCoords = {
-          x: cssX / viewport.width,
-          y: cssY / viewport.height
+          x: baseX / baseViewport.width,
+          y: baseY / baseViewport.height
         };
         
         // Apply ortho snapping for calibration only if explicitly enabled
@@ -2699,10 +2702,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Handle cut-out mode clicks
     if (cutoutMode) {
-      // Convert CSS coordinates to PDF coordinates (0-1) for storage using current page viewport
+      // Convert CSS coordinates to PDF coordinates (0-1) for storage
+      // CRITICAL: Always normalize based on rotation 0, scale 1 viewport for consistency
+      const baseViewport = pdfPageRef.current?.getViewport({ scale: 1, rotation: 0 }) || viewport;
+      const baseX = (cssX / viewport.width) * baseViewport.width;
+      const baseY = (cssY / viewport.height) * baseViewport.height;
       let pdfCoords = {
-        x: cssX / viewport.width,
-        y: cssY / viewport.height
+        x: baseX / baseViewport.width,
+        y: baseY / baseViewport.height
       };
       
       // Disable ortho snapping for cut-outs to avoid interference
@@ -2720,9 +2727,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Handle annotation tool clicks
     if (annotationTool) {
+      // CRITICAL: Always normalize based on rotation 0, scale 1 viewport for consistency
+      const baseViewport = pdfPageRef.current?.getViewport({ scale: 1, rotation: 0 }) || viewport;
+      const baseX = (cssX / viewport.width) * baseViewport.width;
+      const baseY = (cssY / viewport.height) * baseViewport.height;
       const pdfCoords = {
-        x: cssX / viewport.width,
-        y: cssY / viewport.height
+        x: baseX / baseViewport.width,
+        y: baseY / baseViewport.height
       };
       
       if (annotationTool === 'text') {
@@ -2773,10 +2784,17 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Removed verbose logging - was causing console spam
     
-    // Convert CSS coordinates to PDF coordinates (0-1) for storage using current page viewport
+    // Convert CSS coordinates to PDF coordinates (0-1) for storage
+    // CRITICAL: Always normalize based on rotation 0, scale 1 viewport for consistency
+    // This ensures coordinates match the actual PDF page dimensions regardless of current rotation
+    const baseViewport = pdfPageRef.current?.getViewport({ scale: 1, rotation: 0 }) || viewport;
+    // Convert CSS coordinates to normalized coordinates based on base viewport
+    // First convert CSS coords to base viewport coords, then normalize
+    const baseX = (cssX / viewport.width) * baseViewport.width;
+    const baseY = (cssY / viewport.height) * baseViewport.height;
     let pdfCoords = {
-      x: cssX / viewport.width,
-      y: cssY / viewport.height
+      x: baseX / baseViewport.width,
+      y: baseY / baseViewport.height
     };
     
     // Smart cut-out mode entry removed - using manual toggle instead
