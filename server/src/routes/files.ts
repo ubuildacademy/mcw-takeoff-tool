@@ -256,6 +256,8 @@ router.get('/:fileId', async (req, res) => {
     
     const { fileId } = req.params;
     
+    console.log('🔍 Fetching file:', { fileId, userId: user.id });
+    
     // Query file directly by ID instead of getting all files
     const { data: fileData, error: fileError } = await supabase
       .from(TABLES.FILES)
@@ -263,9 +265,21 @@ router.get('/:fileId', async (req, res) => {
       .eq('id', fileId)
       .single();
     
-    if (fileError || !fileData) {
+    if (fileError) {
+      console.error('❌ Supabase query error:', fileError);
+      // Check if it's a "not found" error (PGRST116) or other error
+      if (fileError.code === 'PGRST116') {
+        return res.status(404).json({ error: 'File not found' });
+      }
+      return res.status(500).json({ error: 'Database error', details: fileError.message });
+    }
+    
+    if (!fileData) {
+      console.error('❌ No file data returned for fileId:', fileId);
       return res.status(404).json({ error: 'File not found' });
     }
+    
+    console.log('✅ File found:', { id: fileData.id, projectId: fileData.project_id, path: fileData.path });
     
     // Map to StoredFileMeta format
     const meta: StoredFileMeta = {
