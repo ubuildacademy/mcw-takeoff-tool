@@ -1254,20 +1254,49 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     
     // Transform points to match current viewport
-    // Points are stored in PDF coordinates - convert to viewport coordinates for rendering
+    // Points are stored normalized to BASE viewport (rotation 0), but we need to render on ROTATED viewport
     const pdfPage = pdfPageRef.current;
     if (!pdfPage) return;
     
     // Use the passed viewport directly - caller already calculated the correct one
-    // This prevents drift by using the fresh viewport instead of recalculating with stale viewState.scale
     const currentViewport = viewport;
     
-    // Convert normalized coordinates to current viewport coordinates for rendering
-    // Simple and reliable approach
+    // Get base viewport (rotation 0) to transform coordinates correctly
+    const baseViewport = pdfPage.getViewport({ scale: 1, rotation: 0 });
+    const rotation = viewState.rotation || 0;
+    
+    // Convert normalized coordinates (base viewport) to current viewport coordinates (rotated)
+    // This is the INVERSE of the transformation we do when storing coordinates
     const transformedPoints = points.map((point) => {
-      // Convert normalized coordinates to current viewport coordinates
-      const canvasX = point.x * currentViewport.width;
-      const canvasY = point.y * currentViewport.height;
+      // Coordinates are normalized to base viewport (rotation 0)
+      // Convert to base viewport pixel coordinates first
+      const baseX = point.x * baseViewport.width;
+      const baseY = point.y * baseViewport.height;
+      
+      // Transform from base coordinates to rotated viewport coordinates
+      let canvasX: number, canvasY: number;
+      
+      if (rotation === 0) {
+        // No rotation: direct mapping
+        canvasX = (baseX / baseViewport.width) * currentViewport.width;
+        canvasY = (baseY / baseViewport.height) * currentViewport.height;
+      } else if (rotation === 90) {
+        // 90° clockwise: (baseX, baseY) → (baseY, baseWidth - baseX) in rotated coords
+        canvasX = (baseY / baseViewport.height) * currentViewport.width;
+        canvasY = (1 - baseX / baseViewport.width) * currentViewport.height;
+      } else if (rotation === 180) {
+        // 180°: (baseX, baseY) → (baseWidth - baseX, baseHeight - baseY) in rotated coords
+        canvasX = (1 - baseX / baseViewport.width) * currentViewport.width;
+        canvasY = (1 - baseY / baseViewport.height) * currentViewport.height;
+      } else if (rotation === 270) {
+        // 270° clockwise: (baseX, baseY) → (baseHeight - baseY, baseX) in rotated coords
+        canvasX = (1 - baseY / baseViewport.height) * currentViewport.width;
+        canvasY = (baseX / baseViewport.width) * currentViewport.height;
+      } else {
+        // Fallback: direct mapping
+        canvasX = (baseX / baseViewport.width) * currentViewport.width;
+        canvasY = (baseY / baseViewport.height) * currentViewport.height;
+      }
       
       return {
         x: canvasX,
