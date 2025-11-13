@@ -248,10 +248,35 @@ router.get('/', async (req, res) => {
 
 router.get('/:fileId', async (req, res) => {
   try {
+    // Get authenticated user
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    
     const { fileId } = req.params;
     const files = await storage.getFiles();
     const meta = files.find(f => f.id === fileId);
     if (!meta) return res.status(404).json({ error: 'Not found' });
+    
+    // Check if user is admin
+    const userIsAdmin = await isAdmin(user.id);
+    
+    // Verify the user has access to this file's project
+    let projectQuery = supabase
+      .from(TABLES.PROJECTS)
+      .select('id, user_id')
+      .eq('id', meta.projectId);
+    
+    if (!userIsAdmin) {
+      projectQuery = projectQuery.eq('user_id', user.id);
+    }
+    
+    const { data: project, error: projectError } = await projectQuery.single();
+    
+    if (projectError || !project) {
+      return res.status(404).json({ error: 'File not found or access denied' });
+    }
     
     // Get file from Supabase Storage
     console.log('Fetching file from Supabase Storage:', meta.path);
