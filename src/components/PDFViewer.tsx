@@ -1263,11 +1263,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Get base viewport (rotation 0) to transform coordinates correctly
     const baseViewport = pdfPage.getViewport({ scale: 1, rotation: 0 });
-    // Normalize rotation to 0-360 range (handle negative values: -90 → 270, -180 → 180, -270 → 90)
-    let rotation = (viewState.rotation || 0) % 360;
-    if (rotation < 0) rotation += 360;
-    // Normalize to standard values (0, 90, 180, 270)
-    rotation = Math.round(rotation / 90) * 90;
+    const rotation = viewState.rotation || 0;
     
     // Convert normalized coordinates (base viewport) to current viewport coordinates (rotated)
     // This is the INVERSE of the transformation we do when storing coordinates
@@ -1943,11 +1939,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     const pdfPage = pdfPageRef.current;
     if (!pdfPage) return;
     const baseViewport = pdfPage.getViewport({ scale: 1, rotation: 0 });
-    // Normalize rotation to 0-360 range (handle negative values: -90 → 270, -180 → 180, -270 → 90)
-    let rotation = (viewState.rotation || 0) % 360;
-    if (rotation < 0) rotation += 360;
-    // Normalize to standard values (0, 90, 180, 270)
-    rotation = Math.round(rotation / 90) * 90;
+    const rotation = viewState.rotation || 0;
     
     // Transform coordinates from base viewport to rotated viewport (same as measurements)
     const points = annotation.points.map((p, idx) => {
@@ -2843,11 +2835,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Convert CSS coordinates to PDF coordinates (0-1) for storage
       // CRITICAL: Always normalize based on rotation 0, scale 1 viewport for consistency
       const baseViewport = pdfPageRef.current?.getViewport({ scale: 1, rotation: 0 }) || viewport;
-      // Normalize rotation to 0-360 range (handle negative values: -90 → 270, -180 → 180, -270 → 90)
-      let rotation = (viewState.rotation || 0) % 360;
-      if (rotation < 0) rotation += 360;
-      // Normalize to standard values (0, 90, 180, 270)
-      rotation = Math.round(rotation / 90) * 90;
+      const rotation = viewState.rotation || 0;
       
       let baseX: number, baseY: number;
       if (rotation === 0) {
@@ -2889,11 +2877,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (annotationTool) {
       // CRITICAL: Always normalize based on rotation 0, scale 1 viewport for consistency
       const baseViewport = pdfPageRef.current?.getViewport({ scale: 1, rotation: 0 }) || viewport;
-      // Normalize rotation to 0-360 range (handle negative values: -90 → 270, -180 → 180, -270 → 90)
-      let rotation = (viewState.rotation || 0) % 360;
-      if (rotation < 0) rotation += 360;
-      // Normalize to standard values (0, 90, 180, 270)
-      rotation = Math.round(rotation / 90) * 90;
+      const rotation = viewState.rotation || 0;
       
       let baseX: number, baseY: number;
       if (rotation === 0) {
