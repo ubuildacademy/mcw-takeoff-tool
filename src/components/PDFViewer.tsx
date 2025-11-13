@@ -1281,18 +1281,25 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         canvasY = normalizedY * currentViewport.height;
       } else if (rotation === 90) {
         // 90° clockwise rotation
-        // Storage: (cssX/cssW, cssY/cssH) rotated → (cssY/cssH, 1 - cssX/cssW) base normalized
-        // Rendering inverse: (x, y) base normalized → (y, 1-x) rotated normalized → scale
-        canvasX = normalizedY * currentViewport.width;
-        canvasY = (1 - normalizedX) * currentViewport.height;
+        // Storage: (cssX/RW, cssY/RH) rotated → (cssY/RH, 1 - cssX/RW) base normalized
+        // So: normalizedX = cssY/RH, normalizedY = 1 - cssX/RW
+        // Rendering inverse: cssX = RW * (1 - normalizedY), cssY = RH * normalizedX
+        canvasX = currentViewport.width * (1 - normalizedY);
+        canvasY = currentViewport.height * normalizedX;
       } else if (rotation === 180) {
         // 180° rotation
-        canvasX = (1 - normalizedX) * currentViewport.width;
-        canvasY = (1 - normalizedY) * currentViewport.height;
+        // Storage: (cssX/RW, cssY/RH) rotated → (1 - cssX/RW, 1 - cssY/RH) base normalized
+        // So: normalizedX = 1 - cssX/RW, normalizedY = 1 - cssY/RH
+        // Rendering inverse: cssX = RW * (1 - normalizedX), cssY = RH * (1 - normalizedY)
+        canvasX = currentViewport.width * (1 - normalizedX);
+        canvasY = currentViewport.height * (1 - normalizedY);
       } else if (rotation === 270) {
         // 270° clockwise rotation (or -90°)
-        canvasX = (1 - normalizedY) * currentViewport.width;
-        canvasY = normalizedX * currentViewport.height;
+        // Storage: (cssX/RW, cssY/RH) rotated → (1 - cssY/RH, cssX/RW) base normalized
+        // So: normalizedX = 1 - cssY/RH, normalizedY = cssX/RW
+        // Rendering inverse: cssX = RW * normalizedY, cssY = RH * (1 - normalizedX)
+        canvasX = currentViewport.width * normalizedY;
+        canvasY = currentViewport.height * (1 - normalizedX);
       } else {
         // Fallback: direct mapping
         canvasX = normalizedX * currentViewport.width;
@@ -1926,21 +1933,25 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Transform from base coordinates to rotated viewport coordinates
       let canvasX: number, canvasY: number;
       
+      // Use normalized coordinates directly (same as measurements)
+      const normalizedX = baseX / baseViewport.width;
+      const normalizedY = baseY / baseViewport.height;
+      
       if (rotation === 0) {
-        canvasX = (baseX / baseViewport.width) * currentViewport.width;
-        canvasY = (baseY / baseViewport.height) * currentViewport.height;
+        canvasX = normalizedX * currentViewport.width;
+        canvasY = normalizedY * currentViewport.height;
       } else if (rotation === 90) {
-        canvasX = (baseY / baseViewport.height) * currentViewport.width;
-        canvasY = (1 - baseX / baseViewport.width) * currentViewport.height;
+        canvasX = currentViewport.width * (1 - normalizedY);
+        canvasY = currentViewport.height * normalizedX;
       } else if (rotation === 180) {
-        canvasX = (1 - baseX / baseViewport.width) * currentViewport.width;
-        canvasY = (1 - baseY / baseViewport.height) * currentViewport.height;
+        canvasX = currentViewport.width * (1 - normalizedX);
+        canvasY = currentViewport.height * (1 - normalizedY);
       } else if (rotation === 270) {
-        canvasX = (1 - baseY / baseViewport.height) * currentViewport.width;
-        canvasY = (baseX / baseViewport.width) * currentViewport.height;
+        canvasX = currentViewport.width * normalizedY;
+        canvasY = currentViewport.height * (1 - normalizedX);
       } else {
-        canvasX = (baseX / baseViewport.width) * currentViewport.width;
-        canvasY = (baseY / baseViewport.height) * currentViewport.height;
+        canvasX = normalizedX * currentViewport.width;
+        canvasY = normalizedY * currentViewport.height;
       }
       
       return { x: canvasX, y: canvasY };
