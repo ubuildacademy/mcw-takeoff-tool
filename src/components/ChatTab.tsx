@@ -18,6 +18,7 @@ import {
 import { ollamaService, type OllamaMessage } from '../services/ollamaService';
 import { serverOcrService } from '../services/serverOcrService';
 import { useTakeoffStore } from '../store/useTakeoffStore';
+import { authHelpers } from '../lib/supabase';
 import type { PDFDocument } from '../types';
 // Removed complex export libraries - keeping it simple
 
@@ -47,6 +48,7 @@ export function ChatTab({
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isOllamaAvailable, setIsOllamaAvailable] = useState<boolean | null>(null);
+  const [userName, setUserName] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Function to strip markdown formatting from text
@@ -102,6 +104,22 @@ export function ChatTab({
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
+  // Load user name on mount
+  useEffect(() => {
+    const loadUserName = async () => {
+      try {
+        const metadata = await authHelpers.getUserMetadata();
+        if (metadata?.full_name) {
+          setUserName(metadata.full_name);
+        }
+      } catch (error) {
+        console.error('Failed to load user name:', error);
+      }
+    };
+
+    loadUserName();
+  }, []);
+
   // Check Ollama availability on mount
   useEffect(() => {
     const initializeOllama = async () => {
@@ -153,17 +171,18 @@ export function ChatTab({
   // Add initial system message
   useEffect(() => {
     if (messages.length === 0 && isOllamaAvailable) {
+      const greeting = userName ? `Hello ${userName}!` : 'Hello!';
       const systemMessage: ChatMessage = {
         id: 'system-welcome',
         role: 'assistant',
-        content: `Hello! I'm your AI assistant for this takeoff project. I can help you analyze documents, answer questions about the project, and assist with measurements.
+        content: `${greeting} I'm your AI assistant for this takeoff project. I can help you analyze documents, answer questions about the project, and assist with measurements.
 
 What would you like to know about this project?`,
         timestamp: new Date()
       };
       setMessages([systemMessage]);
     }
-  }, [isOllamaAvailable, messages.length]);
+  }, [isOllamaAvailable, messages.length, userName]);
 
   // Handle sending a message
   const handleSendMessage = async () => {
@@ -324,11 +343,9 @@ When answering questions:
       });
     }
     
-    // Documents with OCR status
+    // Documents (OCR is automatic, so we just list them)
     if (documents.length > 0) {
       context += `\n=== DOCUMENTS ===\n`;
-      let processedCount = 0;
-      let unprocessedCount = 0;
       
       for (const doc of documents) {
         context += `- ${doc.originalName || doc.filename}`;
@@ -336,39 +353,24 @@ When answering questions:
         if (doc.uploadedAt) context += ` - Uploaded: ${new Date(doc.uploadedAt).toLocaleDateString()}`;
         context += `\n`;
         
-        // Check OCR status
-        if (doc.ocrEnabled || doc.pages?.some(page => page.ocrProcessed)) {
-          context += `  ✓ OCR Processed (${doc.pages?.length || 1} pages)\n`;
-          processedCount++;
-          
-          // Try to get OCR data from server
-          try {
-            const ocrData = await serverOcrService.getDocumentData(doc.id, projectId);
-            // CRITICAL FIX: Ensure results is an array before accessing length
-            if (ocrData && Array.isArray(ocrData.results) && ocrData.results.length > 0) {
-              // Include full text content from all pages for comprehensive AI analysis
-              // CRITICAL FIX: Filter out null/undefined results before accessing pageNumber
-              const fullText = ocrData.results
-                .filter((result: any) => result != null && result.pageNumber != null)
-                .map((result: any) => `    Page ${result.pageNumber}:\n${result.text}`)
-                .join('\n\n');
-              if (fullText) {
-                context += `  Full OCR content:\n${fullText}\n`;
-              }
+        // Get OCR data from server (documents are automatically OCR'd)
+        try {
+          const ocrData = await serverOcrService.getDocumentData(doc.id, projectId);
+          // CRITICAL FIX: Ensure results is an array before accessing length
+          if (ocrData && Array.isArray(ocrData.results) && ocrData.results.length > 0) {
+            // Include full text content from all pages for comprehensive AI analysis
+            // CRITICAL FIX: Filter out null/undefined results before accessing pageNumber
+            const fullText = ocrData.results
+              .filter((result: any) => result != null && result.pageNumber != null)
+              .map((result: any) => `    Page ${result.pageNumber}:\n${result.text}`)
+              .join('\n\n');
+            if (fullText) {
+              context += `  Full OCR content:\n${fullText}\n`;
             }
-          } catch (error) {
-            context += `  ⚠ OCR data not accessible - AI analysis limited\n`;
           }
-        } else {
-          context += `  ⚠ OCR Not processed - AI cannot analyze content\n`;
-          unprocessedCount++;
+        } catch (error) {
+          // Silently skip if OCR data not available
         }
-      }
-      
-      context += `\nOCR Status: ${processedCount} processed, ${unprocessedCount} unprocessed\n`;
-      
-      if (unprocessedCount > 0) {
-        context += `\n💡 SUGGESTION: Run OCR on unprocessed documents to enable AI analysis of their content.\n`;
       }
     } else {
       context += `\n=== DOCUMENTS ===\n`;
@@ -491,7 +493,7 @@ Generated by Meridian Takeoff`;
     <div className="flex flex-col h-full bg-white">
       {/* Header with AI icon */}
       <div className="p-4 border-b border-slate-200">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
               <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -527,30 +529,6 @@ Generated by Meridian Takeoff`;
             )}
           </div>
         </div>
-
-        {/* Input */}
-        <div className="flex gap-2">
-          <Input
-            placeholder="Ask me anything about your project documents..."
-            value={inputMessage}
-            onChange={(e) => setInputMessage(e.target.value)}
-            onKeyPress={handleKeyPress}
-            disabled={isLoading}
-            className="flex-1 border-slate-300 focus:border-blue-500 focus:ring-blue-500"
-          />
-          <Button 
-            onClick={handleSendMessage}
-            disabled={!inputMessage.trim() || isLoading}
-            size="sm"
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4"
-          >
-            {isLoading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Send className="w-4 h-4" />
-            )}
-          </Button>
-        </div>
       </div>
 
       {/* Messages */}
@@ -562,7 +540,7 @@ Generated by Meridian Takeoff`;
             </div>
             <h3 className="text-lg font-semibold text-slate-900 mb-2">Start a conversation</h3>
             <p className="text-slate-600 max-w-sm">
-              Ask me anything about your project documents, measurements, or conditions. I can help you understand your blueprints and project details.
+              Ask me anything about your project. I can help you understand your blueprints and project details.
             </p>
           </div>
         ) : (
@@ -608,6 +586,32 @@ Generated by Meridian Takeoff`;
           ))
         )}
         <div ref={messagesEndRef} />
+      </div>
+      
+      {/* Input bar at bottom */}
+      <div className="p-4 border-t border-slate-200 bg-white">
+        <div className="flex gap-2">
+          <Input
+            placeholder="Ask me anything about your project"
+            value={inputMessage}
+            onChange={(e) => setInputMessage(e.target.value)}
+            onKeyPress={handleKeyPress}
+            disabled={isLoading}
+            className="flex-1 border-slate-300 focus:border-blue-500 focus:ring-blue-500"
+          />
+          <Button 
+            onClick={handleSendMessage}
+            disabled={!inputMessage.trim() || isLoading}
+            size="sm"
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4"
+          >
+            {isLoading ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Send className="w-4 h-4" />
+            )}
+          </Button>
+        </div>
       </div>
       
       {/* Status bar */}
