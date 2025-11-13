@@ -18,6 +18,8 @@ async function fetchPDFBytes(fileId: string): Promise<Uint8Array> {
   const { getApiBaseUrl } = await import('../lib/apiConfig');
   const API_BASE_URL = getApiBaseUrl();
   
+  console.log('📥 Fetching PDF bytes for fileId:', fileId);
+  
   // Get authentication token from Supabase session
   const { supabase } = await import('../lib/supabase');
   const { data: { session } } = await supabase.auth.getSession();
@@ -27,17 +29,24 @@ async function fetchPDFBytes(fileId: string): Promise<Uint8Array> {
   const headers: HeadersInit = {};
   if (authToken) {
     headers['Authorization'] = `Bearer ${authToken}`;
+  } else {
+    console.warn('⚠️ No auth token available for PDF fetch');
   }
   
-  const response = await fetch(`${API_BASE_URL}/files/${fileId}`, {
+  const url = `${API_BASE_URL}/files/${fileId}`;
+  console.log('🌐 Fetching PDF from:', url);
+  
+  const response = await fetch(url, {
     headers,
   });
   
   if (!response.ok) {
     const errorText = await response.text().catch(() => response.statusText);
+    console.error('❌ Failed to fetch PDF:', { status: response.status, statusText: response.statusText, errorText, fileId });
     throw new Error(`Failed to fetch PDF: ${response.status} ${errorText}`);
   }
   
+  console.log('✅ PDF fetched successfully for fileId:', fileId);
   const arrayBuffer = await response.arrayBuffer();
   return new Uint8Array(arrayBuffer);
 }
