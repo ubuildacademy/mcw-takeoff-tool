@@ -2668,8 +2668,26 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         // Normalized coordinates represent position in PDF space, independent of zoom level and rotation
         // The calibration calculation will use these normalized coords with baseViewport dimensions
         const baseViewport = pdfPageRef.current?.getViewport({ scale: 1, rotation: 0 }) || viewport;
-        const baseX = (cssX / viewport.width) * baseViewport.width;
-        const baseY = (cssY / viewport.height) * baseViewport.height;
+        const rotation = viewState.rotation || 0;
+        
+        let baseX: number, baseY: number;
+        if (rotation === 0) {
+          baseX = (cssX / viewport.width) * baseViewport.width;
+          baseY = (cssY / viewport.height) * baseViewport.height;
+        } else if (rotation === 90) {
+          baseX = (cssY / viewport.height) * baseViewport.width;
+          baseY = (1 - cssX / viewport.width) * baseViewport.height;
+        } else if (rotation === 180) {
+          baseX = (1 - cssX / viewport.width) * baseViewport.width;
+          baseY = (1 - cssY / viewport.height) * baseViewport.height;
+        } else if (rotation === 270) {
+          baseX = (1 - cssY / viewport.height) * baseViewport.width;
+          baseY = (cssX / viewport.width) * baseViewport.height;
+        } else {
+          baseX = (cssX / viewport.width) * baseViewport.width;
+          baseY = (cssY / viewport.height) * baseViewport.height;
+        }
+        
         let pdfCoords = {
           x: baseX / baseViewport.width,
           y: baseY / baseViewport.height
@@ -2705,8 +2723,26 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Convert CSS coordinates to PDF coordinates (0-1) for storage
       // CRITICAL: Always normalize based on rotation 0, scale 1 viewport for consistency
       const baseViewport = pdfPageRef.current?.getViewport({ scale: 1, rotation: 0 }) || viewport;
-      const baseX = (cssX / viewport.width) * baseViewport.width;
-      const baseY = (cssY / viewport.height) * baseViewport.height;
+      const rotation = viewState.rotation || 0;
+      
+      let baseX: number, baseY: number;
+      if (rotation === 0) {
+        baseX = (cssX / viewport.width) * baseViewport.width;
+        baseY = (cssY / viewport.height) * baseViewport.height;
+      } else if (rotation === 90) {
+        baseX = (cssY / viewport.height) * baseViewport.width;
+        baseY = (1 - cssX / viewport.width) * baseViewport.height;
+      } else if (rotation === 180) {
+        baseX = (1 - cssX / viewport.width) * baseViewport.width;
+        baseY = (1 - cssY / viewport.height) * baseViewport.height;
+      } else if (rotation === 270) {
+        baseX = (1 - cssY / viewport.height) * baseViewport.width;
+        baseY = (cssX / viewport.width) * baseViewport.height;
+      } else {
+        baseX = (cssX / viewport.width) * baseViewport.width;
+        baseY = (cssY / viewport.height) * baseViewport.height;
+      }
+      
       let pdfCoords = {
         x: baseX / baseViewport.width,
         y: baseY / baseViewport.height
@@ -2729,8 +2765,26 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (annotationTool) {
       // CRITICAL: Always normalize based on rotation 0, scale 1 viewport for consistency
       const baseViewport = pdfPageRef.current?.getViewport({ scale: 1, rotation: 0 }) || viewport;
-      const baseX = (cssX / viewport.width) * baseViewport.width;
-      const baseY = (cssY / viewport.height) * baseViewport.height;
+      const rotation = viewState.rotation || 0;
+      
+      let baseX: number, baseY: number;
+      if (rotation === 0) {
+        baseX = (cssX / viewport.width) * baseViewport.width;
+        baseY = (cssY / viewport.height) * baseViewport.height;
+      } else if (rotation === 90) {
+        baseX = (cssY / viewport.height) * baseViewport.width;
+        baseY = (1 - cssX / viewport.width) * baseViewport.height;
+      } else if (rotation === 180) {
+        baseX = (1 - cssX / viewport.width) * baseViewport.width;
+        baseY = (1 - cssY / viewport.height) * baseViewport.height;
+      } else if (rotation === 270) {
+        baseX = (1 - cssY / viewport.height) * baseViewport.width;
+        baseY = (cssX / viewport.width) * baseViewport.height;
+      } else {
+        baseX = (cssX / viewport.width) * baseViewport.width;
+        baseY = (cssY / viewport.height) * baseViewport.height;
+      }
+      
       const pdfCoords = {
         x: baseX / baseViewport.width,
         y: baseY / baseViewport.height
@@ -2788,10 +2842,35 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // CRITICAL: Always normalize based on rotation 0, scale 1 viewport for consistency
     // This ensures coordinates match the actual PDF page dimensions regardless of current rotation
     const baseViewport = pdfPageRef.current?.getViewport({ scale: 1, rotation: 0 }) || viewport;
-    // Convert CSS coordinates to normalized coordinates based on base viewport
-    // First convert CSS coords to base viewport coords, then normalize
-    const baseX = (cssX / viewport.width) * baseViewport.width;
-    const baseY = (cssY / viewport.height) * baseViewport.height;
+    
+    // Transform CSS coordinates from rotated viewport to base viewport coordinates
+    // pdf.js rotates by swapping dimensions and rotating the coordinate system
+    let baseX: number, baseY: number;
+    const rotation = viewState.rotation || 0;
+    
+    if (rotation === 0) {
+      // No rotation: direct mapping
+      baseX = (cssX / viewport.width) * baseViewport.width;
+      baseY = (cssY / viewport.height) * baseViewport.height;
+    } else if (rotation === 90) {
+      // 90° clockwise: (x, y) in rotated → (y, width - x) in base
+      baseX = (cssY / viewport.height) * baseViewport.width;
+      baseY = (1 - cssX / viewport.width) * baseViewport.height;
+    } else if (rotation === 180) {
+      // 180°: (x, y) in rotated → (width - x, height - y) in base
+      baseX = (1 - cssX / viewport.width) * baseViewport.width;
+      baseY = (1 - cssY / viewport.height) * baseViewport.height;
+    } else if (rotation === 270) {
+      // 270° clockwise (90° counter-clockwise): (x, y) in rotated → (height - y, x) in base
+      baseX = (1 - cssY / viewport.height) * baseViewport.width;
+      baseY = (cssX / viewport.width) * baseViewport.height;
+    } else {
+      // Fallback: use direct mapping (shouldn't happen with standard rotations)
+      baseX = (cssX / viewport.width) * baseViewport.width;
+      baseY = (cssY / viewport.height) * baseViewport.height;
+    }
+    
+    // Normalize to 0-1 range based on base viewport
     let pdfCoords = {
       x: baseX / baseViewport.width,
       y: baseY / baseViewport.height
