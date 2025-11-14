@@ -8,11 +8,6 @@ cmds = [
   "pip3 install --break-system-packages -r requirements.txt"
 ]
 
-[phases.build]
-cmds = [
-  "export PATH=\"/root/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin:$PATH\" && which npm && npm --version && npm install && npm run build"
-]
-
 [variables]
 PATH = "/root/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
