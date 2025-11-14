@@ -8,13 +8,8 @@ cmds = [
   "pip3 install --break-system-packages -r requirements.txt"
 ]
 
-[phases.build]
-cmds = [
-  "cd /app && npm install && npm run build"
-]
-
 [variables]
-PATH = "/root/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+PATH = "/root/.nix-profile/bin:$PATH"
 
 [start]
 cmd = "npm start"
