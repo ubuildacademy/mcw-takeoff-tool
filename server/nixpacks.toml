@@ -14,6 +14,9 @@ cmds = [
   "npm run build"
 ]
 
+[variables]
+PATH = "/root/.nix-profile/bin:$PATH"
+
 [start]
-cmd = "export PATH=\"/root/.nix-profile/bin:$PATH\" && npm start"
+cmd = "npm start"
 
