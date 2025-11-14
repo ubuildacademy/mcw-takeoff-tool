@@ -427,22 +427,30 @@ if __name__ == "__main__":
     };
 
     try {
-      // Check Python (try python3 first, then python)
-      let pythonCommand = 'python3';
-      try {
-        const { stdout } = await execAsync(`${pythonCommand} --version`, { timeout: 5000 });
-        result.pythonAvailable = true;
-        result.pythonVersion = stdout.trim();
-      } catch {
-        pythonCommand = 'python';
+      // Check Python (try multiple paths - Nix profile, system paths)
+      const pythonPaths = [
+        '/root/.nix-profile/bin/python3',
+        '/nix/var/nix/profiles/default/bin/python3',
+        'python3',
+        'python'
+      ];
+      
+      let pythonCommand: string | null = null;
+      for (const pythonPath of pythonPaths) {
         try {
-          const { stdout } = await execAsync(`${pythonCommand} --version`, { timeout: 5000 });
+          const { stdout } = await execAsync(`${pythonPath} --version`, { timeout: 5000 });
           result.pythonAvailable = true;
           result.pythonVersion = stdout.trim();
-        } catch (error) {
-          result.error = `Python not found: ${error instanceof Error ? error.message : 'Unknown error'}`;
-          return result;
+          pythonCommand = pythonPath;
+          break;
+        } catch {
+          continue;
         }
+      }
+      
+      if (!pythonCommand) {
+        result.error = 'Python not found in any expected location';
+        return result;
       }
       
       // Check OpenCV
