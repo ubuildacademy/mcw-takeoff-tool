@@ -859,10 +859,13 @@ export function SheetSidebar({
             sheetsToSave.map(s => s.pageNumber).join(', '));
 
           // Save sheets sequentially without debounced reloads to prevent race conditions
+          // CRITICAL: Refresh document reference to get latest page data before checking
+          const currentDocument = documents.find(doc => doc.id === document.id) || document;
+          
           for (const sheet of sheetsToSave) {
             try {
-              // Check if this page already has a meaningful label - if so, skip it
-              const page = document.pages.find(p => p.pageNumber === sheet.pageNumber);
+              // Use fresh document reference to check for existing labels
+              const page = currentDocument.pages.find(p => p.pageNumber === sheet.pageNumber);
               if (page && hasMeaningfulLabel(page)) {
                 console.log(`[Labeling] Skipping page ${sheet.pageNumber} - already has meaningful label: ${page.sheetName || page.sheetNumber}`);
                 continue;
