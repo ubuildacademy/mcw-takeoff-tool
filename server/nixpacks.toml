@@ -15,5 +15,5 @@ cmds = [
 ]
 
 [start]
-cmd = "npm start"
+cmd = "export PATH=\"/root/.nix-profile/bin:$PATH\" && npm start"
 
