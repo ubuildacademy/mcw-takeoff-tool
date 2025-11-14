@@ -1,13 +1,10 @@
-# Let Railway auto-detect providers from package.json and requirements.txt
-# This ensures npm is properly available
+providers = ["node", "python"]
 
-[phases.install]
-cmds = [
-  "python3 -m pip install --user --break-system-packages -r requirements.txt || pip3 install --user --break-system-packages -r requirements.txt || true"
-]
+# Railway's python provider will auto-install requirements.txt
+# Railway's node provider will auto-install npm packages and run build
 
 [variables]
-PATH = "/root/.local/bin:/opt/venv/bin:$PATH"
+PATH = "/opt/venv/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
 [start]
 cmd = "npm start"
