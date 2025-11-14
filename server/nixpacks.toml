@@ -10,11 +10,11 @@ cmds = [
 
 [phases.build]
 cmds = [
-  "export PATH=\"/app/node_modules/.bin:$PATH\" && npm install && npm run build"
+  "export PATH=\"/root/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin:$PATH\" && which npm && npm --version && npm install && npm run build"
 ]
 
 [variables]
-PATH = "/root/.nix-profile/bin:$PATH"
+PATH = "/root/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
 [start]
 cmd = "npm start"
