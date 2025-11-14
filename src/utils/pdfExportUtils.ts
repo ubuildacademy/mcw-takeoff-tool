@@ -22,8 +22,6 @@ async function fetchPDFBytes(fileId: string): Promise<Uint8Array> {
   const { getApiBaseUrl } = await import('../lib/apiConfig');
   const API_BASE_URL = getApiBaseUrl();
   
-  console.log('📥 Fetching PDF bytes for fileId:', fileId);
-  
   // Get authentication token from Supabase session
   const { supabase } = await import('../lib/supabase');
   const { data: { session } } = await supabase.auth.getSession();
@@ -38,7 +36,6 @@ async function fetchPDFBytes(fileId: string): Promise<Uint8Array> {
   }
   
   const url = `${API_BASE_URL}/files/${fileId}`;
-  console.log('🌐 Fetching PDF from:', url);
   
   const response = await fetch(url, {
     headers,
@@ -49,8 +46,6 @@ async function fetchPDFBytes(fileId: string): Promise<Uint8Array> {
     console.error('❌ Failed to fetch PDF:', { status: response.status, statusText: response.statusText, errorText, fileId });
     throw new Error(`Failed to fetch PDF: ${response.status} ${errorText}`);
   }
-  
-  console.log('✅ PDF fetched successfully for fileId:', fileId);
   const arrayBuffer = await response.arrayBuffer();
   return new Uint8Array(arrayBuffer);
 }
@@ -470,11 +465,7 @@ export async function exportPagesWithMeasurementsToPDF(
       pagesBySheet.set(pageMeasurement.sheetId, existing);
     });
 
-    console.log('📊 PDF Export - Pages grouped by sheet:', {
-      totalSheets: pagesBySheet.size,
-      sheetIds: Array.from(pagesBySheet.keys()),
-      totalPages: pagesWithMeasurements.length
-    });
+    // Grouping pages by sheet for export
 
     let processedPages = 0;
     const totalPages = pagesWithMeasurements.length;
@@ -484,7 +475,7 @@ export async function exportPagesWithMeasurementsToPDF(
     for (const [sheetId, pages] of pagesBySheet.entries()) {
       onProgress?.(10 + (processedPages / totalPages) * 70);
 
-      console.log('📄 Processing sheet:', { sheetId, pageCount: pages.length, pages: pages.map(p => p.pageNumber) });
+      // Processing sheet
       
       try {
         // Fetch the source PDF
@@ -517,15 +508,6 @@ export async function exportPagesWithMeasurementsToPDF(
           const baseViewportWidth = baseViewport.width;
           const baseViewportHeight = baseViewport.height;
           
-          // Debug logging BEFORE rotation
-          console.log(`📐 Exporting page ${pageMeasurement.pageNumber} from sheet ${sheetId}:`, {
-            originalDimensions: { width: originalWidth, height: originalHeight },
-            pdfJsBaseViewport: { width: baseViewportWidth, height: baseViewportHeight },
-            documentRotation,
-            measurementCount: pageMeasurement.measurements.length,
-            firstMeasurementCoords: pageMeasurement.measurements[0]?.pdfCoordinates?.[0]
-          });
-          
           // Draw measurements on UNROTATED page using base viewport dimensions
           // Coordinates are normalized to rotation 0, so use base dimensions
           for (const measurement of pageMeasurement.measurements) {
@@ -544,7 +526,6 @@ export async function exportPagesWithMeasurementsToPDF(
           // This ensures measurements rotate WITH the page content
           if (documentRotation !== 0) {
             addedPage.setRotation(degrees(documentRotation));
-            console.log(`🔄 Rotated exported page ${pageMeasurement.pageNumber} by ${documentRotation}° to match viewer`);
           }
 
           processedPages++;

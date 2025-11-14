@@ -63,14 +63,14 @@ class ServerOCRService {
   }
 
   private async _processDocument(documentId: string, projectId: string): Promise<DocumentOCRData> {
-    console.log(`🔍 Starting server-side OCR processing for document: ${documentId}`);
+    // Starting server-side OCR processing
     
     try {
       // Start OCR processing on server
       const startResponse = await ocrService.processDocument(documentId, projectId);
       
       if (startResponse.alreadyProcessed) {
-        console.log(`✅ Document ${documentId} already processed, fetching results...`);
+        // Document already processed, fetching results
         // Document already processed, fetch results
         const resultsResponse = await ocrService.getDocumentResults(documentId, projectId);
         return resultsResponse;
@@ -100,10 +100,10 @@ class ServerOCRService {
       try {
         const statusResponse = await ocrService.getJobStatus(jobId);
         
-        console.log(`📊 OCR Progress: ${statusResponse.progress}% (${statusResponse.processedPages}/${statusResponse.totalPages} pages)`);
+        // OCR progress update
         
         if (statusResponse.status === 'completed') {
-          console.log(`✅ OCR processing completed for document: ${documentId}`);
+          // OCR processing completed
           
           // Fetch the results
           const resultsResponse = await ocrService.getDocumentResults(documentId, projectId);
@@ -138,7 +138,7 @@ class ServerOCRService {
     const searchQuery = query.toLowerCase().trim();
     if (searchQuery.length < 2) return [];
 
-    console.log('🔍 Searching for:', searchQuery);
+    // Searching OCR data
 
     try {
       if (documentId) {
@@ -178,7 +178,7 @@ class ServerOCRService {
   // Get OCR data for a document
   async getDocumentData(documentId: string, projectId: string): Promise<DocumentOCRData | null> {
     try {
-      console.log(`🔍 Getting OCR data for document ${documentId} in project ${projectId}`);
+      // Getting OCR data for document
       const resultsResponse = await ocrService.getDocumentResults(documentId, projectId);
       
       // CRITICAL FIX: Ensure resultsResponse is valid and has a results array
@@ -227,12 +227,7 @@ class ServerOCRService {
         sampleResults = [];
       }
       
-      console.log(`📊 OCR data retrieved:`, {
-        documentId: resultsResponse.documentId || documentId,
-        totalPages: resultsResponse.totalPages || 0,
-        resultsCount: safeResults.length,
-        sampleResults: sampleResults
-      });
+      // OCR data retrieved
       
       // Ensure we return a valid structure with a safe results array
       // Don't spread resultsResponse to avoid any potential issues with its structure

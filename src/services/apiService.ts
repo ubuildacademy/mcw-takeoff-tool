@@ -116,7 +116,7 @@ export const fileService = {
   },
 
   async getProjectFiles(projectId: string) {
-    console.log('🔍 fileService.getProjectFiles: projectId =', projectId);
+    // Fetching project files
     const response = await apiClient.get(`/files/project/${projectId}`);
     
     // Transform field names from snake_case to camelCase
