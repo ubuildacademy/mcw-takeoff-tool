@@ -22,6 +22,14 @@ The CV Takeoff feature uses computer vision to automatically detect architectura
 
 ## Installation
 
+### Railway Deployment (Automatic)
+
+If you're deploying to Railway, Python and OpenCV will be automatically installed during the build process. Railway's NIXPACKS builder will detect the `requirements.txt` file in the `server` directory and install the Python dependencies automatically.
+
+**No additional configuration needed** - just deploy and Railway will handle Python/OpenCV installation.
+
+### Local Development Setup
+
 **Quick Setup:**
 ```bash
 # Install Python dependencies (if not already installed)
