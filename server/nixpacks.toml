@@ -1,17 +1,19 @@
-[providers]
-python = "3.11"
+providers = ["python"]
+
+[phases.setup]
+nixPkgs = ["python311"]
 
 [phases.install]
 cmds = [
-  'pip install -r requirements.txt'
+  "pip install -r requirements.txt"
 ]
 
 [phases.build]
 cmds = [
-  'npm install',
-  'npm run build'
+  "npm install",
+  "npm run build"
 ]
 
 [start]
-cmd = 'npm start'
+cmd = "npm start"
 
