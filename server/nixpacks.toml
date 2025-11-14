@@ -10,8 +10,7 @@ cmds = [
 
 [phases.build]
 cmds = [
-  "npm install",
-  "npm run build"
+  "export PATH=\"/app/node_modules/.bin:$PATH\" && npm install && npm run build"
 ]
 
 [variables]
