@@ -8,7 +8,7 @@ import { ChatTab } from './ChatTab';
 import { SearchTab } from './SearchTab';
 import { OCRProcessingDialog } from './OCRProcessingDialog';
 import { ProfitMarginDialog } from './ProfitMarginDialog';
-import { AITakeoffAgent } from './AITakeoffAgent';
+import { CVTakeoffAgent } from './CVTakeoffAgent';
 
 import { useTakeoffStore } from '../store/useTakeoffStore';
 import type { TakeoffCondition, Sheet, ProjectFile, PDFDocument, Calibration, PDFPage } from '../types';
@@ -46,8 +46,8 @@ import {
   Palette,
   Trash2,
   ChevronDown,
-  Bot,
-  Highlighter
+  Highlighter,
+  Scan
 } from "lucide-react";
 import { fileService, sheetService, ocrService } from '../services/apiService';
 
@@ -77,7 +77,7 @@ export function TakeoffWorkspace() {
   
   // Dialog states
   const [showProfitMarginDialog, setShowProfitMarginDialog] = useState(false);
-  const [showAITakeoffAgent, setShowAITakeoffAgent] = useState(false);
+  const [showCVTakeoffAgent, setShowCVTakeoffAgent] = useState(false);
   
   // Cut-out states
   const [cutoutMode, setCutoutMode] = useState(false);
@@ -1358,15 +1358,15 @@ export function TakeoffWorkspace() {
 
           <Separator orientation="vertical" className="h-8" />
 
-          {/* AI Takeoff Button */}
+          {/* CV Takeoff Button */}
           <Button
             size="sm"
             variant="outline"
             className="flex items-center gap-2"
-            onClick={() => setShowAITakeoffAgent(true)}
+            onClick={() => setShowCVTakeoffAgent(true)}
           >
-            <Bot className="w-4 h-4" />
-            AI Takeoff
+            <Scan className="w-4 h-4" />
+            CV Takeoff
           </Button>
 
           <Separator orientation="vertical" className="h-8" />
@@ -1870,15 +1870,16 @@ export function TakeoffWorkspace() {
         />
       )}
 
-      {/* AI Takeoff Agent */}
-      <AITakeoffAgent
-        isOpen={showAITakeoffAgent}
-        onClose={() => setShowAITakeoffAgent(false)}
-        projectId={projectId!}
-        documents={documents}
-        onPageSelect={handlePageSelect}
-      />
-
+      {/* CV Takeoff Agent */}
+      {projectId && (
+        <CVTakeoffAgent
+          isOpen={showCVTakeoffAgent}
+          onClose={() => setShowCVTakeoffAgent(false)}
+          projectId={projectId}
+          documentId={currentPdfFile?.id || null}
+          pageNumber={currentPage || null}
+        />
+      )}
 
     </div>
   );

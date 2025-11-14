@@ -198,54 +198,6 @@ export interface ProjectCostBreakdown {
   };
 }
 
-export interface AITakeoffScope {
-  scope: string;
-  projectId: string;
-  documentIds: string[];
-}
-
-export interface AIIdentifiedPage {
-  documentId: string;
-  pageNumber: number;
-  confidence: number;
-  reason: string;
-  selected: boolean;
-  pageType?: 'floor-plan' | 'finish-schedule' | 'detail-drawing' | 'elevation' | 'other';
-  indicators?: string[];
-  relevanceScore?: number;
-}
-
-export interface AITakeoffResult {
-  pageNumber: number;
-  documentId: string;
-  conditions: Array<{
-    name: string;
-    type: 'area' | 'volume' | 'linear' | 'count';
-    unit: string;
-    description: string;
-    color: string;
-  }>;
-  measurements: Array<{
-    conditionIndex: number;
-    points: Array<{ x: number; y: number }>;
-    calculatedValue: number;
-  }>;
-  calibration?: {
-    scaleFactor: number;
-    unit: string;
-    scaleText?: string; // Human-readable scale text
-  };
-}
-
-export interface AITakeoffProgress {
-  stage: 'identifying' | 'processing' | 'complete' | 'error';
-  currentPage: number;
-  totalPages: number;
-  message: string;
-  result?: AITakeoffResult;
-  error?: string;
-}
-
 export interface VisualSearchMatch {
   id: string;
   pageNumber: number;
