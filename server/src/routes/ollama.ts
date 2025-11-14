@@ -305,9 +305,10 @@ router.post('/analyze-sheets', async (req, res) => {
       const batchProgress = 15 + (currentBatch / totalBatches) * 70; // 15-85% for batch processing
       sendProgress(Math.round(batchProgress), `Processing batch ${currentBatch}/${totalBatches} (pages ${batchStart + 1}-${batchEnd})...`);
     
-      // Build context for this batch
+      // Build context for this batch - make page numbers explicit and clear
       let batchContext = `Analyze this batch of construction document pages and identify sheet information from title blocks.\n\n`;
-      batchContext += `Batch: pages ${batchStart + 1}-${batchEnd} of ${totalPages}\n\n`;
+      batchContext += `IMPORTANT: This batch contains pages ${batchStart + 1}-${batchEnd} of ${totalPages} total pages in the document.\n`;
+      batchContext += `You must return pageNumber values that match the actual page numbers shown below (${batchStart + 1}, ${batchStart + 2}, etc.), NOT relative positions in the batch.\n\n`;
       
       pagesToAnalyze.forEach((page: any) => {
         if (page && page.text && page.text.trim().length > 0) {
@@ -316,7 +317,8 @@ router.post('/analyze-sheets', async (req, res) => {
           
           // Limit to reasonable size to avoid token limits (increased for longer sheet names)
           const limitedText = filteredText.substring(0, 6000);
-          batchContext += `Page ${page.pageNumber}:\n${limitedText}\n\n`;
+          // Make it very clear this is the absolute page number
+          batchContext += `--- PAGE ${page.pageNumber} (absolute page number in document) ---\n${limitedText}\n\n`;
         }
       });
       
@@ -440,15 +442,26 @@ If you cannot find a sheet number or name, use "Unknown". Extract exactly what y
           throw new Error('Response is not an array');
         }
 
-        // Validate each sheet object
-        batchSheets = batchSheets.filter(sheet => 
-          sheet && 
-          typeof sheet.pageNumber === 'number' && 
-          typeof sheet.sheetNumber === 'string' && 
-          typeof sheet.sheetName === 'string'
-        );
+        // Validate each sheet object and ensure page numbers match the batch
+        const expectedPageNumbers = new Set(pagesToAnalyze.map((p: any) => p.pageNumber));
+        
+        batchSheets = batchSheets
+          .filter(sheet => 
+            sheet && 
+            typeof sheet.pageNumber === 'number' && 
+            typeof sheet.sheetNumber === 'string' && 
+            typeof sheet.sheetName === 'string'
+          )
+          // CRITICAL: Validate that pageNumber matches one of the pages in this batch
+          .filter(sheet => {
+            if (!expectedPageNumbers.has(sheet.pageNumber)) {
+              console.warn(`[Batch ${Math.floor(batchStart / BATCH_SIZE) + 1}] AI returned invalid pageNumber ${sheet.pageNumber} for batch containing pages: ${Array.from(expectedPageNumbers).join(', ')}`);
+              return false;
+            }
+            return true;
+          });
 
-        console.log(`Batch ${Math.floor(batchStart / BATCH_SIZE) + 1} parsed sheets:`, batchSheets.length, 'sheets found');
+        console.log(`Batch ${Math.floor(batchStart / BATCH_SIZE) + 1} parsed sheets:`, batchSheets.length, 'sheets found (expected pages:', Array.from(expectedPageNumbers).join(', '), ')');
         
         // Add to all sheets
         allSheets = allSheets.concat(batchSheets);
