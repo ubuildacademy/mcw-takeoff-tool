@@ -415,7 +415,7 @@ export function TakeoffWorkspace() {
           });
           
           if (calibrations.length > 0) {
-            console.log(`✅ Loaded ${calibrations.length} calibration(s) from database for project ${projectId}`);
+            // Calibrations loaded from database
           } else {
             console.log(`ℹ️ No calibrations found in database for project ${projectId}`);
           }
@@ -1052,7 +1052,7 @@ export function TakeoffWorkspace() {
           });
           
           await Promise.all(savePromises);
-          console.log(`✅ Calibration saved to database for entire project (${pdfFiles.length} sheet(s))`, { scope, scaleFactor, unit });
+          // Calibration saved to database for entire project
         } else {
           // "This sheet only" = save calibration for just the current sheet
           // scope = 'page' -> pageNumber = currentPage or provided pageNumber (page-specific)
@@ -1073,7 +1073,7 @@ export function TakeoffWorkspace() {
             viewportHeight,
             rotation
           );
-          console.log('✅ Calibration saved to database for this sheet only', { scope, pageNumber: calibrationPageNumber, sheetId: currentPdfFile.id });
+          // Calibration saved to database for this sheet only
         }
       } catch (error) {
         console.error('❌ Failed to save calibration to database:', error);

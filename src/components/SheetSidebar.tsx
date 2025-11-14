@@ -349,8 +349,7 @@ export function SheetSidebar({
         onDocumentsUpdate(updatedDocuments);
       }
       
-      // Show success feedback
-      console.log(`✅ Sheet name saved: "${editingSheetName.trim()}" for page ${editingPageNumber}`);
+      // Sheet name saved successfully
       
       cancelEditingSheetName();
     } catch (error) {
@@ -435,7 +434,7 @@ export function SheetSidebar({
       }
       
       // Show success feedback
-      console.log(`✅ Sheet number saved: "${editingSheetNumber.trim()}" for page ${editingSheetNumberPageNumber}`);
+      // Sheet number saved successfully
       
       cancelEditingSheetNumber();
     } catch (error) {
@@ -465,7 +464,7 @@ export function SheetSidebar({
   // Handle unified document analysis using AI
   const handleAnalyzeDocument = async (documentId: string) => {
     try {
-      console.log('Starting unified document analysis for document:', documentId);
+      // Starting unified document analysis
       
       // Check if document exists
       const document = documents.find(doc => doc.id === documentId);
@@ -543,7 +542,7 @@ export function SheetSidebar({
           sheet.sheetName && sheet.sheetName !== 'Unknown'
         );
         
-        console.log(`Saving ${sheetsToSave.length} sheet labels to database...`);
+        // Saving sheet labels to database
         
         // Save sheets in batches to avoid overwhelming the API
         const BATCH_SIZE = 10; // Save 10 sheets at a time
@@ -586,7 +585,7 @@ export function SheetSidebar({
             } catch (error: any) {
               // Handle expected 404s gracefully (they're normal for new sheets)
               if (error.isExpected404) {
-                console.log(`Sheet ${sheet.pageNumber} not found (expected for new document), attempting to create...`);
+                // Sheet not found, creating new entry
                 // Try again - the PUT endpoint should create it
                 try {
                   const sheetId = `${documentId}-${sheet.pageNumber}`;
@@ -635,7 +634,7 @@ export function SheetSidebar({
         
         setLabelingProgress('Complete!');
         setLabelingProgressPercent(100);
-        console.log(`Successfully saved ${savedCount} sheet labels to database${failedCount > 0 ? ` (${failedCount} failed)` : ''}`);
+        // Sheet labels saved to database
         
         // Show success message first
         const successMessage = failedCount > 0 
@@ -843,23 +842,41 @@ export function SheetSidebar({
             sheetName: string;
           }
 
-          const sheetsToSave = (result.sheets as SheetAnalysisResult[]).filter((sheet: SheetAnalysisResult) => 
-            sheet.sheetNumber && sheet.sheetNumber !== 'Unknown' && 
-            sheet.sheetName && sheet.sheetName !== 'Unknown'
-          );
+          // Get max page number for validation
+          const maxPageNumber = Math.max(document.totalPages || 0, document.pages.length || 0);
+          
+          const sheetsToSave = (result.sheets as SheetAnalysisResult[])
+            .filter((sheet: SheetAnalysisResult) => 
+              sheet.sheetNumber && sheet.sheetNumber !== 'Unknown' && 
+              sheet.sheetName && sheet.sheetName !== 'Unknown' &&
+              sheet.pageNumber && typeof sheet.pageNumber === 'number' &&
+              sheet.pageNumber > 0 && sheet.pageNumber <= maxPageNumber
+            )
+            // CRITICAL: Sort by pageNumber to ensure correct order and prevent lag accumulation
+            .sort((a, b) => a.pageNumber - b.pageNumber);
 
-          // Save sheets and update UI per page (only update pages that don't already have meaningful labels)
-          let reloadTimeout: NodeJS.Timeout | null = null;
+          console.log(`[Labeling] Processing ${sheetsToSave.length} sheets for ${document.name}, pages:`, 
+            sheetsToSave.map(s => s.pageNumber).join(', '));
+
+          // Save sheets sequentially without debounced reloads to prevent race conditions
           for (const sheet of sheetsToSave) {
             try {
               // Check if this page already has a meaningful label - if so, skip it
               const page = document.pages.find(p => p.pageNumber === sheet.pageNumber);
               if (page && hasMeaningfulLabel(page)) {
-                // Skip pages that already have meaningful labels
+                console.log(`[Labeling] Skipping page ${sheet.pageNumber} - already has meaningful label: ${page.sheetName || page.sheetNumber}`);
+                continue;
+              }
+              
+              // Validate page number is within document bounds (double-check after filtering)
+              if (sheet.pageNumber < 1 || sheet.pageNumber > maxPageNumber) {
+                console.warn(`[Labeling] Invalid page number ${sheet.pageNumber} for document ${document.name} (total pages: ${maxPageNumber})`);
                 continue;
               }
               
               const sheetId = `${document.id}-${sheet.pageNumber}`;
+              
+              console.log(`[Labeling] Saving page ${sheet.pageNumber}: "${sheet.sheetNumber}" - "${sheet.sheetName}"`);
               
               await sheetService.updateSheet(sheetId, {
                 documentId: document.id,
@@ -875,26 +892,12 @@ export function SheetSidebar({
                 progress: Math.round(((i + 1) / documentsWithUnlabeledPages.length) * 100),
                 status: 'processing'
               });
-
-              // Debounce document reload to batch updates (reload every 500ms max)
-              if (onReloadDocuments) {
-                if (reloadTimeout) {
-                  clearTimeout(reloadTimeout);
-                }
-                reloadTimeout = setTimeout(async () => {
-                  await onReloadDocuments();
-                }, 500);
-              }
             } catch (error) {
-              console.error(`Failed to save sheet ${sheet.pageNumber} for ${document.name}:`, error);
+              console.error(`[Labeling] Failed to save sheet ${sheet.pageNumber} for ${document.name}:`, error);
             }
           }
           
-          // Ensure final reload happens
-          if (reloadTimeout && onReloadDocuments) {
-            clearTimeout(reloadTimeout);
-            await onReloadDocuments();
-          }
+          console.log(`[Labeling] Completed processing ${sheetsToSave.length} sheets for ${document.name}`);
         }
 
         // Mark document as completed

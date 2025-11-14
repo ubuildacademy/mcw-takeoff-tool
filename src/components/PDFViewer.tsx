@@ -1272,20 +1272,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const normalizedX = point.x;
       const normalizedY = point.y;
       
-      // DETAILED LOGGING: Render coordinate transformation (first point only)
-      if (idx === 0) {
-        console.log('📤 RENDERING COORDINATE:', {
-          step: 'Input (normalized base)',
-          normalized: { x: normalizedX, y: normalizedY },
-          rotation,
-          baseViewport: { width: baseViewport.width, height: baseViewport.height },
-          currentViewport: { width: currentViewport.width, height: currentViewport.height },
-          dimensionSwap: rotation === 90 || rotation === 270 ?
-            `Swapped: currentWidth(${currentViewport.width}) === baseHeight(${baseViewport.height})? ${Math.abs(currentViewport.width - baseViewport.height) < 1}` :
-            'No swap'
-        });
-      }
-      
       // Transform from base normalized coordinates to rotated viewport coordinates
       let canvasX: number, canvasY: number;
       
@@ -1318,19 +1304,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         // Fallback: direct mapping
         canvasX = normalizedX * currentViewport.width;
         canvasY = normalizedY * currentViewport.height;
-      }
-      
-      // DETAILED LOGGING: Render result (first point only)
-      if (idx === 0) {
-        console.log('📤 RENDERING COORDINATE:', {
-          step: 'Output (CSS in rotated viewport)',
-          rendered: { x: canvasX, y: canvasY },
-          formula: rotation === 90 ? 'canvasX = RW*(1-y), canvasY = RH*x' :
-                   rotation === 180 ? 'canvasX = RW*(1-x), canvasY = RH*(1-y)' :
-                   rotation === 270 ? 'canvasX = RW*y, canvasY = RH*(1-x)' :
-                   'direct mapping',
-          roundTripCheck: rotation !== 0 ? 'Compare rendered coords to original click position' : 'N/A'
-        });
       }
       
       return {
@@ -1947,17 +1920,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const normalizedX = p.x;
       const normalizedY = p.y;
       
-      // DETAILED LOGGING: Annotation rendering (first point only)
-      if (idx === 0 && rotation !== 0) {
-        console.log('📤 RENDERING ANNOTATION:', {
-          step: 'Input (normalized base)',
-          normalized: { x: normalizedX, y: normalizedY },
-          rotation,
-          baseViewport: { width: baseViewport.width, height: baseViewport.height },
-          currentViewport: { width: currentViewport.width, height: currentViewport.height }
-        });
-      }
-      
       // Transform from base coordinates to rotated viewport coordinates
       let canvasX: number, canvasY: number;
       
@@ -1976,14 +1938,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       } else {
         canvasX = normalizedX * currentViewport.width;
         canvasY = normalizedY * currentViewport.height;
-      }
-      
-      // DETAILED LOGGING: Annotation rendering result (first point only)
-      if (idx === 0 && rotation !== 0) {
-        console.log('📤 RENDERING ANNOTATION:', {
-          step: 'Output (CSS in rotated viewport)',
-          rendered: { x: canvasX, y: canvasY }
-        });
       }
       
       return { x: canvasX, y: canvasY };
@@ -2960,18 +2914,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     let baseX: number, baseY: number;
     const rotation = viewState.rotation || 0;
     
-    // DETAILED LOGGING: Store coordinate transformation
-    console.log('📥 STORING COORDINATE:', {
-      step: 'Input (CSS in rotated viewport)',
-      cssCoords: { x: cssX, y: cssY },
-      rotation,
-      rotatedViewport: { width: viewport.width, height: viewport.height },
-      baseViewport: { width: baseViewport.width, height: baseViewport.height },
-      dimensionSwap: rotation === 90 || rotation === 270 ? 
-        `Swapped: rotatedWidth(${viewport.width}) === baseHeight(${baseViewport.height})? ${Math.abs(viewport.width - baseViewport.height) < 1}` : 
-        'No swap'
-    });
-    
     if (rotation === 0) {
       // No rotation: direct mapping
       baseX = (cssX / viewport.width) * baseViewport.width;
@@ -2999,17 +2941,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       x: baseX / baseViewport.width,
       y: baseY / baseViewport.height
     };
-    
-    // DETAILED LOGGING: Storage result
-    console.log('📥 STORING COORDINATE:', {
-      step: 'Output (normalized base)',
-      basePixels: { x: baseX, y: baseY },
-      normalized: pdfCoords,
-      formula: rotation === 90 ? 'normalizedX = cssY/RH, normalizedY = 1 - cssX/RW' :
-               rotation === 180 ? 'normalizedX = 1 - cssX/RW, normalizedY = 1 - cssY/RH' :
-               rotation === 270 ? 'normalizedX = 1 - cssY/RH, normalizedY = cssX/RW' :
-               'direct mapping'
-    });
     
     // Smart cut-out mode entry removed - using manual toggle instead
     

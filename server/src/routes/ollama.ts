@@ -469,6 +469,11 @@ If you cannot find a sheet number or name, use "Unknown". Extract exactly what y
 
     console.log(`Total sheets processed: ${allSheets.length} out of ${totalPages} pages`);
 
+    // CRITICAL: Sort sheets by pageNumber to ensure correct order and prevent lag accumulation
+    allSheets.sort((a, b) => a.pageNumber - b.pageNumber);
+    
+    console.log(`Sorted sheets by page number. Page range: ${allSheets[0]?.pageNumber || 'N/A'} - ${allSheets[allSheets.length - 1]?.pageNumber || 'N/A'}`);
+
     sendProgress(90, 'Finalizing results...');
     
     // Send final result
