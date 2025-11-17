@@ -77,6 +77,19 @@ class BoundaryDetectionService {
   }
 
   /**
+   * Get enhanced PATH for Railway/Nixpacks environments
+   */
+  private getEnhancedPath(): string {
+    return [
+      '/opt/venv/bin',           // Railway Nixpacks virtual environment
+      '/usr/local/bin',          // Common system location
+      '/usr/bin',                // Standard system location
+      '/bin',                    // Basic system location
+      process.env.PATH || ''     // Existing PATH
+    ].filter(Boolean).join(':');
+  }
+
+  /**
    * Detect boundaries in a construction drawing image
    */
   async detectBoundaries(
@@ -348,14 +361,15 @@ if __name__ == "__main__":
       }
 
       // Execute Python script
-      // Use absolute path to python3 to avoid PATH issues
+      // Use enhanced PATH to ensure Python is found in Railway/Nixpacks environments
       const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
       const command = `${pythonCommand} "${this.pythonScriptPath}" "${imagePath}" ${opts.scaleFactor} ${opts.minRoomArea} ${opts.minWallLength} ${opts.contourApproximationEpsilon}`;
       
       console.log(`🔍 Executing boundary detection: ${command}`);
       const { stdout, stderr } = await execAsync(command, {
         timeout: 60000, // 60 second timeout (increased for complex images)
-        maxBuffer: 10 * 1024 * 1024 // 10MB buffer
+        maxBuffer: 10 * 1024 * 1024, // 10MB buffer
+        env: { ...process.env, PATH: this.getEnhancedPath() }
       });
 
       if (stderr && !stderr.includes('DeprecationWarning')) {
@@ -427,42 +441,79 @@ if __name__ == "__main__":
     };
 
     try {
-      // Check Python (try multiple paths - Nix profile, system paths)
-      const pythonPaths = [
-        '/root/.nix-profile/bin/python3',
-        '/nix/var/nix/profiles/default/bin/python3',
-        'python3',
-        'python'
-      ];
-      
+      // Enhanced PATH for Railway/Nixpacks environments
+      const enhancedPath = this.getEnhancedPath();
+
+      // Try to find Python using 'which' command first (most reliable)
       let pythonCommand: string | null = null;
-      for (const pythonPath of pythonPaths) {
-        try {
-          const { stdout } = await execAsync(`${pythonPath} --version`, { timeout: 5000 });
+      
+      // First, try using 'which' to dynamically find python3
+      try {
+        const { stdout: whichOutput } = await execAsync('which python3', {
+          timeout: 5000,
+          env: { ...process.env, PATH: enhancedPath }
+        });
+        const foundPath = whichOutput.trim();
+        if (foundPath) {
+          // Verify it works
+          const { stdout } = await execAsync(`${foundPath} --version`, {
+            timeout: 5000,
+            env: { ...process.env, PATH: enhancedPath }
+          });
           result.pythonAvailable = true;
           result.pythonVersion = stdout.trim();
-          pythonCommand = pythonPath;
-          break;
-        } catch {
-          continue;
+          pythonCommand = foundPath;
+        }
+      } catch {
+        // 'which' failed, continue to fallback paths
+      }
+
+      // Fallback: try multiple known paths (including Railway-specific)
+      if (!pythonCommand) {
+        const pythonPaths = [
+          '/opt/venv/bin/python3',              // Railway Nixpacks virtual environment
+          '/usr/local/bin/python3',             // Common system location
+          '/usr/bin/python3',                   // Standard system location
+          '/root/.nix-profile/bin/python3',     // Nix profile (if exists)
+          '/nix/var/nix/profiles/default/bin/python3', // Nix default profile
+          'python3',                            // System PATH
+          'python'                              // Fallback
+        ];
+        
+        for (const pythonPath of pythonPaths) {
+          try {
+            const { stdout } = await execAsync(`${pythonPath} --version`, {
+              timeout: 5000,
+              env: { ...process.env, PATH: enhancedPath }
+            });
+            result.pythonAvailable = true;
+            result.pythonVersion = stdout.trim();
+            pythonCommand = pythonPath;
+            break;
+          } catch {
+            continue;
+          }
         }
       }
       
       if (!pythonCommand) {
-        result.error = 'Python not found in any expected location';
+        result.error = 'Python not found. Checked: /opt/venv/bin/python3, /usr/local/bin/python3, /usr/bin/python3, python3, python';
         return result;
       }
       
-      // Check OpenCV
+      // Check OpenCV with enhanced PATH
       try {
         const { stdout } = await execAsync(
           `${pythonCommand} -c "import cv2; print(cv2.__version__)"`,
-          { timeout: 5000 }
+          {
+            timeout: 5000,
+            env: { ...process.env, PATH: enhancedPath }
+          }
         );
         result.opencvAvailable = true;
         result.opencvVersion = stdout.trim();
       } catch (error) {
-        result.error = `OpenCV not found: ${error instanceof Error ? error.message : 'Unknown error'}`;
+        result.error = `OpenCV not found: ${error instanceof Error ? error.message : 'Unknown error'}. Python found at: ${pythonCommand}`;
         return result;
       }
 
