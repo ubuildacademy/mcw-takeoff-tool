@@ -3,8 +3,9 @@ providers = ["node", "python"]
 # Railway's python provider will auto-install requirements.txt
 # Railway's node provider will auto-install npm packages and run build
 
-# Install system libraries required for OpenCV (without Python - python provider handles that)
-[phases.setup]
+# Install system libraries required for OpenCV after Node.js is set up
+# Using install phase instead of setup to avoid interfering with node provider setup
+[phases.install]
 nixPkgs = ["libGL", "glib", "libGLU", "pkg-config"]
 
 [variables]
