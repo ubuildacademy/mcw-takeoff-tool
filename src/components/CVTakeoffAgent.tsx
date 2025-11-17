@@ -225,7 +225,7 @@ export function CVTakeoffAgent({
               <div className="flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-yellow-600" />
                 <span className="text-sm text-yellow-800">
-                  CV detection service requires Python 3 and OpenCV. Please ensure they are installed on the server.
+                  Warning: Could not verify Python/OpenCV availability. You can still try to use CV detection - it will show an error if dependencies are missing.
                 </span>
               </div>
             </div>
@@ -323,7 +323,7 @@ export function CVTakeoffAgent({
                 </Button>
                 <Button 
                   onClick={handleStartProcessing}
-                  disabled={!hasValidPage || !serviceAvailable || !Object.values(detectionOptions).some(v => v)}
+                  disabled={!hasValidPage || !Object.values(detectionOptions).some(v => v)}
                 >
                   <Scan className="w-4 h-4 mr-2" />
                   Start Detection
