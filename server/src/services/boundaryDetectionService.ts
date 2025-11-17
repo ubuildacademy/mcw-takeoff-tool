@@ -443,18 +443,26 @@ if __name__ == "__main__":
     try {
       // Enhanced PATH for Railway/Nixpacks environments
       const enhancedPath = this.getEnhancedPath();
+      
+      // Log current PATH for debugging
+      console.log('🔍 Checking Python/OpenCV availability...');
+      console.log(`   Current PATH: ${process.env.PATH}`);
+      console.log(`   Enhanced PATH: ${enhancedPath}`);
 
       // Try to find Python using 'which' command first (most reliable)
       let pythonCommand: string | null = null;
+      let pythonError: string | null = null;
       
       // First, try using 'which' to dynamically find python3
       try {
-        const { stdout: whichOutput } = await execAsync('which python3', {
+        console.log('   Trying "which python3"...');
+        const { stdout: whichOutput, stderr: whichStderr } = await execAsync('which python3', {
           timeout: 5000,
           env: { ...process.env, PATH: enhancedPath }
         });
         const foundPath = whichOutput.trim();
         if (foundPath) {
+          console.log(`   Found Python at: ${foundPath}`);
           // Verify it works
           const { stdout } = await execAsync(`${foundPath} --version`, {
             timeout: 5000,
@@ -463,13 +471,18 @@ if __name__ == "__main__":
           result.pythonAvailable = true;
           result.pythonVersion = stdout.trim();
           pythonCommand = foundPath;
+          console.log(`   ✅ Python version: ${result.pythonVersion}`);
+        } else {
+          pythonError = `which python3 returned empty: ${whichStderr || 'no output'}`;
         }
-      } catch {
-        // 'which' failed, continue to fallback paths
+      } catch (whichError) {
+        pythonError = `which python3 failed: ${whichError instanceof Error ? whichError.message : 'Unknown error'}`;
+        console.log(`   ⚠️ ${pythonError}`);
       }
 
       // Fallback: try multiple known paths (including Railway-specific)
       if (!pythonCommand) {
+        console.log('   Trying fallback paths...');
         const pythonPaths = [
           '/opt/venv/bin/python3',              // Railway Nixpacks virtual environment
           '/usr/local/bin/python3',             // Common system location
@@ -482,28 +495,34 @@ if __name__ == "__main__":
         
         for (const pythonPath of pythonPaths) {
           try {
-            const { stdout } = await execAsync(`${pythonPath} --version`, {
+            console.log(`   Checking: ${pythonPath}`);
+            const { stdout, stderr } = await execAsync(`${pythonPath} --version`, {
               timeout: 5000,
               env: { ...process.env, PATH: enhancedPath }
             });
             result.pythonAvailable = true;
             result.pythonVersion = stdout.trim();
             pythonCommand = pythonPath;
+            console.log(`   ✅ Found Python at: ${pythonPath} (${result.pythonVersion})`);
             break;
-          } catch {
+          } catch (pathError) {
+            console.log(`   ❌ ${pythonPath} failed: ${pathError instanceof Error ? pathError.message : 'Unknown error'}`);
             continue;
           }
         }
       }
       
       if (!pythonCommand) {
-        result.error = 'Python not found. Checked: /opt/venv/bin/python3, /usr/local/bin/python3, /usr/bin/python3, python3, python';
+        const errorMsg = `Python not found. Checked: /opt/venv/bin/python3, /usr/local/bin/python3, /usr/bin/python3, python3, python. ${pythonError ? `Last error: ${pythonError}` : ''}`;
+        console.error(`   ❌ ${errorMsg}`);
+        result.error = errorMsg;
         return result;
       }
       
       // Check OpenCV with enhanced PATH
+      console.log(`   Checking OpenCV with Python: ${pythonCommand}`);
       try {
-        const { stdout } = await execAsync(
+        const { stdout, stderr } = await execAsync(
           `${pythonCommand} -c "import cv2; print(cv2.__version__)"`,
           {
             timeout: 5000,
@@ -512,14 +531,26 @@ if __name__ == "__main__":
         );
         result.opencvAvailable = true;
         result.opencvVersion = stdout.trim();
+        console.log(`   ✅ OpenCV version: ${result.opencvVersion}`);
+        if (stderr && !stderr.includes('DeprecationWarning')) {
+          console.warn(`   OpenCV import warnings: ${stderr}`);
+        }
       } catch (error) {
-        result.error = `OpenCV not found: ${error instanceof Error ? error.message : 'Unknown error'}. Python found at: ${pythonCommand}`;
+        const errorMsg = `OpenCV not found: ${error instanceof Error ? error.message : 'Unknown error'}. Python found at: ${pythonCommand}`;
+        console.error(`   ❌ ${errorMsg}`);
+        if (error instanceof Error && 'stderr' in error) {
+          console.error(`   OpenCV import stderr: ${(error as any).stderr}`);
+        }
+        result.error = errorMsg;
         return result;
       }
 
+      console.log('   ✅ Python and OpenCV are available!');
       return result;
     } catch (error) {
-      result.error = error instanceof Error ? error.message : 'Unknown error';
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`   ❌ Unexpected error: ${errorMsg}`);
+      result.error = errorMsg;
       return result;
     }
   }
