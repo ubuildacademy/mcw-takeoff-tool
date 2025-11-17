@@ -3,8 +3,13 @@ providers = ["node", "python"]
 # Railway's python provider will auto-install requirements.txt
 # Railway's node provider will auto-install npm packages and run build
 
+# Install system libraries required for OpenCV
+[phases.setup]
+nixPkgs = ["python312", "gcc", "libGL", "glib", "glibc", "libGLU", "pkg-config"]
+
 [variables]
 PATH = "/opt/venv/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+PYTHONUNBUFFERED = "1"
 
 [start]
 cmd = "npm start"
