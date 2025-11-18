@@ -45,7 +45,12 @@ export const cvTakeoffService = {
   /**
    * Check if CV takeoff service is available
    */
-  async checkStatus(): Promise<{ available: boolean; message: string }> {
+  async checkStatus(): Promise<{ 
+    available: boolean; 
+    message: string;
+    details?: any;
+    diagnostics?: any;
+  }> {
     try {
       const response = await fetch('/api/cv-takeoff/status', {
         method: 'GET',
@@ -55,19 +60,23 @@ export const cvTakeoffService = {
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`HTTP error! status: ${response.status}. ${errorData.error || ''}`);
       }
 
       const data = await response.json();
       return {
         available: data.available || false,
-        message: data.message || 'CV takeoff service status unknown'
+        message: data.message || 'CV takeoff service status unknown',
+        details: data.details,
+        diagnostics: data.details?.diagnostics
       };
     } catch (error) {
       console.error('Error checking CV takeoff status:', error);
       return {
         available: false,
-        message: 'Failed to check CV takeoff service status'
+        message: `Failed to check CV takeoff service status: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        details: { error: error instanceof Error ? error.message : 'Unknown error' }
       };
     }
   },
@@ -102,15 +111,20 @@ export const cvTakeoffService = {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        const errorData = await response.json().catch(() => ({}));
+        const errorMessage = errorData.error || `HTTP error! status: ${response.status}`;
+        const errorWithDetails = errorData.details 
+          ? `${errorMessage}. Details: ${JSON.stringify(errorData.details, null, 2)}`
+          : errorMessage;
+        throw new Error(errorWithDetails);
       }
 
       const data = await response.json();
       return data.result;
     } catch (error) {
       console.error('Error processing page:', error);
-      throw new Error(`Failed to process page: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`Failed to process page: ${errorMessage}`);
     }
   },
 

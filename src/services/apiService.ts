@@ -122,9 +122,9 @@ export const fileService = {
     // Transform field names from snake_case to camelCase
     const transformedFiles = response.data.files?.map((file: any) => ({
       ...file,
-      projectId: file.project_id,
-      originalName: file.original_name,
-      uploadedAt: file.uploaded_at
+      projectId: file.project_id || file.projectId,
+      originalName: file.original_name || file.originalName,
+      uploadedAt: file.uploaded_at || file.uploadedAt
     })) || [];
     
     return { files: transformedFiles };

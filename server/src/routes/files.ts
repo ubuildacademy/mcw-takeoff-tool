@@ -377,7 +377,10 @@ router.get('/project/:projectId', async (req, res) => {
     
     if (error) {
       console.error('Error fetching project files:', error);
-      return res.status(500).json({ error: 'Failed to fetch project files' });
+      return res.status(500).json({ 
+        error: 'Failed to fetch project files',
+        details: error.message 
+      });
     }
     
     return res.json({ files: files || [] });
