@@ -36,6 +36,7 @@ export function CVTakeoffAgent({
   const [currentStage, setCurrentStage] = useState<Stage>('selection');
   const [serviceAvailable, setServiceAvailable] = useState<boolean>(false);
   const [isCheckingStatus, setIsCheckingStatus] = useState(true);
+  const [statusDetails, setStatusDetails] = useState<any>(null);
   
   // Processing state
   const [isProcessing, setIsProcessing] = useState(false);
@@ -49,6 +50,7 @@ export function CVTakeoffAgent({
     doorsDetected: number;
     windowsDetected: number;
     errors: string[];
+    errorDetails?: any;
   } | null>(null);
 
   // Detection options - what to detect
@@ -88,9 +90,16 @@ export function CVTakeoffAgent({
     try {
       const status = await cvTakeoffService.checkStatus();
       setServiceAvailable(status.available);
+      setStatusDetails(status.details || status.diagnostics);
+      console.log('CV Takeoff Status:', {
+        available: status.available,
+        details: status.details,
+        diagnostics: status.diagnostics
+      });
     } catch (error) {
       console.error('Error checking service status:', error);
       setServiceAvailable(false);
+      setStatusDetails({ error: error instanceof Error ? error.message : 'Unknown error' });
     } finally {
       setIsCheckingStatus(false);
     }
@@ -163,6 +172,18 @@ export function CVTakeoffAgent({
       setCurrentStage('complete');
     } catch (error) {
       console.error('Error processing page:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      // Try to extract error details from the message
+      let errorDetails = null;
+      try {
+        const detailsMatch = errorMessage.match(/Details: ({.*})/);
+        if (detailsMatch) {
+          errorDetails = JSON.parse(detailsMatch[1]);
+        }
+      } catch (e) {
+        // Ignore parsing errors
+      }
+      
       setResults({
         conditionsCreated: 0,
         measurementsCreated: 0,
@@ -170,7 +191,8 @@ export function CVTakeoffAgent({
         wallsDetected: 0,
         doorsDetected: 0,
         windowsDetected: 0,
-        errors: [error instanceof Error ? error.message : 'Unknown error']
+        errors: [errorMessage],
+        errorDetails
       });
       setCurrentStage('complete');
     } finally {
@@ -222,11 +244,26 @@ export function CVTakeoffAgent({
             </div>
           ) : (
             <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
-              <div className="flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-yellow-600" />
-                <span className="text-sm text-yellow-800">
-                  Warning: Could not verify Python/OpenCV availability. You can still try to use CV detection - it will show an error if dependencies are missing.
-                </span>
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-yellow-600 mt-0.5" />
+                <div className="flex-1">
+                  <span className="text-sm text-yellow-800 font-medium block mb-1">
+                    Warning: Could not verify Python/OpenCV availability.
+                  </span>
+                  {statusDetails && (
+                    <details className="mt-2">
+                      <summary className="text-xs text-yellow-700 cursor-pointer hover:text-yellow-900">
+                        Show diagnostic details
+                      </summary>
+                      <pre className="mt-2 text-xs bg-yellow-100 p-2 rounded overflow-auto max-h-48 text-yellow-900">
+                        {JSON.stringify(statusDetails, null, 2)}
+                      </pre>
+                    </details>
+                  )}
+                  <span className="text-xs text-yellow-700 block mt-1">
+                    You can still try to use CV detection - it will show detailed errors if dependencies are missing.
+                  </span>
+                </div>
               </div>
             </div>
           )}
@@ -399,13 +436,23 @@ export function CVTakeoffAgent({
 
               {/* Errors */}
               {results.errors.length > 0 && (
-                <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                  <h5 className="font-medium text-yellow-800 mb-2 text-sm">Errors</h5>
-                  <ul className="list-disc list-inside text-xs text-yellow-700">
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                  <h5 className="font-medium text-red-800 mb-2 text-sm">Errors</h5>
+                  <ul className="list-disc list-inside text-xs text-red-700 mb-2">
                     {results.errors.map((error, index) => (
-                      <li key={index}>{error}</li>
+                      <li key={index} className="mb-1">{error}</li>
                     ))}
                   </ul>
+                  {results.errorDetails && (
+                    <details className="mt-2">
+                      <summary className="text-xs text-red-700 cursor-pointer hover:text-red-900 font-medium">
+                        Show detailed diagnostic information
+                      </summary>
+                      <pre className="mt-2 text-xs bg-red-100 p-2 rounded overflow-auto max-h-64 text-red-900">
+                        {JSON.stringify(results.errorDetails, null, 2)}
+                      </pre>
+                    </details>
+                  )}
                 </div>
               )}
 

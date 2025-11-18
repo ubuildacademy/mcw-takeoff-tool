@@ -98,23 +98,23 @@ class BoundaryDetectionService {
     options: DetectionOptions = {}
   ): Promise<BoundaryDetectionResult> {
     const startTime = Date.now();
+    let imageId: string | undefined;
+    let imagePath: string | undefined;
+    const opts = {
+      minRoomArea: options.minRoomArea || 50, // 50 square feet minimum
+      minWallLength: options.minWallLength || 2, // 2 linear feet minimum
+      edgeThreshold1: options.edgeThreshold1 || 50,
+      edgeThreshold2: options.edgeThreshold2 || 150,
+      contourApproximationEpsilon: options.contourApproximationEpsilon || 0.02,
+      scaleFactor: scaleFactor || 1.0
+    };
 
     try {
       // Save image to temp file
-      const imageId = uuidv4();
-      const imagePath = path.join(this.tempDir, `${imageId}.png`);
+      imageId = uuidv4();
+      imagePath = path.join(this.tempDir, `${imageId}.png`);
       const imageBuffer = Buffer.from(imageData, 'base64');
       await fs.writeFile(imagePath, imageBuffer);
-
-      // Prepare options
-      const opts = {
-        minRoomArea: options.minRoomArea || 50, // 50 square feet minimum
-        minWallLength: options.minWallLength || 2, // 2 linear feet minimum
-        edgeThreshold1: options.edgeThreshold1 || 50,
-        edgeThreshold2: options.edgeThreshold2 || 150,
-        contourApproximationEpsilon: options.contourApproximationEpsilon || 0.02,
-        scaleFactor: scaleFactor || 1.0
-      };
 
       // Call Python script for boundary detection
       const pythonScript = `
@@ -360,17 +360,70 @@ if __name__ == "__main__":
         }
       }
 
+      // Check Python availability before executing
+      const statusDetails = await this.getStatusDetails();
+      if (!statusDetails.pythonAvailable || !statusDetails.opencvAvailable) {
+        const errorDetails = {
+          pythonAvailable: statusDetails.pythonAvailable,
+          opencvAvailable: statusDetails.opencvAvailable,
+          pythonVersion: statusDetails.pythonVersion,
+          opencvVersion: statusDetails.opencvVersion,
+          error: statusDetails.error,
+          platform: process.platform,
+          nodeVersion: process.version,
+          cwd: process.cwd(),
+          enhancedPath: this.getEnhancedPath(),
+          scriptPath: this.pythonScriptPath,
+          scriptExists: await fs.pathExists(this.pythonScriptPath)
+        };
+        console.error('❌ Python/OpenCV not available before execution:', JSON.stringify(errorDetails, null, 2));
+        throw new Error(`Python/OpenCV not available. ${statusDetails.error || 'Unknown error'}. Details: ${JSON.stringify(errorDetails)}`);
+      }
+
       // Execute Python script
       // Use enhanced PATH to ensure Python is found in Railway/Nixpacks environments
       const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
       const command = `${pythonCommand} "${this.pythonScriptPath}" "${imagePath}" ${opts.scaleFactor} ${opts.minRoomArea} ${opts.minWallLength} ${opts.contourApproximationEpsilon}`;
       
-      console.log(`🔍 Executing boundary detection: ${command}`);
-      const { stdout, stderr } = await execAsync(command, {
-        timeout: 60000, // 60 second timeout (increased for complex images)
-        maxBuffer: 10 * 1024 * 1024, // 10MB buffer
-        env: { ...process.env, PATH: this.getEnhancedPath() }
-      });
+      console.log(`🔍 Executing boundary detection:`);
+      console.log(`   Command: ${command}`);
+      console.log(`   Python: ${statusDetails.pythonVersion || 'unknown'}`);
+      console.log(`   OpenCV: ${statusDetails.opencvVersion || 'unknown'}`);
+      console.log(`   Script path: ${this.pythonScriptPath}`);
+      console.log(`   Script exists: ${await fs.pathExists(this.pythonScriptPath)}`);
+      console.log(`   Image path: ${imagePath}`);
+      console.log(`   Image exists: ${await fs.pathExists(imagePath)}`);
+      console.log(`   Enhanced PATH: ${this.getEnhancedPath()}`);
+      
+      let stdout: string;
+      let stderr: string;
+      try {
+        const execResult = await execAsync(command, {
+          timeout: 60000, // 60 second timeout (increased for complex images)
+          maxBuffer: 10 * 1024 * 1024, // 10MB buffer
+          env: { ...process.env, PATH: this.getEnhancedPath() }
+        });
+        stdout = execResult.stdout;
+        stderr = execResult.stderr;
+      } catch (execError: any) {
+        const errorDetails = {
+          command,
+          pythonCommand,
+          scriptPath: this.pythonScriptPath,
+          imagePath,
+          platform: process.platform,
+          enhancedPath: this.getEnhancedPath(),
+          error: execError instanceof Error ? execError.message : 'Unknown error',
+          code: execError?.code,
+          signal: execError?.signal,
+          stdout: execError?.stdout || '',
+          stderr: execError?.stderr || '',
+          killed: execError?.killed,
+          timedOut: execError?.timedOut
+        };
+        console.error('❌ Python script execution failed:', JSON.stringify(errorDetails, null, 2));
+        throw new Error(`Python script execution failed: ${execError instanceof Error ? execError.message : 'Unknown error'}. Command: ${command}. Details: ${JSON.stringify(errorDetails)}`);
+      }
 
       if (stderr && !stderr.includes('DeprecationWarning')) {
         console.warn('⚠️ Python script warnings:', stderr);
@@ -379,13 +432,29 @@ if __name__ == "__main__":
       // Parse JSON result
       let result;
       try {
-        result = JSON.parse(stdout.trim());
+        const trimmedOutput = stdout.trim();
+        console.log(`📄 Python script output length: ${trimmedOutput.length} characters`);
+        console.log(`📄 First 500 chars: ${trimmedOutput.substring(0, 500)}`);
+        result = JSON.parse(trimmedOutput);
       } catch (parseError) {
-        console.error('Failed to parse Python script output:', stdout);
-        throw new Error(`Failed to parse detection results: ${parseError instanceof Error ? parseError.message : 'Invalid JSON'}`);
+        const errorDetails = {
+          parseError: parseError instanceof Error ? parseError.message : 'Unknown parse error',
+          stdoutLength: stdout.length,
+          stdoutPreview: stdout.substring(0, 1000),
+          stderr: stderr || 'none'
+        };
+        console.error('❌ Failed to parse Python script output:', JSON.stringify(errorDetails, null, 2));
+        throw new Error(`Failed to parse detection results: ${parseError instanceof Error ? parseError.message : 'Invalid JSON'}. Output preview: ${stdout.substring(0, 500)}`);
       }
       
       if (result.error) {
+        const errorDetails = {
+          pythonError: result.error,
+          command,
+          stdout: stdout.substring(0, 500),
+          stderr: stderr || 'none'
+        };
+        console.error('❌ Python script returned error:', JSON.stringify(errorDetails, null, 2));
         throw new Error(`Boundary detection failed: ${result.error}`);
       }
 
@@ -406,8 +475,23 @@ if __name__ == "__main__":
       };
 
     } catch (error) {
-      console.error('❌ Boundary detection error:', error);
-      throw new Error(`Boundary detection failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      const errorDetails = {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+        imageId,
+        imagePath,
+        scaleFactor: opts.scaleFactor,
+        options: opts,
+        platform: process.platform,
+        nodeVersion: process.version,
+        cwd: process.cwd(),
+        pythonScriptPath: this.pythonScriptPath,
+        scriptExists: await fs.pathExists(this.pythonScriptPath).catch(() => false),
+        tempDir: this.tempDir,
+        tempDirExists: await fs.pathExists(this.tempDir).catch(() => false)
+      };
+      console.error('❌ Boundary detection error:', JSON.stringify(errorDetails, null, 2));
+      throw new Error(`Boundary detection failed: ${error instanceof Error ? error.message : 'Unknown error'}. Full details logged.`);
     }
   }
 
@@ -513,9 +597,28 @@ if __name__ == "__main__":
       }
       
       if (!pythonCommand) {
+        const errorDetails = {
+          checkedPaths: [
+            '/opt/venv/bin/python3',
+            '/usr/local/bin/python3',
+            '/usr/bin/python3',
+            '/root/.nix-profile/bin/python3',
+            '/nix/var/nix/profiles/default/bin/python3',
+            'python3',
+            'python'
+          ],
+          pythonError,
+          platform: process.platform,
+          nodeVersion: process.version,
+          currentPath: process.env.PATH,
+          enhancedPath: enhancedPath,
+          cwd: process.cwd(),
+          whichOutput: pythonError
+        };
         const errorMsg = `Python not found. Checked: /opt/venv/bin/python3, /usr/local/bin/python3, /usr/bin/python3, python3, python. ${pythonError ? `Last error: ${pythonError}` : ''}`;
         console.error(`   ❌ ${errorMsg}`);
-        result.error = errorMsg;
+        console.error(`   Python check details:`, JSON.stringify(errorDetails, null, 2));
+        result.error = `${errorMsg}. Details: ${JSON.stringify(errorDetails)}`;
         return result;
       }
       
@@ -536,21 +639,45 @@ if __name__ == "__main__":
           console.warn(`   OpenCV import warnings: ${stderr}`);
         }
       } catch (error) {
+        const errorDetails = {
+          pythonCommand,
+          pythonVersion: result.pythonVersion,
+          command: `${pythonCommand} -c "import cv2; print(cv2.__version__)"`,
+          error: error instanceof Error ? error.message : 'Unknown error',
+          code: (error as any)?.code,
+          signal: (error as any)?.signal,
+          stdout: (error as any)?.stdout || '',
+          stderr: (error as any)?.stderr || '',
+          killed: (error as any)?.killed,
+          timedOut: (error as any)?.timedOut,
+          platform: process.platform,
+          enhancedPath: enhancedPath,
+          currentPath: process.env.PATH
+        };
         const errorMsg = `OpenCV not found: ${error instanceof Error ? error.message : 'Unknown error'}. Python found at: ${pythonCommand}`;
         console.error(`   ❌ ${errorMsg}`);
-        if (error instanceof Error && 'stderr' in error) {
-          console.error(`   OpenCV import stderr: ${(error as any).stderr}`);
-        }
-        result.error = errorMsg;
+        console.error(`   OpenCV check details:`, JSON.stringify(errorDetails, null, 2));
+        result.error = `${errorMsg}. Details: ${JSON.stringify(errorDetails)}`;
         return result;
       }
 
       console.log('   ✅ Python and OpenCV are available!');
       return result;
     } catch (error) {
+      const enhancedPath = this.getEnhancedPath();
+      const errorDetails = {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+        platform: process.platform,
+        nodeVersion: process.version,
+        cwd: process.cwd(),
+        currentPath: process.env.PATH,
+        enhancedPath: enhancedPath
+      };
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       console.error(`   ❌ Unexpected error: ${errorMsg}`);
-      result.error = errorMsg;
+      console.error(`   Status check error details:`, JSON.stringify(errorDetails, null, 2));
+      result.error = `${errorMsg}. Details: ${JSON.stringify(errorDetails)}`;
       return result;
     }
   }

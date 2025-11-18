@@ -33,20 +33,44 @@ router.get('/status', async (req, res) => {
   try {
     const available = await cvTakeoffService.isAvailable();
     const details = await cvTakeoffService.getStatusDetails();
+    
+    // Add diagnostic information
+    const diagnostics = {
+      platform: process.platform,
+      nodeVersion: process.version,
+      cwd: process.cwd(),
+      currentPath: process.env.PATH,
+      pythonAvailable: details.pythonAvailable,
+      opencvAvailable: details.opencvAvailable,
+      pythonVersion: details.pythonVersion,
+      opencvVersion: details.opencvVersion,
+      error: details.error
+    };
+    
     res.json({
       success: true,
       available,
       message: available 
         ? 'CV takeoff service is available' 
         : 'CV takeoff service requires Python 3 and OpenCV',
-      details
+      details: {
+        ...details,
+        diagnostics
+      }
     });
   } catch (error) {
-    console.error('Error checking CV takeoff status:', error);
+    const errorDetails = {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined,
+      platform: process.platform,
+      nodeVersion: process.version
+    };
+    console.error('Error checking CV takeoff status:', JSON.stringify(errorDetails, null, 2));
     res.status(500).json({
       success: false,
       available: false,
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: error instanceof Error ? error.message : 'Unknown error',
+      details: errorDetails
     });
   }
 });
@@ -82,11 +106,18 @@ router.post('/test', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('CV detection test failed:', error);
+    const errorDetails = {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined,
+      platform: process.platform,
+      nodeVersion: process.version
+    };
+    console.error('CV detection test failed:', JSON.stringify(errorDetails, null, 2));
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
-      message: 'CV detection test failed. Please ensure Python 3 and OpenCV are installed.'
+      message: 'CV detection test failed. Please ensure Python 3 and OpenCV are installed.',
+      details: errorDetails
     });
   }
 });
@@ -137,10 +168,21 @@ router.post('/process-page', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error processing page:', error);
+    const errorDetails = {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined,
+      documentId,
+      pageNumber,
+      projectId,
+      scaleFactor,
+      platform: process.platform,
+      nodeVersion: process.version
+    };
+    console.error('Error processing page:', JSON.stringify(errorDetails, null, 2));
     res.status(500).json({
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: error instanceof Error ? error.message : 'Unknown error',
+      details: errorDetails
     });
   }
 });
@@ -197,10 +239,21 @@ router.post('/process-pages', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error processing pages:', error);
+    const errorDetails = {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined,
+      documentId,
+      pageNumbers,
+      projectId,
+      scaleFactor,
+      platform: process.platform,
+      nodeVersion: process.version
+    };
+    console.error('Error processing pages:', JSON.stringify(errorDetails, null, 2));
     res.status(500).json({
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: error instanceof Error ? error.message : 'Unknown error',
+      details: errorDetails
     });
   }
 });

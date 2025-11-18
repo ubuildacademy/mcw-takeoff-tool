@@ -374,6 +374,8 @@ export function TakeoffWorkspace() {
         }
       } catch (e: any) {
         if (isDev) console.error('Error loading project files:', e);
+        // Set empty array to prevent undefined state
+        setProjectFiles([]);
       }
     }
     loadFiles();
@@ -636,8 +638,8 @@ export function TakeoffWorkspace() {
     
     try {
       setDocumentsLoading(true);
-      const filesRes = await fileService.getProjectFiles(projectId);
-      const files = filesRes.files || [];
+      // Use projectFiles state instead of calling API again to avoid duplicate requests
+      const files = projectFiles.length > 0 ? projectFiles : (await fileService.getProjectFiles(projectId)).files || [];
       
       const pdfFiles = files.filter((file: any) => file.mimetype === 'application/pdf');
       
@@ -820,7 +822,7 @@ export function TakeoffWorkspace() {
       console.error('Error loading project documents:', error);
       setDocumentsLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, projectFiles]);
 
   // Load documents when project changes
   useEffect(() => {
