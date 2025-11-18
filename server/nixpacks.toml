@@ -2,19 +2,18 @@ providers = ["node", "python"]
 
 # Railway's python provider will auto-install requirements.txt
 # Railway's node provider will auto-install npm packages and run build
+# Both providers run automatically when package.json and requirements.txt are detected
+# IMPORTANT: Ensure Railway service root directory is set to "server/" in Railway dashboard
 
-# Setup phase: Ensure Node.js and npm are available before build
-# This is critical for Railway free tier where npm might not be in PATH initially
-[phases.setup]
-nixPkgs = ["nodejs-20_x"]
-
-# Install system libraries required for OpenCV after Node.js is set up
+# Install system libraries required for OpenCV
+# These are installed after Node.js provider sets up npm
 [phases.install]
 nixPkgs = ["libGL", "glib", "libGLU", "pkg-config"]
 
 [variables]
-# Ensure Node.js bin directory and Python virtual environment are in PATH
-PATH = "/nix/var/nix/profiles/default/bin:/opt/venv/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+# Python virtual environment path (set by python provider)
+# Node.js provider handles npm PATH automatically - don't override it
+PATH = "/opt/venv/bin:$PATH"
 PYTHONUNBUFFERED = "1"
 
 [start]
