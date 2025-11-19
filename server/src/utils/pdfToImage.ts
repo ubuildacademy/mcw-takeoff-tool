@@ -183,6 +183,41 @@ class PDFToImageConverter {
   }
 
   /**
+   * Check if ImageMagick is available and can handle PDFs
+   */
+  private async checkImageMagickAvailable(): Promise<{ available: boolean; command: string; error?: string }> {
+    // Try 'magick' first (ImageMagick 7+), then 'convert' (ImageMagick 6 or legacy)
+    const commands = ['magick', 'convert'];
+    
+    for (const cmd of commands) {
+      try {
+        // Try to run the command with --version to check if it exists
+        await execAsync(`${cmd} --version`, { timeout: 5000 });
+        // If we get here, the command exists
+        // Check if it can handle PDFs by checking delegates
+        try {
+          const { stdout } = await execAsync(`${cmd} -list delegate`, { timeout: 5000 });
+          if (stdout && stdout.toLowerCase().includes('pdf')) {
+            console.log(`✅ ImageMagick found: ${cmd} (with PDF support)`);
+            return { available: true, command: cmd };
+          } else {
+            console.warn(`⚠️ ImageMagick found (${cmd}) but PDF support may be missing (Ghostscript required)`);
+            return { available: true, command: cmd, error: 'PDF support may be missing' };
+          }
+        } catch {
+          // If delegate check fails, still try to use it
+          console.warn(`⚠️ Could not verify PDF support for ${cmd}, will attempt anyway`);
+          return { available: true, command: cmd };
+        }
+      } catch {
+        continue;
+      }
+    }
+    
+    return { available: false, command: 'magick', error: 'ImageMagick not found in PATH' };
+  }
+
+  /**
    * Fallback method using ImageMagick directly
    */
   private async convertPageToBufferWithImageMagick(
@@ -191,6 +226,14 @@ class PDFToImageConverter {
     options: Omit<PDFToImageOptions, 'pageNumber'> = {}
   ): Promise<Buffer | null> {
     try {
+      // Check if ImageMagick is available
+      const magickCheck = await this.checkImageMagickAvailable();
+      if (!magickCheck.available) {
+        console.error(`❌ ImageMagick not available: ${magickCheck.error}`);
+        return null;
+      }
+      
+      const magickCmd = magickCheck.command;
       const {
         outputDir = this.tempDir,
         format = 'png',
@@ -209,21 +252,28 @@ class PDFToImageConverter {
       // Calculate density (DPI) based on scale - use higher density for better text quality
       const density = Math.round(200 * scale);
 
-      // Use ImageMagick magick command with flattening and text enhancement options
-      const command = `magick -density ${density} "${pdfPath}[${pageNumber - 1}]" -background white -alpha remove -flatten -enhance -sharpen 0x1 -quality ${quality} "${outputFile}"`;
+      // Use ImageMagick command (magick for v7+, convert for v6)
+      // Note: For 'convert', we need to adjust the syntax slightly
+      const command = magickCmd === 'convert' 
+        ? `${magickCmd} -density ${density} "${pdfPath}[${pageNumber - 1}]" -background white -alpha remove -flatten -enhance -sharpen 0x1 -quality ${quality} "${outputFile}"`
+        : `${magickCmd} -density ${density} "${pdfPath}[${pageNumber - 1}]" -background white -alpha remove -flatten -enhance -sharpen 0x1 -quality ${quality} "${outputFile}"`;
       
-      console.log('Running ImageMagick command:', command);
+      console.log(`Running ImageMagick command (${magickCmd}):`, command);
       console.log(`PDF path exists: ${await fs.pathExists(pdfPath)}`);
       console.log(`PDF path: ${pdfPath}`);
+      console.log(`Output file will be: ${outputFile}`);
       
       try {
         const { stdout, stderr } = await execAsync(command, { timeout: 30000 });
         if (stdout) console.log('ImageMagick stdout:', stdout);
-        if (stderr) console.warn('ImageMagick stderr:', stderr);
+        if (stderr && !stderr.includes('deprecated')) {
+          console.warn('ImageMagick stderr:', stderr);
+        }
       } catch (execError: any) {
         console.error('ImageMagick command failed:', execError);
         console.error('Command stdout:', execError.stdout);
         console.error('Command stderr:', execError.stderr);
+        console.error('Error code:', execError.code);
         throw execError;
       }
 

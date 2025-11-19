@@ -7,8 +7,9 @@ providers = ["node", "python"]
 
 # Install system libraries required for OpenCV and PDF processing
 # These are installed after Node.js provider sets up npm
+# Note: ImageMagick requires Ghostscript for PDF support
 [phases.install]
-nixPkgs = ["libGL", "glib", "libGLU", "pkg-config", "imagemagick"]
+nixPkgs = ["libGL", "glib", "libGLU", "pkg-config", "imagemagick", "ghostscript"]
 
 [variables]
 # Don't override PATH here - let Node.js and Python providers set up their own paths
