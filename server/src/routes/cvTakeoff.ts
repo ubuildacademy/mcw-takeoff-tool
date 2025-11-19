@@ -168,6 +168,7 @@ router.post('/process-page', async (req, res) => {
     });
 
   } catch (error) {
+    const { documentId, pageNumber, projectId, scaleFactor } = req.body || {};
     const errorDetails = {
       error: error instanceof Error ? error.message : 'Unknown error',
       stack: error instanceof Error ? error.stack : undefined,
@@ -239,6 +240,7 @@ router.post('/process-pages', async (req, res) => {
     });
 
   } catch (error) {
+    const { documentId, pageNumbers, projectId, scaleFactor } = req.body || {};
     const errorDetails = {
       error: error instanceof Error ? error.message : 'Unknown error',
       stack: error instanceof Error ? error.stack : undefined,
