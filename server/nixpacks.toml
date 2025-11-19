@@ -20,7 +20,11 @@ cmds = [
   "ls -la dist/ || echo 'WARNING: dist directory not found'",
   "echo 'Verifying Python packages installation...'",
   "if [ -f /opt/venv/bin/python3 ]; then /opt/venv/bin/python3 -m pip list | grep -i opencv || echo 'WARNING: opencv-python not found in pip list'; fi",
-  "if [ -f /opt/venv/bin/python3 ]; then /opt/venv/bin/python3 -c 'import sys; print(sys.path)' || echo 'Could not check Python path'; fi"
+  "if [ -f /opt/venv/bin/python3 ]; then /opt/venv/bin/python3 -c 'import sys; print(sys.path)' || echo 'Could not check Python path'; fi",
+  "echo 'Verifying ImageMagick installation...'",
+  "which magick || which convert || find /nix/store -name 'magick' -type f 2>/dev/null | head -1 || echo 'WARNING: ImageMagick not found in PATH'",
+  "echo 'Verifying Ghostscript installation...'",
+  "which gs || find /nix/store -name 'gs' -type f 2>/dev/null | head -1 || echo 'WARNING: Ghostscript not found in PATH'"
 ]
 
 [variables]

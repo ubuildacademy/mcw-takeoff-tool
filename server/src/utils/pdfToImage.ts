@@ -223,14 +223,96 @@ class PDFToImageConverter {
    * Get enhanced PATH for Railway/Nixpacks environments
    */
   private getEnhancedPath(): string {
+    // In nixpacks, packages are installed in the nix store
+    // We need to include nix profile paths and also search the store
     return [
       '/nix/var/nix/profiles/default/bin',  // Nix default profile
       '/root/.nix-profile/bin',               // Nix user profile
+      '/nix/var/nix/profiles/system/sw/bin',  // System profile (nixpacks)
       '/usr/local/bin',                        // Common system location
       '/usr/bin',                              // Standard system location
       '/bin',                                  // Basic system location
       process.env.PATH || ''                   // Existing PATH
     ].filter(Boolean).join(':');
+  }
+  
+  /**
+   * Find ImageMagick in nix store (for nixpacks installations)
+   */
+  private async findImageMagickInNixStore(): Promise<string | null> {
+    const enhancedPath = this.getEnhancedPath();
+    
+    // Method 1: Use find to search nix store directly
+    try {
+      console.log(`   Searching nix store for ImageMagick...`);
+      const { stdout } = await execAsync(`find /nix/store -name "magick" -type f 2>/dev/null | head -1`, {
+        timeout: 10000,
+        env: { ...process.env, PATH: enhancedPath }
+      });
+      if (stdout && stdout.trim()) {
+        const foundPath = stdout.trim();
+        console.log(`   Found magick at: ${foundPath}`);
+        // Verify it's actually ImageMagick
+        try {
+          const { stdout: version } = await execAsync(`${foundPath} --version`, { 
+            timeout: 3000,
+            env: { ...process.env, PATH: enhancedPath }
+          });
+          if (version && version.toLowerCase().includes('imagemagick')) {
+            console.log(`   ✅ Verified ImageMagick: ${version.substring(0, 50)}`);
+            return foundPath;
+          }
+        } catch {
+          console.log(`   ⚠️ Found magick but verification failed`);
+        }
+      }
+    } catch (error) {
+      console.log(`   ⚠️ find command failed: ${error instanceof Error ? error.message : 'Unknown'}`);
+    }
+    
+    // Method 2: Try to find convert (ImageMagick 6)
+    try {
+      const { stdout } = await execAsync(`find /nix/store -name "convert" -path "*/bin/convert" -type f 2>/dev/null | head -1`, {
+        timeout: 10000,
+        env: { ...process.env, PATH: enhancedPath }
+      });
+      if (stdout && stdout.trim()) {
+        const foundPath = stdout.trim();
+        console.log(`   Found convert at: ${foundPath}`);
+        // Verify it's ImageMagick convert (not file system convert)
+        try {
+          const { stdout: version } = await execAsync(`${foundPath} --version`, { 
+            timeout: 3000,
+            env: { ...process.env, PATH: enhancedPath }
+          });
+          if (version && (version.toLowerCase().includes('imagemagick') || version.toLowerCase().includes('image magick'))) {
+            console.log(`   ✅ Verified ImageMagick convert: ${version.substring(0, 50)}`);
+            return foundPath;
+          }
+        } catch {
+          // Not ImageMagick convert
+        }
+      }
+    } catch {
+      // find failed
+    }
+    
+    // Method 3: Try nix-shell approach (if available)
+    try {
+      const { stdout } = await execAsync(`nix-shell -p imagemagick --run "which magick" 2>/dev/null || echo ""`, {
+        timeout: 10000,
+        env: { ...process.env, PATH: enhancedPath }
+      });
+      if (stdout && stdout.trim()) {
+        const foundPath = stdout.trim();
+        console.log(`   Found via nix-shell: ${foundPath}`);
+        return foundPath;
+      }
+    } catch {
+      // nix-shell might not be available
+    }
+    
+    return null;
   }
 
   /**
@@ -241,7 +323,38 @@ class PDFToImageConverter {
     const commands = ['magick', 'convert'];
     const enhancedPath = this.getEnhancedPath();
     
-    // First, try to find ImageMagick using 'which' with enhanced PATH
+    console.log(`🔍 Checking for ImageMagick availability...`);
+    console.log(`   Enhanced PATH: ${enhancedPath}`);
+    
+    // First, try to find ImageMagick in nix store (for nixpacks installations)
+    const nixStorePath = await this.findImageMagickInNixStore();
+    if (nixStorePath) {
+      console.log(`✅ ImageMagick found in nix store: ${nixStorePath}`);
+      try {
+        await execAsync(`${nixStorePath} --version`, { timeout: 5000, env: { ...process.env, PATH: enhancedPath } });
+        // Check PDF support
+        try {
+          const { stdout: delegateStdout } = await execAsync(`${nixStorePath} -list delegate`, { 
+            timeout: 5000,
+            env: { ...process.env, PATH: enhancedPath }
+          });
+          if (delegateStdout && delegateStdout.toLowerCase().includes('pdf')) {
+            console.log(`✅ ImageMagick PDF support confirmed`);
+            return { available: true, command: nixStorePath };
+          } else {
+            console.warn(`⚠️ ImageMagick found but PDF support may be missing (Ghostscript required)`);
+            return { available: true, command: nixStorePath, error: 'PDF support may be missing' };
+          }
+        } catch {
+          console.warn(`⚠️ Could not verify PDF support, will attempt anyway`);
+          return { available: true, command: nixStorePath };
+        }
+      } catch {
+        console.warn(`⚠️ ImageMagick found in nix store but doesn't work, continuing search...`);
+      }
+    }
+    
+    // Try to find ImageMagick using 'which' with enhanced PATH
     for (const cmd of commands) {
       try {
         const { stdout: whichOutput } = await execAsync(`which ${cmd}`, {
@@ -287,6 +400,7 @@ class PDFToImageConverter {
         cmd,  // Try in PATH first
         `/nix/var/nix/profiles/default/bin/${cmd}`,  // Nix default profile
         `/root/.nix-profile/bin/${cmd}`,              // Nix user profile
+        `/nix/var/nix/profiles/system/sw/bin/${cmd}`, // System profile (nixpacks)
         `/usr/local/bin/${cmd}`,                      // Common system location
         `/usr/bin/${cmd}`                             // Standard system location
       ];
@@ -327,7 +441,8 @@ class PDFToImageConverter {
       }
     }
     
-    return { available: false, command: 'magick', error: 'ImageMagick not found in PATH or standard locations' };
+    console.error(`❌ ImageMagick not found in any location`);
+    return { available: false, command: 'magick', error: 'ImageMagick not found in PATH, nix store, or standard locations' };
   }
 
   /**
