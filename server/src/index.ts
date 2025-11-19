@@ -136,11 +136,38 @@ app.use(cors({
   preflightContinue: false,
   optionsSuccessStatus: 204,
 }));
-app.use(express.json({ limit: '5gb' }));
-app.use(express.urlencoded({ extended: true, limit: '5gb' }));
+// Reduced limits for Railway free tier (512MB RAM limit)
+// Large files should be handled via Supabase Storage directly, not through JSON
+app.use(express.json({ limit: '50mb' })); // Reduced from 5gb for free tier
+app.use(express.urlencoded({ extended: true, limit: '50mb' })); // Reduced from 5gb for free tier
 
 fs.ensureDirSync(path.join(__dirname, '../uploads'));
 fs.ensureDirSync(path.join(__dirname, '../data'));
+
+// Health check endpoint for Railway monitoring
+app.get('/health', (req, res) => {
+  const memoryUsage = process.memoryUsage();
+  const memoryMB = {
+    rss: (memoryUsage.rss / 1024 / 1024).toFixed(2),
+    heapTotal: (memoryUsage.heapTotal / 1024 / 1024).toFixed(2),
+    heapUsed: (memoryUsage.heapUsed / 1024 / 1024).toFixed(2),
+    external: (memoryUsage.external / 1024 / 1024).toFixed(2)
+  };
+  
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    memory: memoryMB,
+    nodeVersion: process.version,
+    platform: process.platform,
+    env: process.env.NODE_ENV || 'development',
+    railway: {
+      environment: process.env.RAILWAY_ENVIRONMENT || 'not set',
+      serviceName: process.env.RAILWAY_SERVICE_NAME || 'not set'
+    }
+  });
+});
 
 // Health - explicitly allow OPTIONS
 app.all('/api/health', (req, res) => {
