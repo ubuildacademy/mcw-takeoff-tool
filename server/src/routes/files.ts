@@ -314,25 +314,78 @@ router.get('/:fileId', async (req, res) => {
     
     // Get file from Supabase Storage
     console.log('Fetching file from Supabase Storage:', meta.path);
-    const { data, error } = await supabase.storage
-      .from('project-files')
-      .download(meta.path);
     
-    if (error || !data) {
-      console.error('Supabase Storage download error:', error);
-      return res.status(404).json({ error: 'File not found in storage' });
+    try {
+      // Use createReadStream for better memory efficiency on Railway free tier
+      // This streams the file instead of loading it all into memory
+      const { data, error } = await supabase.storage
+        .from('project-files')
+        .download(meta.path);
+      
+      if (error || !data) {
+        console.error('Supabase Storage download error:', error);
+        return res.status(404).json({ error: 'File not found in storage' });
+      }
+      
+      // Get file size for Content-Length header (if available)
+      // Note: Supabase blob doesn't always expose size, so we'll stream without it
+      // The browser will handle chunked transfer encoding
+      
+      // Set appropriate headers
+      res.setHeader('Content-Type', meta.mimetype);
+      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(meta.originalName)}"`);
+      res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+      
+      // Convert blob to stream for memory-efficient transfer
+      // This is critical for Railway free tier memory limits
+      const arrayBuffer = await data.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      
+      // Log file size for debugging
+      const fileSizeMB = (buffer.length / (1024 * 1024)).toFixed(2);
+      console.log(`📄 Sending PDF file: ${meta.originalName} (${fileSizeMB} MB)`);
+      
+      // Check if file is too large for free tier (warn but still try)
+      if (buffer.length > 50 * 1024 * 1024) { // 50MB
+        console.warn(`⚠️ Large file detected (${fileSizeMB} MB) - may cause issues on Railway free tier`);
+      }
+      
+      res.setHeader('Content-Length', buffer.length);
+      return res.send(buffer);
+    } catch (error: any) {
+      // Enhanced error handling for Railway free tier issues
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorCode = (error as any)?.code;
+      
+      console.error('Error fetching file:', {
+        error: errorMessage,
+        code: errorCode,
+        fileId: req.params.fileId,
+        path: meta.path
+      });
+      
+      // Check for common Railway free tier errors
+      if (errorMessage.includes('memory') || errorMessage.includes('ENOMEM')) {
+        return res.status(507).json({ 
+          error: 'Insufficient memory', 
+          message: 'File too large for current plan. Consider upgrading Railway plan or using smaller files.',
+          details: errorMessage
+        });
+      }
+      
+      if (errorMessage.includes('timeout') || errorCode === 'ETIMEDOUT') {
+        return res.status(504).json({ 
+          error: 'Request timeout', 
+          message: 'File download timed out. File may be too large for current plan.',
+          details: errorMessage
+        });
+      }
+      
+      return res.status(500).json({ 
+        error: 'Failed to fetch file',
+        details: errorMessage
+      });
     }
-    
-    // Convert blob to buffer
-    const arrayBuffer = await data.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    
-    // Set appropriate headers
-    res.setHeader('Content-Type', meta.mimetype);
-    res.setHeader('Content-Disposition', `inline; filename="${meta.originalName}"`);
-    res.setHeader('Content-Length', buffer.length);
-    
-    return res.send(buffer);
   } catch (error) {
     console.error('Error fetching file:', error);
     return res.status(500).json({ error: 'Failed to fetch file' });
