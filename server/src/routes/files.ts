@@ -247,16 +247,31 @@ router.get('/', async (req, res) => {
 });
 
 router.get('/:fileId', async (req, res) => {
+  const startTime = Date.now();
+  const { fileId } = req.params;
+  
+  console.log('🔍 [FILE REQUEST] Starting file fetch:', {
+    fileId,
+    method: req.method,
+    path: req.path,
+    hasAuthHeader: !!req.headers.authorization,
+    userAgent: req.headers['user-agent']?.substring(0, 50),
+    timestamp: new Date().toISOString()
+  });
+  
   try {
     // Get authenticated user
     const user = await getAuthenticatedUser(req);
     if (!user) {
+      console.error('❌ [FILE REQUEST] Authentication failed:', {
+        fileId,
+        hasAuthHeader: !!req.headers.authorization,
+        authHeaderLength: req.headers.authorization?.length || 0
+      });
       return res.status(401).json({ error: 'Unauthorized' });
     }
     
-    const { fileId } = req.params;
-    
-    console.log('🔍 Fetching file:', { fileId, userId: user.id });
+    console.log('✅ [FILE REQUEST] User authenticated:', { fileId, userId: user.id, email: user.email });
     
     // Query file directly by ID instead of getting all files
     const { data: fileData, error: fileError } = await supabase
@@ -343,25 +358,31 @@ router.get('/:fileId', async (req, res) => {
       
       // Log file size for debugging
       const fileSizeMB = (buffer.length / (1024 * 1024)).toFixed(2);
-      console.log(`📄 Sending PDF file: ${meta.originalName} (${fileSizeMB} MB)`);
+      const elapsedMs = Date.now() - startTime;
+      console.log(`📄 [FILE REQUEST] Sending PDF file: ${meta.originalName} (${fileSizeMB} MB) - took ${elapsedMs}ms`);
       
       // Check if file is too large for free tier (warn but still try)
       if (buffer.length > 50 * 1024 * 1024) { // 50MB
-        console.warn(`⚠️ Large file detected (${fileSizeMB} MB) - may cause issues on Railway free tier`);
+        console.warn(`⚠️ [FILE REQUEST] Large file detected (${fileSizeMB} MB) - may cause issues on Railway free tier`);
       }
       
       res.setHeader('Content-Length', buffer.length);
-      return res.send(buffer);
+      res.send(buffer);
+      console.log(`✅ [FILE REQUEST] File sent successfully: ${fileId} (${elapsedMs}ms total)`);
+      return;
     } catch (error: any) {
       // Enhanced error handling for Railway free tier issues
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       const errorCode = (error as any)?.code;
+      const elapsedMs = Date.now() - startTime;
       
-      console.error('Error fetching file:', {
+      console.error('❌ [FILE REQUEST] Error fetching file from storage:', {
         error: errorMessage,
         code: errorCode,
         fileId: req.params.fileId,
-        path: meta.path
+        path: meta?.path || 'unknown',
+        stack: error instanceof Error ? error.stack : undefined,
+        elapsedMs
       });
       
       // Check for common Railway free tier errors
@@ -387,8 +408,23 @@ router.get('/:fileId', async (req, res) => {
       });
     }
   } catch (error) {
-    console.error('Error fetching file:', error);
-    return res.status(500).json({ error: 'Failed to fetch file' });
+    const elapsedMs = Date.now() - startTime;
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    
+    console.error('❌ [FILE REQUEST] Unexpected error in file route:', {
+      fileId,
+      error: errorMessage,
+      stack: errorStack,
+      elapsedMs,
+      timestamp: new Date().toISOString()
+    });
+    
+    return res.status(500).json({ 
+      error: 'Failed to fetch file',
+      details: errorMessage,
+      fileId
+    });
   }
 });
 
