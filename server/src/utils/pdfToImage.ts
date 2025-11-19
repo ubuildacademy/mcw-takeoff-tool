@@ -204,8 +204,48 @@ class PDFToImageConverter {
     const commands = ['magick', 'convert'];
     const enhancedPath = this.getEnhancedPath();
     
+    // First, try to find ImageMagick using 'which' with enhanced PATH
     for (const cmd of commands) {
-      // Try both with and without full path
+      try {
+        const { stdout: whichOutput } = await execAsync(`which ${cmd}`, {
+          timeout: 5000,
+          env: { ...process.env, PATH: enhancedPath }
+        });
+        if (whichOutput && whichOutput.trim()) {
+          const cmdPath = whichOutput.trim();
+          console.log(`✅ ImageMagick found via 'which': ${cmdPath}`);
+          // Verify it works and check PDF support
+          try {
+            await execAsync(`${cmdPath} --version`, { timeout: 5000, env: { ...process.env, PATH: enhancedPath } });
+            // Check PDF support
+            try {
+              const { stdout: delegateStdout } = await execAsync(`${cmdPath} -list delegate`, { 
+                timeout: 5000,
+                env: { ...process.env, PATH: enhancedPath }
+              });
+              if (delegateStdout && delegateStdout.toLowerCase().includes('pdf')) {
+                console.log(`✅ ImageMagick PDF support confirmed`);
+                return { available: true, command: cmdPath };
+              } else {
+                console.warn(`⚠️ ImageMagick found but PDF support may be missing (Ghostscript required)`);
+                return { available: true, command: cmdPath, error: 'PDF support may be missing' };
+              }
+            } catch {
+              console.warn(`⚠️ Could not verify PDF support, will attempt anyway`);
+              return { available: true, command: cmdPath };
+            }
+          } catch {
+            // which found it but it doesn't work, continue searching
+            continue;
+          }
+        }
+      } catch {
+        // which didn't find it, continue to manual paths
+      }
+    }
+    
+    // If 'which' didn't find it, try known paths
+    for (const cmd of commands) {
       const cmdPaths = [
         cmd,  // Try in PATH first
         `/nix/var/nix/profiles/default/bin/${cmd}`,  // Nix default profile
