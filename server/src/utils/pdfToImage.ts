@@ -183,38 +183,74 @@ class PDFToImageConverter {
   }
 
   /**
+   * Get enhanced PATH for Railway/Nixpacks environments
+   */
+  private getEnhancedPath(): string {
+    return [
+      '/nix/var/nix/profiles/default/bin',  // Nix default profile
+      '/root/.nix-profile/bin',               // Nix user profile
+      '/usr/local/bin',                        // Common system location
+      '/usr/bin',                              // Standard system location
+      '/bin',                                  // Basic system location
+      process.env.PATH || ''                   // Existing PATH
+    ].filter(Boolean).join(':');
+  }
+
+  /**
    * Check if ImageMagick is available and can handle PDFs
    */
   private async checkImageMagickAvailable(): Promise<{ available: boolean; command: string; error?: string }> {
     // Try 'magick' first (ImageMagick 7+), then 'convert' (ImageMagick 6 or legacy)
     const commands = ['magick', 'convert'];
+    const enhancedPath = this.getEnhancedPath();
     
     for (const cmd of commands) {
-      try {
-        // Try to run the command with --version to check if it exists
-        await execAsync(`${cmd} --version`, { timeout: 5000 });
-        // If we get here, the command exists
-        // Check if it can handle PDFs by checking delegates
+      // Try both with and without full path
+      const cmdPaths = [
+        cmd,  // Try in PATH first
+        `/nix/var/nix/profiles/default/bin/${cmd}`,  // Nix default profile
+        `/root/.nix-profile/bin/${cmd}`,              // Nix user profile
+        `/usr/local/bin/${cmd}`,                      // Common system location
+        `/usr/bin/${cmd}`                             // Standard system location
+      ];
+      
+      for (const cmdPath of cmdPaths) {
         try {
-          const { stdout } = await execAsync(`${cmd} -list delegate`, { timeout: 5000 });
-          if (stdout && stdout.toLowerCase().includes('pdf')) {
-            console.log(`✅ ImageMagick found: ${cmd} (with PDF support)`);
-            return { available: true, command: cmd };
-          } else {
-            console.warn(`⚠️ ImageMagick found (${cmd}) but PDF support may be missing (Ghostscript required)`);
-            return { available: true, command: cmd, error: 'PDF support may be missing' };
+          // Try to run the command with --version to check if it exists
+          const { stdout } = await execAsync(`${cmdPath} --version`, { 
+            timeout: 5000,
+            env: { ...process.env, PATH: enhancedPath }
+          });
+          
+          if (stdout) {
+            console.log(`✅ ImageMagick found: ${cmdPath}`);
+            
+            // Check if it can handle PDFs by checking delegates
+            try {
+              const { stdout: delegateStdout } = await execAsync(`${cmdPath} -list delegate`, { 
+                timeout: 5000,
+                env: { ...process.env, PATH: enhancedPath }
+              });
+              if (delegateStdout && delegateStdout.toLowerCase().includes('pdf')) {
+                console.log(`✅ ImageMagick PDF support confirmed`);
+                return { available: true, command: cmdPath };
+              } else {
+                console.warn(`⚠️ ImageMagick found but PDF support may be missing (Ghostscript required)`);
+                return { available: true, command: cmdPath, error: 'PDF support may be missing' };
+              }
+            } catch {
+              // If delegate check fails, still try to use it
+              console.warn(`⚠️ Could not verify PDF support, will attempt anyway`);
+              return { available: true, command: cmdPath };
+            }
           }
         } catch {
-          // If delegate check fails, still try to use it
-          console.warn(`⚠️ Could not verify PDF support for ${cmd}, will attempt anyway`);
-          return { available: true, command: cmd };
+          continue;
         }
-      } catch {
-        continue;
       }
     }
     
-    return { available: false, command: 'magick', error: 'ImageMagick not found in PATH' };
+    return { available: false, command: 'magick', error: 'ImageMagick not found in PATH or standard locations' };
   }
 
   /**
@@ -264,7 +300,11 @@ class PDFToImageConverter {
       console.log(`Output file will be: ${outputFile}`);
       
       try {
-        const { stdout, stderr } = await execAsync(command, { timeout: 30000 });
+        const enhancedPath = this.getEnhancedPath();
+        const { stdout, stderr } = await execAsync(command, { 
+          timeout: 30000,
+          env: { ...process.env, PATH: enhancedPath }
+        });
         if (stdout) console.log('ImageMagick stdout:', stdout);
         if (stderr && !stderr.includes('deprecated')) {
           console.warn('ImageMagick stderr:', stderr);
@@ -274,6 +314,7 @@ class PDFToImageConverter {
         console.error('Command stdout:', execError.stdout);
         console.error('Command stderr:', execError.stderr);
         console.error('Error code:', execError.code);
+        console.error('Enhanced PATH used:', this.getEnhancedPath());
         throw execError;
       }
 
