@@ -11,9 +11,13 @@ providers = ["node", "python"]
 [phases.install]
 nixPkgs = ["libGL", "glib", "libGLU", "pkg-config", "imagemagick", "ghostscript"]
 
-# Build phase: Verify Python packages are installed correctly
+# Build phase: Build TypeScript and verify Python packages
 [phases.build]
 cmds = [
+  "echo 'Building TypeScript...'",
+  "npm run build",
+  "echo 'Verifying build output...'",
+  "ls -la dist/ || echo 'WARNING: dist directory not found'",
   "echo 'Verifying Python packages installation...'",
   "if [ -f /opt/venv/bin/python3 ]; then /opt/venv/bin/python3 -m pip list | grep -i opencv || echo 'WARNING: opencv-python not found in pip list'; fi",
   "if [ -f /opt/venv/bin/python3 ]; then /opt/venv/bin/python3 -c 'import sys; print(sys.path)' || echo 'Could not check Python path'; fi"
