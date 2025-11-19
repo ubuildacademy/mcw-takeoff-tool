@@ -78,16 +78,55 @@ class CVTakeoffService {
         throw new Error(`PDF file not found for document ${documentId}`);
       }
 
+      // Validate PDF file exists and has content
+      if (!await fs.pathExists(pdfPath)) {
+        throw new Error(`PDF file does not exist at path: ${pdfPath}`);
+      }
+      
+      const pdfStats = await fs.stat(pdfPath);
+      if (pdfStats.size === 0) {
+        throw new Error(`PDF file is empty (0 bytes) at path: ${pdfPath}`);
+      }
+      
+      console.log(`📄 PDF file validated: ${pdfPath} (${pdfStats.size} bytes)`);
+
       // Convert PDF page to image
-      const imageBuffer = await pdfToImage.convertPageToBuffer(pdfPath, pageNumber, {
-        format: 'png',
-        scale: 2.0, // Higher resolution for better detection
-        quality: 90
-      });
+      console.log(`🖼️ Converting page ${pageNumber} to image...`);
+      let imageBuffer: Buffer | null;
+      try {
+        imageBuffer = await pdfToImage.convertPageToBuffer(pdfPath, pageNumber, {
+          format: 'png',
+          scale: 2.0, // Higher resolution for better detection
+          quality: 90
+        });
+      } catch (conversionError) {
+        // Provide detailed error information
+        const pdfExists = await fs.pathExists(pdfPath);
+        const pdfSize = pdfExists ? (await fs.stat(pdfPath)).size : 0;
+        const errorMessage = conversionError instanceof Error ? conversionError.message : 'Unknown conversion error';
+        console.error(`❌ PDF conversion error:`, conversionError);
+        throw new Error(
+          `Failed to convert page ${pageNumber} to image. ` +
+          `PDF path: ${pdfPath}, PDF exists: ${pdfExists}, PDF size: ${pdfSize} bytes. ` +
+          `Error: ${errorMessage}. ` +
+          `This usually means ImageMagick/pdf2pic failed to convert the PDF page. ` +
+          `Please check server logs for ImageMagick availability.`
+        );
+      }
 
       if (!imageBuffer || imageBuffer.length === 0) {
-        throw new Error(`Failed to convert page ${pageNumber} to image - empty buffer`);
+        // Provide more detailed error information
+        const pdfExists = await fs.pathExists(pdfPath);
+        const pdfSize = pdfExists ? (await fs.stat(pdfPath)).size : 0;
+        throw new Error(
+          `Failed to convert page ${pageNumber} to image - empty buffer returned. ` +
+          `PDF path: ${pdfPath}, PDF exists: ${pdfExists}, PDF size: ${pdfSize} bytes. ` +
+          `Both pdf2pic and ImageMagick fallback returned null/empty. ` +
+          `Please check server logs for ImageMagick availability and PDF conversion errors.`
+        );
       }
+      
+      console.log(`✅ Image conversion successful: ${imageBuffer.length} bytes`);
 
       // Convert to base64
       const imageData = imageBuffer.toString('base64');
@@ -469,11 +508,27 @@ class CVTakeoffService {
 
       // Save to temporary file
       // Use /tmp on Railway/production, or local temp directory in development
-      const baseTempDir = process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === 'production'
-        ? '/tmp/pdf-processing'
-        : path.join(process.cwd(), 'temp', 'pdf-processing');
+      const isProduction = process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === 'production';
+      let baseTempDir: string;
+      
+      if (isProduction) {
+        baseTempDir = '/tmp/pdf-processing';
+      } else {
+        // In dev, check if cwd is server/ or repo root
+        const cwd = process.cwd();
+        if (cwd.endsWith('server') || cwd.endsWith('server/')) {
+          baseTempDir = path.join(cwd, 'temp', 'pdf-processing');
+        } else {
+          baseTempDir = path.join(cwd, 'server', 'temp', 'pdf-processing');
+        }
+      }
+      
       await fs.ensureDir(baseTempDir);
       const tempPath = path.join(baseTempDir, `${documentId}.pdf`);
+      
+      console.log(`📥 Downloading PDF to: ${tempPath}`);
+      console.log(`📥 PDF file exists in storage: ${file ? 'yes' : 'no'}`);
+      console.log(`📥 Storage path: ${file?.path}`);
 
       const arrayBuffer = await data.arrayBuffer();
       await fs.writeFile(tempPath, Buffer.from(arrayBuffer));

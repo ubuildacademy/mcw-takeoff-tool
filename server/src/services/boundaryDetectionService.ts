@@ -67,13 +67,60 @@ class BoundaryDetectionService {
 
   constructor() {
     // Path to Python CV detection script (will be created dynamically)
-    // Store in server/src/scripts directory
-    this.pythonScriptPath = path.join(process.cwd(), 'server', 'src', 'scripts', 'cv_boundary_detection.py');
-    this.tempDir = path.join(process.cwd(), 'server', 'temp', 'cv-detection');
+    // In Railway: process.cwd() is /app/server (service root)
+    // In local dev: process.cwd() might be repo root or server/
+    const isProduction = process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT;
+    
+    // Get current file's directory (works in both source and compiled)
+    // In compiled: __dirname = /app/server/dist/services
+    // In source (ts-node): __dirname = /app/server/src/services
+    let currentDir: string;
+    try {
+      // @ts-ignore - __dirname exists at runtime in CommonJS
+      currentDir = __dirname;
+    } catch {
+      // Fallback if __dirname not available (shouldn't happen in CommonJS)
+      currentDir = process.cwd();
+    }
+    
+    // Determine if we're in dist (compiled) or src (source)
+    const isCompiled = currentDir.includes('dist');
+    
+    // Scripts directory should always be in src/scripts (not dist)
+    // Navigate from current location to server root, then to src/scripts
+    let scriptsBaseDir: string;
+    if (isCompiled) {
+      // dist/services -> dist -> server root -> src
+      scriptsBaseDir = path.join(currentDir, '..', '..', 'src');
+    } else {
+      // src/services -> src
+      scriptsBaseDir = path.join(currentDir, '..');
+    }
+    
+    this.pythonScriptPath = path.join(scriptsBaseDir, 'scripts', 'cv_boundary_detection.py');
+    
+    // Temp directory: use /tmp in production, local temp in dev
+    if (isProduction) {
+      this.tempDir = '/tmp/cv-detection';
+    } else {
+      // In dev, check if cwd is server/ or repo root
+      const cwd = process.cwd();
+      if (cwd.endsWith('server') || cwd.endsWith('server/')) {
+        this.tempDir = path.join(cwd, 'temp', 'cv-detection');
+      } else {
+        this.tempDir = path.join(cwd, 'server', 'temp', 'cv-detection');
+      }
+    }
     
     // Ensure temp directory exists
     fs.ensureDirSync(this.tempDir);
     fs.ensureDirSync(path.dirname(this.pythonScriptPath));
+    
+    console.log(`📁 Python script path: ${this.pythonScriptPath}`);
+    console.log(`📁 Temp directory: ${this.tempDir}`);
+    console.log(`📁 Process CWD: ${process.cwd()}`);
+    console.log(`📁 Current dir: ${currentDir}`);
+    console.log(`📁 Is compiled: ${isCompiled}`);
   }
 
   /**
