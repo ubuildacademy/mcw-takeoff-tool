@@ -624,6 +624,36 @@ if __name__ == "__main__":
       
       // Check OpenCV with enhanced PATH
       console.log(`   Checking OpenCV with Python: ${pythonCommand}`);
+      
+      // First, check if pip can see opencv-python
+      try {
+        console.log(`   Checking if opencv-python is installed...`);
+        const { stdout: pipList } = await execAsync(
+          `${pythonCommand} -m pip list | grep -i opencv || echo "not found"`,
+          {
+            timeout: 5000,
+            env: { ...process.env, PATH: enhancedPath }
+          }
+        );
+        console.log(`   pip list opencv: ${pipList.trim()}`);
+      } catch (pipError) {
+        console.warn(`   Could not check pip list: ${pipError}`);
+      }
+      
+      // Check Python site-packages location
+      try {
+        const { stdout: sitePackages } = await execAsync(
+          `${pythonCommand} -c "import site; print(site.getsitepackages())"`,
+          {
+            timeout: 5000,
+            env: { ...process.env, PATH: enhancedPath }
+          }
+        );
+        console.log(`   Python site-packages: ${sitePackages.trim()}`);
+      } catch (siteError) {
+        console.warn(`   Could not check site-packages: ${siteError}`);
+      }
+      
       try {
         const { stdout, stderr } = await execAsync(
           `${pythonCommand} -c "import cv2; print(cv2.__version__)"`,
@@ -639,11 +669,27 @@ if __name__ == "__main__":
           console.warn(`   OpenCV import warnings: ${stderr}`);
         }
       } catch (error) {
+        // Try to get more details about the import error
+        let importErrorDetails = '';
+        try {
+          const { stderr: importStderr } = await execAsync(
+            `${pythonCommand} -c "import cv2" 2>&1 || true`,
+            {
+              timeout: 5000,
+              env: { ...process.env, PATH: enhancedPath }
+            }
+          );
+          importErrorDetails = importStderr || '';
+        } catch {
+          // Ignore
+        }
+        
         const errorDetails = {
           pythonCommand,
           pythonVersion: result.pythonVersion,
           command: `${pythonCommand} -c "import cv2; print(cv2.__version__)"`,
           error: error instanceof Error ? error.message : 'Unknown error',
+          importError: importErrorDetails,
           code: (error as any)?.code,
           signal: (error as any)?.signal,
           stdout: (error as any)?.stdout || '',
