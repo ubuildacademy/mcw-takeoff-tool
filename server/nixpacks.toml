@@ -11,9 +11,8 @@ providers = ["node", "python"]
 nixPkgs = ["libGL", "glib", "libGLU", "pkg-config"]
 
 [variables]
-# Python virtual environment path (set by python provider)
-# Node.js provider handles npm PATH automatically - don't override it
-PATH = "/opt/venv/bin:$PATH"
+# Don't override PATH here - let Node.js and Python providers set up their own paths
+# Python venv will be available at runtime via the python provider
 PYTHONUNBUFFERED = "1"
 
 [start]
