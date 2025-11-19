@@ -25,7 +25,11 @@ class PDFToImageConverter {
   private tempDir: string;
 
   constructor() {
-    this.tempDir = path.join(process.cwd(), 'server', 'temp', 'pdf-images');
+    // Use /tmp on Railway/production, or local temp directory in development
+    const baseTempDir = process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === 'production' 
+      ? '/tmp/pdf-images' 
+      : path.join(process.cwd(), 'temp', 'pdf-images');
+    this.tempDir = baseTempDir;
     this.ensureTempDir();
   }
 
@@ -139,7 +143,24 @@ class PDFToImageConverter {
 
       if (result.success && result.images.length > 0) {
         // Read the first (and should be only) image file
-        const imageBuffer = await fs.readFile(result.images[0]);
+        const imagePath = result.images[0];
+        console.log(`Reading image file: ${imagePath}`);
+        
+        // Verify file exists and has content
+        if (!await fs.pathExists(imagePath)) {
+          console.error(`Image file does not exist: ${imagePath}`);
+          // Fallback to ImageMagick
+          return await this.convertPageToBufferWithImageMagick(pdfPath, pageNumber, options);
+        }
+        
+        const imageBuffer = await fs.readFile(imagePath);
+        console.log(`Image buffer size: ${imageBuffer.length} bytes`);
+        
+        if (imageBuffer.length === 0) {
+          console.error(`Image file is empty: ${imagePath}`);
+          // Fallback to ImageMagick
+          return await this.convertPageToBufferWithImageMagick(pdfPath, pageNumber, options);
+        }
         
         // Clean up the temporary file
         await this.cleanupTempFiles(result.images);
@@ -148,7 +169,10 @@ class PDFToImageConverter {
       }
 
       // Fallback to ImageMagick if pdf2pic fails
-      console.log('pdf2pic failed, trying ImageMagick fallback...');
+      console.log(`pdf2pic failed (success: ${result.success}, images: ${result.images.length}), trying ImageMagick fallback...`);
+      if (result.error) {
+        console.error(`pdf2pic error: ${result.error}`);
+      }
       return await this.convertPageToBufferWithImageMagick(pdfPath, pageNumber, options);
     } catch (error) {
       console.error('Error converting PDF page to buffer:', error);
@@ -189,7 +213,19 @@ class PDFToImageConverter {
       const command = `magick -density ${density} "${pdfPath}[${pageNumber - 1}]" -background white -alpha remove -flatten -enhance -sharpen 0x1 -quality ${quality} "${outputFile}"`;
       
       console.log('Running ImageMagick command:', command);
-      await execAsync(command);
+      console.log(`PDF path exists: ${await fs.pathExists(pdfPath)}`);
+      console.log(`PDF path: ${pdfPath}`);
+      
+      try {
+        const { stdout, stderr } = await execAsync(command, { timeout: 30000 });
+        if (stdout) console.log('ImageMagick stdout:', stdout);
+        if (stderr) console.warn('ImageMagick stderr:', stderr);
+      } catch (execError: any) {
+        console.error('ImageMagick command failed:', execError);
+        console.error('Command stdout:', execError.stdout);
+        console.error('Command stderr:', execError.stderr);
+        throw execError;
+      }
 
       // Check if the file was created
       if (await fs.pathExists(outputFile)) {

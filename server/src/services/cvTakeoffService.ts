@@ -61,6 +61,8 @@ class CVTakeoffService {
     scaleFactor: number,
     options: CVTakeoffOptions = {}
   ): Promise<PageDetectionResult> {
+    let pdfPath: string | null = null;
+    
     try {
       console.log(`🔍 Processing page ${pageNumber} for CV takeoff`);
 
@@ -70,8 +72,8 @@ class CVTakeoffService {
         scaleFactor = 0.0833;
       }
 
-      // Get PDF file path
-      const pdfPath = await this.getPDFFilePath(documentId, projectId);
+      // Get PDF file path (downloads from Supabase Storage to temp file)
+      pdfPath = await this.getPDFFilePath(documentId, projectId);
       if (!pdfPath) {
         throw new Error(`PDF file not found for document ${documentId}`);
       }
@@ -173,6 +175,18 @@ class CVTakeoffService {
     } catch (error) {
       console.error(`❌ Error processing page ${pageNumber}:`, error);
       throw error;
+    } finally {
+      // Always clean up the temporary PDF file
+      if (pdfPath) {
+        try {
+          if (await fs.pathExists(pdfPath)) {
+            await fs.remove(pdfPath);
+            console.log(`🧹 Cleaned up temp PDF file: ${pdfPath}`);
+          }
+        } catch (cleanupError) {
+          console.error(`⚠️ Error cleaning up temp PDF file: ${pdfPath}`, cleanupError);
+        }
+      }
     }
   }
 
@@ -454,9 +468,12 @@ class CVTakeoffService {
       }
 
       // Save to temporary file
-      const tempDir = path.join(process.cwd(), 'server', 'temp', 'pdf-processing');
-      await fs.ensureDir(tempDir);
-      const tempPath = path.join(tempDir, `${documentId}.pdf`);
+      // Use /tmp on Railway/production, or local temp directory in development
+      const baseTempDir = process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === 'production'
+        ? '/tmp/pdf-processing'
+        : path.join(process.cwd(), 'temp', 'pdf-processing');
+      await fs.ensureDir(baseTempDir);
+      const tempPath = path.join(baseTempDir, `${documentId}.pdf`);
 
       const arrayBuffer = await data.arrayBuffer();
       await fs.writeFile(tempPath, Buffer.from(arrayBuffer));

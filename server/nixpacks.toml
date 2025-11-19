@@ -5,10 +5,10 @@ providers = ["node", "python"]
 # Both providers run automatically when package.json and requirements.txt are detected
 # IMPORTANT: Ensure Railway service root directory is set to "server/" in Railway dashboard
 
-# Install system libraries required for OpenCV
+# Install system libraries required for OpenCV and PDF processing
 # These are installed after Node.js provider sets up npm
 [phases.install]
-nixPkgs = ["libGL", "glib", "libGLU", "pkg-config"]
+nixPkgs = ["libGL", "glib", "libGLU", "pkg-config", "imagemagick"]
 
 [variables]
 # Don't override PATH here - let Node.js and Python providers set up their own paths
