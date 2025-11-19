@@ -23,6 +23,9 @@ cmds = [
 # Don't override PATH here - let Node.js and Python providers set up their own paths
 # Python venv will be available at runtime via the python provider
 PYTHONUNBUFFERED = "1"
+# Set LD_LIBRARY_PATH so OpenCV can find libGL.so.1 and other shared libraries from nixpacks
+# This includes common nix store locations where libGL and other libraries are installed
+LD_LIBRARY_PATH = "/nix/var/nix/profiles/default/lib:/root/.nix-profile/lib:/usr/lib:/usr/local/lib:$LD_LIBRARY_PATH"
 
 [start]
 cmd = "npm start"

@@ -82,10 +82,25 @@ class BoundaryDetectionService {
   private getEnhancedPath(): string {
     return [
       '/opt/venv/bin',           // Railway Nixpacks virtual environment
+      '/nix/var/nix/profiles/default/bin',  // Nix default profile
+      '/root/.nix-profile/bin',   // Nix user profile
       '/usr/local/bin',          // Common system location
       '/usr/bin',                // Standard system location
       '/bin',                    // Basic system location
       process.env.PATH || ''     // Existing PATH
+    ].filter(Boolean).join(':');
+  }
+
+  /**
+   * Get enhanced LD_LIBRARY_PATH for OpenCV to find shared libraries
+   */
+  private getEnhancedLdLibraryPath(): string {
+    return [
+      '/nix/var/nix/profiles/default/lib',  // Nix default profile libs
+      '/root/.nix-profile/lib',             // Nix user profile libs
+      '/usr/lib',                           // System libs
+      '/usr/local/lib',                     // Local libs
+      process.env.LD_LIBRARY_PATH || ''     // Existing LD_LIBRARY_PATH
     ].filter(Boolean).join(':');
   }
 
@@ -394,6 +409,7 @@ if __name__ == "__main__":
       console.log(`   Image path: ${imagePath}`);
       console.log(`   Image exists: ${await fs.pathExists(imagePath)}`);
       console.log(`   Enhanced PATH: ${this.getEnhancedPath()}`);
+      console.log(`   Enhanced LD_LIBRARY_PATH: ${this.getEnhancedLdLibraryPath()}`);
       
       let stdout: string;
       let stderr: string;
@@ -401,7 +417,11 @@ if __name__ == "__main__":
         const execResult = await execAsync(command, {
           timeout: 60000, // 60 second timeout (increased for complex images)
           maxBuffer: 10 * 1024 * 1024, // 10MB buffer
-          env: { ...process.env, PATH: this.getEnhancedPath() }
+          env: { 
+            ...process.env, 
+            PATH: this.getEnhancedPath(),
+            LD_LIBRARY_PATH: this.getEnhancedLdLibraryPath()
+          }
         });
         stdout = execResult.stdout;
         stderr = execResult.stderr;
@@ -628,11 +648,16 @@ if __name__ == "__main__":
       // First, check if pip can see opencv-python
       try {
         console.log(`   Checking if opencv-python is installed...`);
+        const enhancedLdPath = this.getEnhancedLdLibraryPath();
         const { stdout: pipList } = await execAsync(
           `${pythonCommand} -m pip list | grep -i opencv || echo "not found"`,
           {
             timeout: 5000,
-            env: { ...process.env, PATH: enhancedPath }
+            env: { 
+              ...process.env, 
+              PATH: enhancedPath,
+              LD_LIBRARY_PATH: enhancedLdPath
+            }
           }
         );
         console.log(`   pip list opencv: ${pipList.trim()}`);
@@ -642,11 +667,16 @@ if __name__ == "__main__":
       
       // Check Python site-packages location
       try {
+        const enhancedLdPath = this.getEnhancedLdLibraryPath();
         const { stdout: sitePackages } = await execAsync(
           `${pythonCommand} -c "import site; print(site.getsitepackages())"`,
           {
             timeout: 5000,
-            env: { ...process.env, PATH: enhancedPath }
+            env: { 
+              ...process.env, 
+              PATH: enhancedPath,
+              LD_LIBRARY_PATH: enhancedLdPath
+            }
           }
         );
         console.log(`   Python site-packages: ${sitePackages.trim()}`);
@@ -655,11 +685,16 @@ if __name__ == "__main__":
       }
       
       try {
+        const enhancedLdPath = this.getEnhancedLdLibraryPath();
         const { stdout, stderr } = await execAsync(
           `${pythonCommand} -c "import cv2; print(cv2.__version__)"`,
           {
             timeout: 5000,
-            env: { ...process.env, PATH: enhancedPath }
+            env: { 
+              ...process.env, 
+              PATH: enhancedPath,
+              LD_LIBRARY_PATH: enhancedLdPath
+            }
           }
         );
         result.opencvAvailable = true;
@@ -672,11 +707,16 @@ if __name__ == "__main__":
         // Try to get more details about the import error
         let importErrorDetails = '';
         try {
+          const enhancedLdPath = this.getEnhancedLdLibraryPath();
           const { stderr: importStderr } = await execAsync(
             `${pythonCommand} -c "import cv2" 2>&1 || true`,
             {
               timeout: 5000,
-              env: { ...process.env, PATH: enhancedPath }
+              env: { 
+                ...process.env, 
+                PATH: enhancedPath,
+                LD_LIBRARY_PATH: enhancedLdPath
+              }
             }
           );
           importErrorDetails = importStderr || '';
