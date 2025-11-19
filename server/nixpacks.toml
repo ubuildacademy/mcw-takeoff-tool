@@ -11,6 +11,14 @@ providers = ["node", "python"]
 [phases.install]
 nixPkgs = ["libGL", "glib", "libGLU", "pkg-config", "imagemagick", "ghostscript"]
 
+# Build phase: Verify Python packages are installed correctly
+[phases.build]
+cmds = [
+  "echo 'Verifying Python packages installation...'",
+  "if [ -f /opt/venv/bin/python3 ]; then /opt/venv/bin/python3 -m pip list | grep -i opencv || echo 'WARNING: opencv-python not found in pip list'; fi",
+  "if [ -f /opt/venv/bin/python3 ]; then /opt/venv/bin/python3 -c 'import sys; print(sys.path)' || echo 'Could not check Python path'; fi"
+]
+
 [variables]
 # Don't override PATH here - let Node.js and Python providers set up their own paths
 # Python venv will be available at runtime via the python provider
