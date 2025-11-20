@@ -9,6 +9,7 @@
 
 import { boundaryDetectionService, RoomBoundary, WallSegment, DoorWindow } from './boundaryDetectionService';
 import { pythonPdfConverter } from './pythonPdfConverter';
+import { enhancedOcrService } from './enhancedOcrService';
 import { storage } from '../storage';
 import { supabase } from '../supabase';
 import { v4 as uuidv4 } from 'uuid';
@@ -131,7 +132,25 @@ class CVTakeoffService {
       // Convert to base64
       const imageData = imageBuffer.toString('base64');
 
-      // Detect boundaries
+      // Step 1: Run OCR to get room labels and text context
+      console.log(`📝 Running OCR analysis for room labels...`);
+      let ocrResult = null;
+      let roomLabels: Array<{ name: string; bbox: { x: number; y: number; width: number; height: number }; confidence: number }> = [];
+      
+      try {
+        ocrResult = await enhancedOcrService.analyzeImage(imageData);
+        roomLabels = ocrResult.roomNames.map(room => ({
+          name: room.name,
+          bbox: room.bbox,
+          confidence: room.confidence
+        }));
+        console.log(`✅ OCR found ${roomLabels.length} room labels: ${roomLabels.map(r => r.name).join(', ')}`);
+      } catch (ocrError) {
+        console.warn(`⚠️ OCR analysis failed, continuing without room labels:`, ocrError instanceof Error ? ocrError.message : 'Unknown error');
+        // Continue without OCR - CV detection will still work
+      }
+
+      // Step 2: Detect boundaries using CV
       const detectionResult = await boundaryDetectionService.detectBoundaries(
         imageData,
         scaleFactor,
@@ -142,6 +161,19 @@ class CVTakeoffService {
       );
 
       console.log(`✅ Detection complete: ${detectionResult.rooms.length} rooms, ${detectionResult.walls.length} walls, ${detectionResult.doors.length} doors, ${detectionResult.windows.length} windows`);
+
+      // Step 3: Match OCR room labels with detected room contours
+      if (roomLabels.length > 0 && detectionResult.rooms.length > 0) {
+        console.log(`🔗 Matching ${roomLabels.length} room labels with ${detectionResult.rooms.length} detected rooms...`);
+        const matchedRooms = this.matchRoomLabelsToContours(
+          detectionResult.rooms,
+          roomLabels,
+          detectionResult.imageWidth,
+          detectionResult.imageHeight
+        );
+        detectionResult.rooms = matchedRooms;
+        console.log(`✅ Matched ${matchedRooms.filter(r => r.roomLabel).length} rooms with labels`);
+      }
 
       // Create conditions and measurements
       let conditionsCreated = 0;
@@ -331,44 +363,67 @@ class CVTakeoffService {
     pageNumber: number,
     conditionName: string
   ): Promise<{ conditions: number; measurements: number }> {
-    // Check if condition already exists
-    let condition = await this.findOrCreateCondition(
-      projectId,
-      conditionName,
-      'area',
-      'SF',
-      '#4CAF50' // Green for rooms
-    );
-
-    // Create measurements for each room
+    // Group rooms by label if available, or use default condition name
+    const roomsByLabel = new Map<string, RoomBoundary[]>();
+    
     for (const room of rooms) {
-      // Convert normalized points to PDF coordinates
-      const pdfCoordinates = room.points;
+      const label = room.roomLabel || conditionName;
+      if (!roomsByLabel.has(label)) {
+        roomsByLabel.set(label, []);
+      }
+      roomsByLabel.get(label)!.push(room);
+    }
 
-      // Create measurement
-      const measurement = {
-        id: uuidv4(),
+    let totalConditionsCreated = 0;
+    let totalMeasurementsCreated = 0;
+
+    // Create a condition for each unique room label (or use default)
+    for (const [label, labeledRooms] of roomsByLabel) {
+      // Use room label as condition name if available, otherwise use default
+      const conditionNameToUse = label !== conditionName ? `${conditionName} - ${label}` : conditionName;
+      
+      // Check if condition already exists
+      let condition = await this.findOrCreateCondition(
         projectId,
-        sheetId: documentId,
-        conditionId: condition.id,
-        type: 'area' as const,
-        points: pdfCoordinates, // Same as pdfCoordinates for area measurements
-        calculatedValue: room.area,
-        unit: 'SF',
-        timestamp: Date.now().toString(),
-        pdfPage: pageNumber,
-        pdfCoordinates,
-        conditionColor: condition.color,
-        conditionName: condition.name,
-        perimeterValue: room.perimeter
-      };
+        conditionNameToUse,
+        'area',
+        'SF',
+        '#4CAF50' // Green for rooms
+      );
 
-      await storage.saveTakeoffMeasurement(measurement);
+      // Create measurements for each room in this group
+      for (const room of labeledRooms) {
+        // Convert normalized points to PDF coordinates
+        const pdfCoordinates = room.points;
+
+        // Create measurement with room label if available
+        const measurement = {
+          id: uuidv4(),
+          projectId,
+          sheetId: documentId,
+          conditionId: condition.id,
+          type: 'area' as const,
+          points: pdfCoordinates,
+          calculatedValue: room.area,
+          unit: 'SF',
+          timestamp: Date.now().toString(),
+          pdfPage: pageNumber,
+          pdfCoordinates,
+          conditionColor: condition.color,
+          conditionName: condition.name,
+          perimeterValue: room.perimeter
+        };
+
+        await storage.saveTakeoffMeasurement(measurement);
+      }
+
+      totalConditionsCreated += condition.wasCreated ? 1 : 0;
+      totalMeasurementsCreated += labeledRooms.length;
     }
 
     return {
-      conditions: condition.wasCreated ? 1 : 0, // 1 if created, 0 if existed
-      measurements: rooms.length
+      conditions: totalConditionsCreated,
+      measurements: totalMeasurementsCreated
     };
   }
 
@@ -476,6 +531,97 @@ class CVTakeoffService {
       conditions: condition.wasCreated ? 1 : 0,
       measurements: items.length
     };
+  }
+
+  /**
+   * Match OCR-detected room labels with CV-detected room contours
+   * Room labels are typically placed outside the room, pointing inward
+   */
+  private matchRoomLabelsToContours(
+    rooms: RoomBoundary[],
+    roomLabels: Array<{ name: string; bbox: { x: number; y: number; width: number; height: number }; confidence: number }>,
+    imageWidth: number,
+    imageHeight: number
+  ): RoomBoundary[] {
+    if (roomLabels.length === 0) {
+      return rooms;
+    }
+
+    // Convert normalized coordinates to pixel coordinates for matching
+    const labelCenters = roomLabels.map(label => ({
+      name: label.name,
+      x: (label.bbox.x + label.bbox.width / 2) * imageWidth,
+      y: (label.bbox.y + label.bbox.height / 2) * imageHeight,
+      confidence: label.confidence
+    }));
+
+    // For each room contour, find the nearest label
+    const matchedRooms = rooms.map(room => {
+      // Calculate room center (centroid of points)
+      const roomPoints = room.points.map(p => ({
+        x: p.x * imageWidth,
+        y: p.y * imageHeight
+      }));
+
+      // Calculate centroid
+      const centroidX = roomPoints.reduce((sum, p) => sum + p.x, 0) / roomPoints.length;
+      const centroidY = roomPoints.reduce((sum, p) => sum + p.y, 0) / roomPoints.length;
+
+      // Find nearest label (within reasonable distance)
+      let nearestLabel: { name: string; distance: number; confidence: number } | null = null;
+      const MAX_DISTANCE = Math.min(imageWidth, imageHeight) * 0.15; // 15% of image dimension
+
+      for (const label of labelCenters) {
+        const distance = Math.sqrt(
+          Math.pow(centroidX - label.x, 2) + Math.pow(centroidY - label.y, 2)
+        );
+
+        if (distance < MAX_DISTANCE) {
+          if (!nearestLabel || distance < nearestLabel.distance) {
+            nearestLabel = {
+              name: label.name,
+              distance,
+              confidence: label.confidence
+            };
+          }
+        }
+      }
+
+      // Also check if label is near any point on the room boundary
+      // (labels are often placed just outside the room)
+      if (!nearestLabel) {
+        for (const label of labelCenters) {
+          for (const point of roomPoints) {
+            const distance = Math.sqrt(
+              Math.pow(point.x - label.x, 2) + Math.pow(point.y - label.y, 2)
+            );
+
+            if (distance < MAX_DISTANCE) {
+              if (!nearestLabel || distance < nearestLabel.distance) {
+                nearestLabel = {
+                  name: label.name,
+                  distance,
+                  confidence: label.confidence
+                };
+              }
+            }
+          }
+        }
+      }
+
+      // If we found a matching label, add it to the room
+      if (nearestLabel) {
+        return {
+          ...room,
+          roomLabel: nearestLabel.name,
+          confidence: Math.min(0.95, room.confidence + 0.1) // Boost confidence for labeled rooms
+        };
+      }
+
+      return room;
+    });
+
+    return matchedRooms;
   }
 
   /**
