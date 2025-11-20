@@ -391,12 +391,12 @@ class CVTakeoffService {
       '#2196F3' // Blue for walls
     );
 
-    // Create measurements for each wall segment
-    for (const wall of walls) {
+    // Batch create measurements for better performance
+    const measurements = walls.map(wall => {
       // Create linear measurement with start and end points
       const pdfCoordinates = [wall.start, wall.end];
 
-      const measurement = {
+      return {
         id: uuidv4(),
         projectId,
         sheetId: documentId,
@@ -411,9 +411,10 @@ class CVTakeoffService {
         conditionColor: condition.color,
         conditionName: condition.name
       };
+    });
 
-      await storage.saveTakeoffMeasurement(measurement);
-    }
+    // Use batch save for better performance and to avoid database timeouts
+    await storage.saveTakeoffMeasurementsBatch(measurements);
 
     return {
       conditions: condition.wasCreated ? 1 : 0,

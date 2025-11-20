@@ -230,27 +230,57 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
     # Apply Gaussian blur to reduce noise
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
     
-    # Edge detection
+    # Edge detection with adjusted thresholds for better room separation
     edges = cv2.Canny(blurred, 50, 150)
     
-    # Dilate edges to close gaps
+    # Dilate edges to close gaps (but less aggressive to preserve room boundaries)
     kernel = np.ones((3, 3), np.uint8)
     dilated = cv2.dilate(edges, kernel, iterations=1)
     
-    # Find contours
-    contours, hierarchy = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # Find ALL contours (not just external) to detect individual rooms
+    # RETR_TREE retrieves all contours and reconstructs a full hierarchy
+    contours, hierarchy = cv2.findContours(dilated, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     
     rooms = []
     min_area_pixels = (min_area_sf / (scale_factor ** 2)) if scale_factor > 0 else 1000
+    # Maximum area to filter out the entire floor plan (e.g., 80% of image)
+    max_area_pixels = (width * height) * 0.8
     
-    for contour in contours:
+    # Track processed contours to avoid duplicates
+    processed_contours = set()
+    
+    for i, contour in enumerate(contours):
+        # Skip if already processed
+        contour_id = id(contour)
+        if contour_id in processed_contours:
+            continue
+        
         area_pixels = cv2.contourArea(contour)
+        
+        # Skip if too small
         if area_pixels < min_area_pixels:
+            continue
+        
+        # Skip if too large (likely the entire floor plan)
+        if area_pixels > max_area_pixels:
+            continue
+        
+        # Check if this is a child contour (internal room) or has reasonable aspect ratio
+        # Rooms should have reasonable width/height ratio (not extremely elongated)
+        x, y, w, h = cv2.boundingRect(contour)
+        aspect_ratio = max(w, h) / min(w, h) if min(w, h) > 0 else 0
+        
+        # Filter out extremely elongated shapes (likely corridors or hallways)
+        if aspect_ratio > 10:
             continue
         
         # Simplify contour (reduce vertices)
         epsilon_factor = epsilon * cv2.arcLength(contour, True)
         approx = cv2.approxPolyDP(contour, epsilon_factor, True)
+        
+        # Skip if simplified contour has too few points (likely noise)
+        if len(approx) < 3:
+            continue
         
         # Convert to normalized coordinates (0-1)
         points = []
@@ -267,11 +297,14 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
         perimeter_lf = perimeter_pixels * scale_factor
         
         # Confidence based on contour regularity (more regular = higher confidence)
-        # Simple heuristic: compare area of contour vs bounding box
-        x, y, w, h = cv2.boundingRect(contour)
         bbox_area = w * h
         regularity = area_pixels / bbox_area if bbox_area > 0 else 0
+        # Higher confidence for more regular shapes (closer to rectangle)
         confidence = min(0.95, 0.5 + regularity * 0.45)
+        
+        # Lower confidence for very large rooms (might be multiple rooms merged)
+        if area_sf > 5000:  # Very large rooms get lower confidence
+            confidence *= 0.7
         
         rooms.append({
             "points": points,
@@ -279,11 +312,16 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
             "perimeter": round(perimeter_lf, 2),
             "confidence": round(confidence, 3)
         })
+        
+        processed_contours.add(contour_id)
+    
+    # Sort by confidence (highest first) and limit to top results
+    rooms.sort(key=lambda r: r["confidence"], reverse=True)
     
     return rooms
 
 def detect_walls(image_path, scale_factor, min_length_lf):
-    """Detect wall segments using line detection"""
+    """Detect wall segments using line detection with improved filtering"""
     img = cv2.imread(image_path)
     if img is None:
         return []
@@ -297,11 +335,17 @@ def detect_walls(image_path, scale_factor, min_length_lf):
     # Edge detection
     edges = cv2.Canny(blurred, 50, 150)
     
-    # Hough Line Transform
-    lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=100, minLineLength=50, maxLineGap=10)
+    # Hough Line Transform with stricter parameters to reduce false positives
+    # Higher threshold = fewer but more confident lines
+    # Longer minLineLength = only detect substantial wall segments
+    min_line_length_pixels = max(50, min_length_lf / scale_factor * 0.8) if scale_factor > 0 else 50
+    lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=150, minLineLength=int(min_line_length_pixels), maxLineGap=15)
     
     walls = []
     min_length_pixels = min_length_lf / scale_factor if scale_factor > 0 else 20
+    
+    # Track similar lines to merge nearby parallel lines
+    processed_lines = []
     
     if lines is not None:
         for line in lines:
@@ -314,12 +358,32 @@ def detect_walls(image_path, scale_factor, min_length_lf):
             if length_lf < min_length_lf:
                 continue
             
+            # Filter out very short segments (likely noise)
+            if length_pixels < 20:
+                continue
+            
             # Normalize coordinates
             start = {"x": float(x1) / width, "y": float(y1) / height}
             end = {"x": float(x2) / width, "y": float(y2) / height}
             
-            # Confidence based on line strength (simplified)
-            confidence = 0.7
+            # Check if this line is too similar to an existing one (within 5 pixels)
+            is_duplicate = False
+            for existing in processed_lines:
+                ex_start = existing["start"]
+                ex_end = existing["end"]
+                # Check if start and end points are close
+                dist_start = np.sqrt((start["x"] - ex_start["x"])**2 * width**2 + (start["y"] - ex_start["y"])**2 * height**2)
+                dist_end = np.sqrt((end["x"] - ex_end["x"])**2 * width**2 + (end["y"] - ex_end["y"])**2 * height**2)
+                if dist_start < 5 and dist_end < 5:
+                    is_duplicate = True
+                    break
+            
+            if is_duplicate:
+                continue
+            
+            # Confidence based on line length (longer = more confident)
+            # Normalize confidence: 0.6 for min_length, 0.9 for very long walls
+            confidence = min(0.9, 0.6 + (length_lf / 100) * 0.1)
             
             walls.append({
                 "start": start,
@@ -327,6 +391,12 @@ def detect_walls(image_path, scale_factor, min_length_lf):
                 "length": round(length_lf, 2),
                 "confidence": round(confidence, 3)
             })
+            
+            processed_lines.append({"start": start, "end": end})
+    
+    # Sort by confidence and limit to reasonable number (top 2000 to avoid overwhelming database)
+    walls.sort(key=lambda w: w["confidence"], reverse=True)
+    walls = walls[:2000]  # Limit to top 2000 most confident walls
     
     return walls
 
