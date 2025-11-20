@@ -502,6 +502,8 @@ class CVTakeoffService {
     }
 
     // Create new condition
+    // Note: aiGenerated is not included as the column may not exist in all database schemas
+    // The storage service will handle this conditionally
     const condition = {
       id: uuidv4(),
       projectId,
@@ -511,7 +513,6 @@ class CVTakeoffService {
       wasteFactor: 0,
       color,
       description: `CV-detected ${type} condition`,
-      aiGenerated: false,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
