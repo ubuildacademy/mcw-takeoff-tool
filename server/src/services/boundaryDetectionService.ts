@@ -327,19 +327,8 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
             if exclusion_overlap > (w * h * 0.3):
                 continue
         
-        # Check for high text density (title blocks/legends)
-        if text_regions:
-            text_overlap_area = 0
-            bbox_area = w * h
-            for tx, ty, tw, th in text_regions:
-                # Calculate overlap between text region and room bounding box
-                overlap_x = max(0, min(x + w, tx + tw) - max(x, tx))
-                overlap_y = max(0, min(y + h, ty + th) - max(y, ty))
-                text_overlap_area += overlap_x * overlap_y
-            
-            # If more than 20% of bounding box overlaps with text, likely a title block
-            if bbox_area > 0 and (text_overlap_area / bbox_area) > 0.2:
-                continue
+        # Text density filtering disabled (OCR not available)
+        # Using only geometric exclusion zones for title blocks
         
         # Check if contour is approximately closed (rooms should be enclosed)
         # Calculate how close the start and end points are
