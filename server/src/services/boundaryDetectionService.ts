@@ -232,9 +232,18 @@ import sys
 import os
 
 # Try to import pytesseract, but continue without it if not available
+TESSERACT_AVAILABLE = False
+TESSERACT_BINARY_AVAILABLE = False
 try:
     import pytesseract
     TESSERACT_AVAILABLE = True
+    # Check if Tesseract binary is actually available
+    try:
+        pytesseract.get_tesseract_version()
+        TESSERACT_BINARY_AVAILABLE = True
+    except Exception:
+        TESSERACT_BINARY_AVAILABLE = False
+        print("Warning: pytesseract imported but Tesseract binary not found, OCR will be skipped", file=sys.stderr)
 except ImportError:
     TESSERACT_AVAILABLE = False
     print("Warning: pytesseract not available, OCR will be skipped", file=sys.stderr)
@@ -250,8 +259,8 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
     
     # Detect text areas to exclude title blocks (optional, won't fail if OCR unavailable)
     text_regions = []
-    try:
-        if TESSERACT_AVAILABLE:
+    if TESSERACT_AVAILABLE and TESSERACT_BINARY_AVAILABLE:
+        try:
             rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             ocr_data = pytesseract.image_to_data(rgb_img, output_type=pytesseract.Output.DICT, config='--psm 6')
             n_boxes = len(ocr_data['text'])
@@ -262,8 +271,10 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
                     w = ocr_data['width'][i]
                     h = ocr_data['height'][i]
                     text_regions.append((x, y, w, h))
-    except:
-        pass  # OCR failed, continue without text filtering
+        except Exception as ocr_err:
+            # OCR failed, continue without text filtering
+            print(f"OCR detection failed in detect_rooms: {str(ocr_err)}", file=sys.stderr)
+            text_regions = []  # Ensure it's empty if OCR fails
     
     # Apply Gaussian blur to reduce noise
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
@@ -629,7 +640,7 @@ def detect_openings(image_path, scale_factor):
 
 def detect_text_ocr(image_path):
     """Detect text using OCR with bounding boxes"""
-    if not TESSERACT_AVAILABLE:
+    if not TESSERACT_AVAILABLE or not TESSERACT_BINARY_AVAILABLE:
         return []
     
     try:
@@ -644,7 +655,11 @@ def detect_text_ocr(image_path):
         
         # Get detailed OCR data with bounding boxes
         # Using --psm 6 (Assume a single uniform block of text) for architectural drawings
-        ocr_data = pytesseract.image_to_data(rgb_img, output_type=pytesseract.Output.DICT, config='--psm 6')
+        try:
+            ocr_data = pytesseract.image_to_data(rgb_img, output_type=pytesseract.Output.DICT, config='--psm 6')
+        except Exception as tesseract_err:
+            print(f"Tesseract OCR call failed: {str(tesseract_err)}", file=sys.stderr)
+            return []
         
         text_elements = []
         
@@ -738,10 +753,16 @@ if __name__ == "__main__":
         # Detect text using OCR (optional - won't fail if unavailable)
         ocr_text = []
         try:
-            ocr_text = detect_text_ocr(image_path)
+            if TESSERACT_AVAILABLE and TESSERACT_BINARY_AVAILABLE:
+                ocr_text = detect_text_ocr(image_path)
+            else:
+                print("OCR skipped: Tesseract not available", file=sys.stderr)
         except Exception as ocr_error:
             # OCR failed but continue without it
-            print(f"OCR detection skipped: {str(ocr_error)}", file=sys.stderr)
+            print(f"OCR detection skipped due to error: {str(ocr_error)}", file=sys.stderr)
+            import traceback
+            print(f"OCR error traceback: {traceback.format_exc()}", file=sys.stderr)
+            ocr_text = []  # Ensure it's empty
         
         result = {
             "rooms": rooms,
