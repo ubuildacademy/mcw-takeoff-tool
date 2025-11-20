@@ -36,6 +36,14 @@ except ImportError:
     OPENCV_AVAILABLE = False
     print("Warning: OpenCV not available, using fallback titleblock detection", file=sys.stderr)
 
+# Try to import PIL/Pillow for image cropping (fallback when OpenCV unavailable)
+try:
+    from PIL import Image
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+    print("Warning: PIL/Pillow not available, will need OpenCV for region extraction", file=sys.stderr)
+
 # Try to import pytesseract, but continue without it if not available
 try:
     import pytesseract
@@ -159,34 +167,74 @@ def extract_text_from_region(image_path, region):
     if not TESSERACT_AVAILABLE:
         return []
     
-    if not OPENCV_AVAILABLE:
-        # Can't extract region without OpenCV
+    # Get image dimensions and extract region
+    if OPENCV_AVAILABLE:
+        img = cv2.imread(image_path)
+        if img is None:
+            return []
+        
+        height, width = img.shape[:2]
+        
+        # Convert region coordinates to pixels
+        x = int(region['x'] * width)
+        y = int(region['y'] * height)
+        w = int(region['width'] * width)
+        h = int(region['height'] * height)
+        
+        # Extract region
+        roi = img[y:y+h, x:x+w]
+        
+        if roi.size == 0:
+            return []
+        
+        # Convert to RGB for pytesseract
+        rgb_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
+        img_width = width
+        img_height = height
+        roi_x_offset = x
+        roi_y_offset = y
+        
+    elif PIL_AVAILABLE:
+        # Use PIL/Pillow as fallback
+        img = Image.open(image_path)
+        width, height = img.size
+        
+        # Convert region coordinates to pixels
+        x = int(region['x'] * width)
+        y = int(region['y'] * height)
+        w = int(region['width'] * width)
+        h = int(region['height'] * height)
+        
+        # Extract region
+        roi = img.crop((x, y, x + w, y + h))
+        
+        if roi.size[0] == 0 or roi.size[1] == 0:
+            return []
+        
+        # Convert to RGB (PIL images are already RGB)
+        rgb_roi = roi.convert('RGB')
+        img_width = width
+        img_height = height
+        roi_x_offset = x
+        roi_y_offset = y
+        
+    else:
+        # No image library available - can't extract region
+        print("Error: Neither OpenCV nor PIL available for region extraction", file=sys.stderr)
         return []
-    
-    img = cv2.imread(image_path)
-    if img is None:
-        return []
-    
-    height, width = img.shape[:2]
-    
-    # Convert region coordinates to pixels
-    x = int(region['x'] * width)
-    y = int(region['y'] * height)
-    w = int(region['width'] * width)
-    h = int(region['height'] * height)
-    
-    # Extract region
-    roi = img[y:y+h, x:x+w]
-    
-    if roi.size == 0:
-        return []
-    
-    # Convert to RGB for pytesseract
-    rgb_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
     
     # Perform OCR with detailed data
+    # pytesseract accepts PIL Images directly, or numpy arrays
     try:
-        ocr_data = pytesseract.image_to_data(rgb_roi, output_type=pytesseract.Output.DICT, config='--psm 6')
+        # Convert to numpy array if using OpenCV, or use PIL Image directly
+        if OPENCV_AVAILABLE:
+            # OpenCV image is already numpy array
+            ocr_input = rgb_roi
+        else:
+            # PIL Image - pytesseract can use it directly
+            ocr_input = rgb_roi
+        
+        ocr_data = pytesseract.image_to_data(ocr_input, output_type=pytesseract.Output.DICT, config='--psm 6')
         
         text_elements = []
         n_boxes = len(ocr_data['text'])
@@ -205,10 +253,10 @@ def extract_text_from_region(image_path, region):
             h_local = ocr_data['height'][i]
             
             # Convert to absolute coordinates (normalized)
-            x_abs = (x + x_local) / width
-            y_abs = (y + y_local) / height
-            w_abs = w_local / width
-            h_abs = h_local / height
+            x_abs = (roi_x_offset + x_local) / img_width
+            y_abs = (roi_y_offset + y_local) / img_height
+            w_abs = w_local / img_width
+            h_abs = h_local / img_height
             
             text_elements.append({
                 'text': text,
