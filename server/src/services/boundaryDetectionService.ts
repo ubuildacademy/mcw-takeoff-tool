@@ -716,7 +716,10 @@ def detect_text_ocr(image_path):
         
         return text_elements
     except Exception as e:
-        print(f"OCR error: {str(e)}", file=sys.stderr)
+        # Log the error but don't crash - return empty list
+        print(f"OCR detection error in detect_text_ocr: {str(e)}", file=sys.stderr)
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
         return []
 
 # Main execution
