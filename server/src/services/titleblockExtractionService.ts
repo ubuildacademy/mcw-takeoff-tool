@@ -96,7 +96,7 @@ class TitleblockExtractionService {
         };
       }
 
-      // Check pytesseract (optional but recommended)
+      // Check pytesseract (required for OCR)
       try {
         await execAsync(`${pythonCommand} -c "import pytesseract; print('pytesseract available')"`, {
           timeout: 5000,
@@ -109,20 +109,26 @@ class TitleblockExtractionService {
         };
       }
 
-      // Check OpenCV (optional but recommended)
+      // Check OpenCV (optional - script has fallback without it)
+      let opencvAvailable = false;
       try {
         await execAsync(`${pythonCommand} -c "import cv2; print('OpenCV available')"`, {
           timeout: 5000,
           env: { ...process.env, PATH: enhancedPath }
         });
+        opencvAvailable = true;
       } catch (cvError) {
-        return {
-          available: false,
-          error: 'OpenCV not available. Titleblock detection may be limited. Install with: pip install opencv-python'
-        };
+        // OpenCV is optional - script will use fallback region detection
+        console.warn('OpenCV not available - will use fallback titleblock detection');
+        opencvAvailable = false;
       }
 
-      return { available: true };
+      // Service is available if we have PyMuPDF and pytesseract
+      // OpenCV is nice-to-have but not required
+      return { 
+        available: true,
+        ...(opencvAvailable ? {} : { warning: 'OpenCV not available - using fallback detection' })
+      };
     } catch (error) {
       return {
         available: false,

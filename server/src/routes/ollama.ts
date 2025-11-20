@@ -281,6 +281,11 @@ router.post('/analyze-sheets', async (req, res) => {
           return;
         }
         
+        // Log warning if OpenCV is missing (but continue anyway)
+        if (availability.warning) {
+          console.warn(`⚠️ ${availability.warning}`);
+        }
+        
         sendProgress(10, 'Getting document information...');
         
         // Get PDF file path (similar to CV takeoff)
