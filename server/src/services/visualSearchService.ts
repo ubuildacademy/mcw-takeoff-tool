@@ -88,6 +88,7 @@ class VisualSearchService {
 
   private pythonScriptPath: string;
   private tempDir: string;
+  private cachedGlibLibPath: string | null = null;
 
   constructor() {
     // Determine script path (works in both source and compiled)
@@ -116,6 +117,50 @@ class VisualSearchService {
       '/bin',
       process.env.PATH || ''
     ].filter(Boolean).join(':');
+  }
+
+  /**
+   * Find glib library directory in Nix store (cached)
+   */
+  private async findGlibLibPath(): Promise<string> {
+    if (this.cachedGlibLibPath !== null) {
+      return this.cachedGlibLibPath;
+    }
+
+    try {
+      // Try to find libgthread-2.0.so.0 in the Nix store
+      const { stdout } = await execAsync(
+        "find /nix/store -name 'libgthread-2.0.so.0' 2>/dev/null | head -1 | xargs dirname 2>/dev/null || echo ''",
+        { timeout: 5000 }
+      );
+      const glibPath = stdout.trim();
+      if (glibPath) {
+        this.cachedGlibLibPath = glibPath;
+        console.log(`✅ Found glib libraries at: ${glibPath}`);
+        return glibPath;
+      }
+    } catch (error) {
+      console.warn(`⚠️ Could not find glib libraries: ${error}`);
+    }
+
+    this.cachedGlibLibPath = '';
+    return '';
+  }
+
+  /**
+   * Get enhanced LD_LIBRARY_PATH for OpenCV to find shared libraries
+   */
+  private async getEnhancedLdLibraryPath(): Promise<string> {
+    const glibLibPath = await this.findGlibLibPath();
+    const paths = [
+      glibLibPath,                          // Glib libraries from Nix store (if found)
+      '/nix/var/nix/profiles/default/lib',  // Nix default profile libs
+      '/root/.nix-profile/lib',             // Nix user profile libs
+      '/usr/lib',                           // System libs
+      '/usr/local/lib',                     // Local libs
+      process.env.LD_LIBRARY_PATH || ''     // Existing LD_LIBRARY_PATH
+    ].filter(Boolean);
+    return paths.join(':');
   }
 
   /**
@@ -233,9 +278,10 @@ print(json.dumps({"success": True, "output": output_path}))
       const command = `${pythonCommand} "${cropScriptPath}" "${imagePath}" "${outputPath}" ${selectionBox.x} ${selectionBox.y} ${selectionBox.width} ${selectionBox.height}`;
 
       const enhancedPath = this.getEnhancedPath();
+      const enhancedLdPath = await this.getEnhancedLdLibraryPath();
       const { stdout } = await execAsync(command, {
         timeout: 10000,
-        env: { ...process.env, PATH: enhancedPath }
+        env: { ...process.env, PATH: enhancedPath, LD_LIBRARY_PATH: enhancedLdPath }
       });
 
       // Clean up script
@@ -355,6 +401,7 @@ print(json.dumps({"success": True, "output": output_path}))
       console.log(`🔧 Executing visual search: ${command}`);
 
       const enhancedPath = this.getEnhancedPath();
+      const enhancedLdPath = await this.getEnhancedLdLibraryPath();
       let stdout: string;
       let stderr: string;
 
@@ -362,7 +409,7 @@ print(json.dumps({"success": True, "output": output_path}))
         const execResult = await execAsync(command, {
           timeout: 60000, // 60 second timeout
           maxBuffer: 10 * 1024 * 1024, // 10MB buffer
-          env: { ...process.env, PATH: enhancedPath }
+          env: { ...process.env, PATH: enhancedPath, LD_LIBRARY_PATH: enhancedLdPath }
         });
         stdout = execResult.stdout;
         stderr = execResult.stderr;
