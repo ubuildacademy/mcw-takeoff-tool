@@ -8,8 +8,9 @@ providers = ["node", "python"]
 # Install system libraries required for OpenCV and PDF processing
 # These are installed after Node.js provider sets up npm
 # Note: ImageMagick requires Ghostscript for PDF support
+# bash is needed for sharp package to build native bindings
 [phases.install]
-nixPkgs = ["libGL", "glib", "libGLU", "pkg-config", "imagemagick", "ghostscript"]
+nixPkgs = ["libGL", "glib", "libGLU", "pkg-config", "imagemagick", "ghostscript", "bash"]
 
 # Build phase: Build TypeScript and verify Python packages
 [phases.build]
@@ -29,8 +30,13 @@ cmds = [
 
 [variables]
 # Add nix profile bin to PATH so ImageMagick and other nix packages are available
-# nixpacks installs packages but they need to be in PATH at runtime
-PATH = "/nix/var/nix/profiles/default/bin:/root/.nix-profile/bin:$PATH"
+# nixpacks installs packages via nix-env which creates symlinks in the profile
+# We need to ensure these are in PATH at both build time and runtime
+# Note: nix-env creates symlinks in /nix/var/nix/profiles/default/bin
+# Include /bin and /usr/bin early so bash/sh are available for npm install
+PATH = "/nix/var/nix/profiles/default/bin:/root/.nix-profile/bin:/usr/bin:/bin:$PATH"
+# Ensure SHELL is set so npm can find shell for native builds (sharp package)
+SHELL = "/bin/bash"
 # Python venv will be available at runtime via the python provider
 PYTHONUNBUFFERED = "1"
 # Set LD_LIBRARY_PATH so OpenCV can find libGL.so.1 and other shared libraries from nixpacks
