@@ -40,7 +40,7 @@ router.post('/extract-template', async (req, res) => {
 // Search for symbols matching a template
 router.post('/search-symbols', async (req, res) => {
   try {
-    const { conditionId, pdfFileId, template, options } = req.body;
+    const { conditionId, pdfFileId, template, options, pageNumber } = req.body;
 
     if (!conditionId || !pdfFileId || !template) {
       return res.status(400).json({
@@ -52,7 +52,8 @@ router.post('/search-symbols', async (req, res) => {
       conditionId,
       pdfFileId,
       template,
-      options
+      options,
+      pageNumber
     );
 
     return res.json({
@@ -86,19 +87,22 @@ router.post('/complete-search', async (req, res) => {
 
     console.log('🔍 Starting complete visual search workflow...');
 
-    // Step 1: Extract symbol template
+    // Step 1: Extract symbol template (pass projectId for PDF download)
     const template = await visualSearchService.extractSymbolTemplate(
       pdfFileId,
       pageNumber,
-      selectionBox
+      selectionBox,
+      projectId
     );
 
-    // Step 2: Search for matching symbols
+    // Step 2: Search for matching symbols (pass pageNumber and projectId)
     const searchResult = await visualSearchService.searchForSymbols(
       conditionId,
       pdfFileId,
       template,
-      options
+      options,
+      pageNumber,
+      projectId
     );
 
     // Step 3: Create count measurements

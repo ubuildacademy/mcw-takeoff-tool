@@ -8,7 +8,7 @@
  */
 
 import { boundaryDetectionService, RoomBoundary, WallSegment, DoorWindow } from './boundaryDetectionService';
-import { pdfToImage } from '../utils/pdfToImage';
+import { pythonPdfConverter } from './pythonPdfConverter';
 import { storage } from '../storage';
 import { supabase } from '../supabase';
 import { v4 as uuidv4 } from 'uuid';
@@ -90,11 +90,11 @@ class CVTakeoffService {
       
       console.log(`📄 PDF file validated: ${pdfPath} (${pdfStats.size} bytes)`);
 
-      // Convert PDF page to image
+      // Convert PDF page to image using Python/PyMuPDF
       console.log(`🖼️ Converting page ${pageNumber} to image...`);
       let imageBuffer: Buffer | null;
       try {
-        imageBuffer = await pdfToImage.convertPageToBuffer(pdfPath, pageNumber, {
+        imageBuffer = await pythonPdfConverter.convertPageToBuffer(pdfPath, pageNumber, {
           format: 'png',
           scale: 2.0, // Higher resolution for better detection
           quality: 90
@@ -109,8 +109,8 @@ class CVTakeoffService {
           `Failed to convert page ${pageNumber} to image. ` +
           `PDF path: ${pdfPath}, PDF exists: ${pdfExists}, PDF size: ${pdfSize} bytes. ` +
           `Error: ${errorMessage}. ` +
-          `This usually means ImageMagick/pdf2pic failed to convert the PDF page. ` +
-          `Please check server logs for ImageMagick availability.`
+          `This usually means PyMuPDF failed to convert the PDF page. ` +
+          `Please check server logs for Python/PyMuPDF availability.`
         );
       }
 
@@ -121,8 +121,8 @@ class CVTakeoffService {
         throw new Error(
           `Failed to convert page ${pageNumber} to image - empty buffer returned. ` +
           `PDF path: ${pdfPath}, PDF exists: ${pdfExists}, PDF size: ${pdfSize} bytes. ` +
-          `Both pdf2pic and ImageMagick fallback returned null/empty. ` +
-          `Please check server logs for ImageMagick availability and PDF conversion errors.`
+          `PyMuPDF returned null/empty buffer. ` +
+          `Please check server logs for Python/PyMuPDF errors.`
         );
       }
       

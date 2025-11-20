@@ -6,7 +6,6 @@
  */
 
 import { simpleOcrService } from './simpleOcrService';
-import { pdfToImage } from '../utils/pdfToImage';
 
 export interface OCRTextElement {
   text: string;

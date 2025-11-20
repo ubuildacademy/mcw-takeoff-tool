@@ -9,7 +9,6 @@ import { yoloDetectionService, YOLODetection, ConstructionElement } from './yolo
 import { qwenVisionService } from './qwenVisionService';
 import { enhancedOcrService } from './enhancedOcrService';
 import { ruleBasedValidationService } from './ruleBasedValidationService';
-import { pdfToImage } from '../utils/pdfToImage';
 
 export interface HybridDetectionResult {
   elements: ConstructionElement[];
