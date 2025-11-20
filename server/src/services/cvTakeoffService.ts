@@ -214,13 +214,43 @@ class CVTakeoffService {
     } catch (error) {
       // Ensure error is properly formatted before throwing
       let errorMessage: string;
+      let errorStack: string | undefined;
+      
       if (error instanceof Error) {
-        errorMessage = error.message || error.toString();
-        console.error(`❌ Error processing page ${pageNumber}:`, errorMessage);
-        if (error.stack) {
-          console.error(`❌ Error stack:`, error.stack);
+        errorMessage = error.message || String(error) || 'Unknown error occurred during CV takeoff processing';
+        errorStack = error.stack;
+        // If the message is "[object Object]", try to extract more details
+        if (errorMessage === '[object Object]' || errorMessage.includes('[object Object]')) {
+          try {
+            const errorObj = error as any;
+            errorMessage = errorObj.message || errorObj.error || JSON.stringify(errorObj, Object.getOwnPropertyNames(errorObj)) || 'Unknown error';
+          } catch {
+            errorMessage = 'Unknown error occurred during CV takeoff processing';
+          }
         }
-        throw error; // Re-throw the Error object as-is
+        console.error(`❌ Error processing page ${pageNumber}:`, errorMessage);
+        if (errorStack) {
+          console.error(`❌ Error stack:`, errorStack);
+        }
+        // Create a new error with the properly formatted message
+        const formattedError = new Error(errorMessage);
+        formattedError.stack = errorStack;
+        throw formattedError;
+      } else if (error && typeof error === 'object') {
+        // Try to extract meaningful error information from object
+        try {
+          const errorObj = error as any;
+          errorMessage = errorObj.message || errorObj.error || errorObj.toString() || JSON.stringify(errorObj);
+          errorStack = errorObj.stack;
+        } catch {
+          errorMessage = 'Unknown error occurred during CV takeoff processing';
+        }
+        console.error(`❌ Error processing page ${pageNumber}:`, errorMessage);
+        const formattedError = new Error(errorMessage);
+        if (errorStack) {
+          formattedError.stack = errorStack;
+        }
+        throw formattedError;
       } else {
         errorMessage = String(error) || 'Unknown error occurred during CV takeoff processing';
         console.error(`❌ Error processing page ${pageNumber}:`, errorMessage);

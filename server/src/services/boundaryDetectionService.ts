@@ -452,6 +452,15 @@ if __name__ == "__main__":
             // Ignore errors - script will still work without execute permission
           });
         }
+        console.log(`✅ Created Python script at: ${this.pythonScriptPath}`);
+      } else {
+        console.log(`✅ Python script exists at: ${this.pythonScriptPath}`);
+      }
+      
+      // Verify script exists before executing
+      const scriptExists = await fs.pathExists(this.pythonScriptPath);
+      if (!scriptExists) {
+        throw new Error(`Python script was not created at expected path: ${this.pythonScriptPath}`);
       }
 
       // Check Python availability before executing
@@ -506,6 +515,16 @@ if __name__ == "__main__":
         stdout = execResult.stdout;
         stderr = execResult.stderr;
       } catch (execError: any) {
+        // Extract error message properly
+        let execErrorMessage = 'Unknown error';
+        if (execError instanceof Error) {
+          execErrorMessage = execError.message || String(execError);
+        } else if (execError && typeof execError === 'object') {
+          execErrorMessage = execError.message || execError.error || execError.toString() || JSON.stringify(execError);
+        } else {
+          execErrorMessage = String(execError);
+        }
+        
         const errorDetails = {
           command,
           pythonCommand,
@@ -513,7 +532,7 @@ if __name__ == "__main__":
           imagePath,
           platform: process.platform,
           enhancedPath: this.getEnhancedPath(),
-          error: execError instanceof Error ? execError.message : 'Unknown error',
+          error: execErrorMessage,
           code: execError?.code,
           signal: execError?.signal,
           stdout: execError?.stdout || '',
@@ -522,7 +541,7 @@ if __name__ == "__main__":
           timedOut: execError?.timedOut
         };
         console.error('❌ Python script execution failed:', JSON.stringify(errorDetails, null, 2));
-        throw new Error(`Python script execution failed: ${execError instanceof Error ? execError.message : 'Unknown error'}. Command: ${command}. Details: ${JSON.stringify(errorDetails)}`);
+        throw new Error(`Python script execution failed: ${execErrorMessage}. Command: ${command}. Stderr: ${errorDetails.stderr || 'none'}. Stdout: ${errorDetails.stdout.substring(0, 500) || 'none'}`);
       }
 
       if (stderr && !stderr.includes('DeprecationWarning')) {
@@ -575,9 +594,37 @@ if __name__ == "__main__":
       };
 
     } catch (error) {
+      // Extract error message properly
+      let errorMessage = 'Unknown error';
+      let errorStack: string | undefined;
+      
+      if (error instanceof Error) {
+        errorMessage = error.message || String(error);
+        errorStack = error.stack;
+        // If message is "[object Object]", try to extract more details
+        if (errorMessage === '[object Object]' || errorMessage.includes('[object Object]')) {
+          try {
+            const errorObj = error as any;
+            errorMessage = errorObj.message || errorObj.error || JSON.stringify(errorObj, Object.getOwnPropertyNames(errorObj)) || 'Unknown error';
+          } catch {
+            errorMessage = 'Unknown error occurred during boundary detection';
+          }
+        }
+      } else if (error && typeof error === 'object') {
+        try {
+          const errorObj = error as any;
+          errorMessage = errorObj.message || errorObj.error || errorObj.toString() || JSON.stringify(errorObj);
+          errorStack = errorObj.stack;
+        } catch {
+          errorMessage = 'Unknown error occurred during boundary detection';
+        }
+      } else {
+        errorMessage = String(error);
+      }
+      
       const errorDetails = {
-        error: error instanceof Error ? error.message : 'Unknown error',
-        stack: error instanceof Error ? error.stack : undefined,
+        error: errorMessage,
+        stack: errorStack,
         imageId,
         imagePath,
         scaleFactor: opts.scaleFactor,
@@ -591,7 +638,11 @@ if __name__ == "__main__":
         tempDirExists: await fs.pathExists(this.tempDir).catch(() => false)
       };
       console.error('❌ Boundary detection error:', JSON.stringify(errorDetails, null, 2));
-      throw new Error(`Boundary detection failed: ${error instanceof Error ? error.message : 'Unknown error'}. Full details logged.`);
+      const formattedError = new Error(`Boundary detection failed: ${errorMessage}. Full details logged.`);
+      if (errorStack) {
+        formattedError.stack = errorStack;
+      }
+      throw formattedError;
     }
   }
 
