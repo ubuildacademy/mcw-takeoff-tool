@@ -212,8 +212,20 @@ class CVTakeoffService {
       };
 
     } catch (error) {
-      console.error(`❌ Error processing page ${pageNumber}:`, error);
-      throw error;
+      // Ensure error is properly formatted before throwing
+      let errorMessage: string;
+      if (error instanceof Error) {
+        errorMessage = error.message || error.toString();
+        console.error(`❌ Error processing page ${pageNumber}:`, errorMessage);
+        if (error.stack) {
+          console.error(`❌ Error stack:`, error.stack);
+        }
+        throw error; // Re-throw the Error object as-is
+      } else {
+        errorMessage = String(error) || 'Unknown error occurred during CV takeoff processing';
+        console.error(`❌ Error processing page ${pageNumber}:`, errorMessage);
+        throw new Error(errorMessage);
+      }
     } finally {
       // Always clean up the temporary PDF file
       if (pdfPath) {

@@ -12,10 +12,11 @@ interface CreateConditionDialogProps {
   projectId: string;
   onClose: () => void;
   onConditionCreated: (condition: any) => void;
+  onConditionSelect?: (condition: any) => void; // Optional callback to select condition after creation
   editingCondition?: any; // Condition to edit, if provided
 }
 
-export function CreateConditionDialog({ projectId, onClose, onConditionCreated, editingCondition }: CreateConditionDialogProps) {
+export function CreateConditionDialog({ projectId, onClose, onConditionCreated, onConditionSelect, editingCondition }: CreateConditionDialogProps) {
   const { addCondition, updateCondition } = useTakeoffStore();
 
   const [formData, setFormData] = useState({
@@ -106,16 +107,32 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
       };
       
       let result;
+      let createdCondition: any = null;
+      
       if (editingCondition) {
         // Update existing condition
-        result = await updateCondition(editingCondition.id, conditionData);
+        await updateCondition(editingCondition.id, conditionData);
+        result = editingCondition; // Use existing condition for callback
       } else {
-        // Create new condition
-        result = await addCondition(conditionData);
+        // Create new condition - get the condition ID
+        const conditionId = await addCondition(conditionData);
+        
+        // Get the full condition object from the store (it was added by addCondition)
+        const store = useTakeoffStore.getState();
+        createdCondition = store.conditions.find(c => c.id === conditionId);
+        result = createdCondition || { id: conditionId, ...conditionData };
       }
       
       // Call the callback with the result
       onConditionCreated(result);
+      
+      // Auto-select visual-search conditions after creation to enable selection mode
+      if (!editingCondition && createdCondition && createdCondition.type === 'visual-search' && onConditionSelect) {
+        // Small delay to ensure condition is fully created and UI is updated
+        setTimeout(() => {
+          onConditionSelect(createdCondition);
+        }, 100);
+      }
       
     } catch (error) {
       console.error('Error saving condition:', error);

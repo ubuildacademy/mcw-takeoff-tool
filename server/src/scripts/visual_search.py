@@ -104,49 +104,117 @@ def visual_search(image_path, template_path, confidence_threshold=0.7, method='c
         
         match_method = method_map.get(method, cv2.TM_CCOEFF_NORMED)
         
-        # Perform template matching
-        result = cv2.matchTemplate(img_gray, template_gray, match_method)
+        # Test multiple rotations: 0°, 90°, 180°, 270°
+        # This allows finding symbols in different orientations
+        rotations = [0, 90, 180, 270]
+        all_detections = []
         
-        # For TM_SQDIFF_NORMED, lower values are better, so we invert
-        if match_method in [cv2.TM_SQDIFF, cv2.TM_SQDIFF_NORMED]:
-            result = 1 - result
+        for rotation in rotations:
+            # Rotate template if needed
+            if rotation == 0:
+                rotated_template = template_gray
+                rotated_width = template_width
+                rotated_height = template_height
+            else:
+                # Get rotation matrix
+                center = (template_width // 2, template_height // 2)
+                rotation_matrix = cv2.getRotationMatrix2D(center, rotation, 1.0)
+                
+                # Calculate new dimensions after rotation
+                cos = np.abs(rotation_matrix[0, 0])
+                sin = np.abs(rotation_matrix[0, 1])
+                rotated_width = int((template_height * sin) + (template_width * cos))
+                rotated_height = int((template_height * cos) + (template_width * sin))
+                
+                # Adjust rotation matrix for new center
+                rotation_matrix[0, 2] += (rotated_width / 2) - center[0]
+                rotation_matrix[1, 2] += (rotated_height / 2) - center[1]
+                
+                # Perform rotation
+                rotated_template = cv2.warpAffine(template_gray, rotation_matrix, (rotated_width, rotated_height))
+            
+            # Perform template matching with rotated template
+            result = cv2.matchTemplate(img_gray, rotated_template, match_method)
+            
+            # For TM_SQDIFF_NORMED, lower values are better, so we invert
+            if match_method in [cv2.TM_SQDIFF, cv2.TM_SQDIFF_NORMED]:
+                result = 1 - result
+            
+            # Find all locations where match exceeds threshold
+            locations = np.where(result >= confidence_threshold)
+            
+            # Extract match information with rotation
+            for pt in zip(*locations[::-1]):  # Switch x and y coordinates
+                x, y = pt
+                confidence = float(result[y, x])
+                
+                all_detections.append({
+                    'x': x,
+                    'y': y,
+                    'width': rotated_width,
+                    'height': rotated_height,
+                    'confidence': confidence,
+                    'rotation': rotation
+                })
         
-        # Find all locations where match exceeds threshold
-        locations = np.where(result >= confidence_threshold)
+        # Limit total detections to prevent runaway matching
+        if len(all_detections) > 1000:
+            # Sort by confidence and take top 1000
+            all_detections = sorted(all_detections, key=lambda d: d['confidence'], reverse=True)[:1000]
         
+        # Group nearby detections to avoid duplicates (distance-based deduplication)
+        # Similar to JP Takeoff prototype approach
         matches = []
         match_id = 0
+        detected_positions = []
         
-        # Extract match information
-        for pt in zip(*locations[::-1]):  # Switch x and y coordinates
-            x, y = pt
-            confidence = float(result[y, x])
+        # Sort by confidence (highest first)
+        all_detections_sorted = sorted(all_detections, key=lambda d: d['confidence'], reverse=True)
+        
+        for detection in all_detections_sorted:
+            x, y = detection['x'], detection['y']
+            w, h = detection['width'], detection['height']
             
-            # Normalize coordinates (0-1)
-            bbox = {
-                "x": float(x) / img_width,
-                "y": float(y) / img_height,
-                "width": float(template_width) / img_width,
-                "height": float(template_height) / img_height
-            }
+            # Check if this position is too close to existing detections
+            # Use distance-based threshold (like JP Takeoff: max(width, height) * 0.8)
+            min_distance = max(w, h) * 0.8
+            too_close = False
             
-            # PDF coordinates (pixels)
-            pdf_coordinates = {
-                "x": float(x),
-                "y": float(y),
-                "width": float(template_width),
-                "height": float(template_height)
-            }
+            for existing_x, existing_y in detected_positions:
+                distance = np.sqrt((x - existing_x)**2 + (y - existing_y)**2)
+                if distance < min_distance:
+                    too_close = True
+                    break
             
-            matches.append({
-                "id": f"match_{match_id}",
-                "confidence": round(confidence, 4),
-                "boundingBox": bbox,
-                "pdfCoordinates": pdf_coordinates,
-                "pageNumber": 1  # Will be set by caller
-            })
-            
-            match_id += 1
+            if not too_close:
+                detected_positions.append((x, y))
+                
+                # Normalize coordinates (0-1)
+                bbox = {
+                    "x": float(x) / img_width,
+                    "y": float(y) / img_height,
+                    "width": float(w) / img_width,
+                    "height": float(h) / img_height
+                }
+                
+                # PDF coordinates (pixels)
+                pdf_coordinates = {
+                    "x": float(x),
+                    "y": float(y),
+                    "width": float(w),
+                    "height": float(h)
+                }
+                
+                matches.append({
+                    "id": f"match_{match_id}",
+                    "confidence": round(detection['confidence'], 4),
+                    "boundingBox": bbox,
+                    "pdfCoordinates": pdf_coordinates,
+                    "rotation": detection['rotation'],  # Include rotation angle
+                    "pageNumber": 1  # Will be set by caller
+                })
+                
+                match_id += 1
         
         # Remove overlapping matches (non-maximum suppression)
         # Keep only the highest confidence match in each overlapping region
