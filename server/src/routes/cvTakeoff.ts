@@ -169,9 +169,25 @@ router.post('/process-page', async (req, res) => {
 
   } catch (error) {
     const { documentId, pageNumber, projectId, scaleFactor } = req.body || {};
+    
+    // Extract error message more robustly
+    let errorMessage = 'Unknown error';
+    let errorStack: string | undefined;
+    
+    if (error instanceof Error) {
+      errorMessage = error.message || error.toString() || 'Unknown error';
+      errorStack = error.stack;
+    } else if (typeof error === 'string') {
+      errorMessage = error;
+    } else if (error && typeof error === 'object') {
+      // Try to extract message from error object
+      errorMessage = (error as any).message || (error as any).error || JSON.stringify(error);
+      errorStack = (error as any).stack;
+    }
+    
     const errorDetails = {
-      error: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? error.stack : undefined,
+      error: errorMessage,
+      stack: errorStack,
       documentId,
       pageNumber,
       projectId,
@@ -179,10 +195,16 @@ router.post('/process-page', async (req, res) => {
       platform: process.platform,
       nodeVersion: process.version
     };
-    console.error('Error processing page:', JSON.stringify(errorDetails, null, 2));
+    
+    console.error('❌ Error processing page:', errorMessage);
+    console.error('❌ Error details:', JSON.stringify(errorDetails, null, 2));
+    if (errorStack) {
+      console.error('❌ Error stack:', errorStack);
+    }
+    
     res.status(500).json({
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: errorMessage,
       details: errorDetails
     });
   }

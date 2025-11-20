@@ -1802,6 +1802,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
             refreshProjectConditions(projectId); // Force refresh conditions from API
             handleCloseDialog();
           }}
+          onConditionSelect={onConditionSelect} // Pass condition select handler for auto-selection
           editingCondition={editingCondition}
         />
       )}

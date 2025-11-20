@@ -48,5 +48,7 @@ PYTHONUNBUFFERED = "1"
 LD_LIBRARY_PATH = "/nix/var/nix/profiles/default/lib:/root/.nix-profile/lib:/usr/lib:/usr/local/lib:$LD_LIBRARY_PATH"
 
 [start]
+# Find glib libraries at runtime and add to LD_LIBRARY_PATH for OpenCV
+# This ensures OpenCV can load libgthread-2.0.so.0 at runtime
 cmd = "GLIB_LIB=$(find /nix/store -name 'libgthread-2.0.so.0' 2>/dev/null | head -1 | xargs dirname 2>/dev/null || echo ''); if [ -n \"$GLIB_LIB\" ]; then export LD_LIBRARY_PATH=\"$GLIB_LIB:$LD_LIBRARY_PATH\"; fi; npm start"
 
