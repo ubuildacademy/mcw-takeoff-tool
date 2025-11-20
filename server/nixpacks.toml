@@ -5,12 +5,12 @@ providers = ["node", "python"]
 # Both providers run automatically when package.json and requirements.txt are detected
 # IMPORTANT: Ensure Railway service root directory is set to "server/" in Railway dashboard
 
-# Install system libraries required for OpenCV and PDF processing
+# Install system libraries required for OpenCV
 # These are installed after Node.js provider sets up npm
-# Note: ImageMagick requires Ghostscript for PDF support
+# Note: PDF processing now uses PyMuPDF (pure Python, no system dependencies)
 # bash is needed for sharp package to build native bindings
 [phases.install]
-nixPkgs = ["libGL", "glib", "libGLU", "pkg-config", "imagemagick", "ghostscript", "bash"]
+nixPkgs = ["libGL", "glib", "libGLU", "pkg-config", "bash"]
 
 # Build phase: Build TypeScript and verify Python packages
 [phases.build]
@@ -22,14 +22,12 @@ cmds = [
   "echo 'Verifying Python packages installation...'",
   "if [ -f /opt/venv/bin/python3 ]; then /opt/venv/bin/python3 -m pip list | grep -i opencv || echo 'WARNING: opencv-python not found in pip list'; fi",
   "if [ -f /opt/venv/bin/python3 ]; then /opt/venv/bin/python3 -c 'import sys; print(sys.path)' || echo 'Could not check Python path'; fi",
-  "echo 'Verifying ImageMagick installation...'",
-  "which magick || which convert || find /nix/store -name 'magick' -type f 2>/dev/null | head -1 || echo 'WARNING: ImageMagick not found in PATH'",
-  "echo 'Verifying Ghostscript installation...'",
-  "which gs || find /nix/store -name 'gs' -type f 2>/dev/null | head -1 || echo 'WARNING: Ghostscript not found in PATH'"
+  "echo 'Verifying PyMuPDF installation...'",
+  "if [ -f /opt/venv/bin/python3 ]; then /opt/venv/bin/python3 -c 'import fitz; print(\"PyMuPDF available\")' || echo 'WARNING: PyMuPDF not found'; fi"
 ]
 
 [variables]
-# Add nix profile bin to PATH so ImageMagick and other nix packages are available
+# Add nix profile bin to PATH so nix packages are available
 # nixpacks installs packages via nix-env which creates symlinks in the profile
 # We need to ensure these are in PATH at both build time and runtime
 # Note: nix-env creates symlinks in /nix/var/nix/profiles/default/bin
