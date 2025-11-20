@@ -941,12 +941,15 @@ if __name__ == "__main__":
     const result: {
       pythonAvailable: boolean;
       opencvAvailable: boolean;
+      pytesseractAvailable: boolean;
       pythonVersion?: string;
       opencvVersion?: string;
+      tesseractVersion?: string;
       error?: string;
     } = {
       pythonAvailable: false,
-      opencvAvailable: false
+      opencvAvailable: false,
+      pytesseractAvailable: false
     };
 
     try {
