@@ -700,6 +700,89 @@ class SupabaseStorage {
     };
   }
 
+  /**
+   * Batch save multiple takeoff measurements (more efficient for large numbers)
+   */
+  async saveTakeoffMeasurementsBatch(measurements: StoredTakeoffMeasurement[]): Promise<StoredTakeoffMeasurement[]> {
+    if (measurements.length === 0) {
+      return [];
+    }
+
+    // Map camelCase to snake_case for database
+    const dbMeasurements = measurements.map(measurement => ({
+      id: measurement.id,
+      project_id: measurement.projectId,
+      sheet_id: measurement.sheetId,
+      condition_id: measurement.conditionId,
+      type: measurement.type,
+      points: measurement.points,
+      calculated_value: measurement.calculatedValue,
+      unit: measurement.unit,
+      timestamp: measurement.timestamp,
+      pdf_page: measurement.pdfPage,
+      pdf_coordinates: measurement.pdfCoordinates,
+      condition_color: measurement.conditionColor,
+      condition_name: measurement.conditionName,
+      perimeter_value: measurement.perimeterValue,
+      cutouts: measurement.cutouts,
+      net_calculated_value: measurement.netCalculatedValue
+    }));
+
+    // Batch insert in chunks of 100 to avoid overwhelming the database
+    const BATCH_SIZE = 100;
+    const results: StoredTakeoffMeasurement[] = [];
+
+    for (let i = 0; i < dbMeasurements.length; i += BATCH_SIZE) {
+      const batch = dbMeasurements.slice(i, i + BATCH_SIZE);
+      
+      const { data, error } = await supabase
+        .from(TABLES.TAKEOFF_MEASUREMENTS)
+        .upsert(batch, { onConflict: 'id' })
+        .select();
+
+      if (error) {
+        console.error(`❌ ERROR: Failed to save batch ${i / BATCH_SIZE + 1}:`, error);
+        console.error('❌ ERROR: Error details:', {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code,
+          batchSize: batch.length
+        });
+        throw new Error(`Database error saving batch: ${error.message} (${error.code})`);
+      }
+
+      // Map snake_case back to camelCase
+      const mappedResults = (data || []).map((item: any) => ({
+        id: item.id,
+        projectId: item.project_id,
+        sheetId: item.sheet_id,
+        conditionId: item.condition_id,
+        type: item.type,
+        points: item.points,
+        calculatedValue: item.calculated_value,
+        unit: item.unit,
+        timestamp: item.timestamp,
+        pdfPage: item.pdf_page,
+        pdfCoordinates: item.pdf_coordinates,
+        conditionColor: item.condition_color,
+        conditionName: item.condition_name,
+        perimeterValue: item.perimeter_value,
+        cutouts: item.cutouts,
+        netCalculatedValue: item.net_calculated_value
+      }));
+
+      results.push(...mappedResults);
+      
+      // Small delay between batches to avoid overwhelming the database
+      if (i + BATCH_SIZE < dbMeasurements.length) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+    }
+
+    return results;
+  }
+
   async deleteTakeoffMeasurement(id: string): Promise<void> {
     const { error } = await supabase
       .from(TABLES.TAKEOFF_MEASUREMENTS)
