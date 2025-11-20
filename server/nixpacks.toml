@@ -19,11 +19,16 @@ cmds = [
   "npm run build",
   "echo 'Verifying build output...'",
   "ls -la dist/ || echo 'WARNING: dist directory not found'",
+  "echo 'Finding glib libraries for OpenCV...'",
+  "GLIB_LIB=$(find /nix/store -name 'libgthread-2.0.so.0' 2>/dev/null | head -1 | xargs dirname 2>/dev/null || echo '')",
+  "if [ -n \"$GLIB_LIB\" ]; then echo \"Found glib lib at: $GLIB_LIB\"; export LD_LIBRARY_PATH=\"$GLIB_LIB:$LD_LIBRARY_PATH\"; fi",
   "echo 'Verifying Python packages installation...'",
   "if [ -f /opt/venv/bin/python3 ]; then /opt/venv/bin/python3 -m pip list | grep -i opencv || echo 'WARNING: opencv-python not found in pip list'; fi",
   "if [ -f /opt/venv/bin/python3 ]; then /opt/venv/bin/python3 -c 'import sys; print(sys.path)' || echo 'Could not check Python path'; fi",
   "echo 'Verifying PyMuPDF installation...'",
-  "if [ -f /opt/venv/bin/python3 ]; then /opt/venv/bin/python3 -c 'import fitz; print(\"PyMuPDF available\")' || echo 'WARNING: PyMuPDF not found'; fi"
+  "if [ -f /opt/venv/bin/python3 ]; then /opt/venv/bin/python3 -c 'import fitz; print(\"PyMuPDF available\")' || echo 'WARNING: PyMuPDF not found'; fi",
+  "echo 'Testing OpenCV import...'",
+  "if [ -f /opt/venv/bin/python3 ]; then /opt/venv/bin/python3 -c 'import cv2; print(\"OpenCV available:\", cv2.__version__)' 2>&1 || echo 'WARNING: OpenCV import failed'; fi"
 ]
 
 [variables]
@@ -39,8 +44,9 @@ SHELL = "/bin/bash"
 PYTHONUNBUFFERED = "1"
 # Set LD_LIBRARY_PATH so OpenCV can find libGL.so.1 and other shared libraries from nixpacks
 # This includes common nix store locations where libGL and other libraries are installed
+# Note: glib libraries will be found dynamically in the start command
 LD_LIBRARY_PATH = "/nix/var/nix/profiles/default/lib:/root/.nix-profile/lib:/usr/lib:/usr/local/lib:$LD_LIBRARY_PATH"
 
 [start]
-cmd = "npm start"
+cmd = "GLIB_LIB=$(find /nix/store -name 'libgthread-2.0.so.0' 2>/dev/null | head -1 | xargs dirname 2>/dev/null || echo ''); if [ -n \"$GLIB_LIB\" ]; then export LD_LIBRARY_PATH=\"$GLIB_LIB:$LD_LIBRARY_PATH\"; fi; npm start"
 

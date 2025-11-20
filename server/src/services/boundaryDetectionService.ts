@@ -64,6 +64,7 @@ export interface DetectionOptions {
 class BoundaryDetectionService {
   private pythonScriptPath: string;
   private tempDir: string;
+  private cachedGlibLibPath: string | null = null;
 
   constructor() {
     // Path to Python CV detection script (will be created dynamically)
@@ -139,16 +140,47 @@ class BoundaryDetectionService {
   }
 
   /**
+   * Find glib library directory in Nix store (cached)
+   */
+  private async findGlibLibPath(): Promise<string> {
+    if (this.cachedGlibLibPath !== null) {
+      return this.cachedGlibLibPath;
+    }
+
+    try {
+      // Try to find libgthread-2.0.so.0 in the Nix store
+      const { stdout } = await execAsync(
+        "find /nix/store -name 'libgthread-2.0.so.0' 2>/dev/null | head -1 | xargs dirname 2>/dev/null || echo ''",
+        { timeout: 5000 }
+      );
+      const glibPath = stdout.trim();
+      if (glibPath) {
+        this.cachedGlibLibPath = glibPath;
+        console.log(`✅ Found glib libraries at: ${glibPath}`);
+        return glibPath;
+      }
+    } catch (error) {
+      console.warn(`⚠️ Could not find glib libraries: ${error}`);
+    }
+
+    this.cachedGlibLibPath = '';
+    return '';
+  }
+
+  /**
    * Get enhanced LD_LIBRARY_PATH for OpenCV to find shared libraries
    */
-  private getEnhancedLdLibraryPath(): string {
-    return [
+  private async getEnhancedLdLibraryPath(): Promise<string> {
+    const glibLibPath = await this.findGlibLibPath();
+    const paths = [
+      glibLibPath,                          // Glib libraries from Nix store (if found)
       '/nix/var/nix/profiles/default/lib',  // Nix default profile libs
       '/root/.nix-profile/lib',             // Nix user profile libs
       '/usr/lib',                           // System libs
       '/usr/local/lib',                     // Local libs
       process.env.LD_LIBRARY_PATH || ''     // Existing LD_LIBRARY_PATH
-    ].filter(Boolean).join(':');
+    ].filter(Boolean);
+    return paths.join(':');
   }
 
   /**
@@ -456,7 +488,8 @@ if __name__ == "__main__":
       console.log(`   Image path: ${imagePath}`);
       console.log(`   Image exists: ${await fs.pathExists(imagePath)}`);
       console.log(`   Enhanced PATH: ${this.getEnhancedPath()}`);
-      console.log(`   Enhanced LD_LIBRARY_PATH: ${this.getEnhancedLdLibraryPath()}`);
+      const enhancedLdPath = await this.getEnhancedLdLibraryPath();
+      console.log(`   Enhanced LD_LIBRARY_PATH: ${enhancedLdPath}`);
       
       let stdout: string;
       let stderr: string;
@@ -467,7 +500,7 @@ if __name__ == "__main__":
           env: { 
             ...process.env, 
             PATH: this.getEnhancedPath(),
-            LD_LIBRARY_PATH: this.getEnhancedLdLibraryPath()
+            LD_LIBRARY_PATH: enhancedLdPath
           }
         });
         stdout = execResult.stdout;
@@ -695,7 +728,7 @@ if __name__ == "__main__":
       // First, check if pip can see opencv-python
       try {
         console.log(`   Checking if opencv-python is installed...`);
-        const enhancedLdPath = this.getEnhancedLdLibraryPath();
+        const enhancedLdPath = await this.getEnhancedLdLibraryPath();
         const { stdout: pipList } = await execAsync(
           `${pythonCommand} -m pip list | grep -i opencv || echo "not found"`,
           {
@@ -714,7 +747,7 @@ if __name__ == "__main__":
       
       // Check Python site-packages location
       try {
-        const enhancedLdPath = this.getEnhancedLdLibraryPath();
+        const enhancedLdPath = await this.getEnhancedLdLibraryPath();
         const { stdout: sitePackages } = await execAsync(
           `${pythonCommand} -c "import site; print(site.getsitepackages())"`,
           {
@@ -732,7 +765,7 @@ if __name__ == "__main__":
       }
       
       try {
-        const enhancedLdPath = this.getEnhancedLdLibraryPath();
+        const enhancedLdPath = await this.getEnhancedLdLibraryPath();
         const { stdout, stderr } = await execAsync(
           `${pythonCommand} -c "import cv2; print(cv2.__version__)"`,
           {
@@ -754,7 +787,7 @@ if __name__ == "__main__":
         // Try to get more details about the import error
         let importErrorDetails = '';
         try {
-          const enhancedLdPath = this.getEnhancedLdLibraryPath();
+          const enhancedLdPath = await this.getEnhancedLdLibraryPath();
           const { stderr: importStderr } = await execAsync(
             `${pythonCommand} -c "import cv2" 2>&1 || true`,
             {
