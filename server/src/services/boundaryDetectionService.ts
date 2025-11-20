@@ -558,9 +558,18 @@ if __name__ == "__main__":
     epsilon = float(sys.argv[5]) if len(sys.argv) > 5 else 0.02
     
     try:
+        # Validate image file exists
+        if not os.path.exists(image_path):
+            print(json.dumps({"error": f"Image file not found: {image_path}"}))
+            sys.exit(1)
+        
         # Get image dimensions
         img = cv2.imread(image_path)
-        height, width = img.shape[:2] if img is not None else (0, 0)
+        if img is None:
+            print(json.dumps({"error": f"Failed to load image: {image_path}"}))
+            sys.exit(1)
+        
+        height, width = img.shape[:2]
         
         # Detect elements
         rooms = detect_rooms(image_path, scale_factor, min_room_area, epsilon)
@@ -577,8 +586,12 @@ if __name__ == "__main__":
         }
         
         print(json.dumps(result))
+        sys.stdout.flush()  # Ensure output is flushed
     except Exception as e:
-        print(json.dumps({"error": str(e)}))
+        import traceback
+        error_msg = f"{str(e)}\\nTraceback:\\n{traceback.format_exc()}"
+        print(json.dumps({"error": error_msg}), file=sys.stderr)
+        sys.stderr.flush()
         sys.exit(1)
 `;
 
@@ -643,6 +656,22 @@ if __name__ == "__main__":
       let stdout: string;
       let stderr: string;
       try {
+        // Test Python script syntax first by trying to import it
+        const testCommand = `${pythonCommand} -m py_compile "${this.pythonScriptPath}"`;
+        try {
+          await execAsync(testCommand, {
+            timeout: 5000,
+            env: { 
+              ...process.env, 
+              PATH: this.getEnhancedPath(),
+              LD_LIBRARY_PATH: enhancedLdPath
+            }
+          });
+        } catch (compileError: any) {
+          console.error('❌ Python script syntax error:', compileError.stderr || compileError.message);
+          throw new Error(`Python script has syntax errors: ${compileError.stderr || compileError.message}`);
+        }
+
         const execResult = await execAsync(command, {
           timeout: 60000, // 60 second timeout (increased for complex images)
           maxBuffer: 10 * 1024 * 1024, // 10MB buffer
