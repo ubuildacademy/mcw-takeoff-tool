@@ -48,6 +48,32 @@ except ImportError:
 try:
     import pytesseract
     TESSERACT_AVAILABLE = True
+    
+    # Try to find tesseract binary and configure pytesseract to use it
+    # This is needed on Railway/Nixpacks where tesseract might be in /nix/store
+    import shutil
+    tesseract_path = shutil.which('tesseract')
+    if not tesseract_path:
+        # Try to find in common Nix store locations
+        import subprocess
+        try:
+            result = subprocess.run(
+                ['find', '/nix/store', '-name', 'tesseract', '-type', 'f', '-executable'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                tesseract_path = result.stdout.strip().split('\n')[0]
+        except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+            pass
+    
+    if tesseract_path:
+        pytesseract.pytesseract.tesseract_cmd = tesseract_path
+        print(f"Configured pytesseract to use: {tesseract_path}", file=sys.stderr)
+    else:
+        print("Warning: tesseract binary not found, OCR may fail", file=sys.stderr)
+        
 except ImportError:
     TESSERACT_AVAILABLE = False
     print("Warning: pytesseract not available, OCR will be skipped", file=sys.stderr)
