@@ -5,12 +5,13 @@ providers = ["node", "python"]
 # Both providers run automatically when package.json and requirements.txt are detected
 # IMPORTANT: Ensure Railway service root directory is set to "server/" in Railway dashboard
 
-# Install system libraries required for OpenCV
+# Install system libraries required for OpenCV and Tesseract OCR
 # These are installed after Node.js provider sets up npm
 # Note: PDF processing now uses PyMuPDF (pure Python, no system dependencies)
 # bash is needed for sharp package to build native bindings
+# tesseract is required for OCR text extraction with coordinates
 [phases.install]
-nixPkgs = ["libGL", "glib", "libGLU", "pkg-config", "bash"]
+nixPkgs = ["libGL", "glib", "libGLU", "pkg-config", "bash", "tesseract"]
 
 # Build phase: Build TypeScript and verify Python packages
 [phases.build]
@@ -27,8 +28,10 @@ cmds = [
   "if [ -f /opt/venv/bin/python3 ]; then /opt/venv/bin/python3 -c 'import sys; print(sys.path)' || echo 'Could not check Python path'; fi",
   "echo 'Verifying PyMuPDF installation...'",
   "if [ -f /opt/venv/bin/python3 ]; then /opt/venv/bin/python3 -c 'import fitz; print(\"PyMuPDF available\")' || echo 'WARNING: PyMuPDF not found'; fi",
-  "echo 'Testing OpenCV import...'",
-  "if [ -f /opt/venv/bin/python3 ]; then /opt/venv/bin/python3 -c 'import cv2; print(\"OpenCV available:\", cv2.__version__)' 2>&1 || echo 'WARNING: OpenCV import failed'; fi"
+      "echo 'Testing OpenCV import...'",
+      "if [ -f /opt/venv/bin/python3 ]; then /opt/venv/bin/python3 -c 'import cv2; print(\"OpenCV available:\", cv2.__version__)' 2>&1 || echo 'WARNING: OpenCV import failed'; fi",
+      "echo 'Verifying Tesseract OCR installation...'",
+      "if command -v tesseract >/dev/null 2>&1; then tesseract --version || echo 'WARNING: Tesseract command not working'; else echo 'WARNING: Tesseract not found in PATH'; fi"
 ]
 
 [variables]
