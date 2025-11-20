@@ -221,6 +221,9 @@ class TitleblockExtractionService {
       
       const command = `${pythonCommand} "${this.pythonScriptPath}" "${pdfPath}" "${pageNumbersStr}" "${this.tempDir}"`;
       
+      console.log(`[Python Extraction] Processing batch: pages ${pageNumbers.join(',')}`);
+      console.log(`[Python Extraction] Command: ${command.substring(0, 200)}...`);
+      
       const enhancedPath = this.getEnhancedPath();
       const execResult = await execAsync(command, {
         timeout: 120000, // 2 minutes per batch
@@ -231,8 +234,16 @@ class TitleblockExtractionService {
         }
       });
 
+      // Log stderr if present (Python warnings/errors)
+      if (execResult.stderr && execResult.stderr.trim()) {
+        console.warn(`[Python Extraction] Python stderr: ${execResult.stderr.substring(0, 500)}`);
+      }
+
       // Parse JSON output
       const output = execResult.stdout.trim();
+      console.log(`[Python Extraction] Python stdout length: ${output.length} chars`);
+      console.log(`[Python Extraction] Python stdout preview: ${output.substring(0, 500)}`);
+      
       let sheets: SheetInfo[];
       
       try {
@@ -243,10 +254,21 @@ class TitleblockExtractionService {
           throw new Error('Output is not an array');
         }
         
+        console.log(`[Python Extraction] Parsed ${sheets.length} sheets from batch`);
+        
+        // Log what was extracted
+        const extractedCount = sheets.filter(s => s.sheetNumber !== 'Unknown' || s.sheetName !== 'Unknown').length;
+        console.log(`[Python Extraction] Successfully extracted info for ${extractedCount}/${sheets.length} pages`);
+        
+        if (extractedCount === 0) {
+          console.warn(`[Python Extraction] WARNING: All pages returned "Unknown" - extraction may have failed`);
+        }
+        
         // Ensure all pages are represented
         const resultPages = new Set(sheets.map(s => s.pageNumber));
         for (const pageNum of pageNumbers) {
           if (!resultPages.has(pageNum)) {
+            console.warn(`[Python Extraction] Missing result for page ${pageNum}, adding Unknown`);
             sheets.push({
               pageNumber: pageNum,
               sheetNumber: "Unknown",
@@ -259,7 +281,8 @@ class TitleblockExtractionService {
         sheets.sort((a, b) => a.pageNumber - b.pageNumber);
         
       } catch (parseError) {
-        console.error('Failed to parse Python output:', output.substring(0, 500));
+        console.error(`[Python Extraction] Failed to parse Python output:`, parseError);
+        console.error(`[Python Extraction] Raw output: ${output.substring(0, 1000)}`);
         // Return Unknown for all pages in batch
         sheets = pageNumbers.map(pageNum => ({
           pageNumber: pageNum,
@@ -273,7 +296,7 @@ class TitleblockExtractionService {
         sheets
       };
     } catch (error) {
-      console.error(`Error processing batch [${pageNumbers.join(',')}]:`, error);
+      console.error(`[Python Extraction] Error processing batch [${pageNumbers.join(',')}]:`, error);
       
       // Return Unknown for all pages in batch
       const sheets: SheetInfo[] = pageNumbers.map(pageNum => ({

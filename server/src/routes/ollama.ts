@@ -427,6 +427,15 @@ router.post('/analyze-sheets', async (req, res) => {
         // Sort by page number
         allSheets.sort((a, b) => a.pageNumber - b.pageNumber);
         
+        // Log extraction results
+        const extractedCount = allSheets.filter(s => s.sheetNumber !== 'Unknown' || s.sheetName !== 'Unknown').length;
+        console.log(`[Python Extraction] Complete: ${allSheets.length} total sheets, ${extractedCount} with extracted data`);
+        
+        if (extractedCount === 0) {
+          console.warn(`[Python Extraction] WARNING: No sheets were successfully extracted (all returned "Unknown")`);
+          console.warn(`[Python Extraction] This may indicate: titleblock detection failed, OCR failed, or pattern matching failed`);
+        }
+        
         sendProgress(90, 'Finalizing results...');
         
         console.log(`Python extraction complete: ${allSheets.length} sheets processed`);
