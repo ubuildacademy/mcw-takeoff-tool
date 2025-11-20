@@ -9,7 +9,6 @@
 
 import { boundaryDetectionService, RoomBoundary, WallSegment, DoorWindow } from './boundaryDetectionService';
 import { pythonPdfConverter } from './pythonPdfConverter';
-import { enhancedOcrService } from './enhancedOcrService';
 import { storage } from '../storage';
 import { supabase } from '../supabase';
 import { v4 as uuidv4 } from 'uuid';
@@ -132,25 +131,7 @@ class CVTakeoffService {
       // Convert to base64
       const imageData = imageBuffer.toString('base64');
 
-      // Step 1: Run OCR to get room labels and text context
-      console.log(`📝 Running OCR analysis for room labels...`);
-      let ocrResult = null;
-      let roomLabels: Array<{ name: string; bbox: { x: number; y: number; width: number; height: number }; confidence: number }> = [];
-      
-      try {
-        ocrResult = await enhancedOcrService.analyzeImage(imageData);
-        roomLabels = ocrResult.roomNames.map(room => ({
-          name: room.name,
-          bbox: room.bbox,
-          confidence: room.confidence
-        }));
-        console.log(`✅ OCR found ${roomLabels.length} room labels: ${roomLabels.map(r => r.name).join(', ')}`);
-      } catch (ocrError) {
-        console.warn(`⚠️ OCR analysis failed, continuing without room labels:`, ocrError instanceof Error ? ocrError.message : 'Unknown error');
-        // Continue without OCR - CV detection will still work
-      }
-
-      // Step 2: Detect boundaries using CV
+      // Detect boundaries using CV (now includes OCR)
       const detectionResult = await boundaryDetectionService.detectBoundaries(
         imageData,
         scaleFactor,
@@ -161,8 +142,18 @@ class CVTakeoffService {
       );
 
       console.log(`✅ Detection complete: ${detectionResult.rooms.length} rooms, ${detectionResult.walls.length} walls, ${detectionResult.doors.length} doors, ${detectionResult.windows.length} windows`);
+      console.log(`✅ OCR found ${detectionResult.ocrText.length} text elements`);
 
-      // Step 3: Match OCR room labels with detected room contours
+      // Match OCR room labels with detected room contours
+      // OCR is now done in Python with precise coordinates
+      const roomLabels = detectionResult.ocrText
+        .filter(text => text.type === 'room_label')
+        .map(text => ({
+          name: text.text,
+          bbox: text.bbox,
+          confidence: text.confidence
+        }));
+
       if (roomLabels.length > 0 && detectionResult.rooms.length > 0) {
         console.log(`🔗 Matching ${roomLabels.length} room labels with ${detectionResult.rooms.length} detected rooms...`);
         const matchedRooms = this.matchRoomLabelsToContours(

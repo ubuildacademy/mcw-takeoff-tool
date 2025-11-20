@@ -42,11 +42,24 @@ export interface DoorWindow {
   confidence: number;
 }
 
+export interface OCRTextElement {
+  text: string;
+  confidence: number;
+  bbox: {
+    x: number; // Normalized 0-1
+    y: number; // Normalized 0-1
+    width: number; // Normalized 0-1
+    height: number; // Normalized 0-1
+  };
+  type?: 'room_label' | 'dimension' | 'note' | 'other';
+}
+
 export interface BoundaryDetectionResult {
   rooms: RoomBoundary[];
   walls: WallSegment[];
   doors: DoorWindow[];
   windows: DoorWindow[];
+  ocrText: OCRTextElement[]; // OCR text with coordinates
   processingTime: number;
   imageWidth: number;
   imageHeight: number;
@@ -217,6 +230,14 @@ import numpy as np
 import json
 import sys
 import os
+
+# Try to import pytesseract, but continue without it if not available
+try:
+    import pytesseract
+    TESSERACT_AVAILABLE = True
+except ImportError:
+    TESSERACT_AVAILABLE = False
+    print("Warning: pytesseract not available, OCR will be skipped", file=sys.stderr)
 
 def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
     """Detect room boundaries - rooms are enclosed spaces surrounded by walls"""
@@ -545,6 +566,83 @@ def detect_openings(image_path, scale_factor):
     
     return doors, windows
 
+def detect_text_ocr(image_path):
+    """Detect text using OCR with bounding boxes"""
+    if not TESSERACT_AVAILABLE:
+        return []
+    
+    try:
+        img = cv2.imread(image_path)
+        if img is None:
+            return []
+        
+        height, width = img.shape[:2]
+        
+        # Convert to RGB for pytesseract (it expects RGB)
+        rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        
+        # Get detailed OCR data with bounding boxes
+        # Using --psm 6 (Assume a single uniform block of text) for architectural drawings
+        ocr_data = pytesseract.image_to_data(rgb_img, output_type=pytesseract.Output.DICT, config='--psm 6')
+        
+        text_elements = []
+        
+        # Process OCR results
+        n_boxes = len(ocr_data['text'])
+        for i in range(n_boxes):
+            text = ocr_data['text'][i].strip()
+            conf = int(ocr_data['conf'][i])
+            
+            # Skip empty text or low confidence
+            if not text or conf < 30:
+                continue
+            
+            # Get bounding box coordinates
+            x = ocr_data['left'][i]
+            y = ocr_data['top'][i]
+            w = ocr_data['width'][i]
+            h = ocr_data['height'][i]
+            
+            # Normalize coordinates (0-1)
+            x_norm = float(x) / width
+            y_norm = float(y) / height
+            w_norm = float(w) / width
+            h_norm = float(h) / height
+            
+            # Classify text type based on patterns
+            text_lower = text.lower()
+            text_type = 'other'
+            
+            # Room labels: numbers, "room", "bedroom", etc.
+            if any(keyword in text_lower for keyword in ['room', 'bedroom', 'bath', 'kitchen', 'closet', 'office', 'hall', 'corridor']):
+                text_type = 'room_label'
+            elif text.replace('.', '').replace('-', '').isdigit() and len(text) <= 4:
+                # Short numeric strings are likely room numbers
+                text_type = 'room_label'
+            elif any(char in text for char in ['\'', '"', 'ft', 'in', 'cm', 'm']) or any(char.isdigit() for char in text):
+                # Contains measurement units or numbers - likely dimension
+                text_type = 'dimension'
+            elif len(text) > 20:
+                # Long text is likely a note
+                text_type = 'note'
+            
+            text_elements.append({
+                "text": text,
+                "confidence": float(conf) / 100.0,  # Convert to 0-1 scale
+                "bbox": {
+                    "x": x_norm,
+                    "y": y_norm,
+                    "width": w_norm,
+                    "height": h_norm
+                },
+                "type": text_type
+            })
+        
+        return text_elements
+    except Exception as e:
+        print(f"OCR error: {str(e)}", file=sys.stderr)
+        return []
+
 # Main execution
 if __name__ == "__main__":
     if len(sys.argv) < 3:
@@ -576,11 +674,15 @@ if __name__ == "__main__":
         walls = detect_walls(image_path, scale_factor, min_wall_length)
         doors, windows = detect_openings(image_path, scale_factor)
         
+        # Detect text using OCR
+        ocr_text = detect_text_ocr(image_path)
+        
         result = {
             "rooms": rooms,
             "walls": walls,
             "doors": doors,
             "windows": windows,
+            "ocrText": ocr_text,
             "imageWidth": width,
             "imageHeight": height
         }
@@ -757,6 +859,7 @@ if __name__ == "__main__":
         walls: Array.isArray(result.walls) ? result.walls : [],
         doors: Array.isArray(result.doors) ? result.doors : [],
         windows: Array.isArray(result.windows) ? result.windows : [],
+        ocrText: Array.isArray(result.ocrText) ? result.ocrText : [],
         processingTime,
         imageWidth: result.imageWidth || 0,
         imageHeight: result.imageHeight || 0
@@ -829,8 +932,10 @@ if __name__ == "__main__":
   async getStatusDetails(): Promise<{
     pythonAvailable: boolean;
     opencvAvailable: boolean;
+    pytesseractAvailable: boolean;
     pythonVersion?: string;
     opencvVersion?: string;
+    tesseractVersion?: string;
     error?: string;
   }> {
     const result: {
@@ -1045,6 +1150,29 @@ if __name__ == "__main__":
         console.error(`   OpenCV check details:`, JSON.stringify(errorDetails, null, 2));
         result.error = `${errorMsg}. Details: ${JSON.stringify(errorDetails)}`;
         return result;
+      }
+
+      // Check pytesseract availability
+      try {
+        const enhancedLdPath = await this.getEnhancedLdLibraryPath();
+        const { stdout: tesseractVersion } = await execAsync(
+          `${pythonCommand} -c "import pytesseract; print(pytesseract.get_tesseract_version())"`,
+          {
+            timeout: 5000,
+            env: { 
+              ...process.env, 
+              PATH: enhancedPath,
+              LD_LIBRARY_PATH: enhancedLdPath
+            }
+          }
+        );
+        result.pytesseractAvailable = true;
+        result.tesseractVersion = tesseractVersion.trim();
+        console.log(`   ✅ Tesseract version: ${result.tesseractVersion}`);
+      } catch (tesseractError) {
+        console.warn(`   ⚠️ pytesseract/Tesseract not available: ${tesseractError instanceof Error ? tesseractError.message : 'Unknown error'}`);
+        result.pytesseractAvailable = false;
+        // Don't fail - OCR is optional, CV detection will still work
       }
 
       console.log('   ✅ Python and OpenCV are available!');
