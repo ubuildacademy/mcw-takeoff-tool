@@ -172,16 +172,48 @@ export function CVTakeoffAgent({
       setCurrentStage('complete');
     } catch (error) {
       console.error('Error processing page:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      // Try to extract error details from the message
-      let errorDetails = null;
-      try {
-        const detailsMatch = errorMessage.match(/Details: ({.*})/);
-        if (detailsMatch) {
-          errorDetails = JSON.parse(detailsMatch[1]);
+      
+      // Extract error message properly
+      let errorMessage = 'Unknown error';
+      let errorDetails: any = null;
+      
+      if (error instanceof Error) {
+        errorMessage = error.message || String(error);
+        // If message is "[object Object]", try to extract more details
+        if (errorMessage === '[object Object]' || errorMessage.includes('[object Object]')) {
+          try {
+            const errorObj = error as any;
+            errorMessage = errorObj.message || errorObj.error || JSON.stringify(errorObj) || 'Unknown error';
+          } catch {
+            errorMessage = 'Failed to process page - unknown error';
+          }
         }
-      } catch (e) {
-        // Ignore parsing errors
+        
+        // Try to extract error details from the message
+        try {
+          const detailsMatch = errorMessage.match(/Details: ({.*})/s);
+          if (detailsMatch) {
+            errorDetails = JSON.parse(detailsMatch[1]);
+          } else {
+            // Also check if error object has details property
+            const errorObj = error as any;
+            if (errorObj.details) {
+              errorDetails = errorObj.details;
+            }
+          }
+        } catch (e) {
+          // Ignore parsing errors
+        }
+      } else if (error && typeof error === 'object') {
+        try {
+          const errorObj = error as any;
+          errorMessage = errorObj.message || errorObj.error || JSON.stringify(errorObj) || 'Unknown error';
+          errorDetails = errorObj.details || null;
+        } catch {
+          errorMessage = 'Failed to process page - unknown error';
+        }
+      } else {
+        errorMessage = String(error);
       }
       
       setResults({

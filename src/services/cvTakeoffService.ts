@@ -111,11 +111,23 @@ export const cvTakeoffService = {
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
+        let errorData: any = {};
+        try {
+          errorData = await response.json();
+        } catch {
+          // If JSON parsing fails, create a basic error object
+          errorData = { error: `HTTP error! status: ${response.status}` };
+        }
+        
         const errorMessage = errorData.error || `HTTP error! status: ${response.status}`;
+        // Ensure error message is a string, not an object
+        const errorMessageStr = typeof errorMessage === 'string' 
+          ? errorMessage 
+          : JSON.stringify(errorMessage);
+        
         const errorWithDetails = errorData.details 
-          ? `${errorMessage}. Details: ${JSON.stringify(errorData.details, null, 2)}`
-          : errorMessage;
+          ? `${errorMessageStr}. Details: ${JSON.stringify(errorData.details, null, 2)}`
+          : errorMessageStr;
         throw new Error(errorWithDetails);
       }
 
@@ -123,7 +135,27 @@ export const cvTakeoffService = {
       return data.result;
     } catch (error) {
       console.error('Error processing page:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      let errorMessage = 'Unknown error';
+      if (error instanceof Error) {
+        errorMessage = error.message || String(error);
+        // If message is "[object Object]", try to extract more details
+        if (errorMessage === '[object Object]' || errorMessage.includes('[object Object]')) {
+          try {
+            const errorObj = error as any;
+            errorMessage = errorObj.message || errorObj.error || JSON.stringify(errorObj) || 'Unknown error';
+          } catch {
+            errorMessage = 'Failed to process page - unknown error';
+          }
+        }
+      } else if (error && typeof error === 'object') {
+        try {
+          errorMessage = (error as any).message || (error as any).error || JSON.stringify(error) || 'Unknown error';
+        } catch {
+          errorMessage = 'Failed to process page - unknown error';
+        }
+      } else {
+        errorMessage = String(error);
+      }
       throw new Error(`Failed to process page: ${errorMessage}`);
     }
   },

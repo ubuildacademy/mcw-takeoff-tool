@@ -175,14 +175,28 @@ router.post('/process-page', async (req, res) => {
     let errorStack: string | undefined;
     
     if (error instanceof Error) {
-      errorMessage = error.message || error.toString() || 'Unknown error';
+      errorMessage = error.message || String(error) || 'Unknown error';
       errorStack = error.stack;
+      // If message is "[object Object]", try to extract more details
+      if (errorMessage === '[object Object]' || errorMessage.includes('[object Object]')) {
+        try {
+          const errorObj = error as any;
+          errorMessage = errorObj.message || errorObj.error || JSON.stringify(errorObj, Object.getOwnPropertyNames(errorObj)) || 'Unknown error';
+        } catch {
+          errorMessage = 'Unknown error occurred during page processing';
+        }
+      }
     } else if (typeof error === 'string') {
       errorMessage = error;
     } else if (error && typeof error === 'object') {
       // Try to extract message from error object
-      errorMessage = (error as any).message || (error as any).error || JSON.stringify(error);
-      errorStack = (error as any).stack;
+      try {
+        const errorObj = error as any;
+        errorMessage = errorObj.message || errorObj.error || errorObj.toString() || JSON.stringify(errorObj, Object.getOwnPropertyNames(errorObj));
+        errorStack = errorObj.stack;
+      } catch {
+        errorMessage = 'Unknown error occurred during page processing';
+      }
     }
     
     const errorDetails = {
