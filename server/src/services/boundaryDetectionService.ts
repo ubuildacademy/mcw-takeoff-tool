@@ -231,22 +231,10 @@ import json
 import sys
 import os
 
-# Try to import pytesseract, but continue without it if not available
+# OCR/Tesseract is disabled for now - CV detection works without it
+# Can be re-enabled later if needed
 TESSERACT_AVAILABLE = False
 TESSERACT_BINARY_AVAILABLE = False
-try:
-    import pytesseract
-    TESSERACT_AVAILABLE = True
-    # Check if Tesseract binary is actually available
-    try:
-        pytesseract.get_tesseract_version()
-        TESSERACT_BINARY_AVAILABLE = True
-    except Exception:
-        TESSERACT_BINARY_AVAILABLE = False
-        print("Warning: pytesseract imported but Tesseract binary not found, OCR will be skipped", file=sys.stderr)
-except ImportError:
-    TESSERACT_AVAILABLE = False
-    print("Warning: pytesseract not available, OCR will be skipped", file=sys.stderr)
 
 def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
     """Detect room boundaries - rooms are enclosed spaces surrounded by walls"""
@@ -257,24 +245,8 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
     height, width = img.shape[:2]
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
-    # Detect text areas to exclude title blocks (optional, won't fail if OCR unavailable)
+    # OCR disabled for now - using geometric filtering only
     text_regions = []
-    if TESSERACT_AVAILABLE and TESSERACT_BINARY_AVAILABLE:
-        try:
-            rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            ocr_data = pytesseract.image_to_data(rgb_img, output_type=pytesseract.Output.DICT, config='--psm 6')
-            n_boxes = len(ocr_data['text'])
-            for i in range(n_boxes):
-                if ocr_data['text'][i].strip() and int(ocr_data['conf'][i]) > 30:
-                    x = ocr_data['left'][i]
-                    y = ocr_data['top'][i]
-                    w = ocr_data['width'][i]
-                    h = ocr_data['height'][i]
-                    text_regions.append((x, y, w, h))
-        except Exception as ocr_err:
-            # OCR failed, continue without text filtering
-            print(f"OCR detection failed in detect_rooms: {str(ocr_err)}", file=sys.stderr)
-            text_regions = []  # Ensure it's empty if OCR fails
     
     # Apply Gaussian blur to reduce noise
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
