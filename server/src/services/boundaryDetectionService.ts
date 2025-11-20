@@ -714,19 +714,8 @@ if __name__ == "__main__":
         walls = detect_walls(image_path, scale_factor, min_wall_length)
         doors, windows = detect_openings(image_path, scale_factor)
         
-        # Detect text using OCR (optional - won't fail if unavailable)
+        # OCR disabled - CV detection works without it
         ocr_text = []
-        try:
-            if TESSERACT_AVAILABLE and TESSERACT_BINARY_AVAILABLE:
-                ocr_text = detect_text_ocr(image_path)
-            else:
-                print("OCR skipped: Tesseract not available", file=sys.stderr)
-        except Exception as ocr_error:
-            # OCR failed but continue without it
-            print(f"OCR detection skipped due to error: {str(ocr_error)}", file=sys.stderr)
-            import traceback
-            print(f"OCR error traceback: {traceback.format_exc()}", file=sys.stderr)
-            ocr_text = []  # Ensure it's empty
         
         result = {
             "rooms": rooms,
