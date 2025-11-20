@@ -72,7 +72,7 @@ class TitleblockExtractionService {
   /**
    * Check if Python and required libraries are available
    */
-  async checkAvailability(): Promise<{ available: boolean; error?: string }> {
+  async checkAvailability(): Promise<{ available: boolean; error?: string; warning?: string }> {
     const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
     const enhancedPath = this.getEnhancedPath();
 
