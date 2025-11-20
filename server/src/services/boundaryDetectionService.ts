@@ -248,6 +248,23 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
     height, width = img.shape[:2]
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
+    # Detect text areas to exclude title blocks (optional, won't fail if OCR unavailable)
+    text_regions = []
+    try:
+        if TESSERACT_AVAILABLE:
+            rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            ocr_data = pytesseract.image_to_data(rgb_img, output_type=pytesseract.Output.DICT, config='--psm 6')
+            n_boxes = len(ocr_data['text'])
+            for i in range(n_boxes):
+                if ocr_data['text'][i].strip() and int(ocr_data['conf'][i]) > 30:
+                    x = ocr_data['left'][i]
+                    y = ocr_data['top'][i]
+                    w = ocr_data['width'][i]
+                    h = ocr_data['height'][i]
+                    text_regions.append((x, y, w, h))
+    except:
+        pass  # OCR failed, continue without text filtering
+    
     # Apply Gaussian blur to reduce noise
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
     
@@ -268,8 +285,15 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
     
     rooms = []
     min_area_pixels = (min_area_sf / (scale_factor ** 2)) if scale_factor > 0 else 1000
-    # Maximum area to filter out the entire floor plan (e.g., 70% of image)
-    max_area_pixels = (width * height) * 0.7
+    # Maximum area to filter out the entire floor plan - lowered to 50% to exclude full page
+    max_area_pixels = (width * height) * 0.5
+    
+    # Define exclusion zones for title blocks (typically at edges)
+    # Exclude top 15%, bottom 15%, left 10%, right 10% of image
+    exclude_top = height * 0.15
+    exclude_bottom = height * 0.85
+    exclude_left = width * 0.10
+    exclude_right = width * 0.90
     
     # Track processed contours to avoid duplicates
     processed_contours = set()
@@ -290,14 +314,49 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
         if area_pixels > max_area_pixels:
             continue
         
-        # Get bounding box to check aspect ratio
+        # Get bounding box to check aspect ratio and position
         x, y, w, h = cv2.boundingRect(contour)
         aspect_ratio = max(w, h) / min(w, h) if min(w, h) > 0 else 0
         
-        # Filter out extremely elongated shapes (likely corridors)
-        # Corridors are usually much longer than wide
-        if aspect_ratio > 8:
+        # Filter out extremely elongated shapes (likely corridors) - relaxed from 8 to 10
+        if aspect_ratio > 10:
             continue
+        
+        # Exclude title blocks and edge areas
+        bbox_center_x = x + w / 2
+        bbox_center_y = y + h / 2
+        
+        # Check if bounding box is in exclusion zones (title blocks)
+        if (y < exclude_top or y + h > exclude_bottom or 
+            x < exclude_left or x + w > exclude_right):
+            # Additional check: if it's mostly in an exclusion zone, skip it
+            exclusion_overlap = 0
+            if y < exclude_top:
+                exclusion_overlap += min(h, exclude_top - y) * w
+            if y + h > exclude_bottom:
+                exclusion_overlap += min(h, (y + h) - exclude_bottom) * w
+            if x < exclude_left:
+                exclusion_overlap += min(w, exclude_left - x) * h
+            if x + w > exclude_right:
+                exclusion_overlap += min(w, (x + w) - exclude_right) * h
+            
+            # If more than 30% of bounding box is in exclusion zones, skip
+            if exclusion_overlap > (w * h * 0.3):
+                continue
+        
+        # Check for high text density (title blocks/legends)
+        if text_regions:
+            text_overlap_area = 0
+            bbox_area = w * h
+            for tx, ty, tw, th in text_regions:
+                # Calculate overlap between text region and room bounding box
+                overlap_x = max(0, min(x + w, tx + tw) - max(x, tx))
+                overlap_y = max(0, min(y + h, ty + th) - max(y, ty))
+                text_overlap_area += overlap_x * overlap_y
+            
+            # If more than 20% of bounding box overlaps with text, likely a title block
+            if bbox_area > 0 and (text_overlap_area / bbox_area) > 0.2:
+                continue
         
         # Check if contour is approximately closed (rooms should be enclosed)
         # Calculate how close the start and end points are
@@ -307,7 +366,8 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
             closure_dist = np.sqrt((start_point[0] - end_point[0])**2 + (start_point[1] - end_point[1])**2)
             perimeter = cv2.arcLength(contour, True)
             # If start and end are far apart relative to perimeter, it's not closed
-            if perimeter > 0 and closure_dist / perimeter > 0.1:
+            # Relaxed from 0.1 to 0.15 to allow slightly more open contours
+            if perimeter > 0 and closure_dist / perimeter > 0.15:
                 continue
         
         # Simplify contour (reduce vertices while preserving shape)
@@ -315,7 +375,8 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
         approx = cv2.approxPolyDP(contour, epsilon_factor, True)
         
         # Skip if simplified contour has too few points (likely noise)
-        if len(approx) < 4:  # At least 4 points for a room (rectangle minimum)
+        # Relaxed from 4 to 3 to catch simpler shapes
+        if len(approx) < 3:
             continue
         
         # Convert to normalized coordinates (0-1)
@@ -674,8 +735,13 @@ if __name__ == "__main__":
         walls = detect_walls(image_path, scale_factor, min_wall_length)
         doors, windows = detect_openings(image_path, scale_factor)
         
-        # Detect text using OCR
-        ocr_text = detect_text_ocr(image_path)
+        # Detect text using OCR (optional - won't fail if unavailable)
+        ocr_text = []
+        try:
+            ocr_text = detect_text_ocr(image_path)
+        except Exception as ocr_error:
+            # OCR failed but continue without it
+            print(f"OCR detection skipped: {str(ocr_error)}", file=sys.stderr)
         
         result = {
             "rooms": rooms,
