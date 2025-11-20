@@ -46,6 +46,8 @@ PYTHONUNBUFFERED = "1"
 # This includes common nix store locations where libGL and other libraries are installed
 # Note: glib libraries will be found dynamically in the start command
 LD_LIBRARY_PATH = "/nix/var/nix/profiles/default/lib:/root/.nix-profile/lib:/usr/lib:/usr/local/lib:$LD_LIBRARY_PATH"
+# Enable Python-based titleblock extraction (bypasses AI for testing)
+USE_PYTHON_TITLEBLOCK_EXTRACTION = "true"
 
 [start]
 # Find glib libraries at runtime and add to LD_LIBRARY_PATH for OpenCV
