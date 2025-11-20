@@ -619,7 +619,7 @@ def detect_text_ocr(image_path):
             elif text.replace('.', '').replace('-', '').isdigit() and len(text) <= 4:
                 # Short numeric strings are likely room numbers
                 text_type = 'room_label'
-            elif any(char in text for char in ['\'', '"', 'ft', 'in', 'cm', 'm']) or any(char.isdigit() for char in text):
+            elif any(char in text for char in ["'", '"', 'ft', 'in', 'cm', 'm']) or any(char.isdigit() for char in text):
                 # Contains measurement units or numbers - likely dimension
                 text_type = 'dimension'
             elif len(text) > 20:
