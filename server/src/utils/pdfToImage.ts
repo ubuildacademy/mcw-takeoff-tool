@@ -238,11 +238,29 @@ class PDFToImageConverter {
   
   /**
    * Find ImageMagick in nix store (for nixpacks installations)
+   * Returns the command to use (either direct path or nix-shell wrapper)
    */
-  private async findImageMagickInNixStore(): Promise<string | null> {
+  private async findImageMagickInNixStore(): Promise<{ command: string; useNixShell: boolean } | null> {
     const enhancedPath = this.getEnhancedPath();
     
-    // Method 1: Use find to search nix store directly
+    // Method 1: Use nix-shell to run ImageMagick (most reliable for nixpacks)
+    // This ensures the nix environment is properly set up
+    try {
+      console.log(`   Trying nix-shell approach...`);
+      // Test if nix-shell works and can find ImageMagick
+      const { stdout: testOutput } = await execAsync(`nix-shell -p imagemagick --run "magick --version" 2>&1`, {
+        timeout: 10000,
+        env: { ...process.env, PATH: enhancedPath }
+      });
+      if (testOutput && testOutput.toLowerCase().includes('imagemagick')) {
+        console.log(`   ✅ nix-shell can access ImageMagick`);
+        return { command: 'magick', useNixShell: true };
+      }
+    } catch (error) {
+      console.log(`   ⚠️ nix-shell test failed: ${error instanceof Error ? error.message.substring(0, 100) : 'Unknown'}`);
+    }
+    
+    // Method 2: Use find to search nix store directly
     try {
       console.log(`   Searching nix store for ImageMagick...`);
       const { stdout } = await execAsync(`find /nix/store -name "magick" -type f 2>/dev/null | head -1`, {
@@ -260,17 +278,17 @@ class PDFToImageConverter {
           });
           if (version && version.toLowerCase().includes('imagemagick')) {
             console.log(`   ✅ Verified ImageMagick: ${version.substring(0, 50)}`);
-            return foundPath;
+            return { command: foundPath, useNixShell: false };
           }
         } catch {
           console.log(`   ⚠️ Found magick but verification failed`);
         }
       }
     } catch (error) {
-      console.log(`   ⚠️ find command failed: ${error instanceof Error ? error.message : 'Unknown'}`);
+      console.log(`   ⚠️ find command failed: ${error instanceof Error ? error.message.substring(0, 100) : 'Unknown'}`);
     }
     
-    // Method 2: Try to find convert (ImageMagick 6)
+    // Method 3: Try to find convert (ImageMagick 6)
     try {
       const { stdout } = await execAsync(`find /nix/store -name "convert" -path "*/bin/convert" -type f 2>/dev/null | head -1`, {
         timeout: 10000,
@@ -287,7 +305,7 @@ class PDFToImageConverter {
           });
           if (version && (version.toLowerCase().includes('imagemagick') || version.toLowerCase().includes('image magick'))) {
             console.log(`   ✅ Verified ImageMagick convert: ${version.substring(0, 50)}`);
-            return foundPath;
+            return { command: foundPath, useNixShell: false };
           }
         } catch {
           // Not ImageMagick convert
@@ -297,57 +315,55 @@ class PDFToImageConverter {
       // find failed
     }
     
-    // Method 3: Try nix-shell approach (if available)
-    try {
-      const { stdout } = await execAsync(`nix-shell -p imagemagick --run "which magick" 2>/dev/null || echo ""`, {
-        timeout: 10000,
-        env: { ...process.env, PATH: enhancedPath }
-      });
-      if (stdout && stdout.trim()) {
-        const foundPath = stdout.trim();
-        console.log(`   Found via nix-shell: ${foundPath}`);
-        return foundPath;
-      }
-    } catch {
-      // nix-shell might not be available
-    }
-    
     return null;
   }
 
   /**
    * Check if ImageMagick is available and can handle PDFs
    */
-  private async checkImageMagickAvailable(): Promise<{ available: boolean; command: string; error?: string }> {
+  private async checkImageMagickAvailable(): Promise<{ available: boolean; command: string; useNixShell?: boolean; error?: string }> {
     // Try 'magick' first (ImageMagick 7+), then 'convert' (ImageMagick 6 or legacy)
     const commands = ['magick', 'convert'];
     const enhancedPath = this.getEnhancedPath();
     
     console.log(`🔍 Checking for ImageMagick availability...`);
     console.log(`   Enhanced PATH: ${enhancedPath}`);
+    console.log(`   Current PATH: ${process.env.PATH}`);
     
     // First, try to find ImageMagick in nix store (for nixpacks installations)
-    const nixStorePath = await this.findImageMagickInNixStore();
-    if (nixStorePath) {
-      console.log(`✅ ImageMagick found in nix store: ${nixStorePath}`);
+    const nixStoreResult = await this.findImageMagickInNixStore();
+    if (nixStoreResult) {
+      const { command: nixCommand, useNixShell } = nixStoreResult;
+      console.log(`✅ ImageMagick found in nix store: ${nixCommand} (useNixShell: ${useNixShell})`);
+      
       try {
-        await execAsync(`${nixStorePath} --version`, { timeout: 5000, env: { ...process.env, PATH: enhancedPath } });
+        // Test the command
+        const testCommand = useNixShell 
+          ? `nix-shell -p imagemagick --run "${nixCommand} --version"`
+          : `${nixCommand} --version`;
+        
+        await execAsync(testCommand, { timeout: 5000, env: { ...process.env, PATH: enhancedPath } });
+        
         // Check PDF support
         try {
-          const { stdout: delegateStdout } = await execAsync(`${nixStorePath} -list delegate`, { 
+          const delegateCommand = useNixShell
+            ? `nix-shell -p imagemagick --run "${nixCommand} -list delegate"`
+            : `${nixCommand} -list delegate`;
+          
+          const { stdout: delegateStdout } = await execAsync(delegateCommand, { 
             timeout: 5000,
             env: { ...process.env, PATH: enhancedPath }
           });
           if (delegateStdout && delegateStdout.toLowerCase().includes('pdf')) {
             console.log(`✅ ImageMagick PDF support confirmed`);
-            return { available: true, command: nixStorePath };
+            return { available: true, command: nixCommand, useNixShell };
           } else {
             console.warn(`⚠️ ImageMagick found but PDF support may be missing (Ghostscript required)`);
-            return { available: true, command: nixStorePath, error: 'PDF support may be missing' };
+            return { available: true, command: nixCommand, useNixShell, error: 'PDF support may be missing' };
           }
         } catch {
           console.warn(`⚠️ Could not verify PDF support, will attempt anyway`);
-          return { available: true, command: nixStorePath };
+          return { available: true, command: nixCommand, useNixShell };
         }
       } catch {
         console.warn(`⚠️ ImageMagick found in nix store but doesn't work, continuing search...`);
@@ -375,14 +391,14 @@ class PDFToImageConverter {
               });
               if (delegateStdout && delegateStdout.toLowerCase().includes('pdf')) {
                 console.log(`✅ ImageMagick PDF support confirmed`);
-                return { available: true, command: cmdPath };
+                return { available: true, command: cmdPath, useNixShell: false };
               } else {
                 console.warn(`⚠️ ImageMagick found but PDF support may be missing (Ghostscript required)`);
-                return { available: true, command: cmdPath, error: 'PDF support may be missing' };
+                return { available: true, command: cmdPath, useNixShell: false, error: 'PDF support may be missing' };
               }
             } catch {
               console.warn(`⚠️ Could not verify PDF support, will attempt anyway`);
-              return { available: true, command: cmdPath };
+              return { available: true, command: cmdPath, useNixShell: false };
             }
           } catch {
             // which found it but it doesn't work, continue searching
@@ -424,15 +440,15 @@ class PDFToImageConverter {
               });
               if (delegateStdout && delegateStdout.toLowerCase().includes('pdf')) {
                 console.log(`✅ ImageMagick PDF support confirmed`);
-                return { available: true, command: cmdPath };
+                return { available: true, command: cmdPath, useNixShell: false };
               } else {
                 console.warn(`⚠️ ImageMagick found but PDF support may be missing (Ghostscript required)`);
-                return { available: true, command: cmdPath, error: 'PDF support may be missing' };
+                return { available: true, command: cmdPath, useNixShell: false, error: 'PDF support may be missing' };
               }
             } catch {
               // If delegate check fails, still try to use it
               console.warn(`⚠️ Could not verify PDF support, will attempt anyway`);
-              return { available: true, command: cmdPath };
+              return { available: true, command: cmdPath, useNixShell: false };
             }
           }
         } catch {
@@ -442,7 +458,7 @@ class PDFToImageConverter {
     }
     
     console.error(`❌ ImageMagick not found in any location`);
-    return { available: false, command: 'magick', error: 'ImageMagick not found in PATH, nix store, or standard locations' };
+    return { available: false, command: 'magick', useNixShell: false, error: 'ImageMagick not found in PATH, nix store, or standard locations' };
   }
 
   /**
@@ -470,6 +486,7 @@ class PDFToImageConverter {
       }
       
       const magickCmd = magickCheck.command;
+      const useNixShell = magickCheck.useNixShell || false;
       const {
         outputDir = this.tempDir,
         format = 'png',
@@ -489,21 +506,28 @@ class PDFToImageConverter {
       // Calculate density (DPI) based on scale - use higher density for better text quality
       const density = Math.round(200 * scale);
 
-      // Use ImageMagick command (magick for v7+, convert for v6)
-      // Note: For 'convert', we need to adjust the syntax slightly
       // Page numbers in ImageMagick are 0-indexed, so subtract 1
       const pageIndex = pageNumber - 1;
-      const command = magickCmd === 'convert' 
+      
+      // Build the ImageMagick command
+      // If using nix-shell, wrap the command; otherwise use direct path
+      const imagemagickCommand = magickCmd === 'convert' 
         ? `${magickCmd} -density ${density} "${pdfPath}[${pageIndex}]" -background white -alpha remove -flatten -enhance -sharpen 0x1 -quality ${quality} "${outputFile}"`
         : `${magickCmd} -density ${density} "${pdfPath}[${pageIndex}]" -background white -alpha remove -flatten -enhance -sharpen 0x1 -quality ${quality} "${outputFile}"`;
       
+      // Wrap in nix-shell if needed
+      const command = useNixShell
+        ? `nix-shell -p imagemagick ghostscript --run "${imagemagickCommand.replace(/"/g, '\\"')}"`
+        : imagemagickCommand;
+      
       console.log(`🔧 Running ImageMagick command: ${magickCmd}`);
+      console.log(`🔧 Using nix-shell: ${useNixShell}`);
       console.log(`📄 PDF path: ${pdfPath}`);
       console.log(`📄 PDF exists: ${await fs.pathExists(pdfPath)}`);
       console.log(`📄 PDF size: ${(await fs.stat(pdfPath)).size} bytes`);
       console.log(`📄 Page index: ${pageIndex} (page ${pageNumber})`);
       console.log(`📁 Output file: ${outputFile}`);
-      console.log(`⚙️ Command: ${command}`);
+      console.log(`⚙️ Full command: ${command}`);
       
       const enhancedPath = this.getEnhancedPath();
       const enhancedLdPath = [

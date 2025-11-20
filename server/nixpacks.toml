@@ -28,7 +28,9 @@ cmds = [
 ]
 
 [variables]
-# Don't override PATH here - let Node.js and Python providers set up their own paths
+# Add nix profile bin to PATH so ImageMagick and other nix packages are available
+# nixpacks installs packages but they need to be in PATH at runtime
+PATH = "/nix/var/nix/profiles/default/bin:/root/.nix-profile/bin:$PATH"
 # Python venv will be available at runtime via the python provider
 PYTHONUNBUFFERED = "1"
 # Set LD_LIBRARY_PATH so OpenCV can find libGL.so.1 and other shared libraries from nixpacks
