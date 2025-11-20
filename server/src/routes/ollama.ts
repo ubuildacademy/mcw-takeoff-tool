@@ -1,6 +1,8 @@
 import express from 'express';
 import axios from 'axios';
 import { supabase } from '../supabase';
+import * as path from 'path';
+import * as fs from 'fs-extra';
 
 const router = express.Router();
 
@@ -237,6 +239,10 @@ router.post('/analyze-sheets', async (req, res) => {
   try {
     const { documentId, projectId, customPrompt } = req.body;
     
+    // DEVELOPMENT FLAG: Set to true to use Python extraction instead of AI
+    // TODO: Remove this flag after testing or make it configurable
+    const USE_PYTHON_EXTRACTION = process.env.USE_PYTHON_TITLEBLOCK_EXTRACTION === 'true';
+    
     // Set up Server-Sent Events for progress updates
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -251,7 +257,7 @@ router.post('/analyze-sheets', async (req, res) => {
       res.write(`data: ${JSON.stringify({ progress, message })}\n\n`);
     };
 
-    console.log('Sheet analysis request:', { documentId, projectId });
+    console.log('Sheet analysis request:', { documentId, projectId, usePython: USE_PYTHON_EXTRACTION });
 
     if (!documentId || !projectId) {
       res.write(`data: ${JSON.stringify({ error: 'Missing required fields: documentId and projectId' })}\n\n`);
@@ -259,6 +265,190 @@ router.post('/analyze-sheets', async (req, res) => {
       return;
     }
 
+    // Python extraction path
+    if (USE_PYTHON_EXTRACTION) {
+      try {
+        sendProgress(5, 'Initializing Python extraction...');
+        
+        const { titleblockExtractionService } = await import('../services/titleblockExtractionService');
+        const { storage } = await import('../storage');
+        
+        // Check availability
+        const availability = await titleblockExtractionService.checkAvailability();
+        if (!availability.available) {
+          res.write(`data: ${JSON.stringify({ error: `Python extraction not available: ${availability.error}` })}\n\n`);
+          res.end();
+          return;
+        }
+        
+        sendProgress(10, 'Getting document information...');
+        
+        // Get PDF file path (similar to CV takeoff)
+        const files = await storage.getFilesByProject(projectId);
+        const file = files.find(f => f.id === documentId);
+        
+        if (!file || file.mimetype !== 'application/pdf') {
+          res.write(`data: ${JSON.stringify({ error: 'Document not found or not a PDF' })}\n\n`);
+          res.end();
+          return;
+        }
+        
+        sendProgress(15, 'Downloading PDF...');
+        
+        // Download PDF from Supabase Storage
+        const { data: pdfData, error: downloadError } = await supabase.storage
+          .from('project-files')
+          .download(file.path);
+        
+        if (downloadError || !pdfData) {
+          res.write(`data: ${JSON.stringify({ error: `Failed to download PDF: ${downloadError?.message || 'Unknown error'}` })}\n\n`);
+          res.end();
+          return;
+        }
+        
+        // Save to temporary file
+        const isProduction = process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === 'production';
+        let baseTempDir: string;
+        
+        if (isProduction) {
+          baseTempDir = '/tmp/pdf-processing';
+        } else {
+          const cwd = process.cwd();
+          if (cwd.endsWith('server') || cwd.endsWith('server/')) {
+            baseTempDir = path.join(cwd, 'temp', 'pdf-processing');
+          } else {
+            baseTempDir = path.join(cwd, 'server', 'temp', 'pdf-processing');
+          }
+        }
+        
+        await fs.ensureDir(baseTempDir);
+        const tempPdfPath = path.join(baseTempDir, `${documentId}.pdf`);
+        
+        const arrayBuffer = await pdfData.arrayBuffer();
+        await fs.writeFile(tempPdfPath, Buffer.from(arrayBuffer));
+        
+        sendProgress(20, 'Getting page count...');
+        
+        // Get page count from OCR data (or parse PDF)
+        const { simpleOcrService } = await import('../services/simpleOcrService');
+        const ocrData = await simpleOcrService.getDocumentOCRResults(projectId, documentId);
+        
+        if (!ocrData || ocrData.length === 0) {
+          res.write(`data: ${JSON.stringify({ error: 'No OCR data found. Please run OCR first to determine page count.' })}\n\n`);
+          res.end();
+          return;
+        }
+        
+        const totalPages = ocrData.length;
+        const pageNumbers = ocrData.map((page: any) => page.pageNumber);
+        
+        sendProgress(25, `Processing ${totalPages} pages with Python OCR...`);
+        
+        // Process pages in batches with parallel processing
+        const BATCH_SIZE = 10; // Process 10 pages per batch
+        const CONCURRENT_BATCHES = 5; // Process 5 batches concurrently
+        const totalBatches = Math.ceil(totalPages / BATCH_SIZE);
+        let allSheets: any[] = [];
+        
+        // Create batch tasks
+        const batchTasks: Array<{ start: number; end: number; batchNum: number; pageNums: number[] }> = [];
+        for (let batchStart = 0; batchStart < totalPages; batchStart += BATCH_SIZE) {
+          const batchEnd = Math.min(batchStart + BATCH_SIZE, totalPages);
+          const batchPageNumbers = pageNumbers.slice(batchStart, batchEnd);
+          const currentBatch = Math.floor(batchStart / BATCH_SIZE) + 1;
+          
+          batchTasks.push({
+            start: batchStart,
+            end: batchEnd,
+            batchNum: currentBatch,
+            pageNums: batchPageNumbers
+          });
+        }
+        
+        // Process batches with concurrency limit
+        for (let i = 0; i < batchTasks.length; i += CONCURRENT_BATCHES) {
+          const concurrentTasks = batchTasks.slice(i, i + CONCURRENT_BATCHES);
+          
+          // Update progress
+          const completedBatches = i;
+          const batchProgress = 25 + (completedBatches / totalBatches) * 60;
+          sendProgress(Math.round(batchProgress), `Processing batches ${i + 1}-${Math.min(i + CONCURRENT_BATCHES, totalBatches)}/${totalBatches}...`);
+          
+          // Process batches in parallel
+          const batchPromises = concurrentTasks.map(async (task) => {
+            console.log(`Processing batch ${task.batchNum}/${totalBatches}: pages ${task.start + 1}-${task.end}`);
+            
+            const result = await titleblockExtractionService.extractSheets(
+              tempPdfPath,
+              task.pageNums,
+              BATCH_SIZE
+            );
+            
+            return {
+              batchNum: task.batchNum,
+              result,
+              pageNums: task.pageNums
+            };
+          });
+          
+          const batchResults = await Promise.all(batchPromises);
+          
+          // Collect results
+          for (const batchResult of batchResults) {
+            if (batchResult.result.success && batchResult.result.sheets) {
+              allSheets = allSheets.concat(batchResult.result.sheets);
+            } else {
+              // Add Unknown entries for failed batch
+              for (const pageNum of batchResult.pageNums) {
+                allSheets.push({
+                  pageNumber: pageNum,
+                  sheetNumber: "Unknown",
+                  sheetName: "Unknown"
+                });
+              }
+            }
+          }
+        }
+        
+        // Clean up temp PDF
+        try {
+          if (await fs.pathExists(tempPdfPath)) {
+            await fs.remove(tempPdfPath);
+          }
+        } catch (cleanupError) {
+          console.warn('Error cleaning up temp PDF:', cleanupError);
+        }
+        
+        // Sort by page number
+        allSheets.sort((a, b) => a.pageNumber - b.pageNumber);
+        
+        sendProgress(90, 'Finalizing results...');
+        
+        console.log(`Python extraction complete: ${allSheets.length} sheets processed`);
+        
+        // Send final result (same format as AI)
+        res.write(`data: ${JSON.stringify({
+          success: true,
+          sheets: allSheets,
+          totalPages: totalPages,
+          analyzedSheets: allSheets.length,
+          progress: 100,
+          message: 'Complete!'
+        })}\n\n`);
+        
+        res.end();
+        return;
+        
+      } catch (error) {
+        console.error('Error in Python extraction:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        res.write(`data: ${JSON.stringify({ error: `Python extraction failed: ${errorMessage}` })}\n\n`);
+        res.end();
+        return;
+      }
+    }
+
+    // Original AI extraction path (kept intact)
     if (!OLLAMA_API_KEY) {
       res.write(`data: ${JSON.stringify({ error: 'Ollama API key not configured' })}\n\n`);
       res.end();
