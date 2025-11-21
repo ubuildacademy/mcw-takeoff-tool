@@ -5,13 +5,13 @@ providers = ["node", "python"]
 # Both providers run automatically when package.json and requirements.txt are detected
 # IMPORTANT: Ensure Railway service root directory is set to "server/" in Railway dashboard
 
-# Install system libraries required for OpenCV and Tesseract OCR
+# Install system libraries required for OpenCV
 # These are installed after Node.js provider sets up npm
 # Note: PDF processing now uses PyMuPDF (pure Python, no system dependencies)
 # bash is needed for sharp package to build native bindings
-# tesseract is required for OCR text extraction with coordinates
+# OCR/Tesseract disabled - using CV-only detection
 [phases.install]
-nixPkgs = ["libGL", "glib", "libGLU", "pkg-config", "bash", "tesseract"]
+nixPkgs = ["libGL", "glib", "libGLU", "pkg-config", "bash"]
 
 # Build phase: Build TypeScript and verify Python packages
 [phases.build]
@@ -29,9 +29,7 @@ cmds = [
   "echo 'Verifying PyMuPDF installation...'",
   "if [ -f /opt/venv/bin/python3 ]; then /opt/venv/bin/python3 -c 'import fitz; print(\"PyMuPDF available\")' || echo 'WARNING: PyMuPDF not found'; fi",
       "echo 'Testing OpenCV import...'",
-      "if [ -f /opt/venv/bin/python3 ]; then /opt/venv/bin/python3 -c 'import cv2; print(\"OpenCV available:\", cv2.__version__)' 2>&1 || echo 'WARNING: OpenCV import failed'; fi",
-      "echo 'Verifying Tesseract OCR installation...'",
-      "if command -v tesseract >/dev/null 2>&1; then tesseract --version || echo 'WARNING: Tesseract command not working'; else echo 'WARNING: Tesseract not found in PATH'; fi"
+      "GLIB_LIB=$(find /nix/store -name 'libgthread-2.0.so.0' 2>/dev/null | head -1 | xargs dirname 2>/dev/null || echo ''); if [ -n \"$GLIB_LIB\" ]; then export LD_LIBRARY_PATH=\"$GLIB_LIB:$LD_LIBRARY_PATH\"; fi; if [ -f /opt/venv/bin/python3 ]; then /opt/venv/bin/python3 -c 'import cv2; print(\"OpenCV available:\", cv2.__version__)' 2>&1 || echo 'WARNING: OpenCV import failed'; fi"
 ]
 
 [variables]
@@ -53,8 +51,8 @@ LD_LIBRARY_PATH = "/nix/var/nix/profiles/default/lib:/root/.nix-profile/lib:/usr
 USE_PYTHON_TITLEBLOCK_EXTRACTION = "true"
 
 [start]
-# Find glib libraries and tesseract binary at runtime and add to PATH/LD_LIBRARY_PATH
-# This ensures OpenCV can load libgthread-2.0.so.0 and pytesseract can find tesseract binary
-# Tesseract is installed via nixPkgs but may be in /nix/store, so we find it dynamically
-cmd = "GLIB_LIB=$(find /nix/store -name 'libgthread-2.0.so.0' 2>/dev/null | head -1 | xargs dirname 2>/dev/null || echo ''); if [ -n \"$GLIB_LIB\" ]; then export LD_LIBRARY_PATH=\"$GLIB_LIB:$LD_LIBRARY_PATH\"; fi; TESSERACT_BIN=$(find /nix/store -name 'tesseract' -type f 2>/dev/null | head -1 | xargs dirname 2>/dev/null || echo ''); if [ -n \"$TESSERACT_BIN\" ]; then export PATH=\"$TESSERACT_BIN:$PATH\"; fi; npm start"
+# Find glib libraries at runtime and add to LD_LIBRARY_PATH
+# This ensures OpenCV can load libgthread-2.0.so.0
+# OCR/Tesseract disabled - using CV-only detection
+cmd = "GLIB_LIB=$(find /nix/store -name 'libgthread-2.0.so.0' 2>/dev/null | head -1 | xargs dirname 2>/dev/null || echo ''); if [ -n \"$GLIB_LIB\" ]; then export LD_LIBRARY_PATH=\"$GLIB_LIB:/nix/var/nix/profiles/default/lib:/root/.nix-profile/lib:/usr/lib:/usr/local/lib:$LD_LIBRARY_PATH\"; fi; npm start"
 
