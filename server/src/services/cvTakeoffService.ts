@@ -52,6 +52,60 @@ export interface PageDetectionResult {
 
 class CVTakeoffService {
   /**
+   * Transform normalized coordinates from image space to PDF viewport space
+   * 
+   * @param imageCoords Normalized coordinates (0-1) relative to image dimensions
+   * @param imageWidth Image width in pixels (scaled)
+   * @param imageHeight Image height in pixels (scaled)
+   * @param pdfWidth Base PDF page width in points (at scale 1.0)
+   * @param pdfHeight Base PDF page height in points (at scale 1.0)
+   * @returns Normalized coordinates (0-1) relative to PDF viewport
+   */
+  private transformImageCoordsToPdfCoords(
+    imageCoords: { x: number; y: number },
+    imageWidth: number,
+    imageHeight: number,
+    pdfWidth: number,
+    pdfHeight: number
+  ): { x: number; y: number } {
+    // Image coordinates are normalized (0-1) relative to image dimensions
+    // PDF coordinates should be normalized (0-1) relative to PDF viewport dimensions
+    
+    // If image and PDF have same aspect ratio, coordinates map 1:1
+    // Otherwise, we need to account for aspect ratio differences
+    const imageAspect = imageWidth / imageHeight;
+    const pdfAspect = pdfWidth / pdfHeight;
+    
+    // For now, assume 1:1 mapping since PyMuPDF should preserve aspect ratio
+    // The image is just scaled, so normalized coordinates should match
+    // However, we validate this assumption with logging
+    if (Math.abs(imageAspect - pdfAspect) > 0.01) {
+      console.warn(`⚠️ Aspect ratio mismatch: image ${imageAspect.toFixed(3)} vs PDF ${pdfAspect.toFixed(3)}`);
+    }
+    
+    // Direct 1:1 mapping (normalized coordinates are scale-independent)
+    return {
+      x: imageCoords.x,
+      y: imageCoords.y
+    };
+  }
+
+  /**
+   * Adjust scale factor to account for image rendering scale
+   * 
+   * @param scaleFactor Original scale factor (pixels to feet at PDF viewport scale)
+   * @param imageScale Image rendering scale (e.g., 2.0 for 2x)
+   * @returns Adjusted scale factor for image pixel measurements
+   */
+  private adjustScaleFactorForImage(scaleFactor: number, imageScale: number): number {
+    // The scaleFactor is calibrated for PDF viewport coordinates
+    // But the image is rendered at imageScale (e.g., 2x)
+    // So 1 pixel in the image = (1/imageScale) pixels in PDF viewport
+    // Therefore, scaleFactor needs to be divided by imageScale
+    return scaleFactor / imageScale;
+  }
+
+  /**
    * Process a single page for CV takeoff
    */
   async processPage(
@@ -90,13 +144,15 @@ class CVTakeoffService {
       
       console.log(`📄 PDF file validated: ${pdfPath} (${pdfStats.size} bytes)`);
 
-      // Convert PDF page to image using Python/PyMuPDF
+      // Convert PDF page to image using Python/PyMuPDF with metadata
       console.log(`🖼️ Converting page ${pageNumber} to image...`);
-      let imageBuffer: Buffer | null;
+      const IMAGE_SCALE = 2.0; // Image rendering scale
+      let conversionMetadata: { buffer: Buffer; pdfWidth: number; pdfHeight: number; imageWidth: number; imageHeight: number; imageScale: number } | null = null;
+      
       try {
-        imageBuffer = await pythonPdfConverter.convertPageToBuffer(pdfPath, pageNumber, {
+        conversionMetadata = await pythonPdfConverter.convertPageToBufferWithMetadata(pdfPath, pageNumber, {
           format: 'png',
-          scale: 2.0, // Higher resolution for better detection
+          scale: IMAGE_SCALE, // Higher resolution for better detection
           quality: 90
         });
       } catch (conversionError) {
@@ -114,7 +170,7 @@ class CVTakeoffService {
         );
       }
 
-      if (!imageBuffer || imageBuffer.length === 0) {
+      if (!conversionMetadata || !conversionMetadata.buffer || conversionMetadata.buffer.length === 0) {
         // Provide more detailed error information
         const pdfExists = await fs.pathExists(pdfPath);
         const pdfSize = pdfExists ? (await fs.stat(pdfPath)).size : 0;
@@ -126,15 +182,23 @@ class CVTakeoffService {
         );
       }
       
+      const { buffer: imageBuffer, pdfWidth, pdfHeight, imageWidth, imageHeight, imageScale } = conversionMetadata;
+      
       console.log(`✅ Image conversion successful: ${imageBuffer.length} bytes`);
+      console.log(`📐 Dimensions: Image ${imageWidth}x${imageHeight}px (scale ${imageScale}), PDF base ${pdfWidth}x${pdfHeight}pt`);
+      
+      // Adjust scale factor for image rendering scale
+      // The scaleFactor is calibrated for PDF viewport, but detection uses scaled image
+      const adjustedScaleFactor = this.adjustScaleFactorForImage(scaleFactor, imageScale);
+      console.log(`📏 Scale factors: Original ${scaleFactor.toFixed(6)} ft/pixel (PDF), Adjusted ${adjustedScaleFactor.toFixed(6)} ft/pixel (image)`);
 
       // Convert to base64
       const imageData = imageBuffer.toString('base64');
 
-      // Detect boundaries using CV (now includes OCR)
+      // Detect boundaries using CV with adjusted scale factor
       const detectionResult = await boundaryDetectionService.detectBoundaries(
         imageData,
-        scaleFactor,
+        adjustedScaleFactor, // Use adjusted scale factor for image pixel measurements
         {
           minRoomArea: options.minRoomArea || 50,
           minWallLength: options.minWallLength || 2
@@ -177,7 +241,11 @@ class CVTakeoffService {
           projectId,
           documentId,
           pageNumber,
-          options.roomConditionName || 'Rooms'
+          options.roomConditionName || 'Rooms',
+          imageWidth,
+          imageHeight,
+          pdfWidth,
+          pdfHeight
         );
         conditionsCreated += conditions;
         measurementsCreated += measurements;
@@ -190,7 +258,11 @@ class CVTakeoffService {
           projectId,
           documentId,
           pageNumber,
-          options.wallConditionName || 'Walls'
+          options.wallConditionName || 'Walls',
+          imageWidth,
+          imageHeight,
+          pdfWidth,
+          pdfHeight
         );
         conditionsCreated += conditions;
         measurementsCreated += measurements;
@@ -204,7 +276,11 @@ class CVTakeoffService {
           documentId,
           pageNumber,
           options.doorConditionName || 'Doors',
-          'door'
+          'door',
+          imageWidth,
+          imageHeight,
+          pdfWidth,
+          pdfHeight
         );
         conditionsCreated += conditions;
         measurementsCreated += measurements;
@@ -218,7 +294,11 @@ class CVTakeoffService {
           documentId,
           pageNumber,
           options.windowConditionName || 'Windows',
-          'window'
+          'window',
+          imageWidth,
+          imageHeight,
+          pdfWidth,
+          pdfHeight
         );
         conditionsCreated += conditions;
         measurementsCreated += measurements;
@@ -352,7 +432,11 @@ class CVTakeoffService {
     projectId: string,
     documentId: string,
     pageNumber: number,
-    conditionName: string
+    conditionName: string,
+    imageWidth: number,
+    imageHeight: number,
+    pdfWidth: number,
+    pdfHeight: number
   ): Promise<{ conditions: number; measurements: number }> {
     // Group rooms by label if available, or use default condition name
     const roomsByLabel = new Map<string, RoomBoundary[]>();
@@ -384,8 +468,23 @@ class CVTakeoffService {
 
       // Create measurements for each room in this group
       for (const room of labeledRooms) {
-        // Convert normalized points to PDF coordinates
-        const pdfCoordinates = room.points;
+        // Transform normalized coordinates from image space to PDF viewport space
+        const pdfCoordinates = room.points.map(point => 
+          this.transformImageCoordsToPdfCoords(
+            point,
+            imageWidth,
+            imageHeight,
+            pdfWidth,
+            pdfHeight
+          )
+        );
+
+        // Log coordinate transformation for debugging
+        if (labeledRooms.indexOf(room) === 0) {
+          console.log(`🔍 Room coordinate transformation example:`);
+          console.log(`   Image coords (first point): x=${room.points[0].x.toFixed(4)}, y=${room.points[0].y.toFixed(4)}`);
+          console.log(`   PDF coords (first point): x=${pdfCoordinates[0].x.toFixed(4)}, y=${pdfCoordinates[0].y.toFixed(4)}`);
+        }
 
         // Create measurement with room label if available
         const measurement = {
@@ -426,7 +525,11 @@ class CVTakeoffService {
     projectId: string,
     documentId: string,
     pageNumber: number,
-    conditionName: string
+    conditionName: string,
+    imageWidth: number,
+    imageHeight: number,
+    pdfWidth: number,
+    pdfHeight: number
   ): Promise<{ conditions: number; measurements: number }> {
     // Check if condition already exists
     let condition = await this.findOrCreateCondition(
@@ -438,9 +541,31 @@ class CVTakeoffService {
     );
 
     // Batch create measurements for better performance
-    const measurements = walls.map(wall => {
-      // Create linear measurement with start and end points
-      const pdfCoordinates = [wall.start, wall.end];
+    const measurements = walls.map((wall, index) => {
+      // Transform normalized coordinates from image space to PDF viewport space
+      const startPdf = this.transformImageCoordsToPdfCoords(
+        wall.start,
+        imageWidth,
+        imageHeight,
+        pdfWidth,
+        pdfHeight
+      );
+      const endPdf = this.transformImageCoordsToPdfCoords(
+        wall.end,
+        imageWidth,
+        imageHeight,
+        pdfWidth,
+        pdfHeight
+      );
+      
+      const pdfCoordinates = [startPdf, endPdf];
+
+      // Log coordinate transformation for debugging (first wall only)
+      if (index === 0) {
+        console.log(`🔍 Wall coordinate transformation example:`);
+        console.log(`   Image coords: start=(${wall.start.x.toFixed(4)}, ${wall.start.y.toFixed(4)}), end=(${wall.end.x.toFixed(4)}, ${wall.end.y.toFixed(4)})`);
+        console.log(`   PDF coords: start=(${startPdf.x.toFixed(4)}, ${startPdf.y.toFixed(4)}), end=(${endPdf.x.toFixed(4)}, ${endPdf.y.toFixed(4)})`);
+      }
 
       return {
         id: uuidv4(),
@@ -477,7 +602,11 @@ class CVTakeoffService {
     documentId: string,
     pageNumber: number,
     conditionName: string,
-    type: 'door' | 'window'
+    type: 'door' | 'window',
+    imageWidth: number,
+    imageHeight: number,
+    pdfWidth: number,
+    pdfHeight: number
   ): Promise<{ conditions: number; measurements: number }> {
     // Check if condition already exists
     let condition = await this.findOrCreateCondition(
@@ -494,10 +623,29 @@ class CVTakeoffService {
     // 2. Create individual measurements for each item
     
     // Option 2: Individual measurements (more detailed)
-    for (const item of items) {
-      // Use bbox center as measurement point
-      const centerX = item.bbox.x + item.bbox.width / 2;
-      const centerY = item.bbox.y + item.bbox.height / 2;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      // Use bbox center as measurement point (normalized coordinates from image)
+      const centerImage = {
+        x: item.bbox.x + item.bbox.width / 2,
+        y: item.bbox.y + item.bbox.height / 2
+      };
+      
+      // Transform to PDF coordinates
+      const centerPdf = this.transformImageCoordsToPdfCoords(
+        centerImage,
+        imageWidth,
+        imageHeight,
+        pdfWidth,
+        pdfHeight
+      );
+
+      // Log coordinate transformation for debugging (first item only)
+      if (i === 0) {
+        console.log(`🔍 ${type} coordinate transformation example:`);
+        console.log(`   Image coords (center): x=${centerImage.x.toFixed(4)}, y=${centerImage.y.toFixed(4)}`);
+        console.log(`   PDF coords (center): x=${centerPdf.x.toFixed(4)}, y=${centerPdf.y.toFixed(4)}`);
+      }
 
       const measurement = {
         id: uuidv4(),
@@ -505,12 +653,12 @@ class CVTakeoffService {
         sheetId: documentId,
         conditionId: condition.id,
         type: 'count' as const,
-        points: [{ x: centerX, y: centerY }],
+        points: [centerPdf],
         calculatedValue: 1, // Each item counts as 1
         unit: 'EA',
         timestamp: Date.now().toString(),
         pdfPage: pageNumber,
-        pdfCoordinates: [{ x: centerX, y: centerY }],
+        pdfCoordinates: [centerPdf],
         conditionColor: condition.color,
         conditionName: condition.name
       };
