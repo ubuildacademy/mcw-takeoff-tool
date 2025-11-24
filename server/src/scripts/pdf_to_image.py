@@ -19,8 +19,11 @@ Output:
     JSON with:
     - success: boolean
     - imageData: base64-encoded image data (if success)
-    - imageWidth: image width in pixels
-    - imageHeight: image height in pixels
+    - imageWidth: image width in pixels (scaled)
+    - imageHeight: image height in pixels (scaled)
+    - pdfWidth: base PDF page width in points (at scale 1.0)
+    - pdfHeight: base PDF page height in points (at scale 1.0)
+    - imageScale: rendering scale factor used
     - error: error message (if failed)
 """
 
@@ -71,6 +74,12 @@ def convert_pdf_page_to_image(pdf_path, page_number, scale=2.0, format='png', qu
         # Get page (0-indexed)
         page = doc[page_number - 1]
         
+        # Get base PDF page dimensions (at scale 1.0, rotation 0)
+        # This represents the PDF viewport dimensions used for coordinate normalization
+        base_rect = page.rect  # Page rectangle in PDF points (72 DPI)
+        base_width = base_rect.width
+        base_height = base_rect.height
+        
         # Create transformation matrix for scale
         # PyMuPDF uses 72 DPI as base, so scale of 2.0 = 144 DPI
         # For higher quality, we multiply by scale
@@ -80,7 +89,7 @@ def convert_pdf_page_to_image(pdf_path, page_number, scale=2.0, format='png', qu
         # Render page to pixmap
         pix = page.get_pixmap(matrix=mat, alpha=False)
         
-        # Get image dimensions
+        # Get image dimensions (scaled)
         width = pix.width
         height = pix.height
         
@@ -106,6 +115,9 @@ def convert_pdf_page_to_image(pdf_path, page_number, scale=2.0, format='png', qu
             "imageData": image_data_b64,
             "imageWidth": width,
             "imageHeight": height,
+            "pdfWidth": base_width,  # Base PDF page width (at scale 1.0)
+            "pdfHeight": base_height,  # Base PDF page height (at scale 1.0)
+            "imageScale": scale,  # Image rendering scale factor
             "format": image_format
         }
         

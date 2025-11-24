@@ -21,8 +21,11 @@ export interface PDFToImageOptions {
 interface PythonConversionResult {
   success: boolean;
   imageData?: string; // Base64-encoded image data
-  imageWidth?: number;
-  imageHeight?: number;
+  imageWidth?: number; // Scaled image width in pixels
+  imageHeight?: number; // Scaled image height in pixels
+  pdfWidth?: number; // Base PDF page width in points (at scale 1.0)
+  pdfHeight?: number; // Base PDF page height in points (at scale 1.0)
+  imageScale?: number; // Image rendering scale factor
   format?: string;
   error?: string;
 }
@@ -96,13 +99,52 @@ class PythonPdfConverter {
   }
 
   /**
-   * Convert a PDF page to image buffer
+   * Convert a PDF page to image buffer with metadata
+   */
+  async convertPageToBufferWithMetadata(
+    pdfPath: string,
+    pageNumber: number,
+    options: PDFToImageOptions = {}
+  ): Promise<{ buffer: Buffer; pdfWidth: number; pdfHeight: number; imageWidth: number; imageHeight: number; imageScale: number } | null> {
+    const result = await this.convertPageToBufferInternal(pdfPath, pageNumber, options);
+    if (!result || !result.imageData) {
+      return null;
+    }
+    
+    const imageBuffer = Buffer.from(result.imageData, 'base64');
+    return {
+      buffer: imageBuffer,
+      pdfWidth: result.pdfWidth || 0,
+      pdfHeight: result.pdfHeight || 0,
+      imageWidth: result.imageWidth || 0,
+      imageHeight: result.imageHeight || 0,
+      imageScale: result.imageScale || 1.0
+    };
+  }
+
+  /**
+   * Convert a PDF page to image buffer (backward compatible)
    */
   async convertPageToBuffer(
     pdfPath: string,
     pageNumber: number,
     options: PDFToImageOptions = {}
   ): Promise<Buffer | null> {
+    const result = await this.convertPageToBufferInternal(pdfPath, pageNumber, options);
+    if (!result || !result.imageData) {
+      return null;
+    }
+    return Buffer.from(result.imageData, 'base64');
+  }
+
+  /**
+   * Internal method to convert PDF page to image
+   */
+  private async convertPageToBufferInternal(
+    pdfPath: string,
+    pageNumber: number,
+    options: PDFToImageOptions = {}
+  ): Promise<PythonConversionResult | null> {
     try {
       // Validate PDF file exists
       if (!await fs.pathExists(pdfPath)) {
@@ -199,9 +241,9 @@ class PythonPdfConverter {
         throw new Error('Decoded image buffer is empty');
       }
 
-      console.log(`✅ PDF conversion successful: ${imageBuffer.length} bytes, ${result.imageWidth}x${result.imageHeight}px, format=${result.format}`);
+      console.log(`✅ PDF conversion successful: ${imageBuffer.length} bytes, ${result.imageWidth}x${result.imageHeight}px (scale ${result.imageScale}), PDF base: ${result.pdfWidth}x${result.pdfHeight}pt, format=${result.format}`);
 
-      return imageBuffer;
+      return result;
     } catch (error) {
       console.error('❌ Error converting PDF page to buffer:', error);
       throw error;
