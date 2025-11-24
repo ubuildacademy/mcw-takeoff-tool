@@ -81,7 +81,7 @@ class BoundaryDetectionService {
 
   constructor() {
     // Path to Python CV detection script (will be created dynamically)
-    // In Railway: process.cwd() is /app/server (service root)
+    // In Railway: process.cwd() might be /app (repo root) or /app/server (service root)
     // In local dev: process.cwd() might be repo root or server/
     const isProduction = process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT;
     
@@ -111,7 +111,29 @@ class BoundaryDetectionService {
       scriptsBaseDir = path.join(currentDir, '..');
     }
     
-    this.pythonScriptPath = path.join(scriptsBaseDir, 'scripts', 'cv_boundary_detection.py');
+    // Verify the scripts directory exists, if not try alternative paths
+    const candidateScriptPath = path.join(scriptsBaseDir, 'scripts', 'cv_boundary_detection.py');
+    
+    // Check if candidate path exists, if not try alternative resolution
+    // This handles cases where process.cwd() might be repo root instead of server/
+    if (!fs.existsSync(path.dirname(candidateScriptPath))) {
+      const cwd = process.cwd();
+      // Try server/src/scripts if cwd is repo root
+      if (cwd.endsWith('Meridian Takeoff') || cwd === '/app') {
+        const altPath = path.join(cwd, 'server', 'src', 'scripts', 'cv_boundary_detection.py');
+        if (fs.existsSync(path.dirname(altPath))) {
+          this.pythonScriptPath = altPath;
+          console.log(`📁 Using alternative script path (repo root detected): ${this.pythonScriptPath}`);
+        } else {
+          this.pythonScriptPath = candidateScriptPath;
+          console.log(`⚠️ Script directory doesn't exist yet, will create: ${this.pythonScriptPath}`);
+        }
+      } else {
+        this.pythonScriptPath = candidateScriptPath;
+      }
+    } else {
+      this.pythonScriptPath = candidateScriptPath;
+    }
     
     // Temp directory: use /tmp in production, local temp in dev
     if (isProduction) {
@@ -739,23 +761,47 @@ if __name__ == "__main__":
 
       // Write Python script if it doesn't exist
       if (!await fs.pathExists(this.pythonScriptPath)) {
-        await fs.ensureDir(path.dirname(this.pythonScriptPath));
-        await fs.writeFile(this.pythonScriptPath, pythonScript);
-        // Make script executable (Unix/Linux/Mac)
-        if (process.platform !== 'win32') {
-          await execAsync(`chmod +x "${this.pythonScriptPath}"`).catch(() => {
-            // Ignore errors - script will still work without execute permission
-          });
+        try {
+          await fs.ensureDir(path.dirname(this.pythonScriptPath));
+          await fs.writeFile(this.pythonScriptPath, pythonScript);
+          // Make script executable (Unix/Linux/Mac)
+          if (process.platform !== 'win32') {
+            await execAsync(`chmod +x "${this.pythonScriptPath}"`).catch(() => {
+              // Ignore errors - script will still work without execute permission
+            });
+          }
+          console.log(`✅ Created Python script at: ${this.pythonScriptPath}`);
+        } catch (writeError) {
+          const errorDetails = {
+            scriptPath: this.pythonScriptPath,
+            dirname: path.dirname(this.pythonScriptPath),
+            dirExists: await fs.pathExists(path.dirname(this.pythonScriptPath)),
+            cwd: process.cwd(),
+            error: writeError instanceof Error ? writeError.message : String(writeError)
+          };
+          console.error('❌ Failed to create Python script:', JSON.stringify(errorDetails, null, 2));
+          throw new Error(`Failed to create Python script at ${this.pythonScriptPath}: ${errorDetails.error}`);
         }
-        console.log(`✅ Created Python script at: ${this.pythonScriptPath}`);
       } else {
         console.log(`✅ Python script exists at: ${this.pythonScriptPath}`);
       }
       
-      // Verify script exists before executing
+      // Verify script exists and is readable before executing
       const scriptExists = await fs.pathExists(this.pythonScriptPath);
       if (!scriptExists) {
         throw new Error(`Python script was not created at expected path: ${this.pythonScriptPath}`);
+      }
+      
+      // Verify script is readable
+      try {
+        const stats = await fs.stat(this.pythonScriptPath);
+        if (stats.size === 0) {
+          throw new Error(`Python script exists but is empty: ${this.pythonScriptPath}`);
+        }
+        console.log(`✅ Python script verified: ${stats.size} bytes`);
+      } catch (statError) {
+        console.error(`❌ Failed to verify Python script: ${statError}`);
+        throw new Error(`Python script exists but cannot be read: ${this.pythonScriptPath}`);
       }
 
       // Check Python availability before executing
@@ -814,6 +860,24 @@ if __name__ == "__main__":
           throw new Error(`Python script has syntax errors: ${compileError.stderr || compileError.message}`);
         }
 
+        // First, verify Python can read the script file
+        try {
+          // Use Python to check if file is readable (escape path properly)
+          const escapedPath = this.pythonScriptPath.replace(/'/g, "'\"'\"'");
+          const testReadCommand = `${pythonCommand} -c "import os; assert os.path.exists('${escapedPath}'), 'File not found'; f=open('${escapedPath}'); f.read(1); f.close(); print('Script readable')"`;
+          await execAsync(testReadCommand, {
+            timeout: 5000,
+            env: { 
+              ...process.env, 
+              PATH: this.getEnhancedPath(),
+              LD_LIBRARY_PATH: enhancedLdPath
+            }
+          });
+        } catch (readError: any) {
+          // Don't fail on read test - just log it, the actual execution will show the real error
+          console.warn('⚠️ Script readability test failed (non-fatal):', readError instanceof Error ? readError.message : String(readError));
+        }
+
         const execResult = await execAsync(command, {
           timeout: 60000, // 60 second timeout (increased for complex images)
           maxBuffer: 10 * 1024 * 1024, // 10MB buffer
@@ -836,12 +900,26 @@ if __name__ == "__main__":
           execErrorMessage = String(execError);
         }
         
+        // Try to get more details about the failure
+        let scriptContentPreview = '';
+        try {
+          const scriptContent = await fs.readFile(this.pythonScriptPath, 'utf8');
+          scriptContentPreview = scriptContent.substring(0, 200);
+        } catch {
+          scriptContentPreview = 'Could not read script file';
+        }
+        
         const errorDetails = {
           command,
           pythonCommand,
           scriptPath: this.pythonScriptPath,
+          scriptExists: await fs.pathExists(this.pythonScriptPath),
+          scriptSize: (await fs.stat(this.pythonScriptPath).catch(() => ({ size: 0 }))).size,
+          scriptPreview: scriptContentPreview,
           imagePath,
+          imageExists: await fs.pathExists(imagePath),
           platform: process.platform,
+          cwd: process.cwd(),
           enhancedPath: this.getEnhancedPath(),
           error: execErrorMessage,
           code: execError?.code,
