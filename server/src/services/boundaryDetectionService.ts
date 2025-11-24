@@ -81,61 +81,22 @@ class BoundaryDetectionService {
 
   constructor() {
     // Path to Python CV detection script (will be created dynamically)
-    // In Railway: process.cwd() might be /app (repo root) or /app/server (service root)
-    // In local dev: process.cwd() might be repo root or server/
-    const isProduction = process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT;
-    
-    // Get current file's directory (works in both source and compiled)
+    // Use the same pattern as other services (titleblockExtractionService, visualSearchService, pythonPdfConverter)
     // In compiled: __dirname = /app/server/dist/services
-    // In source (ts-node): __dirname = /app/server/src/services
-    let currentDir: string;
-    try {
-      // @ts-ignore - __dirname exists at runtime in CommonJS
-      currentDir = __dirname;
-    } catch {
-      // Fallback if __dirname not available (shouldn't happen in CommonJS)
-      currentDir = process.cwd();
-    }
+    // In source: __dirname = /app/server/src/services
     
-    // Determine if we're in dist (compiled) or src (source)
-    const isCompiled = currentDir.includes('dist');
-    
-    // Scripts directory should always be in src/scripts (not dist)
-    // Navigate from current location to server root, then to src/scripts
-    let scriptsBaseDir: string;
-    if (isCompiled) {
-      // dist/services -> dist -> server root -> src
-      scriptsBaseDir = path.join(currentDir, '..', '..', 'src');
-    } else {
-      // src/services -> src
-      scriptsBaseDir = path.join(currentDir, '..');
-    }
-    
-    // Verify the scripts directory exists, if not try alternative paths
-    const candidateScriptPath = path.join(scriptsBaseDir, 'scripts', 'cv_boundary_detection.py');
-    
-    // Check if candidate path exists, if not try alternative resolution
-    // This handles cases where process.cwd() might be repo root instead of server/
-    if (!fs.existsSync(path.dirname(candidateScriptPath))) {
-      const cwd = process.cwd();
-      // Try server/src/scripts if cwd is repo root
-      if (cwd.endsWith('Meridian Takeoff') || cwd === '/app') {
-        const altPath = path.join(cwd, 'server', 'src', 'scripts', 'cv_boundary_detection.py');
-        if (fs.existsSync(path.dirname(altPath))) {
-          this.pythonScriptPath = altPath;
-          console.log(`📁 Using alternative script path (repo root detected): ${this.pythonScriptPath}`);
-        } else {
-          this.pythonScriptPath = candidateScriptPath;
-          console.log(`⚠️ Script directory doesn't exist yet, will create: ${this.pythonScriptPath}`);
-        }
-      } else {
-        this.pythonScriptPath = candidateScriptPath;
-      }
-    } else {
-      this.pythonScriptPath = candidateScriptPath;
-    }
+    // Determine script path (works in both source and compiled)
+    const isCompiled = __dirname.includes('dist');
+    const baseDir = isCompiled 
+      ? path.join(__dirname, '..', '..') // dist/services -> dist -> server root
+      : path.join(__dirname, '..'); // src/services -> src -> server root
+
+    // Scripts are always in src/scripts (not dist)
+    // Use absolute path to avoid any relative path issues
+    this.pythonScriptPath = path.resolve(path.join(baseDir, 'src', 'scripts', 'cv_boundary_detection.py'));
     
     // Temp directory: use /tmp in production, local temp in dev
+    const isProduction = process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === 'production';
     if (isProduction) {
       this.tempDir = '/tmp/cv-detection';
     } else {
@@ -155,8 +116,9 @@ class BoundaryDetectionService {
     console.log(`📁 Python script path: ${this.pythonScriptPath}`);
     console.log(`📁 Temp directory: ${this.tempDir}`);
     console.log(`📁 Process CWD: ${process.cwd()}`);
-    console.log(`📁 Current dir: ${currentDir}`);
+    console.log(`📁 __dirname: ${__dirname}`);
     console.log(`📁 Is compiled: ${isCompiled}`);
+    console.log(`📁 Base dir: ${baseDir}`);
   }
 
   /**
