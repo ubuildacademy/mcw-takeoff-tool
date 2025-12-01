@@ -464,7 +464,16 @@ def detect_walls(image_path, scale_factor, min_length_lf):
     text_mask = (edge_density > 0.4).astype(np.uint8)  # Threshold for text regions
     
     for line in lines:
-        x1, y1, x2, y2 = line[0, 0]
+        # LSD returns lines as numpy arrays with shape (1, 4) containing [x1, y1, x2, y2]
+        # Handle different possible shapes: (1, 4), (4,), or scalar access
+        if line.shape == (1, 4):
+            x1, y1, x2, y2 = line[0]
+        elif line.shape == (4,):
+            x1, y1, x2, y2 = line
+        else:
+            # Fallback: flatten and take first 4 elements
+            coords = line.flatten()[:4]
+            x1, y1, x2, y2 = coords
         
         # Calculate length
         length_pixels = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
