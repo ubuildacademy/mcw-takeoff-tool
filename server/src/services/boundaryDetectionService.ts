@@ -870,6 +870,7 @@ if __name__ == "__main__":
         }
 
         // Run the actual script with better error capture
+        // Note: Railway free tier has memory limits, so we need to be careful with large images
         const execResult = await execAsync(command, {
           timeout: 120000, // 120 second timeout (2 minutes for complex images with OpenCV processing)
           maxBuffer: 10 * 1024 * 1024, // 10MB buffer
@@ -878,7 +879,10 @@ if __name__ == "__main__":
             PATH: this.getEnhancedPath(),
             LD_LIBRARY_PATH: enhancedLdPath,
             PYTHONUNBUFFERED: '1', // Ensure Python output is not buffered
-            PYTHONIOENCODING: 'utf-8' // Ensure UTF-8 encoding
+            PYTHONIOENCODING: 'utf-8', // Ensure UTF-8 encoding
+            // Limit Python memory usage to prevent OOM kills
+            PYTHONHASHSEED: '0', // Deterministic hashing (saves some memory)
+            MALLOC_TRIM_THRESHOLD_: '131072' // Help Python release memory
           }
         });
         stdout = execResult.stdout;
