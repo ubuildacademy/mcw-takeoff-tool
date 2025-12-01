@@ -229,8 +229,9 @@ import os
 TESSERACT_AVAILABLE = False
 TESSERACT_BINARY_AVAILABLE = False
 
-def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
-    """Detect room boundaries - rooms are enclosed spaces surrounded by walls"""
+def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=None):
+    """Detect room boundaries - rooms are enclosed spaces surrounded by EXTERIOR walls only
+    Interior walls (like bathroom walls within a hotel unit) are ignored for room boundaries"""
     img = cv2.imread(image_path)
     if img is None:
         return []
@@ -255,46 +256,115 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
     
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
-    # OCR disabled for now - using geometric filtering only
-    text_regions = []
+    # PHASE 3: Improved titleblock/legend exclusion
+    # Titleblocks are typically in corners or along edges with high text density
+    # Exclude larger regions: top 20%, bottom 20%, left 15%, right 25% (titleblocks often on right)
+    exclude_top = height * 0.20
+    exclude_bottom = height * 0.80
+    exclude_left = width * 0.15
+    exclude_right = width * 0.75  # More aggressive right-side exclusion for titleblocks
     
-    # OPTIMIZATION: Use smaller blur kernel for faster processing
-    blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+    # Create a mask for titleblock regions using edge density (text creates high edge density)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    edges = cv2.Canny(blurred, 50, 150)
+    
+    # Find regions with very high edge density (titleblocks, legends, notes)
+    kernel_large = np.ones((25, 25), np.float32) / 625  # Larger kernel for titleblock detection
+    edge_density = cv2.filter2D((edges > 0).astype(np.uint8), -1, kernel_large)
+    titleblock_mask = (edge_density > 0.5).astype(np.uint8)  # Higher threshold for titleblocks
+    
+    # Also mark edge regions as potential titleblocks
+    titleblock_mask[0:int(exclude_top), :] = 1
+    titleblock_mask[int(exclude_bottom):, :] = 1
+    titleblock_mask[:, 0:int(exclude_left)] = 1
+    titleblock_mask[:, int(exclude_right):] = 1
+    
+    # PHASE 3: Use walls to constrain room detection
+    # Rooms must be bounded by detected walls - this is the key logical constraint
+    wall_mask = None
+    if exterior_walls and len(exterior_walls) > 0:
+        wall_mask = np.zeros((height, width), dtype=np.uint8)
+        for wall in exterior_walls:
+            # Convert normalized coordinates to pixel coordinates
+            x1 = int(wall["start"]["x"] * width)
+            y1 = int(wall["start"]["y"] * height)
+            x2 = int(wall["end"]["x"] * width)
+            y2 = int(wall["end"]["y"] * height)
+            # Draw wall line on mask (thicker for better alignment detection)
+            cv2.line(wall_mask, (x1, y1), (x2, y2), 255, 5)  # Increased thickness from 3 to 5
+        
+        # Dilate wall mask to create a boundary region (rooms can be slightly inside walls)
+        kernel_wall = np.ones((7, 7), np.uint8)  # Increased from 5x5 to 7x7
+        wall_mask = cv2.dilate(wall_mask, kernel_wall, iterations=3)  # Increased iterations from 2 to 3
     
     # Edge detection - rooms are surrounded by walls, so we need to detect closed boundaries
+    # OPTIMIZATION: Use smaller blur kernel for faster processing
+    blurred = cv2.GaussianBlur(gray, (3, 3), 0)
     edges = cv2.Canny(blurred, 50, 150)
+    
+    # PHASE 3: If we have wall mask, use it to enhance edges
+    if wall_mask is not None:
+        # Combine edges with wall mask (walls should have strong edges)
+        edges = cv2.bitwise_or(edges, (wall_mask > 0).astype(np.uint8) * 255)
     
     # OPTIMIZATION: Use smaller kernel and fewer iterations for faster processing
     kernel = np.ones((3, 3), np.uint8)
     dilated = cv2.dilate(edges, kernel, iterations=1)
     closed = cv2.erode(dilated, kernel, iterations=1)
     
-    # PHASE 2: Use RETR_CCOMP to get both external and internal contours (for rooms inside buildings)
-    # This is more accurate for architectural drawings with multiple rooms
-    contours, hierarchy = cv2.findContours(closed, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+    # PHASE 3: Use RETR_EXTERNAL first to get only outer boundaries (rooms, not interior spaces)
+    # This naturally groups connected spaces (like hotel room + bathroom) into one room
+    contours, hierarchy = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     rooms = []
     min_area_pixels = (min_area_sf / (scale_factor ** 2)) if scale_factor > 0 else 1000
     # Maximum area to filter out the entire floor plan - lowered to 50% to exclude full page
     max_area_pixels = (width * height) * 0.5
     
-    # Define exclusion zones for title blocks (typically at edges)
-    # Exclude top 15%, bottom 15%, left 10%, right 10% of image
-    exclude_top = height * 0.15
-    exclude_bottom = height * 0.85
-    exclude_left = width * 0.10
-    exclude_right = width * 0.90
-    
-    # OPTIMIZATION: Pre-filter contours by area before expensive operations
+    # PHASE 3: Pre-filter contours by area and titleblock exclusion
     # Calculate areas first and sort to process likely rooms first
-    # Limit to top 100 contours to ensure fast processing
     contour_areas = [(i, cv2.contourArea(contour)) for i, contour in enumerate(contours)]
-    # Filter and sort by area (largest first, but within reasonable range)
-    filtered_indices = [
-        i for i, area in contour_areas 
-        if min_area_pixels <= area <= max_area_pixels
-    ]
-    # Sort by area (largest first) and limit to top 100 to ensure fast processing
+    
+    # Filter by area and titleblock exclusion
+    filtered_indices = []
+    for i, area in contour_areas:
+        if area < min_area_pixels or area > max_area_pixels:
+            continue
+        
+        contour = contours[i]
+        x, y, w, h = cv2.boundingRect(contour)
+        
+        # PHASE 3: More aggressive titleblock exclusion
+        # Check if contour overlaps significantly with titleblock mask
+        contour_mask = np.zeros((height, width), dtype=np.uint8)
+        cv2.drawContours(contour_mask, [contour], -1, 255, -1)
+        titleblock_overlap = cv2.bitwise_and(contour_mask, titleblock_mask)
+        overlap_ratio = np.sum(titleblock_overlap > 0) / max(1, np.sum(contour_mask > 0))
+        
+        # If more than 20% of contour is in titleblock regions, skip it
+        if overlap_ratio > 0.2:
+            continue
+        
+        # Check if bounding box is in exclusion zones
+        if (y < exclude_top or y + h > exclude_bottom or 
+            x < exclude_left or x + w > exclude_right):
+            # If more than 40% of bounding box is in exclusion zones, skip (stricter)
+            exclusion_overlap = 0
+            if y < exclude_top:
+                exclusion_overlap += min(h, exclude_top - y) * w
+            if y + h > exclude_bottom:
+                exclusion_overlap += min(h, (y + h) - exclude_bottom) * w
+            if x < exclude_left:
+                exclusion_overlap += min(w, exclude_left - x) * h
+            if x + w > exclude_right:
+                exclusion_overlap += min(w, (x + w) - exclude_right) * h
+            
+            if exclusion_overlap > (w * h * 0.4):  # Increased from 0.3 to 0.4
+                continue
+        
+        filtered_indices.append(i)
+    
+    # Sort by area (largest first) and limit to top 100
     filtered_indices.sort(key=lambda i: contour_areas[i][1], reverse=True)
     filtered_indices = filtered_indices[:100]
     
@@ -314,34 +384,39 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
         x, y, w, h = cv2.boundingRect(contour)
         aspect_ratio = max(w, h) / min(w, h) if min(w, h) > 0 else 0
         
-        # PHASE 2: Relax aspect ratio filter to catch more rooms (corridors, long rooms)
-        if aspect_ratio > 15:  # Increased from 10 to 15
+        # PHASE 3: Stricter aspect ratio - rooms should be reasonably rectangular
+        # Very elongated shapes are likely corridors or dimension strings
+        if aspect_ratio > 10:  # Reduced from 15 to 10 for better accuracy
             continue
         
-        # Exclude title blocks and edge areas
-        bbox_center_x = x + w / 2
-        bbox_center_y = y + h / 2
-        
-        # Check if bounding box is in exclusion zones (title blocks)
-        if (y < exclude_top or y + h > exclude_bottom or 
-            x < exclude_left or x + w > exclude_right):
-            # Additional check: if it's mostly in an exclusion zone, skip it
-            exclusion_overlap = 0
-            if y < exclude_top:
-                exclusion_overlap += min(h, exclude_top - y) * w
-            if y + h > exclude_bottom:
-                exclusion_overlap += min(h, (y + h) - exclude_bottom) * w
-            if x < exclude_left:
-                exclusion_overlap += min(w, exclude_left - x) * h
-            if x + w > exclude_right:
-                exclusion_overlap += min(w, (x + w) - exclude_right) * h
+        # PHASE 3: Validate that room is bounded by walls
+        # Rooms must be enclosed by detected walls - this is the key logical constraint
+        if wall_mask is not None:
+            # Check if room boundary aligns with walls
+            # Sample points along the contour and check if they're near walls
+            contour_points = contour.reshape(-1, 2)
+            wall_alignment_count = 0
+            num_check_points = min(50, len(contour_points))  # Check up to 50 points
             
-            # If more than 30% of bounding box is in exclusion zones, skip
-            if exclusion_overlap > (w * h * 0.3):
-                continue
-        
-        # Text density filtering disabled (OCR not available)
-        # Using only geometric exclusion zones for title blocks
+            for i in range(0, len(contour_points), max(1, len(contour_points) // num_check_points)):
+                px, py = contour_points[i]
+                px, py = int(px), int(py)
+                
+                if 0 <= px < width and 0 <= py < height:
+                    # Check if this point is near a wall (within 5 pixels)
+                    y_min = max(0, py - 5)
+                    y_max = min(height, py + 6)
+                    x_min = max(0, px - 5)
+                    x_max = min(width, px + 6)
+                    
+                    if np.any(wall_mask[y_min:y_max, x_min:x_max] > 0):
+                        wall_alignment_count += 1
+            
+            # PHASE 3: At least 40% of room boundary should align with walls
+            # This ensures rooms are actually bounded by detected walls
+            alignment_ratio = wall_alignment_count / num_check_points if num_check_points > 0 else 0
+            if alignment_ratio < 0.40:
+                continue  # Room is not properly bounded by walls, skip it
         
         # Check if contour is approximately closed (rooms should be enclosed)
         # Calculate how close the start and end points are
@@ -350,9 +425,9 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
             end_point = contour[-1][0]
             closure_dist = np.sqrt((start_point[0] - end_point[0])**2 + (start_point[1] - end_point[1])**2)
             perimeter = cv2.arcLength(contour, True)
-            # PHASE 2: Relax closure threshold to catch more rooms
-            # Some rooms may have small gaps (doors, openings)
-            if perimeter > 0 and closure_dist / perimeter > 0.2:  # Increased from 0.15 to 0.2
+            # PHASE 3: Stricter closure - rooms should be well-enclosed
+            # Some rooms may have small gaps (doors, openings), but not too large
+            if perimeter > 0 and closure_dist / perimeter > 0.15:  # Reduced from 0.2 to 0.15 for better accuracy
                 continue
         
         # Simplify contour (reduce vertices while preserving shape)
@@ -451,17 +526,20 @@ def detect_walls(image_path, scale_factor, min_length_lf):
     segments = []
     min_length_pixels = min_length_lf / scale_factor if scale_factor > 0 else 20
     
-    # PHASE 2: Filter out text regions (dimension strings)
-    # Create a mask for text regions (we'll use edge density as a proxy)
-    # Text regions typically have high edge density in small areas
-    text_mask = np.zeros((height, width), dtype=np.uint8)
+    # PHASE 3: Better text/dimension string detection
+    # Create a mask for text regions using edge density
     edges = cv2.Canny(blurred, 50, 150)
     kernel = np.ones((5, 5), np.uint8)
     dilated_edges = cv2.dilate(edges, kernel, iterations=2)
     
-    # Find regions with very high edge density (likely text)
+    # Find regions with very high edge density (likely text/dimension strings)
     edge_density = cv2.filter2D((dilated_edges > 0).astype(np.uint8), -1, np.ones((15, 15), np.float32) / 225)
     text_mask = (edge_density > 0.4).astype(np.uint8)  # Threshold for text regions
+    
+    # PHASE 3: Detect solid vs dashed lines
+    # Walls are solid or hatched (continuous edges), not dashed
+    # Create a binary edge image for continuity checking
+    binary_edges = (edges > 0).astype(np.uint8)
     
     for line in lines:
         # LSD returns lines as numpy arrays with shape (1, 4) containing [x1, y1, x2, y2]
@@ -482,21 +560,94 @@ def detect_walls(image_path, scale_factor, min_length_lf):
         if length_pixels < min_length_pixels:
             continue
         
-        # PHASE 2: Filter out lines that pass through text regions
+        # PHASE 3: Filter out dimension string lines
+        # Dimension strings are typically:
+        # - Short lines (extension lines, dimension lines)
+        # - Near text/numbers
+        # - Horizontal or vertical
         # Sample points along the line and check if they're in text regions
-        num_samples = max(5, int(length_pixels / 10))
+        num_samples = max(10, int(length_pixels / 5))  # More samples for better detection
         text_intersections = 0
+        near_text_count = 0
+        
+        # Check if line is horizontal or vertical (common for dimension strings)
+        dx = abs(x2 - x1)
+        dy = abs(y2 - y1)
+        is_horizontal = dy < dx * 0.1  # Mostly horizontal
+        is_vertical = dx < dy * 0.1   # Mostly vertical
+        
+        # Check points along the line
         for i in range(num_samples):
             t = i / (num_samples - 1) if num_samples > 1 else 0
             x = int(x1 + t * (x2 - x1))
             y = int(y1 + t * (y2 - y1))
             if 0 <= x < width and 0 <= y < height:
+                # Check if point is in text region
                 if text_mask[y, x] > 0:
                     text_intersections += 1
+                
+                # Check if point is near text (within 10 pixels)
+                y_min = max(0, y - 10)
+                y_max = min(height, y + 10)
+                x_min = max(0, x - 10)
+                x_max = min(width, x + 10)
+                if np.any(text_mask[y_min:y_max, x_min:x_max] > 0):
+                    near_text_count += 1
         
-        # If more than 30% of the line passes through text, skip it
-        if text_intersections / num_samples > 0.3:
+        # PHASE 3: Filter dimension strings more aggressively
+        # If line is short AND (passes through text OR is near text), likely a dimension string
+        is_short_line = length_pixels < min_length_pixels * 2  # Short relative to min wall length
+        text_ratio = text_intersections / num_samples
+        near_text_ratio = near_text_count / num_samples
+        
+        # Dimension strings: short, horizontal/vertical, and near text
+        if is_short_line and (is_horizontal or is_vertical) and (text_ratio > 0.2 or near_text_ratio > 0.5):
             continue
+        
+        # If more than 40% of the line passes through text regions, skip it (stricter)
+        if text_ratio > 0.4:
+            continue
+        
+        # PHASE 3: Filter out dashed lines - walls are solid or hatched
+        # Sample points along the line and check edge continuity
+        # Dashed lines will have gaps (low edge density in segments)
+        continuity_samples = max(20, int(length_pixels / 3))  # More samples for continuity check
+        edge_hits = 0
+        gap_count = 0
+        consecutive_gaps = 0
+        max_consecutive_gaps = 0
+        
+        for i in range(continuity_samples):
+            t = i / (continuity_samples - 1) if continuity_samples > 1 else 0
+            x = int(x1 + t * (x2 - x1))
+            y = int(y1 + t * (y2 - y1))
+            if 0 <= x < width and 0 <= y < height:
+                # Check if there's an edge at this point (with small tolerance for line width)
+                # Check a 3x3 region around the point
+                y_min = max(0, y - 1)
+                y_max = min(height, y + 2)
+                x_min = max(0, x - 1)
+                x_max = min(width, x + 2)
+                has_edge = np.any(binary_edges[y_min:y_max, x_min:x_max] > 0)
+                
+                if has_edge:
+                    edge_hits += 1
+                    consecutive_gaps = 0
+                else:
+                    gap_count += 1
+                    consecutive_gaps += 1
+                    max_consecutive_gaps = max(max_consecutive_gaps, consecutive_gaps)
+        
+        # PHASE 3: Dashed line detection
+        # Solid walls should have high edge continuity (>70% edge hits)
+        # Dashed lines will have lower continuity and larger gaps
+        edge_continuity = edge_hits / continuity_samples if continuity_samples > 0 else 0
+        
+        # Filter out dashed lines:
+        # - Low edge continuity (< 60%)
+        # - OR has large consecutive gaps (indicating dashes)
+        if edge_continuity < 0.60 or max_consecutive_gaps > continuity_samples * 0.3:
+            continue  # Likely a dashed line, not a wall
         
         segments.append({
             "start": (int(x1), int(y1)),
@@ -820,9 +971,14 @@ if __name__ == "__main__":
         
         height, width = img.shape[:2]
         
-        # Detect elements
-        rooms = detect_rooms(image_path, scale_factor, min_room_area, epsilon)
+        # PHASE 3: Detect walls FIRST, then use them to constrain room detection
+        # This ensures rooms are logically bounded by walls
         walls = detect_walls(image_path, scale_factor, min_wall_length)
+        
+        # Now detect rooms using walls as constraints
+        # Rooms must be enclosed by detected walls
+        rooms = detect_rooms(image_path, scale_factor, min_room_area, epsilon, exterior_walls=walls)
+        
         doors, windows = detect_openings(image_path, scale_factor)
         
         # OCR disabled - CV detection works without it
