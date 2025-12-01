@@ -25,10 +25,6 @@ import { livePreviewService } from './services/livePreviewService';
 const app = express();
 const PORT = parseInt(process.env.PORT || '4000', 10);
 
-// Set server timeout to handle long-running CV detection requests (3 minutes)
-// Railway's gateway timeout is 60s, but we can try to keep the connection alive
-app.timeout = 180000; // 3 minutes
-
 // CRITICAL: Handle OPTIONS FIRST - before any other middleware is registered
 // Express processes middleware in order, so this MUST be first to catch preflight
 // Railway's Caddy edge intercepts OPTIONS, so this needs to be extremely early
@@ -265,6 +261,12 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`📝 NODE_ENV: ${process.env.NODE_ENV || 'development'}`);
   console.log(`📝 Allowed origins configured: ${isProduction ? 'Production mode' : 'Development mode (all allowed)'}`);
 });
+
+// Set server timeout to handle long-running CV detection requests (3 minutes)
+// Railway's gateway timeout is 60s, but we can try to keep the connection alive
+server.timeout = 180000; // 3 minutes
+server.keepAliveTimeout = 180000; // 3 minutes
+server.headersTimeout = 181000; // Slightly longer than keepAliveTimeout
 
 // Initialize live preview service
 livePreviewService.initialize(server);
