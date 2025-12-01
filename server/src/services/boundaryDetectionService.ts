@@ -852,6 +852,24 @@ if __name__ == "__main__":
           console.warn('⚠️ Script readability test failed (non-fatal):', readError instanceof Error ? readError.message : String(readError));
         }
 
+        // Test Python can import required modules before running the script
+        try {
+          const testImportCommand = `${pythonCommand} -c "import cv2; import numpy; import json; import sys; print('Imports OK')"`;
+          const importTest = await execAsync(testImportCommand, {
+            timeout: 10000,
+            env: { 
+              ...process.env, 
+              PATH: this.getEnhancedPath(),
+              LD_LIBRARY_PATH: enhancedLdPath
+            }
+          });
+          console.log(`✅ Python imports test: ${importTest.stdout.trim()}`);
+        } catch (importError: any) {
+          console.error('❌ Python import test failed:', importError.stderr || importError.message);
+          throw new Error(`Python cannot import required modules (cv2, numpy). Error: ${importError.stderr || importError.message}`);
+        }
+
+        // Run the actual script with better error capture
         const execResult = await execAsync(command, {
           timeout: 120000, // 120 second timeout (2 minutes for complex images with OpenCV processing)
           maxBuffer: 10 * 1024 * 1024, // 10MB buffer
@@ -859,7 +877,8 @@ if __name__ == "__main__":
             ...process.env, 
             PATH: this.getEnhancedPath(),
             LD_LIBRARY_PATH: enhancedLdPath,
-            PYTHONUNBUFFERED: '1' // Ensure Python output is not buffered
+            PYTHONUNBUFFERED: '1', // Ensure Python output is not buffered
+            PYTHONIOENCODING: 'utf-8' // Ensure UTF-8 encoding
           }
         });
         stdout = execResult.stdout;
@@ -883,6 +902,25 @@ if __name__ == "__main__":
         } catch {
           scriptContentPreview = 'Could not read script file';
         }
+
+        // Try to run Python with verbose error output to capture what's happening
+        let verboseError = '';
+        try {
+          const verboseCommand = `${pythonCommand} -u "${this.pythonScriptPath}" "${imagePath}" ${opts.scaleFactor} ${opts.minRoomArea} ${opts.minWallLength} ${opts.contourApproximationEpsilon} 2>&1 || echo "EXIT_CODE:$?"`;
+          const verboseResult = await execAsync(verboseCommand, {
+            timeout: 5000,
+            env: { 
+              ...process.env, 
+              PATH: this.getEnhancedPath(),
+              LD_LIBRARY_PATH: enhancedLdPath,
+              PYTHONUNBUFFERED: '1',
+              PYTHONIOENCODING: 'utf-8'
+            }
+          });
+          verboseError = verboseResult.stdout || verboseResult.stderr || '';
+        } catch {
+          // Ignore - this is just for diagnostics
+        }
         
         const errorDetails = {
           command,
@@ -893,19 +931,45 @@ if __name__ == "__main__":
           scriptPreview: scriptContentPreview,
           imagePath,
           imageExists: await fs.pathExists(imagePath),
+          imageSize: (await fs.stat(imagePath).catch(() => ({ size: 0 }))).size,
           platform: process.platform,
           cwd: process.cwd(),
           enhancedPath: this.getEnhancedPath(),
+          enhancedLdPath,
           error: execErrorMessage,
           code: execError?.code,
           signal: execError?.signal,
           stdout: execError?.stdout || '',
           stderr: execError?.stderr || '',
           killed: execError?.killed,
-          timedOut: execError?.timedOut
+          timedOut: execError?.timedOut,
+          verboseError: verboseError.substring(0, 1000) // Limit verbose output
         };
         console.error('❌ Python script execution failed:', JSON.stringify(errorDetails, null, 2));
-        throw new Error(`Python script execution failed: ${execErrorMessage}. Command: ${command}. Stderr: ${errorDetails.stderr || 'none'}. Stdout: ${errorDetails.stdout.substring(0, 500) || 'none'}`);
+        
+        // Provide a more helpful error message
+        let helpfulError = `Python script execution failed: ${execErrorMessage}`;
+        if (execError?.code) {
+          helpfulError += ` (exit code: ${execError.code})`;
+        }
+        if (execError?.signal) {
+          helpfulError += ` (signal: ${execError.signal})`;
+        }
+        if (execError?.killed) {
+          helpfulError += ' (process was killed)';
+        }
+        if (execError?.timedOut) {
+          helpfulError += ' (process timed out)';
+        }
+        if (errorDetails.stderr) {
+          helpfulError += `. Stderr: ${errorDetails.stderr.substring(0, 500)}`;
+        } else if (errorDetails.stdout) {
+          helpfulError += `. Stdout: ${errorDetails.stdout.substring(0, 500)}`;
+        } else {
+          helpfulError += '. No output from Python script (script may have crashed immediately or failed to start)';
+        }
+        
+        throw new Error(helpfulError);
       }
 
       if (stderr && !stderr.includes('DeprecationWarning')) {
