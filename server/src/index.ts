@@ -21,6 +21,8 @@ import visualSearchRoutes from './routes/visualSearch';
 import settingsRoutes from './routes/settings';
 import calibrationRoutes from './routes/calibrations';
 import { livePreviewService } from './services/livePreviewService';
+// Initialize queue service (starts worker)
+import './services/queueService';
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '4000', 10);

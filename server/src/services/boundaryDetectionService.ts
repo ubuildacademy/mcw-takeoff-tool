@@ -237,10 +237,8 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
     
     height, width = img.shape[:2]
     
-    # OPTIMIZATION: Resize large images to speed up processing (maintain aspect ratio)
-    # Aggressively resize to 2000px max to ensure fast processing (finish in < 90 seconds)
-    # This is a trade-off: lower resolution = faster processing but slightly less accuracy
-    max_dimension = 2000
+    # PHASE 2: Increase max dimension to 3000px for better accuracy (queue removes timeout constraint)
+    max_dimension = 3000
     scale_down = 1.0
     if width > max_dimension or height > max_dimension:
         if width > height:
@@ -271,9 +269,9 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
     dilated = cv2.dilate(edges, kernel, iterations=1)
     closed = cv2.erode(dilated, kernel, iterations=1)
     
-    # OPTIMIZATION: Use RETR_EXTERNAL first to get outer contours only (faster)
-    # Skip RETR_CCOMP to save time - external contours are usually enough for rooms
-    contours, hierarchy = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # PHASE 2: Use RETR_CCOMP to get both external and internal contours (for rooms inside buildings)
+    # This is more accurate for architectural drawings with multiple rooms
+    contours, hierarchy = cv2.findContours(closed, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
     
     rooms = []
     min_area_pixels = (min_area_sf / (scale_factor ** 2)) if scale_factor > 0 else 1000
@@ -316,8 +314,8 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
         x, y, w, h = cv2.boundingRect(contour)
         aspect_ratio = max(w, h) / min(w, h) if min(w, h) > 0 else 0
         
-        # Filter out extremely elongated shapes (likely corridors) - relaxed from 8 to 10
-        if aspect_ratio > 10:
+        # PHASE 2: Relax aspect ratio filter to catch more rooms (corridors, long rooms)
+        if aspect_ratio > 15:  # Increased from 10 to 15
             continue
         
         # Exclude title blocks and edge areas
@@ -352,9 +350,9 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
             end_point = contour[-1][0]
             closure_dist = np.sqrt((start_point[0] - end_point[0])**2 + (start_point[1] - end_point[1])**2)
             perimeter = cv2.arcLength(contour, True)
-            # If start and end are far apart relative to perimeter, it's not closed
-            # Relaxed from 0.1 to 0.15 to allow slightly more open contours
-            if perimeter > 0 and closure_dist / perimeter > 0.15:
+            # PHASE 2: Relax closure threshold to catch more rooms
+            # Some rooms may have small gaps (doors, openings)
+            if perimeter > 0 and closure_dist / perimeter > 0.2:  # Increased from 0.15 to 0.2
                 continue
         
         # Simplify contour (reduce vertices while preserving shape)
@@ -407,22 +405,21 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
     # Sort by confidence (highest first) and limit to reasonable number
     rooms.sort(key=lambda r: r["confidence"], reverse=True)
     
-    # Limit to top rooms (reduced to 50 for faster processing)
-    rooms = rooms[:50]
+    # PHASE 2: Keep more rooms for better accuracy (queue removes timeout constraint)
+    rooms = rooms[:100]  # Increased from 50 to 100
     
     return rooms
 
 def detect_walls(image_path, scale_factor, min_length_lf):
-    """Detect wall segments and merge connected segments into continuous stretches"""
+    """Detect wall segments using Line Segment Detector (LSD) for better accuracy"""
     img = cv2.imread(image_path)
     if img is None:
         return []
     
     height, width = img.shape[:2]
     
-    # OPTIMIZATION: Resize if needed (same as detect_rooms)
-    # Use same aggressive resize to 2000px max
-    max_dimension = 2000
+    # PHASE 2: Increase max dimension to 3000px for better accuracy (queue removes timeout constraint)
+    max_dimension = 3000
     scale_down = 1.0
     if width > max_dimension or height > max_dimension:
         if width > height:
@@ -434,28 +431,40 @@ def detect_walls(image_path, scale_factor, min_length_lf):
         img = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_AREA)
         height, width = img.shape[:2]
         scale_factor = scale_factor / scale_down
+        print(f"Resized image to {width}x{height} for wall detection", file=sys.stderr)
     
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
-    # OPTIMIZATION: Use smaller blur kernel
-    blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+    # PHASE 2: Better preprocessing for architectural drawings
+    # Use adaptive thresholding to handle varying line weights
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
     
-    # Edge detection
-    edges = cv2.Canny(blurred, 50, 150)
-    
-    # OPTIMIZATION: Increase threshold and reduce resolution for faster Hough transform
-    min_line_length_pixels = max(30, min_length_lf / scale_factor * 0.5) if scale_factor > 0 else 30
-    lines = cv2.HoughLinesP(edges, 2, np.pi/180, threshold=150, minLineLength=int(min_line_length_pixels), maxLineGap=30)
+    # PHASE 2: Use Line Segment Detector (LSD) instead of Hough transform
+    # LSD is more accurate for architectural drawings and handles corners better
+    lsd = cv2.createLineSegmentDetector(cv2.LSD_REFINE_STD)
+    lines, widths, prec, nfa = lsd.detect(gray)
     
     if lines is None or len(lines) == 0:
         return []
     
-    # Convert lines to wall segments with pixel coordinates
+    # PHASE 2: Convert LSD lines to wall segments with filtering
     segments = []
     min_length_pixels = min_length_lf / scale_factor if scale_factor > 0 else 20
     
+    # PHASE 2: Filter out text regions (dimension strings)
+    # Create a mask for text regions (we'll use edge density as a proxy)
+    # Text regions typically have high edge density in small areas
+    text_mask = np.zeros((height, width), dtype=np.uint8)
+    edges = cv2.Canny(blurred, 50, 150)
+    kernel = np.ones((5, 5), np.uint8)
+    dilated_edges = cv2.dilate(edges, kernel, iterations=2)
+    
+    # Find regions with very high edge density (likely text)
+    edge_density = cv2.filter2D((dilated_edges > 0).astype(np.uint8), -1, np.ones((15, 15), np.float32) / 225)
+    text_mask = (edge_density > 0.4).astype(np.uint8)  # Threshold for text regions
+    
     for line in lines:
-        x1, y1, x2, y2 = line[0]
+        x1, y1, x2, y2 = line[0, 0]
         
         # Calculate length
         length_pixels = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
@@ -464,53 +473,115 @@ def detect_walls(image_path, scale_factor, min_length_lf):
         if length_pixels < min_length_pixels:
             continue
         
+        # PHASE 2: Filter out lines that pass through text regions
+        # Sample points along the line and check if they're in text regions
+        num_samples = max(5, int(length_pixels / 10))
+        text_intersections = 0
+        for i in range(num_samples):
+            t = i / (num_samples - 1) if num_samples > 1 else 0
+            x = int(x1 + t * (x2 - x1))
+            y = int(y1 + t * (y2 - y1))
+            if 0 <= x < width and 0 <= y < height:
+                if text_mask[y, x] > 0:
+                    text_intersections += 1
+        
+        # If more than 30% of the line passes through text, skip it
+        if text_intersections / num_samples > 0.3:
+            continue
+        
         segments.append({
-            "start": (x1, y1),
-            "end": (x2, y2),
+            "start": (int(x1), int(y1)),
+            "end": (int(x2), int(y2)),
             "length": length_pixels
         })
     
     if len(segments) == 0:
         return []
     
-    # Merge connected segments into continuous wall stretches
-    # Two segments are connected if their endpoints are close together
-    CONNECTION_THRESHOLD = 15  # pixels
+    # PHASE 2: Improved merging with angle constraints for 90° corners
+    CONNECTION_THRESHOLD = 20  # pixels (increased for better corner detection)
+    ANGLE_TOLERANCE = 15  # degrees (allow 90° ± 15°)
     
     def distance(p1, p2):
         return np.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
     
+    def angle_between_lines(seg1, seg2):
+        """Calculate angle between two line segments"""
+        # Calculate direction vectors
+        dx1 = seg1["end"][0] - seg1["start"][0]
+        dy1 = seg1["end"][1] - seg1["start"][1]
+        dx2 = seg2["end"][0] - seg2["start"][0]
+        dy2 = seg2["end"][1] - seg2["start"][1]
+        
+        # Calculate angles
+        angle1 = np.arctan2(dy1, dx1) * 180 / np.pi
+        angle2 = np.arctan2(dy2, dx2) * 180 / np.pi
+        
+        # Normalize angles to 0-180
+        angle_diff = abs(angle1 - angle2)
+        if angle_diff > 180:
+            angle_diff = 360 - angle_diff
+        
+        return angle_diff
+    
     def are_connected(seg1, seg2):
-        """Check if two segments can be connected"""
+        """Check if two segments can be connected with angle constraint"""
         # Check all endpoint combinations
         d1 = distance(seg1["end"], seg2["start"])
         d2 = distance(seg1["end"], seg2["end"])
         d3 = distance(seg1["start"], seg2["start"])
         d4 = distance(seg1["start"], seg2["end"])
         
-        return min(d1, d2, d3, d4) < CONNECTION_THRESHOLD
+        min_dist = min(d1, d2, d3, d4)
+        if min_dist >= CONNECTION_THRESHOLD:
+            return False
+        
+        # PHASE 2: Check if the angle is approximately 90° (wall corner)
+        # or 0°/180° (straight continuation)
+        angle = angle_between_lines(seg1, seg2)
+        
+        # Allow 90° corners (± tolerance) or straight lines (0° or 180°)
+        is_corner = abs(angle - 90) < ANGLE_TOLERANCE
+        is_straight = angle < ANGLE_TOLERANCE or abs(angle - 180) < ANGLE_TOLERANCE
+        
+        return is_corner or is_straight
     
     def merge_segments(seg1, seg2):
-        """Merge two connected segments"""
-        # Find the two endpoints that are farthest apart
-        points = [seg1["start"], seg1["end"], seg2["start"], seg2["end"]]
-        max_dist = 0
-        merged_start = points[0]
-        merged_end = points[1]
+        """Merge two connected segments, following wall contours"""
+        # PHASE 2: Smart merging that follows wall direction
+        # Find the connection point
+        d1 = distance(seg1["end"], seg2["start"])
+        d2 = distance(seg1["end"], seg2["end"])
+        d3 = distance(seg1["start"], seg2["start"])
+        d4 = distance(seg1["start"], seg2["end"])
         
-        for i in range(len(points)):
-            for j in range(i + 1, len(points)):
-                dist = distance(points[i], points[j])
-                if dist > max_dist:
-                    max_dist = dist
-                    merged_start = points[i]
-                    merged_end = points[j]
+        min_dist = min(d1, d2, d3, d4)
         
-        return {
-            "start": merged_start,
-            "end": merged_end,
-            "length": max_dist
-        }
+        # Determine connection type and merge accordingly
+        if min_dist == d1:  # seg1.end -> seg2.start
+            return {
+                "start": seg1["start"],
+                "end": seg2["end"],
+                "length": distance(seg1["start"], seg2["end"])
+            }
+        elif min_dist == d2:  # seg1.end -> seg2.end
+            return {
+                "start": seg1["start"],
+                "end": seg2["start"],
+                "length": distance(seg1["start"], seg2["start"])
+            }
+        elif min_dist == d3:  # seg1.start -> seg2.start
+            return {
+                "start": seg1["end"],
+                "end": seg2["end"],
+                "length": distance(seg1["end"], seg2["end"])
+            }
+        else:  # seg1.start -> seg2.end
+            return {
+                "start": seg1["end"],
+                "end": seg2["start"],
+                "length": distance(seg1["end"], seg2["start"])
+            }
     
     # Group segments into connected chains
     merged_walls = []
@@ -550,8 +621,8 @@ def detect_walls(image_path, scale_factor, min_length_lf):
     # Sort by length (longest first) and limit to reasonable number
     merged_walls.sort(key=lambda w: w["length"], reverse=True)
     
-    # Limit to top walls (reduced to 30 for faster processing)
-    merged_walls = merged_walls[:30]  # Reduced for faster processing
+    # PHASE 2: Keep more walls for better accuracy (queue removes timeout constraint)
+    merged_walls = merged_walls[:100]  # Increased limit for better coverage
     
     return merged_walls
 
