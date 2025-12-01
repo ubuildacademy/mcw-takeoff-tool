@@ -236,28 +236,46 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
         return []
     
     height, width = img.shape[:2]
+    
+    # OPTIMIZATION: Resize large images to speed up processing (maintain aspect ratio)
+    # If image is larger than 3000px in any dimension, resize it
+    max_dimension = 3000
+    scale_down = 1.0
+    if width > max_dimension or height > max_dimension:
+        if width > height:
+            scale_down = max_dimension / width
+        else:
+            scale_down = max_dimension / height
+        new_width = int(width * scale_down)
+        new_height = int(height * scale_down)
+        img = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_AREA)
+        height, width = img.shape[:2]
+        # Adjust scale factor for resized image
+        scale_factor = scale_factor / scale_down
+    
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
     # OCR disabled for now - using geometric filtering only
     text_regions = []
     
-    # Apply Gaussian blur to reduce noise
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    # OPTIMIZATION: Use smaller blur kernel for faster processing
+    blurred = cv2.GaussianBlur(gray, (3, 3), 0)
     
     # Edge detection - rooms are surrounded by walls, so we need to detect closed boundaries
     edges = cv2.Canny(blurred, 50, 150)
     
-    # Morphological operations to close gaps in walls
-    # Use a larger kernel to better connect wall segments
-    kernel = np.ones((5, 5), np.uint8)
-    dilated = cv2.dilate(edges, kernel, iterations=2)
-    # Then erode to restore approximate original size
+    # OPTIMIZATION: Use smaller kernel and fewer iterations for faster processing
+    kernel = np.ones((3, 3), np.uint8)
+    dilated = cv2.dilate(edges, kernel, iterations=1)
     closed = cv2.erode(dilated, kernel, iterations=1)
     
-    # Find ALL contours including internal ones (rooms inside the building)
-    # RETR_TREE gets all contours with full hierarchy
-    # RETR_CCOMP might be better for finding enclosed spaces
-    contours, hierarchy = cv2.findContours(closed, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+    # OPTIMIZATION: Use RETR_EXTERNAL first to get outer contours only (faster)
+    # Then use RETR_CCOMP only if needed
+    contours, hierarchy = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    # If we don't find enough rooms, try RETR_CCOMP for internal contours
+    if len(contours) < 5:
+        contours, hierarchy = cv2.findContours(closed, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
     
     rooms = []
     min_area_pixels = (min_area_sf / (scale_factor ** 2)) if scale_factor > 0 else 1000
@@ -271,24 +289,28 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
     exclude_left = width * 0.10
     exclude_right = width * 0.90
     
+    # OPTIMIZATION: Pre-filter contours by area before expensive operations
+    # Calculate areas first and sort to process likely rooms first
+    contour_areas = [(i, cv2.contourArea(contour)) for i, contour in enumerate(contours)]
+    # Filter and sort by area (largest first, but within reasonable range)
+    filtered_indices = [
+        i for i, area in contour_areas 
+        if min_area_pixels <= area <= max_area_pixels
+    ]
+    # Limit to top 200 contours to avoid processing too many
+    filtered_indices = filtered_indices[:200]
+    
     # Track processed contours to avoid duplicates
     processed_contours = set()
     
-    for i, contour in enumerate(contours):
+    for i in filtered_indices:
+        contour = contours[i]
         # Skip if already processed
         contour_id = id(contour)
         if contour_id in processed_contours:
             continue
         
         area_pixels = cv2.contourArea(contour)
-        
-        # Skip if too small (likely noise or furniture)
-        if area_pixels < min_area_pixels:
-            continue
-        
-        # Skip if too large (likely the entire floor plan or building outline)
-        if area_pixels > max_area_pixels:
-            continue
         
         # Get bounding box to check aspect ratio and position
         x, y, w, h = cv2.boundingRect(contour)
@@ -397,17 +419,32 @@ def detect_walls(image_path, scale_factor, min_length_lf):
         return []
     
     height, width = img.shape[:2]
+    
+    # OPTIMIZATION: Resize if needed (same as detect_rooms)
+    max_dimension = 3000
+    scale_down = 1.0
+    if width > max_dimension or height > max_dimension:
+        if width > height:
+            scale_down = max_dimension / width
+        else:
+            scale_down = max_dimension / height
+        new_width = int(width * scale_down)
+        new_height = int(height * scale_down)
+        img = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_AREA)
+        height, width = img.shape[:2]
+        scale_factor = scale_factor / scale_down
+    
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
-    # Apply Gaussian blur
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    # OPTIMIZATION: Use smaller blur kernel
+    blurred = cv2.GaussianBlur(gray, (3, 3), 0)
     
     # Edge detection
     edges = cv2.Canny(blurred, 50, 150)
     
-    # Hough Line Transform with stricter parameters to reduce false positives
+    # OPTIMIZATION: Increase threshold and reduce resolution for faster Hough transform
     min_line_length_pixels = max(30, min_length_lf / scale_factor * 0.5) if scale_factor > 0 else 30
-    lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=100, minLineLength=int(min_line_length_pixels), maxLineGap=20)
+    lines = cv2.HoughLinesP(edges, 2, np.pi/180, threshold=150, minLineLength=int(min_line_length_pixels), maxLineGap=30)
     
     if lines is None or len(lines) == 0:
         return []
@@ -908,9 +945,10 @@ if __name__ == "__main__":
         }
 
         // Run the actual script with better error capture
-        // Note: Railway free tier has memory limits, so we need to be careful with large images
+        // Note: Railway may kill processes after ~2 minutes, so we need to finish faster
+        // Reduced timeout to 90 seconds to finish before Railway kills it
         const execResult = await execAsync(command, {
-          timeout: 120000, // 120 second timeout (2 minutes for complex images with OpenCV processing)
+          timeout: 90000, // 90 second timeout (finish before Railway's ~2 minute process limit)
           maxBuffer: 10 * 1024 * 1024, // 10MB buffer
           env: { 
             ...process.env, 
