@@ -238,8 +238,9 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
     height, width = img.shape[:2]
     
     # OPTIMIZATION: Resize large images to speed up processing (maintain aspect ratio)
-    # If image is larger than 3000px in any dimension, resize it
-    max_dimension = 3000
+    # Aggressively resize to 2000px max to ensure fast processing (finish in < 90 seconds)
+    # This is a trade-off: lower resolution = faster processing but slightly less accuracy
+    max_dimension = 2000
     scale_down = 1.0
     if width > max_dimension or height > max_dimension:
         if width > height:
@@ -252,6 +253,7 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
         height, width = img.shape[:2]
         # Adjust scale factor for resized image
         scale_factor = scale_factor / scale_down
+        print(f"Resized image to {width}x{height} for faster processing", file=sys.stderr)
     
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
@@ -270,12 +272,8 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
     closed = cv2.erode(dilated, kernel, iterations=1)
     
     # OPTIMIZATION: Use RETR_EXTERNAL first to get outer contours only (faster)
-    # Then use RETR_CCOMP only if needed
+    # Skip RETR_CCOMP to save time - external contours are usually enough for rooms
     contours, hierarchy = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    # If we don't find enough rooms, try RETR_CCOMP for internal contours
-    if len(contours) < 5:
-        contours, hierarchy = cv2.findContours(closed, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
     
     rooms = []
     min_area_pixels = (min_area_sf / (scale_factor ** 2)) if scale_factor > 0 else 1000
@@ -291,14 +289,16 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
     
     # OPTIMIZATION: Pre-filter contours by area before expensive operations
     # Calculate areas first and sort to process likely rooms first
+    # Limit to top 100 contours to ensure fast processing
     contour_areas = [(i, cv2.contourArea(contour)) for i, contour in enumerate(contours)]
     # Filter and sort by area (largest first, but within reasonable range)
     filtered_indices = [
         i for i, area in contour_areas 
         if min_area_pixels <= area <= max_area_pixels
     ]
-    # Limit to top 200 contours to avoid processing too many
-    filtered_indices = filtered_indices[:200]
+    # Sort by area (largest first) and limit to top 100 to ensure fast processing
+    filtered_indices.sort(key=lambda i: contour_areas[i][1], reverse=True)
+    filtered_indices = filtered_indices[:100]
     
     # Track processed contours to avoid duplicates
     processed_contours = set()
@@ -407,8 +407,8 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon):
     # Sort by confidence (highest first) and limit to reasonable number
     rooms.sort(key=lambda r: r["confidence"], reverse=True)
     
-    # Limit to top rooms (reasonable number for a single page)
-    rooms = rooms[:100]
+    # Limit to top rooms (reduced to 50 for faster processing)
+    rooms = rooms[:50]
     
     return rooms
 
@@ -421,7 +421,8 @@ def detect_walls(image_path, scale_factor, min_length_lf):
     height, width = img.shape[:2]
     
     # OPTIMIZATION: Resize if needed (same as detect_rooms)
-    max_dimension = 3000
+    # Use same aggressive resize to 2000px max
+    max_dimension = 2000
     scale_down = 1.0
     if width > max_dimension or height > max_dimension:
         if width > height:
@@ -549,8 +550,8 @@ def detect_walls(image_path, scale_factor, min_length_lf):
     # Sort by length (longest first) and limit to reasonable number
     merged_walls.sort(key=lambda w: w["length"], reverse=True)
     
-    # Limit to top walls (should be 3-4 stretches per floor plan)
-    merged_walls = merged_walls[:50]  # Reasonable limit for a single page
+    # Limit to top walls (reduced to 30 for faster processing)
+    merged_walls = merged_walls[:30]  # Reduced for faster processing
     
     return merged_walls
 
