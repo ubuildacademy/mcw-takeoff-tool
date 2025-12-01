@@ -657,14 +657,18 @@ def detect_walls(image_path, scale_factor, min_length_lf):
         })
     
     if len(segments) < 2:
+        print(f"No segments found for wall pairing (need at least 2, found {len(segments)})", file=sys.stderr)
         return []  # Need at least 2 lines to form a wall pair
     
-    # PHASE 4: Walls are TWO parallel lines with space between (wall thickness)
-    # Wall thickness is typically 4" to 12"+ at scale (0.33' to 1.0'+)
-    min_wall_thickness_pixels = (0.33 / scale_factor) if scale_factor > 0 else 3  # 4" minimum
-    max_wall_thickness_pixels = (1.5 / scale_factor) if scale_factor > 0 else 50  # 18" maximum (allows for thick walls)
+    print(f"Found {len(segments)} candidate segments for wall pairing", file=sys.stderr)
     
-    def are_parallel(seg1, seg2, angle_tolerance=5.0):
+    # PHASE 4: Walls are TWO parallel lines with space between (wall thickness)
+    # Wall thickness is typically 4" to 12"+ at scale (0.33' to 2.0'+)
+    # Relaxed range to catch more wall types (3" to 24")
+    min_wall_thickness_pixels = (0.25 / scale_factor) if scale_factor > 0 else 2  # 3" minimum (relaxed)
+    max_wall_thickness_pixels = (2.0 / scale_factor) if scale_factor > 0 else 60  # 24" maximum (allows for very thick walls)
+    
+    def are_parallel(seg1, seg2, angle_tolerance=10.0):
         """Check if two segments are parallel (within tolerance in degrees)"""
         angle1 = seg1["angle"] * 180 / np.pi
         angle2 = seg2["angle"] * 180 / np.pi
@@ -698,8 +702,9 @@ def detect_walls(image_path, scale_factor, min_length_lf):
         
         return perp_dist
     
-    def lines_overlap(seg1, seg2):
-        """Check if two parallel line segments overlap along their length"""
+    def lines_overlap(seg1, seg2, min_overlap_ratio=0.3):
+        """Check if two parallel line segments overlap along their length
+        More lenient: requires at least 30% overlap (was 100% before)"""
         # Project both lines onto their direction vector
         dir1 = np.array([seg1["end"][0] - seg1["start"][0], seg1["end"][1] - seg1["start"][1]])
         dir1_norm = np.linalg.norm(dir1)
@@ -722,7 +727,22 @@ def detect_walls(image_path, scale_factor, min_length_lf):
         range1 = (min(proj1_start, proj1_end), max(proj1_start, proj1_end))
         range2 = (min(proj2_start, proj2_end), max(proj2_start, proj2_end))
         
-        return not (range1[1] < range2[0] or range2[1] < range1[0])
+        # Calculate overlap length
+        overlap_start = max(range1[0], range2[0])
+        overlap_end = min(range1[1], range2[1])
+        overlap_length = max(0, overlap_end - overlap_start)
+        
+        # Calculate minimum length of the two segments
+        len1 = range1[1] - range1[0]
+        len2 = range2[1] - range2[0]
+        min_length = min(len1, len2)
+        
+        # Require at least 30% overlap relative to the shorter segment
+        if min_length == 0:
+            return False
+        overlap_ratio = overlap_length / min_length
+        
+        return overlap_ratio >= min_overlap_ratio
     
     # PHASE 4: Find wall pairs (two parallel lines with appropriate spacing)
     wall_pairs = []
@@ -743,12 +763,12 @@ def detect_walls(image_path, scale_factor, min_length_lf):
             
             seg2 = segments[j]
             
-            # Check if lines are parallel
-            if not are_parallel(seg1, seg2, angle_tolerance=5.0):
+            # Check if lines are parallel (relaxed tolerance: 10°)
+            if not are_parallel(seg1, seg2, angle_tolerance=10.0):
                 continue
             
-            # Check if lines overlap along their length
-            if not lines_overlap(seg1, seg2):
+            # Check if lines overlap along their length (relaxed: 30% overlap required)
+            if not lines_overlap(seg1, seg2, min_overlap_ratio=0.3):
                 continue
             
             # Calculate distance between parallel lines (wall thickness)
@@ -791,7 +811,11 @@ def detect_walls(image_path, scale_factor, min_length_lf):
                 used_segments.add(i)
                 used_segments.add(best_pair)
     
+    print(f"Found {len(wall_pairs)} wall pairs from {len(segments)} segments", file=sys.stderr)
+    
     if len(wall_pairs) == 0:
+        print("No valid wall pairs found - wall thickness range may be too restrictive", file=sys.stderr)
+        print(f"Wall thickness range: {min_wall_thickness_pixels:.1f} to {max_wall_thickness_pixels:.1f} pixels", file=sys.stderr)
         return []  # No valid wall pairs found
     
     # PHASE 4: Merge connected wall pairs into continuous walls
