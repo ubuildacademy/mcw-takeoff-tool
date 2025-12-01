@@ -801,16 +801,35 @@ if __name__ == "__main__":
       if (!pythonCommand) {
         throw new Error('Python command not found. Please ensure Python 3 is installed and available in PATH.');
       }
+
+      // Validate script path is set and exists
+      if (!this.pythonScriptPath || this.pythonScriptPath.trim() === '') {
+        throw new Error(`Python script path is not set! Current value: "${this.pythonScriptPath}"`);
+      }
+
+      const scriptExists = await fs.pathExists(this.pythonScriptPath);
+      if (!scriptExists) {
+        throw new Error(`Python script does not exist at path: ${this.pythonScriptPath}. Please ensure the script was created.`);
+      }
+
+      // Build command with explicit validation
       const command = `${pythonCommand} "${this.pythonScriptPath}" "${imagePath}" ${opts.scaleFactor} ${opts.minRoomArea} ${opts.minWallLength} ${opts.contourApproximationEpsilon}`;
       
+      // Validate command contains script path (safety check)
+      if (!command.includes(this.pythonScriptPath)) {
+        throw new Error(`Command does not include script path! Command: ${command}, Script path: ${this.pythonScriptPath}`);
+      }
+      
       console.log(`🔍 Executing boundary detection:`);
-      console.log(`   Command: ${command}`);
-      console.log(`   Python: ${statusDetails.pythonVersion || 'unknown'}`);
-      console.log(`   OpenCV: ${statusDetails.opencvVersion || 'unknown'}`);
+      console.log(`   Python command: ${pythonCommand}`);
       console.log(`   Script path: ${this.pythonScriptPath}`);
-      console.log(`   Script exists: ${await fs.pathExists(this.pythonScriptPath)}`);
+      console.log(`   Script exists: ${scriptExists}`);
+      console.log(`   Script size: ${(await fs.stat(this.pythonScriptPath)).size} bytes`);
       console.log(`   Image path: ${imagePath}`);
       console.log(`   Image exists: ${await fs.pathExists(imagePath)}`);
+      console.log(`   Full command: ${command}`);
+      console.log(`   Python: ${statusDetails.pythonVersion || 'unknown'}`);
+      console.log(`   OpenCV: ${statusDetails.opencvVersion || 'unknown'}`);
       console.log(`   Enhanced PATH: ${this.getEnhancedPath()}`);
       const enhancedLdPath = await this.getEnhancedLdLibraryPath();
       console.log(`   Enhanced LD_LIBRARY_PATH: ${enhancedLdPath}`);
@@ -867,6 +886,24 @@ if __name__ == "__main__":
         } catch (importError: any) {
           console.error('❌ Python import test failed:', importError.stderr || importError.message);
           throw new Error(`Python cannot import required modules (cv2, numpy). Error: ${importError.stderr || importError.message}`);
+        }
+
+        // Test that the script can at least be executed (run with --help or version check)
+        try {
+          const testScriptCommand = `${pythonCommand} "${this.pythonScriptPath}" --test 2>&1 || ${pythonCommand} -c "import sys; sys.path.insert(0, '/tmp'); exec(open('${this.pythonScriptPath}').read().split('if __name__')[0] + 'print(\"Script syntax OK\")')"`;
+          const scriptTest = await execAsync(testScriptCommand, {
+            timeout: 10000,
+            env: { 
+              ...process.env, 
+              PATH: this.getEnhancedPath(),
+              LD_LIBRARY_PATH: enhancedLdPath,
+              PYTHONUNBUFFERED: '1'
+            }
+          });
+          console.log(`✅ Python script test: ${scriptTest.stdout.trim().substring(0, 200)}`);
+        } catch (scriptTestError: any) {
+          // Don't fail on this - it's just a diagnostic
+          console.warn('⚠️ Python script test failed (non-fatal):', scriptTestError.stderr?.substring(0, 200) || scriptTestError.message);
         }
 
         // Run the actual script with better error capture
