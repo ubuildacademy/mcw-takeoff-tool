@@ -124,6 +124,14 @@ router.post('/test', async (req, res) => {
 
 // Process a single page
 router.post('/process-page', async (req, res) => {
+  // Set a longer timeout for this route (3 minutes to handle complex images)
+  req.setTimeout(180000); // 3 minutes
+  res.setTimeout(180000); // 3 minutes
+  
+  // Set keep-alive headers to prevent Railway from closing the connection
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Keep-Alive', 'timeout=180');
+  
   try {
     const user = await getAuthenticatedUser(req);
     if (!user) {
