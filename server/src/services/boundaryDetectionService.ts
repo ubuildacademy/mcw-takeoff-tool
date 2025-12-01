@@ -802,13 +802,14 @@ if __name__ == "__main__":
         throw new Error('Python command not found. Please ensure Python 3 is installed and available in PATH.');
       }
 
-      // Validate script path is set and exists
+      // Validate script path is set and exists (scriptExists already checked above)
       if (!this.pythonScriptPath || this.pythonScriptPath.trim() === '') {
         throw new Error(`Python script path is not set! Current value: "${this.pythonScriptPath}"`);
       }
 
-      const scriptExists = await fs.pathExists(this.pythonScriptPath);
-      if (!scriptExists) {
+      // Re-verify script exists (scriptExists was already checked above, but double-check for safety)
+      const scriptStillExists = await fs.pathExists(this.pythonScriptPath);
+      if (!scriptStillExists) {
         throw new Error(`Python script does not exist at path: ${this.pythonScriptPath}. Please ensure the script was created.`);
       }
 
