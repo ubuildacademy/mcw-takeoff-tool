@@ -161,7 +161,7 @@ router.post('/process-page', async (req, res) => {
     };
 
     const job = await cvTakeoffQueue.add(
-      'process-page',
+      'cv-takeoff',
       {
         documentId,
         pageNumber,
@@ -171,7 +171,7 @@ router.post('/process-page', async (req, res) => {
       },
       {
         jobId: `${documentId}-${pageNumber}-${Date.now()}`,
-        removeOnComplete: true,
+        // Don't override removeOnComplete - use queue defaults (keeps jobs for 1 hour)
         removeOnFail: false,
       }
     );
@@ -200,26 +200,38 @@ router.post('/process-page', async (req, res) => {
 router.get('/job/:jobId', async (req, res) => {
   try {
     const { jobId } = req.params;
+    console.log(`🔍 [Job Status] Looking up job ${jobId}`);
+    
     const job = await cvTakeoffQueue.getJob(jobId);
 
     if (!job) {
+      console.log(`❌ [Job Status] Job ${jobId} not found in queue`);
       return res.status(404).json({ error: 'Job not found' });
     }
 
     const state = await job.getState();
+    console.log(`📊 [Job Status] Job ${jobId} state: ${state}`);
+    
     const progress = job.progress || 0;
     let result = null;
     let error = null;
 
     if (state === 'completed') {
-      const jobResult = await job.returnvalue;
-      result = jobResult?.result || null;
+      // BullMQ stores the return value in job.returnvalue
+      const jobReturnValue = job.returnvalue;
+      console.log(`✅ [Job Status] Job ${jobId} completed, return value type:`, typeof jobReturnValue);
+      
+      if (jobReturnValue) {
+        // The worker returns { success: true, result: PageDetectionResult }
+        result = jobReturnValue.result || jobReturnValue;
+      }
     } else if (state === 'failed') {
       const failedReason = job.failedReason;
       error = failedReason || 'Job failed';
+      console.log(`❌ [Job Status] Job ${jobId} failed:`, error);
     }
 
-    res.json({
+    const response = {
       jobId: job.id,
       status: state === 'completed' ? 'completed' : state === 'failed' ? 'failed' : state === 'active' ? 'processing' : 'pending',
       progress: typeof progress === 'number' ? progress : 0,
@@ -227,9 +239,17 @@ router.get('/job/:jobId', async (req, res) => {
       error,
       startedAt: job.timestamp ? new Date(job.timestamp) : undefined,
       completedAt: state === 'completed' || state === 'failed' ? new Date() : undefined,
+    };
+    
+    console.log(`📤 [Job Status] Returning status for job ${jobId}:`, {
+      status: response.status,
+      hasResult: !!response.result,
+      hasError: !!response.error,
     });
+    
+    res.json(response);
   } catch (error) {
-    console.error('Error getting job status:', error);
+    console.error('❌ [Job Status] Error getting job status:', error);
     res.status(500).json({ error: 'Failed to get job status' });
   }
 });
