@@ -652,26 +652,162 @@ def detect_walls(image_path, scale_factor, min_length_lf):
         segments.append({
             "start": (int(x1), int(y1)),
             "end": (int(x2), int(y2)),
-            "length": length_pixels
+            "length": length_pixels,
+            "angle": np.arctan2(y2 - y1, x2 - x1)  # Store angle for parallel matching
         })
     
-    if len(segments) == 0:
-        return []
+    if len(segments) < 2:
+        return []  # Need at least 2 lines to form a wall pair
     
-    # PHASE 2: Improved merging with angle constraints for 90° corners
+    # PHASE 4: Walls are TWO parallel lines with space between (wall thickness)
+    # Wall thickness is typically 4" to 12"+ at scale (0.33' to 1.0'+)
+    min_wall_thickness_pixels = (0.33 / scale_factor) if scale_factor > 0 else 3  # 4" minimum
+    max_wall_thickness_pixels = (1.5 / scale_factor) if scale_factor > 0 else 50  # 18" maximum (allows for thick walls)
+    
+    def are_parallel(seg1, seg2, angle_tolerance=5.0):
+        """Check if two segments are parallel (within tolerance in degrees)"""
+        angle1 = seg1["angle"] * 180 / np.pi
+        angle2 = seg2["angle"] * 180 / np.pi
+        
+        # Normalize angles to 0-180
+        angle1 = angle1 % 180
+        angle2 = angle2 % 180
+        
+        angle_diff = abs(angle1 - angle2)
+        if angle_diff > 90:
+            angle_diff = 180 - angle_diff
+        
+        return angle_diff < angle_tolerance
+    
+    def distance_between_parallel_lines(seg1, seg2):
+        """Calculate perpendicular distance between two parallel line segments"""
+        # Get a point on each line
+        x1, y1 = seg1["start"][0], seg1["start"][1]
+        x2, y2 = seg2["start"][0], seg2["start"][1]
+        
+        # Get direction vector of first line
+        dx = seg1["end"][0] - seg1["start"][0]
+        dy = seg1["end"][1] - seg1["start"][1]
+        dir_norm = np.sqrt(dx*dx + dy*dy)
+        if dir_norm == 0:
+            return float('inf')
+        
+        # Calculate perpendicular distance from point on line2 to line1
+        # Using formula: distance = |(y2-y1)*dx - (x2-x1)*dy| / sqrt(dx^2 + dy^2)
+        perp_dist = abs((y2 - y1) * dx - (x2 - x1) * dy) / dir_norm
+        
+        return perp_dist
+    
+    def lines_overlap(seg1, seg2):
+        """Check if two parallel line segments overlap along their length"""
+        # Project both lines onto their direction vector
+        dir1 = np.array([seg1["end"][0] - seg1["start"][0], seg1["end"][1] - seg1["start"][1]])
+        dir1_norm = np.linalg.norm(dir1)
+        if dir1_norm == 0:
+            return False
+        dir1 = dir1 / dir1_norm
+        
+        # Project start and end points of both segments
+        p1_start = np.array([seg1["start"][0], seg1["start"][1]])
+        p1_end = np.array([seg1["end"][0], seg1["end"][1]])
+        p2_start = np.array([seg2["start"][0], seg2["start"][1]])
+        p2_end = np.array([seg2["end"][0], seg2["end"][1]])
+        
+        proj1_start = np.dot(p1_start, dir1)
+        proj1_end = np.dot(p1_end, dir1)
+        proj2_start = np.dot(p2_start, dir1)
+        proj2_end = np.dot(p2_end, dir1)
+        
+        # Check for overlap
+        range1 = (min(proj1_start, proj1_end), max(proj1_start, proj1_end))
+        range2 = (min(proj2_start, proj2_end), max(proj2_start, proj2_end))
+        
+        return not (range1[1] < range2[0] or range2[1] < range1[0])
+    
+    # PHASE 4: Find wall pairs (two parallel lines with appropriate spacing)
+    wall_pairs = []
+    used_segments = set()
+    
+    for i in range(len(segments)):
+        if i in used_segments:
+            continue
+        
+        seg1 = segments[i]
+        best_pair = None
+        best_distance = float('inf')
+        
+        # Find the best matching parallel line
+        for j in range(i + 1, len(segments)):
+            if j in used_segments:
+                continue
+            
+            seg2 = segments[j]
+            
+            # Check if lines are parallel
+            if not are_parallel(seg1, seg2, angle_tolerance=5.0):
+                continue
+            
+            # Check if lines overlap along their length
+            if not lines_overlap(seg1, seg2):
+                continue
+            
+            # Calculate distance between parallel lines (wall thickness)
+            dist = distance_between_parallel_lines(seg1, seg2)
+            
+            # Wall thickness should be between 4" and 18" (0.33' to 1.5')
+            if min_wall_thickness_pixels <= dist <= max_wall_thickness_pixels:
+                # This is a potential wall pair
+                if dist < best_distance:
+                    best_distance = dist
+                    best_pair = j
+        
+        # If we found a matching pair, create a wall
+        if best_pair is not None:
+            seg2 = segments[best_pair]
+            
+            # Create wall from the pair - use the average of the two lines
+            # Wall centerline is the midpoint between the two parallel lines
+            mid_start = (
+                (seg1["start"][0] + seg2["start"][0]) / 2,
+                (seg1["start"][1] + seg2["start"][1]) / 2
+            )
+            mid_end = (
+                (seg1["end"][0] + seg2["end"][0]) / 2,
+                (seg1["end"][1] + seg2["end"][1]) / 2
+            )
+            
+            # Use the longer of the two segments for length
+            wall_length = max(seg1["length"], seg2["length"])
+            wall_length_lf = wall_length * scale_factor
+            
+            if wall_length_lf >= min_length_lf:
+                wall_pairs.append({
+                    "start": (int(mid_start[0]), int(mid_start[1])),
+                    "end": (int(mid_end[0]), int(mid_end[1])),
+                    "length": wall_length,
+                    "thickness": best_distance * scale_factor  # Wall thickness in feet
+                })
+                
+                used_segments.add(i)
+                used_segments.add(best_pair)
+    
+    if len(wall_pairs) == 0:
+        return []  # No valid wall pairs found
+    
+    # PHASE 4: Merge connected wall pairs into continuous walls
     CONNECTION_THRESHOLD = 20  # pixels (increased for better corner detection)
     ANGLE_TOLERANCE = 15  # degrees (allow 90° ± 15°)
     
     def distance(p1, p2):
         return np.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
     
-    def angle_between_lines(seg1, seg2):
-        """Calculate angle between two line segments"""
+    def angle_between_walls(wall1, wall2):
+        """Calculate angle between two wall segments"""
         # Calculate direction vectors
-        dx1 = seg1["end"][0] - seg1["start"][0]
-        dy1 = seg1["end"][1] - seg1["start"][1]
-        dx2 = seg2["end"][0] - seg2["start"][0]
-        dy2 = seg2["end"][1] - seg2["start"][1]
+        dx1 = wall1["end"][0] - wall1["start"][0]
+        dy1 = wall1["end"][1] - wall1["start"][1]
+        dx2 = wall2["end"][0] - wall2["start"][0]
+        dy2 = wall2["end"][1] - wall2["start"][1]
         
         # Calculate angles
         angle1 = np.arctan2(dy1, dx1) * 180 / np.pi
@@ -684,21 +820,21 @@ def detect_walls(image_path, scale_factor, min_length_lf):
         
         return angle_diff
     
-    def are_connected(seg1, seg2):
-        """Check if two segments can be connected with angle constraint"""
+    def are_walls_connected(wall1, wall2):
+        """Check if two wall segments can be connected with angle constraint"""
         # Check all endpoint combinations
-        d1 = distance(seg1["end"], seg2["start"])
-        d2 = distance(seg1["end"], seg2["end"])
-        d3 = distance(seg1["start"], seg2["start"])
-        d4 = distance(seg1["start"], seg2["end"])
+        d1 = distance(wall1["end"], wall2["start"])
+        d2 = distance(wall1["end"], wall2["end"])
+        d3 = distance(wall1["start"], wall2["start"])
+        d4 = distance(wall1["start"], wall2["end"])
         
         min_dist = min(d1, d2, d3, d4)
         if min_dist >= CONNECTION_THRESHOLD:
             return False
         
-        # PHASE 2: Check if the angle is approximately 90° (wall corner)
+        # PHASE 4: Check if the angle is approximately 90° (wall corner)
         # or 0°/180° (straight continuation)
-        angle = angle_between_lines(seg1, seg2)
+        angle = angle_between_walls(wall1, wall2)
         
         # Allow 90° corners (± tolerance) or straight lines (0° or 180°)
         is_corner = abs(angle - 90) < ANGLE_TOLERANCE
@@ -706,65 +842,68 @@ def detect_walls(image_path, scale_factor, min_length_lf):
         
         return is_corner or is_straight
     
-    def merge_segments(seg1, seg2):
-        """Merge two connected segments, following wall contours"""
-        # PHASE 2: Smart merging that follows wall direction
+    def merge_walls(wall1, wall2):
+        """Merge two connected wall segments"""
         # Find the connection point
-        d1 = distance(seg1["end"], seg2["start"])
-        d2 = distance(seg1["end"], seg2["end"])
-        d3 = distance(seg1["start"], seg2["start"])
-        d4 = distance(seg1["start"], seg2["end"])
+        d1 = distance(wall1["end"], wall2["start"])
+        d2 = distance(wall1["end"], wall2["end"])
+        d3 = distance(wall1["start"], wall2["start"])
+        d4 = distance(wall1["start"], wall2["end"])
         
         min_dist = min(d1, d2, d3, d4)
         
         # Determine connection type and merge accordingly
-        if min_dist == d1:  # seg1.end -> seg2.start
+        if min_dist == d1:  # wall1.end -> wall2.start
             return {
-                "start": seg1["start"],
-                "end": seg2["end"],
-                "length": distance(seg1["start"], seg2["end"])
+                "start": wall1["start"],
+                "end": wall2["end"],
+                "length": distance(wall1["start"], wall2["end"]),
+                "thickness": (wall1["thickness"] + wall2["thickness"]) / 2  # Average thickness
             }
-        elif min_dist == d2:  # seg1.end -> seg2.end
+        elif min_dist == d2:  # wall1.end -> wall2.end
             return {
-                "start": seg1["start"],
-                "end": seg2["start"],
-                "length": distance(seg1["start"], seg2["start"])
+                "start": wall1["start"],
+                "end": wall2["start"],
+                "length": distance(wall1["start"], wall2["start"]),
+                "thickness": (wall1["thickness"] + wall2["thickness"]) / 2
             }
-        elif min_dist == d3:  # seg1.start -> seg2.start
+        elif min_dist == d3:  # wall1.start -> wall2.start
             return {
-                "start": seg1["end"],
-                "end": seg2["end"],
-                "length": distance(seg1["end"], seg2["end"])
+                "start": wall1["end"],
+                "end": wall2["end"],
+                "length": distance(wall1["end"], wall2["end"]),
+                "thickness": (wall1["thickness"] + wall2["thickness"]) / 2
             }
-        else:  # seg1.start -> seg2.end
+        else:  # wall1.start -> wall2.end
             return {
-                "start": seg1["end"],
-                "end": seg2["start"],
-                "length": distance(seg1["end"], seg2["start"])
+                "start": wall1["end"],
+                "end": wall2["start"],
+                "length": distance(wall1["end"], wall2["start"]),
+                "thickness": (wall1["thickness"] + wall2["thickness"]) / 2
             }
     
-    # Group segments into connected chains
+    # Group wall pairs into connected chains
     merged_walls = []
-    used = [False] * len(segments)
+    used = [False] * len(wall_pairs)
     
-    for i in range(len(segments)):
+    for i in range(len(wall_pairs)):
         if used[i]:
             continue
         
         # Start a new wall chain
-        current_wall = segments[i]
+        current_wall = wall_pairs[i]
         used[i] = True
         changed = True
         
-        # Keep merging connected segments until no more connections found
+        # Keep merging connected walls until no more connections found
         while changed:
             changed = False
-            for j in range(len(segments)):
+            for j in range(len(wall_pairs)):
                 if used[j]:
                     continue
                 
-                if are_connected(current_wall, segments[j]):
-                    current_wall = merge_segments(current_wall, segments[j])
+                if are_walls_connected(current_wall, wall_pairs[j]):
+                    current_wall = merge_walls(current_wall, wall_pairs[j])
                     used[j] = True
                     changed = True
         
@@ -775,13 +914,14 @@ def detect_walls(image_path, scale_factor, min_length_lf):
                 "start": {"x": float(current_wall["start"][0]) / width, "y": float(current_wall["start"][1]) / height},
                 "end": {"x": float(current_wall["end"][0]) / width, "y": float(current_wall["end"][1]) / height},
                 "length": round(length_lf, 2),
-                "confidence": min(0.95, 0.7 + (length_lf / 200) * 0.1)  # Higher confidence for longer walls
+                "thickness": round(current_wall["thickness"], 2),  # Wall thickness in feet
+                "confidence": min(0.95, 0.8 + (length_lf / 200) * 0.1)  # Higher confidence for longer walls
             })
     
     # Sort by length (longest first) and limit to reasonable number
     merged_walls.sort(key=lambda w: w["length"], reverse=True)
     
-    # PHASE 2: Keep more walls for better accuracy (queue removes timeout constraint)
+    # PHASE 4: Keep more walls for better accuracy (queue removes timeout constraint)
     merged_walls = merged_walls[:100]  # Increased limit for better coverage
     
     return merged_walls
