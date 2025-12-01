@@ -87,19 +87,28 @@ class BoundaryDetectionService {
     
     // Determine script path (works in both source and compiled)
     const isCompiled = __dirname.includes('dist');
-    const baseDir = isCompiled 
-      ? path.join(__dirname, '..', '..') // dist/services -> dist -> server root
-      : path.join(__dirname, '..'); // src/services -> src -> server root
-
-    // Scripts are always in src/scripts (not dist)
-    // Use absolute path to avoid any relative path issues
-    this.pythonScriptPath = path.resolve(path.join(baseDir, 'src', 'scripts', 'cv_boundary_detection.py'));
+    // Detect production: check for Railway environment or if we're in /app (Railway's working directory)
+    const isProduction = process.env.RAILWAY_ENVIRONMENT || 
+                         process.env.NODE_ENV === 'production' || 
+                         process.cwd() === '/app' ||
+                         __dirname.startsWith('/app/');
     
-    // Temp directory: use /tmp in production, local temp in dev
-    const isProduction = process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === 'production';
+    // In production, use /tmp for scripts (writable and reliable)
+    // In dev, use the server/src/scripts directory
     if (isProduction) {
+      // Production: use /tmp for script storage (always writable)
+      this.pythonScriptPath = '/tmp/cv_boundary_detection.py';
       this.tempDir = '/tmp/cv-detection';
     } else {
+      // Development: use server/src/scripts
+      const baseDir = isCompiled 
+        ? path.join(__dirname, '..', '..') // dist/services -> dist -> server root
+        : path.join(__dirname, '..'); // src/services -> src -> server root
+
+      // Scripts are always in src/scripts (not dist)
+      // Use absolute path to avoid any relative path issues
+      this.pythonScriptPath = path.resolve(path.join(baseDir, 'src', 'scripts', 'cv_boundary_detection.py'));
+      
       // In dev, check if cwd is server/ or repo root
       const cwd = process.cwd();
       if (cwd.endsWith('server') || cwd.endsWith('server/')) {
@@ -118,7 +127,7 @@ class BoundaryDetectionService {
     console.log(`📁 Process CWD: ${process.cwd()}`);
     console.log(`📁 __dirname: ${__dirname}`);
     console.log(`📁 Is compiled: ${isCompiled}`);
-    console.log(`📁 Base dir: ${baseDir}`);
+    console.log(`📁 Is production: ${isProduction}`);
   }
 
   /**
@@ -787,8 +796,11 @@ if __name__ == "__main__":
       }
 
       // Execute Python script
-      // Use enhanced PATH to ensure Python is found in Railway/Nixpacks environments
-      const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
+      // Find Python command using the same logic as getStatusDetails
+      const pythonCommand = await this.findPythonCommand();
+      if (!pythonCommand) {
+        throw new Error('Python command not found. Please ensure Python 3 is installed and available in PATH.');
+      }
       const command = `${pythonCommand} "${this.pythonScriptPath}" "${imagePath}" ${opts.scaleFactor} ${opts.minRoomArea} ${opts.minWallLength} ${opts.contourApproximationEpsilon}`;
       
       console.log(`🔍 Executing boundary detection:`);
@@ -841,12 +853,13 @@ if __name__ == "__main__":
         }
 
         const execResult = await execAsync(command, {
-          timeout: 60000, // 60 second timeout (increased for complex images)
+          timeout: 120000, // 120 second timeout (2 minutes for complex images with OpenCV processing)
           maxBuffer: 10 * 1024 * 1024, // 10MB buffer
           env: { 
             ...process.env, 
             PATH: this.getEnhancedPath(),
-            LD_LIBRARY_PATH: enhancedLdPath
+            LD_LIBRARY_PATH: enhancedLdPath,
+            PYTHONUNBUFFERED: '1' // Ensure Python output is not buffered
           }
         });
         stdout = execResult.stdout;
@@ -996,6 +1009,57 @@ if __name__ == "__main__":
       }
       throw formattedError;
     }
+  }
+
+  /**
+   * Find Python command path (reusable helper)
+   */
+  private async findPythonCommand(): Promise<string | null> {
+    const enhancedPath = this.getEnhancedPath();
+    
+    // Try using 'which' command first (most reliable)
+    try {
+      const { stdout: whichOutput } = await execAsync('which python3', {
+        timeout: 5000,
+        env: { ...process.env, PATH: enhancedPath }
+      });
+      const foundPath = whichOutput.trim();
+      if (foundPath) {
+        // Verify it works
+        await execAsync(`${foundPath} --version`, {
+          timeout: 5000,
+          env: { ...process.env, PATH: enhancedPath }
+        });
+        return foundPath;
+      }
+    } catch {
+      // Continue to fallback paths
+    }
+
+    // Fallback: try multiple known paths (including Railway-specific)
+    const pythonPaths = [
+      '/opt/venv/bin/python3',              // Railway Nixpacks virtual environment
+      '/usr/local/bin/python3',             // Common system location
+      '/usr/bin/python3',                   // Standard system location
+      '/root/.nix-profile/bin/python3',     // Nix profile (if exists)
+      '/nix/var/nix/profiles/default/bin/python3', // Nix default profile
+      'python3',                            // System PATH
+      process.platform === 'win32' ? 'python' : 'python3' // Platform-specific fallback
+    ];
+    
+    for (const pythonPath of pythonPaths) {
+      try {
+        await execAsync(`${pythonPath} --version`, {
+          timeout: 5000,
+          env: { ...process.env, PATH: enhancedPath }
+        });
+        return pythonPath;
+      } catch {
+        continue;
+      }
+    }
+    
+    return null;
   }
 
   /**
