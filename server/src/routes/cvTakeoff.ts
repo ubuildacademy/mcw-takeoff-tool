@@ -8,8 +8,64 @@ import express from 'express';
 import { cvTakeoffService } from '../services/cvTakeoffService';
 import { storage } from '../storage';
 import { supabase, TABLES } from '../supabase';
+import { v4 as uuidv4 } from 'uuid';
 
 const router = express.Router();
+
+// In-memory job storage for CV takeoff processing
+// In production, you might want to use Redis or a database
+interface CVTakeoffJob {
+  id: string;
+  documentId: string;
+  pageNumber: number;
+  projectId: string;
+  scaleFactor: number;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  progress: number;
+  result?: any;
+  error?: string;
+  startedAt: Date;
+  completedAt?: Date;
+}
+
+const cvTakeoffJobs = new Map<string, CVTakeoffJob>();
+
+// Background processing function
+async function processCVTakeoffJob(jobId: string) {
+  const job = cvTakeoffJobs.get(jobId);
+  if (!job) {
+    console.error(`❌ Job ${jobId} not found`);
+    return;
+  }
+
+  try {
+    job.status = 'processing';
+    job.progress = 10;
+    job.startedAt = new Date();
+
+    console.log(`🔄 Processing CV takeoff job ${jobId} for page ${job.pageNumber}`);
+
+    const result = await cvTakeoffService.processPage(
+      job.documentId,
+      job.pageNumber,
+      job.projectId,
+      job.scaleFactor,
+      {}
+    );
+
+    job.status = 'completed';
+    job.progress = 100;
+    job.result = result;
+    job.completedAt = new Date();
+
+    console.log(`✅ CV takeoff job ${jobId} completed successfully`);
+  } catch (error) {
+    job.status = 'failed';
+    job.error = error instanceof Error ? error.message : 'Unknown error';
+    job.completedAt = new Date();
+    console.error(`❌ CV takeoff job ${jobId} failed:`, job.error);
+  }
+}
 
 // Helper function to get authenticated user
 async function getAuthenticatedUser(req: express.Request) {
@@ -122,16 +178,8 @@ router.post('/test', async (req, res) => {
   }
 });
 
-// Process a single page
+// Process a single page (async - returns job ID immediately)
 router.post('/process-page', async (req, res) => {
-  // Set a longer timeout for this route (3 minutes to handle complex images)
-  req.setTimeout(180000); // 3 minutes
-  res.setTimeout(180000); // 3 minutes
-  
-  // Set keep-alive headers to prevent Railway from closing the connection
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('Keep-Alive', 'timeout=180');
-  
   try {
     const user = await getAuthenticatedUser(req);
     if (!user) {
@@ -159,76 +207,66 @@ router.post('/process-page', async (req, res) => {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
 
-    console.log(`🔍 Processing page ${pageNumber} of document ${documentId} for CV takeoff`);
-
-    const result = await cvTakeoffService.processPage(
+    // Create job
+    const jobId = uuidv4();
+    const job: CVTakeoffJob = {
+      id: jobId,
       documentId,
       pageNumber,
       projectId,
       scaleFactor,
-      options || {}
-    );
+      status: 'pending',
+      progress: 0,
+      startedAt: new Date()
+    };
 
+    cvTakeoffJobs.set(jobId, job);
+
+    // Start processing in background (don't await)
+    processCVTakeoffJob(jobId).catch(error => {
+      console.error(`❌ Background processing error for job ${jobId}:`, error);
+    });
+
+    // Return immediately with job ID
     res.json({
       success: true,
-      result,
-      message: `Processed page ${pageNumber}: ${result.conditionsCreated} conditions, ${result.measurementsCreated} measurements`
+      jobId,
+      status: 'pending',
+      message: `CV takeoff processing started for page ${pageNumber}`
     });
 
   } catch (error) {
-    const { documentId, pageNumber, projectId, scaleFactor } = req.body || {};
-    
-    // Extract error message more robustly
-    let errorMessage = 'Unknown error';
-    let errorStack: string | undefined;
-    
-    if (error instanceof Error) {
-      errorMessage = error.message || String(error) || 'Unknown error';
-      errorStack = error.stack;
-      // If message is "[object Object]", try to extract more details
-      if (errorMessage === '[object Object]' || errorMessage.includes('[object Object]')) {
-        try {
-          const errorObj = error as any;
-          errorMessage = errorObj.message || errorObj.error || JSON.stringify(errorObj, Object.getOwnPropertyNames(errorObj)) || 'Unknown error';
-        } catch {
-          errorMessage = 'Unknown error occurred during page processing';
-        }
-      }
-    } else if (typeof error === 'string') {
-      errorMessage = error;
-    } else if (error && typeof error === 'object') {
-      // Try to extract message from error object
-      try {
-        const errorObj = error as any;
-        errorMessage = errorObj.message || errorObj.error || errorObj.toString() || JSON.stringify(errorObj, Object.getOwnPropertyNames(errorObj));
-        errorStack = errorObj.stack;
-      } catch {
-        errorMessage = 'Unknown error occurred during page processing';
-      }
-    }
-    
-    const errorDetails = {
-      error: errorMessage,
-      stack: errorStack,
-      documentId,
-      pageNumber,
-      projectId,
-      scaleFactor,
-      platform: process.platform,
-      nodeVersion: process.version
-    };
-    
-    console.error('❌ Error processing page:', errorMessage);
-    console.error('❌ Error details:', JSON.stringify(errorDetails, null, 2));
-    if (errorStack) {
-      console.error('❌ Error stack:', errorStack);
-    }
-    
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('❌ Error starting CV takeoff job:', errorMessage);
     res.status(500).json({
       success: false,
-      error: errorMessage,
-      details: errorDetails
+      error: errorMessage
     });
+  }
+});
+
+// Get job status
+router.get('/job/:jobId', async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const job = cvTakeoffJobs.get(jobId);
+
+    if (!job) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+
+    res.json({
+      jobId: job.id,
+      status: job.status,
+      progress: job.progress,
+      result: job.result,
+      error: job.error,
+      startedAt: job.startedAt,
+      completedAt: job.completedAt
+    });
+  } catch (error) {
+    console.error('Error getting job status:', error);
+    res.status(500).json({ error: 'Failed to get job status' });
   }
 });
 
