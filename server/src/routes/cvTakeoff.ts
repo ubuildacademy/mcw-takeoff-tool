@@ -20,6 +20,7 @@ interface CVTakeoffJob {
   pageNumber: number;
   projectId: string;
   scaleFactor: number;
+  options?: any; // Store options from request
   status: 'pending' | 'processing' | 'completed' | 'failed';
   progress: number;
   result?: any;
@@ -45,12 +46,20 @@ async function processCVTakeoffJob(jobId: string) {
 
     console.log(`🔄 Processing CV takeoff job ${jobId} for page ${job.pageNumber}`);
 
+    // Use options from job, or default to detecting all elements
+    const options = job.options || {
+      detectRooms: true,
+      detectWalls: true,
+      detectDoors: true,
+      detectWindows: true
+    };
+
     const result = await cvTakeoffService.processPage(
       job.documentId,
       job.pageNumber,
       job.projectId,
       job.scaleFactor,
-      {}
+      options
     );
 
     job.status = 'completed';
@@ -215,6 +224,12 @@ router.post('/process-page', async (req, res) => {
       pageNumber,
       projectId,
       scaleFactor,
+      options: options || {
+        detectRooms: true,
+        detectWalls: true,
+        detectDoors: true,
+        detectWindows: true
+      },
       status: 'pending',
       progress: 0,
       startedAt: new Date()
