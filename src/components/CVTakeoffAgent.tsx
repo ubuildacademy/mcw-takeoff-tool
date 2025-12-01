@@ -139,7 +139,7 @@ export function CVTakeoffAgent({
 
       console.log(`Using scale factor: ${scaleFactor} (1 pixel = ${scaleFactor} feet)`);
 
-      // Process the current page
+      // Process the current page (async with progress updates)
       const result = await cvTakeoffService.processPage(
         documentId,
         pageNumber,
@@ -152,6 +152,11 @@ export function CVTakeoffAgent({
           detectWindows: detectionOptions.detectWindows,
           minRoomArea: 50,
           minWallLength: 2
+        },
+        (progress, status) => {
+          // Update progress in UI
+          console.log(`Processing progress: ${progress}% (${status})`);
+          // You could update a progress bar here if needed
         }
       );
 

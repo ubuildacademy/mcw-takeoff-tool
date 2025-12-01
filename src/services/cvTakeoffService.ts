@@ -82,20 +82,59 @@ export const cvTakeoffService = {
   },
 
   /**
-   * Process a single page
+   * Get job status
+   */
+  async getJobStatus(jobId: string): Promise<{
+    jobId: string;
+    status: 'pending' | 'processing' | 'completed' | 'failed';
+    progress: number;
+    result?: PageDetectionResult;
+    error?: string;
+    startedAt?: Date;
+    completedAt?: Date;
+  }> {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const authToken = session?.access_token;
+
+      const response = await fetch(`/api/cv-takeoff/job/${jobId}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken && { 'Authorization': `Bearer ${authToken}` }),
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Error getting job status:', error);
+      throw new Error(`Failed to get job status: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  },
+
+  /**
+   * Process a single page (async - returns job ID, then polls for results)
    */
   async processPage(
     documentId: string,
     pageNumber: number,
     projectId: string,
     scaleFactor: number,
-    options: CVTakeoffOptions = {}
+    options: CVTakeoffOptions = {},
+    onProgress?: (progress: number, status: string) => void
   ): Promise<PageDetectionResult> {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const authToken = session?.access_token;
 
-      const response = await fetch('/api/cv-takeoff/process-page', {
+      // Start the job
+      const startResponse = await fetch('/api/cv-takeoff/process-page', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -110,35 +149,61 @@ export const cvTakeoffService = {
         }),
       });
 
-      if (!response.ok) {
+      if (!startResponse.ok) {
         let errorData: any = {};
         try {
-          errorData = await response.json();
+          errorData = await startResponse.json();
         } catch {
-          // If JSON parsing fails, create a basic error object
-          errorData = { error: `HTTP error! status: ${response.status}` };
+          errorData = { error: `HTTP error! status: ${startResponse.status}` };
         }
         
-        const errorMessage = errorData.error || `HTTP error! status: ${response.status}`;
-        // Ensure error message is a string, not an object
+        const errorMessage = errorData.error || `HTTP error! status: ${startResponse.status}`;
         const errorMessageStr = typeof errorMessage === 'string' 
           ? errorMessage 
           : JSON.stringify(errorMessage);
-        
-        const errorWithDetails = errorData.details 
-          ? `${errorMessageStr}. Details: ${JSON.stringify(errorData.details, null, 2)}`
-          : errorMessageStr;
-        throw new Error(errorWithDetails);
+        throw new Error(errorMessageStr);
       }
 
-      const data = await response.json();
-      return data.result;
+      const startData = await startResponse.json();
+      const jobId = startData.jobId;
+
+      if (!jobId) {
+        throw new Error('No job ID returned from server');
+      }
+
+      // Poll for job completion
+      const maxAttempts = 300; // 5 minutes max (1 second intervals)
+      let attempts = 0;
+
+      while (attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second between polls
+
+        const status = await this.getJobStatus(jobId);
+        
+        if (onProgress) {
+          onProgress(status.progress, status.status);
+        }
+
+        if (status.status === 'completed') {
+          if (!status.result) {
+            throw new Error('Job completed but no result returned');
+          }
+          return status.result;
+        }
+
+        if (status.status === 'failed') {
+          throw new Error(status.error || 'Job failed');
+        }
+
+        attempts++;
+      }
+
+      throw new Error('Job timeout - processing took too long');
     } catch (error) {
       console.error('Error processing page:', error);
       let errorMessage = 'Unknown error';
       if (error instanceof Error) {
         errorMessage = error.message || String(error);
-        // If message is "[object Object]", try to extract more details
         if (errorMessage === '[object Object]' || errorMessage.includes('[object Object]')) {
           try {
             const errorObj = error as any;
