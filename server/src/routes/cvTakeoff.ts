@@ -8,73 +8,9 @@ import express from 'express';
 import { cvTakeoffService } from '../services/cvTakeoffService';
 import { storage } from '../storage';
 import { supabase, TABLES } from '../supabase';
-import { v4 as uuidv4 } from 'uuid';
+import { cvTakeoffQueue } from '../services/queueService';
 
 const router = express.Router();
-
-// In-memory job storage for CV takeoff processing
-// In production, you might want to use Redis or a database
-interface CVTakeoffJob {
-  id: string;
-  documentId: string;
-  pageNumber: number;
-  projectId: string;
-  scaleFactor: number;
-  options?: any; // Store options from request
-  status: 'pending' | 'processing' | 'completed' | 'failed';
-  progress: number;
-  result?: any;
-  error?: string;
-  startedAt: Date;
-  completedAt?: Date;
-}
-
-const cvTakeoffJobs = new Map<string, CVTakeoffJob>();
-
-// Background processing function
-async function processCVTakeoffJob(jobId: string) {
-  const job = cvTakeoffJobs.get(jobId);
-  if (!job) {
-    console.error(`❌ Job ${jobId} not found`);
-    return;
-  }
-
-  try {
-    job.status = 'processing';
-    job.progress = 10;
-    job.startedAt = new Date();
-
-    console.log(`🔄 Processing CV takeoff job ${jobId} for page ${job.pageNumber}`);
-
-    // Use options from job, or default to detecting all elements
-    const options = job.options || {
-      detectRooms: true,
-      detectWalls: true,
-      detectDoors: true,
-      detectWindows: true
-    };
-
-    const result = await cvTakeoffService.processPage(
-      job.documentId,
-      job.pageNumber,
-      job.projectId,
-      job.scaleFactor,
-      options
-    );
-
-    job.status = 'completed';
-    job.progress = 100;
-    job.result = result;
-    job.completedAt = new Date();
-
-    console.log(`✅ CV takeoff job ${jobId} completed successfully`);
-  } catch (error) {
-    job.status = 'failed';
-    job.error = error instanceof Error ? error.message : 'Unknown error';
-    job.completedAt = new Date();
-    console.error(`❌ CV takeoff job ${jobId} failed:`, job.error);
-  }
-}
 
 // Helper function to get authenticated user
 async function getAuthenticatedUser(req: express.Request) {
@@ -216,36 +152,36 @@ router.post('/process-page', async (req, res) => {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
 
-    // Create job
-    const jobId = uuidv4();
-    const job: CVTakeoffJob = {
-      id: jobId,
-      documentId,
-      pageNumber,
-      projectId,
-      scaleFactor,
-      options: options || {
-        detectRooms: true,
-        detectWalls: true,
-        detectDoors: true,
-        detectWindows: true
-      },
-      status: 'pending',
-      progress: 0,
-      startedAt: new Date()
+    // Add job to queue
+    const jobOptions = options || {
+      detectRooms: true,
+      detectWalls: true,
+      detectDoors: true,
+      detectWindows: true
     };
 
-    cvTakeoffJobs.set(jobId, job);
+    const job = await cvTakeoffQueue.add(
+      'process-page',
+      {
+        documentId,
+        pageNumber,
+        projectId,
+        scaleFactor,
+        options: jobOptions,
+      },
+      {
+        jobId: `${documentId}-${pageNumber}-${Date.now()}`,
+        removeOnComplete: true,
+        removeOnFail: false,
+      }
+    );
 
-    // Start processing in background (don't await)
-    processCVTakeoffJob(jobId).catch(error => {
-      console.error(`❌ Background processing error for job ${jobId}:`, error);
-    });
+    console.log(`✅ [Queue] Added CV takeoff job ${job.id} to queue`);
 
     // Return immediately with job ID
     res.json({
       success: true,
-      jobId,
+      jobId: job.id,
       status: 'pending',
       message: `CV takeoff processing started for page ${pageNumber}`
     });
@@ -264,20 +200,33 @@ router.post('/process-page', async (req, res) => {
 router.get('/job/:jobId', async (req, res) => {
   try {
     const { jobId } = req.params;
-    const job = cvTakeoffJobs.get(jobId);
+    const job = await cvTakeoffQueue.getJob(jobId);
 
     if (!job) {
       return res.status(404).json({ error: 'Job not found' });
     }
 
+    const state = await job.getState();
+    const progress = job.progress || 0;
+    let result = null;
+    let error = null;
+
+    if (state === 'completed') {
+      const jobResult = await job.returnvalue;
+      result = jobResult?.result || null;
+    } else if (state === 'failed') {
+      const failedReason = job.failedReason;
+      error = failedReason || 'Job failed';
+    }
+
     res.json({
       jobId: job.id,
-      status: job.status,
-      progress: job.progress,
-      result: job.result,
-      error: job.error,
-      startedAt: job.startedAt,
-      completedAt: job.completedAt
+      status: state === 'completed' ? 'completed' : state === 'failed' ? 'failed' : state === 'active' ? 'processing' : 'pending',
+      progress: typeof progress === 'number' ? progress : 0,
+      result,
+      error,
+      startedAt: job.timestamp ? new Date(job.timestamp) : undefined,
+      completedAt: state === 'completed' || state === 'failed' ? new Date() : undefined,
     });
   } catch (error) {
     console.error('Error getting job status:', error);

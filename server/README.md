@@ -11,6 +11,11 @@ PORT=4000
 NODE_ENV=development
 FRONTEND_URL=http://localhost:3000
 
+# Redis Configuration (Required for CV Takeoff background processing)
+REDIS_URL=redis://localhost:6379
+# On Railway, add a Redis service and use the REDIS_URL from the service variables
+# Or use Redis Cloud: REDISCLOUD_URL=redis://...
+
 # Ollama API Configuration (Optional - for AI features)
 OLLAMA_BASE_URL=https://ollama.com
 OLLAMA_API_KEY=your_ollama_api_key_here
