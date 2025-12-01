@@ -146,14 +146,17 @@ class CVTakeoffService {
 
       // Convert PDF page to image using Python/PyMuPDF with metadata
       console.log(`🖼️ Converting page ${pageNumber} to image...`);
-      const IMAGE_SCALE = 2.0; // Image rendering scale
+      // Reduced scale to 1.5 to prevent memory issues on Railway free tier
+      // Scale 2.0 creates 6048x4320px images which can use 200-400MB+ memory
+      // Scale 1.5 creates ~4500x3200px images, using ~150-250MB memory (more manageable)
+      const IMAGE_SCALE = 1.5; // Reduced from 2.0 to prevent SIGTERM (memory limit) on Railway
       let conversionMetadata: { buffer: Buffer; pdfWidth: number; pdfHeight: number; imageWidth: number; imageHeight: number; imageScale: number } | null = null;
       
       try {
         conversionMetadata = await pythonPdfConverter.convertPageToBufferWithMetadata(pdfPath, pageNumber, {
           format: 'png',
-          scale: IMAGE_SCALE, // Higher resolution for better detection
-          quality: 90
+          scale: IMAGE_SCALE, // Reduced scale to prevent memory issues
+          quality: 85 // Slightly reduced quality to save memory
         });
       } catch (conversionError) {
         // Provide detailed error information
