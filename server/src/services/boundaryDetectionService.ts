@@ -256,13 +256,13 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
     
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
-    # PHASE 3: Improved titleblock/legend exclusion (relaxed to catch more rooms)
+    # PHASE 3: Very relaxed titleblock/legend exclusion (to catch more rooms)
     # Titleblocks are typically in corners or along edges with high text density
-    # Exclude smaller regions: top 15%, bottom 15%, left 10%, right 20% (titleblocks often on right)
-    exclude_top = height * 0.15
-    exclude_bottom = height * 0.85
-    exclude_left = width * 0.10
-    exclude_right = width * 0.80  # Less aggressive right-side exclusion
+    # Exclude even smaller regions: top 10%, bottom 10%, left 5%, right 15% (titleblocks often on right)
+    exclude_top = height * 0.10
+    exclude_bottom = height * 0.90
+    exclude_left = width * 0.05
+    exclude_right = width * 0.85  # Much less aggressive right-side exclusion
     
     # Create a mask for titleblock regions using edge density (text creates high edge density)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
@@ -312,14 +312,22 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
     dilated = cv2.dilate(edges, kernel, iterations=1)
     closed = cv2.erode(dilated, kernel, iterations=1)
     
-    # PHASE 3: Use RETR_EXTERNAL first to get only outer boundaries (rooms, not interior spaces)
-    # This naturally groups connected spaces (like hotel room + bathroom) into one room
-    contours, hierarchy = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # PHASE 3: Use RETR_TREE to get all contours (including nested ones)
+    # This helps find rooms even when they're not perfectly closed or have interior elements
+    # Fallback to RETR_EXTERNAL if we get too many contours
+    contours, hierarchy = cv2.findContours(closed, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    
+    # If we get too many contours, use RETR_EXTERNAL instead for better performance
+    if len(contours) > 500:
+        print(f"Too many contours ({len(contours)}), using RETR_EXTERNAL instead", file=sys.stderr)
+        contours, hierarchy = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    print(f"Found {len(contours)} contours for room detection", file=sys.stderr)
     
     rooms = []
     min_area_pixels = (min_area_sf / (scale_factor ** 2)) if scale_factor > 0 else 1000
-    # Maximum area to filter out the entire floor plan - lowered to 50% to exclude full page
-    max_area_pixels = (width * height) * 0.5
+    # Maximum area to filter out the entire floor plan - increased to 70% to allow larger rooms
+    max_area_pixels = (width * height) * 0.7
     
     # PHASE 3: Pre-filter contours by area and titleblock exclusion
     # Calculate areas first and sort to process likely rooms first
@@ -334,21 +342,22 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
         contour = contours[i]
         x, y, w, h = cv2.boundingRect(contour)
         
-        # PHASE 3: Relaxed titleblock exclusion (to catch more rooms while still avoiding titleblocks)
+        # PHASE 3: Very relaxed titleblock exclusion (to catch more rooms)
         # Check if contour overlaps significantly with titleblock mask
         contour_mask = np.zeros((height, width), dtype=np.uint8)
         cv2.drawContours(contour_mask, [contour], -1, 255, -1)
         titleblock_overlap = cv2.bitwise_and(contour_mask, titleblock_mask)
         overlap_ratio = np.sum(titleblock_overlap > 0) / max(1, np.sum(contour_mask > 0))
         
-        # If more than 40% of contour is in titleblock regions, skip it (relaxed from 20%)
-        if overlap_ratio > 0.4:
+        # If more than 70% of contour is in titleblock regions, skip it (very relaxed from 40%)
+        # This allows rooms that partially overlap with titleblock areas
+        if overlap_ratio > 0.7:
             continue
         
-        # Check if bounding box is in exclusion zones
+        # Check if bounding box is in exclusion zones (very relaxed)
         if (y < exclude_top or y + h > exclude_bottom or 
             x < exclude_left or x + w > exclude_right):
-            # If more than 60% of bounding box is in exclusion zones, skip (relaxed from 40%)
+            # If more than 80% of bounding box is in exclusion zones, skip (very relaxed from 60%)
             exclusion_overlap = 0
             if y < exclude_top:
                 exclusion_overlap += min(h, exclude_top - y) * w
@@ -359,7 +368,7 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
             if x + w > exclude_right:
                 exclusion_overlap += min(w, (x + w) - exclude_right) * h
             
-            if exclusion_overlap > (w * h * 0.6):  # Relaxed from 0.4 to 0.6
+            if exclusion_overlap > (w * h * 0.8):  # Very relaxed from 0.6 to 0.8
                 continue
         
         filtered_indices.append(i)
@@ -384,9 +393,9 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
         x, y, w, h = cv2.boundingRect(contour)
         aspect_ratio = max(w, h) / min(w, h) if min(w, h) > 0 else 0
         
-        # PHASE 3: Relaxed aspect ratio - rooms should be reasonably rectangular
+        # PHASE 3: Very relaxed aspect ratio - rooms should be reasonably rectangular
         # Very elongated shapes are likely corridors or dimension strings
-        if aspect_ratio > 12:  # Relaxed from 10 to 12 to catch more room shapes
+        if aspect_ratio > 15:  # Very relaxed from 12 to 15 to catch more room shapes
             continue
         
         # PHASE 3: Validate that room is bounded by walls (optional requirement)
@@ -416,10 +425,10 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
                     if np.any(wall_mask[y_min:y_max, x_min:x_max] > 0):
                         wall_alignment_count += 1
             
-            # PHASE 3: At least 20% of room boundary should align with walls (relaxed from 25%)
+            # PHASE 3: At least 15% of room boundary should align with walls (very relaxed from 20%)
             # This ensures rooms are somewhat bounded by detected walls, but allows more flexibility
             alignment_ratio = wall_alignment_count / num_check_points if num_check_points > 0 else 0
-            if alignment_ratio < 0.20:
+            if alignment_ratio < 0.15:
                 continue  # Room is not properly bounded by walls, skip it
         # If we have fewer than 4 walls or no walls, skip wall alignment check entirely
         
@@ -430,9 +439,9 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
             end_point = contour[-1][0]
             closure_dist = np.sqrt((start_point[0] - end_point[0])**2 + (start_point[1] - end_point[1])**2)
             perimeter = cv2.arcLength(contour, True)
-            # PHASE 3: Relaxed closure - rooms should be reasonably enclosed
+            # PHASE 3: Very relaxed closure - rooms should be reasonably enclosed
             # Some rooms may have small gaps (doors, openings), but not too large
-            if perimeter > 0 and closure_dist / perimeter > 0.20:  # Relaxed from 0.15 to 0.20
+            if perimeter > 0 and closure_dist / perimeter > 0.25:  # Very relaxed from 0.20 to 0.25
                 continue
         
         # Simplify contour (reduce vertices while preserving shape)
