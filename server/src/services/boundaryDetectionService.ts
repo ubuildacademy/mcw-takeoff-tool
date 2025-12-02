@@ -408,7 +408,9 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
         
         # PHASE 3: Very relaxed aspect ratio - rooms should be reasonably rectangular
         # Very elongated shapes are likely corridors or dimension strings
-        if aspect_ratio > 15:  # Very relaxed from 12 to 15 to catch more room shapes
+        # Further relaxed from 15 to 20 to catch more room shapes
+        if aspect_ratio > 20:
+            print(f"  Rejected contour {i}: aspect ratio too high ({aspect_ratio:.2f})", file=sys.stderr)
             continue
         
         # PHASE 3: Validate that room is bounded by walls (optional requirement)
@@ -442,6 +444,7 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
             # This ensures rooms are somewhat bounded by detected walls, but allows more flexibility
             alignment_ratio = wall_alignment_count / num_check_points if num_check_points > 0 else 0
             if alignment_ratio < 0.15:
+                print(f"  Rejected contour {i}: wall alignment too low ({alignment_ratio:.3f})", file=sys.stderr)
                 continue  # Room is not properly bounded by walls, skip it
         # If we have fewer than 4 walls or no walls, skip wall alignment check entirely
         
@@ -454,7 +457,9 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
             perimeter = cv2.arcLength(contour, True)
             # PHASE 3: Very relaxed closure - rooms should be reasonably enclosed
             # Some rooms may have small gaps (doors, openings), but not too large
-            if perimeter > 0 and closure_dist / perimeter > 0.25:  # Very relaxed from 0.20 to 0.25
+            # Further relaxed from 0.25 to 0.40 to catch rooms with larger openings
+            if perimeter > 0 and closure_dist / perimeter > 0.40:
+                print(f"  Rejected contour {i}: closure check failed (closure_dist/perimeter = {closure_dist/perimeter:.3f})", file=sys.stderr)
                 continue
         
         # Simplify contour (reduce vertices while preserving shape)
@@ -462,8 +467,9 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
         approx = cv2.approxPolyDP(contour, epsilon_factor, True)
         
         # Skip if simplified contour has too few points (likely noise)
-        # Relaxed from 4 to 3 to catch simpler shapes
-        if len(approx) < 3:
+        # Further relaxed from 3 to 2 to catch even simpler shapes
+        if len(approx) < 2:
+            print(f"  Rejected contour {i}: simplified contour has too few points ({len(approx)})", file=sys.stderr)
             continue
         
         # Convert to normalized coordinates (0-1)
@@ -494,6 +500,8 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
         aspect_score = 1.0 if aspect_ratio < 3 else max(0.5, 1.0 - (aspect_ratio - 3) * 0.1)
         
         confidence = min(0.95, 0.5 + regularity * 0.3) * size_score * aspect_score
+        
+        print(f"  Accepted contour {i}: area={area_sf:.1f} SF, aspect={aspect_ratio:.2f}, confidence={confidence:.3f}", file=sys.stderr)
         
         rooms.append({
             "points": points,
