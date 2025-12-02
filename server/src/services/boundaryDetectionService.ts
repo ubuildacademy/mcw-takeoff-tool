@@ -312,9 +312,10 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
     edges = cv2.Canny(blurred, 50, 150)
     
     # Find regions with very high edge density (titleblocks, legends, notes)
-    kernel_large = np.ones((25, 25), np.float32) / 625  # Larger kernel for titleblock detection
+    # Use smaller kernel and higher threshold to be more selective - only mark dense text regions
+    kernel_large = np.ones((15, 15), np.float32) / 225  # Smaller kernel for more precise detection
     edge_density = cv2.filter2D((edges > 0).astype(np.uint8), -1, kernel_large)
-    titleblock_mask = (edge_density > 0.6).astype(np.uint8)  # Higher threshold to be more selective
+    titleblock_mask = (edge_density > 0.8).astype(np.uint8)  # Much higher threshold (0.8) to only catch very dense text regions
     
     # Also mark edge regions as potential titleblocks
     titleblock_mask[0:int(exclude_top), :] = 1
@@ -369,8 +370,8 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
     
     rooms = []
     min_area_pixels = (min_area_sf / (scale_factor ** 2)) if scale_factor > 0 else 1000
-    # Maximum area to filter out the entire floor plan - increased to 70% to allow larger rooms
-    max_area_pixels = (width * height) * 0.7
+    # Maximum area to filter out the entire floor plan - increased to 90% to allow larger rooms and floor plans
+    max_area_pixels = (width * height) * 0.9
     
     # PHASE 3: Pre-filter contours by area and titleblock exclusion
     # Calculate areas first and sort to process likely rooms first
@@ -394,10 +395,10 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
         titleblock_overlap = cv2.bitwise_and(contour_mask, titleblock_mask)
         overlap_ratio = np.sum(titleblock_overlap > 0) / max(1, np.sum(contour_mask > 0))
         
-        # If more than 70% of contour is in titleblock regions, skip it (very relaxed from 40%)
+        # If more than 90% of contour is in titleblock regions, skip it (very relaxed to catch more rooms)
         # This allows rooms that partially overlap with titleblock areas
-        if overlap_ratio > 0.7:
-            print(f"  Contour {i}: rejected - titleblock overlap {overlap_ratio:.2f} > 0.7", file=sys.stderr)
+        if overlap_ratio > 0.9:
+            print(f"  Contour {i}: rejected - titleblock overlap {overlap_ratio:.2f} > 0.9", file=sys.stderr)
             continue
         
         # Check if bounding box is in exclusion zones (very relaxed)
