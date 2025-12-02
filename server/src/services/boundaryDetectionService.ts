@@ -372,6 +372,12 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
     blurred = cv2.GaussianBlur(gray, (3, 3), 0)
     edges = cv2.Canny(blurred, 50, 150)
     
+    # PHASE 3: Remove dimension string edges from edge detection
+    # Dimension strings create false boundaries, so exclude them
+    if dimension_mask is not None:
+        # Remove edges that are in dimension string regions
+        edges = cv2.bitwise_and(edges, 255 - dimension_mask)
+    
     # PHASE 3: If we have wall mask, use it to enhance edges
     if wall_mask is not None:
         # Combine edges with wall mask (walls should have strong edges)
@@ -442,19 +448,31 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
         
         # Additional check: filter out very small contours that are likely note boxes or dimension artifacts
         # These are typically small rectangular areas with high text density
-        if area < min_area_pixels * 1.5:  # If area is close to minimum, check more carefully
+        # Increased threshold to catch larger note boxes
+        if area < min_area_pixels * 2.5:  # Check more contours for note boxes
             # Check if it's a small rectangular box (likely a note box)
             box_ratio = area / (w * h) if (w * h) > 0 else 0
-            if box_ratio > 0.7 and (w < 100 or h < 100):  # Small, compact rectangle
+            # Increased size threshold to catch larger note boxes (up to 150px)
+            if box_ratio > 0.6 and (w < 150 or h < 150):  # Small to medium, compact rectangle
                 # Check if it has high text density (likely a note box)
                 contour_region = gray[y:y+h, x:x+w]
                 if contour_region.size > 0:
                     # High edge density in small area = likely text box
                     region_edges = cv2.Canny(contour_region, 50, 150)
                     edge_density = np.sum(region_edges > 0) / max(1, region_edges.size)
-                    if edge_density > 0.3:  # High edge density = text
-                        print(f"  Contour {i}: rejected - small text box (area={area:.0f}, edge_density={edge_density:.2f})", file=sys.stderr)
+                    # Lower threshold to catch more text boxes (0.25 instead of 0.3)
+                    if edge_density > 0.25:  # High edge density = text
+                        print(f"  Contour {i}: rejected - text box (area={area:.0f}, size={w}x{h}, edge_density={edge_density:.2f})", file=sys.stderr)
                         continue
+                
+                # Also check if it's in a high text density region (using exclusion mask)
+                contour_mask = np.zeros((height, width), dtype=np.uint8)
+                cv2.drawContours(contour_mask, [contour], -1, 255, -1)
+                text_overlap = cv2.bitwise_and(contour_mask, exclusion_mask)
+                text_overlap_ratio = np.sum(text_overlap > 0) / max(1, np.sum(contour_mask > 0))
+                if text_overlap_ratio > 0.5:  # More than 50% overlap with text regions
+                    print(f"  Contour {i}: rejected - note box in text region (text_overlap={text_overlap_ratio:.2f})", file=sys.stderr)
+                    continue
         
         # Check if bounding box is in exclusion zones (very relaxed)
         if (y < exclude_top or y + h > exclude_bottom or 
@@ -743,18 +761,39 @@ def detect_walls(image_path, scale_factor, min_length_lf):
                     near_text_count += 1
         
         # PHASE 3: Filter dimension strings more aggressively
-        # If line is short AND (passes through text OR is near text), likely a dimension string
+        # Dimension strings are typically:
+        # - Short lines (extension lines, dimension lines) OR very long horizontal/vertical lines near edges
+        # - Near text/numbers
+        # - Horizontal or vertical
+        # - Near the edges of the drawing (where dimensions are placed)
         is_short_line = length_pixels < min_length_pixels * 2  # Short relative to min wall length
         text_ratio = text_intersections / num_samples
         near_text_ratio = near_text_count / num_samples
         
-        # Dimension strings: short, horizontal/vertical, and near text
-        if is_short_line and (is_horizontal or is_vertical) and (text_ratio > 0.2 or near_text_ratio > 0.5):
-            continue
+        # Check if line is near edges (dimension strings are typically near drawing edges)
+        line_center_x = (x1 + x2) / 2
+        line_center_y = (y1 + y2) / 2
+        edge_distance = min(line_center_x, line_center_y, width - line_center_x, height - line_center_y)
+        is_near_edge = edge_distance < min(width, height) * 0.15  # Within 15% of edge
         
-        # If more than 40% of the line passes through text regions, skip it (stricter)
-        if text_ratio > 0.4:
-            continue
+        # Check if line is near edges (dimension strings are typically near drawing edges)
+        line_center_x = (x1 + x2) / 2
+        line_center_y = (y1 + y2) / 2
+        edge_distance = min(line_center_x, line_center_y, width - line_center_x, height - line_center_y)
+        is_near_edge = edge_distance < min(width, height) * 0.20  # Within 20% of edge
+        
+        # More aggressive dimension string filtering:
+        # 1. Short lines near text (dimension extension lines)
+        # 2. Lines near edges that are horizontal/vertical and near text (dimension strings)
+        # 3. Very long horizontal/vertical lines near edges (dimension baselines)
+        # 4. Any line with high text intersection (>30%)
+        is_very_long = length_pixels > min(width, height) * 0.25  # Very long line
+        
+        if (is_short_line and (text_ratio > 0.15 or near_text_ratio > 0.3)) or \
+           (is_near_edge and (is_horizontal or is_vertical) and (text_ratio > 0.1 or near_text_ratio > 0.2)) or \
+           (is_very_long and is_near_edge and (is_horizontal or is_vertical)) or \
+           (text_ratio > 0.3):  # Any line with >30% text intersection
+            continue  # Skip dimension string lines
         
         # PHASE 3: Filter out dashed lines - walls are solid or hatched
         # Sample points along the line and check edge continuity
