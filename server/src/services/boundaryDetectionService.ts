@@ -1157,12 +1157,14 @@ def detect_text_ocr(image_path):
             
             # Pattern 3: Name + Number format (e.g., "OFFICE 107", "FITNESS ROOM 123")
             # Matches: [WORD(S)] [3-4 digit number]
-            name_number_pattern = r'^[A-Z][A-Z0-9\s\-\'"]+\s+(\d{3,4})$'
+            # Use regular string to properly escape quotes
+            name_number_pattern = "^[A-Z][A-Z0-9\\s\\-'\"]+\\s+(\\d{3,4})$"
             if re.match(name_number_pattern, text_upper):
                 is_room_label = True
             
             # Pattern 4: Unit codes (e.g., "Unit 'QQ-A' 202", "QQ-B 203")
-            unit_pattern = r"(unit\s*['\"]?[A-Z0-9\-]+['\"]?\s*\d+)|([A-Z]{1,3}[-'][A-Z]\s*\d{3})"
+            # Use regular string to properly escape quotes
+            unit_pattern = "(unit\\s*['\"]?[A-Z0-9\\-]+['\"]?\\s*\\d+)|([A-Z]{1,3}[-'][A-Z]\\s*\\d{3})"
             if re.search(unit_pattern, text_upper, re.IGNORECASE):
                 is_room_label = True
             
