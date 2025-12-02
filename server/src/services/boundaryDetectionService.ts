@@ -378,8 +378,10 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
     
     # Filter by area and titleblock exclusion
     filtered_indices = []
+    print(f"Pre-filtering {len(contour_areas)} contours (min_area={min_area_pixels:.0f}, max_area={max_area_pixels:.0f})", file=sys.stderr)
     for i, area in contour_areas:
         if area < min_area_pixels or area > max_area_pixels:
+            print(f"  Contour {i}: rejected - area {area:.0f} outside range [{min_area_pixels:.0f}, {max_area_pixels:.0f}]", file=sys.stderr)
             continue
         
         contour = contours[i]
@@ -395,6 +397,7 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
         # If more than 70% of contour is in titleblock regions, skip it (very relaxed from 40%)
         # This allows rooms that partially overlap with titleblock areas
         if overlap_ratio > 0.7:
+            print(f"  Contour {i}: rejected - titleblock overlap {overlap_ratio:.2f} > 0.7", file=sys.stderr)
             continue
         
         # Check if bounding box is in exclusion zones (very relaxed)
@@ -411,9 +414,12 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
             if x + w > exclude_right:
                 exclusion_overlap += min(w, (x + w) - exclude_right) * h
             
+            exclusion_ratio = exclusion_overlap / (w * h) if (w * h) > 0 else 0
             if exclusion_overlap > (w * h * 0.8):  # Very relaxed from 0.6 to 0.8
+                print(f"  Contour {i}: rejected - exclusion zone overlap {exclusion_ratio:.2f} > 0.8", file=sys.stderr)
                 continue
         
+        print(f"  Contour {i}: passed pre-filter (area={area:.0f}, bbox=({x},{y},{w},{h}))", file=sys.stderr)
         filtered_indices.append(i)
     
     # Sort by area (largest first) and limit to top 100
