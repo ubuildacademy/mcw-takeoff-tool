@@ -389,9 +389,10 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
         if aspect_ratio > 12:  # Relaxed from 10 to 12 to catch more room shapes
             continue
         
-        # PHASE 3: Validate that room is bounded by walls (relaxed requirement)
-        # Rooms should ideally be enclosed by detected walls, but allow more flexibility
-        if wall_mask is not None:
+        # PHASE 3: Validate that room is bounded by walls (optional requirement)
+        # Rooms should ideally be enclosed by detected walls, but make this optional
+        # Only enforce wall alignment if we have a reasonable number of walls detected
+        if wall_mask is not None and exterior_walls is not None and len(exterior_walls) >= 4:  # Only enforce if we have at least 4 walls
             # Check if room boundary aligns with walls
             # Sample points along the contour and check if they're near walls
             contour_points = contour.reshape(-1, 2)
@@ -415,11 +416,12 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
                     if np.any(wall_mask[y_min:y_max, x_min:x_max] > 0):
                         wall_alignment_count += 1
             
-            # PHASE 3: At least 25% of room boundary should align with walls (relaxed from 40%)
+            # PHASE 3: At least 20% of room boundary should align with walls (relaxed from 25%)
             # This ensures rooms are somewhat bounded by detected walls, but allows more flexibility
             alignment_ratio = wall_alignment_count / num_check_points if num_check_points > 0 else 0
-            if alignment_ratio < 0.25:
+            if alignment_ratio < 0.20:
                 continue  # Room is not properly bounded by walls, skip it
+        # If we have fewer than 4 walls or no walls, skip wall alignment check entirely
         
         # Check if contour is approximately closed (rooms should be enclosed)
         # Calculate how close the start and end points are
@@ -659,9 +661,9 @@ def detect_walls(image_path, scale_factor, min_length_lf):
             "angle": np.arctan2(y2 - y1, x2 - x1)  # Store angle for parallel matching
         })
     
-    if len(segments) < 2:
-        print(f"No segments found for wall pairing (need at least 2, found {len(segments)})", file=sys.stderr)
-        return []  # Need at least 2 lines to form a wall pair
+    if len(segments) == 0:
+        print(f"No segments found for wall detection", file=sys.stderr)
+        return []  # No line segments found at all
     
     print(f"Found {len(segments)} candidate segments for wall pairing", file=sys.stderr)
     
@@ -816,10 +818,38 @@ def detect_walls(image_path, scale_factor, min_length_lf):
     
     print(f"Found {len(wall_pairs)} wall pairs from {len(segments)} segments", file=sys.stderr)
     
+    # If no wall pairs found, fallback to using single line segments as walls
+    # This handles cases where walls are drawn as single lines or pairing logic is too strict
     if len(wall_pairs) == 0:
-        print("No valid wall pairs found - wall thickness range may be too restrictive", file=sys.stderr)
-        print(f"Wall thickness range: {min_wall_thickness_pixels:.1f} to {max_wall_thickness_pixels:.1f} pixels", file=sys.stderr)
-        return []  # No valid wall pairs found
+        print("No valid wall pairs found - falling back to single line segments", file=sys.stderr)
+        print(f"Wall thickness range was: {min_wall_thickness_pixels:.1f} to {max_wall_thickness_pixels:.1f} pixels", file=sys.stderr)
+        
+        # Use single line segments as walls (assume default wall thickness)
+        # Filter segments by length and convert to normalized wall format
+        default_wall_thickness = 0.5  # Assume 6" wall thickness in feet
+        single_wall_segments = []
+        
+        for seg in segments:
+            length_lf = seg["length"] * scale_factor
+            if length_lf >= min_length_lf:
+                # Convert to normalized coordinates (0-1) like the merged walls
+                single_wall_segments.append({
+                    "start": {"x": float(seg["start"][0]) / width, "y": float(seg["start"][1]) / height},
+                    "end": {"x": float(seg["end"][0]) / width, "y": float(seg["end"][1]) / height},
+                    "length": round(length_lf, 2),
+                    "thickness": default_wall_thickness,  # Default thickness in feet
+                    "confidence": min(0.95, 0.7 + (length_lf / 200) * 0.1)  # Lower confidence for single lines
+                })
+        
+        if len(single_wall_segments) > 0:
+            print(f"Using {len(single_wall_segments)} single line segments as walls", file=sys.stderr)
+            # Sort by length (longest first) and limit to reasonable number
+            single_wall_segments.sort(key=lambda w: w["length"], reverse=True)
+            single_wall_segments = single_wall_segments[:100]  # Limit to top 100
+            return single_wall_segments  # Return directly, skip merging
+        else:
+            print("No valid single line segments found either", file=sys.stderr)
+            return []  # No valid walls found at all
     
     # PHASE 4: Merge connected wall pairs into continuous walls
     CONNECTION_THRESHOLD = 20  # pixels (increased for better corner detection)
