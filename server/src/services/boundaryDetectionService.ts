@@ -328,19 +328,23 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
     dimension_mask = np.zeros((height, width), dtype=np.uint8)
     
     # Detect horizontal lines (dimension strings are often horizontal)
-    horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (40, 1))  # Long horizontal kernel
+    # Use longer kernel to catch dimension baselines, but be more selective
+    horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (60, 1))  # Longer horizontal kernel
     horizontal_lines = cv2.morphologyEx(edges, cv2.MORPH_OPEN, horizontal_kernel)
-    horizontal_lines = cv2.dilate(horizontal_lines, np.ones((3, 3), np.uint8), iterations=3)
+    # Less aggressive dilation to avoid removing room boundaries
+    horizontal_lines = cv2.dilate(horizontal_lines, np.ones((2, 2), np.uint8), iterations=2)
     dimension_mask = cv2.bitwise_or(dimension_mask, horizontal_lines)
     
     # Detect vertical lines (some dimension strings are vertical)
-    vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 40))  # Long vertical kernel
+    vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 60))  # Longer vertical kernel
     vertical_lines = cv2.morphologyEx(edges, cv2.MORPH_OPEN, vertical_kernel)
-    vertical_lines = cv2.dilate(vertical_lines, np.ones((3, 3), np.uint8), iterations=3)
+    # Less aggressive dilation
+    vertical_lines = cv2.dilate(vertical_lines, np.ones((2, 2), np.uint8), iterations=2)
     dimension_mask = cv2.bitwise_or(dimension_mask, vertical_lines)
     
     # Dilate dimension mask to exclude areas near dimension strings
-    dimension_mask = cv2.dilate(dimension_mask, np.ones((15, 15), np.uint8), iterations=2)
+    # Reduced dilation to avoid removing too much (from 15x15 iterations=2 to 8x8 iterations=1)
+    dimension_mask = cv2.dilate(dimension_mask, np.ones((8, 8), np.uint8), iterations=1)
     
     # Combine titleblock and dimension masks
     exclusion_mask = cv2.bitwise_or(titleblock_mask, dimension_mask)
@@ -440,37 +444,38 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
         exclusion_overlap = cv2.bitwise_and(contour_mask, exclusion_mask)
         overlap_ratio = np.sum(exclusion_overlap > 0) / max(1, np.sum(contour_mask > 0))
         
-        # If more than 80% of contour is in exclusion regions (titleblock/dimensions), skip it
-        # This allows rooms that partially overlap with exclusion areas but filters out dimension artifacts
-        if overlap_ratio > 0.8:
-            print(f"  Contour {i}: rejected - exclusion zone overlap {overlap_ratio:.2f} > 0.8", file=sys.stderr)
+        # If more than 95% of contour is in exclusion regions (titleblock/dimensions), skip it
+        # Relaxed from 0.8 to 0.95 to allow rooms near dimension strings but still filter out dimension artifacts
+        if overlap_ratio > 0.95:
+            print(f"  Contour {i}: rejected - exclusion zone overlap {overlap_ratio:.2f} > 0.95", file=sys.stderr)
             continue
         
         # Additional check: filter out very small contours that are likely note boxes or dimension artifacts
         # These are typically small rectangular areas with high text density
-        # Increased threshold to catch larger note boxes
-        if area < min_area_pixels * 2.5:  # Check more contours for note boxes
+        # Only check very small contours to avoid filtering out actual rooms
+        if area < min_area_pixels * 1.2:  # Only check contours very close to minimum
             # Check if it's a small rectangular box (likely a note box)
             box_ratio = area / (w * h) if (w * h) > 0 else 0
-            # Increased size threshold to catch larger note boxes (up to 150px)
-            if box_ratio > 0.6 and (w < 150 or h < 150):  # Small to medium, compact rectangle
+            # Only filter very small boxes (less than 80px) with high text density
+            if box_ratio > 0.7 and (w < 80 or h < 80):  # Very small, compact rectangle
                 # Check if it has high text density (likely a note box)
                 contour_region = gray[y:y+h, x:x+w]
                 if contour_region.size > 0:
                     # High edge density in small area = likely text box
                     region_edges = cv2.Canny(contour_region, 50, 150)
                     edge_density = np.sum(region_edges > 0) / max(1, region_edges.size)
-                    # Lower threshold to catch more text boxes (0.25 instead of 0.3)
-                    if edge_density > 0.25:  # High edge density = text
-                        print(f"  Contour {i}: rejected - text box (area={area:.0f}, size={w}x{h}, edge_density={edge_density:.2f})", file=sys.stderr)
+                    # Higher threshold to avoid filtering actual rooms (0.35 instead of 0.25)
+                    if edge_density > 0.35:  # Very high edge density = text box
+                        print(f"  Contour {i}: rejected - small text box (area={area:.0f}, size={w}x{h}, edge_density={edge_density:.2f})", file=sys.stderr)
                         continue
                 
                 # Also check if it's in a high text density region (using exclusion mask)
+                # Only reject if almost entirely in text region
                 contour_mask = np.zeros((height, width), dtype=np.uint8)
                 cv2.drawContours(contour_mask, [contour], -1, 255, -1)
                 text_overlap = cv2.bitwise_and(contour_mask, exclusion_mask)
                 text_overlap_ratio = np.sum(text_overlap > 0) / max(1, np.sum(contour_mask > 0))
-                if text_overlap_ratio > 0.5:  # More than 50% overlap with text regions
+                if text_overlap_ratio > 0.9:  # More than 90% overlap with text regions (very strict)
                     print(f"  Contour {i}: rejected - note box in text region (text_overlap={text_overlap_ratio:.2f})", file=sys.stderr)
                     continue
         
@@ -1338,19 +1343,44 @@ def detect_text_ocr(image_path):
                 re.search(unit_code, text_upper, re.IGNORECASE)):
                 is_room_label = True
             
+            # EXCLUDE: Gridlines and section tags (e.g., "A6.01", "A4.05", "16A A4.05", "03", "01 A6.01")
+            # These are typically alphanumeric codes with dots or small numbers in circles
+            is_gridline_or_section = False
+            # Pattern: Letter(s) + number(s) + dot + number(s) - e.g., "A6.01", "A4.05"
+            if re.match(r'^[A-Z]\d+\.\d+$', text_upper):
+                is_gridline_or_section = True
+            # Pattern: Number(s) + Letter(s) + space + Letter + number + dot + number - e.g., "16A A4.05"
+            if re.match(r'^\d+[A-Z]\s+[A-Z]\d+\.\d+$', text_upper):
+                is_gridline_or_section = True
+            # Pattern: Small numbers in circles (typically 1-2 digits) - e.g., "03", "01", "07"
+            if text.isdigit() and len(text) <= 2:
+                # Check if it's very small (likely a circle annotation)
+                if w < 30 and h < 30:  # Very small text = likely annotation
+                    is_gridline_or_section = True
+            # Pattern: Number + Letter + dot + number - e.g., "01 A6.01", "02 A6.02"
+            if re.match(r'^\d+\s+[A-Z]\d+\.\d+$', text_upper):
+                is_gridline_or_section = True
+            
+            if is_gridline_or_section:
+                text_type = 'annotation'  # Mark as annotation, not room label
+                is_room_label = False
+            
             # Pattern 5: Standalone 3-4 digit numbers (likely room numbers)
-            # But exclude if it's clearly a dimension or in titleblock area
-            if text.replace('.', '').replace('-', '').isdigit() and 3 <= len(text) <= 4:
+            # But exclude if it's clearly a dimension, gridline, or in titleblock area
+            if not is_gridline_or_section and text.replace('.', '').replace('-', '').isdigit() and 3 <= len(text) <= 4:
                 # Check if it's in titleblock region (right 20% or bottom 20%)
                 if x_norm < 0.8 and y_norm < 0.8:  # Not in titleblock
                     is_room_label = True
             
             # Pattern 6: Room abbreviations (BR, BA, KT, OF, etc.)
-            room_abbrevs = ['br', 'ba', 'kt', 'lr', 'dr', 'of', 'cl', 'st', 'el', 'lb', 'vb', 'hk', 'la']
-            if text_lower in room_abbrevs or re.match(r'^[A-Z]{1,3}\s*\d+$', text_upper):
-                is_room_label = True
+            # But exclude if it matches gridline patterns
+            if not is_gridline_or_section:
+                room_abbrevs = ['br', 'ba', 'kt', 'lr', 'dr', 'of', 'cl', 'st', 'el', 'lb', 'vb', 'hk', 'la']
+                if text_lower in room_abbrevs or re.match(r'^[A-Z]{1,3}\s*\d+$', text_upper):
+                    is_room_label = True
             
             # Exclude dimensions (has units) and very long text (notes)
+            # Note: gridlines/section tags are already marked as 'annotation' above
             if has_dimension_units:
                 text_type = 'dimension'
             elif len(text) > 25:
@@ -1359,6 +1389,7 @@ def detect_text_ocr(image_path):
                 text_type = 'room_label'
             elif any(char.isdigit() for char in text) and ('ft' in text_lower or 'in' in text_lower or "'" in text or '"' in text):
                 text_type = 'dimension'
+            # If already marked as annotation (gridline/section), keep that type
             
             text_elements.append({
                 "text": text,
