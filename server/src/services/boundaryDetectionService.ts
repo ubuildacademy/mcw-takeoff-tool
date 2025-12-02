@@ -247,8 +247,10 @@ try:
                 timeout=5
             )
             if result.returncode == 0 and result.stdout.strip():
-                tesseract_path = result.stdout.strip().split('\\n')[0]
+                tesseract_path = result.stdout.strip().split('\n')[0]
                 print(f"Found tesseract in Nix store: {tesseract_path}", file=sys.stderr)
+            else:
+                print(f"Tesseract search in Nix store returned: returncode={result.returncode}, stdout={result.stdout[:200]}", file=sys.stderr)
         except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
             print(f"Could not find tesseract in Nix store: {str(e)}", file=sys.stderr)
     
