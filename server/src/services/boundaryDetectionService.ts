@@ -223,11 +223,24 @@ import numpy as np
 import json
 import sys
 import os
+import re
 
-# OCR/Tesseract is disabled for now - CV detection works without it
-# Can be re-enabled later if needed
+# Try to enable OCR/Tesseract if available
 TESSERACT_AVAILABLE = False
 TESSERACT_BINARY_AVAILABLE = False
+
+try:
+    import pytesseract
+    TESSERACT_AVAILABLE = True
+    # Check if tesseract binary is available
+    try:
+        pytesseract.get_tesseract_version()
+        TESSERACT_BINARY_AVAILABLE = True
+        print("Tesseract OCR is available", file=sys.stderr)
+    except:
+        print("Tesseract Python library available but binary not found", file=sys.stderr)
+except ImportError:
+    print("Tesseract OCR not available (pytesseract not installed)", file=sys.stderr)
 
 def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=None):
     """Detect room boundaries - rooms are enclosed spaces surrounded by EXTERIOR walls only
@@ -1070,6 +1083,7 @@ def detect_openings(image_path, scale_factor):
 def detect_text_ocr(image_path):
     """Detect text using OCR with bounding boxes"""
     if not TESSERACT_AVAILABLE or not TESSERACT_BINARY_AVAILABLE:
+        print("Tesseract not available, skipping OCR", file=sys.stderr)
         return []
     
     try:
@@ -1114,22 +1128,65 @@ def detect_text_ocr(image_path):
             w_norm = float(w) / width
             h_norm = float(h) / height
             
-            # Classify text type based on patterns
-            text_lower = text.lower()
+            # Classify text type based on patterns (improved for architectural drawings)
+            text_lower = text.lower().strip()
+            text_upper = text.upper().strip()
             text_type = 'other'
             
-            # Room labels: numbers, "room", "bedroom", etc.
-            if any(keyword in text_lower for keyword in ['room', 'bedroom', 'bath', 'kitchen', 'closet', 'office', 'hall', 'corridor']):
-                text_type = 'room_label'
-            elif text.replace('.', '').replace('-', '').isdigit() and len(text) <= 4:
-                # Short numeric strings are likely room numbers
-                text_type = 'room_label'
-            elif any(char in text for char in ["'", '"', 'ft', 'in', 'cm', 'm']) or any(char.isdigit() for char in text):
-                # Contains measurement units or numbers - likely dimension
+            # Skip if text is clearly a dimension (has units)
+            has_dimension_units = any(unit in text_lower for unit in ["'", '"', 'ft', 'in', 'cm', 'm', 'feet', 'inch', 'meter'])
+            
+            # Improved room label detection patterns based on actual floor plans
+            is_room_label = False
+            
+            # Pattern 1: Explicit room keywords (ROOM, UNIT, SPACE, AREA, etc.)
+            room_keywords = ['room', 'rm', 'unit', 'space', 'area', 'zone', 'lobby', 'vestibule', 'vest']
+            if any(keyword in text_lower for keyword in room_keywords):
+                is_room_label = True
+            
+            # Pattern 2: Room type names (OFFICE, RESTROOM, LOUNGE, etc.)
+            room_types = [
+                'office', 'restroom', 'bathroom', 'bath', 'kitchen', 'bedroom', 'closet', 
+                'hall', 'corridor', 'stair', 'elevator', 'lounge', 'breakroom', 'laundry',
+                'storage', 'fitness', 'game', 'trash', 'fire', 'elect', 'linen', 'prep',
+                'hydration', 'dry', 'goods', 'women', 'men', 'accessible', 'housekeeping',
+                'mech', 'command', 'center', 'work', 'eat', 'drink', 'mailroom', 'pbx'
+            ]
+            if any(room_type in text_lower for room_type in room_types):
+                is_room_label = True
+            
+            # Pattern 3: Name + Number format (e.g., "OFFICE 107", "FITNESS ROOM 123")
+            # Matches: [WORD(S)] [3-4 digit number]
+            name_number_pattern = r'^[A-Z][A-Z0-9\s\-\'"]+\s+(\d{3,4})$'
+            if re.match(name_number_pattern, text_upper):
+                is_room_label = True
+            
+            # Pattern 4: Unit codes (e.g., "Unit 'QQ-A' 202", "QQ-B 203")
+            unit_pattern = r"(unit\s*['\"]?[A-Z0-9\-]+['\"]?\s*\d+)|([A-Z]{1,3}[-'][A-Z]\s*\d{3})"
+            if re.search(unit_pattern, text_upper, re.IGNORECASE):
+                is_room_label = True
+            
+            # Pattern 5: Standalone 3-4 digit numbers (likely room numbers)
+            # But exclude if it's clearly a dimension or in titleblock area
+            if text.replace('.', '').replace('-', '').isdigit() and 3 <= len(text) <= 4:
+                # Check if it's in titleblock region (right 20% or bottom 20%)
+                if x_norm < 0.8 and y_norm < 0.8:  # Not in titleblock
+                    is_room_label = True
+            
+            # Pattern 6: Room abbreviations (BR, BA, KT, OF, etc.)
+            room_abbrevs = ['br', 'ba', 'kt', 'lr', 'dr', 'of', 'cl', 'st', 'el', 'lb', 'vb', 'hk', 'la']
+            if text_lower in room_abbrevs or re.match(r'^[A-Z]{1,3}\s*\d+$', text_upper):
+                is_room_label = True
+            
+            # Exclude dimensions (has units) and very long text (notes)
+            if has_dimension_units:
                 text_type = 'dimension'
-            elif len(text) > 20:
-                # Long text is likely a note
+            elif len(text) > 25:
                 text_type = 'note'
+            elif is_room_label:
+                text_type = 'room_label'
+            elif any(char.isdigit() for char in text) and ('ft' in text_lower or 'in' in text_lower or "'" in text or '"' in text):
+                text_type = 'dimension'
             
             text_elements.append({
                 "text": text,
@@ -1150,6 +1207,195 @@ def detect_text_ocr(image_path):
         import traceback
         print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
         return []
+
+def detect_rooms_from_text(image_path, scale_factor, min_area_sf, room_labels, walls=None):
+    """Detect rooms using text-first approach: grow regions from room label positions"""
+    img = cv2.imread(image_path)
+    if img is None or len(room_labels) == 0:
+        return []
+    
+    height, width = img.shape[:2]
+    
+    # Resize if needed (same as detect_rooms)
+    max_dimension = 3000
+    scale_down = 1.0
+    if width > max_dimension or height > max_dimension:
+        if width > height:
+            scale_down = max_dimension / width
+        else:
+            scale_down = max_dimension / height
+        new_width = int(width * scale_down)
+        new_height = int(height * scale_down)
+        img = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_AREA)
+        height, width = img.shape[:2]
+        scale_factor = scale_factor / scale_down
+    
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    
+    # Create boundary mask from walls if available
+    boundary_mask = np.zeros((height, width), dtype=np.uint8)
+    if walls and len(walls) > 0:
+        for wall in walls:
+            x1 = int(wall["start"]["x"] * width)
+            y1 = int(wall["start"]["y"] * height)
+            x2 = int(wall["end"]["x"] * width)
+            y2 = int(wall["end"]["y"] * height)
+            cv2.line(boundary_mask, (x1, y1), (x2, y2), 255, 3)
+        # Dilate walls to create boundary region
+        kernel = np.ones((5, 5), np.uint8)
+        boundary_mask = cv2.dilate(boundary_mask, kernel, iterations=2)
+    
+    # Also use edge detection to find boundaries
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    edges = cv2.Canny(blurred, 50, 150)
+    kernel = np.ones((3, 3), np.uint8)
+    dilated_edges = cv2.dilate(edges, kernel, iterations=2)
+    boundary_mask = cv2.bitwise_or(boundary_mask, dilated_edges)
+    
+    # Titleblock exclusion (same as detect_rooms)
+    exclude_top = height * 0.10
+    exclude_bottom = height * 0.90
+    exclude_left = width * 0.05
+    exclude_right = width * 0.85
+    
+    rooms = []
+    min_area_pixels = (min_area_sf / (scale_factor ** 2)) if scale_factor > 0 else 1000
+    max_area_pixels = (width * height) * 0.7
+    
+    def grow_room_from_seed(seed_x, seed_y, search_direction='down', max_distance=200):
+        """Grow room region from seed point using flood fill"""
+        if not (0 <= seed_x < width and 0 <= seed_y < height):
+            return None
+        
+        # Check if seed is in titleblock region
+        if seed_y < exclude_top or seed_y > exclude_bottom or seed_x < exclude_left or seed_x > exclude_right:
+            return None
+        
+        # Create mask for flood fill
+        fill_mask = np.zeros((height + 2, width + 2), dtype=np.uint8)
+        
+        # Adjust seed for mask (floodFill needs +1 offset)
+        mask_x, mask_y = int(seed_x) + 1, int(seed_y) + 1
+        
+        # Flood fill parameters
+        lo_diff = (20, 20, 20)
+        up_diff = (20, 20, 20)
+        flags = 4 | (255 << 8) | cv2.FLOODFILL_MASK_ONLY
+        
+        # Create a copy of image for flood fill
+        img_copy = img.copy()
+        
+        try:
+            # Perform flood fill
+            _, img_copy, fill_mask, rect = cv2.floodFill(
+                img_copy, fill_mask, (mask_x, mask_y), 255,
+                loDiff=lo_diff, upDiff=up_diff, flags=flags
+            )
+            
+            # Remove border padding
+            fill_mask = fill_mask[1:-1, 1:-1]
+            
+            # Stop at boundaries (walls/edges)
+            fill_mask = cv2.bitwise_and(fill_mask, 255 - boundary_mask)
+            
+            # Find contours in the filled region
+            contours, _ = cv2.findContours(fill_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            if not contours:
+                return None
+            
+            # Get largest contour
+            largest_contour = max(contours, key=cv2.contourArea)
+            area_pixels = cv2.contourArea(largest_contour)
+            
+            # Validate area
+            if area_pixels < min_area_pixels or area_pixels > max_area_pixels:
+                return None
+            
+            # Check aspect ratio
+            x, y, w, h = cv2.boundingRect(largest_contour)
+            aspect_ratio = max(w, h) / min(w, h) if min(w, h) > 0 else 0
+            if aspect_ratio > 15:
+                return None
+            
+            # Simplify contour
+            epsilon = 0.02 * cv2.arcLength(largest_contour, True)
+            approx = cv2.approxPolyDP(largest_contour, epsilon, True)
+            
+            if len(approx) < 3:
+                return None
+            
+            # Convert to normalized coordinates
+            points = []
+            for point in approx:
+                x_norm = float(point[0][0]) / width
+                y_norm = float(point[0][1]) / height
+                points.append({"x": x_norm, "y": y_norm})
+            
+            # Calculate area and perimeter
+            area_sf = area_pixels * (scale_factor ** 2)
+            perimeter_pixels = cv2.arcLength(largest_contour, True)
+            perimeter_lf = perimeter_pixels * scale_factor
+            
+            return {
+                "points": points,
+                "area": round(area_sf, 2),
+                "perimeter": round(perimeter_lf, 2),
+                "confidence": 0.85,  # High confidence for text-based detection
+                "roomLabel": None  # Will be set by caller
+            }
+        except Exception as e:
+            print(f"Flood fill error: {str(e)}", file=sys.stderr)
+            return None
+    
+    # Process each room label
+    for label in room_labels:
+        label_bbox = label.get("bbox", {})
+        label_text = label.get("text", "")
+        
+        # Get label position (normalized to 0-1)
+        label_x_norm = label_bbox.get("x", 0) + label_bbox.get("width", 0) / 2
+        label_y_norm = label_bbox.get("y", 0) + label_bbox.get("height", 0) / 2
+        
+        # Convert to pixel coordinates
+        label_x = int(label_x_norm * width)
+        label_y = int(label_y_norm * height)
+        label_w = int(label_bbox.get("width", 0) * width)
+        label_h = int(label_bbox.get("height", 0) * height)
+        
+        # Try multiple search strategies
+        strategies = [
+            # Strategy 1: Label above room (most common) - search down
+            (label_x, label_y + label_h + 10, 'down', 0.9),
+            # Strategy 2: Label inside room - use center
+            (label_x, label_y, 'all', 0.85),
+            # Strategy 3: Label below room - search up
+            (label_x, label_y - 20, 'up', 0.8),
+            # Strategy 4: Label beside room - search right
+            (label_x + label_w + 10, label_y, 'right', 0.75),
+            # Strategy 5: Label beside room - search left
+            (label_x - 10, label_y, 'left', 0.75),
+        ]
+        
+        best_room = None
+        best_confidence = 0
+        
+        for seed_x, seed_y, direction, base_conf in strategies:
+            room = grow_room_from_seed(seed_x, seed_y, direction)
+            if room:
+                # Adjust confidence based on strategy
+                room["confidence"] = base_conf
+                room["roomLabel"] = label_text
+                
+                if room["confidence"] > best_confidence:
+                    best_room = room
+                    best_confidence = room["confidence"]
+        
+        if best_room:
+            rooms.append(best_room)
+    
+    print(f"Text-first detection found {len(rooms)} rooms from {len(room_labels)} labels", file=sys.stderr)
+    return rooms
 
 # Main execution
 if __name__ == "__main__":
@@ -1181,14 +1427,67 @@ if __name__ == "__main__":
         # This ensures rooms are logically bounded by walls
         walls = detect_walls(image_path, scale_factor, min_wall_length)
         
-        # Now detect rooms using walls as constraints
-        # Rooms must be enclosed by detected walls
-        rooms = detect_rooms(image_path, scale_factor, min_room_area, epsilon, exterior_walls=walls)
+        # PHASE 4: Text-first room detection (if OCR available)
+        # Try to detect rooms from text labels first, then fall back to geometry
+        text_based_rooms = []
+        ocr_text = []
+        room_labels = []
+        
+        # Try to enable OCR if available
+        try:
+            ocr_text = detect_text_ocr(image_path)
+            room_labels = [text for text in ocr_text if text.get("type") == "room_label"]
+            print(f"OCR found {len(ocr_text)} text elements, {len(room_labels)} room labels", file=sys.stderr)
+            
+            if len(room_labels) > 0:
+                # Use text-first detection
+                text_based_rooms = detect_rooms_from_text(image_path, scale_factor, min_room_area, room_labels, walls)
+                print(f"Text-first detection found {len(text_based_rooms)} rooms", file=sys.stderr)
+        except Exception as e:
+            print(f"OCR/text-first detection failed: {str(e)}", file=sys.stderr)
+            ocr_text = []
+            room_labels = []
+        
+        # Geometry-based room detection (fallback or supplement)
+        geometry_rooms = detect_rooms(image_path, scale_factor, min_room_area, epsilon, exterior_walls=walls)
+        print(f"Geometry-based detection found {len(geometry_rooms)} rooms", file=sys.stderr)
+        
+        # Combine text-based and geometry-based results
+        # Merge duplicates and keep best confidence
+        all_rooms = {}
+        
+        # Add text-based rooms (higher priority)
+        for room in text_based_rooms:
+            # Use room center as key for deduplication
+            center_x = sum(p["x"] for p in room["points"]) / len(room["points"])
+            center_y = sum(p["y"] for p in room["points"]) / len(room["points"])
+            key = (round(center_x, 3), round(center_y, 3))
+            
+            if key not in all_rooms or room["confidence"] > all_rooms[key]["confidence"]:
+                all_rooms[key] = room
+        
+        # Add geometry-based rooms (lower priority, but keep if not duplicate)
+        for room in geometry_rooms:
+            center_x = sum(p["x"] for p in room["points"]) / len(room["points"])
+            center_y = sum(p["y"] for p in room["points"]) / len(room["points"])
+            key = (round(center_x, 3), round(center_y, 3))
+            
+            # Only add if not already found by text, or if geometry has higher confidence
+            if key not in all_rooms:
+                # Lower confidence for geometry-only detection
+                room["confidence"] = room.get("confidence", 0.7) * 0.9
+                all_rooms[key] = room
+            elif room.get("confidence", 0.7) > all_rooms[key]["confidence"]:
+                all_rooms[key] = room
+        
+        # Convert back to list and sort by confidence
+        rooms = list(all_rooms.values())
+        rooms.sort(key=lambda r: r.get("confidence", 0.5), reverse=True)
+        rooms = rooms[:100]  # Limit to top 100
+        
+        print(f"Combined detection: {len(rooms)} total rooms ({len(text_based_rooms)} text-based, {len(geometry_rooms)} geometry-based)", file=sys.stderr)
         
         doors, windows = detect_openings(image_path, scale_factor)
-        
-        # OCR disabled - CV detection works without it
-        ocr_text = []
         
         result = {
             "rooms": rooms,
