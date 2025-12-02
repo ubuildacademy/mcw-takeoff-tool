@@ -272,7 +272,7 @@ except ImportError:
     TESSERACT_AVAILABLE = False
     TESSERACT_BINARY_AVAILABLE = False
 
-def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=None):
+def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=None, dimension_text_mask=None):
     """Detect room boundaries - rooms are enclosed spaces surrounded by EXTERIOR walls only
     Interior walls (like bathroom walls within a hotel unit) are ignored for room boundaries"""
     img = cv2.imread(image_path)
@@ -311,7 +311,7 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
     edges = cv2.Canny(blurred, 50, 150)
     
-    # Find regions with very high edge density (titleblocks, legends, notes)
+    # Find regions with very high edge density (titleblocks, legends, notes, dimension strings)
     # Use smaller kernel and higher threshold to be more selective - only mark dense text regions
     kernel_large = np.ones((15, 15), np.float32) / 225  # Smaller kernel for more precise detection
     edge_density = cv2.filter2D((edges > 0).astype(np.uint8), -1, kernel_large)
@@ -322,6 +322,32 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
     titleblock_mask[int(exclude_bottom):, :] = 1
     titleblock_mask[:, 0:int(exclude_left)] = 1
     titleblock_mask[:, int(exclude_right):] = 1
+    
+    # Create dimension string mask - detect elongated horizontal/vertical line regions
+    # Dimension strings are typically long thin lines with text nearby
+    dimension_mask = np.zeros((height, width), dtype=np.uint8)
+    
+    # Detect horizontal lines (dimension strings are often horizontal)
+    horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (40, 1))  # Long horizontal kernel
+    horizontal_lines = cv2.morphologyEx(edges, cv2.MORPH_OPEN, horizontal_kernel)
+    horizontal_lines = cv2.dilate(horizontal_lines, np.ones((3, 3), np.uint8), iterations=3)
+    dimension_mask = cv2.bitwise_or(dimension_mask, horizontal_lines)
+    
+    # Detect vertical lines (some dimension strings are vertical)
+    vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 40))  # Long vertical kernel
+    vertical_lines = cv2.morphologyEx(edges, cv2.MORPH_OPEN, vertical_kernel)
+    vertical_lines = cv2.dilate(vertical_lines, np.ones((3, 3), np.uint8), iterations=3)
+    dimension_mask = cv2.bitwise_or(dimension_mask, vertical_lines)
+    
+    # Dilate dimension mask to exclude areas near dimension strings
+    dimension_mask = cv2.dilate(dimension_mask, np.ones((15, 15), np.uint8), iterations=2)
+    
+    # Combine titleblock and dimension masks
+    exclusion_mask = cv2.bitwise_or(titleblock_mask, dimension_mask)
+    
+    # If dimension_text_mask is provided (from OCR), add it to exclusion mask
+    if dimension_text_mask is not None:
+        exclusion_mask = cv2.bitwise_or(exclusion_mask, dimension_text_mask)
     
     # PHASE 3: Use walls to constrain room detection
     # Rooms must be bounded by detected walls - this is the key logical constraint
@@ -401,18 +427,34 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
         contour = contours[i]
         x, y, w, h = cv2.boundingRect(contour)
         
-        # PHASE 3: Very relaxed titleblock exclusion (to catch more rooms)
-        # Check if contour overlaps significantly with titleblock mask
+        # PHASE 3: Very relaxed titleblock/dimension exclusion (to catch more rooms)
+        # Check if contour overlaps significantly with titleblock or dimension string mask
         contour_mask = np.zeros((height, width), dtype=np.uint8)
         cv2.drawContours(contour_mask, [contour], -1, 255, -1)
-        titleblock_overlap = cv2.bitwise_and(contour_mask, titleblock_mask)
-        overlap_ratio = np.sum(titleblock_overlap > 0) / max(1, np.sum(contour_mask > 0))
+        exclusion_overlap = cv2.bitwise_and(contour_mask, exclusion_mask)
+        overlap_ratio = np.sum(exclusion_overlap > 0) / max(1, np.sum(contour_mask > 0))
         
-        # If more than 90% of contour is in titleblock regions, skip it (very relaxed to catch more rooms)
-        # This allows rooms that partially overlap with titleblock areas
-        if overlap_ratio > 0.9:
-            print(f"  Contour {i}: rejected - titleblock overlap {overlap_ratio:.2f} > 0.9", file=sys.stderr)
+        # If more than 80% of contour is in exclusion regions (titleblock/dimensions), skip it
+        # This allows rooms that partially overlap with exclusion areas but filters out dimension artifacts
+        if overlap_ratio > 0.8:
+            print(f"  Contour {i}: rejected - exclusion zone overlap {overlap_ratio:.2f} > 0.8", file=sys.stderr)
             continue
+        
+        # Additional check: filter out very small contours that are likely note boxes or dimension artifacts
+        # These are typically small rectangular areas with high text density
+        if area < min_area_pixels * 1.5:  # If area is close to minimum, check more carefully
+            # Check if it's a small rectangular box (likely a note box)
+            box_ratio = area / (w * h) if (w * h) > 0 else 0
+            if box_ratio > 0.7 and (w < 100 or h < 100):  # Small, compact rectangle
+                # Check if it has high text density (likely a note box)
+                contour_region = gray[y:y+h, x:x+w]
+                if contour_region.size > 0:
+                    # High edge density in small area = likely text box
+                    region_edges = cv2.Canny(contour_region, 50, 150)
+                    edge_density = np.sum(region_edges > 0) / max(1, region_edges.size)
+                    if edge_density > 0.3:  # High edge density = text
+                        print(f"  Contour {i}: rejected - small text box (area={area:.0f}, edge_density={edge_density:.2f})", file=sys.stderr)
+                        continue
         
         # Check if bounding box is in exclusion zones (very relaxed)
         if (y < exclude_top or y + h > exclude_bottom or 
@@ -457,6 +499,23 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
         # Get bounding box to check aspect ratio and position
         x, y, w, h = cv2.boundingRect(contour)
         aspect_ratio = max(w, h) / min(w, h) if min(w, h) > 0 else 0
+        
+        # PHASE 3: Filter out dimension string artifacts
+        # Dimension strings create very elongated contours between dimension lines and floor plan
+        # These are typically very thin and long
+        if aspect_ratio > 15:  # Very elongated
+            # Check if it's likely a dimension string artifact (thin, long, near edges)
+            min_dim = min(w, h)
+            max_dim = max(w, h)
+            # If it's very thin (< 20 pixels) and very long, likely a dimension artifact
+            if min_dim < 20 and max_dim > 200:
+                print(f"  Rejected contour {contour_idx}: dimension string artifact (aspect={aspect_ratio:.2f}, size={w}x{h})", file=sys.stderr)
+                continue
+            # Also check if it's near the edges (where dimension strings typically are)
+            edge_distance = min(x, y, width - x - w, height - y - h)
+            if edge_distance < 50:  # Close to edge
+                print(f"  Rejected contour {contour_idx}: elongated shape near edge (aspect={aspect_ratio:.2f}, edge_dist={edge_distance})", file=sys.stderr)
+                continue
         
         # PHASE 3: Very relaxed aspect ratio - rooms should be reasonably rectangular
         # Very elongated shapes are likely corridors or dimension strings
@@ -1522,8 +1581,35 @@ if __name__ == "__main__":
             ocr_text = []
             room_labels = []
         
+        # Create dimension text mask from OCR if available
+        dimension_text_mask = None
+        if len(ocr_text) > 0:
+            dimension_text_mask = np.zeros((height, width), dtype=np.uint8)
+            for text_elem in ocr_text:
+                if text_elem.get("type") == "dimension":
+                    bbox = text_elem.get("bbox", {})
+                    x_norm = bbox.get("x", 0)
+                    y_norm = bbox.get("y", 0)
+                    w_norm = bbox.get("width", 0)
+                    h_norm = bbox.get("height", 0)
+                    
+                    # Convert to pixel coordinates
+                    x_px = int(x_norm * width)
+                    y_px = int(y_norm * height)
+                    w_px = int(w_norm * width)
+                    h_px = int(h_norm * height)
+                    
+                    # Mark dimension text region and expand it (dimension strings extend beyond text)
+                    cv2.rectangle(dimension_text_mask, (x_px, y_px), (x_px + w_px, y_px + h_px), 255, -1)
+            
+            # Dilate dimension text mask to exclude areas near dimension strings
+            if np.sum(dimension_text_mask > 0) > 0:
+                dimension_text_mask = cv2.dilate(dimension_text_mask, np.ones((20, 20), np.uint8), iterations=2)
+                print(f"Created dimension text mask from {len([t for t in ocr_text if t.get('type') == 'dimension'])} dimension text elements", file=sys.stderr)
+        
         # Geometry-based room detection (fallback or supplement)
-        geometry_rooms = detect_rooms(image_path, scale_factor, min_room_area, epsilon, exterior_walls=walls)
+        # Pass dimension_text_mask to exclude dimension regions
+        geometry_rooms = detect_rooms(image_path, scale_factor, min_room_area, epsilon, exterior_walls=walls, dimension_text_mask=dimension_text_mask)
         print(f"Geometry-based detection found {len(geometry_rooms)} rooms", file=sys.stderr)
         
         # Combine text-based and geometry-based results
