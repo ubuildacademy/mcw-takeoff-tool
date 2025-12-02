@@ -358,31 +358,44 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
     
     # PHASE 3: Use RETR_TREE to get all contours (including nested ones)
     # This helps find rooms even when they're not perfectly closed or have interior elements
-    # Fallback to RETR_EXTERNAL if we get too many contours
+    # RETR_TREE gets nested contours (rooms inside the building outline)
+    # Fallback to RETR_CCOMP if we get too many contours (still gets nested contours, just 2-level hierarchy)
     contours, hierarchy = cv2.findContours(closed, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     
-    # If we get too many contours, use RETR_EXTERNAL instead for better performance
+    # If we get too many contours, use RETR_CCOMP instead (still gets nested contours, better than RETR_EXTERNAL)
+    # RETR_CCOMP retrieves all contours and organizes them into a two-level hierarchy
+    # This allows us to find individual rooms even when there's a building outline
     if len(contours) > 500:
-        print(f"Too many contours ({len(contours)}), using RETR_EXTERNAL instead", file=sys.stderr)
-        contours, hierarchy = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        print(f"Too many contours ({len(contours)}), using RETR_CCOMP instead to get nested contours", file=sys.stderr)
+        contours, hierarchy = cv2.findContours(closed, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
     
     print(f"Found {len(contours)} contours for room detection", file=sys.stderr)
     
     rooms = []
     min_area_pixels = (min_area_sf / (scale_factor ** 2)) if scale_factor > 0 else 1000
-    # Maximum area to filter out the entire floor plan - increased to 90% to allow larger rooms and floor plans
-    max_area_pixels = (width * height) * 0.9
+    # Maximum area to filter out the entire floor plan - set to 40% to exclude building outline but allow large rooms
+    # Individual rooms should be much smaller than the entire floor plan
+    max_area_pixels = (width * height) * 0.40
     
     # PHASE 3: Pre-filter contours by area and titleblock exclusion
     # Calculate areas first and sort to process likely rooms first
     contour_areas = [(i, cv2.contourArea(contour)) for i, contour in enumerate(contours)]
     
     # Filter by area and titleblock exclusion
+    # Also filter out contours that are clearly the entire building (cover too much of the image)
     filtered_indices = []
+    image_area = width * height
     print(f"Pre-filtering {len(contour_areas)} contours (min_area={min_area_pixels:.0f}, max_area={max_area_pixels:.0f})", file=sys.stderr)
     for i, area in contour_areas:
+        # Check area bounds
         if area < min_area_pixels or area > max_area_pixels:
             print(f"  Contour {i}: rejected - area {area:.0f} outside range [{min_area_pixels:.0f}, {max_area_pixels:.0f}]", file=sys.stderr)
+            continue
+        
+        # Additional check: if contour covers more than 50% of image, it's likely the entire building outline
+        area_ratio = area / image_area if image_area > 0 else 0
+        if area_ratio > 0.50:
+            print(f"  Contour {i}: rejected - covers {area_ratio*100:.1f}% of image (likely entire building outline)", file=sys.stderr)
             continue
         
         contour = contours[i]
