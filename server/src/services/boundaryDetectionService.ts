@@ -231,16 +231,44 @@ TESSERACT_BINARY_AVAILABLE = False
 
 try:
     import pytesseract
+    import shutil
+    import subprocess
     TESSERACT_AVAILABLE = True
-    # Check if tesseract binary is available
-    try:
-        pytesseract.get_tesseract_version()
-        TESSERACT_BINARY_AVAILABLE = True
-        print("Tesseract OCR is available", file=sys.stderr)
-    except:
-        print("Tesseract Python library available but binary not found", file=sys.stderr)
+    
+    # Try to find tesseract binary in PATH or Nix store
+    tesseract_path = shutil.which('tesseract')
+    if not tesseract_path:
+        # Try to find in Nix store (common location for nixpacks)
+        try:
+            result = subprocess.run(
+                ['find', '/nix/store', '-name', 'tesseract', '-type', 'f', '-executable'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                tesseract_path = result.stdout.strip().split('\\n')[0]
+                print(f"Found tesseract in Nix store: {tesseract_path}", file=sys.stderr)
+        except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
+            print(f"Could not find tesseract in Nix store: {str(e)}", file=sys.stderr)
+    
+    # Configure pytesseract to use found binary
+    if tesseract_path:
+        pytesseract.pytesseract.tesseract_cmd = tesseract_path
+        try:
+            pytesseract.get_tesseract_version()
+            TESSERACT_BINARY_AVAILABLE = True
+            print(f"Tesseract OCR is available at: {tesseract_path}", file=sys.stderr)
+        except Exception as e:
+            print(f"Tesseract binary found but version check failed: {str(e)}", file=sys.stderr)
+            TESSERACT_BINARY_AVAILABLE = False
+    else:
+        print("Tesseract Python library available but binary not found in PATH or Nix store", file=sys.stderr)
+        TESSERACT_BINARY_AVAILABLE = False
 except ImportError:
     print("Tesseract OCR not available (pytesseract not installed)", file=sys.stderr)
+    TESSERACT_AVAILABLE = False
+    TESSERACT_BINARY_AVAILABLE = False
 
 def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=None):
     """Detect room boundaries - rooms are enclosed spaces surrounded by EXTERIOR walls only
@@ -393,8 +421,10 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
     # Track processed contours to avoid duplicates
     processed_contours = set()
     
-    for i in filtered_indices:
-        contour = contours[i]
+    print(f"Processing {len(filtered_indices)} filtered contours for room detection", file=sys.stderr)
+    
+    for contour_idx in filtered_indices:
+        contour = contours[contour_idx]
         # Skip if already processed
         contour_id = id(contour)
         if contour_id in processed_contours:
@@ -410,7 +440,7 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
         # Very elongated shapes are likely corridors or dimension strings
         # Further relaxed from 15 to 20 to catch more room shapes
         if aspect_ratio > 20:
-            print(f"  Rejected contour {i}: aspect ratio too high ({aspect_ratio:.2f})", file=sys.stderr)
+            print(f"  Rejected contour {contour_idx}: aspect ratio too high ({aspect_ratio:.2f})", file=sys.stderr)
             continue
         
         # PHASE 3: Validate that room is bounded by walls (optional requirement)
@@ -426,8 +456,8 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
             # Increase search radius for wall alignment (from 5 to 10 pixels)
             search_radius = 10
             
-            for i in range(0, len(contour_points), max(1, len(contour_points) // num_check_points)):
-                px, py = contour_points[i]
+            for pt_idx in range(0, len(contour_points), max(1, len(contour_points) // num_check_points)):
+                px, py = contour_points[pt_idx]
                 px, py = int(px), int(py)
                 
                 if 0 <= px < width and 0 <= py < height:
@@ -444,9 +474,11 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
             # This ensures rooms are somewhat bounded by detected walls, but allows more flexibility
             alignment_ratio = wall_alignment_count / num_check_points if num_check_points > 0 else 0
             if alignment_ratio < 0.15:
-                print(f"  Rejected contour {i}: wall alignment too low ({alignment_ratio:.3f})", file=sys.stderr)
+                print(f"  Rejected contour {contour_idx}: wall alignment too low ({alignment_ratio:.3f})", file=sys.stderr)
                 continue  # Room is not properly bounded by walls, skip it
         # If we have fewer than 4 walls or no walls, skip wall alignment check entirely
+        else:
+            print(f"  Skipping wall alignment check for contour {contour_idx} (walls={len(exterior_walls) if exterior_walls else 0})", file=sys.stderr)
         
         # Check if contour is approximately closed (rooms should be enclosed)
         # Calculate how close the start and end points are
@@ -459,7 +491,7 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
             # Some rooms may have small gaps (doors, openings), but not too large
             # Further relaxed from 0.25 to 0.40 to catch rooms with larger openings
             if perimeter > 0 and closure_dist / perimeter > 0.40:
-                print(f"  Rejected contour {i}: closure check failed (closure_dist/perimeter = {closure_dist/perimeter:.3f})", file=sys.stderr)
+                print(f"  Rejected contour {contour_idx}: closure check failed (closure_dist/perimeter = {closure_dist/perimeter:.3f})", file=sys.stderr)
                 continue
         
         # Simplify contour (reduce vertices while preserving shape)
@@ -469,7 +501,7 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
         # Skip if simplified contour has too few points (likely noise)
         # Further relaxed from 3 to 2 to catch even simpler shapes
         if len(approx) < 2:
-            print(f"  Rejected contour {i}: simplified contour has too few points ({len(approx)})", file=sys.stderr)
+            print(f"  Rejected contour {contour_idx}: simplified contour has too few points ({len(approx)})", file=sys.stderr)
             continue
         
         # Convert to normalized coordinates (0-1)
@@ -501,7 +533,7 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
         
         confidence = min(0.95, 0.5 + regularity * 0.3) * size_score * aspect_score
         
-        print(f"  Accepted contour {i}: area={area_sf:.1f} SF, aspect={aspect_ratio:.2f}, confidence={confidence:.3f}", file=sys.stderr)
+        print(f"  Accepted contour {contour_idx}: area={area_sf:.1f} SF, aspect={aspect_ratio:.2f}, confidence={confidence:.3f}", file=sys.stderr)
         
         rooms.append({
             "points": points,
