@@ -5,13 +5,13 @@ providers = ["node", "python"]
 # Both providers run automatically when package.json and requirements.txt are detected
 # IMPORTANT: Ensure Railway service root directory is set to "server/" in Railway dashboard
 
-# Install system libraries required for OpenCV
+# Install system libraries required for OpenCV and Tesseract
 # These are installed after Node.js provider sets up npm
 # Note: PDF processing now uses PyMuPDF (pure Python, no system dependencies)
 # bash is needed for sharp package to build native bindings
-# OCR/Tesseract disabled - using CV-only detection
+# tesseract is required for OCR-based room detection
 [phases.install]
-nixPkgs = ["libGL", "glib", "libGLU", "pkg-config", "bash"]
+nixPkgs = ["libGL", "glib", "libGLU", "pkg-config", "bash", "tesseract"]
 
 # Build phase: Build TypeScript and verify Python packages
 [phases.build]
@@ -53,6 +53,6 @@ USE_PYTHON_TITLEBLOCK_EXTRACTION = "true"
 [start]
 # Find glib libraries at runtime and add to LD_LIBRARY_PATH
 # This ensures OpenCV can load libgthread-2.0.so.0
-# OCR/Tesseract disabled - using CV-only detection
+# OCR/Tesseract enabled for text-first room detection
 cmd = "GLIB_LIB=$(find /nix/store -name 'libgthread-2.0.so.0' 2>/dev/null | head -1 | xargs dirname 2>/dev/null || echo ''); if [ -n \"$GLIB_LIB\" ]; then export LD_LIBRARY_PATH=\"$GLIB_LIB:/nix/var/nix/profiles/default/lib:/root/.nix-profile/lib:/usr/lib:/usr/local/lib:$LD_LIBRARY_PATH\"; fi; npm start"
 
