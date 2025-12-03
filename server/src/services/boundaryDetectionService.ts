@@ -362,6 +362,9 @@ CONFIG = {
     # Deep learning settings (REQUIRED)
     'dl_confidence_threshold': 0.5,  # Minimum confidence for DL predictions (0-1)
     'dl_model_input_size': 512,  # Input size for DL model (512x512 recommended, larger = more detail but slower)
+    # To use ozturkoktay model: Set path to trained weights file
+    # Example: 'dl_model_path': '/path/to/server/models/ozturkoktay_model.pth'
+    # Run: python3 server/scripts/setup_ozturkoktay_model.py to get started
     'dl_model_path': None,  # Path to custom pre-trained floor plan model weights (None = use ImageNet pre-trained)
     'dl_use_huggingface': False,  # Use HuggingFace Transformers model instead
     'dl_huggingface_model': 'nvidia/segformer-b0-finetuned-ade-512-512',  # HuggingFace model name
