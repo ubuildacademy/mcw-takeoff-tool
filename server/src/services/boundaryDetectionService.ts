@@ -297,7 +297,7 @@ CONFIG = {
     
     # Room detection
     'min_room_area_sf': 50.0,
-    'max_room_area_sf': 2000.0,
+    'max_room_area_sf': 1000.0,  # Reduced from 2000 to filter out entire floor plans
     'corridor_aspect_ratio_threshold': 5.0,
     'corridor_perimeter_area_ratio_threshold': 0.3,
     
@@ -1331,9 +1331,11 @@ def validate_rooms(rooms, wall_mask, wall_graph):
                 
                 is_open_space = enclosure_score < 0.5  # Less than 50% enclosed
                 
-                # Validation flags
-                room['valid_enclosed_room'] = enclosure_score > 0.7 and not is_corridor
-                room['valid_open_space_room'] = is_open_space and not is_corridor
+                # Validation flags - stricter criteria
+                # Require higher enclosure score for enclosed rooms
+                room['valid_enclosed_room'] = enclosure_score > 0.75 and not is_corridor and area_sf >= CONFIG['min_room_area_sf'] and area_sf <= CONFIG['max_room_area_sf']
+                # Open space rooms still allowed but with stricter checks
+                room['valid_open_space_room'] = is_open_space and not is_corridor and area_sf >= CONFIG['min_room_area_sf'] and area_sf <= CONFIG['max_room_area_sf']
                 room['corridor_like_region'] = is_corridor
                 room['invalid_region'] = not (room['valid_enclosed_room'] or room['valid_open_space_room'] or room['corridor_like_region'])
                 room['enclosure_score'] = enclosure_score
@@ -1396,6 +1398,306 @@ def check_enclosure(polygon_px, wall_mask):
     except Exception as e:
         print(f"ERROR in check_enclosure: {str(e)}", file=sys.stderr)
         return 0.5  # Default score on error
+
+# ============================================================================
+# PHASE 4: Wall Refinement with Room Feedback (Iterative Refinement)
+# ============================================================================
+
+def refine_walls_with_room_feedback(wall_graph, rooms, wall_mask, wall_likelihood_mask, scale_factor, image_shape):
+    """
+    Iteratively refine walls using room boundary feedback
+    
+    Steps:
+    1. Identify rooms with gaps (enclosure_score 0.3-0.7)
+    2. Find boundary gaps in these rooms
+    3. Search for nearby segments that could close gaps
+    4. Promote segments if they align with room boundaries
+    5. Remove spurious walls (not supporting any room)
+    6. Re-validate rooms with refined walls
+    7. Iterate until convergence or max iterations
+    """
+    try:
+        max_iterations = 3
+        convergence_threshold = 0.05  # Stop if enclosure improvement < 5%
+        
+        height, width = image_shape
+        previous_avg_enclosure = 0.0
+        
+        if not rooms or len(rooms) == 0:
+            print("Phase 4: No rooms to refine walls with", file=sys.stderr)
+            return wall_graph, wall_mask, rooms
+        
+        print(f"Phase 4: Starting iterative refinement with {len(rooms)} rooms", file=sys.stderr)
+        
+        for iteration in range(max_iterations):
+            print(f"Phase 4 iteration {iteration + 1}/{max_iterations}", file=sys.stderr)
+            
+            # Step 1: Close gaps from room boundaries
+            wall_graph, wall_mask = close_wall_gaps_from_rooms(
+                rooms, wall_graph, wall_mask, wall_likelihood_mask, scale_factor, image_shape
+            )
+            
+            # Step 2: Remove spurious walls
+            wall_graph = remove_spurious_walls(wall_graph, rooms, image_shape)
+            
+            # Step 3: Re-render wall mask
+            wall_mask = render_wall_mask(wall_graph, image_shape, scale_factor)
+            
+            # Step 4: Re-validate rooms with refined walls
+            rooms = validate_rooms(rooms, wall_mask, wall_graph)
+            
+            # Step 5: Check convergence
+            valid_rooms = [r for r in rooms if r.get('valid_enclosed_room') or r.get('valid_open_space_room')]
+            if valid_rooms:
+                current_avg_enclosure = sum(r.get('enclosure_score', 0) for r in valid_rooms) / len(valid_rooms)
+                improvement = current_avg_enclosure - previous_avg_enclosure
+                
+                print(f"Iteration {iteration + 1}: avg_enclosure={current_avg_enclosure:.3f}, improvement={improvement:.3f}", file=sys.stderr)
+                
+                if improvement < convergence_threshold and iteration > 0:
+                    print(f"Converged after {iteration + 1} iterations", file=sys.stderr)
+                    break
+                
+                previous_avg_enclosure = current_avg_enclosure
+            else:
+                print(f"Iteration {iteration + 1}: No valid rooms to measure improvement", file=sys.stderr)
+                break
+        
+        print(f"Phase 4 complete: Refined walls and re-validated {len(rooms)} rooms", file=sys.stderr)
+        return wall_graph, wall_mask, rooms
+    except Exception as e:
+        print(f"ERROR in refine_walls_with_room_feedback: {str(e)}", file=sys.stderr)
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
+        return wall_graph, wall_mask, rooms  # Return unchanged on error
+
+def close_wall_gaps_from_rooms(rooms, wall_graph, wall_mask, wall_likelihood_mask, scale_factor, image_shape):
+    """
+    Use room polygons to identify and close gaps in walls
+    
+    Steps:
+    1. For each "almost enclosed" room, find boundary gaps
+    2. Search for nearby low-confidence segments that could close gaps
+    3. Promote segments if they align geometrically
+    4. Update wall graph and mask
+    """
+    try:
+        height, width = image_shape
+        segments_promoted = 0
+        
+        for room in rooms:
+            enclosure_score = room.get('enclosure_score', 1.0)
+            # Focus on rooms that are "almost enclosed" (0.3-0.7)
+            if enclosure_score < 0.7 and enclosure_score > 0.3:
+                polygon_px = [
+                    (int(p['x'] * width), int(p['y'] * height))
+                    for p in room['polygon']
+                ]
+                
+                # Find boundary arcs with gaps
+                gaps = find_boundary_gaps(polygon_px, wall_mask, image_shape)
+                
+                for gap in gaps:
+                    # Search for segments that could close this gap
+                    candidate_segments = find_gap_closing_segments(
+                        gap, wall_graph, wall_likelihood_mask, image_shape
+                    )
+                    
+                    for seg_info in candidate_segments:
+                        # Promote segment confidence
+                        edge = seg_info['edge']
+                        if NETWORKX_AVAILABLE and isinstance(wall_graph, nx.Graph):
+                            if wall_graph.has_edge(*edge):
+                                current_conf = wall_graph.edges[edge].get('confidence', 0.3)
+                                if current_conf < 0.5:
+                                    wall_graph.edges[edge]['confidence'] = 0.7
+                                    segments_promoted += 1
+        
+        if segments_promoted > 0:
+            print(f"Promoted {segments_promoted} segments to close gaps", file=sys.stderr)
+        
+        # Re-render wall mask with updated segments
+        wall_mask = render_wall_mask(wall_graph, image_shape, scale_factor)
+        
+        return wall_graph, wall_mask
+    except Exception as e:
+        print(f"ERROR in close_wall_gaps_from_rooms: {str(e)}", file=sys.stderr)
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
+        return wall_graph, wall_mask
+
+def find_boundary_gaps(polygon_px, wall_mask, image_shape):
+    """
+    Find gaps in room boundary where walls should be
+    
+    Returns list of gap segments
+    """
+    try:
+        gaps = []
+        search_radius = 10
+        height, width = image_shape
+        
+        for i in range(len(polygon_px)):
+            p1 = polygon_px[i]
+            p2 = polygon_px[(i + 1) % len(polygon_px)]
+            
+            # Sample points along edge
+            edge_length = np.sqrt((p2[0]-p1[0])**2 + (p2[1]-p1[1])**2)
+            num_samples = max(10, int(edge_length / 5))
+            gap_points = []
+            
+            for j in range(num_samples):
+                t = j / (num_samples - 1) if num_samples > 1 else 0
+                x = int(p1[0] + t * (p2[0] - p1[0]))
+                y = int(p1[1] + t * (p2[1] - p1[1]))
+                
+                # Check if point is near a wall
+                y_min = max(0, y - search_radius)
+                y_max = min(height, y + search_radius + 1)
+                x_min = max(0, x - search_radius)
+                x_max = min(width, x + search_radius + 1)
+                
+                if 0 <= y < height and 0 <= x < width:
+                    if not np.any(wall_mask[y_min:y_max, x_min:x_max] > 0):
+                        gap_points.append((x, y))
+            
+            # If more than 30% of edge is gap, record it
+            if len(gap_points) > num_samples * 0.3:
+                gaps.append({
+                    'start': p1,
+                    'end': p2,
+                    'gap_points': gap_points
+                })
+        
+        return gaps
+    except Exception as e:
+        print(f"ERROR in find_boundary_gaps: {str(e)}", file=sys.stderr)
+        return []
+
+def find_gap_closing_segments(gap, wall_graph, wall_likelihood_mask, image_shape):
+    """
+    Find low-confidence segments that could close a gap
+    
+    Returns candidate segments
+    """
+    try:
+        candidates = []
+        height, width = image_shape
+        
+        # Search for segments near gap
+        gap_center_x = (gap['start'][0] + gap['end'][0]) / 2
+        gap_center_y = (gap['start'][1] + gap['end'][1]) / 2
+        
+        # Calculate gap direction
+        gap_angle = np.arctan2(gap['end'][1] - gap['start'][1], gap['end'][0] - gap['start'][0])
+        
+        if NETWORKX_AVAILABLE and isinstance(wall_graph, nx.Graph):
+            for edge in wall_graph.edges(data=True):
+                node1, node2, data = edge
+                x1, y1 = node1
+                x2, y2 = node2
+                
+                # Check if segment is near gap
+                seg_center_x = (x1 + x2) / 2
+                seg_center_y = (y1 + y2) / 2
+                
+                distance = np.sqrt((gap_center_x - seg_center_x)**2 + (gap_center_y - seg_center_y)**2)
+                
+                if distance < 50:  # Within 50 pixels
+                    confidence = data.get('confidence', 1.0)
+                    if confidence < 0.5:  # Low confidence segment
+                        # Check if segment aligns with gap direction
+                        seg_angle = data.get('angle', np.arctan2(y2 - y1, x2 - x1))
+                        
+                        angle_diff = abs(gap_angle - seg_angle) % np.pi
+                        if angle_diff < np.pi / 6 or angle_diff > 5 * np.pi / 6:  # Within 30°
+                            candidates.append({
+                                'edge': (node1, node2),
+                                'data': data,
+                                'confidence': confidence
+                            })
+        
+        return candidates
+    except Exception as e:
+        print(f"ERROR in find_gap_closing_segments: {str(e)}", file=sys.stderr)
+        return []
+
+def remove_spurious_walls(wall_graph, rooms, image_shape):
+    """
+    Remove walls that don't support any room boundary
+    
+    Returns: Updated wall_graph with spurious walls removed
+    """
+    try:
+        height, width = image_shape
+        
+        if not rooms or len(rooms) == 0:
+            return wall_graph
+        
+        # Create room boundary mask
+        room_boundary_mask = np.zeros((height, width), dtype=np.uint8)
+        
+        for room in rooms:
+            polygon_px = [
+                (int(p['x'] * width), int(p['y'] * height))
+                for p in room['polygon']
+            ]
+            # Draw room boundary
+            if len(polygon_px) >= 3:
+                cv2.polylines(room_boundary_mask, [np.array(polygon_px, dtype=np.int32)], True, 255, 2)
+        
+        # Dilate to include nearby regions
+        kernel = np.ones((15, 15), np.uint8)
+        room_boundary_mask = cv2.dilate(room_boundary_mask, kernel, iterations=1)
+        
+        # Check each wall segment
+        edges_to_remove = []
+        
+        if NETWORKX_AVAILABLE and isinstance(wall_graph, nx.Graph):
+            for edge in wall_graph.edges(data=True):
+                node1, node2, data = edge
+                x1, y1 = node1
+                x2, y2 = node2
+                
+                # Sample points along segment
+                length = data.get('length', np.sqrt((x2-x1)**2 + (y2-y1)**2))
+                num_samples = max(5, int(length / 10))
+                near_room_count = 0
+                
+                for i in range(num_samples):
+                    t = i / (num_samples - 1) if num_samples > 1 else 0
+                    x = int(x1 + t * (x2 - x1))
+                    y = int(y1 + t * (y2 - y1))
+                    
+                    if 0 <= x < width and 0 <= y < height:
+                        if room_boundary_mask[y, x] > 0:
+                            near_room_count += 1
+                
+                # If segment is far from rooms and has low confidence, mark for removal
+                near_room_ratio = near_room_count / num_samples if num_samples > 0 else 0
+                confidence = data.get('confidence', 0.5)
+                
+                if near_room_ratio < 0.2 and confidence < 0.4:
+                    # Check if isolated (few connections)
+                    degree1 = wall_graph.degree(node1)
+                    degree2 = wall_graph.degree(node2)
+                    
+                    if degree1 <= 2 and degree2 <= 2:
+                        edges_to_remove.append((node1, node2))
+            
+            # Remove spurious walls
+            for edge in edges_to_remove:
+                wall_graph.remove_edge(*edge)
+        
+        if len(edges_to_remove) > 0:
+            print(f"Removed {len(edges_to_remove)} spurious wall segments", file=sys.stderr)
+        
+        return wall_graph
+    except Exception as e:
+        print(f"ERROR in remove_spurious_walls: {str(e)}", file=sys.stderr)
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
+        return wall_graph
 
 def calculate_aspect_ratio(polygon_px):
     """Calculate aspect ratio of room polygon"""
@@ -2955,10 +3257,17 @@ if __name__ == "__main__":
                         rooms = compute_room_adjacency(rooms)
                         print(f"Phase 3.4 complete: adjacency computed", file=sys.stderr)
                         
-                        # Convert to output format
+                        # Convert to output format - ONLY include validated rooms
                         text_based_rooms = []
                         for room in rooms:
+                            # Only include rooms that passed validation
                             if room.get('valid_enclosed_room') or room.get('valid_open_space_room'):
+                                # Additional filtering: exclude very large rooms (likely false positives)
+                                area_sf = room.get('area_sf', 0)
+                                if area_sf > CONFIG['max_room_area_sf']:
+                                    print(f"Filtering out oversized room: {area_sf:.1f} SF (max: {CONFIG['max_room_area_sf']} SF)", file=sys.stderr)
+                                    continue
+                                
                                 text_based_rooms.append({
                                     "points": room['polygon'],
                                     "area": room['area_sf'],
@@ -2968,7 +3277,41 @@ if __name__ == "__main__":
                                     "roomType": room.get('room_type', 'other')
                                 })
                         
-                        print(f"Phase 3 complete: {len(text_based_rooms)} valid rooms", file=sys.stderr)
+                        print(f"Phase 3 complete: {len(text_based_rooms)} valid rooms (after validation and size filtering)", file=sys.stderr)
+                        
+                        # PHASE 4: Iterative wall refinement with room feedback
+                        if wall_graph is not None and len(rooms) > 0:
+                            try:
+                                print("Starting Phase 4: Iterative wall refinement", file=sys.stderr)
+                                wall_graph, wall_mask, rooms = refine_walls_with_room_feedback(
+                                    wall_graph, rooms, wall_mask, wall_likelihood_mask, scale_factor_adj, image_shape_adj
+                                )
+                                
+                                # Re-convert rooms to output format after refinement
+                                text_based_rooms = []
+                                for room in rooms:
+                                    if room.get('valid_enclosed_room') or room.get('valid_open_space_room'):
+                                        area_sf = room.get('area_sf', 0)
+                                        if area_sf > CONFIG['max_room_area_sf']:
+                                            continue
+                                        
+                                        text_based_rooms.append({
+                                            "points": room['polygon'],
+                                            "area": room['area_sf'],
+                                            "perimeter": room['perimeter_lf'],
+                                            "confidence": room.get('confidence', 0.7),
+                                            "roomLabel": room.get('label_text', ''),
+                                            "roomType": room.get('room_type', 'other')
+                                        })
+                                
+                                print(f"Phase 4 complete: {len(text_based_rooms)} rooms after refinement", file=sys.stderr)
+                            except Exception as e:
+                                print(f"ERROR in Phase 4: {str(e)}", file=sys.stderr)
+                                import traceback
+                                print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
+                                # Continue with Phase 3 results if Phase 4 fails
+                        else:
+                            print("Phase 4: Skipping (wall graph or rooms not available)", file=sys.stderr)
                     else:
                         print("Phase 2: No room seeds found, skipping Phase 3", file=sys.stderr)
                 else:
@@ -3007,45 +3350,42 @@ if __name__ == "__main__":
                 dimension_text_mask = cv2.dilate(dimension_text_mask, np.ones((20, 20), np.uint8), iterations=2)
                 print(f"Created dimension text mask from {len([t for t in ocr_text if t.get('type') == 'dimension'])} dimension text elements", file=sys.stderr)
         
-        # Geometry-based room detection (fallback or supplement)
-        # Pass dimension_text_mask to exclude dimension regions
-        geometry_rooms = detect_rooms(image_path, scale_factor, min_room_area, epsilon, exterior_walls=walls, dimension_text_mask=dimension_text_mask)
-        print(f"Geometry-based detection found {len(geometry_rooms)} rooms", file=sys.stderr)
+        # Geometry-based room detection (ONLY as fallback if Phase 2-3 found no rooms)
+        # Disable geometry-based detection if we have good text-based results to avoid false positives
+        geometry_rooms = []
+        if len(text_based_rooms) == 0:
+            print("No text-based rooms found, falling back to geometry-based detection", file=sys.stderr)
+            geometry_rooms = detect_rooms(image_path, scale_factor, min_room_area, epsilon, exterior_walls=walls, dimension_text_mask=dimension_text_mask)
+            print(f"Geometry-based detection found {len(geometry_rooms)} rooms", file=sys.stderr)
+        else:
+            print(f"Skipping geometry-based detection - using {len(text_based_rooms)} text-based rooms only", file=sys.stderr)
         
-        # Combine text-based and geometry-based results
-        # Merge duplicates and keep best confidence
-        all_rooms = {}
+        # Use text-based rooms as primary, geometry only if no text-based found
+        if len(text_based_rooms) > 0:
+            # Use text-based rooms directly (already validated in Phase 3)
+            rooms = text_based_rooms
+            print(f"Using {len(rooms)} text-based rooms (Phase 2-3 detection)", file=sys.stderr)
+        else:
+            # Fallback to geometry-based if no text-based found
+            rooms = geometry_rooms
+            print(f"Using {len(rooms)} geometry-based rooms (fallback)", file=sys.stderr)
         
-        # Add text-based rooms (higher priority)
-        for room in text_based_rooms:
-            # Use room center as key for deduplication
-            center_x = sum(p["x"] for p in room["points"]) / len(room["points"])
-            center_y = sum(p["y"] for p in room["points"]) / len(room["points"])
-            key = (round(center_x, 3), round(center_y, 3))
-            
-            if key not in all_rooms or room["confidence"] > all_rooms[key]["confidence"]:
-                all_rooms[key] = room
+        # Final filtering: remove any rooms that are too large (likely false positives)
+        # This catches cases where entire floor plans or multiple floors are detected
+        max_reasonable_room_area = CONFIG['max_room_area_sf']
+        filtered_rooms = []
+        for room in rooms:
+            area = room.get('area', 0)
+            if area > max_reasonable_room_area:
+                print(f"Filtering out oversized room: {area:.1f} SF (max: {max_reasonable_room_area} SF)", file=sys.stderr)
+                continue
+            filtered_rooms.append(room)
         
-        # Add geometry-based rooms (lower priority, but keep if not duplicate)
-        for room in geometry_rooms:
-            center_x = sum(p["x"] for p in room["points"]) / len(room["points"])
-            center_y = sum(p["y"] for p in room["points"]) / len(room["points"])
-            key = (round(center_x, 3), round(center_y, 3))
-            
-            # Only add if not already found by text, or if geometry has higher confidence
-            if key not in all_rooms:
-                # Lower confidence for geometry-only detection
-                room["confidence"] = room.get("confidence", 0.7) * 0.9
-                all_rooms[key] = room
-            elif room.get("confidence", 0.7) > all_rooms[key]["confidence"]:
-                all_rooms[key] = room
-        
-        # Convert back to list and sort by confidence
-        rooms = list(all_rooms.values())
+        rooms = filtered_rooms
         rooms.sort(key=lambda r: r.get("confidence", 0.5), reverse=True)
         rooms = rooms[:100]  # Limit to top 100
         
-        print(f"Combined detection: {len(rooms)} total rooms ({len(text_based_rooms)} text-based, {len(geometry_rooms)} geometry-based)", file=sys.stderr)
+        print(f"Final detection: {len(rooms)} rooms after filtering", file=sys.stderr)
         
         doors, windows = detect_openings(image_path, scale_factor)
         
