@@ -296,6 +296,16 @@ except ImportError as e:
     TORCH_AVAILABLE = False
     raise  # Fail fast - DL is required
 
+# Try to import HuggingFace Transformers (optional, for alternative models)
+HUGGINGFACE_AVAILABLE = False
+try:
+    from transformers import SegformerForSemanticSegmentation, SegformerImageProcessor
+    HUGGINGFACE_AVAILABLE = True
+    print("HuggingFace Transformers available for alternative models", file=sys.stderr)
+except ImportError:
+    HUGGINGFACE_AVAILABLE = False
+    print("HuggingFace Transformers not available (optional)", file=sys.stderr)
+
 # ============================================================================
 # PHASE 0: Configuration Constants
 # ============================================================================
@@ -352,6 +362,9 @@ CONFIG = {
     # Deep learning settings (REQUIRED)
     'dl_confidence_threshold': 0.5,  # Minimum confidence for DL predictions (0-1)
     'dl_model_input_size': 512,  # Input size for DL model (512x512 recommended, larger = more detail but slower)
+    'dl_model_path': None,  # Path to custom pre-trained floor plan model weights (None = use ImageNet pre-trained)
+    'dl_use_huggingface': False,  # Use HuggingFace Transformers model instead
+    'dl_huggingface_model': 'nvidia/segformer-b0-finetuned-ade-512-512',  # HuggingFace model name
 }
 
 # ============================================================================
@@ -1504,22 +1517,76 @@ class DeepLearningSegmentationService:
         
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.model = None
+        self.hf_model = None
+        self.hf_processor = None
         self.preprocessing_fn = None
+        self.use_huggingface = False
         self.load_model()
     
     def load_model(self):
-        """Load pre-trained U-Net segmentation model"""
+        """Load pre-trained U-Net segmentation model
+        
+        Supports:
+        1. Custom pre-trained floor plan model (if dl_model_path is set)
+        2. HuggingFace Transformers model (if dl_use_huggingface is True)
+        3. Default: ImageNet pre-trained U-Net (fallback)
+        """
         try:
-            print(f"Loading U-Net segmentation model on {self.device}", file=sys.stderr)
+            model_path = CONFIG.get('dl_model_path')
+            use_huggingface = CONFIG.get('dl_use_huggingface', False)
             
-            # Use U-Net with EfficientNet-B0 encoder (good balance of speed/accuracy)
-            # Alternative: 'resnet34', 'resnet50', 'efficientnet-b3', etc.
+            # Option 1: Use HuggingFace Transformers model
+            if use_huggingface and HUGGINGFACE_AVAILABLE:
+                model_name = CONFIG.get('dl_huggingface_model', 'nvidia/segformer-b0-finetuned-ade-512-512')
+                print(f"Loading HuggingFace model: {model_name}", file=sys.stderr)
+                self.hf_model = SegformerForSemanticSegmentation.from_pretrained(model_name)
+                self.hf_processor = SegformerImageProcessor.from_pretrained(model_name)
+                self.hf_model.to(self.device)
+                self.hf_model.eval()
+                self.use_huggingface = True
+                print(f"HuggingFace model loaded successfully", file=sys.stderr)
+                return
+            
+            # Option 2: Load custom pre-trained floor plan model
+            if model_path and os.path.exists(model_path):
+                print(f"Loading custom floor plan model from: {model_path}", file=sys.stderr)
+                ENCODER = 'resnet34'  # Common encoder for floor plan models
+                CLASSES = ['background', 'walls', 'rooms']
+                
+                # Create model architecture
+                self.model = smp.Unet(
+                    encoder_name=ENCODER,
+                    encoder_weights=None,  # Don't load ImageNet weights
+                    classes=len(CLASSES),
+                    activation='softmax',
+                )
+                
+                # Load custom weights
+                checkpoint = torch.load(model_path, map_location=self.device)
+                if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+                    self.model.load_state_dict(checkpoint['state_dict'])
+                elif isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+                    self.model.load_state_dict(checkpoint['model_state_dict'])
+                else:
+                    self.model.load_state_dict(checkpoint)
+                
+                self.model.to(self.device)
+                self.model.eval()
+                self.preprocessing_fn = smp.encoders.get_preprocessing_fn(ENCODER, 'imagenet')
+                self.use_huggingface = False
+                print(f"Custom floor plan model loaded successfully", file=sys.stderr)
+                print(f"Model parameters: {sum(p.numel() for p in self.model.parameters()):,}", file=sys.stderr)
+                return
+            
+            # Option 3: Default - ImageNet pre-trained (fallback)
+            print(f"Loading default U-Net model (ImageNet pre-trained)", file=sys.stderr)
+            print("NOTE: For better accuracy, use a floor-plan-trained model. See FLOOR_PLAN_MODEL_RESEARCH.md", file=sys.stderr)
+            
             ENCODER = 'efficientnet-b0'
             ENCODER_WEIGHTS = 'imagenet'
-            CLASSES = ['background', 'walls', 'rooms']  # 3 classes: background, walls, rooms
-            ACTIVATION = 'softmax'  # Multi-class segmentation
+            CLASSES = ['background', 'walls', 'rooms']
+            ACTIVATION = 'softmax'
             
-            # Create model
             self.model = smp.Unet(
                 encoder_name=ENCODER,
                 encoder_weights=ENCODER_WEIGHTS,
@@ -1527,12 +1594,10 @@ class DeepLearningSegmentationService:
                 activation=ACTIVATION,
             )
             
-            # Move to device
             self.model.to(self.device)
             self.model.eval()
-            
-            # Get preprocessing function for the encoder
             self.preprocessing_fn = smp.encoders.get_preprocessing_fn(ENCODER, ENCODER_WEIGHTS)
+            self.use_huggingface = False
             
             print(f"U-Net model loaded successfully (encoder: {ENCODER})", file=sys.stderr)
             print(f"Model parameters: {sum(p.numel() for p in self.model.parameters()):,}", file=sys.stderr)
@@ -1574,44 +1639,73 @@ class DeepLearningSegmentationService:
             if np.mean(binary) > 127:
                 binary = 255 - binary
             
-            # Use DL model to detect edges/lines (treat as semantic segmentation)
-            # Convert grayscale to RGB for model input
-            image_rgb = cv2.cvtColor(binary, cv2.COLOR_GRAY2RGB)
-            
-            # Resize to model input size
-            target_size = CONFIG['dl_model_input_size']
-            scale = min(target_size / original_width, target_size / original_height)
-            new_width = int(original_width * scale)
-            new_height = int(original_height * scale)
-            image_resized = cv2.resize(image_rgb, (new_width, new_height), interpolation=cv2.INTER_AREA)
-            
-            # Pad to target size
-            pad_h = target_size - new_height
-            pad_w = target_size - new_width
-            image_padded = cv2.copyMakeBorder(
-                image_resized, 0, pad_h, 0, pad_w,
-                cv2.BORDER_CONSTANT, value=[0, 0, 0]
-            )
-            
-            # Preprocess for model
-            image_preprocessed = self.preprocessing_fn(image_padded)
-            image_tensor = torch.from_numpy(image_preprocessed).permute(2, 0, 1).float()
-            image_tensor = image_tensor.unsqueeze(0).to(self.device)
-            
-            # Run inference
-            with torch.no_grad():
-                pr_mask = self.model.predict(image_tensor)
-            
-            # Apply softmax
-            if pr_mask.shape[1] == 3:
-                pr_mask = torch.softmax(pr_mask, dim=1)
-            
-            pr_mask_np = pr_mask[0].cpu().numpy()  # [3, H, W]
-            
-            # Use DL output to enhance traditional edge detection
-            # Class 1 (walls) = edges/lines, Class 2 (rooms) = enclosed regions
-            edge_probs = pr_mask_np[1]  # Edge/line probabilities
-            region_probs = pr_mask_np[2]  # Region probabilities
+            # Run inference based on model type
+            if self.use_huggingface and self.hf_model is not None:
+                # Use HuggingFace Transformers model
+                image_pil = Image.fromarray(cv2.cvtColor(binary, cv2.COLOR_GRAY2RGB))
+                inputs = self.hf_processor(images=image_pil, return_tensors="pt")
+                inputs = {k: v.to(self.device) for k, v in inputs.items()}
+                
+                with torch.no_grad():
+                    outputs = self.hf_model(**inputs)
+                    logits = outputs.logits
+                
+                # Upsample logits to original size
+                upsampled_logits = nn.functional.interpolate(
+                    logits, size=(original_height, original_width),
+                    mode="bilinear", align_corners=False
+                )
+                pr_mask_np = torch.softmax(upsampled_logits, dim=1)[0].cpu().numpy()
+                
+                # Segformer outputs: background, walls, rooms (or similar classes)
+                if pr_mask_np.shape[0] >= 3:
+                    edge_probs = pr_mask_np[1]  # Walls/edges
+                    region_probs = pr_mask_np[2]  # Rooms
+                else:
+                    # Fallback if model has different class structure
+                    edge_probs = pr_mask_np[0] if pr_mask_np.shape[0] > 0 else np.zeros((original_height, original_width))
+                    region_probs = pr_mask_np[1] if pr_mask_np.shape[0] > 1 else np.zeros((original_height, original_width))
+            else:
+                # Use segmentation-models-pytorch model
+                # Convert grayscale to RGB for model input
+                image_rgb = cv2.cvtColor(binary, cv2.COLOR_GRAY2RGB)
+                
+                # Resize to model input size
+                target_size = CONFIG['dl_model_input_size']
+                scale = min(target_size / original_width, target_size / original_height)
+                new_width = int(original_width * scale)
+                new_height = int(original_height * scale)
+                image_resized = cv2.resize(image_rgb, (new_width, new_height), interpolation=cv2.INTER_AREA)
+                
+                # Pad to target size
+                pad_h = target_size - new_height
+                pad_w = target_size - new_width
+                image_padded = cv2.copyMakeBorder(
+                    image_resized, 0, pad_h, 0, pad_w,
+                    cv2.BORDER_CONSTANT, value=[0, 0, 0]
+                )
+                
+                # Preprocess for model
+                image_preprocessed = self.preprocessing_fn(image_padded)
+                image_tensor = torch.from_numpy(image_preprocessed).permute(2, 0, 1).float()
+                image_tensor = image_tensor.unsqueeze(0).to(self.device)
+                
+                # Run inference
+                with torch.no_grad():
+                    pr_mask = self.model.predict(image_tensor)
+                
+                # Apply softmax
+                if pr_mask.shape[1] == 3:
+                    pr_mask = torch.softmax(pr_mask, dim=1)
+                
+                pr_mask_np = pr_mask[0].cpu().numpy()  # [3, H, W]
+                
+                # Resize back to original size (crop padding first)
+                edge_probs = pr_mask_np[1][:new_height, :new_width]  # Edge/line probabilities
+                region_probs = pr_mask_np[2][:new_height, :new_width]  # Region probabilities
+                
+                edge_probs = cv2.resize(edge_probs, (original_width, original_height), interpolation=cv2.INTER_LINEAR)
+                region_probs = cv2.resize(region_probs, (original_width, original_height), interpolation=cv2.INTER_LINEAR)
             
             # Resize back
             edge_probs = edge_probs[:new_height, :new_width]
