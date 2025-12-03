@@ -281,12 +281,28 @@ except ImportError:
     NETWORKX_AVAILABLE = False
     print("NetworkX not available - wall graph features will be limited", file=sys.stderr)
 
+# Import PyTorch for deep learning (Phase 5) - REQUIRED
+try:
+    import torch
+    import torch.nn as nn
+    import torchvision.transforms as transforms
+    import segmentation_models_pytorch as smp
+    from PIL import Image
+    TORCH_AVAILABLE = True
+    print("PyTorch and segmentation-models-pytorch loaded successfully", file=sys.stderr)
+except ImportError as e:
+    print(f"ERROR: PyTorch or segmentation-models-pytorch not installed: {str(e)}", file=sys.stderr)
+    print("Please install: pip install torch torchvision segmentation-models-pytorch", file=sys.stderr)
+    TORCH_AVAILABLE = False
+    raise  # Fail fast - DL is required
+
 # ============================================================================
 # PHASE 0: Configuration Constants
 # ============================================================================
 CONFIG = {
     # Wall detection
-    'min_wall_length_ft': 1.0,
+    'min_wall_length_ft': 2.0,  # Increased from 1.0 to filter short segments
+    'min_wall_confidence': 0.5,  # Minimum confidence for walls (filter low-confidence)
     'wall_thickness_pixels': 3,
     'wall_thickness_ft_range': (0.25, 2.0),  # 3" to 24"
     
@@ -296,8 +312,9 @@ CONFIG = {
     'parallel_angle_tolerance_deg': 10.0,
     
     # Room detection
-    'min_room_area_sf': 50.0,
-    'max_room_area_sf': 1000.0,  # Reduced from 2000 to filter out entire floor plans
+    'min_room_area_sf': 75.0,  # Increased from 50.0 to filter small false positives
+    'max_room_area_sf': 800.0,  # Reduced from 1000 to be more aggressive
+    'min_room_confidence': 0.6,  # Minimum confidence for rooms
     'corridor_aspect_ratio_threshold': 5.0,
     'corridor_perimeter_area_ratio_threshold': 0.3,
     
@@ -330,7 +347,11 @@ CONFIG = {
     'titleblock_exclude_top': 0.10,
     'titleblock_exclude_bottom': 0.90,
     'titleblock_exclude_left': 0.05,
-    'titleblock_exclude_right': 0.85
+    'titleblock_exclude_right': 0.85,
+    
+    # Deep learning settings (REQUIRED)
+    'dl_confidence_threshold': 0.5,  # Minimum confidence for DL predictions (0-1)
+    'dl_model_input_size': 512,  # Input size for DL model (512x512 recommended, larger = more detail but slower)
 }
 
 # ============================================================================
@@ -615,8 +636,8 @@ def filter_non_wall_segments(segments, scale_factor, ocr_text, image_shape, wall
         x2, y2 = seg['end']
         length = seg['length']
         
-        # Filter 1: Minimum length
-        if length < min_length_px:
+        # Filter 1: Minimum length (stricter)
+        if length < min_length_px * 1.5:  # Require 1.5x minimum length
             continue
         
         # Filter 2: Titleblock exclusion
@@ -633,6 +654,16 @@ def filter_non_wall_segments(segments, scale_factor, ocr_text, image_shape, wall
         # Filter 4: Dashed line detection
         if is_dashed_line(seg, wall_likelihood_mask):
             continue
+        
+        # Filter 5: Check if segment is too close to image edges (likely not a wall)
+        edge_margin = min(width, height) * 0.02  # 2% margin
+        if (x1 < edge_margin or x1 > width - edge_margin or
+            x2 < edge_margin or x2 > width - edge_margin or
+            y1 < edge_margin or y1 > height - edge_margin or
+            y2 < edge_margin or y2 > height - edge_margin):
+            # Check if it's a very short edge segment (likely dimension line)
+            if length < min_length_px * 3:
+                continue
         
         candidate_walls.append(seg)
     
@@ -797,44 +828,90 @@ def build_wall_graph(segments, scale_factor, wall_likelihood_mask):
 
 def compute_segment_confidence(segment_data, wall_likelihood_mask, graph, scale_factor):
     """Compute confidence score for a wall segment"""
-    length = segment_data.get('length', 0)
-    angle = segment_data.get('angle', 0)
-    
-    # 1. Length score
-    typical_wall_length = 10.0 / scale_factor  # 10 feet typical
-    length_score = min(1.0, length / typical_wall_length) if typical_wall_length > 0 else 0.5
-    
-    # 2. Mask overlap score (simplified)
-    mask_overlap_score = 0.8  # Placeholder - would calculate from mask
-    
-    # 3. Local density score
-    parallel_count = 0
-    if NETWORKX_AVAILABLE and graph:
-        for edge in graph.edges(data=True):
-            if edge[0:2] == (segment_data.get('start'), segment_data.get('end')):
-                continue
-            other_angle = edge[2].get('angle', 0)
-            angle_diff = abs(angle - other_angle) % np.pi
-            if angle_diff < np.pi / 6 or angle_diff > 5 * np.pi / 6:  # Parallel
-                parallel_count += 1
-            elif abs(angle_diff - np.pi / 2) < np.pi / 6:  # Perpendicular
-                parallel_count += 0.5
+    try:
+        length = segment_data.get('length', 0)
+        angle = segment_data.get('angle', 0)
+        start = segment_data.get('start', (0, 0))
+        end = segment_data.get('end', (0, 0))
         
-    density_score = min(1.0, parallel_count / 5.0)
-    
-    # 4. Structural alignment
-    structural_score = 1.0  # Placeholder
-    
-    # Combine scores
-    weights = CONFIG['confidence_weights']
-    confidence = (
-        weights['length'] * length_score +
-        weights['mask_overlap'] * mask_overlap_score +
-        weights['local_density'] * density_score +
-        weights['structural_alignment'] * structural_score
-    )
-    
-    return min(1.0, max(0.0, confidence))
+        # 1. Length score (more strict - prefer longer walls)
+        min_wall_length_px = CONFIG['min_wall_length_ft'] / scale_factor
+        if length < min_wall_length_px * 2:
+            length_score = 0.3  # Very low for short segments
+        elif length < min_wall_length_px * 5:
+            length_score = 0.5  # Medium for medium segments
+        else:
+            length_score = 1.0  # High for long segments
+        
+        # 2. Mask overlap score (calculate actual overlap)
+        mask_overlap_score = 0.5  # Default
+        if wall_likelihood_mask is not None:
+            try:
+                # Sample points along segment
+                num_samples = max(5, int(length / 5))
+                overlap_count = 0
+                height, width = wall_likelihood_mask.shape
+                
+                for i in range(num_samples):
+                    t = i / (num_samples - 1) if num_samples > 1 else 0
+                    x = int(start[0] + t * (end[0] - start[0]))
+                    y = int(start[1] + t * (end[1] - start[1]))
+                    
+                    if 0 <= x < width and 0 <= y < height:
+                        if wall_likelihood_mask[y, x] > 0:
+                            overlap_count += 1
+                
+                mask_overlap_score = overlap_count / num_samples if num_samples > 0 else 0.5
+            except:
+                mask_overlap_score = 0.5
+        
+        # 3. Local density score (connections to other walls)
+        parallel_count = 0
+        perpendicular_count = 0
+        if NETWORKX_AVAILABLE and graph:
+            try:
+                for edge in graph.edges(data=True):
+                    if edge[0:2] == (start, end) or edge[0:2] == (end, start):
+                        continue
+                    other_angle = edge[2].get('angle', 0)
+                    angle_diff = abs(angle - other_angle) % np.pi
+                    if angle_diff < np.pi / 6 or angle_diff > 5 * np.pi / 6:  # Parallel
+                        parallel_count += 1
+                    elif abs(angle_diff - np.pi / 2) < np.pi / 6:  # Perpendicular
+                        perpendicular_count += 1
+            except:
+                pass
+        
+        # Density score: prefer walls with connections
+        total_connections = parallel_count + perpendicular_count
+        density_score = min(1.0, total_connections / 3.0)  # Good if 3+ connections
+        
+        # 4. Structural alignment (prefer horizontal/vertical walls)
+        angle_deg = abs(np.degrees(angle)) % 90
+        if angle_deg < 5 or angle_deg > 85:  # Nearly horizontal or vertical
+            structural_score = 1.0
+        elif angle_deg < 15 or angle_deg > 75:  # Close to horizontal/vertical
+            structural_score = 0.8
+        else:  # Diagonal
+            structural_score = 0.6
+        
+        # Combine scores with weights
+        weights = CONFIG['confidence_weights']
+        confidence = (
+            weights['length'] * length_score +
+            weights['mask_overlap'] * mask_overlap_score +
+            weights['local_density'] * density_score +
+            weights['structural_alignment'] * structural_score
+        )
+        
+        # Penalize very short segments more aggressively
+        if length < min_wall_length_px * 1.5:
+            confidence *= 0.5  # Halve confidence for short segments
+        
+        return min(1.0, max(0.0, confidence))
+    except Exception as e:
+        print(f"ERROR computing segment confidence: {str(e)}", file=sys.stderr)
+        return 0.5  # Default confidence on error
 
 # ============================================================================
 # PHASE 1: New Wall Detection (using graph-based approach)
@@ -900,12 +977,21 @@ def detect_walls_new(image_path, scale_factor, min_length_lf, ocr_text=None):
                         
                         # Convert to normalized coordinates
                         length_lf = data.get('length', 0) * scale_factor_adj
+                        confidence = data.get('confidence', 0.7)
+                        
+                        # Filter by confidence threshold
+                        if confidence < CONFIG['min_wall_confidence']:
+                            continue
+                        
+                        # Additional length check (in real units)
+                        if length_lf < CONFIG['min_wall_length_ft']:
+                            continue
                         
                         walls.append({
                             "start": {"x": float(x1) / width, "y": float(y1) / height},
                             "end": {"x": float(x2) / width, "y": float(y2) / height},
                             "length": length_lf,
-                            "confidence": data.get('confidence', 0.7),
+                            "confidence": confidence,
                             "thickness": data.get('thickness')
                         })
                     except Exception as e:
@@ -1398,6 +1484,272 @@ def check_enclosure(polygon_px, wall_mask):
     except Exception as e:
         print(f"ERROR in check_enclosure: {str(e)}", file=sys.stderr)
         return 0.5  # Default score on error
+
+# ============================================================================
+# PHASE 5: Deep Learning Segmentation Service
+# ============================================================================
+
+class DeepLearningSegmentationService:
+    """
+    Deep learning-based segmentation for floor plans
+    Uses segmentation-models-pytorch with pre-trained models
+    
+    Model: U-Net with EfficientNet-B0 encoder (good for architectural segmentation)
+    Pre-trained on ImageNet, fine-tuned for segmentation tasks
+    """
+    
+    def __init__(self):
+        if not TORCH_AVAILABLE:
+            raise RuntimeError("PyTorch and segmentation-models-pytorch are required but not installed")
+        
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.model = None
+        self.preprocessing_fn = None
+        self.load_model()
+    
+    def load_model(self):
+        """Load pre-trained U-Net segmentation model"""
+        try:
+            print(f"Loading U-Net segmentation model on {self.device}", file=sys.stderr)
+            
+            # Use U-Net with EfficientNet-B0 encoder (good balance of speed/accuracy)
+            # Alternative: 'resnet34', 'resnet50', 'efficientnet-b3', etc.
+            ENCODER = 'efficientnet-b0'
+            ENCODER_WEIGHTS = 'imagenet'
+            CLASSES = ['background', 'walls', 'rooms']  # 3 classes: background, walls, rooms
+            ACTIVATION = 'softmax'  # Multi-class segmentation
+            
+            # Create model
+            self.model = smp.Unet(
+                encoder_name=ENCODER,
+                encoder_weights=ENCODER_WEIGHTS,
+                classes=len(CLASSES),
+                activation=ACTIVATION,
+            )
+            
+            # Move to device
+            self.model.to(self.device)
+            self.model.eval()
+            
+            # Get preprocessing function for the encoder
+            self.preprocessing_fn = smp.encoders.get_preprocessing_fn(ENCODER, ENCODER_WEIGHTS)
+            
+            print(f"U-Net model loaded successfully (encoder: {ENCODER})", file=sys.stderr)
+            print(f"Model parameters: {sum(p.numel() for p in self.model.parameters()):,}", file=sys.stderr)
+            
+        except Exception as e:
+            print(f"ERROR loading DL model: {str(e)}", file=sys.stderr)
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
+            raise RuntimeError(f"Failed to load deep learning model: {str(e)}")
+    
+    def segment_image(self, image_path):
+        """
+        Segment floor plan image into walls and rooms
+        
+        Returns:
+            - wall_mask: Binary mask of walls (uint8, 0-255)
+            - room_mask: Binary mask of rooms (uint8, 0-255)
+            - confidence_map: Confidence scores (float32, 0-1)
+        """
+        try:
+            # Load image
+            image = cv2.imread(image_path)
+            if image is None:
+                raise ValueError(f"Failed to load image: {image_path}")
+            
+            original_height, original_width = image.shape[:2]
+            
+            # Convert BGR to RGB
+            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            
+            # Resize to model input size (maintain aspect ratio or pad)
+            target_size = CONFIG['dl_model_input_size']
+            
+            # Resize maintaining aspect ratio
+            scale = min(target_size / original_width, target_size / original_height)
+            new_width = int(original_width * scale)
+            new_height = int(original_height * scale)
+            image_resized = cv2.resize(image_rgb, (new_width, new_height), interpolation=cv2.INTER_AREA)
+            
+            # Pad to target size
+            pad_h = target_size - new_height
+            pad_w = target_size - new_width
+            image_padded = cv2.copyMakeBorder(
+                image_resized, 0, pad_h, 0, pad_w,
+                cv2.BORDER_CONSTANT, value=[0, 0, 0]
+            )
+            
+            # Preprocess for model
+            # segmentation-models-pytorch expects RGB image in [0, 255] range
+            image_preprocessed = self.preprocessing_fn(image_padded)
+            image_tensor = torch.from_numpy(image_preprocessed).permute(2, 0, 1).float()
+            image_tensor = image_tensor.unsqueeze(0).to(self.device)
+            
+            # Run inference
+            with torch.no_grad():
+                pr_mask = self.model.predict(image_tensor)
+            
+            # pr_mask shape: [1, 3, H, W] (batch, classes, height, width)
+            # Apply softmax if not already applied
+            if pr_mask.shape[1] == 3:
+                pr_mask = torch.softmax(pr_mask, dim=1)
+            
+            # Extract class predictions
+            pr_mask_np = pr_mask[0].cpu().numpy()  # [3, H, W]
+            
+            # Class 0: background, Class 1: walls, Class 2: rooms
+            wall_probs = pr_mask_np[1]  # Wall probabilities
+            room_probs = pr_mask_np[2]  # Room probabilities
+            
+            # Resize back to original size (crop padding first)
+            wall_probs = wall_probs[:new_height, :new_width]
+            room_probs = room_probs[:new_height, :new_width]
+            
+            wall_probs = cv2.resize(wall_probs, (original_width, original_height), interpolation=cv2.INTER_LINEAR)
+            room_probs = cv2.resize(room_probs, (original_width, original_height), interpolation=cv2.INTER_LINEAR)
+            
+            # Apply confidence threshold and create binary masks
+            wall_threshold = CONFIG['dl_confidence_threshold']
+            room_threshold = CONFIG['dl_confidence_threshold']
+            
+            wall_mask = (wall_probs > wall_threshold).astype(np.uint8) * 255
+            room_mask = (room_probs > room_threshold).astype(np.uint8) * 255
+            
+            # Remove wall regions from room mask (rooms shouldn't overlap walls)
+            room_mask = cv2.bitwise_and(room_mask, 255 - wall_mask)
+            
+            # Confidence map (max of wall/room probabilities)
+            confidence_map = np.maximum(wall_probs, room_probs)
+            
+            wall_pixels = np.sum(wall_mask > 0)
+            room_pixels = np.sum(room_mask > 0)
+            print(f"DL segmentation complete: wall_mask={wall_pixels}px ({wall_pixels/(original_width*original_height)*100:.1f}%), room_mask={room_pixels}px ({room_pixels/(original_width*original_height)*100:.1f}%)", file=sys.stderr)
+            
+            return wall_mask, room_mask, confidence_map
+            
+        except Exception as e:
+            print(f"ERROR in DL segmentation: {str(e)}", file=sys.stderr)
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
+            raise RuntimeError(f"Deep learning segmentation failed: {str(e)}")
+
+def build_wall_graph_from_mask(wall_mask, scale_factor, image_shape):
+    """
+    Build wall graph from deep learning segmentation mask
+    
+    Steps:
+    1. Extract line segments from mask
+    2. Filter and validate
+    3. Build graph
+    """
+    try:
+        # Use existing line detection on DL mask
+        segments = detect_line_segments(wall_mask)
+        print(f"DL mask: Detected {len(segments)} line segments", file=sys.stderr)
+        
+        # Filter segments (use existing filter function)
+        # Note: OCR text might not be available yet, so pass empty list
+        candidate_walls = filter_non_wall_segments(segments, scale_factor, [], image_shape, wall_mask)
+        print(f"DL mask: Filtered to {len(candidate_walls)} candidate wall segments", file=sys.stderr)
+        
+        # Build graph
+        wall_graph = build_wall_graph(candidate_walls, scale_factor, wall_mask)
+        
+        return wall_graph
+    except Exception as e:
+        print(f"ERROR building wall graph from DL mask: {str(e)}", file=sys.stderr)
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
+        return None
+
+def extract_rooms_from_dl_mask(room_mask, scale_factor, ocr_text, image_shape):
+    """
+    Extract rooms from deep learning segmentation mask
+    
+    Steps:
+    1. Find connected components in room mask
+    2. Match with OCR labels
+    3. Validate and classify
+    """
+    try:
+        height, width = image_shape
+        
+        # Find connected components
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(room_mask, connectivity=8)
+        
+        rooms = []
+        for i in range(1, num_labels):  # Skip background (label 0)
+            # Get component mask
+            component_mask = (labels == i).astype(np.uint8) * 255
+            
+            # Find contours
+            contours, _ = cv2.findContours(component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if not contours:
+                continue
+            
+            # Get largest contour
+            largest_contour = max(contours, key=cv2.contourArea)
+            area_px = cv2.contourArea(largest_contour)
+            
+            # Validate area
+            min_area_px = CONFIG['min_room_area_sf'] / (scale_factor ** 2) if scale_factor > 0 else 1000
+            max_area_px = CONFIG['max_room_area_sf'] / (scale_factor ** 2) if scale_factor > 0 else (width * height * 0.7)
+            
+            if area_px < min_area_px or area_px > max_area_px:
+                continue
+            
+            # Simplify contour
+            epsilon = 0.02 * cv2.arcLength(largest_contour, True)
+            approx = cv2.approxPolyDP(largest_contour, epsilon, True)
+            
+            if len(approx) < 3:
+                continue
+            
+            # Calculate area and perimeter
+            area_sf = area_px * (scale_factor ** 2)
+            perimeter_px = cv2.arcLength(largest_contour, True)
+            perimeter_lf = perimeter_px * scale_factor
+            
+            # Convert to normalized coordinates
+            polygon = []
+            for point in approx:
+                x_norm = float(point[0][0]) / width
+                y_norm = float(point[0][1]) / height
+                polygon.append({'x': x_norm, 'y': y_norm})
+            
+            # Match with OCR labels
+            label_text = ''
+            if ocr_text:
+                centroid_x = centroids[i][0] / width
+                centroid_y = centroids[i][1] / height
+                # Find nearest OCR label
+                min_dist = float('inf')
+                for text in ocr_text:
+                    if text.get('type') == 'room_label':
+                        bbox = text.get('bbox', {})
+                        text_x = bbox.get('x', 0) + bbox.get('width', 0) / 2
+                        text_y = bbox.get('y', 0) + bbox.get('height', 0) / 2
+                        dist = np.sqrt((centroid_x - text_x)**2 + (centroid_y - text_y)**2)
+                        if dist < min_dist and dist < 0.1:  # Within 10% of image
+                            min_dist = dist
+                            label_text = text.get('text', '')
+            
+            rooms.append({
+                'polygon': polygon,
+                'area_sf': round(area_sf, 2),
+                'perimeter_lf': round(perimeter_lf, 2),
+                'label_text': label_text,
+                'confidence': 0.8  # DL confidence (higher than CV default)
+            })
+        
+        print(f"DL mask: Extracted {len(rooms)} rooms from segmentation", file=sys.stderr)
+        return rooms
+    except Exception as e:
+        print(f"ERROR extracting rooms from DL mask: {str(e)}", file=sys.stderr)
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
+        return []
 
 # ============================================================================
 # PHASE 4: Wall Refinement with Room Feedback (Iterative Refinement)
@@ -3209,20 +3561,62 @@ if __name__ == "__main__":
             ocr_text = []
             room_labels = []
         
-        # PHASE 1: New wall detection using graph-based approach
-        try:
-            walls, wall_graph, wall_likelihood_mask, image_shape_adj, scale_factor_adj = detect_walls_new(image_path, scale_factor, min_wall_length, ocr_text)
-            print(f"Phase 1 complete: {len(walls)} walls detected", file=sys.stderr)
-        except Exception as e:
-            print(f"ERROR in Phase 1 wall detection: {str(e)}", file=sys.stderr)
-            import traceback
-            print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
-            # Fallback to empty walls
-            walls = []
-            wall_graph = None
-            wall_likelihood_mask = None
-            image_shape_adj = (height, width)
-            scale_factor_adj = scale_factor
+        # PHASE 1: Wall detection using deep learning (REQUIRED)
+        if not TORCH_AVAILABLE:
+            raise RuntimeError("PyTorch and segmentation-models-pytorch are required but not installed. Please install: pip install torch torchvision segmentation-models-pytorch")
+        
+        print("Starting deep learning segmentation...", file=sys.stderr)
+        dl_service = DeepLearningSegmentationService()
+        wall_mask_dl, room_mask_dl, confidence_map = dl_service.segment_image(image_path)
+        
+        if wall_mask_dl is None or room_mask_dl is None:
+            raise RuntimeError("Deep learning segmentation failed - returned None masks")
+        
+        print("Deep learning segmentation complete, building wall graph...", file=sys.stderr)
+        
+        # Build wall graph from DL mask
+        image_shape_adj = (height, width)
+        scale_factor_adj = scale_factor
+        wall_graph = build_wall_graph_from_mask(wall_mask_dl, scale_factor, image_shape_adj)
+        
+        if wall_graph is None:
+            raise RuntimeError("Failed to build wall graph from DL mask")
+        
+        # Create wall_likelihood_mask from DL mask for compatibility
+        wall_likelihood_mask = wall_mask_dl.copy()
+        
+        # Convert graph to wall segments format
+        walls = []
+        if NETWORKX_AVAILABLE and isinstance(wall_graph, nx.Graph):
+            for edge in wall_graph.edges(data=True):
+                try:
+                    node1, node2, data = edge
+                    x1, y1 = node1
+                    x2, y2 = node2
+                    
+                    if not (0 <= x1 < width and 0 <= y1 < height and 0 <= x2 < width and 0 <= y2 < height):
+                        continue
+                    
+                    length_lf = data.get('length', 0) * scale_factor
+                    confidence = data.get('confidence', 0.7)
+                    
+                    if confidence < CONFIG['min_wall_confidence']:
+                        continue
+                    if length_lf < CONFIG['min_wall_length_ft']:
+                        continue
+                    
+                    walls.append({
+                        "start": {"x": float(x1) / width, "y": float(y1) / height},
+                        "end": {"x": float(x2) / width, "y": float(y2) / height},
+                        "length": length_lf,
+                        "confidence": confidence,
+                        "thickness": data.get('thickness')
+                    })
+                except Exception as e:
+                    print(f"ERROR converting DL edge to wall: {str(e)}", file=sys.stderr)
+                    continue
+        
+        print(f"DL Phase 1 complete: {len(walls)} walls detected from DL mask", file=sys.stderr)
         
         # PHASE 2: Wall mask generation and room seeds
         text_based_rooms = []
@@ -3239,25 +3633,25 @@ if __name__ == "__main__":
                     room_seeds = prepare_room_seeds(ocr_text, wall_mask, distance_transform)
                     print(f"Phase 2 complete: {len(room_seeds)} room seeds prepared", file=sys.stderr)
                     
-                    # PHASE 3: Constrained flood fill for room extraction
-                    if room_seeds:
-                        # Phase 3.1: Extract rooms via flood fill
-                        rooms = extract_rooms_constrained_flood_fill(room_seeds, wall_mask, scale_factor_adj)
-                        print(f"Phase 3.1 complete: {len(rooms)} rooms extracted", file=sys.stderr)
-                        
-                        # Phase 3.2: Validate rooms
-                        rooms = validate_rooms(rooms, wall_mask, wall_graph)
-                        print(f"Phase 3.2 complete: {len(rooms)} rooms validated", file=sys.stderr)
-                        
-                        # Phase 3.3: Classify room types
-                        rooms = classify_room_types(rooms)
-                        print(f"Phase 3.3 complete: room types classified", file=sys.stderr)
-                        
-                        # Phase 3.4: Compute adjacency
-                        rooms = compute_room_adjacency(rooms)
-                        print(f"Phase 3.4 complete: adjacency computed", file=sys.stderr)
-                        
-                        # Convert to output format - ONLY include validated rooms
+                    # PHASE 3: Room extraction from DL mask (REQUIRED)
+                    print("Extracting rooms from DL segmentation mask", file=sys.stderr)
+                    rooms = extract_rooms_from_dl_mask(room_mask_dl, scale_factor_adj, ocr_text, image_shape_adj)
+                    print(f"DL Phase 3.1 complete: {len(rooms)} rooms extracted from DL mask", file=sys.stderr)
+                    
+                    # Phase 3.2: Validate rooms
+                    rooms = validate_rooms(rooms, wall_mask, wall_graph)
+                    print(f"DL Phase 3.2 complete: {len(rooms)} rooms validated", file=sys.stderr)
+                    
+                    # Phase 3.3: Classify room types
+                    rooms = classify_room_types(rooms)
+                    print(f"DL Phase 3.3 complete: room types classified", file=sys.stderr)
+                    
+                    # Phase 3.4: Compute adjacency
+                    rooms = compute_room_adjacency(rooms)
+                    print(f"DL Phase 3.4 complete: adjacency computed", file=sys.stderr)
+                    
+                    # Convert to output format - ONLY include validated rooms (for both DL and CV)
+                    if rooms:
                         text_based_rooms = []
                         for room in rooms:
                             # Only include rooms that passed validation
@@ -3268,11 +3662,16 @@ if __name__ == "__main__":
                                     print(f"Filtering out oversized room: {area_sf:.1f} SF (max: {CONFIG['max_room_area_sf']} SF)", file=sys.stderr)
                                     continue
                                 
+                                # Filter by confidence and area
+                                room_confidence = room.get('confidence', 0.7)
+                                if room_confidence < CONFIG['min_room_confidence']:
+                                    continue
+                                
                                 text_based_rooms.append({
                                     "points": room['polygon'],
                                     "area": room['area_sf'],
                                     "perimeter": room['perimeter_lf'],
-                                    "confidence": room.get('confidence', 0.7),
+                                    "confidence": room_confidence,
                                     "roomLabel": room.get('label_text', ''),
                                     "roomType": room.get('room_type', 'other')
                                 })
@@ -3295,11 +3694,16 @@ if __name__ == "__main__":
                                         if area_sf > CONFIG['max_room_area_sf']:
                                             continue
                                         
+                                        # Filter by confidence
+                                        room_confidence = room.get('confidence', 0.7)
+                                        if room_confidence < CONFIG['min_room_confidence']:
+                                            continue
+                                        
                                         text_based_rooms.append({
                                             "points": room['polygon'],
                                             "area": room['area_sf'],
                                             "perimeter": room['perimeter_lf'],
-                                            "confidence": room.get('confidence', 0.7),
+                                            "confidence": room_confidence,
                                             "roomLabel": room.get('label_text', ''),
                                             "roomType": room.get('room_type', 'other')
                                         })
