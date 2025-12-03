@@ -272,6 +272,1274 @@ except ImportError:
     TESSERACT_AVAILABLE = False
     TESSERACT_BINARY_AVAILABLE = False
 
+# Try to import NetworkX for wall graph (Phase 1)
+try:
+    import networkx as nx
+    NETWORKX_AVAILABLE = True
+    print("NetworkX available for wall graph structure", file=sys.stderr)
+except ImportError:
+    NETWORKX_AVAILABLE = False
+    print("NetworkX not available - wall graph features will be limited", file=sys.stderr)
+
+# ============================================================================
+# PHASE 0: Configuration Constants
+# ============================================================================
+CONFIG = {
+    # Wall detection
+    'min_wall_length_ft': 1.0,
+    'wall_thickness_pixels': 3,
+    'wall_thickness_ft_range': (0.25, 2.0),  # 3" to 24"
+    
+    # Tolerances
+    'endpoint_snap_distance_px': 3,
+    'angular_tolerance_deg': 5.0,
+    'parallel_angle_tolerance_deg': 10.0,
+    
+    # Room detection
+    'min_room_area_sf': 50.0,
+    'max_room_area_sf': 2000.0,
+    'corridor_aspect_ratio_threshold': 5.0,
+    'corridor_perimeter_area_ratio_threshold': 0.3,
+    
+    # Preprocessing
+    'image_max_dimension_px': 3000,
+    'gaussian_blur_kernel': (5, 5),
+    'bilateral_filter_d': 9,
+    'bilateral_filter_sigma_color': 75,
+    'bilateral_filter_sigma_space': 75,
+    
+    # Morphological operations
+    'morph_horizontal_kernel_size': (15, 3),
+    'morph_vertical_kernel_size': (3, 15),
+    'morph_closing_iterations': 2,
+    'morph_opening_iterations': 1,
+    
+    # Graph building
+    'node_snap_distance_px': 2,
+    'collinear_merge_distance_px': 5,
+    
+    # Confidence scoring weights
+    'confidence_weights': {
+        'length': 0.3,
+        'mask_overlap': 0.3,
+        'local_density': 0.2,
+        'structural_alignment': 0.2
+    },
+    
+    # Titleblock exclusion (normalized 0-1)
+    'titleblock_exclude_top': 0.10,
+    'titleblock_exclude_bottom': 0.90,
+    'titleblock_exclude_left': 0.05,
+    'titleblock_exclude_right': 0.85
+}
+
+# ============================================================================
+# PHASE 0: Preprocessing Pipeline
+# ============================================================================
+def preprocess_image(image_path, scale_factor):
+    """
+    Preprocess floor plan image for wall/room detection
+    
+    Returns:
+        - processed_image: Binary image
+        - scale_factor_adjusted: Adjusted scale factor if image was resized
+        - pixel_to_unit: Conversion factor (pixels to feet)
+        - image_shape: (height, width)
+    """
+    img = cv2.imread(image_path)
+    if img is None:
+        return None, scale_factor, scale_factor, None
+    
+    height, width = img.shape[:2]
+    original_shape = (height, width)
+    
+    # Resize if needed
+    max_dim = CONFIG['image_max_dimension_px']
+    if width > max_dim or height > max_dim:
+        scale_down = max_dim / max(width, height)
+        new_width = int(width * scale_down)
+        new_height = int(height * scale_down)
+        img = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_AREA)
+        height, width = img.shape[:2]
+        scale_factor = scale_factor / scale_down
+        print(f"Resized image to {width}x{height} for processing", file=sys.stderr)
+    
+    # Convert to grayscale
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    
+    # Denoise with bilateral filter (preserves edges better than Gaussian)
+    denoised = cv2.bilateralFilter(
+        gray,
+        CONFIG['bilateral_filter_d'],
+        CONFIG['bilateral_filter_sigma_color'],
+        CONFIG['bilateral_filter_sigma_space']
+    )
+    
+    # Adaptive threshold to binary
+    binary = cv2.adaptiveThreshold(
+        denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV, 11, 2
+    )
+    
+    pixel_to_unit = scale_factor
+    
+    return binary, scale_factor, pixel_to_unit, (height, width)
+
+# ============================================================================
+# PHASE 1.1: Wall-Likelihood Mask Generation
+# ============================================================================
+def generate_wall_likelihood_mask(binary_image):
+    """
+    Create a wall-likelihood mask using morphological operations
+    
+    Returns: Binary image where walls are likely present
+    """
+    # Horizontal wall emphasis
+    kernel_h = cv2.getStructuringElement(
+        cv2.MORPH_RECT,
+        CONFIG['morph_horizontal_kernel_size']
+    )
+    horizontal = cv2.morphologyEx(
+        binary_image, cv2.MORPH_CLOSE, kernel_h,
+        iterations=CONFIG['morph_closing_iterations']
+    )
+    
+    # Vertical wall emphasis
+    kernel_v = cv2.getStructuringElement(
+        cv2.MORPH_RECT,
+        CONFIG['morph_vertical_kernel_size']
+    )
+    vertical = cv2.morphologyEx(
+        binary_image, cv2.MORPH_CLOSE, kernel_v,
+        iterations=CONFIG['morph_closing_iterations']
+    )
+    
+    # Optional: Diagonal walls (45° and 135°)
+    kernel_d1 = np.zeros((11, 11), np.uint8)
+    cv2.line(kernel_d1, (0, 11), (11, 0), 255, 2)  # 45° diagonal
+    kernel_d2 = np.zeros((11, 11), np.uint8)
+    cv2.line(kernel_d2, (0, 0), (11, 11), 255, 2)  # 135° diagonal
+    
+    diagonal_45 = cv2.morphologyEx(
+        binary_image, cv2.MORPH_CLOSE, kernel_d1,
+        iterations=CONFIG['morph_closing_iterations']
+    )
+    diagonal_135 = cv2.morphologyEx(
+        binary_image, cv2.MORPH_CLOSE, kernel_d2,
+        iterations=CONFIG['morph_closing_iterations']
+    )
+    
+    # Combine all orientations
+    combined = cv2.bitwise_or(horizontal, vertical)
+    combined = cv2.bitwise_or(combined, diagonal_45)
+    combined = cv2.bitwise_or(combined, diagonal_135)
+    
+    # Optional: Opening to remove small artifacts
+    kernel_small = np.ones((3, 3), np.uint8)
+    cleaned = cv2.morphologyEx(
+        combined, cv2.MORPH_OPEN, kernel_small,
+        iterations=CONFIG['morph_opening_iterations']
+    )
+    
+    return cleaned
+
+# ============================================================================
+# PHASE 1.2: Line Segment Detection
+# ============================================================================
+def detect_line_segments(wall_likelihood_mask):
+    """
+    Detect line segments from wall-likelihood mask using LSD
+    
+    Returns: List of line segments with start, end, length, angle
+    """
+    # Use LSD for better accuracy (handles arbitrary angles)
+    lsd = cv2.createLineSegmentDetector(cv2.LSD_REFINE_STD)
+    lines, widths, prec, nfa = lsd.detect(wall_likelihood_mask)
+    
+    if lines is None or len(lines) == 0:
+        return []
+    
+    segments = []
+    for line in lines:
+        # Handle different line formats from LSD
+        if line.shape == (1, 4):
+            x1, y1, x2, y2 = line[0]
+        elif line.shape == (4,):
+            x1, y1, x2, y2 = line
+        else:
+            coords = line.flatten()[:4]
+            x1, y1, x2, y2 = coords
+        
+        length = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+        angle = np.arctan2(y2 - y1, x2 - x1)
+        
+        segments.append({
+            'start': (int(x1), int(y1)),
+            'end': (int(x2), int(y2)),
+            'length': length,
+            'angle': angle
+        })
+    
+    return segments
+
+# ============================================================================
+# PHASE 1.3: Filter Non-Wall Segments
+# ============================================================================
+def create_text_mask(ocr_text, width, height):
+    """Create a mask of text regions from OCR results"""
+    text_mask = np.zeros((height, width), dtype=np.uint8)
+    
+    for text_elem in ocr_text:
+        bbox = text_elem.get('bbox', {})
+        x_norm = bbox.get('x', 0)
+        y_norm = bbox.get('y', 0)
+        w_norm = bbox.get('width', 0)
+        h_norm = bbox.get('height', 0)
+        
+        x_px = int(x_norm * width)
+        y_px = int(y_norm * height)
+        w_px = int(w_norm * width)
+        h_px = int(h_norm * height)
+        
+        cv2.rectangle(text_mask, (x_px, y_px), (x_px + w_px, y_px + h_px), 255, -1)
+    
+    # Dilate to capture nearby regions
+    kernel = np.ones((10, 10), np.uint8)
+    text_mask = cv2.dilate(text_mask, kernel, iterations=1)
+    
+    return text_mask
+
+def is_dimension_string(segment, text_mask, width, height, scale_factor):
+    """Detect if segment is likely a dimension string"""
+    x1, y1 = segment['start']
+    x2, y2 = segment['end']
+    length = segment['length']
+    
+    # Check if horizontal or vertical
+    dx = abs(x2 - x1)
+    dy = abs(y2 - y1)
+    is_horizontal = dy < dx * 0.1
+    is_vertical = dx < dy * 0.1
+    
+    # Sample points along line
+    num_samples = max(10, int(length / 5))
+    text_intersections = 0
+    
+    for i in range(num_samples):
+        t = i / (num_samples - 1) if num_samples > 1 else 0
+        x = int(x1 + t * (x2 - x1))
+        y = int(y1 + t * (y2 - y1))
+        if 0 <= x < width and 0 <= y < height:
+            if text_mask[y, x] > 0:
+                text_intersections += 1
+    
+    text_ratio = text_intersections / num_samples
+    
+    # Check edge proximity
+    center_x = (x1 + x2) / 2
+    center_y = (y1 + y2) / 2
+    edge_distance = min(center_x, center_y, width - center_x, height - center_y)
+    is_near_edge = edge_distance < min(width, height) * 0.15
+    
+    # Dimension string criteria
+    min_length_px = CONFIG['min_wall_length_ft'] / scale_factor
+    is_short = length < min_length_px * 2
+    is_very_long = length > min(width, height) * 0.25
+    
+    if (is_short and text_ratio > 0.15) or \\
+       (is_near_edge and (is_horizontal or is_vertical) and text_ratio > 0.1) or \\
+       (is_very_long and is_near_edge and (is_horizontal or is_vertical)) or \\
+       (text_ratio > 0.3):
+        return True
+    
+    return False
+
+def is_dashed_line(segment, wall_likelihood_mask):
+    """Detect if segment is a dashed line (not a solid wall)"""
+    x1, y1 = segment['start']
+    x2, y2 = segment['end']
+    length = segment['length']
+    
+    # Sample points along line
+    num_samples = max(20, int(length / 3))
+    edge_hits = 0
+    consecutive_gaps = 0
+    max_consecutive_gaps = 0
+    
+    height, width = wall_likelihood_mask.shape
+    
+    for i in range(num_samples):
+        t = i / (num_samples - 1) if num_samples > 1 else 0
+        x = int(x1 + t * (x2 - x1))
+        y = int(y1 + t * (y2 - y1))
+        
+        # Check 3x3 region around point
+        y_min = max(0, y - 1)
+        y_max = min(height, y + 2)
+        x_min = max(0, x - 1)
+        x_max = min(width, x + 2)
+        
+        if np.any(wall_likelihood_mask[y_min:y_max, x_min:x_max] > 0):
+            edge_hits += 1
+            consecutive_gaps = 0
+        else:
+            consecutive_gaps += 1
+            max_consecutive_gaps = max(max_consecutive_gaps, consecutive_gaps)
+    
+    edge_continuity = edge_hits / num_samples if num_samples > 0 else 0
+    
+    # Dashed lines have low continuity or large gaps
+    if edge_continuity < 0.60 or max_consecutive_gaps > num_samples * 0.3:
+        return True
+    
+    return False
+
+def filter_non_wall_segments(segments, scale_factor, ocr_text, image_shape, wall_likelihood_mask):
+    """Filter out obvious non-wall segments"""
+    height, width = image_shape
+    min_length_px = CONFIG['min_wall_length_ft'] / scale_factor
+    
+    # Create text mask from OCR
+    text_mask = create_text_mask(ocr_text, width, height) if ocr_text else np.zeros((height, width), dtype=np.uint8)
+    
+    # Titleblock exclusion zones
+    exclude_top = int(height * CONFIG['titleblock_exclude_top'])
+    exclude_bottom = int(height * CONFIG['titleblock_exclude_bottom'])
+    exclude_left = int(width * CONFIG['titleblock_exclude_left'])
+    exclude_right = int(width * CONFIG['titleblock_exclude_right'])
+    
+    candidate_walls = []
+    
+    for seg in segments:
+        x1, y1 = seg['start']
+        x2, y2 = seg['end']
+        length = seg['length']
+        
+        # Filter 1: Minimum length
+        if length < min_length_px:
+            continue
+        
+        # Filter 2: Titleblock exclusion
+        center_x = (x1 + x2) / 2
+        center_y = (y1 + y2) / 2
+        if (center_y < exclude_top or center_y > exclude_bottom or
+            center_x < exclude_left or center_x > exclude_right):
+            continue
+        
+        # Filter 3: Dimension string detection
+        if is_dimension_string(seg, text_mask, width, height, scale_factor):
+            continue
+        
+        # Filter 4: Dashed line detection
+        if is_dashed_line(seg, wall_likelihood_mask):
+            continue
+        
+        candidate_walls.append(seg)
+    
+    return candidate_walls
+
+# ============================================================================
+# PHASE 1.4: Build Wall Graph (with NetworkX if available)
+# ============================================================================
+def snap_endpoints(segments, snap_distance):
+    """Snap endpoints that are within snap_distance pixels"""
+    node_mapping = {}
+    used_nodes = set()
+    
+    # Group nearby endpoints
+    for i, seg in enumerate(segments):
+        node1 = seg['start']
+        node2 = seg['end']
+        
+        # Find existing group for node1
+        found_group1 = None
+        for existing_node, group in node_mapping.items():
+            if existing_node in used_nodes:
+                continue
+            dist = np.sqrt((node1[0] - existing_node[0])**2 + (node1[1] - existing_node[1])**2)
+            if dist <= snap_distance:
+                found_group1 = existing_node
+                break
+        
+        # Find existing group for node2
+        found_group2 = None
+        for existing_node, group in node_mapping.items():
+            if existing_node in used_nodes:
+                continue
+            dist = np.sqrt((node2[0] - existing_node[0])**2 + (node2[1] - existing_node[1])**2)
+            if dist <= snap_distance:
+                found_group2 = existing_node
+                break
+        
+        # Create or merge groups
+        if found_group1 and found_group2:
+            # Merge groups
+            if found_group1 != found_group2:
+                node_mapping[found_group1].extend(node_mapping[found_group2])
+                for node in node_mapping[found_group2]:
+                    node_mapping[node] = node_mapping[found_group1]
+                del node_mapping[found_group2]
+        elif found_group1:
+            node_mapping[found_group1].append(node2)
+            node_mapping[node2] = node_mapping[found_group1]
+        elif found_group2:
+            node_mapping[found_group2].append(node1)
+            node_mapping[node1] = node_mapping[found_group2]
+        else:
+            # Create new group
+            group = [node1, node2]
+            node_mapping[node1] = group
+            node_mapping[node2] = group
+    
+    # Calculate centroids for each group
+    snapped_nodes = {}
+    for node, group in node_mapping.items():
+        if node in used_nodes:
+            continue
+        center_x = sum(n[0] for n in group) / len(group)
+        center_y = sum(n[1] for n in group) / len(group)
+        snapped_node = (int(center_x), int(center_y))
+        for n in group:
+            snapped_nodes[n] = snapped_node
+            used_nodes.add(n)
+    
+    # Update segments with snapped nodes
+    snapped_segments = []
+    for seg in segments:
+        new_start = snapped_nodes.get(seg['start'], seg['start'])
+        new_end = snapped_nodes.get(seg['end'], seg['end'])
+        if new_start != new_end:  # Don't add zero-length segments
+            new_seg = seg.copy()
+            new_seg['start'] = new_start
+            new_seg['end'] = new_end
+            snapped_segments.append(new_seg)
+    
+    return snapped_segments
+
+def build_wall_graph(segments, scale_factor, wall_likelihood_mask):
+    """
+    Build a graph representation of wall segments
+    
+    Returns: NetworkX graph (or list of segments if NetworkX unavailable)
+    """
+    try:
+        if not segments:
+            print("WARNING: No segments provided to build_wall_graph", file=sys.stderr)
+            return [] if not NETWORKX_AVAILABLE else nx.Graph()
+        
+        # Snap endpoints
+        segments = snap_endpoints(segments, CONFIG['node_snap_distance_px'])
+        
+        if NETWORKX_AVAILABLE:
+            try:
+                G = nx.Graph()
+                
+                # Add segments as edges
+                for seg in segments:
+                    try:
+                        node1 = seg['start']
+                        node2 = seg['end']
+                        
+                        # Add nodes and edge
+                        G.add_node(node1)
+                        G.add_node(node2)
+                        G.add_edge(node1, node2, **seg)
+                    except Exception as e:
+                        print(f"ERROR adding edge to graph: {str(e)}", file=sys.stderr)
+                        continue
+                
+                if G.number_of_edges() == 0:
+                    print("WARNING: Graph has no edges after building", file=sys.stderr)
+                    return G
+                
+                # Compute node metadata
+                for node in G.nodes():
+                    try:
+                        degree = G.degree(node)
+                        G.nodes[node]['degree'] = degree
+                        G.nodes[node]['is_junction'] = degree >= 3
+                        G.nodes[node]['is_corner'] = degree == 2
+                    except Exception as e:
+                        print(f"ERROR computing node metadata: {str(e)}", file=sys.stderr)
+                        continue
+                
+                # Calculate confidence scores
+                for edge in G.edges():
+                    try:
+                        seg_data = G.edges[edge]
+                        confidence = compute_segment_confidence(seg_data, wall_likelihood_mask, G, scale_factor)
+                        G.edges[edge]['confidence'] = confidence
+                    except Exception as e:
+                        print(f"ERROR computing confidence for edge: {str(e)}", file=sys.stderr)
+                        G.edges[edge]['confidence'] = 0.7  # Default
+                        continue
+                
+                print(f"Built wall graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges", file=sys.stderr)
+                return G
+            except Exception as e:
+                print(f"ERROR building NetworkX graph: {str(e)}", file=sys.stderr)
+                import traceback
+                print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
+                # Fallback to list
+                for seg in segments:
+                    seg['confidence'] = 0.7
+                return segments
+        else:
+            # Fallback: return segments with basic confidence
+            for seg in segments:
+                seg['confidence'] = 0.7  # Default confidence
+            return segments
+    except Exception as e:
+        print(f"ERROR in build_wall_graph: {str(e)}", file=sys.stderr)
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
+        return [] if not NETWORKX_AVAILABLE else nx.Graph()
+
+def compute_segment_confidence(segment_data, wall_likelihood_mask, graph, scale_factor):
+    """Compute confidence score for a wall segment"""
+    length = segment_data.get('length', 0)
+    angle = segment_data.get('angle', 0)
+    
+    # 1. Length score
+    typical_wall_length = 10.0 / scale_factor  # 10 feet typical
+    length_score = min(1.0, length / typical_wall_length) if typical_wall_length > 0 else 0.5
+    
+    # 2. Mask overlap score (simplified)
+    mask_overlap_score = 0.8  # Placeholder - would calculate from mask
+    
+    # 3. Local density score
+    parallel_count = 0
+    if NETWORKX_AVAILABLE and graph:
+        for edge in graph.edges(data=True):
+            if edge[0:2] == (segment_data.get('start'), segment_data.get('end')):
+                continue
+            other_angle = edge[2].get('angle', 0)
+            angle_diff = abs(angle - other_angle) % np.pi
+            if angle_diff < np.pi / 6 or angle_diff > 5 * np.pi / 6:  # Parallel
+                parallel_count += 1
+            elif abs(angle_diff - np.pi / 2) < np.pi / 6:  # Perpendicular
+                parallel_count += 0.5
+        
+    density_score = min(1.0, parallel_count / 5.0)
+    
+    # 4. Structural alignment
+    structural_score = 1.0  # Placeholder
+    
+    # Combine scores
+    weights = CONFIG['confidence_weights']
+    confidence = (
+        weights['length'] * length_score +
+        weights['mask_overlap'] * mask_overlap_score +
+        weights['local_density'] * density_score +
+        weights['structural_alignment'] * structural_score
+    )
+    
+    return min(1.0, max(0.0, confidence))
+
+# ============================================================================
+# PHASE 1: New Wall Detection (using graph-based approach)
+# ============================================================================
+def detect_walls_new(image_path, scale_factor, min_length_lf, ocr_text=None):
+    """
+    New wall detection using Phase 1 approach:
+    1. Preprocess image
+    2. Generate wall-likelihood mask
+    3. Detect line segments
+    4. Filter non-walls
+    5. Build wall graph
+    """
+    # Phase 0: Preprocessing
+    try:
+        binary, scale_factor_adj, pixel_to_unit, image_shape = preprocess_image(image_path, scale_factor)
+        if binary is None or image_shape is None:
+            print("ERROR: Preprocessing failed - binary or image_shape is None", file=sys.stderr)
+            return [], None, None, None, scale_factor
+    except Exception as e:
+        print(f"ERROR in preprocessing: {str(e)}", file=sys.stderr)
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
+        return [], None, None, None, scale_factor
+    
+    try:
+        height, width = image_shape
+        
+        # Phase 1.1: Generate wall-likelihood mask
+        wall_likelihood_mask = generate_wall_likelihood_mask(binary)
+        if wall_likelihood_mask is None:
+            print("ERROR: Failed to generate wall-likelihood mask", file=sys.stderr)
+            return [], None, None, image_shape, scale_factor_adj
+        
+        # Phase 1.2: Detect line segments
+        segments = detect_line_segments(wall_likelihood_mask)
+        print(f"Detected {len(segments)} line segments", file=sys.stderr)
+        
+        # Phase 1.3: Filter non-wall segments
+        ocr_text_list = ocr_text if ocr_text else []
+        candidate_walls = filter_non_wall_segments(segments, scale_factor_adj, ocr_text_list, image_shape, wall_likelihood_mask)
+        print(f"Filtered to {len(candidate_walls)} candidate wall segments", file=sys.stderr)
+        
+        # Phase 1.4: Build wall graph
+        wall_graph = build_wall_graph(candidate_walls, scale_factor_adj, wall_likelihood_mask)
+        if wall_graph is None:
+            print("ERROR: Failed to build wall graph", file=sys.stderr)
+            return [], None, wall_likelihood_mask, image_shape, scale_factor_adj
+        
+        # Convert graph to wall segments format (for compatibility)
+        walls = []
+        try:
+            if NETWORKX_AVAILABLE and isinstance(wall_graph, nx.Graph):
+                for edge in wall_graph.edges(data=True):
+                    try:
+                        node1, node2, data = edge
+                        x1, y1 = node1
+                        x2, y2 = node2
+                        
+                        # Validate coordinates
+                        if not (0 <= x1 < width and 0 <= y1 < height and 0 <= x2 < width and 0 <= y2 < height):
+                            continue
+                        
+                        # Convert to normalized coordinates
+                        length_lf = data.get('length', 0) * scale_factor_adj
+                        
+                        walls.append({
+                            "start": {"x": float(x1) / width, "y": float(y1) / height},
+                            "end": {"x": float(x2) / width, "y": float(y2) / height},
+                            "length": length_lf,
+                            "confidence": data.get('confidence', 0.7),
+                            "thickness": data.get('thickness')
+                        })
+                    except Exception as e:
+                        print(f"ERROR converting edge to wall segment: {str(e)}", file=sys.stderr)
+                        continue
+            else:
+                # Fallback: use segments directly
+                if isinstance(wall_graph, list):
+                    for seg in wall_graph:
+                        try:
+                            x1, y1 = seg['start']
+                            x2, y2 = seg['end']
+                            
+                            # Validate coordinates
+                            if not (0 <= x1 < width and 0 <= y1 < height and 0 <= x2 < width and 0 <= y2 < height):
+                                continue
+                            
+                            length_lf = seg['length'] * scale_factor_adj
+                            
+                            walls.append({
+                                "start": {"x": float(x1) / width, "y": float(y1) / height},
+                                "end": {"x": float(x2) / width, "y": float(y2) / height},
+                                "length": length_lf,
+                                "confidence": seg.get('confidence', 0.7)
+                            })
+                        except Exception as e:
+                            print(f"ERROR converting segment to wall: {str(e)}", file=sys.stderr)
+                            continue
+        except Exception as e:
+            print(f"ERROR converting wall graph to segments: {str(e)}", file=sys.stderr)
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
+        
+        print(f"Converted to {len(walls)} wall segments", file=sys.stderr)
+        return walls, wall_graph, wall_likelihood_mask, image_shape, scale_factor_adj
+    except Exception as e:
+        print(f"ERROR in detect_walls_new after preprocessing: {str(e)}", file=sys.stderr)
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
+        return [], None, None, image_shape if 'image_shape' in locals() else None, scale_factor_adj if 'scale_factor_adj' in locals() else scale_factor
+
+# ============================================================================
+# PHASE 2.1: Render Wall Mask from Graph
+# ============================================================================
+def render_wall_mask(wall_graph, image_shape, scale_factor):
+    """
+    Create a binary mask of walls from the wall graph
+    
+    Returns: Binary image (255 = wall, 0 = free space)
+    """
+    try:
+        height, width = image_shape
+        wall_mask = np.zeros((height, width), dtype=np.uint8)
+        
+        # Calculate wall thickness in pixels
+        min_thickness_ft, max_thickness_ft = CONFIG['wall_thickness_ft_range']
+        avg_thickness_ft = (min_thickness_ft + max_thickness_ft) / 2
+        wall_thickness_px = int(avg_thickness_ft / scale_factor)
+        wall_thickness_px = max(2, min(wall_thickness_px, 10))  # Clamp 2-10 pixels
+        
+        print(f"Rendering wall mask with thickness {wall_thickness_px}px (avg {avg_thickness_ft:.2f}ft)", file=sys.stderr)
+        
+        if NETWORKX_AVAILABLE and isinstance(wall_graph, nx.Graph):
+            # Draw each edge in the graph
+            edge_count = 0
+            for edge in wall_graph.edges(data=True):
+                try:
+                    node1, node2, data = edge
+                    x1, y1 = node1
+                    x2, y2 = node2
+                    
+                    # Adjust thickness based on confidence
+                    confidence = data.get('confidence', 0.7)
+                    thickness = int(wall_thickness_px * (0.5 + 0.5 * confidence))
+                    
+                    # Ensure coordinates are within bounds
+                    if (0 <= x1 < width and 0 <= y1 < height and
+                        0 <= x2 < width and 0 <= y2 < height):
+                        cv2.line(wall_mask, (x1, y1), (x2, y2), 255, thickness)
+                        edge_count += 1
+                except Exception as e:
+                    print(f"Error drawing wall edge {edge}: {str(e)}", file=sys.stderr)
+                    continue
+            
+            print(f"Drew {edge_count} wall edges on mask", file=sys.stderr)
+        else:
+            # Fallback: use segments directly
+            segment_count = 0
+            for seg in wall_graph:
+                try:
+                    x1, y1 = seg['start']
+                    x2, y2 = seg['end']
+                    confidence = seg.get('confidence', 0.7)
+                    thickness = int(wall_thickness_px * (0.5 + 0.5 * confidence))
+                    
+                    if (0 <= x1 < width and 0 <= y1 < height and
+                        0 <= x2 < width and 0 <= y2 < height):
+                        cv2.line(wall_mask, (x1, y1), (x2, y2), 255, thickness)
+                        segment_count += 1
+                except Exception as e:
+                    print(f"Error drawing wall segment: {str(e)}", file=sys.stderr)
+                    continue
+            
+            print(f"Drew {segment_count} wall segments on mask", file=sys.stderr)
+        
+        # Dilate slightly to close gaps
+        kernel = np.ones((3, 3), np.uint8)
+        wall_mask = cv2.dilate(wall_mask, kernel, iterations=1)
+        
+        wall_pixel_count = np.sum(wall_mask > 0)
+        print(f"Wall mask created: {wall_pixel_count} wall pixels ({wall_pixel_count/(width*height)*100:.2f}% of image)", file=sys.stderr)
+        
+        return wall_mask
+    except Exception as e:
+        print(f"ERROR in render_wall_mask: {str(e)}", file=sys.stderr)
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
+        # Return empty mask on error
+        return np.zeros(image_shape, dtype=np.uint8)
+
+# ============================================================================
+# PHASE 2.2: Generate Distance Transform
+# ============================================================================
+def generate_distance_transform(wall_mask):
+    """
+    Compute distance transform on inverse of wall mask
+    
+    Returns: Distance map (higher values = farther from walls)
+    """
+    try:
+        # Invert mask (walls = 0, free space = 255)
+        free_space = 255 - wall_mask
+        
+        # Distance transform
+        dist_transform = cv2.distanceTransform(free_space, cv2.DIST_L2, 5)
+        
+        max_dist = np.max(dist_transform)
+        print(f"Distance transform: max distance = {max_dist:.1f} pixels", file=sys.stderr)
+        
+        return dist_transform
+    except Exception as e:
+        print(f"ERROR in generate_distance_transform: {str(e)}", file=sys.stderr)
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
+        return None
+
+# ============================================================================
+# PHASE 2.3: Prepare Room Label Seeds
+# ============================================================================
+def prepare_room_seeds(ocr_text, wall_mask, distance_transform):
+    """
+    Prepare seed points for room detection from OCR room labels
+    
+    Returns: List of room seeds
+    """
+    try:
+        if not ocr_text:
+            print("No OCR text provided for room seed preparation", file=sys.stderr)
+            return []
+        
+        height, width = wall_mask.shape
+        
+        # Filter OCR text for room labels
+        room_labels = [text for text in ocr_text if text.get('type') == 'room_label']
+        print(f"Found {len(room_labels)} room labels from {len(ocr_text)} OCR elements", file=sys.stderr)
+        
+        if not room_labels:
+            print("No room labels found in OCR text", file=sys.stderr)
+            return []
+        
+        room_seeds = []
+        
+        for i, label in enumerate(room_labels):
+            try:
+                bbox = label.get('bbox', {})
+                label_text = label.get('text', '')
+                
+                if not bbox:
+                    print(f"Skipping label {i}: no bbox", file=sys.stderr)
+                    continue
+                
+                # Convert normalized bbox to pixel coordinates
+                x_norm = bbox.get('x', 0)
+                y_norm = bbox.get('y', 0)
+                w_norm = bbox.get('width', 0)
+                h_norm = bbox.get('height', 0)
+                
+                x_px = int(x_norm * width)
+                y_px = int(y_norm * height)
+                w_px = int(w_norm * width)
+                h_px = int(h_norm * height)
+                
+                # Check if bbox center is in free space
+                center_x = x_px + w_px // 2
+                center_y = y_px + h_px // 2
+                
+                if not (0 <= center_x < width and 0 <= center_y < height):
+                    print(f"Skipping label {i} '{label_text}': center out of bounds", file=sys.stderr)
+                    continue
+                
+                if wall_mask[center_y, center_x] == 0:  # Free space
+                    seed_x, seed_y = center_x, center_y
+                else:
+                    # Find max distance transform value in bbox
+                    bbox_roi = distance_transform[
+                        max(0, y_px):min(height, y_px + h_px),
+                        max(0, x_px):min(width, x_px + w_px)
+                    ]
+                    
+                    if bbox_roi.size > 0:
+                        max_val = np.max(bbox_roi)
+                        max_pos = np.unravel_index(np.argmax(bbox_roi), bbox_roi.shape)
+                        seed_x = x_px + max_pos[1]
+                        seed_y = y_px + max_pos[0]
+                    else:
+                        print(f"Skipping label {i} '{label_text}': empty bbox ROI", file=sys.stderr)
+                        continue
+                
+                # Validate seed is in free space
+                if 0 <= seed_x < width and 0 <= seed_y < height:
+                    if wall_mask[seed_y, seed_x] == 0:
+                        room_seeds.append({
+                            'seed_id': i,
+                            'position': (seed_x, seed_y),
+                            'text_label': label_text,
+                            'bbox': (x_px, y_px, w_px, h_px),
+                            'confidence': label.get('confidence', 0.7)
+                        })
+                        print(f"Added seed {i} for '{label_text}' at ({seed_x}, {seed_y})", file=sys.stderr)
+                    else:
+                        print(f"Skipping label {i} '{label_text}': seed at wall pixel", file=sys.stderr)
+                else:
+                    print(f"Skipping label {i} '{label_text}': seed out of bounds", file=sys.stderr)
+            except Exception as e:
+                print(f"ERROR processing room label {i}: {str(e)}", file=sys.stderr)
+                import traceback
+                print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
+                continue
+        
+        print(f"Prepared {len(room_seeds)} room seeds from {len(room_labels)} labels", file=sys.stderr)
+        return room_seeds
+    except Exception as e:
+        print(f"ERROR in prepare_room_seeds: {str(e)}", file=sys.stderr)
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
+        return []
+
+# ============================================================================
+# PHASE 3.1: Constrained Flood Fill for Room Extraction
+# ============================================================================
+def extract_rooms_constrained_flood_fill(room_seeds, wall_mask, scale_factor):
+    """
+    Extract room polygons using constrained flood fill
+    
+    Returns: List of room dictionaries
+    """
+    try:
+        if not room_seeds:
+            print("No room seeds provided for flood fill", file=sys.stderr)
+            return []
+        
+        height, width = wall_mask.shape
+        free_space_mask = 255 - wall_mask  # Invert: free space = 255
+        
+        rooms = []
+        min_area_px = CONFIG['min_room_area_sf'] / (scale_factor ** 2)
+        max_area_px = CONFIG['max_room_area_sf'] / (scale_factor ** 2)
+        
+        print(f"Starting flood fill for {len(room_seeds)} seeds (min_area={min_area_px:.0f}px, max_area={max_area_px:.0f}px)", file=sys.stderr)
+        
+        for seed_idx, seed in enumerate(room_seeds):
+            try:
+                seed_x, seed_y = seed['position']
+                
+                # Validate seed position
+                if not (0 <= seed_x < width and 0 <= seed_y < height):
+                    print(f"Skipping seed {seed_idx}: out of bounds ({seed_x}, {seed_y})", file=sys.stderr)
+                    continue
+                
+                if wall_mask[seed_y, seed_x] > 0:
+                    print(f"Skipping seed {seed_idx}: on wall pixel", file=sys.stderr)
+                    continue
+                
+                # Create mask for flood fill
+                fill_mask = np.zeros((height + 2, width + 2), dtype=np.uint8)
+                
+                # Flood fill parameters
+                lo_diff = (20, 20, 20)
+                up_diff = (20, 20, 20)
+                flags = 4 | (255 << 8) | cv2.FLOODFILL_MASK_ONLY
+                
+                # Create image copy for flood fill
+                img_copy = free_space_mask.copy().astype(np.uint8)
+                
+                # Perform flood fill
+                try:
+                    _, img_copy, fill_mask, rect = cv2.floodFill(
+                        img_copy, fill_mask, (seed_x + 1, seed_y + 1), 255,
+                        loDiff=lo_diff, upDiff=up_diff, flags=flags
+                    )
+                except Exception as e:
+                    print(f"Flood fill failed for seed {seed_idx}: {str(e)}", file=sys.stderr)
+                    continue
+                
+                # Remove border padding
+                fill_mask = fill_mask[1:-1, 1:-1]
+                
+                # Find contours in filled region
+                contours, _ = cv2.findContours(fill_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                
+                if not contours:
+                    print(f"No contours found for seed {seed_idx}", file=sys.stderr)
+                    continue
+                
+                # Get largest contour
+                largest_contour = max(contours, key=cv2.contourArea)
+                area_px = cv2.contourArea(largest_contour)
+                
+                # Validate area
+                if area_px < min_area_px:
+                    print(f"Seed {seed_idx}: area {area_px:.0f}px < min {min_area_px:.0f}px", file=sys.stderr)
+                    continue
+                
+                if area_px > max_area_px:
+                    print(f"Seed {seed_idx}: area {area_px:.0f}px > max {max_area_px:.0f}px", file=sys.stderr)
+                    continue
+                
+                # Check aspect ratio
+                x, y, w, h = cv2.boundingRect(largest_contour)
+                aspect_ratio = max(w, h) / min(w, h) if min(w, h) > 0 else 0
+                if aspect_ratio > 15:
+                    print(f"Seed {seed_idx}: aspect ratio {aspect_ratio:.2f} too high", file=sys.stderr)
+                    continue
+                
+                # Simplify contour
+                epsilon = 0.02 * cv2.arcLength(largest_contour, True)
+                approx = cv2.approxPolyDP(largest_contour, epsilon, True)
+                
+                if len(approx) < 3:
+                    print(f"Seed {seed_idx}: simplified contour has {len(approx)} points (< 3)", file=sys.stderr)
+                    continue
+                
+                # Convert to normalized coordinates
+                polygon = []
+                for point in approx:
+                    x_norm = float(point[0][0]) / width
+                    y_norm = float(point[0][1]) / height
+                    polygon.append({'x': x_norm, 'y': y_norm})
+                
+                # Calculate area and perimeter
+                area_sf = area_px * (scale_factor ** 2)
+                perimeter_px = cv2.arcLength(largest_contour, True)
+                perimeter_lf = perimeter_px * scale_factor
+                
+                rooms.append({
+                    'room_id': seed['seed_id'],
+                    'label_text': seed.get('text_label', ''),
+                    'polygon': polygon,
+                    'area_sf': round(area_sf, 2),
+                    'perimeter_lf': round(perimeter_lf, 2),
+                    'confidence': seed.get('confidence', 0.7)
+                })
+                
+                print(f"Extracted room {seed_idx}: {area_sf:.1f} SF, {len(polygon)} points, label='{seed.get('text_label', '')}'", file=sys.stderr)
+                
+            except Exception as e:
+                print(f"ERROR processing seed {seed_idx}: {str(e)}", file=sys.stderr)
+                import traceback
+                print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
+                continue
+        
+        print(f"Extracted {len(rooms)} rooms from {len(room_seeds)} seeds", file=sys.stderr)
+        return rooms
+    except Exception as e:
+        print(f"ERROR in extract_rooms_constrained_flood_fill: {str(e)}", file=sys.stderr)
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
+        return []
+
+# ============================================================================
+# PHASE 3.2: Room Validation
+# ============================================================================
+def validate_rooms(rooms, wall_mask, wall_graph):
+    """
+    Validate detected rooms
+    
+    Returns: Validated rooms with validation flags
+    """
+    try:
+        if not rooms:
+            print("No rooms to validate", file=sys.stderr)
+            return []
+        
+        height, width = wall_mask.shape
+        validated_rooms = []
+        
+        print(f"Validating {len(rooms)} rooms", file=sys.stderr)
+        
+        for i, room in enumerate(rooms):
+            try:
+                polygon = room['polygon']
+                area_sf = room['area_sf']
+                perimeter_lf = room['perimeter_lf']
+                
+                # Convert polygon to pixel coordinates for validation
+                polygon_px = [
+                    (int(p['x'] * width), int(p['y'] * height))
+                    for p in polygon
+                ]
+                
+                # 1. Enclosure check
+                enclosure_score = check_enclosure(polygon_px, wall_mask)
+                
+                # 2. Area and shape checks
+                aspect_ratio = calculate_aspect_ratio(polygon_px)
+                perimeter_area_ratio = perimeter_lf / area_sf if area_sf > 0 else 0
+                
+                # 3. Classify room type
+                is_corridor = (
+                    aspect_ratio > CONFIG['corridor_aspect_ratio_threshold'] or
+                    perimeter_area_ratio > CONFIG['corridor_perimeter_area_ratio_threshold']
+                )
+                
+                is_open_space = enclosure_score < 0.5  # Less than 50% enclosed
+                
+                # Validation flags
+                room['valid_enclosed_room'] = enclosure_score > 0.7 and not is_corridor
+                room['valid_open_space_room'] = is_open_space and not is_corridor
+                room['corridor_like_region'] = is_corridor
+                room['invalid_region'] = not (room['valid_enclosed_room'] or room['valid_open_space_room'] or room['corridor_like_region'])
+                room['enclosure_score'] = enclosure_score
+                room['aspect_ratio'] = aspect_ratio
+                
+                print(f"Room {i} '{room.get('label_text', '')}': enclosure={enclosure_score:.2f}, aspect={aspect_ratio:.2f}, valid={room['valid_enclosed_room']}", file=sys.stderr)
+                
+                validated_rooms.append(room)
+            except Exception as e:
+                print(f"ERROR validating room {i}: {str(e)}", file=sys.stderr)
+                import traceback
+                print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
+                continue
+        
+        valid_count = sum(1 for r in validated_rooms if r['valid_enclosed_room'] or r['valid_open_space_room'])
+        print(f"Validation complete: {valid_count}/{len(validated_rooms)} rooms valid", file=sys.stderr)
+        
+        return validated_rooms
+    except Exception as e:
+        print(f"ERROR in validate_rooms: {str(e)}", file=sys.stderr)
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
+        return rooms  # Return original rooms on error
+
+def check_enclosure(polygon_px, wall_mask):
+    """Check that room boundary is mostly adjacent to walls"""
+    try:
+        height, width = wall_mask.shape
+        
+        # Sample points along polygon boundary
+        boundary_points = []
+        for j in range(len(polygon_px)):
+            p1 = polygon_px[j]
+            p2 = polygon_px[(j + 1) % len(polygon_px)]
+            
+            # Sample points along edge
+            num_samples = max(5, int(np.sqrt((p2[0]-p1[0])**2 + (p2[1]-p1[1])**2) / 5))
+            for k in range(num_samples):
+                t = k / num_samples
+                x = int(p1[0] + t * (p2[0] - p1[0]))
+                y = int(p1[1] + t * (p2[1] - p1[1]))
+                boundary_points.append((x, y))
+        
+        # Check how many boundary points are near walls
+        wall_adjacent_count = 0
+        search_radius = 5
+        
+        for x, y in boundary_points:
+            if 0 <= x < width and 0 <= y < height:
+                y_min = max(0, y - search_radius)
+                y_max = min(height, y + search_radius + 1)
+                x_min = max(0, x - search_radius)
+                x_max = min(width, x + search_radius + 1)
+                
+                if np.any(wall_mask[y_min:y_max, x_min:x_max] > 0):
+                    wall_adjacent_count += 1
+        
+        enclosure_score = wall_adjacent_count / len(boundary_points) if boundary_points else 0
+        return enclosure_score
+    except Exception as e:
+        print(f"ERROR in check_enclosure: {str(e)}", file=sys.stderr)
+        return 0.5  # Default score on error
+
+def calculate_aspect_ratio(polygon_px):
+    """Calculate aspect ratio of room polygon"""
+    try:
+        if len(polygon_px) < 3:
+            return 0
+        
+        # Get bounding box
+        xs = [p[0] for p in polygon_px]
+        ys = [p[1] for p in polygon_px]
+        w = max(xs) - min(xs)
+        h = max(ys) - min(ys)
+        
+        if min(w, h) == 0:
+            return 0
+        
+        return max(w, h) / min(w, h)
+    except Exception as e:
+        print(f"ERROR in calculate_aspect_ratio: {str(e)}", file=sys.stderr)
+        return 1.0  # Default aspect ratio on error
+
+# ============================================================================
+# PHASE 3.3: Room Type Classification
+# ============================================================================
+def classify_room_types(rooms):
+    """
+    Classify room types from labels and context
+    
+    Returns rooms with 'room_type' field added
+    """
+    try:
+        room_type_keywords = {
+            'living_room': ['living', 'lr', 'family', 'great room'],
+            'bedroom': ['bedroom', 'br', 'master', 'guest'],
+            'kitchen': ['kitchen', 'kt', 'cooking'],
+            'bathroom': ['bath', 'ba', 'wc', 'toilet', 'lavatory'],
+            'dining_room': ['dining', 'dr', 'eat'],
+            'office': ['office', 'of', 'study', 'den'],
+            'closet': ['closet', 'cl', 'storage'],
+            'hallway': ['hall', 'hallway', 'corridor'],
+            'balcony': ['balcony', 'deck', 'patio'],
+            'garage': ['garage', 'gar'],
+            'utility': ['utility', 'laundry', 'mechanical']
+        }
+        
+        print(f"Classifying {len(rooms)} rooms", file=sys.stderr)
+        
+        for room in rooms:
+            try:
+                label_lower = room.get('label_text', '').lower()
+                room_type = 'other'
+                confidence = 0.5
+                
+                for type_name, keywords in room_type_keywords.items():
+                    for keyword in keywords:
+                        if keyword in label_lower:
+                            room_type = type_name
+                            confidence = 0.9
+                            break
+                    if room_type != 'other':
+                        break
+                
+                # Special case: open kitchen
+                if room_type == 'kitchen' and room.get('enclosure_score', 1.0) < 0.5:
+                    room_type = 'open_kitchen'
+                    confidence = 0.8
+                
+                room['room_type'] = room_type
+                room['type_confidence'] = confidence
+                
+                print(f"Room '{room.get('label_text', '')}': classified as {room_type} (confidence={confidence:.2f})", file=sys.stderr)
+            except Exception as e:
+                print(f"ERROR classifying room: {str(e)}", file=sys.stderr)
+                room['room_type'] = 'other'
+                room['type_confidence'] = 0.5
+                continue
+        
+        return rooms
+    except Exception as e:
+        print(f"ERROR in classify_room_types: {str(e)}", file=sys.stderr)
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
+        return rooms  # Return original rooms on error
+
+# ============================================================================
+# PHASE 3.4: Adjacency and Topology
+# ============================================================================
+def compute_room_adjacency(rooms):
+    """
+    Compute adjacency graph of rooms
+    
+    Returns rooms with 'adjacent_rooms' field added
+    """
+    try:
+        print(f"Computing adjacency for {len(rooms)} rooms", file=sys.stderr)
+        
+        for i, room1 in enumerate(rooms):
+            try:
+                adjacent = []
+                
+                for j, room2 in enumerate(rooms):
+                    if i == j:
+                        continue
+                    
+                    # Check if polygons are adjacent (simplified distance check)
+                    if are_rooms_adjacent(room1, room2):
+                        adjacent.append(j)
+                
+                room1['adjacent_rooms'] = adjacent
+                
+                if adjacent:
+                    print(f"Room {i} '{room1.get('label_text', '')}': adjacent to {len(adjacent)} rooms", file=sys.stderr)
+            except Exception as e:
+                print(f"ERROR computing adjacency for room {i}: {str(e)}", file=sys.stderr)
+                room1['adjacent_rooms'] = []
+                continue
+        
+        return rooms
+    except Exception as e:
+        print(f"ERROR in compute_room_adjacency: {str(e)}", file=sys.stderr)
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
+        return rooms  # Return original rooms on error
+
+def are_rooms_adjacent(room1, room2):
+    """Check if two rooms are adjacent"""
+    try:
+        poly1 = room1['polygon']
+        poly2 = room2['polygon']
+        
+        # Check if bounding boxes are close (simplified)
+        center1_x = sum(p['x'] for p in poly1) / len(poly1)
+        center1_y = sum(p['y'] for p in poly1) / len(poly1)
+        center2_x = sum(p['x'] for p in poly2) / len(poly2)
+        center2_y = sum(p['y'] for p in poly2) / len(poly2)
+        
+        distance = np.sqrt((center1_x - center2_x)**2 + (center1_y - center2_y)**2)
+        
+        # Rooms are adjacent if close (within 0.1 normalized units)
+        return distance < 0.1
+    except Exception as e:
+        print(f"ERROR in are_rooms_adjacent: {str(e)}", file=sys.stderr)
+        return False
+
 def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=None, dimension_text_mask=None):
     """Detect room boundaries - rooms are enclosed spaces surrounded by EXTERIOR walls only
     Interior walls (like bathroom walls within a hotel unit) are ignored for room boundaries"""
@@ -1626,30 +2894,92 @@ if __name__ == "__main__":
         
         height, width = img.shape[:2]
         
-        # PHASE 3: Detect walls FIRST, then use them to constrain room detection
-        # This ensures rooms are logically bounded by walls
-        walls = detect_walls(image_path, scale_factor, min_wall_length)
-        
-        # PHASE 4: Text-first room detection (if OCR available)
-        # Try to detect rooms from text labels first, then fall back to geometry
-        text_based_rooms = []
+        # PHASE 0 & 1: New wall detection using graph-based approach
+        # First get OCR text for filtering
         ocr_text = []
         room_labels = []
-        
-        # Try to enable OCR if available
         try:
             ocr_text = detect_text_ocr(image_path)
             room_labels = [text for text in ocr_text if text.get("type") == "room_label"]
             print(f"OCR found {len(ocr_text)} text elements, {len(room_labels)} room labels", file=sys.stderr)
-            
-            if len(room_labels) > 0:
-                # Use text-first detection
-                text_based_rooms = detect_rooms_from_text(image_path, scale_factor, min_room_area, room_labels, walls)
-                print(f"Text-first detection found {len(text_based_rooms)} rooms", file=sys.stderr)
         except Exception as e:
-            print(f"OCR/text-first detection failed: {str(e)}", file=sys.stderr)
+            print(f"OCR detection failed: {str(e)}", file=sys.stderr)
             ocr_text = []
             room_labels = []
+        
+        # PHASE 1: New wall detection using graph-based approach
+        try:
+            walls, wall_graph, wall_likelihood_mask, image_shape_adj, scale_factor_adj = detect_walls_new(image_path, scale_factor, min_wall_length, ocr_text)
+            print(f"Phase 1 complete: {len(walls)} walls detected", file=sys.stderr)
+        except Exception as e:
+            print(f"ERROR in Phase 1 wall detection: {str(e)}", file=sys.stderr)
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
+            # Fallback to empty walls
+            walls = []
+            wall_graph = None
+            wall_likelihood_mask = None
+            image_shape_adj = (height, width)
+            scale_factor_adj = scale_factor
+        
+        # PHASE 2: Wall mask generation and room seeds
+        text_based_rooms = []
+        try:
+            if wall_graph is not None and wall_likelihood_mask is not None:
+                # Phase 2.1: Render wall mask
+                wall_mask = render_wall_mask(wall_graph, image_shape_adj, scale_factor_adj)
+                
+                # Phase 2.2: Generate distance transform
+                distance_transform = generate_distance_transform(wall_mask)
+                
+                if distance_transform is not None:
+                    # Phase 2.3: Prepare room seeds
+                    room_seeds = prepare_room_seeds(ocr_text, wall_mask, distance_transform)
+                    print(f"Phase 2 complete: {len(room_seeds)} room seeds prepared", file=sys.stderr)
+                    
+                    # PHASE 3: Constrained flood fill for room extraction
+                    if room_seeds:
+                        # Phase 3.1: Extract rooms via flood fill
+                        rooms = extract_rooms_constrained_flood_fill(room_seeds, wall_mask, scale_factor_adj)
+                        print(f"Phase 3.1 complete: {len(rooms)} rooms extracted", file=sys.stderr)
+                        
+                        # Phase 3.2: Validate rooms
+                        rooms = validate_rooms(rooms, wall_mask, wall_graph)
+                        print(f"Phase 3.2 complete: {len(rooms)} rooms validated", file=sys.stderr)
+                        
+                        # Phase 3.3: Classify room types
+                        rooms = classify_room_types(rooms)
+                        print(f"Phase 3.3 complete: room types classified", file=sys.stderr)
+                        
+                        # Phase 3.4: Compute adjacency
+                        rooms = compute_room_adjacency(rooms)
+                        print(f"Phase 3.4 complete: adjacency computed", file=sys.stderr)
+                        
+                        # Convert to output format
+                        text_based_rooms = []
+                        for room in rooms:
+                            if room.get('valid_enclosed_room') or room.get('valid_open_space_room'):
+                                text_based_rooms.append({
+                                    "points": room['polygon'],
+                                    "area": room['area_sf'],
+                                    "perimeter": room['perimeter_lf'],
+                                    "confidence": room.get('confidence', 0.7),
+                                    "roomLabel": room.get('label_text', ''),
+                                    "roomType": room.get('room_type', 'other')
+                                })
+                        
+                        print(f"Phase 3 complete: {len(text_based_rooms)} valid rooms", file=sys.stderr)
+                    else:
+                        print("Phase 2: No room seeds found, skipping Phase 3", file=sys.stderr)
+                else:
+                    print("Phase 2: Distance transform failed, skipping Phase 3", file=sys.stderr)
+            else:
+                print("Phase 2: Wall graph/mask not available, skipping Phase 2-3", file=sys.stderr)
+        except Exception as e:
+            print(f"ERROR in Phase 2-3: {str(e)}", file=sys.stderr)
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
+            text_based_rooms = []
         
         # Create dimension text mask from OCR if available
         dimension_text_mask = None
