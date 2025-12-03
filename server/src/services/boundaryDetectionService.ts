@@ -1545,11 +1545,14 @@ class DeepLearningSegmentationService:
     
     def segment_image(self, image_path):
         """
-        Segment floor plan image into walls and rooms
+        Use DL to enhance edge detection for floor plans
+        
+        Strategy: Pre-trained models on ImageNet don't work well for floor plans.
+        Instead, use DL to detect edges/lines, then use CV pipeline to build walls/rooms.
         
         Returns:
-            - wall_mask: Binary mask of walls (uint8, 0-255)
-            - room_mask: Binary mask of rooms (uint8, 0-255)
+            - wall_mask: Binary mask of potential wall edges (uint8, 0-255)
+            - room_mask: Binary mask of potential room regions (uint8, 0-255) - may be noisy
             - confidence_map: Confidence scores (float32, 0-1)
         """
         try:
@@ -1560,13 +1563,23 @@ class DeepLearningSegmentationService:
             
             original_height, original_width = image.shape[:2]
             
-            # Convert BGR to RGB
-            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            # Convert to grayscale for better edge detection
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             
-            # Resize to model input size (maintain aspect ratio or pad)
+            # Preprocess: Enhance contrast and reduce noise
+            # Floor plans are typically high contrast (black lines on white)
+            _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            
+            # Invert if needed (assume white background)
+            if np.mean(binary) > 127:
+                binary = 255 - binary
+            
+            # Use DL model to detect edges/lines (treat as semantic segmentation)
+            # Convert grayscale to RGB for model input
+            image_rgb = cv2.cvtColor(binary, cv2.COLOR_GRAY2RGB)
+            
+            # Resize to model input size
             target_size = CONFIG['dl_model_input_size']
-            
-            # Resize maintaining aspect ratio
             scale = min(target_size / original_width, target_size / original_height)
             new_width = int(original_width * scale)
             new_height = int(original_height * scale)
@@ -1581,7 +1594,6 @@ class DeepLearningSegmentationService:
             )
             
             # Preprocess for model
-            # segmentation-models-pytorch expects RGB image in [0, 255] range
             image_preprocessed = self.preprocessing_fn(image_padded)
             image_tensor = torch.from_numpy(image_preprocessed).permute(2, 0, 1).float()
             image_tensor = image_tensor.unsqueeze(0).to(self.device)
@@ -1590,41 +1602,68 @@ class DeepLearningSegmentationService:
             with torch.no_grad():
                 pr_mask = self.model.predict(image_tensor)
             
-            # pr_mask shape: [1, 3, H, W] (batch, classes, height, width)
-            # Apply softmax if not already applied
+            # Apply softmax
             if pr_mask.shape[1] == 3:
                 pr_mask = torch.softmax(pr_mask, dim=1)
             
-            # Extract class predictions
             pr_mask_np = pr_mask[0].cpu().numpy()  # [3, H, W]
             
-            # Class 0: background, Class 1: walls, Class 2: rooms
-            wall_probs = pr_mask_np[1]  # Wall probabilities
-            room_probs = pr_mask_np[2]  # Room probabilities
+            # Use DL output to enhance traditional edge detection
+            # Class 1 (walls) = edges/lines, Class 2 (rooms) = enclosed regions
+            edge_probs = pr_mask_np[1]  # Edge/line probabilities
+            region_probs = pr_mask_np[2]  # Region probabilities
             
-            # Resize back to original size (crop padding first)
-            wall_probs = wall_probs[:new_height, :new_width]
-            room_probs = room_probs[:new_height, :new_width]
+            # Resize back
+            edge_probs = edge_probs[:new_height, :new_width]
+            region_probs = region_probs[:new_height, :new_width]
+            edge_probs = cv2.resize(edge_probs, (original_width, original_height), interpolation=cv2.INTER_LINEAR)
+            region_probs = cv2.resize(region_probs, (original_width, original_height), interpolation=cv2.INTER_LINEAR)
             
-            wall_probs = cv2.resize(wall_probs, (original_width, original_height), interpolation=cv2.INTER_LINEAR)
-            room_probs = cv2.resize(room_probs, (original_width, original_height), interpolation=cv2.INTER_LINEAR)
+            # Combine DL edge detection with traditional Canny
+            # DL helps filter noise, traditional CV provides structure
+            canny_edges = cv2.Canny(gray, 50, 150)
+            dl_edge_mask = (edge_probs > CONFIG['dl_confidence_threshold']).astype(np.uint8) * 255
             
-            # Apply confidence threshold and create binary masks
-            wall_threshold = CONFIG['dl_confidence_threshold']
-            room_threshold = CONFIG['dl_confidence_threshold']
+            # Combine: Use DL to weight traditional edge detection
+            combined_edges = cv2.bitwise_and(canny_edges, dl_edge_mask)
             
-            wall_mask = (wall_probs > wall_threshold).astype(np.uint8) * 255
-            room_mask = (room_probs > room_threshold).astype(np.uint8) * 255
+            # Dilate to create wall mask
+            kernel = np.ones((3, 3), np.uint8)
+            wall_mask = cv2.dilate(combined_edges, kernel, iterations=2)
             
-            # Remove wall regions from room mask (rooms shouldn't overlap walls)
+            # For rooms: Use DL region probabilities but filter aggressively
+            # Pre-trained models often segment white space as "rooms"
+            room_mask = (region_probs > CONFIG['dl_confidence_threshold']).astype(np.uint8) * 255
+            
+            # Remove wall regions from room mask
             room_mask = cv2.bitwise_and(room_mask, 255 - wall_mask)
             
-            # Confidence map (max of wall/room probabilities)
-            confidence_map = np.maximum(wall_probs, room_probs)
+            # Apply titleblock exclusion to room mask
+            exclude_top = int(original_height * CONFIG['titleblock_exclude_top'])
+            exclude_bottom = int(original_height * CONFIG['titleblock_exclude_bottom'])
+            exclude_left = int(original_width * CONFIG['titleblock_exclude_left'])
+            exclude_right = int(original_width * CONFIG['titleblock_exclude_right'])
+            
+            # Zero out titleblock regions
+            room_mask[0:exclude_top, :] = 0
+            room_mask[exclude_bottom:, :] = 0
+            room_mask[:, 0:exclude_left] = 0
+            room_mask[:, exclude_right:] = 0
+            
+            # Filter out very large regions (likely white space outside floor plan)
+            # Find connected components and remove large ones
+            num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(room_mask, connectivity=8)
+            max_room_area_px = (original_width * original_height) * 0.3  # Max 30% of image
+            for i in range(1, num_labels):
+                area = stats[i, cv2.CC_STAT_AREA]
+                if area > max_room_area_px:
+                    room_mask[labels == i] = 0
+            
+            confidence_map = np.maximum(edge_probs, region_probs)
             
             wall_pixels = np.sum(wall_mask > 0)
             room_pixels = np.sum(room_mask > 0)
-            print(f"DL segmentation complete: wall_mask={wall_pixels}px ({wall_pixels/(original_width*original_height)*100:.1f}%), room_mask={room_pixels}px ({room_pixels/(original_width*original_height)*100:.1f}%)", file=sys.stderr)
+            print(f"DL-enhanced segmentation: wall_mask={wall_pixels}px ({wall_pixels/(original_width*original_height)*100:.1f}%), room_mask={room_pixels}px ({room_pixels/(original_width*original_height)*100:.1f}%)", file=sys.stderr)
             
             return wall_mask, room_mask, confidence_map
             
@@ -1669,11 +1708,18 @@ def extract_rooms_from_dl_mask(room_mask, scale_factor, ocr_text, image_shape):
     
     Steps:
     1. Find connected components in room mask
-    2. Match with OCR labels
-    3. Validate and classify
+    2. Filter by titleblock exclusion
+    3. Match with OCR labels
+    4. Validate and classify
     """
     try:
         height, width = image_shape
+        
+        # Titleblock exclusion zones
+        exclude_top = int(height * CONFIG['titleblock_exclude_top'])
+        exclude_bottom = int(height * CONFIG['titleblock_exclude_bottom'])
+        exclude_left = int(width * CONFIG['titleblock_exclude_left'])
+        exclude_right = int(width * CONFIG['titleblock_exclude_right'])
         
         # Find connected components
         num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(room_mask, connectivity=8)
@@ -1682,6 +1728,13 @@ def extract_rooms_from_dl_mask(room_mask, scale_factor, ocr_text, image_shape):
         for i in range(1, num_labels):  # Skip background (label 0)
             # Get component mask
             component_mask = (labels == i).astype(np.uint8) * 255
+            
+            # Check if centroid is in titleblock region
+            centroid_x = int(centroids[i][0])
+            centroid_y = int(centroids[i][1])
+            if (centroid_y < exclude_top or centroid_y > exclude_bottom or
+                centroid_x < exclude_left or centroid_x > exclude_right):
+                continue  # Skip rooms in titleblock region
             
             # Find contours
             contours, _ = cv2.findContours(component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -1692,9 +1745,9 @@ def extract_rooms_from_dl_mask(room_mask, scale_factor, ocr_text, image_shape):
             largest_contour = max(contours, key=cv2.contourArea)
             area_px = cv2.contourArea(largest_contour)
             
-            # Validate area
+            # Validate area (stricter limits)
             min_area_px = CONFIG['min_room_area_sf'] / (scale_factor ** 2) if scale_factor > 0 else 1000
-            max_area_px = CONFIG['max_room_area_sf'] / (scale_factor ** 2) if scale_factor > 0 else (width * height * 0.7)
+            max_area_px = CONFIG['max_room_area_sf'] / (scale_factor ** 2) if scale_factor > 0 else (width * height * 0.25)  # Reduced from 0.7 to 0.25
             
             if area_px < min_area_px or area_px > max_area_px:
                 continue
