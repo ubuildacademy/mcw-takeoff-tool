@@ -112,11 +112,25 @@ def download_alternative_model():
     
     # Try HuggingFace Segformer (works out of the box)
     try:
-        from transformers import SegformerForSemanticSegmentation
-        print("✓ HuggingFace Transformers available")
-        print("  Can use Segformer model (will download on first use)")
+        import subprocess
+        # Try to install transformers if not available
+        try:
+            from transformers import SegformerForSemanticSegmentation
+            print("✓ HuggingFace Transformers available")
+        except ImportError:
+            print("  Installing HuggingFace Transformers...")
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "transformers", "pillow"],
+                check=True,
+                capture_output=True
+            )
+            from transformers import SegformerForSemanticSegmentation
+            print("✓ HuggingFace Transformers installed")
+        
+        print("  Using Segformer model (will download on first use)")
         return "huggingface"
-    except ImportError:
+    except Exception as e:
+        print(f"  Could not set up HuggingFace: {e}")
         pass
     
     return None
