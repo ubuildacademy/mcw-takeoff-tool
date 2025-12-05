@@ -1559,16 +1559,19 @@ class DeepLearningSegmentationService:
                     # We need: /app/server/models/floor_plan_cubicasa5k_resnet50.pth
                     cwd = os.getcwd()
                     
-                    # Primary path: /app/server/models/floor_plan_cubicasa5k_resnet50.pth (where Node.js saves it)
-                    primary_path = os.path.join(cwd, 'server', 'models', 'floor_plan_cubicasa5k_resnet50.pth')
+                    # Check multiple locations where Node.js might save the model
+                    # Primary: /app/models/ (simplest, always exists)
+                    primary_path = os.path.join(cwd, 'models', 'floor_plan_cubicasa5k_resnet50.pth')
                     
-                    # Also check /tmp (backup location)
+                    # Also check /app/server/models/ and /tmp (backup locations)
+                    server_path = os.path.join(cwd, 'server', 'models', 'floor_plan_cubicasa5k_resnet50.pth')
                     tmp_path = '/tmp/floor_plan_cubicasa5k_resnet50.pth'
                     
                     possible_paths = [
-                        primary_path,  # Primary: /app/server/models/... (where Node.js saves it)
+                        primary_path,  # Primary: /app/models/... (simplest path)
+                        server_path,  # Alternative: /app/server/models/...
                         tmp_path,  # Backup: /tmp/... (also saved by Node.js)
-                        os.path.join(cwd, model_path),  # /app/server/models/... (alternative)
+                        os.path.join(cwd, model_path),  # /app/server/models/... (from config)
                         os.path.join(cwd, '..', model_path),  # If cwd is server/
                         model_path  # Try as-is
                     ]
