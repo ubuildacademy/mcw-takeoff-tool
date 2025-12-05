@@ -10,11 +10,11 @@
  *   SUPABASE_SERVICE_ROLE_KEY
  */
 
+import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 
-const MODEL_FILE = 'server/models/floor_plan_cubicasa5k_resnet50.pth';
 const STORAGE_BUCKET = 'project-files';
 const STORAGE_PATH = 'models/floor_plan_cubicasa5k_resnet50.pth';
 
@@ -29,8 +29,10 @@ async function uploadModel() {
 
   const supabase = createClient(supabaseUrl, supabaseKey);
 
-  // Check if model file exists
-  const modelPath = path.resolve(MODEL_FILE);
+  // Resolve model path relative to server directory (where this script is)
+  const scriptDir = path.dirname(__filename);
+  const serverDir = path.dirname(scriptDir);
+  const modelPath = path.join(serverDir, 'models', 'floor_plan_cubicasa5k_resnet50.pth');
   if (!await fs.pathExists(modelPath)) {
     console.error(`❌ Model file not found: ${modelPath}`);
     process.exit(1);
