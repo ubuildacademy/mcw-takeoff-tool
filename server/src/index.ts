@@ -287,8 +287,17 @@ async function ensureModelExists() {
   // Model missing, try to download from Supabase
   console.log('📥 Model file not found locally, downloading from Supabase Storage...');
   try {
-    // Ensure models directory exists
-    await fs.ensureDir(path.dirname(modelPath));
+    // Ensure models directory exists - create with explicit permissions
+    const modelDir = path.dirname(modelPath);
+    await fs.ensureDir(modelDir);
+    
+    // Verify directory was created and is writable
+    const dirExists = await fs.pathExists(modelDir);
+    console.log(`📁 Model directory: ${modelDir}`);
+    console.log(`📁 Directory exists: ${dirExists}`);
+    if (!dirExists) {
+      throw new Error(`Failed to create model directory: ${modelDir}`);
+    }
     
     // Download from Supabase Storage
     const { data, error } = await supabase.storage
@@ -304,20 +313,31 @@ async function ensureModelExists() {
     // Convert blob to buffer and save
     const arrayBuffer = await data.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
-    await fs.writeFile(modelPath, buffer);
-
-    // Verify file was actually written
+    
+    // Write file with explicit error handling
+    await fs.writeFile(modelPath, buffer, { mode: 0o644 });
+    
+    // CRITICAL: Verify file was actually written and is readable
+    const verifyExists = await fs.pathExists(modelPath);
+    if (!verifyExists) {
+      throw new Error(`Model file was not written to ${modelPath}`);
+    }
+    
     const verifyStats = await fs.stat(modelPath);
+    if (verifyStats.size !== buffer.length) {
+      throw new Error(`Model file size mismatch: expected ${buffer.length}, got ${verifyStats.size}`);
+    }
+    
     const fileSizeMB = (buffer.length / (1024 * 1024)).toFixed(2);
     console.log(`✅ Model downloaded successfully from Supabase Storage!`);
     console.log(`   Saved to: ${modelPath}`);
     console.log(`   File size: ${fileSizeMB} MB`);
-    console.log(`   Verified: File exists = ${await fs.pathExists(modelPath)}, Size = ${verifyStats.size} bytes`);
+    console.log(`   Verified: File exists = ${verifyExists}, Size = ${verifyStats.size} bytes`);
     
-    // Also verify the directory structure
-    const modelDir = path.dirname(modelPath);
-    console.log(`   Model directory: ${modelDir}`);
-    console.log(`   Model directory exists: ${await fs.pathExists(modelDir)}`);
+    // Also save to /tmp as backup (Python can check there too)
+    const tmpModelPath = '/tmp/floor_plan_cubicasa5k_resnet50.pth';
+    await fs.writeFile(tmpModelPath, buffer, { mode: 0o644 });
+    console.log(`   Backup saved to: ${tmpModelPath}`);
     
     return true;
   } catch (error) {
