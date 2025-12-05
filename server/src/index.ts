@@ -306,10 +306,19 @@ async function ensureModelExists() {
     const buffer = Buffer.from(arrayBuffer);
     await fs.writeFile(modelPath, buffer);
 
+    // Verify file was actually written
+    const verifyStats = await fs.stat(modelPath);
     const fileSizeMB = (buffer.length / (1024 * 1024)).toFixed(2);
     console.log(`✅ Model downloaded successfully from Supabase Storage!`);
     console.log(`   Saved to: ${modelPath}`);
     console.log(`   File size: ${fileSizeMB} MB`);
+    console.log(`   Verified: File exists = ${await fs.pathExists(modelPath)}, Size = ${verifyStats.size} bytes`);
+    
+    // Also verify the directory structure
+    const modelDir = path.dirname(modelPath);
+    console.log(`   Model directory: ${modelDir}`);
+    console.log(`   Model directory exists: ${await fs.pathExists(modelDir)}`);
+    
     return true;
   } catch (error) {
     console.error('⚠️  Error downloading model:', error);

@@ -1558,9 +1558,13 @@ class DeepLearningSegmentationService:
                     # On Railway: cwd = /app, model_path = 'server/models/floor_plan_cubicasa5k_resnet50.pth'
                     # We need: /app/server/models/floor_plan_cubicasa5k_resnet50.pth
                     cwd = os.getcwd()
+                    
+                    # Primary path: /app/server/models/floor_plan_cubicasa5k_resnet50.pth
+                    primary_path = os.path.join(cwd, 'server', 'models', 'floor_plan_cubicasa5k_resnet50.pth')
+                    
                     possible_paths = [
-                        os.path.join(cwd, model_path),  # /app/server/models/... (correct for Railway)
-                        os.path.join(cwd, 'server', 'models', 'floor_plan_cubicasa5k_resnet50.pth'),  # Explicit path
+                        primary_path,  # Primary: /app/server/models/... (where Node.js saves it)
+                        os.path.join(cwd, model_path),  # /app/server/models/... (alternative)
                         os.path.join(cwd, '..', model_path),  # If cwd is server/
                         model_path  # Try as-is
                     ]
@@ -1570,12 +1574,21 @@ class DeepLearningSegmentationService:
                         # If this is embedded in a TypeScript file, we might be in server/dist or server/
                         script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else cwd
                         possible_paths.extend([
-                            os.path.join(cwd, 'server', 'models', 'floor_plan_cubicasa5k_resnet50.pth'),  # Explicit /app/server/models/
                             os.path.join(script_dir, '..', '..', '..', 'server', 'models', 'floor_plan_cubicasa5k_resnet50.pth'),  # From server/dist/src/services/
                             os.path.join(script_dir, '..', '..', 'models', 'floor_plan_cubicasa5k_resnet50.pth'),  # From server/dist/
                         ])
                     except:
                         pass
+                    
+                    # Remove duplicates while preserving order
+                    seen = set()
+                    unique_paths = []
+                    for p in possible_paths:
+                        abs_p = os.path.abspath(p)
+                        if abs_p not in seen:
+                            seen.add(abs_p)
+                            unique_paths.append(p)
+                    possible_paths = unique_paths
                     
                     print(f"DEBUG: Trying {len(possible_paths)} possible paths...", file=sys.stderr)
                     model_path_resolved = None
