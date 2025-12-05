@@ -363,8 +363,8 @@ CONFIG = {
     'dl_confidence_threshold': 0.5,  # Minimum confidence for DL predictions (0-1)
     'dl_model_input_size': 512,  # Input size for DL model (512x512 recommended, larger = more detail but slower)
     # Auto-configured by: python3 server/scripts/auto_setup_floor_plan_model.py
-    'dl_model_path': None,  # Path to custom pre-trained floor plan model weights (None = use ImageNet pre-trained)
-    'dl_use_huggingface': True,  # Use HuggingFace Transformers model instead
+    'dl_model_path': 'server/models/floor_plan_cubicasa5k_resnet50.pth',  # Path to custom pre-trained floor plan model weights (relative to project root, None = use ImageNet pre-trained)
+    'dl_use_huggingface': False,  # Use HuggingFace Transformers model instead
     'dl_huggingface_model': 'nvidia/segformer-b0-finetuned-ade-512-512',  # HuggingFace model name
 }
 
@@ -1549,35 +1549,53 @@ class DeepLearningSegmentationService:
                 return
             
             # Option 2: Load custom pre-trained floor plan model
-            if model_path and os.path.exists(model_path):
-                print(f"Loading custom floor plan model from: {model_path}", file=sys.stderr)
-                ENCODER = 'resnet34'  # Common encoder for floor plan models
-                CLASSES = ['background', 'walls', 'rooms']
+            if model_path:
+                # Resolve relative paths (relative to project root)
+                if not os.path.isabs(model_path):
+                    # Try multiple possible base paths
+                    # 1. Current working directory (should be project root on Railway)
+                    # 2. Relative to server directory
+                    cwd = os.getcwd()
+                    possible_paths = [
+                        os.path.join(cwd, model_path),  # From project root
+                        os.path.join(cwd, '..', model_path),  # If cwd is server/
+                        model_path  # Try as-is
+                    ]
+                    model_path = None
+                    for path in possible_paths:
+                        if os.path.exists(path):
+                            model_path = os.path.abspath(path)
+                            break
                 
-                # Create model architecture
-                self.model = smp.Unet(
-                    encoder_name=ENCODER,
-                    encoder_weights=None,  # Don't load ImageNet weights
-                    classes=len(CLASSES),
-                    activation='softmax',
-                )
-                
-                # Load custom weights
-                checkpoint = torch.load(model_path, map_location=self.device)
-                if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
-                    self.model.load_state_dict(checkpoint['state_dict'])
-                elif isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-                    self.model.load_state_dict(checkpoint['model_state_dict'])
-                else:
-                    self.model.load_state_dict(checkpoint)
-                
-                self.model.to(self.device)
-                self.model.eval()
-                self.preprocessing_fn = smp.encoders.get_preprocessing_fn(ENCODER, 'imagenet')
-                self.use_huggingface = False
-                print(f"Custom floor plan model loaded successfully", file=sys.stderr)
-                print(f"Model parameters: {sum(p.numel() for p in self.model.parameters()):,}", file=sys.stderr)
-                return
+                if model_path and os.path.exists(model_path):
+                    print(f"Loading custom floor plan model from: {model_path}", file=sys.stderr)
+                    ENCODER = 'resnet50'  # ResNet-50 encoder (matches training)
+                    CLASSES = ['background', 'walls', 'rooms']
+                    
+                    # Create model architecture
+                    self.model = smp.Unet(
+                        encoder_name=ENCODER,
+                        encoder_weights=None,  # Don't load ImageNet weights
+                        classes=len(CLASSES),
+                        activation='softmax',
+                    )
+                    
+                    # Load custom weights
+                    checkpoint = torch.load(model_path, map_location=self.device)
+                    if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+                        self.model.load_state_dict(checkpoint['state_dict'])
+                    elif isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+                        self.model.load_state_dict(checkpoint['model_state_dict'])
+                    else:
+                        self.model.load_state_dict(checkpoint)
+                    
+                    self.model.to(self.device)
+                    self.model.eval()
+                    self.preprocessing_fn = smp.encoders.get_preprocessing_fn(ENCODER, 'imagenet')
+                    self.use_huggingface = False
+                    print(f"Custom floor plan model loaded successfully", file=sys.stderr)
+                    print(f"Model parameters: {sum(p.numel() for p in self.model.parameters()):,}", file=sys.stderr)
+                    return
             
             # Option 3: Default - ImageNet pre-trained (fallback)
             print(f"Loading default U-Net model (ImageNet pre-trained)", file=sys.stderr)
