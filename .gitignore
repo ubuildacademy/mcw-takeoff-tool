@@ -56,3 +56,8 @@ server/data/*.json
 *.temp
 temp/
 .vercel
+
+# Large model files (use Git LFS or external storage)
+server/models/*.pth
+server/models/*.pt
+server/models/*.ckpt
