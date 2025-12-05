@@ -257,18 +257,25 @@ app.use('/api/calibrations', calibrationRoutes);
 // Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
-// Download model from Supabase if missing (async, non-blocking)
+// Download model from Supabase if missing (BLOCKING - must complete before server accepts requests)
 async function ensureModelExists() {
-  const modelPath = path.join(__dirname, '../models/floor_plan_cubicasa5k_resnet50.pth');
   const STORAGE_BUCKET = 'project-files';
   const STORAGE_PATH = 'models/floor_plan_cubicasa5k_resnet50.pth';
+  
+  // Determine correct model path - Python looks for it relative to project root
+  // __dirname is server/dist/src/ in production, server/src/ in dev
+  // We need: server/models/ (relative to project root)
+  const serverDir = path.dirname(path.dirname(__dirname)); // Go up from dist/src or src to server/
+  const modelPath = path.join(serverDir, 'models', 'floor_plan_cubicasa5k_resnet50.pth');
+  
+  console.log(`🔍 Checking for model at: ${modelPath}`);
   
   // Check if model exists and is valid
   if (await fs.pathExists(modelPath)) {
     const stats = await fs.stat(modelPath);
     if (stats.size > 0) {
       console.log(`✓ Model file exists: ${(stats.size / (1024 * 1024)).toFixed(2)} MB`);
-      return;
+      return true;
     }
   }
   
@@ -286,7 +293,7 @@ async function ensureModelExists() {
     if (error || !data) {
       console.log('⚠️  Model download failed:', error?.message || 'Unknown error');
       console.log('⚠️  System will use ImageNet pre-trained model as fallback');
-      return;
+      return false;
     }
 
     // Convert blob to buffer and save
@@ -296,23 +303,32 @@ async function ensureModelExists() {
 
     const fileSizeMB = (buffer.length / (1024 * 1024)).toFixed(2);
     console.log(`✅ Model downloaded successfully from Supabase Storage!`);
+    console.log(`   Saved to: ${modelPath}`);
     console.log(`   File size: ${fileSizeMB} MB`);
+    return true;
   } catch (error) {
     console.error('⚠️  Error downloading model:', error);
     console.log('⚠️  System will use ImageNet pre-trained model as fallback');
+    return false;
   }
 }
 
-// Start server with Socket.IO
-const server = app.listen(PORT, '0.0.0.0', async () => {
-  console.log(`🚀 Takeoff API server running on port ${PORT}`);
-  console.log(`🌐 Server accessible at http://0.0.0.0:${PORT}`);
-  console.log(`📝 NODE_ENV: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`📝 Allowed origins configured: ${isProduction ? 'Production mode' : 'Development mode (all allowed)'}`);
+// Start server with Socket.IO (BLOCKING - wait for model download)
+(async () => {
+  // Download model BEFORE starting server (blocking)
+  console.log('🔄 Ensuring model file is available...');
+  await ensureModelExists();
   
-  // Download model if missing (non-blocking)
-  ensureModelExists().catch(console.error);
-});
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Takeoff API server running on port ${PORT}`);
+    console.log(`🌐 Server accessible at http://0.0.0.0:${PORT}`);
+    console.log(`📝 NODE_ENV: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`📝 Allowed origins configured: ${isProduction ? 'Production mode' : 'Development mode (all allowed)'}`);
+  });
+  
+  // Set server timeout to handle long-running CV detection requests (3 minutes)
+  server.timeout = 180000; // 3 minutes
+})();
 
 // Set server timeout to handle long-running CV detection requests (3 minutes)
 // Railway's gateway timeout is 60s, but we can try to keep the connection alive
