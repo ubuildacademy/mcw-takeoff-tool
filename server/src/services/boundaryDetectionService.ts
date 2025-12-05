@@ -1550,24 +1550,46 @@ class DeepLearningSegmentationService:
             
             # Option 2: Load custom pre-trained floor plan model
             if model_path:
+                print(f"DEBUG: Attempting to load model from path: {model_path}", file=sys.stderr)
+                print(f"DEBUG: Current working directory: {os.getcwd()}", file=sys.stderr)
+                
                 # Resolve relative paths (relative to project root)
                 if not os.path.isabs(model_path):
                     # Try multiple possible base paths
                     # 1. Current working directory (should be project root on Railway)
                     # 2. Relative to server directory
+                    # 3. From __file__ location (if we can determine it)
                     cwd = os.getcwd()
                     possible_paths = [
                         os.path.join(cwd, model_path),  # From project root
+                        os.path.join(cwd, 'server', model_path.split('/', 1)[1] if '/' in model_path else model_path),  # If cwd is project root
                         os.path.join(cwd, '..', model_path),  # If cwd is server/
                         model_path  # Try as-is
                     ]
-                    model_path = None
-                    for path in possible_paths:
-                        if os.path.exists(path):
-                            model_path = os.path.abspath(path)
+                    
+                    # Also try relative to where Python script might be running from
+                    try:
+                        # If this is embedded in a TypeScript file, we might be in server/dist or server/
+                        script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else cwd
+                        possible_paths.extend([
+                            os.path.join(script_dir, '..', '..', model_path),  # From server/dist/src/services/
+                            os.path.join(script_dir, '..', model_path),  # From server/
+                        ])
+                    except:
+                        pass
+                    
+                    print(f"DEBUG: Trying {len(possible_paths)} possible paths...", file=sys.stderr)
+                    model_path_resolved = None
+                    for test_path in possible_paths:
+                        abs_path = os.path.abspath(test_path)
+                        print(f"DEBUG: Checking: {abs_path} (exists: {os.path.exists(abs_path)})", file=sys.stderr)
+                        if os.path.exists(abs_path):
+                            model_path_resolved = abs_path
                             break
+                    model_path = model_path_resolved
                 
                 if model_path and os.path.exists(model_path):
+                    print(f"DEBUG: Found model at: {model_path}", file=sys.stderr)
                     print(f"Loading custom floor plan model from: {model_path}", file=sys.stderr)
                     ENCODER = 'resnet50'  # ResNet-50 encoder (matches training)
                     CLASSES = ['background', 'walls', 'rooms']
@@ -1596,6 +1618,9 @@ class DeepLearningSegmentationService:
                     print(f"Custom floor plan model loaded successfully", file=sys.stderr)
                     print(f"Model parameters: {sum(p.numel() for p in self.model.parameters()):,}", file=sys.stderr)
                     return
+                else:
+                    print(f"WARNING: Model path specified but file not found: {model_path}", file=sys.stderr)
+                    print(f"WARNING: Falling back to ImageNet pre-trained model", file=sys.stderr)
             
             # Option 3: Default - ImageNet pre-trained (fallback)
             print(f"Loading default U-Net model (ImageNet pre-trained)", file=sys.stderr)
