@@ -1555,14 +1555,12 @@ class DeepLearningSegmentationService:
                 
                 # Resolve relative paths (relative to project root)
                 if not os.path.isabs(model_path):
-                    # Try multiple possible base paths
-                    # 1. Current working directory (should be project root on Railway)
-                    # 2. Relative to server directory
-                    # 3. From __file__ location (if we can determine it)
+                    # On Railway: cwd = /app, model_path = 'server/models/floor_plan_cubicasa5k_resnet50.pth'
+                    # We need: /app/server/models/floor_plan_cubicasa5k_resnet50.pth
                     cwd = os.getcwd()
                     possible_paths = [
-                        os.path.join(cwd, model_path),  # From project root
-                        os.path.join(cwd, 'server', model_path.split('/', 1)[1] if '/' in model_path else model_path),  # If cwd is project root
+                        os.path.join(cwd, model_path),  # /app/server/models/... (correct for Railway)
+                        os.path.join(cwd, 'server', 'models', 'floor_plan_cubicasa5k_resnet50.pth'),  # Explicit path
                         os.path.join(cwd, '..', model_path),  # If cwd is server/
                         model_path  # Try as-is
                     ]
@@ -1572,8 +1570,9 @@ class DeepLearningSegmentationService:
                         # If this is embedded in a TypeScript file, we might be in server/dist or server/
                         script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else cwd
                         possible_paths.extend([
-                            os.path.join(script_dir, '..', '..', model_path),  # From server/dist/src/services/
-                            os.path.join(script_dir, '..', model_path),  # From server/
+                            os.path.join(cwd, 'server', 'models', 'floor_plan_cubicasa5k_resnet50.pth'),  # Explicit /app/server/models/
+                            os.path.join(script_dir, '..', '..', '..', 'server', 'models', 'floor_plan_cubicasa5k_resnet50.pth'),  # From server/dist/src/services/
+                            os.path.join(script_dir, '..', '..', 'models', 'floor_plan_cubicasa5k_resnet50.pth'),  # From server/dist/
                         ])
                     except:
                         pass
