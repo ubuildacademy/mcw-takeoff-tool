@@ -280,13 +280,21 @@ async function ensureModelExists() {
   console.log(`🔍 Project root (cwd): ${projectRoot}`);
   console.log(`🔍 __dirname: ${__dirname}`);
   
-  // Check if model exists in any location
-  const checkPaths = [modelPath, serverModelPath, '/tmp/floor_plan_cubicasa5k_resnet50.pth'];
+  // Check if model exists in any location (check all possible paths)
+  const checkPaths = [
+    modelPath,  // /app/models/floor_plan_cubicasa5k_resnet50.pth
+    serverModelPath,  // /app/server/models/floor_plan_cubicasa5k_resnet50.pth
+    '/tmp/floor_plan_cubicasa5k_resnet50.pth'
+  ];
+  
+  console.log(`🔍 Checking for model in ${checkPaths.length} locations...`);
   for (const checkPath of checkPaths) {
-    if (await fs.pathExists(checkPath)) {
+    const exists = await fs.pathExists(checkPath);
+    console.log(`   ${exists ? '✓' : '✗'} ${checkPath}`);
+    if (exists) {
       const stats = await fs.stat(checkPath);
       if (stats.size > 0) {
-        console.log(`✓ Model file exists: ${checkPath} (${(stats.size / (1024 * 1024)).toFixed(2)} MB)`);
+        console.log(`✓ Model file found: ${checkPath} (${(stats.size / (1024 * 1024)).toFixed(2)} MB)`);
         return true;
       }
     }
@@ -338,26 +346,37 @@ async function ensureModelExists() {
     
     const fileSizeMB = (buffer.length / (1024 * 1024)).toFixed(2);
     console.log(`✅ Model downloaded successfully from Supabase Storage!`);
-    console.log(`   Saved to: ${modelPath}`);
+    console.log(`   Primary location: ${modelPath}`);
     console.log(`   File size: ${fileSizeMB} MB`);
     console.log(`   Verified: File exists = ${verifyExists}, Size = ${verifyStats.size} bytes`);
     
-    // Also save to /app/server/models/ and /tmp as backups (Python checks all locations)
+    // CRITICAL: Also save to /app/server/models/ and /tmp as backups (Python checks all locations)
     const savePaths = [
-      { path: serverModelPath, name: 'server/models' },
-      { path: '/tmp/floor_plan_cubicasa5k_resnet50.pth', name: '/tmp' }
+      { path: serverModelPath, name: '/app/server/models/' },
+      { path: '/tmp/floor_plan_cubicasa5k_resnet50.pth', name: '/tmp/' }
     ];
     
+    console.log(`📦 Saving model to ${savePaths.length} backup locations...`);
     for (const { path: savePath, name } of savePaths) {
       try {
         await fs.ensureDir(path.dirname(savePath));
         await fs.writeFile(savePath, buffer, { mode: 0o644 });
         const verify = await fs.pathExists(savePath);
-        console.log(`   Backup saved to: ${savePath} (exists: ${verify})`);
+        const verifyStats = await fs.stat(savePath);
+        if (verify && verifyStats.size === buffer.length) {
+          console.log(`   ✅ Backup saved to: ${savePath} (${(verifyStats.size / (1024 * 1024)).toFixed(2)} MB)`);
+        } else {
+          console.log(`   ⚠️  Backup verification failed: ${savePath} (exists: ${verify}, size: ${verifyStats.size})`);
+        }
       } catch (err) {
-        console.log(`   ⚠️  Failed to save backup to ${name}: ${err}`);
+        console.log(`   ❌ Failed to save backup to ${name}: ${err}`);
       }
     }
+    
+    console.log(`✅ Model saved to all locations. Python should find it at one of:`);
+    console.log(`   1. ${modelPath}`);
+    console.log(`   2. ${serverModelPath}`);
+    console.log(`   3. /tmp/floor_plan_cubicasa5k_resnet50.pth`);
     
     return true;
   } catch (error) {
