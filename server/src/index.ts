@@ -263,12 +263,17 @@ async function ensureModelExists() {
   const STORAGE_PATH = 'models/floor_plan_cubicasa5k_resnet50.pth';
   
   // Determine correct model path - Python looks for it relative to project root
-  // __dirname is server/dist/src/ in production, server/src/ in dev
-  // We need: server/models/ (relative to project root)
-  const serverDir = path.dirname(path.dirname(__dirname)); // Go up from dist/src or src to server/
-  const modelPath = path.join(serverDir, 'models', 'floor_plan_cubicasa5k_resnet50.pth');
+  // On Railway: __dirname = /app/dist/services (or /app/dist/src)
+  // Python runs from /app and looks for server/models/...
+  // So we need: /app/server/models/floor_plan_cubicasa5k_resnet50.pth
+  
+  // Get project root (/app on Railway)
+  const projectRoot = process.cwd(); // Should be /app on Railway
+  const modelPath = path.join(projectRoot, 'server', 'models', 'floor_plan_cubicasa5k_resnet50.pth');
   
   console.log(`🔍 Checking for model at: ${modelPath}`);
+  console.log(`🔍 Project root (cwd): ${projectRoot}`);
+  console.log(`🔍 __dirname: ${__dirname}`);
   
   // Check if model exists and is valid
   if (await fs.pathExists(modelPath)) {
