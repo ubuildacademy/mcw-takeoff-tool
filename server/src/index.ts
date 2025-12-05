@@ -327,14 +327,11 @@ async function ensureModelExists() {
   });
   
   // Set server timeout to handle long-running CV detection requests (3 minutes)
+  // Railway's gateway timeout is 60s, but we can try to keep the connection alive
   server.timeout = 180000; // 3 minutes
+  server.keepAliveTimeout = 180000; // 3 minutes
+  server.headersTimeout = 181000; // Slightly longer than keepAliveTimeout
 })();
-
-// Set server timeout to handle long-running CV detection requests (3 minutes)
-// Railway's gateway timeout is 60s, but we can try to keep the connection alive
-server.timeout = 180000; // 3 minutes
-server.keepAliveTimeout = 180000; // 3 minutes
-server.headersTimeout = 181000; // Slightly longer than keepAliveTimeout
 
 // Initialize live preview service
 livePreviewService.initialize(server);
