@@ -2688,17 +2688,26 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
     # Also filter out contours that are clearly the entire building (cover too much of the image)
     filtered_indices = []
     image_area = width * height
+    rejected_count = 0
+    rejected_reasons = {}
     print(f"Pre-filtering {len(contour_areas)} contours (min_area={min_area_pixels:.0f}, max_area={max_area_pixels:.0f})", file=sys.stderr)
     for i, area in contour_areas:
         # Check area bounds
         if area < min_area_pixels or area > max_area_pixels:
-            print(f"  Contour {i}: rejected - area {area:.0f} outside range [{min_area_pixels:.0f}, {max_area_pixels:.0f}]", file=sys.stderr)
+            rejected_count += 1
+            rejected_reasons['area_out_of_range'] = rejected_reasons.get('area_out_of_range', 0) + 1
+            # Only print first 10 rejections to avoid log spam
+            if rejected_count <= 10:
+                print(f"  Contour {i}: rejected - area {area:.0f} outside range [{min_area_pixels:.0f}, {max_area_pixels:.0f}]", file=sys.stderr)
             continue
         
         # Additional check: if contour covers more than 50% of image, it's likely the entire building outline
         area_ratio = area / image_area if image_area > 0 else 0
         if area_ratio > 0.50:
-            print(f"  Contour {i}: rejected - covers {area_ratio*100:.1f}% of image (likely entire building outline)", file=sys.stderr)
+            rejected_count += 1
+            rejected_reasons['too_large'] = rejected_reasons.get('too_large', 0) + 1
+            if rejected_count <= 10:
+                print(f"  Contour {i}: rejected - covers {area_ratio*100:.1f}% of image (likely entire building outline)", file=sys.stderr)
             continue
         
         contour = contours[i]
@@ -2714,7 +2723,10 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
         # If more than 95% of contour is in exclusion regions (titleblock/dimensions), skip it
         # Relaxed from 0.8 to 0.95 to allow rooms near dimension strings but still filter out dimension artifacts
         if overlap_ratio > 0.95:
-            print(f"  Contour {i}: rejected - exclusion zone overlap {overlap_ratio:.2f} > 0.95", file=sys.stderr)
+            rejected_count += 1
+            rejected_reasons['exclusion_overlap'] = rejected_reasons.get('exclusion_overlap', 0) + 1
+            if rejected_count <= 10:
+                print(f"  Contour {i}: rejected - exclusion zone overlap {overlap_ratio:.2f} > 0.95", file=sys.stderr)
             continue
         
         # Additional check: filter out very small contours that are likely note boxes or dimension artifacts
@@ -2733,7 +2745,10 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
                     edge_density = np.sum(region_edges > 0) / max(1, region_edges.size)
                     # Higher threshold to avoid filtering actual rooms (0.35 instead of 0.25)
                     if edge_density > 0.35:  # Very high edge density = text box
-                        print(f"  Contour {i}: rejected - small text box (area={area:.0f}, size={w}x{h}, edge_density={edge_density:.2f})", file=sys.stderr)
+                        rejected_count += 1
+                        rejected_reasons['text_box'] = rejected_reasons.get('text_box', 0) + 1
+                        if rejected_count <= 10:
+                            print(f"  Contour {i}: rejected - small text box (area={area:.0f}, size={w}x{h}, edge_density={edge_density:.2f})", file=sys.stderr)
                         continue
                 
                 # Also check if it's in a high text density region (using exclusion mask)
@@ -2743,7 +2758,10 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
                 text_overlap = cv2.bitwise_and(contour_mask, exclusion_mask)
                 text_overlap_ratio = np.sum(text_overlap > 0) / max(1, np.sum(contour_mask > 0))
                 if text_overlap_ratio > 0.9:  # More than 90% overlap with text regions (very strict)
-                    print(f"  Contour {i}: rejected - note box in text region (text_overlap={text_overlap_ratio:.2f})", file=sys.stderr)
+                    rejected_count += 1
+                    rejected_reasons['text_region'] = rejected_reasons.get('text_region', 0) + 1
+                    if rejected_count <= 10:
+                        print(f"  Contour {i}: rejected - note box in text region (text_overlap={text_overlap_ratio:.2f})", file=sys.stderr)
                     continue
         
         # Check if bounding box is in exclusion zones (very relaxed)
@@ -2762,7 +2780,10 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
             
             exclusion_ratio = exclusion_overlap / (w * h) if (w * h) > 0 else 0
             if exclusion_overlap > (w * h * 0.8):  # Very relaxed from 0.6 to 0.8
-                print(f"  Contour {i}: rejected - exclusion zone overlap {exclusion_ratio:.2f} > 0.8", file=sys.stderr)
+                rejected_count += 1
+                rejected_reasons['bbox_exclusion'] = rejected_reasons.get('bbox_exclusion', 0) + 1
+                if rejected_count <= 10:
+                    print(f"  Contour {i}: rejected - exclusion zone overlap {exclusion_ratio:.2f} > 0.8", file=sys.stderr)
                 continue
         
         print(f"  Contour {i}: passed pre-filter (area={area:.0f}, bbox=({x},{y},{w},{h}))", file=sys.stderr)
@@ -2771,6 +2792,14 @@ def detect_rooms(image_path, scale_factor, min_area_sf, epsilon, exterior_walls=
     # Sort by area (largest first) and limit to top 100
     filtered_indices.sort(key=lambda i: contour_areas[i][1], reverse=True)
     filtered_indices = filtered_indices[:100]
+    
+    # Print summary of rejections instead of individual messages
+    if rejected_count > 10:
+        print(f"  ... and {rejected_count - 10} more contours rejected (suppressing details)", file=sys.stderr)
+    if rejected_reasons:
+        reason_summary = ', '.join([f"{reason}: {count}" for reason, count in rejected_reasons.items()])
+        print(f"Rejection summary: {reason_summary}", file=sys.stderr)
+    print(f"Pre-filter complete: {len(filtered_indices)}/{len(contour_areas)} contours passed", file=sys.stderr)
     
     # Track processed contours to avoid duplicates
     processed_contours = set()
@@ -4242,7 +4271,8 @@ if __name__ == "__main__":
       }
 
       // Build command with explicit validation
-      const command = `${pythonCommand} "${this.pythonScriptPath}" "${imagePath}" ${opts.scaleFactor} ${opts.minRoomArea} ${opts.minWallLength} ${opts.contourApproximationEpsilon}`;
+      // Use -u flag for unbuffered output to ensure immediate flushing and proper termination
+      const command = `${pythonCommand} -u "${this.pythonScriptPath}" "${imagePath}" ${opts.scaleFactor} ${opts.minRoomArea} ${opts.minWallLength} ${opts.contourApproximationEpsilon}`;
       
       // Validate command contains script path (safety check)
       if (!command.includes(this.pythonScriptPath)) {
@@ -4354,6 +4384,54 @@ if __name__ == "__main__":
         });
         stdout = execResult.stdout;
         stderr = execResult.stderr;
+        
+        // Filter stderr to only show actual errors, not debug messages
+        // Count debug messages but don't flood logs
+        if (stderr) {
+          const stderrLines = stderr.split('\n');
+          const errorLines: string[] = [];
+          const debugLines: string[] = [];
+          let contourRejectionCount = 0;
+          
+          for (const line of stderrLines) {
+            // Actual errors (contain ERROR, Traceback, Exception, etc.)
+            if (/ERROR|Traceback|Exception|Failed|Error:|FATAL/i.test(line) && 
+                !/DeprecationWarning|UserWarning/i.test(line)) {
+              errorLines.push(line);
+            }
+            // Debug messages (contour rejections, info messages)
+            else if (/Contour.*rejected|passed pre-filter|Processing.*contours|Pre-filtering/i.test(line)) {
+              debugLines.push(line);
+              if (/Contour.*rejected/i.test(line)) {
+                contourRejectionCount++;
+              }
+            }
+            // Warnings that might be important
+            else if (/WARNING|WARN/i.test(line) && !/DeprecationWarning/i.test(line)) {
+              errorLines.push(line);
+            }
+            // Other lines (keep them but mark as debug)
+            else if (line.trim()) {
+              debugLines.push(line);
+            }
+          }
+          
+          // Log summary of debug messages instead of flooding
+          if (contourRejectionCount > 0) {
+            console.log(`📊 Contour filtering: ${contourRejectionCount} contours rejected (debug details suppressed)`);
+          }
+          if (debugLines.length > contourRejectionCount) {
+            console.log(`📊 Python debug output: ${debugLines.length - contourRejectionCount} debug lines (suppressed)`);
+          }
+          
+          // Only log actual errors
+          if (errorLines.length > 0) {
+            console.warn(`⚠️ Python script errors/warnings:`, errorLines.join('\n'));
+          }
+          
+          // Clear stderr to prevent it from being logged elsewhere
+          stderr = errorLines.length > 0 ? errorLines.join('\n') : '';
+        }
       } catch (execError: any) {
         // Extract error message properly
         let execErrorMessage = 'Unknown error';
