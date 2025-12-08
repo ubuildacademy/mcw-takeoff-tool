@@ -363,7 +363,8 @@ CONFIG = {
     'dl_confidence_threshold': 0.5,  # Minimum confidence for DL predictions (0-1)
     'dl_model_input_size': 512,  # Input size for DL model (512x512 recommended, larger = more detail but slower)
     # Auto-configured by: python3 server/scripts/auto_setup_floor_plan_model.py
-    'dl_model_path': 'server/models/floor_plan_cubicasa5k_resnet50.pth',  # Path to custom pre-trained floor plan model weights (relative to project root, None = use ImageNet pre-trained)
+    # Model is saved to /app/models/ by Node.js, Python will check multiple locations
+    'dl_model_path': 'models/floor_plan_cubicasa5k_resnet50.pth',  # Path to custom pre-trained floor plan model weights (relative to project root, None = use ImageNet pre-trained)
     'dl_use_huggingface': False,  # Use HuggingFace Transformers model instead
     'dl_huggingface_model': 'nvidia/segformer-b0-finetuned-ade-512-512',  # HuggingFace model name
 }
@@ -4387,15 +4388,21 @@ if __name__ == "__main__":
         
         // Filter stderr to only show actual errors, not debug messages
         // Count debug messages but don't flood logs
+        // IMPORTANT: Always preserve model loading messages
         if (stderr) {
           const stderrLines = stderr.split('\n');
           const errorLines: string[] = [];
+          const importantLines: string[] = [];
           const debugLines: string[] = [];
           let contourRejectionCount = 0;
           
           for (const line of stderrLines) {
+            // IMPORTANT: Model loading messages - always keep these
+            if (/Loading.*model|Found model|model.*loaded|DEBUG.*model|Using.*model|Custom floor plan model|U-Net model loaded/i.test(line)) {
+              importantLines.push(line);
+            }
             // Actual errors (contain ERROR, Traceback, Exception, etc.)
-            if (/ERROR|Traceback|Exception|Failed|Error:|FATAL/i.test(line) && 
+            else if (/ERROR|Traceback|Exception|Failed|Error:|FATAL/i.test(line) && 
                 !/DeprecationWarning|UserWarning/i.test(line)) {
               errorLines.push(line);
             }
@@ -4414,6 +4421,11 @@ if __name__ == "__main__":
             else if (line.trim()) {
               debugLines.push(line);
             }
+          }
+          
+          // Always log important model loading messages
+          if (importantLines.length > 0) {
+            console.log(`🤖 Model loading:`, importantLines.join('\n'));
           }
           
           // Log summary of debug messages instead of flooding
