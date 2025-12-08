@@ -1516,7 +1516,17 @@ class DeepLearningSegmentationService:
         if not TORCH_AVAILABLE:
             raise RuntimeError("PyTorch and segmentation-models-pytorch are required but not installed")
         
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        # Detect best available device (CUDA > MPS > CPU)
+        if torch.cuda.is_available():
+            self.device = torch.device('cuda')
+            print(f"Using CUDA device: {torch.cuda.get_device_name(0)}", file=sys.stderr)
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            self.device = torch.device('mps')
+            print("Using Apple Metal Performance Shaders (MPS)", file=sys.stderr)
+        else:
+            self.device = torch.device('cpu')
+            print("Using CPU (slower - consider using GPU if available)", file=sys.stderr)
+        
         self.model = None
         self.hf_model = None
         self.hf_processor = None
@@ -1622,20 +1632,44 @@ class DeepLearningSegmentationService:
                     )
                     
                     # Load custom weights
-                    checkpoint = torch.load(model_path, map_location=self.device)
-                    if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
-                        self.model.load_state_dict(checkpoint['state_dict'])
-                    elif isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-                        self.model.load_state_dict(checkpoint['model_state_dict'])
-                    else:
-                        self.model.load_state_dict(checkpoint)
+                    # Load to CPU first, then move to device (more reliable across platforms)
+                    checkpoint = torch.load(model_path, map_location='cpu')
+                    
+                    # Try to load state dict with error handling
+                    try:
+                        if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+                            missing_keys, unexpected_keys = self.model.load_state_dict(checkpoint['state_dict'], strict=False)
+                        elif isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+                            missing_keys, unexpected_keys = self.model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+                        else:
+                            missing_keys, unexpected_keys = self.model.load_state_dict(checkpoint, strict=False)
+                        
+                        if missing_keys:
+                            print(f"WARNING: Missing keys in checkpoint: {len(missing_keys)} keys", file=sys.stderr)
+                            if len(missing_keys) <= 10:  # Only print if not too many
+                                print(f"Missing keys: {missing_keys}", file=sys.stderr)
+                        if unexpected_keys:
+                            print(f"WARNING: Unexpected keys in checkpoint: {len(unexpected_keys)} keys", file=sys.stderr)
+                            if len(unexpected_keys) <= 10:
+                                print(f"Unexpected keys: {unexpected_keys}", file=sys.stderr)
+                    except Exception as e:
+                        print(f"ERROR: Failed to load model state dict: {str(e)}", file=sys.stderr)
+                        raise RuntimeError(f"Model checkpoint format incompatible: {str(e)}")
                     
                     self.model.to(self.device)
                     self.model.eval()
-                    self.preprocessing_fn = smp.encoders.get_preprocessing_fn(ENCODER, 'imagenet')
+                    # Preprocessing function uses ImageNet normalization (standard for ResNet encoders)
+                    # This matches the training preprocessing
+                    try:
+                        self.preprocessing_fn = smp.encoders.get_preprocessing_fn(ENCODER, 'imagenet')
+                    except Exception as e:
+                        print(f"WARNING: Could not get preprocessing function for {ENCODER}: {str(e)}", file=sys.stderr)
+                        print("Will use manual ImageNet normalization as fallback", file=sys.stderr)
+                        self.preprocessing_fn = None
                     self.use_huggingface = False
                     print(f"Custom floor plan model loaded successfully", file=sys.stderr)
                     print(f"Model parameters: {sum(p.numel() for p in self.model.parameters()):,}", file=sys.stderr)
+                    print(f"Encoder: {ENCODER}, Classes: {len(CLASSES)}, Input size: {CONFIG['dl_model_input_size']}", file=sys.stderr)
                     return
                 else:
                     print(f"WARNING: Model path specified but file not found: {model_path}", file=sys.stderr)
@@ -1673,45 +1707,48 @@ class DeepLearningSegmentationService:
     
     def segment_image(self, image_path):
         """
-        Use DL to enhance edge detection for floor plans
-        
-        Strategy: Pre-trained models on ImageNet don't work well for floor plans.
-        Instead, use DL to detect edges/lines, then use CV pipeline to build walls/rooms.
+        Use DL to segment floor plans into walls and rooms
         
         Returns:
-            - wall_mask: Binary mask of potential wall edges (uint8, 0-255)
-            - room_mask: Binary mask of potential room regions (uint8, 0-255) - may be noisy
+            - wall_mask: Binary mask of wall pixels (uint8, 0-255)
+            - room_mask: Binary mask of room pixels (uint8, 0-255)
             - confidence_map: Confidence scores (float32, 0-1)
         """
         try:
-            # Load image
-            image = cv2.imread(image_path)
-            if image is None:
+            # Load image in RGB format (matches training)
+            image_bgr = cv2.imread(image_path)
+            if image_bgr is None:
                 raise ValueError(f"Failed to load image: {image_path}")
             
-            original_height, original_width = image.shape[:2]
+            # Validate image dimensions
+            original_height, original_width = image_bgr.shape[:2]
+            if original_height <= 0 or original_width <= 0:
+                raise ValueError(f"Invalid image dimensions: {original_width}x{original_height}")
+            if original_height < 32 or original_width < 32:
+                raise ValueError(f"Image too small: {original_width}x{original_height} (minimum 32x32)")
+            if original_height > 10000 or original_width > 10000:
+                print(f"WARNING: Very large image: {original_width}x{original_height} (may cause memory issues)", file=sys.stderr)
             
-            # Convert to grayscale for better edge detection
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            # Convert BGR to RGB (OpenCV loads as BGR, but model expects RGB)
+            image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
             
-            # Preprocess: Enhance contrast and reduce noise
-            # Floor plans are typically high contrast (black lines on white)
-            _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            
-            # Invert if needed (assume white background)
-            if np.mean(binary) > 127:
-                binary = 255 - binary
+            # Keep grayscale for post-processing (Canny edge detection)
+            gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
             
             # Run inference based on model type
             if self.use_huggingface and self.hf_model is not None:
                 # Use HuggingFace Transformers model
-                image_pil = Image.fromarray(cv2.cvtColor(binary, cv2.COLOR_GRAY2RGB))
+                image_pil = Image.fromarray(image_rgb)
                 inputs = self.hf_processor(images=image_pil, return_tensors="pt")
                 inputs = {k: v.to(self.device) for k, v in inputs.items()}
                 
                 with torch.no_grad():
                     outputs = self.hf_model(**inputs)
                     logits = outputs.logits
+                
+                # Validate logits shape
+                if len(logits.shape) != 4 or logits.shape[0] != 1:
+                    raise ValueError(f"Unexpected logits shape from HuggingFace model: {logits.shape}")
                 
                 # Upsample logits to original size
                 upsampled_logits = nn.functional.interpolate(
@@ -1720,92 +1757,177 @@ class DeepLearningSegmentationService:
                 )
                 pr_mask_np = torch.softmax(upsampled_logits, dim=1)[0].cpu().numpy()
                 
+                # Clean up GPU memory
+                del logits, upsampled_logits, inputs, outputs
+                if self.device.type == 'cuda':
+                    torch.cuda.empty_cache()
+                elif self.device.type == 'mps':
+                    torch.mps.empty_cache()
+                
+                # Validate output shape
+                if len(pr_mask_np.shape) != 3:
+                    raise ValueError(f"Unexpected probability mask shape: {pr_mask_np.shape}")
+                
                 # Segformer outputs: background, walls, rooms (or similar classes)
                 if pr_mask_np.shape[0] >= 3:
-                    edge_probs = pr_mask_np[1]  # Walls/edges
-                    region_probs = pr_mask_np[2]  # Rooms
+                    edge_probs = pr_mask_np[1].copy()  # Walls/edges - copy to avoid memory issues
+                    region_probs = pr_mask_np[2].copy()  # Rooms
                 else:
                     # Fallback if model has different class structure
-                    edge_probs = pr_mask_np[0] if pr_mask_np.shape[0] > 0 else np.zeros((original_height, original_width))
-                    region_probs = pr_mask_np[1] if pr_mask_np.shape[0] > 1 else np.zeros((original_height, original_width))
+                    if pr_mask_np.shape[0] > 0:
+                        edge_probs = pr_mask_np[0].copy() if pr_mask_np.shape[0] > 0 else np.zeros((original_height, original_width), dtype=np.float32)
+                    else:
+                        edge_probs = np.zeros((original_height, original_width), dtype=np.float32)
+                    region_probs = pr_mask_np[1].copy() if pr_mask_np.shape[0] > 1 else np.zeros((original_height, original_width), dtype=np.float32)
+                
+                # Clean up large array
+                del pr_mask_np
             else:
                 # Use segmentation-models-pytorch model
-                # Convert grayscale to RGB for model input
-                image_rgb = cv2.cvtColor(binary, cv2.COLOR_GRAY2RGB)
-                
-                # Resize to model input size
+                # CRITICAL: Match training preprocessing exactly!
+                # Training uses A.Resize(512, 512) which STRETCHES to 512x512 (no aspect ratio preservation)
+                # This is important for accuracy - model was trained on stretched images
                 target_size = CONFIG['dl_model_input_size']
-                scale = min(target_size / original_width, target_size / original_height)
-                new_width = int(original_width * scale)
-                new_height = int(original_height * scale)
-                image_resized = cv2.resize(image_rgb, (new_width, new_height), interpolation=cv2.INTER_AREA)
+                if original_width <= 0 or original_height <= 0:
+                    raise ValueError(f"Invalid image dimensions for resizing: {original_width}x{original_height}")
                 
-                # Pad to target size
-                pad_h = target_size - new_height
-                pad_w = target_size - new_width
-                image_padded = cv2.copyMakeBorder(
-                    image_resized, 0, pad_h, 0, pad_w,
-                    cv2.BORDER_CONSTANT, value=[0, 0, 0]
-                )
+                # Stretch to target_size x target_size (matches training - albumentations Resize)
+                # Use INTER_LINEAR to match albumentations default interpolation
+                image_resized = cv2.resize(image_rgb, (target_size, target_size), interpolation=cv2.INTER_LINEAR)
+                image_padded = image_resized  # No padding needed - already exactly target_size x target_size
+                new_width = target_size
+                new_height = target_size
                 
-                # Preprocess for model
-                image_preprocessed = self.preprocessing_fn(image_padded)
+                # Preprocess for model (ImageNet normalization - matches training exactly)
+                # Training: ToTensorV2() converts to [0,1] range, then Normalize applies ImageNet stats
+                # We need to match this order: convert to [0,1] first, then normalize
+                if self.preprocessing_fn:
+                    # preprocessing_fn from smp handles the full pipeline correctly
+                    image_preprocessed = self.preprocessing_fn(image_padded)
+                else:
+                    # Fallback: manual ImageNet normalization (matches albumentations exactly)
+                    # Step 1: Convert to [0, 1] range (matches ToTensorV2)
+                    image_preprocessed = image_padded.astype(np.float32) / 255.0
+                    # Step 2: Apply ImageNet normalization (matches A.Normalize)
+                    mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+                    std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+                    # Ensure std values are non-zero to avoid division by zero
+                    std = np.maximum(std, 1e-7)  # Prevent division by zero
+                    image_preprocessed = (image_preprocessed - mean) / std
+                
+                # Convert to tensor format: [C, H, W] (matches ToTensorV2 output)
                 image_tensor = torch.from_numpy(image_preprocessed).permute(2, 0, 1).float()
-                image_tensor = image_tensor.unsqueeze(0).to(self.device)
+                image_tensor = image_tensor.unsqueeze(0).to(self.device)  # Add batch dimension: [1, C, H, W]
                 
-                # Run inference
+                # Run inference (model already has softmax activation, so output is probabilities)
                 with torch.no_grad():
-                    pr_mask = self.model.predict(image_tensor)
+                    pr_mask = self.model(image_tensor)  # Use model() not model.predict()
                 
-                # Apply softmax
-                if pr_mask.shape[1] == 3:
-                    pr_mask = torch.softmax(pr_mask, dim=1)
+                # Validate model output shape
+                if pr_mask.shape[1] != 3:
+                    raise ValueError(f"Model output has {pr_mask.shape[1]} classes, expected 3 (background, walls, rooms)")
                 
-                pr_mask_np = pr_mask[0].cpu().numpy()  # [3, H, W]
+                # Model has activation='softmax', so output is already probabilities [0-1]
+                # No need to apply softmax again
+                pr_mask_np = pr_mask[0].cpu().numpy()  # [3, H, W] - already softmaxed
                 
-                # Resize back to original size (crop padding first)
-                edge_probs = pr_mask_np[1][:new_height, :new_width]  # Edge/line probabilities
-                region_probs = pr_mask_np[2][:new_height, :new_width]  # Region probabilities
+                # Clean up GPU memory
+                del pr_mask, image_tensor
+                if self.device.type == 'cuda':
+                    torch.cuda.empty_cache()
+                elif self.device.type == 'mps':
+                    torch.mps.empty_cache()
                 
-                edge_probs = cv2.resize(edge_probs, (original_width, original_height), interpolation=cv2.INTER_LINEAR)
-                region_probs = cv2.resize(region_probs, (original_width, original_height), interpolation=cv2.INTER_LINEAR)
+                # Debug: Log prediction statistics
+                print(f"DL prediction stats: shape={pr_mask_np.shape}, min={pr_mask_np.min():.3f}, max={pr_mask_np.max():.3f}, mean={pr_mask_np.mean():.3f}", file=sys.stderr)
+                print(f"Class probabilities - background: {pr_mask_np[0].mean():.3f}, walls: {pr_mask_np[1].mean():.3f}, rooms: {pr_mask_np[2].mean():.3f}", file=sys.stderr)
+                
+                # Extract class probabilities (model output is [3, target_size, target_size])
+                # Since we stretched to square, no cropping needed - use full output
+                edge_probs = pr_mask_np[1].copy()  # Walls (class 1) - copy to avoid memory issues
+                region_probs = pr_mask_np[2].copy()  # Rooms (class 2)
+                
+                # Clean up large array before resizing
+                del pr_mask_np
+                
+                # Validate dimensions before resizing
+                if edge_probs.shape[0] <= 0 or edge_probs.shape[1] <= 0:
+                    raise ValueError(f"Invalid probability map dimensions: {edge_probs.shape}")
+                if region_probs.shape[0] <= 0 or region_probs.shape[1] <= 0:
+                    raise ValueError(f"Invalid probability map dimensions: {region_probs.shape}")
+                
+                # Resize back to original image size (stretch back to original aspect ratio)
+                # Use INTER_LINEAR to match training interpolation
+                if original_width > 0 and original_height > 0:
+                    edge_probs = cv2.resize(edge_probs, (original_width, original_height), interpolation=cv2.INTER_LINEAR)
+                    region_probs = cv2.resize(region_probs, (original_width, original_height), interpolation=cv2.INTER_LINEAR)
+                else:
+                    raise ValueError(f"Invalid original dimensions for resizing: {original_width}x{original_height}")
+                
+                # Clean up intermediate arrays
+                del image_resized, image_padded, image_preprocessed
             
-            # Resize back
-            edge_probs = edge_probs[:new_height, :new_width]
-            region_probs = region_probs[:new_height, :new_width]
-            edge_probs = cv2.resize(edge_probs, (original_width, original_height), interpolation=cv2.INTER_LINEAR)
-            region_probs = cv2.resize(region_probs, (original_width, original_height), interpolation=cv2.INTER_LINEAR)
+            # Validate that probability maps exist and have correct shape
+            if edge_probs is None or region_probs is None:
+                raise ValueError("Probability maps are None - model inference failed")
+            if edge_probs.shape != (original_height, original_width):
+                raise ValueError(f"Edge probabilities shape mismatch: {edge_probs.shape} != ({original_height}, {original_width})")
+            if region_probs.shape != (original_height, original_width):
+                raise ValueError(f"Region probabilities shape mismatch: {region_probs.shape} != ({original_height}, {original_width})")
             
-            # Combine DL edge detection with traditional Canny
-            # DL helps filter noise, traditional CV provides structure
+            # Validate confidence threshold
+            conf_threshold = CONFIG['dl_confidence_threshold']
+            if not (0.0 <= conf_threshold <= 1.0):
+                print(f"WARNING: Invalid confidence threshold {conf_threshold}, clamping to [0, 1]", file=sys.stderr)
+                conf_threshold = max(0.0, min(1.0, conf_threshold))
+            
+            # Create wall mask from DL predictions
+            # Use a slightly lower threshold for walls to capture more detail
+            wall_threshold = max(0.3, conf_threshold - 0.1)
+            wall_mask = (edge_probs > wall_threshold).astype(np.uint8) * 255
+            
+            # Optional: Combine with Canny edges for refinement (but DL should be primary)
+            # This helps fill small gaps in wall detection
             canny_edges = cv2.Canny(gray, 50, 150)
-            dl_edge_mask = (edge_probs > CONFIG['dl_confidence_threshold']).astype(np.uint8) * 255
+            # Only add Canny edges that are near DL-detected walls (within 3 pixels)
+            kernel_dilate = np.ones((3, 3), np.uint8)
+            wall_mask_dilated = cv2.dilate(wall_mask, kernel_dilate, iterations=1)
+            canny_near_walls = cv2.bitwise_and(canny_edges, wall_mask_dilated)
+            wall_mask = cv2.bitwise_or(wall_mask, canny_near_walls)
             
-            # Combine: Use DL to weight traditional edge detection
-            combined_edges = cv2.bitwise_and(canny_edges, dl_edge_mask)
-            
-            # Dilate to create wall mask
+            # Dilate slightly to create thicker wall mask (walls are typically 3-6 inches)
             kernel = np.ones((3, 3), np.uint8)
-            wall_mask = cv2.dilate(combined_edges, kernel, iterations=2)
+            wall_mask = cv2.dilate(wall_mask, kernel, iterations=1)
             
-            # For rooms: Use DL region probabilities but filter aggressively
-            # Pre-trained models often segment white space as "rooms"
-            room_mask = (region_probs > CONFIG['dl_confidence_threshold']).astype(np.uint8) * 255
+            # Create room mask from DL predictions
+            # Use the configured threshold for rooms (more conservative to avoid false positives)
+            room_mask = (region_probs > conf_threshold).astype(np.uint8) * 255
             
             # Remove wall regions from room mask
             room_mask = cv2.bitwise_and(room_mask, 255 - wall_mask)
             
             # Apply titleblock exclusion to room mask
-            exclude_top = int(original_height * CONFIG['titleblock_exclude_top'])
-            exclude_bottom = int(original_height * CONFIG['titleblock_exclude_bottom'])
-            exclude_left = int(original_width * CONFIG['titleblock_exclude_left'])
-            exclude_right = int(original_width * CONFIG['titleblock_exclude_right'])
+            # Clamp exclusion values to valid ranges
+            exclude_top = max(0, min(int(original_height * CONFIG['titleblock_exclude_top']), original_height))
+            exclude_bottom = max(0, min(int(original_height * CONFIG['titleblock_exclude_bottom']), original_height))
+            exclude_left = max(0, min(int(original_width * CONFIG['titleblock_exclude_left']), original_width))
+            exclude_right = max(0, min(int(original_width * CONFIG['titleblock_exclude_right']), original_width))
             
-            # Zero out titleblock regions
-            room_mask[0:exclude_top, :] = 0
-            room_mask[exclude_bottom:, :] = 0
-            room_mask[:, 0:exclude_left] = 0
-            room_mask[:, exclude_right:] = 0
+            # Ensure exclude_bottom > exclude_top and exclude_right > exclude_left
+            if exclude_bottom <= exclude_top:
+                exclude_bottom = min(exclude_top + 1, original_height)
+            if exclude_right <= exclude_left:
+                exclude_right = min(exclude_left + 1, original_width)
+            
+            # Zero out titleblock regions (safely handle edge cases)
+            if exclude_top > 0:
+                room_mask[0:exclude_top, :] = 0
+            if exclude_bottom < original_height:
+                room_mask[exclude_bottom:, :] = 0
+            if exclude_left > 0:
+                room_mask[:, 0:exclude_left] = 0
+            if exclude_right < original_width:
+                room_mask[:, exclude_right:] = 0
             
             # Filter out very large regions (likely white space outside floor plan)
             # Find connected components and remove large ones
@@ -1816,11 +1938,24 @@ class DeepLearningSegmentationService:
                 if area > max_room_area_px:
                     room_mask[labels == i] = 0
             
-            confidence_map = np.maximum(edge_probs, region_probs)
+            # Create confidence map (safely handle potential NaN or inf values)
+            confidence_map = np.maximum(
+                np.nan_to_num(edge_probs, nan=0.0, posinf=1.0, neginf=0.0),
+                np.nan_to_num(region_probs, nan=0.0, posinf=1.0, neginf=0.0)
+            )
             
             wall_pixels = np.sum(wall_mask > 0)
             room_pixels = np.sum(room_mask > 0)
-            print(f"DL-enhanced segmentation: wall_mask={wall_pixels}px ({wall_pixels/(original_width*original_height)*100:.1f}%), room_mask={room_pixels}px ({room_pixels/(original_width*original_height)*100:.1f}%)", file=sys.stderr)
+            total_pixels = original_width * original_height
+            if total_pixels > 0:
+                wall_pct = (wall_pixels / total_pixels) * 100.0
+                room_pct = (room_pixels / total_pixels) * 100.0
+                print(f"DL-enhanced segmentation: wall_mask={wall_pixels}px ({wall_pct:.1f}%), room_mask={room_pixels}px ({room_pct:.1f}%)", file=sys.stderr)
+            else:
+                print(f"DL-enhanced segmentation: wall_mask={wall_pixels}px, room_mask={room_pixels}px (invalid dimensions)", file=sys.stderr)
+            
+            # Final cleanup of probability maps
+            del edge_probs, region_probs
             
             return wall_mask, room_mask, confidence_map
             
