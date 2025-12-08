@@ -404,8 +404,8 @@ async function ensureModelExists() {
   server.timeout = 180000; // 3 minutes
   server.keepAliveTimeout = 180000; // 3 minutes
   server.headersTimeout = 181000; // Slightly longer than keepAliveTimeout
+  
+  // Initialize live preview service
+  livePreviewService.initialize(server);
+  console.log(`📡 Live preview service initialized`);
 })();
-
-// Initialize live preview service
-livePreviewService.initialize(server);
-console.log(`📡 Live preview service initialized`);
