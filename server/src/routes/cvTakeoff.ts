@@ -48,12 +48,23 @@ router.get('/status', async (req, res) => {
       error: details.error
     };
     
+    // Build status message with model info
+    let message = available 
+      ? 'CV takeoff service is available' 
+      : 'CV takeoff service requires Python 3 and OpenCV';
+    
+    if (details.modelInfo) {
+      if (details.modelInfo.exists && details.modelInfo.type === 'custom') {
+        message = `Custom trained model loaded: ${details.modelInfo.path.split('/').pop()}`;
+      } else {
+        message = 'Using ImageNet pre-trained model (custom trained model not found)';
+      }
+    }
+    
     res.json({
       success: true,
       available,
-      message: available 
-        ? 'CV takeoff service is available' 
-        : 'CV takeoff service requires Python 3 and OpenCV',
+      message,
       details: {
         ...details,
         diagnostics

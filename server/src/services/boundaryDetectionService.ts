@@ -360,7 +360,7 @@ CONFIG = {
     'titleblock_exclude_right': 0.85,
     
     # Deep learning settings (REQUIRED)
-    'dl_confidence_threshold': 0.5,  # Minimum confidence for DL predictions (0-1)
+    'dl_confidence_threshold': 0.3,  # Minimum confidence for DL predictions (0-1) - lowered from 0.5 to capture more predictions
     'dl_model_input_size': 512,  # Input size for DL model (512x512 recommended, larger = more detail but slower)
     # Auto-configured by: python3 server/scripts/auto_setup_floor_plan_model.py
     # Model is saved to /app/models/ by Node.js, Python will check multiple locations
@@ -1901,8 +1901,13 @@ class DeepLearningSegmentationService:
             wall_mask = cv2.dilate(wall_mask, kernel, iterations=1)
             
             # Create room mask from DL predictions
-            # Use the configured threshold for rooms (more conservative to avoid false positives)
-            room_mask = (region_probs > conf_threshold).astype(np.uint8) * 255
+            # Use a slightly lower threshold for rooms to capture more regions
+            # Minimum 0.25 to avoid noise
+            room_threshold = max(0.25, conf_threshold - 0.1)
+            room_mask = (region_probs > room_threshold).astype(np.uint8) * 255
+            
+            # Log threshold info for debugging
+            print(f"Room detection: threshold={room_threshold:.3f}, max_prob={region_probs.max():.3f}, mean_prob={region_probs.mean():.3f}", file=sys.stderr)
             
             # Remove wall regions from room mask
             room_mask = cv2.bitwise_and(room_mask, 255 - wall_mask)
@@ -4398,7 +4403,7 @@ if __name__ == "__main__":
           
           for (const line of stderrLines) {
             // IMPORTANT: Model loading messages - always keep these
-            if (/Loading.*model|Found model|model.*loaded|DEBUG.*model|Using.*model|Custom floor plan model|U-Net model loaded/i.test(line)) {
+            if (/Loading.*model|Found model|model.*loaded|DEBUG.*model|Using.*model|Custom floor plan model|U-Net model loaded|Model parameters|Encoder:|DL prediction stats|Class probabilities/i.test(line)) {
               importantLines.push(line);
             }
             // Actual errors (contain ERROR, Traceback, Exception, etc.)
@@ -4705,6 +4710,12 @@ if __name__ == "__main__":
     pythonVersion?: string;
     opencvVersion?: string;
     tesseractVersion?: string;
+    modelInfo?: {
+      path: string;
+      exists: boolean;
+      size?: number;
+      type: 'custom' | 'imagenet' | 'unknown';
+    };
     error?: string;
   }> {
     const result: {
@@ -4947,6 +4958,43 @@ if __name__ == "__main__":
         // Don't fail - OCR is optional, CV detection will still work
       }
 
+      // Check for trained model
+      const modelPaths = [
+        '/app/models/floor_plan_cubicasa5k_resnet50.pth',
+        '/app/server/models/floor_plan_cubicasa5k_resnet50.pth',
+        '/tmp/floor_plan_cubicasa5k_resnet50.pth'
+      ];
+      
+      let modelInfo: { path: string; exists: boolean; size?: number; type: 'custom' | 'imagenet' | 'unknown' } | undefined;
+      for (const modelPath of modelPaths) {
+        try {
+          if (await fs.pathExists(modelPath)) {
+            const stats = await fs.stat(modelPath);
+            modelInfo = {
+              path: modelPath,
+              exists: true,
+              size: stats.size,
+              type: 'custom'
+            };
+            console.log(`   ✅ Custom trained model found: ${modelPath} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
+            break;
+          }
+        } catch {
+          // Continue to next path
+        }
+      }
+      
+      if (!modelInfo) {
+        modelInfo = {
+          path: 'models/floor_plan_cubicasa5k_resnet50.pth',
+          exists: false,
+          type: 'imagenet'
+        };
+        console.log(`   ⚠️ Custom trained model not found - will use ImageNet pre-trained model`);
+      }
+      
+      (result as any).modelInfo = modelInfo;
+      
       console.log('   ✅ Python and OpenCV are available!');
       return result;
     } catch (error) {

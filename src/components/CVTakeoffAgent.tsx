@@ -276,7 +276,20 @@ export function CVTakeoffAgent({
             <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-md">
               <div className="flex items-center gap-2">
                 <CheckCircle className="w-4 h-4 text-green-600" />
-                <span className="text-sm text-green-800">CV detection service is available</span>
+                <div className="flex-1">
+                  <span className="text-sm text-green-800 font-medium block">
+                    {statusDetails?.modelInfo?.exists && statusDetails?.modelInfo?.type === 'custom'
+                      ? `Custom trained model loaded: ${statusDetails.modelInfo.path.split('/').pop()}`
+                      : statusDetails?.modelInfo?.type === 'imagenet'
+                      ? 'Using ImageNet pre-trained model'
+                      : 'CV detection service is available'}
+                  </span>
+                  {statusDetails?.modelInfo?.exists && statusDetails?.modelInfo?.size && (
+                    <span className="text-xs text-green-700 mt-1 block">
+                      Model size: {(statusDetails.modelInfo.size / 1024 / 1024).toFixed(2)} MB
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
           ) : (
