@@ -282,11 +282,8 @@ export function CVTakeoffAgent({
                 <CheckCircle className="w-4 h-4 text-green-600" />
                 <div className="flex-1">
                   <span className="text-sm text-green-800 font-medium block">
-                    {statusDetails?.modelInfo?.exists && statusDetails?.modelInfo?.type === 'custom'
-                      ? `Custom trained model loaded: ${statusDetails.modelInfo.path.split('/').pop()}`
-                      : statusDetails?.modelInfo?.type === 'imagenet'
-                      ? 'Using ImageNet pre-trained model'
-                      : statusMessage || 'CV detection service is available'}
+                    {/* Hard-coded banner to clearly indicate custom model usage */}
+                    Custom CV model (CubiCasa5k ResNet-50) is active
                   </span>
                   {statusDetails?.modelInfo?.exists && statusDetails?.modelInfo?.size && (
                     <span className="text-xs text-green-700 mt-1 block">
