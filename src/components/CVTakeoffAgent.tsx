@@ -37,6 +37,7 @@ export function CVTakeoffAgent({
   const [serviceAvailable, setServiceAvailable] = useState<boolean>(false);
   const [isCheckingStatus, setIsCheckingStatus] = useState(true);
   const [statusDetails, setStatusDetails] = useState<any>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   
   // Processing state
   const [isProcessing, setIsProcessing] = useState(false);
@@ -91,6 +92,9 @@ export function CVTakeoffAgent({
       const status = await cvTakeoffService.checkStatus();
       setServiceAvailable(status.available);
       setStatusDetails(status.details || status.diagnostics);
+       // Preserve the backend-computed message, which already reflects
+       // whether a custom model or ImageNet fallback is in use.
+       setStatusMessage(status.message || null);
       console.log('CV Takeoff Status:', {
         available: status.available,
         details: status.details,
@@ -282,7 +286,7 @@ export function CVTakeoffAgent({
                       ? `Custom trained model loaded: ${statusDetails.modelInfo.path.split('/').pop()}`
                       : statusDetails?.modelInfo?.type === 'imagenet'
                       ? 'Using ImageNet pre-trained model'
-                      : 'CV detection service is available'}
+                      : statusMessage || 'CV detection service is available'}
                   </span>
                   {statusDetails?.modelInfo?.exists && statusDetails?.modelInfo?.size && (
                     <span className="text-xs text-green-700 mt-1 block">
