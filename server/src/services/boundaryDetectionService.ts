@@ -329,7 +329,9 @@ CONFIG = {
     'min_room_confidence': 0.6,  # Minimum confidence for rooms
     # Open-space rooms (e.g. large lobbies) are allowed with lower enclosure,
     # but must still have *some* adjacency to walls to avoid pure whitespace.
-    'min_open_space_enclosure': 0.15,  # 0–1, minimum enclosure score for open-space rooms
+    # This threshold is intentionally very low so we don't drop real rooms
+    # when the wall graph is sparse, but still reject completely unbounded regions.
+    'min_open_space_enclosure': 0.02,  # 0–1, minimum enclosure score for open-space rooms
     'corridor_aspect_ratio_threshold': 5.0,
     'corridor_perimeter_area_ratio_threshold': 0.3,
     
@@ -1407,6 +1409,23 @@ def validate_rooms(rooms, wall_mask, wall_graph):
         
         height, width = wall_mask.shape
         validated_rooms = []
+
+        # Compute a loose \"plan bounding box\" from wall pixels so we can
+        # reject room polygons that lie entirely in page whitespace or far
+        # outside the actual drawing.
+        wall_indices = np.where(wall_mask > 0)
+        has_wall_bounds = wall_indices[0].size > 0 and wall_indices[1].size > 0
+        if has_wall_bounds:
+            min_y = int(wall_indices[0].min())
+            max_y = int(wall_indices[0].max())
+            min_x = int(wall_indices[1].min())
+            max_x = int(wall_indices[1].max())
+            margin = int(0.02 * min(height, width))  # 2% of smaller dimension
+        else:
+            min_x = min_y = 0
+            max_x = width - 1
+            max_y = height - 1
+            margin = 0
         
         print(f"Validating {len(rooms)} rooms", file=sys.stderr)
         
@@ -1429,6 +1448,19 @@ def validate_rooms(rooms, wall_mask, wall_graph):
                 aspect_ratio = calculate_aspect_ratio(polygon_px)
                 perimeter_area_ratio = perimeter_lf / area_sf if area_sf > 0 else 0
                 
+                # 2a. Plan-bounds check using centroid of polygon
+                inside_plan_bounds = True
+                if has_wall_bounds and polygon_px:
+                    cx = sum(p[0] for p in polygon_px) / len(polygon_px)
+                    cy = sum(p[1] for p in polygon_px) / len(polygon_px)
+                    if (
+                        cx < (min_x - margin)
+                        or cx > (max_x + margin)
+                        or cy < (min_y - margin)
+                        or cy > (max_y + margin)
+                    ):
+                        inside_plan_bounds = False
+
                 # 3. Classify room type
                 is_corridor = (
                     aspect_ratio > CONFIG['corridor_aspect_ratio_threshold'] or
@@ -1444,6 +1476,7 @@ def validate_rooms(rooms, wall_mask, wall_graph):
                     and not is_corridor
                     and area_sf >= CONFIG['min_room_area_sf']
                     and area_sf <= CONFIG['max_room_area_sf']
+                    and inside_plan_bounds
                 )
 
                 # Open space rooms are still allowed but must have *some* enclosure to avoid
@@ -1452,9 +1485,10 @@ def validate_rooms(rooms, wall_mask, wall_graph):
                 room['valid_open_space_room'] = (
                     is_open_space
                     and not is_corridor
-                    and enclosure_score > min_open_enclosure
+                    and enclosure_score >= min_open_enclosure
                     and area_sf >= CONFIG['min_room_area_sf']
                     and area_sf <= CONFIG['max_room_area_sf']
+                    and inside_plan_bounds
                 )
                 room['corridor_like_region'] = is_corridor
                 room['invalid_region'] = not (room['valid_enclosed_room'] or room['valid_open_space_room'] or room['corridor_like_region'])
