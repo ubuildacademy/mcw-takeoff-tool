@@ -311,8 +311,9 @@ except ImportError:
 # ============================================================================
 CONFIG = {
     # Wall detection
-    'min_wall_length_ft': 2.0,  # Increased from 1.0 to filter short segments
-    'min_wall_confidence': 0.5,  # Minimum confidence for walls (filter low-confidence)
+    # Slightly more permissive defaults so we don't lose real walls
+    'min_wall_length_ft': 1.0,  # Minimum wall length in feet (was 2.0, now 1.0 to keep shorter segments)
+    'min_wall_confidence': 0.3,  # Minimum confidence for walls (was 0.5, now 0.3 to keep more candidates)
     'wall_thickness_pixels': 3,
     'wall_thickness_ft_range': (0.25, 2.0),  # 3" to 24"
     
@@ -322,9 +323,13 @@ CONFIG = {
     'parallel_angle_tolerance_deg': 10.0,
     
     # Room detection
-    'min_room_area_sf': 75.0,  # Increased from 50.0 to filter small false positives
-    'max_room_area_sf': 800.0,  # Reduced from 1000 to be more aggressive
+    # Keep a reasonable minimum area, but allow larger spaces typical in commercial plans.
+    'min_room_area_sf': 50.0,   # Minimum room area in square feet (was 75.0)
+    'max_room_area_sf': 1500.0,  # Maximum room area in square feet (was 800.0)
     'min_room_confidence': 0.6,  # Minimum confidence for rooms
+    # Open-space rooms (e.g. large lobbies) are allowed with lower enclosure,
+    # but must still have *some* adjacency to walls to avoid pure whitespace.
+    'min_open_space_enclosure': 0.15,  # 0–1, minimum enclosure score for open-space rooms
     'corridor_aspect_ratio_threshold': 5.0,
     'corridor_perimeter_area_ratio_threshold': 0.3,
     
@@ -1434,9 +1439,23 @@ def validate_rooms(rooms, wall_mask, wall_graph):
                 
                 # Validation flags - stricter criteria
                 # Require higher enclosure score for enclosed rooms
-                room['valid_enclosed_room'] = enclosure_score > 0.75 and not is_corridor and area_sf >= CONFIG['min_room_area_sf'] and area_sf <= CONFIG['max_room_area_sf']
-                # Open space rooms still allowed but with stricter checks
-                room['valid_open_space_room'] = is_open_space and not is_corridor and area_sf >= CONFIG['min_room_area_sf'] and area_sf <= CONFIG['max_room_area_sf']
+                room['valid_enclosed_room'] = (
+                    enclosure_score > 0.75
+                    and not is_corridor
+                    and area_sf >= CONFIG['min_room_area_sf']
+                    and area_sf <= CONFIG['max_room_area_sf']
+                )
+
+                # Open space rooms are still allowed but must have *some* enclosure to avoid
+                # large whitespace regions or areas far away from any walls being treated as rooms.
+                min_open_enclosure = CONFIG.get('min_open_space_enclosure', 0.15)
+                room['valid_open_space_room'] = (
+                    is_open_space
+                    and not is_corridor
+                    and enclosure_score > min_open_enclosure
+                    and area_sf >= CONFIG['min_room_area_sf']
+                    and area_sf <= CONFIG['max_room_area_sf']
+                )
                 room['corridor_like_region'] = is_corridor
                 room['invalid_region'] = not (room['valid_enclosed_room'] or room['valid_open_space_room'] or room['corridor_like_region'])
                 room['enclosure_score'] = enclosure_score
