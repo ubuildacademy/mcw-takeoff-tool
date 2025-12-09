@@ -885,8 +885,16 @@ class CVTakeoffService {
   async getStatusDetails(): Promise<{
     pythonAvailable: boolean;
     opencvAvailable: boolean;
+    pytesseractAvailable: boolean;
     pythonVersion?: string;
     opencvVersion?: string;
+    tesseractVersion?: string;
+    modelInfo?: {
+      path: string;
+      exists: boolean;
+      size?: number;
+      type: 'custom' | 'imagenet' | 'unknown';
+    };
     error?: string;
   }> {
     return await boundaryDetectionService.getStatusDetails();
