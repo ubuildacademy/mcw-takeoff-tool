@@ -103,9 +103,23 @@ class ServerOCRService {
         // OCR progress update
         
         if (statusResponse.status === 'completed') {
-          // OCR processing completed
+          // Check if server found no embedded text (image-based PDF)
+          if (statusResponse.error === 'No searchable text found in PDF') {
+            console.log('📸 Server found no embedded text, triggering client-side image-based OCR fallback...');
+            
+            // Fetch results to check if we got any
+            const resultsResponse = await ocrService.getDocumentResults(documentId, projectId);
+            
+            // If no results, trigger client-side OCR
+            if (!resultsResponse.results || resultsResponse.results.length === 0) {
+              return await this.triggerClientSideOCR(documentId, projectId, jobId);
+            }
+            
+            // If we got some results, return them
+            return resultsResponse;
+          }
           
-          // Fetch the results
+          // OCR processing completed with results
           const resultsResponse = await ocrService.getDocumentResults(documentId, projectId);
           return resultsResponse;
         }
@@ -131,6 +145,69 @@ class ServerOCRService {
     }
     
     throw new Error('OCR processing timeout');
+  }
+
+  /**
+   * Trigger client-side image-based OCR when server finds no embedded text
+   */
+  private async triggerClientSideOCR(documentId: string, projectId: string, jobId: string): Promise<DocumentOCRData> {
+    try {
+      console.log('🖼️ Starting client-side image-based OCR for document:', documentId);
+      
+      // Get PDF URL from Supabase
+      const { supabaseService } = await import('./supabaseService');
+      const pdfUrl = await supabaseService.getPDFUrl(documentId);
+      
+      if (!pdfUrl) {
+        throw new Error('Failed to get PDF URL for client-side OCR');
+      }
+      
+      console.log('📄 PDF URL obtained, starting Tesseract.js OCR...');
+      
+      // Use existing client-side OCR service
+      const { ocrService: clientOcrService } = await import('./ocrService');
+      const ocrResult = await clientOcrService.processDocument(documentId, pdfUrl);
+      
+      console.log(`✅ Client-side OCR completed: ${ocrResult.pages.length} pages processed`);
+      
+      // Convert client OCR results to server format
+      const serverResults = ocrResult.pages.map(page => ({
+        pageNumber: page.pageNumber,
+        text: page.text,
+        confidence: page.confidence,
+        processingTime: page.processingTime,
+        method: 'tesseract' as const
+      }));
+      
+      // Send results back to server
+      await ocrService.submitClientResults(documentId, projectId, serverResults, jobId);
+      
+      console.log('✅ Client-side OCR results submitted to server');
+      
+      // Return formatted results matching DocumentOCRData interface
+      return {
+        documentId,
+        projectId,
+        totalPages: ocrResult.totalPages,
+        results: ocrResult.pages.map(page => ({
+          pageNumber: page.pageNumber,
+          text: page.text,
+          confidence: page.confidence,
+          processingTime: page.processingTime,
+          method: 'tesseract' as const,
+          wordPositions: page.words?.map(word => ({
+            text: word.text,
+            bbox: word.bbox,
+            confidence: word.confidence
+          }))
+        })),
+        processedAt: ocrResult.processedAt
+      };
+      
+    } catch (error) {
+      console.error('❌ Client-side OCR fallback failed:', error);
+      throw new Error(`Client-side OCR failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   }
 
   // Search for text across all processed documents

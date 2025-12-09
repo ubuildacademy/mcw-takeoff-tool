@@ -533,6 +533,15 @@ export const ocrService = {
     const response = await apiClient.get(`/ocr/results/${documentId}?projectId=${projectId}`);
     return response.data;
   },
+
+  async submitClientResults(documentId: string, projectId: string, results: any[], jobId?: string) {
+    const response = await apiClient.post(`/ocr/client-results/${documentId}`, {
+      projectId,
+      results,
+      jobId
+    });
+    return response.data;
+  },
 };
 
 // AI Analysis service

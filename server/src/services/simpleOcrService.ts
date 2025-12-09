@@ -7,7 +7,7 @@ export interface SimpleOCRResult {
   text: string;
   confidence: number;
   processingTime: number;
-  method: 'direct_extraction';
+  method: 'direct_extraction' | 'tesseract';
 }
 
 export interface SimpleDocumentOCRData {

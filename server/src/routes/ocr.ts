@@ -276,6 +276,61 @@ router.delete('/results/:documentId', async (req, res) => {
   }
 });
 
+// Receive client-side OCR results (for image-based OCR fallback)
+router.post('/client-results/:documentId', async (req, res) => {
+  const { documentId } = req.params;
+  const { projectId, results, jobId } = req.body;
+
+  if (!projectId) {
+    return res.status(400).json({ error: 'Project ID is required' });
+  }
+
+  if (!results || !Array.isArray(results)) {
+    return res.status(400).json({ error: 'Results array is required' });
+  }
+
+  try {
+    console.log(`📥 Receiving client-side OCR results for document: ${documentId} (${results.length} pages)`);
+
+    // Convert client-side OCR results to server format
+    const serverResults = results.map((result: any) => ({
+      pageNumber: result.pageNumber,
+      text: result.text || '',
+      confidence: result.confidence || 0,
+      processingTime: result.processingTime || 0,
+      method: 'tesseract' as const // Client-side uses Tesseract.js
+    }));
+
+    // Save results to database using the simple OCR service
+    await simpleOcrService.saveOCRResults(projectId, documentId, serverResults);
+
+    // Update OCR job status if jobId provided
+    if (jobId) {
+      await simpleOcrService.updateJobStatus(jobId, {
+        status: 'completed',
+        progress: 100,
+        total_pages: results.length,
+        processed_pages: results.length,
+        completed_at: new Date().toISOString()
+      });
+    }
+
+    console.log(`✅ Client-side OCR results saved: ${results.length} pages`);
+
+    res.json({
+      success: true,
+      message: 'Client-side OCR results saved successfully',
+      pagesProcessed: results.length
+    });
+  } catch (error) {
+    console.error('Error saving client-side OCR results:', error);
+    res.status(500).json({ 
+      error: 'Failed to save client-side OCR results',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
 // Background OCR processing function using OCR service
 async function processDocumentOCR(documentPath: string, jobId: string, documentId: string, projectId: string) {
   try {
