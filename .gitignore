@@ -61,3 +61,8 @@ temp/
 server/models/*.pth
 server/models/*.pt
 server/models/*.ckpt
+
+# Local training datasets and large assets (kept out of git history)
+Cubicasa5k/
+server/data/
+server/models/segformer_floorplan/
