@@ -300,8 +300,29 @@ class SimpleOCRService {
       // Extract text from PDF with progress updates
       const results = await this.extractTextFromPDFWithProgress(documentPath, jobId);
       
+      // If no text could be extracted (e.g. purely raster PDF), treat this as a
+      // completed job with zero results instead of a hard failure. This keeps
+      // the OCR pipeline stable for image-only drawings while clearly signaling
+      // "no searchable text" to the caller.
       if (results.length === 0) {
-        throw new Error('No text could be extracted from the PDF');
+        console.log('⚠️ No text could be extracted from the PDF; marking OCR job as completed with 0 results');
+        
+        await this.updateJobStatus(jobId, {
+          status: 'completed',
+          progress: 100,
+          total_pages: 0,
+          processed_pages: 0,
+          completed_at: new Date().toISOString(),
+          error_message: 'No searchable text found in PDF'
+        });
+        
+        return {
+          documentId,
+          projectId,
+          totalPages: 0,
+          results: [],
+          processedAt: new Date().toISOString()
+        };
       }
       
       // Update progress: Saving results to database (90-95%)
