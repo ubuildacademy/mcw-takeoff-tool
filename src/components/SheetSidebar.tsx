@@ -550,21 +550,24 @@ export function SheetSidebar({
           effectiveMaxPageNumber = 0;
         }
         
-        // Filter sheets to save (only those with meaningful data and valid page numbers)
+        // Filter sheets to save - accept partial results (either sheetNumber OR sheetName is valid)
+        // This allows us to save what we can extract even if one field is missing
         const sheetsToSave = (result.sheets as SheetAnalysisResult[])
           .filter((sheet: SheetAnalysisResult) => {
-            if (
-              !sheet ||
-              !sheet.sheetNumber ||
-              sheet.sheetNumber === 'Unknown' ||
-              !sheet.sheetName ||
-              sheet.sheetName === 'Unknown' ||
-              typeof sheet.pageNumber !== 'number' ||
-              sheet.pageNumber <= 0
-            ) {
+            if (!sheet || typeof sheet.pageNumber !== 'number' || sheet.pageNumber <= 0) {
               return false;
             }
-            // If we have a reliable max page number, enforce it; otherwise trust the AI.
+            
+            // Accept if EITHER sheetNumber OR sheetName is non-Unknown
+            const hasValidNumber = sheet.sheetNumber && sheet.sheetNumber !== 'Unknown';
+            const hasValidName = sheet.sheetName && sheet.sheetName !== 'Unknown';
+            
+            if (!hasValidNumber && !hasValidName) {
+              // Both are Unknown, skip this sheet
+              return false;
+            }
+            
+            // If we have a reliable max page number, enforce it; otherwise trust the backend.
             if (effectiveMaxPageNumber > 0 && sheet.pageNumber > effectiveMaxPageNumber) {
               console.warn(
                 '[Labeling] (single document) Skipping sheet with out-of-range pageNumber',
@@ -883,13 +886,29 @@ export function SheetSidebar({
           // Get max page number for validation
           const maxPageNumber = Math.max(document.totalPages || 0, document.pages.length || 0);
           
+          // Accept partial results (either sheetNumber OR sheetName is valid)
           const sheetsToSave = (result.sheets as SheetAnalysisResult[])
-            .filter((sheet: SheetAnalysisResult) => 
-              sheet.sheetNumber && sheet.sheetNumber !== 'Unknown' && 
-              sheet.sheetName && sheet.sheetName !== 'Unknown' &&
-              sheet.pageNumber && typeof sheet.pageNumber === 'number' &&
-              sheet.pageNumber > 0 && sheet.pageNumber <= maxPageNumber
-            )
+            .filter((sheet: SheetAnalysisResult) => {
+              if (!sheet || typeof sheet.pageNumber !== 'number' || sheet.pageNumber <= 0) {
+                return false;
+              }
+              
+              // Accept if EITHER sheetNumber OR sheetName is non-Unknown
+              const hasValidNumber = sheet.sheetNumber && sheet.sheetNumber !== 'Unknown';
+              const hasValidName = sheet.sheetName && sheet.sheetName !== 'Unknown';
+              
+              if (!hasValidNumber && !hasValidName) {
+                return false; // Both Unknown, skip
+              }
+              
+              // Validate page number is within document bounds
+              if (sheet.pageNumber > maxPageNumber) {
+                console.warn(`[Labeling] Invalid page number ${sheet.pageNumber} for document ${document.name} (total pages: ${maxPageNumber})`);
+                return false;
+              }
+              
+              return true;
+            })
             // CRITICAL: Sort by pageNumber to ensure correct order and prevent lag accumulation
             .sort((a, b) => a.pageNumber - b.pageNumber);
 
@@ -1123,18 +1142,19 @@ export function SheetSidebar({
             effectiveMaxPageNumber = 0;
           }
           
+          // Accept partial results (either sheetNumber OR sheetName is valid)
           const sheetsToSave = (result.sheets as SheetAnalysisResult[])
             .filter((sheet: SheetAnalysisResult) => {
-              if (
-                !sheet ||
-                !sheet.sheetNumber ||
-                sheet.sheetNumber === 'Unknown' ||
-                !sheet.sheetName ||
-                sheet.sheetName === 'Unknown' ||
-                typeof sheet.pageNumber !== 'number' ||
-                sheet.pageNumber <= 0
-              ) {
+              if (!sheet || typeof sheet.pageNumber !== 'number' || sheet.pageNumber <= 0) {
                 return false;
+              }
+              
+              // Accept if EITHER sheetNumber OR sheetName is non-Unknown
+              const hasValidNumber = sheet.sheetNumber && sheet.sheetNumber !== 'Unknown';
+              const hasValidName = sheet.sheetName && sheet.sheetName !== 'Unknown';
+              
+              if (!hasValidNumber && !hasValidName) {
+                return false; // Both Unknown, skip
               }
               
               if (effectiveMaxPageNumber > 0 && sheet.pageNumber > effectiveMaxPageNumber) {

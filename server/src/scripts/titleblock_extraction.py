@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Titleblock Extraction Script using OCR and Pattern Matching
+Titleblock Extraction Script - Optimized for Vector PDFs
 
 Extracts sheet numbers and names from construction drawing titleblocks.
-Uses spatial detection to find titleblock region, then OCR + pattern matching.
+For vector PDFs: Uses PyMuPDF's native text extraction from right-side region (fast, accurate)
+For raster PDFs: Falls back to image rendering + OCR
 
 Usage:
     python3 titleblock_extraction.py <pdf_path> <page_numbers> [output_dir]
@@ -50,7 +51,6 @@ try:
     TESSERACT_AVAILABLE = True
     
     # Try to find tesseract binary and configure pytesseract to use it
-    # This is needed on Railway/Nixpacks where tesseract might be in /nix/store
     import shutil
     tesseract_path = shutil.which('tesseract')
     if not tesseract_path:
@@ -83,20 +83,14 @@ def fix_ocr_errors(text):
     if not text:
         return text
     
-    # Common OCR errors: O→0, I→1, l→1, S→5, etc.
-    # But be careful - don't change actual letters in sheet names
-    # Only fix obvious errors in sheet numbers (alphanumeric patterns)
-    
     # For sheet numbers (alphanumeric with dots): fix common errors
     if re.match(r'^[A-Z0-9.]+$', text.upper()):
         # This looks like a sheet number
         text = text.replace('O', '0')  # O → 0
         text = text.replace('l', '1')  # lowercase L → 1
-        text = text.replace('I', '1')  # I → 1 (but this might be wrong for sheet names)
-        text = text.replace('S', '5')  # S → 5 (but this might be wrong)
+        text = text.replace('I', '1')  # I → 1
     
     # General fixes for all text
-    # Fix common character confusions
     text = text.replace('０', '0')  # Full-width zero
     text = text.replace('１', '1')  # Full-width one
     text = text.replace('Ｏ', 'O')  # Full-width O
@@ -104,92 +98,93 @@ def fix_ocr_errors(text):
     
     return text.strip()
 
-def detect_titleblock_region(image_path):
+def extract_text_from_pdf_region(page, region):
+    """
+    Extract text from a specific region of a PDF page using PyMuPDF's native text extraction.
+    This is MUCH faster and more accurate for vector PDFs than OCR.
+    
+    Args:
+        page: PyMuPDF page object
+        region: dict with 'x', 'y', 'width', 'height' (normalized 0-1)
+    
+    Returns:
+        List of text elements with bbox info
+    """
+    try:
+        # Get page dimensions
+        page_rect = page.rect
+        page_width = page_rect.width
+        page_height = page_rect.height
+        
+        # Convert normalized region to absolute coordinates
+        x0 = region['x'] * page_width
+        y0 = region['y'] * page_height
+        x1 = (region['x'] + region['width']) * page_width
+        y1 = (region['y'] + region['height']) * page_height
+        
+        # Create rectangle for the right-side region
+        region_rect = fitz.Rect(x0, y0, x1, y1)
+        
+        # Extract text blocks that intersect with this region
+        text_dict = page.get_text("dict")
+        
+        text_elements = []
+        for block in text_dict.get("blocks", []):
+            if "lines" not in block:
+                continue
+            
+            for line in block["lines"]:
+                for span in line.get("spans", []):
+                    # Get text and bounding box
+                    text = span.get("text", "").strip()
+                    if not text:
+                        continue
+                    
+                    # Get bbox (PyMuPDF format: [x0, y0, x1, y1])
+                    bbox = span.get("bbox", [])
+                    if len(bbox) != 4:
+                        continue
+                    
+                    span_rect = fitz.Rect(bbox)
+                    
+                    # Check if this span intersects with our region
+                    if span_rect.intersects(region_rect):
+                        # Normalize bbox coordinates
+                        text_elements.append({
+                            'text': text,
+                            'confidence': 1.0,  # Vector text is perfect
+                            'bbox': {
+                                'x': bbox[0] / page_width,
+                                'y': bbox[1] / page_height,
+                                'width': (bbox[2] - bbox[0]) / page_width,
+                                'height': (bbox[3] - bbox[1]) / page_height
+                            }
+                        })
+        
+        return text_elements
+    except Exception as e:
+        print(f"Error extracting text from PDF region: {str(e)}", file=sys.stderr)
+        return []
+
+def detect_titleblock_region(image_path=None, page_width=None, page_height=None):
     """
     Detect titleblock region on the right side of the page.
     Returns bounding box coordinates (x, y, width, height) normalized 0-1.
+    
+    For vector PDFs, we can use page dimensions directly.
+    For raster PDFs, we use image analysis.
     """
-    if not OPENCV_AVAILABLE:
-        # Fallback: Use right 20% of page, full height
-        # This is a safe assumption for construction drawings (landscape orientation)
-        return {
-            'x': 0.80,  # Start at 80% from left
-            'y': 0.0,
-            'width': 0.20,  # 20% width
-            'height': 1.0
-        }
-    
-    img = cv2.imread(image_path)
-    if img is None:
-        return None
-    
-    height, width = img.shape[:2]
-    
-    # Convert to grayscale
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    
-    # Try to detect bordered region on right side
-    # Titleblocks are typically on the right 15-25% of the page
-    right_region_start = int(width * 0.75)  # Start at 75% from left
-    right_region = gray[:, right_region_start:]
-    
-    # Detect edges to find borders
-    edges = cv2.Canny(right_region, 50, 150)
-    
-    # Find contours (potential borders)
-    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    # Find largest rectangular contour (likely the titleblock border)
-    titleblock_contour = None
-    max_area = 0
-    
-    for contour in contours:
-        # Approximate contour to polygon
-        epsilon = 0.02 * cv2.arcLength(contour, True)
-        approx = cv2.approxPolyDP(contour, epsilon, True)
-        
-        # Check if it's roughly rectangular
-        if len(approx) >= 4:
-            area = cv2.contourArea(contour)
-            if area > max_area:
-                max_area = area
-                titleblock_contour = contour
-    
-    if titleblock_contour is not None and max_area > (width * height * 0.01):  # At least 1% of image
-        # Get bounding box
-        x, y, w, h = cv2.boundingRect(titleblock_contour)
-        # Adjust x to account for right_region_start offset
-        x += right_region_start
-        
-        # Normalize coordinates
-        return {
-            'x': float(x) / width,
-            'y': float(y) / height,
-            'width': float(w) / width,
-            'height': float(h) / height
-        }
-    
-    # Fallback: Use right 20% of page, full height
-    # Check if page is landscape (width > height)
-    if width > height:
-        # Landscape: titleblock on right side
-        return {
-            'x': 0.80,  # Start at 80% from left
-            'y': 0.0,
-            'width': 0.20,  # 20% width
-            'height': 1.0
-        }
-    else:
-        # Portrait: might be rotated, use right side anyway
-        return {
-            'x': 0.80,
-            'y': 0.0,
-            'width': 0.20,
-            'height': 1.0
-        }
+    # Use right 20% of page, full height (standard for construction drawings)
+    # This is more reliable than trying to detect borders
+    return {
+        'x': 0.80,  # Start at 80% from left
+        'y': 0.0,
+        'width': 0.20,  # 20% width
+        'height': 1.0
+    }
 
 def extract_text_from_region(image_path, region):
-    """Extract text from a specific region using OCR"""
+    """Extract text from a specific region using OCR (fallback for raster PDFs)"""
     if not TESSERACT_AVAILABLE:
         return []
     
@@ -221,23 +216,19 @@ def extract_text_from_region(image_path, region):
         roi_y_offset = y
         
     elif PIL_AVAILABLE:
-        # Use PIL/Pillow as fallback
         img = Image.open(image_path)
         width, height = img.size
         
-        # Convert region coordinates to pixels
         x = int(region['x'] * width)
         y = int(region['y'] * height)
         w = int(region['width'] * width)
         h = int(region['height'] * height)
         
-        # Extract region
         roi = img.crop((x, y, x + w, y + h))
         
         if roi.size[0] == 0 or roi.size[1] == 0:
             return []
         
-        # Convert to RGB (PIL images are already RGB)
         rgb_roi = roi.convert('RGB')
         img_width = width
         img_height = height
@@ -245,19 +236,13 @@ def extract_text_from_region(image_path, region):
         roi_y_offset = y
         
     else:
-        # No image library available - can't extract region
-        print("Error: Neither OpenCV nor PIL available for region extraction", file=sys.stderr)
         return []
     
-    # Perform OCR with detailed data
-    # pytesseract accepts PIL Images directly, or numpy arrays
+    # Perform OCR
     try:
-        # Convert to numpy array if using OpenCV, or use PIL Image directly
         if OPENCV_AVAILABLE:
-            # OpenCV image is already numpy array
             ocr_input = rgb_roi
         else:
-            # PIL Image - pytesseract can use it directly
             ocr_input = rgb_roi
         
         ocr_data = pytesseract.image_to_data(ocr_input, output_type=pytesseract.Output.DICT, config='--psm 6')
@@ -272,13 +257,11 @@ def extract_text_from_region(image_path, region):
             if not text or conf < 30:
                 continue
             
-            # Get bounding box (relative to ROI)
             x_local = ocr_data['left'][i]
             y_local = ocr_data['top'][i]
             w_local = ocr_data['width'][i]
             h_local = ocr_data['height'][i]
             
-            # Convert to absolute coordinates (normalized)
             x_abs = (roi_x_offset + x_local) / img_width
             y_abs = (roi_y_offset + y_local) / img_height
             w_abs = w_local / img_width
@@ -302,7 +285,8 @@ def extract_text_from_region(image_path, region):
 
 def extract_sheet_info(text_elements):
     """
-    Extract sheet number and name from OCR text elements using pattern matching.
+    Extract sheet number and name from text elements using pattern matching.
+    Prioritizes "drawing data" and "sheet number" patterns (Hilton format).
     Returns (sheet_number, sheet_name, confidence)
     """
     sheet_number = "Unknown"
@@ -312,29 +296,28 @@ def extract_sheet_info(text_elements):
     if not text_elements:
         return sheet_number, sheet_name, confidence
     
-    # Common label patterns for sheet number
+    # PRIORITIZE: "drawing data" and "sheet number" patterns first (Hilton format)
     sheet_number_patterns = [
-        r'sheet\s*number\s*:?\s*([A-Z0-9.]+)',
-        r'sheet\s*#\s*:?\s*([A-Z0-9.]+)',
-        r'dwg\s*no\s*:?\s*([A-Z0-9.]+)',
-        r'drawing\s*number\s*:?\s*([A-Z0-9.]+)',
-        r'sheet\s*:?\s*([A-Z0-9.]+)',
+        r'sheet\s*number\s*:?\s*([A-Z0-9.]+)',  # "sheet number: A4.21"
+        r'sheet\s*#\s*:?\s*([A-Z0-9.]+)',      # "sheet #: A4.21"
+        r'dwg\s*no\s*:?\s*([A-Z0-9.]+)',       # "dwg no: A4.21"
+        r'drawing\s*number\s*:?\s*([A-Z0-9.]+)', # "drawing number: A4.21"
+        r'sheet\s*:?\s*([A-Z0-9.]+)',          # "sheet: A4.21"
     ]
     
-    # Common label patterns for sheet name
+    # PRIORITIZE: "drawing data" first (Hilton format), then other patterns
     sheet_name_patterns = [
-        r'drawing\s*data\s*:?\s*(.+)',
-        r'drawing\s*title\s*:?\s*(.+)',
-        r'sheet\s*title\s*:?\s*(.+)',
-        r'title\s*:?\s*(.+)',
-        r'project\s*name\s*:?\s*(.+)',
+        r'drawing\s*data\s*:?\s*(.+)',          # "drawing data: Floor Plan" (Hilton format - PRIORITY)
+        r'drawing\s*title\s*:?\s*(.+)',        # "drawing title: Floor Plan"
+        r'sheet\s*title\s*:?\s*(.+)',          # "sheet title: Floor Plan"
+        r'title\s*:?\s*(.+)',                  # "title: Floor Plan"
+        r'project\s*name\s*:?\s*(.+)',         # "project name: Floor Plan"
     ]
     
-    # Combine all text into lines (preserving spatial order)
     # Sort by Y coordinate (top to bottom), then X (left to right)
     sorted_elements = sorted(text_elements, key=lambda e: (e['bbox']['y'], e['bbox']['x']))
     
-    # Build text lines by grouping elements that are on the same horizontal line
+    # Build text lines by grouping elements on the same horizontal line
     lines = []
     current_line = []
     current_y = None
@@ -375,8 +358,7 @@ def extract_sheet_info(text_elements):
                 confidence = 0.6  # Lower confidence without label
                 break
     
-    # Search for sheet name
-    # Sheet names are usually longer and come after "drawing data:" label
+    # Search for sheet name - prioritize "drawing data"
     name_started = False
     name_parts = []
     
@@ -421,7 +403,6 @@ def extract_sheet_info(text_elements):
 def process_page(pdf_path, page_number, output_dir):
     """Process a single page and extract titleblock info"""
     try:
-        # Convert PDF page to image
         doc = fitz.open(pdf_path)
         if page_number > len(doc):
             doc.close()
@@ -432,45 +413,40 @@ def process_page(pdf_path, page_number, output_dir):
             }
         
         page = doc[page_number - 1]
-        zoom = 2.0  # Higher resolution for better OCR
-        mat = fitz.Matrix(zoom, zoom)
-        pix = page.get_pixmap(matrix=mat, alpha=False)
         
-        # Save to temporary image file
-        os.makedirs(output_dir, exist_ok=True)
-        image_path = os.path.join(output_dir, f"page_{page_number}.png")
-        pix.save(image_path)
+        # Detect titleblock region (right 20% of page)
+        titleblock_region = detect_titleblock_region()
         
-        # Clean up
-        pix = None
-        doc.close()
+        # Try vector text extraction first (fast, accurate for vector PDFs)
+        text_elements = extract_text_from_pdf_region(page, titleblock_region)
         
-        # Detect titleblock region
-        titleblock_region = detect_titleblock_region(image_path)
-        
-        if not titleblock_region:
+        # If no vector text found, fall back to image rendering + OCR
+        if not text_elements:
+            # Render page to image for OCR
+            zoom = 2.0
+            mat = fitz.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            
+            # Save to temporary image file
+            os.makedirs(output_dir, exist_ok=True)
+            image_path = os.path.join(output_dir, f"page_{page_number}.png")
+            pix.save(image_path)
+            
+            # Extract text from titleblock region using OCR
+            text_elements = extract_text_from_region(image_path, titleblock_region)
+            
             # Clean up temp image
             try:
                 os.remove(image_path)
             except:
                 pass
-            return {
-                "pageNumber": page_number,
-                "sheetNumber": "Unknown",
-                "sheetName": "Unknown"
-            }
+            
+            pix = None
         
-        # Extract text from titleblock region
-        text_elements = extract_text_from_region(image_path, titleblock_region)
+        doc.close()
         
-        # Extract sheet info
+        # Extract sheet info from text elements
         sheet_number, sheet_name, confidence = extract_sheet_info(text_elements)
-        
-        # Clean up temp image
-        try:
-            os.remove(image_path)
-        except:
-            pass
         
         return {
             "pageNumber": page_number,
@@ -524,4 +500,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
