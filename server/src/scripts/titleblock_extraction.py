@@ -125,11 +125,14 @@ def extract_text_from_pdf_region(page, region):
         # Create rectangle for the right-side region
         region_rect = fitz.Rect(x0, y0, x1, y1)
         
-        # Extract text blocks that intersect with this region
-        text_dict = page.get_text("dict")
+        # Use clip parameter to directly extract text from the region (more efficient)
+        text_dict = page.get_text("dict", clip=region_rect)
         
         text_elements = []
         for block in text_dict.get("blocks", []):
+            if block.get("type") != 0:  # Skip non-text blocks
+                continue
+                
             if "lines" not in block:
                 continue
             
@@ -145,14 +148,43 @@ def extract_text_from_pdf_region(page, region):
                     if len(bbox) != 4:
                         continue
                     
-                    span_rect = fitz.Rect(bbox)
-                    
-                    # Check if this span intersects with our region
-                    if span_rect.intersects(region_rect):
-                        # Normalize bbox coordinates
+                    # Normalize bbox coordinates
+                    text_elements.append({
+                        'text': text,
+                        'confidence': 1.0,  # Vector text is perfect
+                        'bbox': {
+                            'x': bbox[0] / page_width,
+                            'y': bbox[1] / page_height,
+                            'width': (bbox[2] - bbox[0]) / page_width,
+                            'height': (bbox[3] - bbox[1]) / page_height
+                        }
+                    })
+        
+        # If no text found in the clipped region, try the entire page as fallback
+        # (some PDFs might have text slightly outside the expected region)
+        if not text_elements:
+            # Try a wider region (right 30% instead of 20%)
+            wider_region = fitz.Rect(page_width * 0.70, 0, page_width, page_height)
+            text_dict_wide = page.get_text("dict", clip=wider_region)
+            
+            for block in text_dict_wide.get("blocks", []):
+                if block.get("type") != 0:
+                    continue
+                if "lines" not in block:
+                    continue
+                
+                for line in block["lines"]:
+                    for span in line.get("spans", []):
+                        text = span.get("text", "").strip()
+                        if not text:
+                            continue
+                        bbox = span.get("bbox", [])
+                        if len(bbox) != 4:
+                            continue
+                        
                         text_elements.append({
                             'text': text,
-                            'confidence': 1.0,  # Vector text is perfect
+                            'confidence': 1.0,
                             'bbox': {
                                 'x': bbox[0] / page_width,
                                 'y': bbox[1] / page_height,
@@ -348,14 +380,27 @@ def extract_sheet_info(text_elements):
         if sheet_number != "Unknown":
             break
     
-    # If no label found, look for standalone sheet number patterns (e.g., "A4.21")
+    # If no label found, look for standalone sheet number patterns (e.g., "A4.21", "A-4.21", "A4", "S0.02")
     if sheet_number == "Unknown":
         for elem in sorted_elements:
             text = elem['text'].strip()
-            # Pattern: Letter(s) followed by digits and dots (e.g., A4.21, S0.02)
-            if re.match(r'^[A-Z][0-9]+\.[0-9]+$', text.upper()):
-                sheet_number = fix_ocr_errors(text.upper())
-                confidence = 0.6  # Lower confidence without label
+            text_upper = text.upper()
+            # More flexible patterns:
+            # - A4.21, S0.02 (letter + digits + dot + digits)
+            # - A-4.21, S-0.02 (letter + dash + digits + dot + digits)
+            # - A4, S0 (letter + digits, but only if it looks like a sheet number)
+            # - 4.21, 0.02 (just digits with dot, but less likely to be sheet number)
+            if re.match(r'^[A-Z][0-9]+\.[0-9]+$', text_upper):  # A4.21
+                sheet_number = fix_ocr_errors(text_upper)
+                confidence = 0.6
+                break
+            elif re.match(r'^[A-Z]-?[0-9]+\.[0-9]+$', text_upper):  # A-4.21 or A4.21
+                sheet_number = fix_ocr_errors(text_upper)
+                confidence = 0.6
+                break
+            elif re.match(r'^[A-Z][0-9]+$', text_upper) and len(text_upper) <= 5:  # A4, S0 (short, likely sheet number)
+                sheet_number = fix_ocr_errors(text_upper)
+                confidence = 0.5  # Lower confidence for shorter patterns
                 break
     
     # Search for sheet name - prioritize "drawing data"
@@ -420,33 +465,55 @@ def process_page(pdf_path, page_number, output_dir):
         # Try vector text extraction first (fast, accurate for vector PDFs)
         text_elements = extract_text_from_pdf_region(page, titleblock_region)
         
+        # Debug: log what we found
+        if text_elements:
+            sample_texts = [elem['text'] for elem in text_elements[:5]]  # First 5 elements
+            print(f"Page {page_number}: Found {len(text_elements)} text elements in titleblock region. Sample: {sample_texts}", file=sys.stderr)
+        else:
+            print(f"Page {page_number}: No vector text found in titleblock region, trying OCR fallback...", file=sys.stderr)
+        
         # If no vector text found, fall back to image rendering + OCR
-        if not text_elements:
-            # Render page to image for OCR
-            zoom = 2.0
-            mat = fitz.Matrix(zoom, zoom)
-            pix = page.get_pixmap(matrix=mat, alpha=False)
-            
-            # Save to temporary image file
-            os.makedirs(output_dir, exist_ok=True)
-            image_path = os.path.join(output_dir, f"page_{page_number}.png")
-            pix.save(image_path)
-            
-            # Extract text from titleblock region using OCR
-            text_elements = extract_text_from_region(image_path, titleblock_region)
-            
-            # Clean up temp image
+        if not text_elements and TESSERACT_AVAILABLE:
             try:
-                os.remove(image_path)
-            except:
-                pass
-            
-            pix = None
+                # Render page to image for OCR
+                zoom = 2.0
+                mat = fitz.Matrix(zoom, zoom)
+                pix = page.get_pixmap(matrix=mat, alpha=False)
+                
+                # Save to temporary image file
+                os.makedirs(output_dir, exist_ok=True)
+                image_path = os.path.join(output_dir, f"page_{page_number}.png")
+                pix.save(image_path)
+                
+                # Extract text from titleblock region using OCR
+                text_elements = extract_text_from_region(image_path, titleblock_region)
+                
+                if text_elements:
+                    print(f"Page {page_number}: OCR found {len(text_elements)} text elements", file=sys.stderr)
+                
+                # Clean up temp image
+                try:
+                    os.remove(image_path)
+                except:
+                    pass
+                
+                pix = None
+            except Exception as ocr_error:
+                print(f"Page {page_number}: OCR fallback failed: {str(ocr_error)}", file=sys.stderr)
         
         doc.close()
         
         # Extract sheet info from text elements
         sheet_number, sheet_name, confidence = extract_sheet_info(text_elements)
+        
+        # Debug: log extraction results
+        if sheet_number != "Unknown" or sheet_name != "Unknown":
+            print(f"Page {page_number}: Extracted sheetNumber='{sheet_number}', sheetName='{sheet_name}'", file=sys.stderr)
+        else:
+            # If extraction failed, log all text we found for debugging
+            all_text = ' '.join([elem['text'] for elem in text_elements[:20]])  # First 20 elements
+            if all_text:
+                print(f"Page {page_number}: Extraction failed. Found text: {all_text[:200]}...", file=sys.stderr)
         
         return {
             "pageNumber": page_number,
@@ -457,6 +524,8 @@ def process_page(pdf_path, page_number, output_dir):
     except Exception as e:
         error_msg = str(e)
         print(f"Error processing page {page_number}: {error_msg}", file=sys.stderr)
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
         return {
             "pageNumber": page_number,
             "sheetNumber": "Unknown",
