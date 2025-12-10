@@ -13,23 +13,12 @@ providers = ["node", "python"]
 [phases.install]
 nixPkgs = ["libGL", "glib", "libGLU", "pkg-config", "bash", "tesseract"]
 
-# Build phase: Build TypeScript and verify Python packages
+# Build phase: Build TypeScript (keep it lean for faster deploys)
 [phases.build]
 cmds = [
   "echo 'Building TypeScript...'",
   "npm run build",
-  "echo 'Verifying build output...'",
-  "ls -la dist/ || echo 'WARNING: dist directory not found'",
-  "echo 'Finding glib libraries for OpenCV...'",
-  "GLIB_LIB=$(find /nix/store -name 'libgthread-2.0.so.0' 2>/dev/null | head -1 | xargs dirname 2>/dev/null || echo '')",
-  "if [ -n \"$GLIB_LIB\" ]; then echo \"Found glib lib at: $GLIB_LIB\"; export LD_LIBRARY_PATH=\"$GLIB_LIB:$LD_LIBRARY_PATH\"; fi",
-  "echo 'Verifying Python packages installation...'",
-  "if [ -f /opt/venv/bin/python3 ]; then /opt/venv/bin/python3 -m pip list | grep -i opencv || echo 'WARNING: opencv-python not found in pip list'; fi",
-  "if [ -f /opt/venv/bin/python3 ]; then /opt/venv/bin/python3 -c 'import sys; print(sys.path)' || echo 'Could not check Python path'; fi",
-  "echo 'Verifying PyMuPDF installation...'",
-  "if [ -f /opt/venv/bin/python3 ]; then /opt/venv/bin/python3 -c 'import fitz; print(\"PyMuPDF available\")' || echo 'WARNING: PyMuPDF not found'; fi",
-      "echo 'Testing OpenCV import...'",
-      "GLIB_LIB=$(find /nix/store -name 'libgthread-2.0.so.0' 2>/dev/null | head -1 | xargs dirname 2>/dev/null || echo ''); if [ -n \"$GLIB_LIB\" ]; then export LD_LIBRARY_PATH=\"$GLIB_LIB:$LD_LIBRARY_PATH\"; fi; if [ -f /opt/venv/bin/python3 ]; then /opt/venv/bin/python3 -c 'import cv2; print(\"OpenCV available:\", cv2.__version__)' 2>&1 || echo 'WARNING: OpenCV import failed'; fi"
+  "echo 'Build complete.'"
 ]
 
 [variables]
