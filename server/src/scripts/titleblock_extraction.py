@@ -385,11 +385,15 @@ def extract_sheet_info(text_elements):
         for elem in sorted_elements:
             text = elem['text'].strip()
             text_upper = text.upper()
+            
+            # Skip single characters or very short strings that are likely not sheet numbers
+            if len(text_upper) < 2:
+                continue
+            
             # More flexible patterns:
-            # - A4.21, S0.02 (letter + digits + dot + digits)
+            # - A4.21, S0.02 (letter + digits + dot + digits) - BEST MATCH
             # - A-4.21, S-0.02 (letter + dash + digits + dot + digits)
-            # - A4, S0 (letter + digits, but only if it looks like a sheet number)
-            # - 4.21, 0.02 (just digits with dot, but less likely to be sheet number)
+            # - A4, S0 (letter + digits, but require at least 2 chars total and digit after letter)
             if re.match(r'^[A-Z][0-9]+\.[0-9]+$', text_upper):  # A4.21
                 sheet_number = fix_ocr_errors(text_upper)
                 confidence = 0.6
@@ -398,10 +402,12 @@ def extract_sheet_info(text_elements):
                 sheet_number = fix_ocr_errors(text_upper)
                 confidence = 0.6
                 break
-            elif re.match(r'^[A-Z][0-9]+$', text_upper) and len(text_upper) <= 5:  # A4, S0 (short, likely sheet number)
-                sheet_number = fix_ocr_errors(text_upper)
-                confidence = 0.5  # Lower confidence for shorter patterns
-                break
+            elif re.match(r'^[A-Z][0-9]+$', text_upper) and len(text_upper) >= 2 and len(text_upper) <= 5:  # A4, S0 (require at least letter+digit)
+                # Additional check: must have at least one digit
+                if re.search(r'[0-9]', text_upper):
+                    sheet_number = fix_ocr_errors(text_upper)
+                    confidence = 0.5  # Lower confidence for shorter patterns
+                    break
     
     # Search for sheet name - prioritize "drawing data"
     name_started = False
@@ -458,40 +464,78 @@ def process_page(pdf_path, page_number, output_dir):
             }
         
         page = doc[page_number - 1]
+        page_width = page.rect.width
+        page_height = page.rect.height
         
-        # Detect titleblock region (right 20% of page)
+        text_elements = []
+        
+        # Strategy 1: Try right-side region first (20% width, full height)
         titleblock_region = detect_titleblock_region()
-        
-        # Try vector text extraction first (fast, accurate for vector PDFs)
         text_elements = extract_text_from_pdf_region(page, titleblock_region)
         
-        # Debug: log what we found
         if text_elements:
-            sample_texts = [elem['text'] for elem in text_elements[:5]]  # First 5 elements
-            print(f"Page {page_number}: Found {len(text_elements)} text elements in titleblock region. Sample: {sample_texts}", file=sys.stderr)
+            print(f"Page {page_number}: Found {len(text_elements)} text elements in right region (20%)", file=sys.stderr)
         else:
-            print(f"Page {page_number}: No vector text found in titleblock region, trying OCR fallback...", file=sys.stderr)
+            # Strategy 2: Try wider right region (30% width)
+            wider_region = {'x': 0.70, 'y': 0.0, 'width': 0.30, 'height': 1.0}
+            text_elements = extract_text_from_pdf_region(page, wider_region)
+            if text_elements:
+                print(f"Page {page_number}: Found {len(text_elements)} text elements in wider right region (30%)", file=sys.stderr)
         
-        # If no vector text found, fall back to image rendering + OCR
+        # Strategy 3: If still nothing, try bottom-right corner (common for titleblocks)
+        if not text_elements:
+            bottom_right_region = {'x': 0.70, 'y': 0.85, 'width': 0.30, 'height': 0.15}
+            text_elements = extract_text_from_pdf_region(page, bottom_right_region)
+            if text_elements:
+                print(f"Page {page_number}: Found {len(text_elements)} text elements in bottom-right corner", file=sys.stderr)
+        
+        # Strategy 4: Last resort - extract from ENTIRE page and filter for titleblock patterns
+        if not text_elements:
+            print(f"Page {page_number}: No text in expected regions, trying entire page...", file=sys.stderr)
+            full_page_region = {'x': 0.0, 'y': 0.0, 'width': 1.0, 'height': 1.0}
+            all_text_elements = extract_text_from_pdf_region(page, full_page_region)
+            
+            if all_text_elements:
+                print(f"Page {page_number}: Found {len(all_text_elements)} text elements on entire page", file=sys.stderr)
+                # Filter to right-side elements (x > 0.7) or bottom elements (y > 0.8)
+                filtered = []
+                for elem in all_text_elements:
+                    bbox = elem.get('bbox', {})
+                    x = bbox.get('x', 0)
+                    y = bbox.get('y', 0)
+                    # Include if in right 30% OR bottom 20%
+                    if x >= 0.70 or y >= 0.80:
+                        filtered.append(elem)
+                
+                if filtered:
+                    text_elements = filtered
+                    print(f"Page {page_number}: Filtered to {len(text_elements)} elements in titleblock areas", file=sys.stderr)
+                else:
+                    # If no filtering worked, use all text (better than nothing)
+                    text_elements = all_text_elements
+                    print(f"Page {page_number}: Using all {len(text_elements)} text elements from page", file=sys.stderr)
+        
+        # Strategy 5: If still no vector text and OCR is available, try OCR (but it's broken in deployment)
         if not text_elements and TESSERACT_AVAILABLE:
             try:
-                # Render page to image for OCR
+                print(f"Page {page_number}: Attempting OCR fallback...", file=sys.stderr)
                 zoom = 2.0
                 mat = fitz.Matrix(zoom, zoom)
                 pix = page.get_pixmap(matrix=mat, alpha=False)
                 
-                # Save to temporary image file
                 os.makedirs(output_dir, exist_ok=True)
                 image_path = os.path.join(output_dir, f"page_{page_number}.png")
                 pix.save(image_path)
                 
-                # Extract text from titleblock region using OCR
+                # Try right region first
                 text_elements = extract_text_from_region(image_path, titleblock_region)
+                if not text_elements:
+                    # Try wider region
+                    text_elements = extract_text_from_region(image_path, wider_region)
                 
                 if text_elements:
                     print(f"Page {page_number}: OCR found {len(text_elements)} text elements", file=sys.stderr)
                 
-                # Clean up temp image
                 try:
                     os.remove(image_path)
                 except:
@@ -508,12 +552,14 @@ def process_page(pdf_path, page_number, output_dir):
         
         # Debug: log extraction results
         if sheet_number != "Unknown" or sheet_name != "Unknown":
-            print(f"Page {page_number}: Extracted sheetNumber='{sheet_number}', sheetName='{sheet_name}'", file=sys.stderr)
+            print(f"Page {page_number}: ✅ Extracted sheetNumber='{sheet_number}', sheetName='{sheet_name}'", file=sys.stderr)
         else:
-            # If extraction failed, log all text we found for debugging
-            all_text = ' '.join([elem['text'] for elem in text_elements[:20]])  # First 20 elements
-            if all_text:
-                print(f"Page {page_number}: Extraction failed. Found text: {all_text[:200]}...", file=sys.stderr)
+            # If extraction failed, log sample text for debugging
+            if text_elements:
+                sample_texts = [elem['text'] for elem in text_elements[:10]]
+                print(f"Page {page_number}: ❌ Extraction failed. Sample text found: {sample_texts}", file=sys.stderr)
+            else:
+                print(f"Page {page_number}: ❌ No text elements found at all", file=sys.stderr)
         
         return {
             "pageNumber": page_number,
