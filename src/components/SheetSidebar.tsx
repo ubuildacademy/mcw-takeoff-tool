@@ -536,11 +536,24 @@ export function SheetSidebar({
           sheetName: string;
         }
         
-        // Filter sheets to save (only those with meaningful data)
-        const sheetsToSave = (result.sheets as SheetAnalysisResult[]).filter((sheet: SheetAnalysisResult) => 
-          sheet.sheetNumber && sheet.sheetNumber !== 'Unknown' && 
-          sheet.sheetName && sheet.sheetName !== 'Unknown'
-        );
+        // CRITICAL: Derive a safe page range based on the actual document
+        const maxPageNumber = Math.max(document.totalPages || 0, document.pages.length || 0);
+        
+        // Filter sheets to save (only those with meaningful data and valid page numbers)
+        const sheetsToSave = (result.sheets as SheetAnalysisResult[])
+          .filter((sheet: SheetAnalysisResult) => 
+            sheet &&
+            sheet.sheetNumber && sheet.sheetNumber !== 'Unknown' && 
+            sheet.sheetName && sheet.sheetName !== 'Unknown' &&
+            typeof sheet.pageNumber === 'number' &&
+            sheet.pageNumber > 0 &&
+            sheet.pageNumber <= maxPageNumber
+          )
+          // CRITICAL: Sort by pageNumber to ensure deterministic ordering
+          .sort((a, b) => a.pageNumber - b.pageNumber);
+        
+        console.log('[Labeling] (single document) Valid sheets to save for', document.name, 
+          'pages:', sheetsToSave.map(s => s.pageNumber).join(', '));
         
         // Saving sheet labels to database
         
@@ -1065,18 +1078,31 @@ export function SheetSidebar({
             }
           }
           
-          if (result && result.success && result.sheets && result.sheets.length > 0) {
-            // Save sheets (reuse logic from handleAnalyzeDocument)
-            interface SheetAnalysisResult {
-              pageNumber: number;
-              sheetNumber: string;
-              sheetName: string;
-            }
-            
-            const sheetsToSave = (result.sheets as SheetAnalysisResult[]).filter((sheet: SheetAnalysisResult) => 
+        if (result && result.success && result.sheets && result.sheets.length > 0) {
+          // Save sheets (reuse logic from handleAnalyzeDocument)
+          interface SheetAnalysisResult {
+            pageNumber: number;
+            sheetNumber: string;
+            sheetName: string;
+          }
+          
+          // CRITICAL: Derive safe page bounds for this document
+          const maxPageNumber = Math.max(document.totalPages || 0, document.pages.length || 0);
+          
+          const sheetsToSave = (result.sheets as SheetAnalysisResult[])
+            .filter((sheet: SheetAnalysisResult) => 
+              sheet &&
               sheet.sheetNumber && sheet.sheetNumber !== 'Unknown' && 
-              sheet.sheetName && sheet.sheetName !== 'Unknown'
-            );
+              sheet.sheetName && sheet.sheetName !== 'Unknown' &&
+              typeof sheet.pageNumber === 'number' &&
+              sheet.pageNumber > 0 &&
+              sheet.pageNumber <= maxPageNumber
+            )
+            // Ensure we always process in ascending page order
+            .sort((a, b) => a.pageNumber - b.pageNumber);
+          
+          console.log('[Labeling] (bulk) Valid sheets to save for', document.name, 
+            'pages:', sheetsToSave.map(s => s.pageNumber).join(', '));
             
             // Save sheets in parallel
             await Promise.all(sheetsToSave.map(async (sheet: SheetAnalysisResult) => {
