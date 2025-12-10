@@ -234,6 +234,83 @@ function isTitleblockKeyword(line: string): boolean {
   return titleblockKeywords.some(keyword => lowerLine.includes(keyword));
 }
 
+/**
+ * Extract sheet number and name from OCR text using pattern matching
+ * (Same logic as Python script, but runs directly on OCR text)
+ */
+function extractSheetInfoFromOCRText(ocrText: string, pageNumber: number): { pageNumber: number; sheetNumber: string; sheetName: string } {
+  let sheetNumber = "Unknown";
+  let sheetName = "Unknown";
+  
+  if (!ocrText || ocrText.trim().length === 0) {
+    return { pageNumber, sheetNumber, sheetName };
+  }
+  
+  // Sheet number patterns (prioritized)
+  const sheetNumberPatterns = [
+    /sheet\s*number\s*:?\s*([A-Z0-9.]+)/i,
+    /sheet\s*#\s*:?\s*([A-Z0-9.]+)/i,
+    /dwg\s*no\s*:?\s*([A-Z0-9.]+)/i,
+    /drawing\s*number\s*:?\s*([A-Z0-9.]+)/i,
+    /sheet\s*:?\s*([A-Z0-9.]+)/i,
+  ];
+  
+  // Sheet name patterns (prioritized - "drawing data" first for Hilton format)
+  const sheetNamePatterns = [
+    /drawing\s*data\s*:?\s*(.+?)(?:\n|$)/i,
+    /drawing\s*title\s*:?\s*(.+?)(?:\n|$)/i,
+    /sheet\s*title\s*:?\s*(.+?)(?:\n|$)/i,
+    /title\s*:?\s*(.+?)(?:\n|$)/i,
+    /project\s*name\s*:?\s*(.+?)(?:\n|$)/i,
+  ];
+  
+  // Search for sheet number
+  for (const pattern of sheetNumberPatterns) {
+    const match = ocrText.match(pattern);
+    if (match && match[1]) {
+      sheetNumber = match[1].trim().toUpperCase();
+      // Fix common OCR errors
+      sheetNumber = sheetNumber.replace(/O/g, '0').replace(/l/g, '1').replace(/I/g, '1');
+      break;
+    }
+  }
+  
+  // If no label found, look for standalone sheet number patterns
+  if (sheetNumber === "Unknown") {
+    // Pattern: Letter(s) + digits + dot + digits (e.g., A4.21, S0.02)
+    const standalonePattern = /\b([A-Z][0-9]+\.[0-9]+)\b/i;
+    const match = ocrText.match(standalonePattern);
+    if (match && match[1]) {
+      sheetNumber = match[1].trim().toUpperCase();
+      sheetNumber = sheetNumber.replace(/O/g, '0').replace(/l/g, '1').replace(/I/g, '1');
+    } else {
+      // Pattern: Letter + digits (e.g., A4, F2) - but require at least 2 chars
+      const shortPattern = /\b([A-Z][0-9]+)\b/i;
+      const shortMatch = ocrText.match(shortPattern);
+      if (shortMatch && shortMatch[1] && shortMatch[1].length >= 2 && shortMatch[1].length <= 5) {
+        sheetNumber = shortMatch[1].trim().toUpperCase();
+        sheetNumber = sheetNumber.replace(/O/g, '0').replace(/l/g, '1').replace(/I/g, '1');
+      }
+    }
+  }
+  
+  // Search for sheet name
+  for (const pattern of sheetNamePatterns) {
+    const match = ocrText.match(pattern);
+    if (match && match[1]) {
+      let nameText = match[1].trim();
+      // Clean up: remove extra whitespace, trailing punctuation
+      nameText = nameText.replace(/\s+/g, ' ').replace(/[.,;:]+$/, '');
+      if (nameText.length > 2) {
+        sheetName = nameText;
+        break;
+      }
+    }
+  }
+  
+  return { pageNumber, sheetNumber, sheetName };
+}
+
 // Analyze document sheets using AI (restored from d5cdad4 with optimizations)
 router.post('/analyze-sheets', async (req, res) => {
   try {
@@ -265,163 +342,41 @@ router.post('/analyze-sheets', async (req, res) => {
       return;
     }
 
-    // Python extraction path
+    // Python extraction path - NOW USES OCR TEXT DIRECTLY (much faster and more reliable!)
     if (USE_PYTHON_EXTRACTION) {
       try {
-        sendProgress(5, 'Initializing Python extraction...');
+        sendProgress(5, 'Loading OCR data...');
         
-        const { titleblockExtractionService } = await import('../services/titleblockExtractionService');
-        const { storage } = await import('../storage');
-        
-        // Check availability
-        const availability = await titleblockExtractionService.checkAvailability();
-        if (!availability.available) {
-          res.write(`data: ${JSON.stringify({ error: `Python extraction not available: ${availability.error}` })}\n\n`);
-          res.end();
-          return;
-        }
-        
-        // Log warning if OpenCV is missing (but continue anyway)
-        if (availability.warning) {
-          console.warn(`⚠️ ${availability.warning}`);
-        }
-        
-        sendProgress(10, 'Getting document information...');
-        
-        // Get PDF file path (similar to CV takeoff)
-        const files = await storage.getFilesByProject(projectId);
-        const file = files.find(f => f.id === documentId);
-        
-        if (!file || file.mimetype !== 'application/pdf') {
-          res.write(`data: ${JSON.stringify({ error: 'Document not found or not a PDF' })}\n\n`);
-          res.end();
-          return;
-        }
-        
-        sendProgress(15, 'Downloading PDF...');
-        
-        // Download PDF from Supabase Storage
-        const { data: pdfData, error: downloadError } = await supabase.storage
-          .from('project-files')
-          .download(file.path);
-        
-        if (downloadError || !pdfData) {
-          res.write(`data: ${JSON.stringify({ error: `Failed to download PDF: ${downloadError?.message || 'Unknown error'}` })}\n\n`);
-          res.end();
-          return;
-        }
-        
-        // Save to temporary file
-        const isProduction = process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === 'production';
-        let baseTempDir: string;
-        
-        if (isProduction) {
-          baseTempDir = '/tmp/pdf-processing';
-        } else {
-          const cwd = process.cwd();
-          if (cwd.endsWith('server') || cwd.endsWith('server/')) {
-            baseTempDir = path.join(cwd, 'temp', 'pdf-processing');
-          } else {
-            baseTempDir = path.join(cwd, 'server', 'temp', 'pdf-processing');
-          }
-        }
-        
-        await fs.ensureDir(baseTempDir);
-        const tempPdfPath = path.join(baseTempDir, `${documentId}.pdf`);
-        
-        const arrayBuffer = await pdfData.arrayBuffer();
-        await fs.writeFile(tempPdfPath, Buffer.from(arrayBuffer));
-        
-        sendProgress(20, 'Getting page count...');
-        
-        // Get page count from OCR data (or parse PDF)
+        // Get OCR data directly from database (already extracted!)
         const { simpleOcrService } = await import('../services/simpleOcrService');
         const ocrData = await simpleOcrService.getDocumentOCRResults(projectId, documentId);
         
         if (!ocrData || ocrData.length === 0) {
-          res.write(`data: ${JSON.stringify({ error: 'No OCR data found. Please run OCR first to determine page count.' })}\n\n`);
+          res.write(`data: ${JSON.stringify({ error: 'No OCR data found. Please run OCR first.' })}\n\n`);
           res.end();
           return;
         }
         
         const totalPages = ocrData.length;
-        const pageNumbers = ocrData.map((page: any) => page.pageNumber);
+        sendProgress(10, `Extracting from ${totalPages} pages of OCR text...`);
         
-        sendProgress(25, `Processing ${totalPages} pages with Python OCR...`);
+        // Extract titleblock info directly from OCR text using pattern matching
+        const allSheets: any[] = [];
         
-        // Process pages in batches with parallel processing
-        const BATCH_SIZE = 10; // Process 10 pages per batch
-        const CONCURRENT_BATCHES = 5; // Process 5 batches concurrently
-        const totalBatches = Math.ceil(totalPages / BATCH_SIZE);
-        let allSheets: any[] = [];
-        
-        // Create batch tasks
-        const batchTasks: Array<{ start: number; end: number; batchNum: number; pageNums: number[] }> = [];
-        for (let batchStart = 0; batchStart < totalPages; batchStart += BATCH_SIZE) {
-          const batchEnd = Math.min(batchStart + BATCH_SIZE, totalPages);
-          const batchPageNumbers = pageNumbers.slice(batchStart, batchEnd);
-          const currentBatch = Math.floor(batchStart / BATCH_SIZE) + 1;
-          
-          batchTasks.push({
-            start: batchStart,
-            end: batchEnd,
-            batchNum: currentBatch,
-            pageNums: batchPageNumbers
-          });
-        }
-        
-        // Process batches with concurrency limit
-        for (let i = 0; i < batchTasks.length; i += CONCURRENT_BATCHES) {
-          const concurrentTasks = batchTasks.slice(i, i + CONCURRENT_BATCHES);
+        for (let i = 0; i < ocrData.length; i++) {
+          const page = ocrData[i];
+          const pageNumber = page.pageNumber;
+          const ocrText = page.text || '';
           
           // Update progress
-          const completedBatches = i;
-          const batchProgress = 25 + (completedBatches / totalBatches) * 60;
-          sendProgress(Math.round(batchProgress), `Processing batches ${i + 1}-${Math.min(i + CONCURRENT_BATCHES, totalBatches)}/${totalBatches}...`);
-          
-          // Process batches in parallel
-          const batchPromises = concurrentTasks.map(async (task) => {
-            console.log(`Processing batch ${task.batchNum}/${totalBatches}: pages ${task.start + 1}-${task.end}`);
-            
-            const result = await titleblockExtractionService.extractSheets(
-              tempPdfPath,
-              task.pageNums,
-              BATCH_SIZE
-            );
-            
-            return {
-              batchNum: task.batchNum,
-              result,
-              pageNums: task.pageNums
-            };
-          });
-          
-          const batchResults = await Promise.all(batchPromises);
-          
-          // Collect results
-          for (const batchResult of batchResults) {
-            if (batchResult.result.success && batchResult.result.sheets) {
-              allSheets = allSheets.concat(batchResult.result.sheets);
-            } else {
-              // Add Unknown entries for failed batch
-              for (const pageNum of batchResult.pageNums) {
-                allSheets.push({
-                  pageNumber: pageNum,
-                  sheetNumber: "Unknown",
-                  sheetName: "Unknown"
-                });
-              }
-            }
+          const progress = 10 + Math.round((i / totalPages) * 80);
+          if (i % 10 === 0 || i === ocrData.length - 1) {
+            sendProgress(progress, `Processing page ${i + 1}/${totalPages}...`);
           }
-        }
-        
-        // Clean up temp PDF
-        try {
-          if (await fs.pathExists(tempPdfPath)) {
-            await fs.remove(tempPdfPath);
-          }
-        } catch (cleanupError) {
-          console.warn('Error cleaning up temp PDF:', cleanupError);
+          
+          // Extract sheet info from OCR text
+          const sheetInfo = extractSheetInfoFromOCRText(ocrText, pageNumber);
+          allSheets.push(sheetInfo);
         }
         
         // Sort by page number
@@ -429,16 +384,9 @@ router.post('/analyze-sheets', async (req, res) => {
         
         // Log extraction results
         const extractedCount = allSheets.filter(s => s.sheetNumber !== 'Unknown' || s.sheetName !== 'Unknown').length;
-        console.log(`[Python Extraction] Complete: ${allSheets.length} total sheets, ${extractedCount} with extracted data`);
+        console.log(`[OCR Text Extraction] Complete: ${allSheets.length} total sheets, ${extractedCount} with extracted data`);
         
-        if (extractedCount === 0) {
-          console.warn(`[Python Extraction] WARNING: No sheets were successfully extracted (all returned "Unknown")`);
-          console.warn(`[Python Extraction] This may indicate: titleblock detection failed, OCR failed, or pattern matching failed`);
-        }
-        
-        sendProgress(90, 'Finalizing results...');
-        
-        console.log(`Python extraction complete: ${allSheets.length} sheets processed`);
+        sendProgress(95, 'Finalizing results...');
         
         // Send final result (same format as AI)
         res.write(`data: ${JSON.stringify({
@@ -454,9 +402,9 @@ router.post('/analyze-sheets', async (req, res) => {
         return;
         
       } catch (error) {
-        console.error('Error in Python extraction:', error);
+        console.error('Error in OCR text extraction:', error);
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        res.write(`data: ${JSON.stringify({ error: `Python extraction failed: ${errorMessage}` })}\n\n`);
+        res.write(`data: ${JSON.stringify({ error: `Extraction failed: ${errorMessage}` })}\n\n`);
         res.end();
         return;
       }
