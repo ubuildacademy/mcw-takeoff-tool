@@ -536,20 +536,45 @@ export function SheetSidebar({
           sheetName: string;
         }
         
-        // CRITICAL: Derive a safe page range based on the actual document
-        const maxPageNumber = Math.max(document.totalPages || 0, document.pages.length || 0);
+        // Derive a safe page range based on both the frontend document metadata
+        // and the backend's notion of total pages. This prevents filtering out
+        // valid AI results when document.totalPages/pages isn't populated yet.
+        const docPageCount = Math.max(
+          document.totalPages || 0,
+          Array.isArray(document.pages) ? document.pages.length : 0
+        );
+        const serverTotalPages = typeof result.totalPages === 'number' ? result.totalPages : 0;
+        let effectiveMaxPageNumber = Math.max(docPageCount, serverTotalPages);
+        if (!effectiveMaxPageNumber || effectiveMaxPageNumber < 1) {
+          // If we still don't have a reliable max, skip the upper-bound check
+          effectiveMaxPageNumber = 0;
+        }
         
         // Filter sheets to save (only those with meaningful data and valid page numbers)
         const sheetsToSave = (result.sheets as SheetAnalysisResult[])
-          .filter((sheet: SheetAnalysisResult) => 
-            sheet &&
-            sheet.sheetNumber && sheet.sheetNumber !== 'Unknown' && 
-            sheet.sheetName && sheet.sheetName !== 'Unknown' &&
-            typeof sheet.pageNumber === 'number' &&
-            sheet.pageNumber > 0 &&
-            sheet.pageNumber <= maxPageNumber
-          )
-          // CRITICAL: Sort by pageNumber to ensure deterministic ordering
+          .filter((sheet: SheetAnalysisResult) => {
+            if (
+              !sheet ||
+              !sheet.sheetNumber ||
+              sheet.sheetNumber === 'Unknown' ||
+              !sheet.sheetName ||
+              sheet.sheetName === 'Unknown' ||
+              typeof sheet.pageNumber !== 'number' ||
+              sheet.pageNumber <= 0
+            ) {
+              return false;
+            }
+            // If we have a reliable max page number, enforce it; otherwise trust the AI.
+            if (effectiveMaxPageNumber > 0 && sheet.pageNumber > effectiveMaxPageNumber) {
+              console.warn(
+                '[Labeling] (single document) Skipping sheet with out-of-range pageNumber',
+                { pageNumber: sheet.pageNumber, effectiveMaxPageNumber, docPageCount, serverTotalPages }
+              );
+              return false;
+            }
+            return true;
+          })
+          // Sort by pageNumber to ensure deterministic ordering
           .sort((a, b) => a.pageNumber - b.pageNumber);
         
         console.log('[Labeling] (single document) Valid sheets to save for', document.name, 
@@ -1086,18 +1111,42 @@ export function SheetSidebar({
             sheetName: string;
           }
           
-          // CRITICAL: Derive safe page bounds for this document
-          const maxPageNumber = Math.max(document.totalPages || 0, document.pages.length || 0);
+          // Derive safe page bounds for this document, taking into account
+          // both frontend metadata and the backend-reported total page count.
+          const docPageCount = Math.max(
+            document.totalPages || 0,
+            Array.isArray(document.pages) ? document.pages.length : 0
+          );
+          const serverTotalPages = typeof result.totalPages === 'number' ? result.totalPages : 0;
+          let effectiveMaxPageNumber = Math.max(docPageCount, serverTotalPages);
+          if (!effectiveMaxPageNumber || effectiveMaxPageNumber < 1) {
+            effectiveMaxPageNumber = 0;
+          }
           
           const sheetsToSave = (result.sheets as SheetAnalysisResult[])
-            .filter((sheet: SheetAnalysisResult) => 
-              sheet &&
-              sheet.sheetNumber && sheet.sheetNumber !== 'Unknown' && 
-              sheet.sheetName && sheet.sheetName !== 'Unknown' &&
-              typeof sheet.pageNumber === 'number' &&
-              sheet.pageNumber > 0 &&
-              sheet.pageNumber <= maxPageNumber
-            )
+            .filter((sheet: SheetAnalysisResult) => {
+              if (
+                !sheet ||
+                !sheet.sheetNumber ||
+                sheet.sheetNumber === 'Unknown' ||
+                !sheet.sheetName ||
+                sheet.sheetName === 'Unknown' ||
+                typeof sheet.pageNumber !== 'number' ||
+                sheet.pageNumber <= 0
+              ) {
+                return false;
+              }
+              
+              if (effectiveMaxPageNumber > 0 && sheet.pageNumber > effectiveMaxPageNumber) {
+                console.warn(
+                  '[Labeling] (bulk) Skipping sheet with out-of-range pageNumber',
+                  { pageNumber: sheet.pageNumber, effectiveMaxPageNumber, docPageCount, serverTotalPages }
+                );
+                return false;
+              }
+              
+              return true;
+            })
             // Ensure we always process in ascending page order
             .sort((a, b) => a.pageNumber - b.pageNumber);
           
