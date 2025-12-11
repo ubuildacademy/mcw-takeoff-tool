@@ -1726,6 +1726,7 @@ export function SheetSidebar({
                         
                         {openDocumentMenu === document.id && (
                           <div className="absolute right-0 top-full mt-1 w-56 bg-white border rounded-lg shadow-lg z-50 py-1">
+                            {/* Extract Titleblock Info option */}
                             <button
                               className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 text-blue-600 flex items-center gap-2"
                               onClick={(e) => {
