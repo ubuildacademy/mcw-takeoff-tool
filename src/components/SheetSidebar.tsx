@@ -893,12 +893,16 @@ export function SheetSidebar({
                 return false;
               }
               
-              // Accept if EITHER sheetNumber OR sheetName is non-Unknown
-              const hasValidNumber = sheet.sheetNumber && sheet.sheetNumber !== 'Unknown';
-              const hasValidName = sheet.sheetName && sheet.sheetName !== 'Unknown';
+              // Accept if EITHER sheetNumber OR sheetName is non-Unknown (also check for empty strings)
+              const hasValidNumber = sheet.sheetNumber && 
+                                     sheet.sheetNumber !== 'Unknown' && 
+                                     sheet.sheetNumber.trim() !== '';
+              const hasValidName = sheet.sheetName && 
+                                   sheet.sheetName !== 'Unknown' && 
+                                   sheet.sheetName.trim() !== '';
               
               if (!hasValidNumber && !hasValidName) {
-                return false; // Both Unknown, skip
+                return false; // Both Unknown or empty, skip
               }
               
               // Validate page number is within document bounds
@@ -912,8 +916,25 @@ export function SheetSidebar({
             // CRITICAL: Sort by pageNumber to ensure correct order and prevent lag accumulation
             .sort((a, b) => a.pageNumber - b.pageNumber);
 
-          console.log(`[Labeling] Processing ${sheetsToSave.length} sheets for ${document.name}, pages:`, 
-            sheetsToSave.map(s => s.pageNumber).join(', '));
+          console.log(`[Labeling] Received ${result.sheets?.length || 0} sheets from backend, filtered to ${sheetsToSave.length} valid sheets for ${document.name}`);
+          if (sheetsToSave.length > 0) {
+            console.log(`[Labeling] Processing ${sheetsToSave.length} sheets for ${document.name}, pages:`, 
+              sheetsToSave.map(s => s.pageNumber).join(', '));
+            // Log sample of what we're saving
+            const sample = sheetsToSave.slice(0, 3);
+            console.log(`[Labeling] Sample sheets to save:`, sample.map(s => ({
+              page: s.pageNumber,
+              number: s.sheetNumber,
+              name: s.sheetName?.substring(0, 40)
+            })));
+          } else {
+            console.warn(`[Labeling] No valid sheets to save for ${document.name}. Sample of received sheets:`, 
+              result.sheets?.slice(0, 3).map((s: any) => ({
+                page: s.pageNumber,
+                number: s.sheetNumber,
+                name: s.sheetName
+              })));
+          }
 
           // Save sheets sequentially without debounced reloads to prevent race conditions
           // TEMPORARY: Overwrite ALL pages (removed check for existing labels)

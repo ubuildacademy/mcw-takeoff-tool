@@ -303,7 +303,12 @@ async function loadCustomPatterns(): Promise<{
       .order('priority', { ascending: false });
     
     if (error) {
-      console.warn('Failed to load custom patterns, using defaults:', error);
+      // Handle case where table doesn't exist yet (first deployment)
+      if (error.code === 'PGRST116' || error.message?.includes('does not exist')) {
+        console.log('[Pattern Loading] Table sheet_label_patterns does not exist yet, using defaults only');
+      } else {
+        console.warn('Failed to load custom patterns, using defaults:', error);
+      }
       return { sheetNumber: [], sheetName: [] };
     }
     
@@ -324,6 +329,8 @@ async function loadCustomPatterns(): Promise<{
         console.warn(`Invalid regex pattern for ${p.pattern_label}:`, p.pattern_regex);
       }
     });
+    
+    console.log(`[Pattern Loading] Loaded ${sheetNumber.length} sheet number patterns, ${sheetName.length} sheet name patterns from database`);
     
     // Update cache
     customPatternsCache = {
@@ -347,7 +354,11 @@ async function extractSheetInfoFromOCRText(ocrText: string, pageNumber: number):
   let sheetNumber = "Unknown";
   let sheetName = "Unknown";
   
+  // Handle empty or filtered text (filterTextForTitleblock might return empty if no keywords found)
   if (!ocrText || ocrText.trim().length === 0) {
+    if (pageNumber === 1) {
+      console.log(`[Page ${pageNumber}] No OCR text or filtered text is empty - skipping extraction`);
+    }
     return { pageNumber, sheetNumber, sheetName };
   }
   
@@ -372,23 +383,31 @@ async function extractSheetInfoFromOCRText(ocrText: string, pageNumber: number):
     { pattern: /sheet\s*name\s*:?\s*(.+?)(?:\n|$)/i, priority: 75, label: 'sheet name' },
   ];
   
-  // Combine custom and default patterns, prioritizing custom
+  // Combine custom and default patterns, prioritizing custom (custom patterns come first, then defaults)
+  // Always include defaults as fallback, but custom patterns will be tried first due to higher priority
   const sheetNumberPatterns = [
     ...customPatterns.sheetNumber,
-    ...(customPatterns.sheetNumber.length === 0 ? defaultSheetNumberPatterns : [])
+    ...defaultSheetNumberPatterns
   ].sort((a, b) => b.priority - a.priority);
   
   const sheetNamePatterns = [
     ...customPatterns.sheetName,
-    ...(customPatterns.sheetName.length === 0 ? defaultSheetNamePatterns : [])
+    ...defaultSheetNamePatterns
   ].sort((a, b) => b.priority - a.priority);
+  
+  // Debug: Log pattern counts (only for first page to avoid spam)
+  if (pageNumber === 1) {
+    console.log(`[Extraction] Using ${customPatterns.sheetNumber.length} custom + ${defaultSheetNumberPatterns.length} default sheet number patterns (${sheetNumberPatterns.length} total)`);
+    console.log(`[Extraction] Using ${customPatterns.sheetName.length} custom + ${defaultSheetNamePatterns.length} default sheet name patterns (${sheetNamePatterns.length} total)`);
+  }
   
   // Helper function to extract multi-line sheet name after various label types
   // Now uses custom patterns from database
-  const extractMultiLineSheetNameWithCustomPatterns = async (
+  // Note: Function is async for consistency but doesn't actually need to be
+  const extractMultiLineSheetNameWithCustomPatterns = (
     text: string, 
     patterns: Array<{ pattern: RegExp; priority: number; label: string }>
-  ): Promise<string | null> => {
+  ): string | null => {
     const lines = text.split('\n');
     let foundSheetNameLabel = false;
     const nameParts: string[] = [];
@@ -601,7 +620,7 @@ async function extractSheetInfoFromOCRText(ocrText: string, pageNumber: number):
   
   // Search for sheet name - try multi-line extraction first (for labels with box below)
   // Update extractMultiLineSheetName to use custom patterns
-  const multiLineName = await extractMultiLineSheetNameWithCustomPatterns(ocrText, sheetNamePatterns);
+  const multiLineName = extractMultiLineSheetNameWithCustomPatterns(ocrText, sheetNamePatterns);
   if (multiLineName && isValidSheetName(multiLineName)) {
     sheetName = multiLineName;
   } else {
@@ -678,7 +697,11 @@ router.post('/analyze-sheets', async (req, res) => {
         for (let i = 0; i < ocrData.length; i++) {
           const page = ocrData[i];
           const pageNumber = page.pageNumber;
-          const ocrText = page.text || '';
+          const fullOcrText = page.text || '';
+          
+          // Filter OCR text to focus on titleblock region (right side, excludes revisions, etc.)
+          // This mimics what the Python script does - isolates titleblock content
+          const ocrText = filterTextForTitleblock(fullOcrText);
           
           // Update progress
           const progress = 10 + Math.round((i / totalPages) * 80);
@@ -686,8 +709,13 @@ router.post('/analyze-sheets', async (req, res) => {
             sendProgress(progress, `Processing page ${i + 1}/${totalPages}...`);
           }
           
-          // Extract sheet info from OCR text (now async to load custom patterns)
+          // Extract sheet info from filtered OCR text (now async to load custom patterns)
           const sheetInfo = await extractSheetInfoFromOCRText(ocrText, pageNumber);
+          
+          // Log extraction results for debugging (first few pages and pages with data)
+          if (pageNumber <= 3 || (sheetInfo.sheetNumber !== 'Unknown' || sheetInfo.sheetName !== 'Unknown')) {
+            console.log(`[Page ${pageNumber}] Extracted: sheetNumber="${sheetInfo.sheetNumber}", sheetName="${sheetInfo.sheetName}"`);
+          }
           
           // Log if we're getting invalid results
           if (sheetInfo.sheetName && (sheetInfo.sheetName.includes('revisions') || sheetInfo.sheetName.includes('project info'))) {
@@ -705,9 +733,21 @@ router.post('/analyze-sheets', async (req, res) => {
         // Sort by page number
         allSheets.sort((a, b) => a.pageNumber - b.pageNumber);
         
-        // Log extraction results
+        // Log extraction results with more detail
         const extractedCount = allSheets.filter(s => s.sheetNumber !== 'Unknown' || s.sheetName !== 'Unknown').length;
-        console.log(`[OCR Text Extraction] Complete: ${allSheets.length} total sheets, ${extractedCount} with extracted data`);
+        const withSheetNumber = allSheets.filter(s => s.sheetNumber !== 'Unknown').length;
+        const withSheetName = allSheets.filter(s => s.sheetName !== 'Unknown').length;
+        console.log(`[OCR Text Extraction] Complete: ${allSheets.length} total sheets, ${extractedCount} with extracted data (${withSheetNumber} with sheetNumber, ${withSheetName} with sheetName)`);
+        
+        // Log sample of extracted data for debugging
+        const samples = allSheets.filter(s => s.sheetNumber !== 'Unknown' || s.sheetName !== 'Unknown').slice(0, 5);
+        if (samples.length > 0) {
+          console.log(`[OCR Text Extraction] Sample results:`, samples.map(s => ({
+            page: s.pageNumber,
+            number: s.sheetNumber,
+            name: s.sheetName?.substring(0, 50)
+          })));
+        }
         
         sendProgress(95, 'Finalizing results...');
         
