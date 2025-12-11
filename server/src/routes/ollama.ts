@@ -489,6 +489,13 @@ async function extractSheetInfoFromOCRText(ocrText: string, pageNumber: number):
             if (!/^\d{1,2}\/\d{1,2}\/\d{2,4}/.test(line) && // dates
                 !/^rev\s*\d+/i.test(lowerLine) && // revision numbers
                 !/^issuance/i.test(lowerLine)) {
+              // Skip if this line is clearly part of the revisions / project info block
+              // We don't want lines like "revisions :project info" to poison the full name
+              if ((lowerLine.includes('revisions') && lowerLine.includes('project info')) ||
+                  /^revisions?$/i.test(line) ||
+                  /^project\s*info$/i.test(lowerLine)) {
+                continue;
+              }
               nameParts.push(line);
             }
           }
@@ -578,6 +585,101 @@ async function extractSheetInfoFromOCRText(ocrText: string, pageNumber: number):
       return false;
     }
     return true;
+  };
+
+  /**
+   * Fallback heuristic: infer a sheet name from lines near the detected sheet number.
+   * This is layout-agnostic but uses line ordering as a proxy for layout.
+   */
+  const inferSheetNameFromContext = (text: string, sheetNumber: string): string | null => {
+    if (!text || !sheetNumber || sheetNumber === 'Unknown') return null;
+
+    const lines = text.split('\n');
+    if (lines.length === 0) return null;
+
+    const lowerSheet = sheetNumber.toLowerCase();
+    let sheetLineIndex = -1;
+
+    // Find the first line that contains the sheet number (e.g., "sheet number: A4.21" or just "A4.21")
+    for (let i = 0; i < lines.length; i++) {
+      const lowerLine = lines[i].toLowerCase();
+      if (lowerLine.includes(lowerSheet)) {
+        sheetLineIndex = i;
+        break;
+      }
+    }
+
+    if (sheetLineIndex === -1) {
+      return null;
+    }
+
+    const isLineLikelyTitle = (rawLine: string): boolean => {
+      const line = rawLine.trim();
+      if (!line) return false;
+
+      // Reasonable length for a title
+      if (line.length < 4 || line.length > 80) return false;
+
+      const lower = line.toLowerCase();
+
+      // Filter out obvious metadata / non-title content
+      const invalidKeywords = [
+        'revisions', 'revision', 'project info', 'project information',
+        'scale', 'sheet number', 'drawing number', 'dwg no',
+        'architect', 'engineer', 'client', 'owner',
+        'copyright', 'seal', 'issued for', 'issue date'
+      ];
+      if (invalidKeywords.some(keyword => lower.includes(keyword))) {
+        return false;
+      }
+
+      // Skip dates and revision codes
+      if (/^\d{1,2}\/\d{1,2}\/\d{2,4}/.test(line)) return false;
+      if (/^rev\s*\d+/i.test(line)) return false;
+
+      // Skip pure labels like "TITLE:" or "SHEET NAME:"
+      if (/^[^:]{0,40}:\s*$/.test(line)) return false;
+
+      // Skip lines that look like numeric/detail callouts
+      if (/^\d+\s+/.test(line)) return false;
+
+      // Require at least one letter (avoid pure numbers/symbols)
+      if (!/[A-Za-z]/.test(line)) return false;
+
+      return true;
+    };
+
+    // Prefer titles immediately ABOVE the sheet number (common in many titleblocks),
+    // then look just BELOW as a secondary option.
+    const candidateIndices: number[] = [];
+
+    // Look above within a small window
+    for (let offset = 1; offset <= 8; offset++) {
+      const idx = sheetLineIndex - offset;
+      if (idx < 0) break;
+      candidateIndices.push(idx);
+    }
+
+    // Then look below within a smaller window
+    for (let offset = 1; offset <= 6; offset++) {
+      const idx = sheetLineIndex + offset;
+      if (idx >= lines.length) break;
+      candidateIndices.push(idx);
+    }
+
+    for (const idx of candidateIndices) {
+      const candidateLine = lines[idx]?.trim();
+      if (!candidateLine) continue;
+      if (!isLineLikelyTitle(candidateLine)) continue;
+
+      // Clean up whitespace and trailing punctuation
+      const cleaned = candidateLine.replace(/\s+/g, ' ').replace(/[.,;:]+$/, '');
+      if (cleaned.length >= 3) {
+        return cleaned;
+      }
+    }
+
+    return null;
   };
   
   // Search for sheet number
@@ -672,6 +774,19 @@ async function extractSheetInfoFromOCRText(ocrText: string, pageNumber: number):
       if (!foundAnyMatch) {
         console.log(`[Page ${pageNumber}] No sheet name patterns matched. Filtered text sample: ${ocrText.substring(0, 500)}`);
       }
+    }
+  }
+
+  // Fallback: If we have a sheet number but still no sheet name, try to infer it from nearby lines.
+  if (sheetName === 'Unknown' && sheetNumber !== 'Unknown') {
+    const inferredName = inferSheetNameFromContext(ocrText, sheetNumber);
+    if (inferredName && isValidSheetName(inferredName)) {
+      sheetName = inferredName;
+      if (pageNumber <= 3) {
+        console.log(`[Page ${pageNumber}] Inferred sheet name from context near "${sheetNumber}": "${inferredName}"`);
+      }
+    } else if (pageNumber <= 3) {
+      console.log(`[Page ${pageNumber}] Could not infer sheet name from context near "${sheetNumber}"`);
     }
   }
   

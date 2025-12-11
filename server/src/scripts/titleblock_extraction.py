@@ -469,8 +469,29 @@ def process_page(pdf_path, page_number, output_dir):
         
         text_elements = []
         
-        # Strategy 1: Try right-side region first (20% width, full height)
-        titleblock_region = detect_titleblock_region()
+        # Strategy 1: Use custom titleblock region if provided via environment,
+        # otherwise fall back to automatic right-side detection.
+        custom_region_str = os.environ.get('TITLEBLOCK_REGION')
+        if custom_region_str:
+            try:
+                parts = [float(p.strip()) for p in custom_region_str.split(',')]
+                if len(parts) == 4:
+                    titleblock_region = {
+                        'x': parts[0],
+                        'y': parts[1],
+                        'width': parts[2],
+                        'height': parts[3]
+                    }
+                    print(f\"Page {page_number}: Using custom TITLEBLOCK_REGION={titleblock_region}\", file=sys.stderr)
+                else:
+                    print(f\"Page {page_number}: Invalid TITLEBLOCK_REGION format '{custom_region_str}', falling back to auto-detect\", file=sys.stderr)
+                    titleblock_region = detect_titleblock_region()
+            except Exception as e:
+                print(f\"Page {page_number}: Failed to parse TITLEBLOCK_REGION '{custom_region_str}': {e}, falling back to auto-detect\", file=sys.stderr)
+                titleblock_region = detect_titleblock_region()
+        else:
+            titleblock_region = detect_titleblock_region()
+        
         text_elements = extract_text_from_pdf_region(page, titleblock_region)
         
         if text_elements:

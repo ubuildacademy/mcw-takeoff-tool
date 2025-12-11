@@ -48,6 +48,12 @@ interface PDFViewerProps {
   visualSearchMode?: boolean;
   visualSearchCondition?: any;
   onVisualSearchComplete?: (selectionBox: {x: number, y: number, width: number, height: number}) => void;
+  // Titleblock selection (reuses visual selection interaction)
+  titleblockSelectionMode?: 'sheetNumber' | 'sheetName' | null;
+  onTitleblockSelectionComplete?: (
+    field: 'sheetNumber' | 'sheetName',
+    selectionBox: {x: number, y: number, width: number, height: number}
+  ) => void;
 }
 
 interface Measurement {
@@ -110,7 +116,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Visual search props
   visualSearchMode = false,
   visualSearchCondition = null,
-  onVisualSearchComplete
+  onVisualSearchComplete,
+  // Titleblock selection props
+  titleblockSelectionMode = null,
+  onTitleblockSelectionComplete
 }) => {
   // Core PDF state
   const [pdfDocument, setPdfDocument] = useState<any>(null);
@@ -550,7 +559,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Handle visual search mode
   useEffect(() => {
-    if (visualSearchMode) {
+    if (visualSearchMode || !!titleblockSelectionMode) {
       setIsSelectingSymbol(true);
       setSelectionBox(null);
       setSelectionStart(null);
@@ -559,7 +568,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       setSelectionBox(null);
       setSelectionStart(null);
     }
-  }, [visualSearchMode]);
+  }, [visualSearchMode, titleblockSelectionMode]);
 
   // Load PDF document
   useEffect(() => {
@@ -2685,8 +2694,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       cssY = cssY / interactiveScale;
     }
 
-    // Handle visual search symbol selection
-    if (visualSearchMode && isSelectingSymbol) {
+    // Handle visual search or titleblock selection
+    if ((visualSearchMode || !!titleblockSelectionMode) && isSelectingSymbol) {
       if (!selectionStart) {
         // Start selection
         setSelectionStart({ x: cssX, y: cssY });
@@ -2710,8 +2719,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           height: height / viewport.height
         };
         
-        // Call the completion handler
-        if (onVisualSearchComplete) {
+        // Call the appropriate completion handler
+        if (titleblockSelectionMode && onTitleblockSelectionComplete) {
+          onTitleblockSelectionComplete(titleblockSelectionMode, pdfSelectionBox);
+        } else if (visualSearchMode && onVisualSearchComplete) {
           onVisualSearchComplete(pdfSelectionBox);
         }
       }

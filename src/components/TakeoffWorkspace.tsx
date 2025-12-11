@@ -49,7 +49,7 @@ import {
   Highlighter,
   Scan
 } from "lucide-react";
-import { fileService, sheetService, ocrService } from '../services/apiService';
+import { fileService, sheetService, ocrService, titleblockService } from '../services/apiService';
 
 // All interfaces now imported from shared types
 
@@ -91,6 +91,19 @@ export function TakeoffWorkspace() {
   const [visualSearchMode, setVisualSearchMode] = useState(false);
   const [visualSearchCondition, setVisualSearchCondition] = useState<TakeoffCondition | null>(null);
   const [selectionBox, setSelectionBox] = useState<{x: number, y: number, width: number, height: number} | null>(null);
+
+  // Titleblock selection state (user-taught regions for sheet number/name)
+  type TitleblockField = 'sheetNumber' | 'sheetName';
+  type NormalizedBox = { x: number; y: number; width: number; height: number };
+  const [titleblockSelectionMode, setTitleblockSelectionMode] = useState<TitleblockField | null>(null);
+  const [titleblockSelectionContext, setTitleblockSelectionContext] = useState<{
+    documentId: string;
+    scope: 'single' | 'bulk';
+  } | null>(null);
+  const [pendingTitleblockConfig, setPendingTitleblockConfig] = useState<{
+    sheetNumberField?: NormalizedBox;
+    sheetNameField?: NormalizedBox;
+  } | null>(null);
   
   // Store integration
   const { 
@@ -527,6 +540,76 @@ export function TakeoffWorkspace() {
     }
   };
 
+  /**
+   * Handle completion of a titleblock region selection from the PDF viewer.
+   * The selectionBox is normalized PDF coordinates (0-1).
+   */
+  const handleTitleblockSelectionComplete = async (
+    field: TitleblockField,
+    selectionBox: NormalizedBox
+  ) => {
+    if (!titleblockSelectionContext) {
+      return;
+    }
+
+    // Merge into pending config
+    const nextConfig = {
+      ...(pendingTitleblockConfig || {}),
+      ...(field === 'sheetNumber'
+        ? { sheetNumberField: selectionBox }
+        : { sheetNameField: selectionBox }),
+    };
+    setPendingTitleblockConfig(nextConfig);
+
+    if (field === 'sheetNumber') {
+      // Step 1 complete - prompt user for sheet name region next
+      setTitleblockSelectionMode('sheetName');
+      return;
+    }
+
+    // Step 2 complete - we have both regions (or at least the name region now)
+    setTitleblockSelectionMode(null);
+
+    const finalConfig = {
+      sheetNumberField: nextConfig.sheetNumberField || selectionBox,
+      sheetNameField: nextConfig.sheetNameField || selectionBox,
+    };
+    const targetDocumentIds =
+      titleblockSelectionContext.scope === 'single'
+        ? [titleblockSelectionContext.documentId]
+        : documents.map((d) => d.id);
+
+    try {
+      if (!projectId) {
+        throw new Error('Project ID is missing');
+      }
+
+      if (isDev) {
+        console.log('[Titleblock] Calling backend extraction with config:', {
+          projectId,
+          documentIds: targetDocumentIds,
+          finalConfig,
+        });
+      }
+
+      await titleblockService.extractTitleblock(projectId, targetDocumentIds, finalConfig);
+
+      // Reload documents to pick up updated sheet labels
+      await loadProjectDocuments();
+
+      if (isDev) {
+        console.log('[Titleblock] Extraction complete and documents reloaded');
+      }
+    } catch (error) {
+      console.error('Titleblock extraction failed:', error);
+      alert('Titleblock extraction failed. Please try again.');
+    } finally {
+      // Clear context after selection flow completes
+      setTitleblockSelectionContext(null);
+      setPendingTitleblockConfig(null);
+    }
+  };
+
   const rotatePage = (direction: 'clockwise' | 'counterclockwise') => {
     const rotationStep = direction === 'clockwise' ? 90 : -90;
     const newRotation = (rotation + rotationStep) % 360;
@@ -592,6 +675,68 @@ export function TakeoffWorkspace() {
           }
         }, 200);
       }
+    }
+  };
+
+  /**
+   * Start per-document titleblock extraction by prompting the user
+   * to draw regions for sheet number and sheet name on the selected document.
+   */
+  const handleExtractTitleblockForDocument = (documentId: string) => {
+    const targetDocument = documents.find(doc => doc.id === documentId);
+    if (!targetDocument || !projectFiles.length) {
+      alert('Document not found or project files not loaded yet.');
+      return;
+    }
+
+    const firstPage = (Array.isArray(targetDocument.pages) && targetDocument.pages[0])
+      ? targetDocument.pages[0].pageNumber
+      : 1;
+
+    // Bring the target document/page into view
+    handlePageSelect(documentId, firstPage);
+
+    // Initialize titleblock selection flow
+    setTitleblockSelectionContext({ documentId, scope: 'single' });
+    setPendingTitleblockConfig(null);
+    setTitleblockSelectionMode('sheetNumber');
+
+    if (isDev) {
+      console.log('[Titleblock] Starting per-document titleblock selection', {
+        documentId,
+        pageNumber: firstPage,
+      });
+    }
+  };
+
+  /**
+   * Start bulk titleblock extraction using a single reference document.
+   * For now we use the first document as the reference.
+   */
+  const handleBulkExtractTitleblock = () => {
+    if (!documents.length) {
+      alert('No documents available to extract titleblock info from.');
+      return;
+    }
+
+    const referenceDocument = documents[0];
+    const firstPage = (Array.isArray(referenceDocument.pages) && referenceDocument.pages[0])
+      ? referenceDocument.pages[0].pageNumber
+      : 1;
+
+    // Bring the reference document/page into view
+    handlePageSelect(referenceDocument.id, firstPage);
+
+    setTitleblockSelectionContext({ documentId: referenceDocument.id, scope: 'bulk' });
+    setPendingTitleblockConfig(null);
+    setTitleblockSelectionMode('sheetNumber');
+
+    if (isDev) {
+      console.log('[Titleblock] Starting bulk titleblock selection (reference document)', {
+        documentId: referenceDocument.id,
+        pageNumber: firstPage,
+        totalDocuments: documents.length,
+      });
     }
   };
 
@@ -1514,7 +1659,7 @@ export function TakeoffWorkspace() {
 
         {/* PDF Viewer - Fixed height container */}
         <div className="flex-1 flex flex-col h-full overflow-hidden">
-          {/* Visual Search Mode Indicator */}
+          {/* Mode indicator banner */}
           {visualSearchMode && visualSearchCondition && (
             <div className="bg-indigo-100 border-b border-indigo-200 p-3 flex items-center justify-between">
               <div className="flex items-center space-x-2">
@@ -1525,6 +1670,20 @@ export function TakeoffWorkspace() {
               </div>
               <div className="text-xs text-indigo-700">
                 Draw a box around a symbol to find and count similar items
+              </div>
+            </div>
+          )}
+          {titleblockSelectionMode && (
+            <div className="bg-blue-100 border-b border-blue-200 p-3 flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                <span className="text-sm font-medium text-blue-900">
+                  Titleblock Selection: Draw a box around the{' '}
+                  {titleblockSelectionMode === 'sheetNumber' ? 'sheet number' : 'sheet name'} field
+                </span>
+              </div>
+              <div className="text-xs text-blue-800">
+                This configuration will be used to extract sheet titles and numbers automatically.
               </div>
             </div>
           )}
@@ -1562,6 +1721,10 @@ export function TakeoffWorkspace() {
               visualSearchMode={visualSearchMode}
               visualSearchCondition={visualSearchCondition}
               onVisualSearchComplete={handleVisualSearchComplete}
+              // Titleblock selection uses the same box-drawing interaction as visual search
+              // but sends regions back through a separate callback.
+              titleblockSelectionMode={titleblockSelectionMode}
+              onTitleblockSelectionComplete={handleTitleblockSelectionComplete}
             />
           ) : (
             <div className="flex items-center justify-center flex-1 bg-gray-100">
@@ -1656,6 +1819,8 @@ export function TakeoffWorkspace() {
                   onPdfUpload={handlePdfUpload}
                   uploading={uploading}
                   onLabelingJobUpdate={setLabelingJob}
+                  onExtractTitleblockForDocument={handleExtractTitleblockForDocument}
+                  onBulkExtractTitleblock={handleBulkExtractTitleblock}
                 />
               )}
               

@@ -51,6 +51,9 @@ interface SheetSidebarProps {
     totalPages?: number;
     failedDocumentsList?: Array<{id: string, name: string}>;
   } | null) => void;
+  // New titleblock extraction flows
+  onExtractTitleblockForDocument?: (documentId: string) => void;
+  onBulkExtractTitleblock?: () => void;
 }
 
 export function SheetSidebar({ 
@@ -66,7 +69,9 @@ export function SheetSidebar({
   onReloadDocuments,
   onPdfUpload,
   uploading,
-  onLabelingJobUpdate
+  onLabelingJobUpdate,
+  onExtractTitleblockForDocument,
+  onBulkExtractTitleblock,
 }: SheetSidebarProps) {
   const [filterBy, setFilterBy] = useState<'all' | 'withTakeoffs' | 'withoutTakeoffs'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -1410,10 +1415,18 @@ export function SheetSidebar({
             <Button 
               size="sm" 
               variant="outline" 
-              onClick={handleLabelAllUnlabeledPages}
-              title="Label all pages (overwrites existing labels)"
+              onClick={() => {
+                // Bulk titleblock extraction across all project documents
+                if (onBulkExtractTitleblock) {
+                  onBulkExtractTitleblock();
+                } else {
+                  // Fallback to legacy AI bulk labeling for now if no handler provided
+                  handleLabelAllUnlabeledPages();
+                }
+              }}
+              title="Bulk extract titleblock info across all documents"
             >
-              <Brain className="w-4 h-4" />
+              <Settings className="w-4 h-4" />
             </Button>
           </div>
         </div>
@@ -1701,6 +1714,20 @@ export function SheetSidebar({
                         
                         {openDocumentMenu === document.id && (
                           <div className="absolute right-0 top-full mt-1 w-56 bg-white border rounded-lg shadow-lg z-50 py-1">
+                            <button
+                              className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 text-blue-600 flex items-center gap-2"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                if (onExtractTitleblockForDocument) {
+                                  onExtractTitleblockForDocument(document.id);
+                                }
+                                setOpenDocumentMenu(null);
+                              }}
+                            >
+                              <Tag className="w-4 h-4" />
+                              Extract Titleblock Info
+                            </button>
                             <button
                               className="w-full px-3 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center gap-2"
                               onClick={(e) => {

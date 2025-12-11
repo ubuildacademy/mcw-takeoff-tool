@@ -695,6 +695,25 @@ export const sheetLabelPatternsService = {
   },
 };
 
+// Titleblock Extraction Service
+export const titleblockService = {
+  async extractTitleblock(
+    projectId: string,
+    documentIds: string[],
+    titleblockConfig: {
+      sheetNumberField: { x: number; y: number; width: number; height: number };
+      sheetNameField: { x: number; y: number; width: number; height: number };
+    }
+  ) {
+    const response = await apiClient.post('/titleblock/extract', {
+      projectId,
+      documentIds,
+      titleblockConfig,
+    });
+    return response.data;
+  },
+};
+
 // Health check
 export const healthService = {
   async checkHealth() {

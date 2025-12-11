@@ -144,7 +144,8 @@ class TitleblockExtractionService {
   async extractSheets(
     pdfPath: string,
     pageNumbers: number[],
-    batchSize: number = 10
+    batchSize: number = 10,
+    titleblockRegion?: { x: number; y: number; width: number; height: number }
   ): Promise<ExtractionResult> {
     try {
       // Validate PDF exists
@@ -170,7 +171,7 @@ class TitleblockExtractionService {
         const concurrentBatches = batches.slice(i, i + CONCURRENT_BATCHES);
         
         const batchPromises = concurrentBatches.map(batch => 
-          this.processBatch(pdfPath, batch)
+          this.processBatch(pdfPath, batch, titleblockRegion)
         );
         
         const batchResults = await Promise.all(batchPromises);
@@ -214,7 +215,11 @@ class TitleblockExtractionService {
   /**
    * Process a batch of pages
    */
-  private async processBatch(pdfPath: string, pageNumbers: number[]): Promise<ExtractionResult> {
+  private async processBatch(
+    pdfPath: string,
+    pageNumbers: number[],
+    titleblockRegion?: { x: number; y: number; width: number; height: number }
+  ): Promise<ExtractionResult> {
     try {
       const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
       const pageNumbersStr = pageNumbers.join(',');
@@ -230,7 +235,18 @@ class TitleblockExtractionService {
         maxBuffer: 10 * 1024 * 1024, // 10MB buffer
         env: {
           ...process.env,
-          PATH: enhancedPath
+          PATH: enhancedPath,
+          // Optional: pass custom titleblock region to Python via env var
+          ...(titleblockRegion
+            ? {
+                TITLEBLOCK_REGION: [
+                  titleblockRegion.x,
+                  titleblockRegion.y,
+                  titleblockRegion.width,
+                  titleblockRegion.height
+                ].join(',')
+              }
+            : {})
         }
       });
 
