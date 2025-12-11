@@ -625,7 +625,7 @@ async function extractSheetInfoFromOCRText(ocrText: string, pageNumber: number):
     sheetName = multiLineName;
   } else {
     // Fall back to single-line patterns
-    for (const { pattern } of sheetNamePatterns) {
+    for (const { pattern, label } of sheetNamePatterns) {
       const match = ocrText.match(pattern);
       if (match && match[1]) {
         let nameText = match[1].trim();
@@ -633,8 +633,29 @@ async function extractSheetInfoFromOCRText(ocrText: string, pageNumber: number):
         nameText = nameText.replace(/\s+/g, ' ').replace(/[.,;:]+$/, '');
         if (isValidSheetName(nameText)) {
           sheetName = nameText;
+          if (pageNumber <= 3) {
+            console.log(`[Page ${pageNumber}] Found sheet name using pattern "${label}": "${nameText}"`);
+          }
           break;
         }
+      }
+    }
+    
+    // Debug: If no sheet name found, log why (only for first few pages)
+    if (pageNumber <= 3 && sheetName === 'Unknown') {
+      console.log(`[Page ${pageNumber}] No sheet name found. Checking patterns...`);
+      // Check if any patterns would match
+      let foundAnyMatch = false;
+      for (const { pattern, label } of sheetNamePatterns) {
+        const testMatch = ocrText.match(pattern);
+        if (testMatch) {
+          foundAnyMatch = true;
+          const testName = testMatch[1]?.trim() || '';
+          console.log(`[Page ${pageNumber}] Pattern "${label}" matched but result was invalid: "${testName}"`);
+        }
+      }
+      if (!foundAnyMatch) {
+        console.log(`[Page ${pageNumber}] No sheet name patterns matched. Filtered text sample: ${ocrText.substring(0, 500)}`);
       }
     }
   }
@@ -702,6 +723,16 @@ router.post('/analyze-sheets', async (req, res) => {
           // Filter OCR text to focus on titleblock region (right side, excludes revisions, etc.)
           // This mimics what the Python script does - isolates titleblock content
           const ocrText = filterTextForTitleblock(fullOcrText);
+          
+          // Debug: Log filtered text for first few pages to see what we're working with
+          if (pageNumber <= 3) {
+            console.log(`[Page ${pageNumber}] Filtered text length: ${ocrText.length} (original: ${fullOcrText.length})`);
+            if (ocrText.length < 100 && ocrText.length > 0) {
+              console.log(`[Page ${pageNumber}] Filtered text preview: ${ocrText.substring(0, 200)}`);
+            } else if (ocrText.length === 0) {
+              console.warn(`[Page ${pageNumber}] Filtered text is EMPTY - no titleblock keywords found! Original text preview: ${fullOcrText.substring(0, 300)}`);
+            }
+          }
           
           // Update progress
           const progress = 10 + Math.round((i / totalPages) * 80);
