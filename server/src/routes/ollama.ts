@@ -137,20 +137,37 @@ router.post('/chat', async (req, res) => {
 
 // Helper function to filter OCR text for titleblock information
 // Less aggressive filtering - keeps context around title block keywords
+// Excludes revisions block to avoid confusion
 function filterTextForTitleblock(text: string): string {
   const lines = text.split('\n');
   const contextWindow = 15; // Keep 15 lines before and after title block keywords
   const keepLines = new Set<number>();
   
-  // First pass: identify lines with title block keywords
+  // First pass: identify lines with title block keywords (excluding revisions)
   lines.forEach((line, index) => {
     const trimmedLine = line.trim();
+    const lowerLine = trimmedLine.toLowerCase();
+    
+    // Skip revisions block lines - they're not sheet identification
+    if (/^revisions?$/i.test(trimmedLine) || 
+        /revision\s*date/i.test(lowerLine) ||
+        /revision\s*issuance/i.test(lowerLine) ||
+        /^rev\s*\d+/i.test(lowerLine)) {
+      return; // Don't keep revisions block lines
+    }
+    
     if (isTitleblockKeyword(trimmedLine)) {
       // Keep this line and context around it
       const start = Math.max(0, index - contextWindow);
       const end = Math.min(lines.length - 1, index + contextWindow);
       for (let i = start; i <= end; i++) {
-        keepLines.add(i);
+        // Don't add revisions block lines even in context
+        const contextLine = lines[i]?.trim().toLowerCase() || '';
+        if (!/^revisions?$/.test(contextLine) && 
+            !/revision\s*date/i.test(contextLine) &&
+            !/revision\s*issuance/i.test(contextLine)) {
+          keepLines.add(i);
+        }
       }
     }
     
@@ -161,7 +178,13 @@ function filterTextForTitleblock(text: string): string {
       const start = Math.max(0, index - 5);
       const end = Math.min(lines.length - 1, index + 5);
       for (let i = start; i <= end; i++) {
-        keepLines.add(i);
+        // Don't add revisions block lines even in context
+        const contextLine = lines[i]?.trim().toLowerCase() || '';
+        if (!/^revisions?$/.test(contextLine) && 
+            !/revision\s*date/i.test(contextLine) &&
+            !/revision\s*issuance/i.test(contextLine)) {
+          keepLines.add(i);
+        }
       }
     }
   });
@@ -172,6 +195,15 @@ function filterTextForTitleblock(text: string): string {
     
     // Skip empty lines
     if (!trimmedLine) return false;
+    
+    // Skip revisions block lines
+    const lowerLine = trimmedLine.toLowerCase();
+    if (/^revisions?$/i.test(trimmedLine) || 
+        /revision\s*date/i.test(lowerLine) ||
+        /revision\s*issuance/i.test(lowerLine) ||
+        /^rev\s*\d+/i.test(lowerLine)) {
+      return false;
+    }
     
     // Keep lines in our context window
     if (keepLines.has(index)) {
@@ -223,22 +255,95 @@ function isDetailCallout(line: string): boolean {
 }
 
 // Check if a line contains titleblock keywords (should be kept)
+// REFINED: Only use keywords that are directly related to sheet identification
+// Removed: 'project number', 'drawn by', 'proj. manager', 'drawing scale', 'drawing date', 'phase', 'seal'
+// These were causing confusion - they're metadata, not sheet identification fields
 function isTitleblockKeyword(line: string): boolean {
   const titleblockKeywords = [
-    'sheet number', 'drawing data', 'drawing title', 'sheet name',
-    'project number', 'drawn by', 'proj. manager', 'drawing scale',
-    'drawing date', 'phase', 'revisions', 'seal', 'title block'
+    'sheet number', 'drawing data', 'drawing title', 'sheet name', 'sheet title',
+    'drawing name', 'dwg no', 'drawing number'
+    // NOTE: "revisions" is NOT included - it's part of a revisions block, not sheet identification
+    // NOTE: Removed metadata fields like 'project number', 'drawing scale', etc. - they're not used for extraction
   ];
   
   const lowerLine = line.toLowerCase();
   return titleblockKeywords.some(keyword => lowerLine.includes(keyword));
 }
 
+// Cache for custom patterns (refresh every 5 minutes)
+let customPatternsCache: {
+  sheetNumber: Array<{ pattern: RegExp; priority: number; label: string }>;
+  sheetName: Array<{ pattern: RegExp; priority: number; label: string }>;
+  lastUpdated: number;
+} | null = null;
+
+const PATTERNS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Load custom patterns from database (with caching)
+ */
+async function loadCustomPatterns(): Promise<{
+  sheetNumber: Array<{ pattern: RegExp; priority: number; label: string }>;
+  sheetName: Array<{ pattern: RegExp; priority: number; label: string }>;
+}> {
+  // Check cache
+  if (customPatternsCache && Date.now() - customPatternsCache.lastUpdated < PATTERNS_CACHE_TTL) {
+    return {
+      sheetNumber: customPatternsCache.sheetNumber,
+      sheetName: customPatternsCache.sheetName
+    };
+  }
+  
+  try {
+    const { supabase } = await import('../supabase');
+    const { data, error } = await supabase
+      .from('sheet_label_patterns')
+      .select('*')
+      .eq('is_active', true)
+      .order('priority', { ascending: false });
+    
+    if (error) {
+      console.warn('Failed to load custom patterns, using defaults:', error);
+      return { sheetNumber: [], sheetName: [] };
+    }
+    
+    const sheetNumber: Array<{ pattern: RegExp; priority: number; label: string }> = [];
+    const sheetName: Array<{ pattern: RegExp; priority: number; label: string }> = [];
+    
+    (data || []).forEach((p: any) => {
+      try {
+        const pattern = new RegExp(p.pattern_regex, 'i');
+        const item = { pattern, priority: p.priority || 0, label: p.pattern_label };
+        
+        if (p.pattern_type === 'sheet_number') {
+          sheetNumber.push(item);
+        } else if (p.pattern_type === 'sheet_name') {
+          sheetName.push(item);
+        }
+      } catch (e) {
+        console.warn(`Invalid regex pattern for ${p.pattern_label}:`, p.pattern_regex);
+      }
+    });
+    
+    // Update cache
+    customPatternsCache = {
+      sheetNumber,
+      sheetName,
+      lastUpdated: Date.now()
+    };
+    
+    return { sheetNumber, sheetName };
+  } catch (error) {
+    console.warn('Error loading custom patterns, using defaults:', error);
+    return { sheetNumber: [], sheetName: [] };
+  }
+}
+
 /**
  * Extract sheet number and name from OCR text using pattern matching
- * (Same logic as Python script, but runs directly on OCR text)
+ * Now supports both default patterns and custom patterns from database
  */
-function extractSheetInfoFromOCRText(ocrText: string, pageNumber: number): { pageNumber: number; sheetNumber: string; sheetName: string } {
+async function extractSheetInfoFromOCRText(ocrText: string, pageNumber: number): Promise<{ pageNumber: number; sheetNumber: string; sheetName: string }> {
   let sheetNumber = "Unknown";
   let sheetName = "Unknown";
   
@@ -246,32 +351,226 @@ function extractSheetInfoFromOCRText(ocrText: string, pageNumber: number): { pag
     return { pageNumber, sheetNumber, sheetName };
   }
   
-  // Sheet number patterns (prioritized)
-  const sheetNumberPatterns = [
-    /sheet\s*number\s*:?\s*([A-Z0-9.]+)/i,
-    /sheet\s*#\s*:?\s*([A-Z0-9.]+)/i,
-    /dwg\s*no\s*:?\s*([A-Z0-9.]+)/i,
-    /drawing\s*number\s*:?\s*([A-Z0-9.]+)/i,
-    /sheet\s*:?\s*([A-Z0-9.]+)/i,
+  // Load custom patterns from database
+  const customPatterns = await loadCustomPatterns();
+  
+  // Default sheet number patterns (used as fallback if no custom patterns)
+  const defaultSheetNumberPatterns = [
+    { pattern: /sheet\s*number\s*:?\s*([A-Z0-9.]+)/i, priority: 100, label: 'sheet number' },
+    { pattern: /sheet\s*#\s*:?\s*([A-Z0-9.]+)/i, priority: 95, label: 'sheet #' },
+    { pattern: /dwg\s*no\s*:?\s*([A-Z0-9.]+)/i, priority: 90, label: 'dwg no' },
+    { pattern: /drawing\s*number\s*:?\s*([A-Z0-9.]+)/i, priority: 85, label: 'drawing number' },
+    { pattern: /sheet\s*:?\s*([A-Z0-9.]+)/i, priority: 80, label: 'sheet' },
   ];
   
-  // Sheet name patterns (prioritized - "drawing data" first for Hilton format)
-  const sheetNamePatterns = [
-    /drawing\s*data\s*:?\s*(.+?)(?:\n|$)/i,
-    /drawing\s*title\s*:?\s*(.+?)(?:\n|$)/i,
-    /sheet\s*title\s*:?\s*(.+?)(?:\n|$)/i,
-    /title\s*:?\s*(.+?)(?:\n|$)/i,
-    /project\s*name\s*:?\s*(.+?)(?:\n|$)/i,
+  // Default sheet name patterns (used as fallback if no custom patterns)
+  const defaultSheetNamePatterns = [
+    { pattern: /drawing\s*data\s*:?\s*(.+?)(?:\n|$)/i, priority: 100, label: 'drawing data' },
+    { pattern: /drawing\s*title\s*:?\s*(.+?)(?:\n|$)/i, priority: 90, label: 'drawing title' },
+    { pattern: /drawing\s*name\s*:?\s*(.+?)(?:\n|$)/i, priority: 85, label: 'drawing name' },
+    { pattern: /sheet\s*title\s*:?\s*(.+?)(?:\n|$)/i, priority: 80, label: 'sheet title' },
+    { pattern: /sheet\s*name\s*:?\s*(.+?)(?:\n|$)/i, priority: 75, label: 'sheet name' },
   ];
+  
+  // Combine custom and default patterns, prioritizing custom
+  const sheetNumberPatterns = [
+    ...customPatterns.sheetNumber,
+    ...(customPatterns.sheetNumber.length === 0 ? defaultSheetNumberPatterns : [])
+  ].sort((a, b) => b.priority - a.priority);
+  
+  const sheetNamePatterns = [
+    ...customPatterns.sheetName,
+    ...(customPatterns.sheetName.length === 0 ? defaultSheetNamePatterns : [])
+  ].sort((a, b) => b.priority - a.priority);
+  
+  // Helper function to extract multi-line sheet name after various label types
+  // Now uses custom patterns from database
+  const extractMultiLineSheetNameWithCustomPatterns = async (
+    text: string, 
+    patterns: Array<{ pattern: RegExp; priority: number; label: string }>
+  ): Promise<string | null> => {
+    const lines = text.split('\n');
+    let foundSheetNameLabel = false;
+    const nameParts: string[] = [];
+    let labelPattern: RegExp | null = null;
+    
+    // Extract label detection patterns from the full patterns
+    const labelPatterns = patterns.map(p => {
+      // Extract the label part before the capture group
+      const regexStr = p.pattern.source;
+      // Remove the capture group and look for label part
+      const labelMatch = regexStr.match(/^(.+?)(?:\(.+?\)|$)/);
+      if (labelMatch) {
+        try {
+          return new RegExp(labelMatch[1].replace(/\\s\*:?\s\*/, '\\s*:?'), 'i');
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    }).filter((p): p is RegExp => p !== null);
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      const lowerLine = line.toLowerCase();
+      
+      // Check if this line contains a sheet name label (if we haven't found one yet)
+      if (!foundSheetNameLabel) {
+        for (const pattern of labelPatterns) {
+          if (pattern.test(lowerLine)) {
+            foundSheetNameLabel = true;
+            labelPattern = pattern;
+            // Extract text after the label
+            const match = line.match(new RegExp(pattern.source.replace('\\s*:?', '\\s*:?\\s*(.+)'), 'i'));
+            if (match && match[1]) {
+              const afterLabel = match[1].trim();
+              if (afterLabel && afterLabel.length > 0) {
+                nameParts.push(afterLabel);
+              }
+            }
+            break;
+          }
+        }
+        // Continue to next line to capture text in the box below
+        if (foundSheetNameLabel) continue;
+      }
+      
+      // If we found a sheet name label, collect subsequent lines until we hit another label
+      if (foundSheetNameLabel) {
+        // Check if this line matches any of our label patterns (but not the one we're using)
+        let isAnotherLabel = false;
+        for (const p of labelPatterns) {
+          if (p !== labelPattern && p.test(lowerLine)) {
+            isAnotherLabel = true;
+            break;
+          }
+        }
+        
+        // Stop if we hit another titleblock label
+        if (isAnotherLabel || /sheet\s*number|dwg\s*no|drawing\s*number/i.test(lowerLine)) {
+          break;
+        }
+        
+        // Stop if we hit revisions block (common in titleblocks)
+        if (/revisions?|revision\s*date|revision\s*issuance|rev\s*date/i.test(lowerLine)) {
+          break;
+        }
+        
+        // Stop if we hit empty line and already have content
+        if (line.length === 0 && nameParts.length > 0) {
+          break;
+        }
+        
+        // Collect non-empty lines that are part of the sheet name
+        if (line.length > 0) {
+          // Skip if it looks like a label (contains colon and is short)
+          if (!/^[^:]{0,30}:\s*$/.test(line)) {
+            // Skip if it looks like revision information
+            if (!/^\d{1,2}\/\d{1,2}\/\d{2,4}/.test(line) && // dates
+                !/^rev\s*\d+/i.test(lowerLine) && // revision numbers
+                !/^issuance/i.test(lowerLine)) {
+              nameParts.push(line);
+            }
+          }
+        }
+      }
+    }
+    
+    if (nameParts.length > 0) {
+      const fullName = nameParts.join(' ').trim();
+      // Clean up: remove extra whitespace, trailing punctuation
+      const cleaned = fullName.replace(/\s+/g, ' ').replace(/[.,;:]+$/, '');
+      if (cleaned.length > 2) {
+        return cleaned;
+      }
+    }
+    
+    return null;
+  };
+  
+  // Invalid patterns that should be rejected
+  const invalidSheetNamePatterns = [
+    /^revisions\s*:?\s*project\s*info$/i,
+    /^project\s*info$/i,
+    /^revisions?$/i,
+    /revision\s*date/i,
+    /revision\s*issuance/i,
+    /rev\s*\d+/i, // Revision numbers like "Rev 1", "Rev 2"
+    /^\d{1,2}\/\d{1,2}\/\d{2,4}/, // Dates (common in revisions blocks)
+    /^DRAW1NG$/i,
+    /^DRAWING$/i, // Too generic
+    /^drawing$/i,
+  ];
+  
+  // Invalid sheet number patterns
+  const invalidSheetNumberPatterns = [
+    /^DRAW1NG$/i,
+    /^DRAWING$/i,
+    /^[A-Z]{5,}$/i, // All caps words longer than 4 chars are likely not sheet numbers
+  ];
+  
+  // Helper function to validate sheet name
+  const isValidSheetName = (name: string): boolean => {
+    if (!name || name.length < 3) return false;
+    const lowerName = name.toLowerCase().trim();
+    
+    // Reject if it matches invalid patterns
+    for (const pattern of invalidSheetNamePatterns) {
+      if (pattern.test(name.trim())) {
+        return false;
+      }
+    }
+    
+    // Reject if it's just "revisions" or "project info" or similar
+    if (lowerName === 'revisions' || lowerName === 'revision' || 
+        lowerName === 'project info' || lowerName === 'drawing') {
+      return false;
+    }
+    
+    // Reject if it contains "revisions :project info" pattern
+    if (lowerName.includes('revisions') && lowerName.includes('project info')) {
+      return false;
+    }
+    
+    // Reject if it looks like revision information (dates, revision numbers)
+    if (/^\d{1,2}\/\d{1,2}\/\d{2,4}/.test(name.trim()) || // Starts with date
+        /rev\s*\d+/i.test(lowerName) || // Contains revision number
+        /revision\s*date/i.test(lowerName) || // Contains "revision date"
+        /revision\s*issuance/i.test(lowerName)) { // Contains "revision issuance"
+      return false;
+    }
+    
+    return true;
+  };
+  
+  // Helper function to validate sheet number
+  const isValidSheetNumber = (num: string): boolean => {
+    if (!num || num.length < 2) return false;
+    // Reject if it matches invalid patterns
+    for (const pattern of invalidSheetNumberPatterns) {
+      if (pattern.test(num.trim())) {
+        return false;
+      }
+    }
+    // Sheet numbers should be alphanumeric with dots, not all letters
+    // Reject if it's all letters and longer than 4 chars (like "DRAW1NG")
+    if (/^[A-Z]{5,}$/i.test(num) && !num.includes('.')) {
+      return false;
+    }
+    return true;
+  };
   
   // Search for sheet number
-  for (const pattern of sheetNumberPatterns) {
+  for (const { pattern } of sheetNumberPatterns) {
     const match = ocrText.match(pattern);
     if (match && match[1]) {
-      sheetNumber = match[1].trim().toUpperCase();
+      const candidate = match[1].trim().toUpperCase();
       // Fix common OCR errors
-      sheetNumber = sheetNumber.replace(/O/g, '0').replace(/l/g, '1').replace(/I/g, '1');
-      break;
+      const fixed = candidate.replace(/O/g, '0').replace(/l/g, '1').replace(/I/g, '1');
+      if (isValidSheetNumber(fixed)) {
+        sheetNumber = fixed;
+        break;
+      }
     }
   }
   
@@ -281,29 +580,42 @@ function extractSheetInfoFromOCRText(ocrText: string, pageNumber: number): { pag
     const standalonePattern = /\b([A-Z][0-9]+\.[0-9]+)\b/i;
     const match = ocrText.match(standalonePattern);
     if (match && match[1]) {
-      sheetNumber = match[1].trim().toUpperCase();
-      sheetNumber = sheetNumber.replace(/O/g, '0').replace(/l/g, '1').replace(/I/g, '1');
+      const candidate = match[1].trim().toUpperCase();
+      const fixed = candidate.replace(/O/g, '0').replace(/l/g, '1').replace(/I/g, '1');
+      if (isValidSheetNumber(fixed)) {
+        sheetNumber = fixed;
+      }
     } else {
       // Pattern: Letter + digits (e.g., A4, F2) - but require at least 2 chars
       const shortPattern = /\b([A-Z][0-9]+)\b/i;
       const shortMatch = ocrText.match(shortPattern);
       if (shortMatch && shortMatch[1] && shortMatch[1].length >= 2 && shortMatch[1].length <= 5) {
-        sheetNumber = shortMatch[1].trim().toUpperCase();
-        sheetNumber = sheetNumber.replace(/O/g, '0').replace(/l/g, '1').replace(/I/g, '1');
+        const candidate = shortMatch[1].trim().toUpperCase();
+        const fixed = candidate.replace(/O/g, '0').replace(/l/g, '1').replace(/I/g, '1');
+        if (isValidSheetNumber(fixed)) {
+          sheetNumber = fixed;
+        }
       }
     }
   }
   
-  // Search for sheet name
-  for (const pattern of sheetNamePatterns) {
-    const match = ocrText.match(pattern);
-    if (match && match[1]) {
-      let nameText = match[1].trim();
-      // Clean up: remove extra whitespace, trailing punctuation
-      nameText = nameText.replace(/\s+/g, ' ').replace(/[.,;:]+$/, '');
-      if (nameText.length > 2) {
-        sheetName = nameText;
-        break;
+  // Search for sheet name - try multi-line extraction first (for labels with box below)
+  // Update extractMultiLineSheetName to use custom patterns
+  const multiLineName = await extractMultiLineSheetNameWithCustomPatterns(ocrText, sheetNamePatterns);
+  if (multiLineName && isValidSheetName(multiLineName)) {
+    sheetName = multiLineName;
+  } else {
+    // Fall back to single-line patterns
+    for (const { pattern } of sheetNamePatterns) {
+      const match = ocrText.match(pattern);
+      if (match && match[1]) {
+        let nameText = match[1].trim();
+        // Clean up: remove extra whitespace, trailing punctuation
+        nameText = nameText.replace(/\s+/g, ' ').replace(/[.,;:]+$/, '');
+        if (isValidSheetName(nameText)) {
+          sheetName = nameText;
+          break;
+        }
       }
     }
   }
@@ -374,8 +686,19 @@ router.post('/analyze-sheets', async (req, res) => {
             sendProgress(progress, `Processing page ${i + 1}/${totalPages}...`);
           }
           
-          // Extract sheet info from OCR text
-          const sheetInfo = extractSheetInfoFromOCRText(ocrText, pageNumber);
+          // Extract sheet info from OCR text (now async to load custom patterns)
+          const sheetInfo = await extractSheetInfoFromOCRText(ocrText, pageNumber);
+          
+          // Log if we're getting invalid results
+          if (sheetInfo.sheetName && (sheetInfo.sheetName.includes('revisions') || sheetInfo.sheetName.includes('project info'))) {
+            console.warn(`[Page ${pageNumber}] Invalid sheet name detected: "${sheetInfo.sheetName}" - should be rejected`);
+            sheetInfo.sheetName = "Unknown";
+          }
+          if (sheetInfo.sheetNumber && (sheetInfo.sheetNumber === 'DRAW1NG' || sheetInfo.sheetNumber === 'DRAWING')) {
+            console.warn(`[Page ${pageNumber}] Invalid sheet number detected: "${sheetInfo.sheetNumber}" - should be rejected`);
+            sheetInfo.sheetNumber = "Unknown";
+          }
+          
           allSheets.push(sheetInfo);
         }
         
@@ -481,7 +804,7 @@ router.post('/analyze-sheets', async (req, res) => {
 
 TITLE BLOCK LOCATION:
 - Title blocks are ALWAYS on the far right border of construction documents (industry standard)
-- Look for text containing "drawing data:" and "sheet number:" labels
+- Look for text containing sheet identification labels and "sheet number:" labels
 - The text may be rotated or in different orientations, but always on the right side
 
 YOUR TASK:
@@ -489,20 +812,48 @@ Extract EXACT text from title block fields. Your job is to clean up minor OCR er
 
 For each page, find:
 1. Sheet number: Look for "sheet number:" followed by alphanumeric code (e.g., A4.21, A0.01, S0.02)
-2. Sheet name: Look for "drawing data:" followed by the COMPLETE title (can be 7-8+ words long)
+2. Sheet name: Look for ANY of these labels (different projects use different labels):
+   - "drawing data:" (common in some formats)
+   - "drawing title:" (very common)
+   - "drawing name:" (common)
+   - "sheet title:" (common)
+   - "sheet name:" (common)
+   The sheet name is typically in a BOX BELOW the label
+   - The sheet name may be on the SAME line as the label OR on the LINE(S) BELOW it
+   - Capture ALL text in the box below the label until you hit another label or empty line
+   - Sheet names can span multiple lines (e.g., "Enlarged Floor Plan - Ground Floor - East Side")
 
 CRITICAL RULES:
 - Use EXACT text from title block - only fix obvious OCR errors (O→0, I→1, l→1, etc.)
 - DO NOT reword, shorten, or change sheet names
 - DO NOT reorder sheet numbers based on patterns
-- Capture COMPLETE sheet names including all words after "drawing data:"
+- Capture COMPLETE sheet names including all words after the label and in the box below it
+- If the label appears on one line and the sheet name is on the next line(s), capture ALL of it
 - IGNORE detail callouts (lines starting with numbers like "01 Detail" or "25 Section")
+- STOP collecting sheet name text when you encounter:
+  - Another titleblock label (sheet number, drawing title, etc.)
+  - Revisions block information (revision dates, revision numbers, issuance dates)
+  - Empty lines (if you already have content)
+
+CRITICAL - DO NOT EXTRACT (REVISIONS BLOCK):
+- "revisions" or "revision" - this is part of a revisions block, NOT a sheet name
+- "revisions :project info" or "project info" - these are metadata, NOT sheet names
+- Revision dates (e.g., "01/15/2024", "12/31/23")
+- Revision numbers (e.g., "Rev 1", "Rev 2", "Revision 1")
+- Issuance information
+- "DRAW1NG" or "DRAWING" - these are NOT sheet numbers
+- Generic labels like "title:", "revisions:", "project:" without actual sheet information
+- Only extract actual sheet names that describe the drawing (e.g., "Floor Plan", "Elevations", "Details")
 
 EXAMPLES:
 - "drawing data: Enlarged Floor Plan - Ground Floor - East Side" → sheetName: "Enlarged Floor Plan - Ground Floor - East Side"
-- "drawing data: Overall Reflected Ceiling Plans - Third thru Sixth & Int. Roof Level" → sheetName: "Overall Reflected Ceiling Plans - Third thru Sixth & Int. Roof Level"
+- "drawing title: Overall Reflected Ceiling Plans - Third thru Sixth & Int. Roof Level" → sheetName: "Overall Reflected Ceiling Plans - Third thru Sixth & Int. Roof Level"
+- "sheet name: Cover Sheet" → sheetName: "Cover Sheet"
 - "sheet number: A4.21" → sheetNumber: "A4.21"
 - If OCR shows "A4.2l" (lowercase L), correct to "A4.21" (number one)
+- If you see "revisions :project info" → DO NOT use this as sheetName, use "Unknown" instead
+- If you see "revisions" or "revision date" → DO NOT use this as sheetName, use "Unknown" instead
+- If you see "DRAW1NG" → DO NOT use this as sheetNumber, use "Unknown" instead
 
 OUTPUT FORMAT (JSON array):
 [ { "pageNumber": 1, "sheetNumber": "A0.01", "sheetName": "Cover Sheet" }, { "pageNumber": 2, "sheetNumber": "A4.21", "sheetName": "Enlarged Floor Plan - Ground Floor - East Side" } ]
@@ -597,21 +948,62 @@ If you cannot find a sheet number or name, use "Unknown". Extract exactly what y
         // Validate each sheet object and ensure page numbers match the batch
         const expectedPageNumbers = new Set(pagesToAnalyze.map((p: any) => p.pageNumber));
         
+        // Helper function to validate and clean AI results
+        const validateAndCleanSheet = (sheet: any): any | null => {
+          if (!sheet || 
+              typeof sheet.pageNumber !== 'number' || 
+              typeof sheet.sheetNumber !== 'string' || 
+              typeof sheet.sheetName !== 'string') {
+            return null;
+          }
+          
+          // Validate page number matches batch
+          if (!expectedPageNumbers.has(sheet.pageNumber)) {
+            console.warn(`[Batch ${Math.floor(batchStart / BATCH_SIZE) + 1}] AI returned invalid pageNumber ${sheet.pageNumber} for batch containing pages: ${Array.from(expectedPageNumbers).join(', ')}`);
+            return null;
+          }
+          
+          // Validate and clean sheet name
+          let sheetName = sheet.sheetName.trim();
+          const lowerName = sheetName.toLowerCase();
+          
+          // Reject invalid patterns (revisions block, etc.)
+          if (lowerName.includes('revisions') && lowerName.includes('project info')) {
+            console.warn(`[Batch ${Math.floor(batchStart / BATCH_SIZE) + 1}] Page ${sheet.pageNumber}: Rejecting invalid sheet name: "${sheetName}"`);
+            sheetName = "Unknown";
+          } else if (lowerName === 'revisions' || lowerName === 'revision' || 
+                     lowerName === 'project info' || lowerName === 'drawing') {
+            console.warn(`[Batch ${Math.floor(batchStart / BATCH_SIZE) + 1}] Page ${sheet.pageNumber}: Rejecting generic sheet name: "${sheetName}"`);
+            sheetName = "Unknown";
+          } else if (/revision\s*date/i.test(lowerName) ||
+                     /revision\s*issuance/i.test(lowerName) ||
+                     /^rev\s*\d+/i.test(lowerName) ||
+                     /^\d{1,2}\/\d{1,2}\/\d{2,4}/.test(sheetName.trim())) {
+            // Reject revision dates, revision numbers, issuance info
+            console.warn(`[Batch ${Math.floor(batchStart / BATCH_SIZE) + 1}] Page ${sheet.pageNumber}: Rejecting revisions block content: "${sheetName}"`);
+            sheetName = "Unknown";
+          }
+          
+          // Validate and clean sheet number
+          let sheetNumber = sheet.sheetNumber.trim().toUpperCase();
+          
+          // Reject invalid patterns
+          if (sheetNumber === 'DRAW1NG' || sheetNumber === 'DRAWING' || 
+              (sheetNumber.length > 4 && /^[A-Z]+$/.test(sheetNumber) && !sheetNumber.includes('.'))) {
+            console.warn(`[Batch ${Math.floor(batchStart / BATCH_SIZE) + 1}] Page ${sheet.pageNumber}: Rejecting invalid sheet number: "${sheetNumber}"`);
+            sheetNumber = "Unknown";
+          }
+          
+          return {
+            pageNumber: sheet.pageNumber,
+            sheetNumber: sheetNumber,
+            sheetName: sheetName
+          };
+        };
+        
         batchSheets = batchSheets
-          .filter(sheet => 
-            sheet && 
-            typeof sheet.pageNumber === 'number' && 
-            typeof sheet.sheetNumber === 'string' && 
-            typeof sheet.sheetName === 'string'
-          )
-          // CRITICAL: Validate that pageNumber matches one of the pages in this batch
-          .filter(sheet => {
-            if (!expectedPageNumbers.has(sheet.pageNumber)) {
-              console.warn(`[Batch ${Math.floor(batchStart / BATCH_SIZE) + 1}] AI returned invalid pageNumber ${sheet.pageNumber} for batch containing pages: ${Array.from(expectedPageNumbers).join(', ')}`);
-              return false;
-            }
-            return true;
-          });
+          .map(validateAndCleanSheet)
+          .filter((sheet): sheet is any => sheet !== null);
 
         console.log(`Batch ${Math.floor(batchStart / BATCH_SIZE) + 1} parsed sheets:`, batchSheets.length, 'sheets found (expected pages:', Array.from(expectedPageNumbers).join(', '), ')');
         

@@ -652,6 +652,49 @@ export const aiAnalysisService = {
   },
 };
 
+// Sheet Label Patterns Service
+export const sheetLabelPatternsService = {
+  async getPatterns(patternType?: 'sheet_name' | 'sheet_number') {
+    const params = patternType ? { pattern_type: patternType } : {};
+    const response = await apiClient.get('/sheet-label-patterns', { params });
+    return response.data.patterns;
+  },
+
+  async getActivePatterns(patternType?: 'sheet_name' | 'sheet_number') {
+    const params = patternType ? { pattern_type: patternType } : {};
+    const response = await apiClient.get('/sheet-label-patterns/active', { params });
+    return response.data.patterns;
+  },
+
+  async createPattern(pattern: {
+    pattern_type: 'sheet_name' | 'sheet_number';
+    pattern_label: string;
+    pattern_regex: string;
+    priority?: number;
+    description?: string;
+    is_active?: boolean;
+  }) {
+    const response = await apiClient.post('/sheet-label-patterns', pattern);
+    return response.data.pattern;
+  },
+
+  async updatePattern(id: string, updates: {
+    pattern_label?: string;
+    pattern_regex?: string;
+    priority?: number;
+    description?: string;
+    is_active?: boolean;
+  }) {
+    const response = await apiClient.put(`/sheet-label-patterns/${id}`, updates);
+    return response.data.pattern;
+  },
+
+  async deletePattern(id: string) {
+    const response = await apiClient.delete(`/sheet-label-patterns/${id}`);
+    return response.data;
+  },
+};
+
 // Health check
 export const healthService = {
   async checkHealth() {

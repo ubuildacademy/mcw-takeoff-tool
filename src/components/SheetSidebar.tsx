@@ -748,20 +748,21 @@ export function SheetSidebar({
     return document.pages.some(page => !hasMeaningfulLabel(page));
   };
 
-  // Process all unlabeled documents for page labeling (skip OCR, use existing OCR data)
+  // Process all documents for page labeling (skip OCR, use existing OCR data)
+  // TEMPORARY: Overwrites ALL pages for testing (will revert to unlabeled-only later)
   const handleLabelAllUnlabeledPages = async () => {
-    // Find documents that have at least one unlabeled page
-    const documentsWithUnlabeledPages = documents.filter(doc => hasUnlabeledPages(doc));
+    // TEMPORARY: Process ALL documents (not just unlabeled) for testing
+    const documentsToProcess = documents.filter(doc => doc.pages && doc.pages.length > 0);
     
-    if (documentsWithUnlabeledPages.length === 0) {
-      alert('No unlabeled documents found. All documents already have sheet names or numbers.');
+    if (documentsToProcess.length === 0) {
+      alert('No documents found to label.');
       return;
     }
 
     // Initialize labeling job
     if (onLabelingJobUpdate) {
       onLabelingJobUpdate({
-        totalDocuments: documentsWithUnlabeledPages.length,
+        totalDocuments: documentsToProcess.length,
         completedDocuments: 0,
         failedDocuments: 0,
         progress: 0,
@@ -774,10 +775,9 @@ export function SheetSidebar({
     let totalPagesProcessed = 0;
     let totalPages = 0;
 
-    // Calculate total unlabeled pages across all documents
-    for (const doc of documentsWithUnlabeledPages) {
-      const unlabeledCount = doc.pages.filter(page => !hasMeaningfulLabel(page)).length;
-      totalPages += unlabeledCount;
+    // Calculate total pages across all documents (TEMPORARY: all pages, not just unlabeled)
+    for (const doc of documentsToProcess) {
+      totalPages += doc.pages.length;
     }
 
     // Helper function to update labeling job state
@@ -791,7 +791,7 @@ export function SheetSidebar({
     }>) => {
       if (onLabelingJobUpdate) {
         onLabelingJobUpdate({
-          totalDocuments: documentsWithUnlabeledPages.length,
+          totalDocuments: documentsToProcess.length,
           completedDocuments: updates.completedDocuments ?? 0,
           failedDocuments: updates.failedDocuments ?? failedDocumentsList.length,
           progress: updates.progress ?? 0,
@@ -805,15 +805,15 @@ export function SheetSidebar({
     };
 
     // Process documents sequentially
-    for (let i = 0; i < documentsWithUnlabeledPages.length; i++) {
-      const document = documentsWithUnlabeledPages[i];
+    for (let i = 0; i < documentsToProcess.length; i++) {
+      const document = documentsToProcess[i];
       
       try {
         // Update current document
         updateLabelingJob({
           completedDocuments: i,
           failedDocuments: failedDocumentsList.length,
-          progress: Math.round((i / documentsWithUnlabeledPages.length) * 100),
+          progress: Math.round((i / documentsToProcess.length) * 100),
           currentDocument: document.name,
           processedPages: totalPagesProcessed,
           status: 'processing'
@@ -849,8 +849,8 @@ export function SheetSidebar({
                   if (data.progress !== undefined && data.message) {
                     lastProgress = data.progress;
                     // Calculate overall progress: document progress + completed documents
-                    const documentProgress = (lastProgress / 100) * (1 / documentsWithUnlabeledPages.length) * 100;
-                    const completedProgress = (i / documentsWithUnlabeledPages.length) * 100;
+                    const documentProgress = (lastProgress / 100) * (1 / documentsToProcess.length) * 100;
+                    const completedProgress = (i / documentsToProcess.length) * 100;
                     const overallProgress = completedProgress + documentProgress;
                     
                     updateLabelingJob({
@@ -916,19 +916,10 @@ export function SheetSidebar({
             sheetsToSave.map(s => s.pageNumber).join(', '));
 
           // Save sheets sequentially without debounced reloads to prevent race conditions
-          // CRITICAL: Refresh document reference to get latest page data before checking
-          const currentDocument = documents.find(doc => doc.id === document.id) || document;
-          
+          // TEMPORARY: Overwrite ALL pages (removed check for existing labels)
           for (const sheet of sheetsToSave) {
             try {
-              // Use fresh document reference to check for existing labels
-              const page = currentDocument.pages.find(p => p.pageNumber === sheet.pageNumber);
-              if (page && hasMeaningfulLabel(page)) {
-                console.log(`[Labeling] Skipping page ${sheet.pageNumber} - already has meaningful label: ${page.sheetName || page.sheetNumber}`);
-                continue;
-              }
-              
-              // Validate page number is within document bounds (double-check after filtering)
+              // Validate page number is within document bounds
               if (sheet.pageNumber < 1 || sheet.pageNumber > maxPageNumber) {
                 console.warn(`[Labeling] Invalid page number ${sheet.pageNumber} for document ${document.name} (total pages: ${maxPageNumber})`);
                 continue;
@@ -936,7 +927,7 @@ export function SheetSidebar({
               
               const sheetId = `${document.id}-${sheet.pageNumber}`;
               
-              console.log(`[Labeling] Saving page ${sheet.pageNumber}: "${sheet.sheetNumber}" - "${sheet.sheetName}"`);
+              console.log(`[Labeling] Overwriting page ${sheet.pageNumber}: "${sheet.sheetNumber}" - "${sheet.sheetName}"`);
               
               await sheetService.updateSheet(sheetId, {
                 documentId: document.id,
@@ -949,7 +940,7 @@ export function SheetSidebar({
               totalPagesProcessed++;
               updateLabelingJob({
                 processedPages: totalPagesProcessed,
-                progress: Math.round(((i + 1) / documentsWithUnlabeledPages.length) * 100),
+                progress: Math.round(((i + 1) / documentsToProcess.length) * 100),
                 status: 'processing'
               });
             } catch (error) {
@@ -963,7 +954,7 @@ export function SheetSidebar({
         // Mark document as completed
         updateLabelingJob({
           completedDocuments: i + 1,
-          progress: Math.round(((i + 1) / documentsWithUnlabeledPages.length) * 100),
+          progress: Math.round(((i + 1) / documentsToProcess.length) * 100),
           currentDocument: undefined,
           status: 'processing'
         });
@@ -975,7 +966,7 @@ export function SheetSidebar({
         updateLabelingJob({
           failedDocuments: failedDocumentsList.length,
           completedDocuments: i + 1,
-          progress: Math.round(((i + 1) / documentsWithUnlabeledPages.length) * 100),
+          progress: Math.round(((i + 1) / documentsToProcess.length) * 100),
           currentDocument: undefined,
           status: 'processing'
         });
@@ -990,8 +981,8 @@ export function SheetSidebar({
     // Mark as completed and show report
     if (onLabelingJobUpdate) {
       onLabelingJobUpdate({
-        totalDocuments: documentsWithUnlabeledPages.length,
-        completedDocuments: documentsWithUnlabeledPages.length,
+        totalDocuments: documentsToProcess.length,
+        completedDocuments: documentsToProcess.length,
         failedDocuments: failedDocumentsList.length,
         progress: 100,
         status: 'completed',
@@ -1002,7 +993,7 @@ export function SheetSidebar({
     }
 
     // Show completion report
-    const successCount = documentsWithUnlabeledPages.length - failedDocumentsList.length;
+    const successCount = documentsToProcess.length - failedDocumentsList.length;
     const failCount = failedDocumentsList.length;
     
     let reportMessage = `Page labeling complete!\n\n✅ Successfully labeled: ${successCount} document(s)`;
@@ -1399,7 +1390,7 @@ export function SheetSidebar({
               size="sm" 
               variant="outline" 
               onClick={handleLabelAllUnlabeledPages}
-              title="Label all unlabeled pages"
+              title="Label all pages (overwrites existing labels)"
             >
               <Brain className="w-4 h-4" />
             </Button>

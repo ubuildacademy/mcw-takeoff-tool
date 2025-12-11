@@ -19,6 +19,7 @@ import cvTakeoffRoutes from './routes/cvTakeoff';
 import ruleValidationRoutes from './routes/ruleValidation';
 import visualSearchRoutes from './routes/visualSearch';
 import settingsRoutes from './routes/settings';
+import sheetLabelPatternsRoutes from './routes/sheetLabelPatterns';
 import calibrationRoutes from './routes/calibrations';
 import { livePreviewService } from './services/livePreviewService';
 // Initialize queue service (starts worker)
@@ -252,6 +253,7 @@ app.use('/api/cv-takeoff', cvTakeoffRoutes);
 app.use('/api/rule-validation', ruleValidationRoutes);
 app.use('/api/visual-search', visualSearchRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/sheet-label-patterns', sheetLabelPatternsRoutes);
 app.use('/api/calibrations', calibrationRoutes);
 
 // Serve uploaded files

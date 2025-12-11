@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { ollamaService, type OllamaModel } from '../services/ollamaService';
 import { authHelpers, UserMetadata, UserInvitation } from '../lib/supabase';
-import { settingsService } from '../services/apiService';
+import { settingsService, sheetLabelPatternsService } from '../services/apiService';
 
 interface AdminPanelProps {
   isOpen: boolean;
@@ -27,7 +27,7 @@ interface AdminPanelProps {
 }
 
 export function AdminPanel({ isOpen, onClose, projectId }: AdminPanelProps) {
-  const [activeTab, setActiveTab] = useState<'overview' | 'ai-prompt' | 'ai-settings' | 'user-management'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'ai-prompt' | 'ai-settings' | 'user-management' | 'sheet-label-patterns'>('overview');
   const [isLoading, setIsLoading] = useState(false);
   const [adminKey, setAdminKey] = useState('');
   const [isUnlocked, setIsUnlocked] = useState(false);
@@ -425,6 +425,7 @@ When answering questions:
     { id: 'overview', label: 'Overview', icon: BarChart3 },
     { id: 'ai-prompt', label: 'AI Prompt Editor', icon: Brain },
     { id: 'ai-settings', label: 'AI Settings', icon: Brain },
+    { id: 'sheet-label-patterns', label: 'Sheet Label Patterns', icon: Brain },
     { id: 'user-management', label: 'User Management', icon: Users }
   ];
 
@@ -1051,6 +1052,10 @@ When answering questions:
                 </div>
               )}
 
+              {activeTab === 'sheet-label-patterns' && (
+                <SheetLabelPatternsTab />
+              )}
+
             </div>
           </div>
         )}
@@ -1063,5 +1068,255 @@ When answering questions:
       </DialogContent>
 
     </Dialog>
+  );
+}
+
+// Sheet Label Patterns Tab Component
+function SheetLabelPatternsTab() {
+  const [patterns, setPatterns] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filterType, setFilterType] = useState<'all' | 'sheet_name' | 'sheet_number'>('all');
+  const [editingPattern, setEditingPattern] = useState<any | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [formData, setFormData] = useState({
+    pattern_type: 'sheet_name' as 'sheet_name' | 'sheet_number',
+    pattern_label: '',
+    pattern_regex: '',
+    priority: 0,
+    description: '',
+    is_active: true
+  });
+
+  useEffect(() => {
+    loadPatterns();
+  }, [filterType]);
+
+  const loadPatterns = async () => {
+    try {
+      setLoading(true);
+      const allPatterns = await sheetLabelPatternsService.getPatterns(
+        filterType === 'all' ? undefined : filterType
+      );
+      setPatterns(allPatterns);
+    } catch (error) {
+      console.error('Failed to load patterns:', error);
+      alert('Failed to load patterns');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSave = async () => {
+    try {
+      if (editingPattern) {
+        await sheetLabelPatternsService.updatePattern(editingPattern.id, formData);
+      } else {
+        await sheetLabelPatternsService.createPattern(formData);
+      }
+      setShowAddForm(false);
+      setEditingPattern(null);
+      setFormData({
+        pattern_type: 'sheet_name',
+        pattern_label: '',
+        pattern_regex: '',
+        priority: 0,
+        description: '',
+        is_active: true
+      });
+      loadPatterns();
+    } catch (error: any) {
+      console.error('Failed to save pattern:', error);
+      alert(error.response?.data?.error || 'Failed to save pattern');
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this pattern?')) return;
+    try {
+      await sheetLabelPatternsService.deletePattern(id);
+      loadPatterns();
+    } catch (error) {
+      console.error('Failed to delete pattern:', error);
+      alert('Failed to delete pattern');
+    }
+  };
+
+  const handleEdit = (pattern: any) => {
+    setEditingPattern(pattern);
+    setFormData({
+      pattern_type: pattern.pattern_type,
+      pattern_label: pattern.pattern_label,
+      pattern_regex: pattern.pattern_regex,
+      priority: pattern.priority || 0,
+      description: pattern.description || '',
+      is_active: pattern.is_active !== false
+    });
+    setShowAddForm(true);
+  };
+
+  const filteredPatterns = filterType === 'all' 
+    ? patterns 
+    : patterns.filter(p => p.pattern_type === filterType);
+
+  return (
+    <div className="p-6">
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-2xl font-bold">Sheet Label Patterns</h2>
+        <div className="flex items-center gap-4">
+          <select
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value as any)}
+            className="border rounded px-3 py-1"
+          >
+            <option value="all">All Patterns</option>
+            <option value="sheet_name">Sheet Names</option>
+            <option value="sheet_number">Sheet Numbers</option>
+          </select>
+          <Button onClick={() => {
+            setShowAddForm(true);
+            setEditingPattern(null);
+            setFormData({
+              pattern_type: 'sheet_name',
+              pattern_label: '',
+              pattern_regex: '',
+              priority: 0,
+              description: '',
+              is_active: true
+            });
+          }}>
+            Add Pattern
+          </Button>
+        </div>
+      </div>
+
+      {showAddForm && (
+        <div className="border rounded-lg p-6 mb-6 bg-gray-50">
+          <h3 className="text-lg font-semibold mb-4">
+            {editingPattern ? 'Edit Pattern' : 'Add New Pattern'}
+          </h3>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label>Pattern Type</Label>
+              <select
+                className="w-full p-2 border rounded-md"
+                value={formData.pattern_type}
+                onChange={(e) => setFormData({ ...formData, pattern_type: e.target.value as any })}
+              >
+                <option value="sheet_name">Sheet Name</option>
+                <option value="sheet_number">Sheet Number</option>
+              </select>
+            </div>
+            <div>
+              <Label>Pattern Label</Label>
+              <Input
+                value={formData.pattern_label}
+                onChange={(e) => setFormData({ ...formData, pattern_label: e.target.value })}
+                placeholder="e.g., drawing data, sheet title"
+              />
+            </div>
+            <div className="col-span-2">
+              <Label>Regex Pattern</Label>
+              <Input
+                value={formData.pattern_regex}
+                onChange={(e) => setFormData({ ...formData, pattern_regex: e.target.value })}
+                placeholder='e.g., drawing\s*data\s*:?\s*(.+?)(?:\n|$)'
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Use regex to match the label. Capture group ( ) will extract the value.
+              </p>
+            </div>
+            <div>
+              <Label>Priority</Label>
+              <Input
+                type="number"
+                value={formData.priority}
+                onChange={(e) => setFormData({ ...formData, priority: parseInt(e.target.value) || 0 })}
+              />
+              <p className="text-xs text-gray-500 mt-1">Higher priority patterns are tried first</p>
+            </div>
+            <div>
+              <Label>Active</Label>
+              <div className="flex items-center gap-2 mt-2">
+                <input
+                  type="checkbox"
+                  checked={formData.is_active}
+                  onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
+                />
+                <span className="text-sm">Enable this pattern</span>
+              </div>
+            </div>
+            <div className="col-span-2">
+              <Label>Description (Optional)</Label>
+              <Input
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                placeholder="e.g., Used by ABC Architects"
+              />
+            </div>
+            <div className="col-span-2 flex gap-2">
+              <Button onClick={handleSave}>
+                {editingPattern ? 'Update' : 'Create'} Pattern
+              </Button>
+              <Button variant="outline" onClick={() => {
+                setShowAddForm(false);
+                setEditingPattern(null);
+              }}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="text-center py-8">Loading patterns...</div>
+      ) : filteredPatterns.length === 0 ? (
+        <div className="text-center py-8 text-gray-500">No patterns found</div>
+      ) : (
+        <div className="space-y-2">
+          {filteredPatterns.map((pattern) => (
+            <div key={pattern.id} className="border rounded-lg p-4 bg-white">
+              <div className="flex items-start justify-between">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Badge variant={pattern.pattern_type === 'sheet_name' ? 'default' : 'secondary'}>
+                      {pattern.pattern_type === 'sheet_name' ? 'Sheet Name' : 'Sheet Number'}
+                    </Badge>
+                    <span className="font-semibold">{pattern.pattern_label}</span>
+                    {!pattern.is_active && (
+                      <Badge variant="outline" className="text-gray-500">Inactive</Badge>
+                    )}
+                    <Badge variant="outline">Priority: {pattern.priority}</Badge>
+                  </div>
+                  <code className="text-xs bg-gray-100 p-2 rounded block mb-2">
+                    {pattern.pattern_regex}
+                  </code>
+                  {pattern.description && (
+                    <p className="text-sm text-gray-600">{pattern.description}</p>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleEdit(pattern)}
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleDelete(pattern.id)}
+                    className="text-red-600"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
