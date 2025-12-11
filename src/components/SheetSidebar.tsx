@@ -1416,17 +1416,16 @@ export function SheetSidebar({
               size="sm" 
               variant="outline" 
               onClick={() => {
-                // Bulk titleblock extraction across all project documents
                 if (onBulkExtractTitleblock) {
                   onBulkExtractTitleblock();
                 } else {
-                  // Fallback to legacy AI bulk labeling for now if no handler provided
                   handleLabelAllUnlabeledPages();
                 }
               }}
               title="Bulk extract titleblock info across all documents"
             >
               <Settings className="w-4 h-4" />
+              <span className="ml-2">Bulk Extract</span>
             </Button>
           </div>
         </div>
@@ -1655,6 +1654,20 @@ export function SheetSidebar({
                         
                         {openPageMenu === `${document.id}-${page.pageNumber}` && (
                           <div className="absolute right-0 top-full mt-1 w-48 bg-white border rounded-lg shadow-lg z-50 py-1">
+                            <button
+                              className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 text-blue-600 flex items-center gap-2"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                if (onExtractTitleblockForDocument) {
+                                  onExtractTitleblockForDocument(document.id);
+                                }
+                                setOpenPageMenu(null);
+                              }}
+                            >
+                              <Tag className="w-4 h-4" />
+                              Extract Titleblock Info
+                            </button>
                             <button
                               className="w-full px-3 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center gap-2"
                               onClick={(e) => {
