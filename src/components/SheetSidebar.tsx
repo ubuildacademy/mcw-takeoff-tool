@@ -1424,8 +1424,7 @@ export function SheetSidebar({
               }}
               title="Bulk extract titleblock info across all documents"
             >
-              <Settings className="w-4 h-4" />
-              <span className="ml-2">Bulk Extract</span>
+              <Brain className="w-4 h-4" />
             </Button>
           </div>
         </div>
