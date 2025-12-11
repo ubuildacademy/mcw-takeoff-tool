@@ -375,6 +375,7 @@ async function extractSheetInfoFromOCRText(ocrText: string, pageNumber: number):
   ];
   
   // Default sheet name patterns (used as fallback if no custom patterns)
+  // Simplified: capture until newline or end, but we'll validate the result
   const defaultSheetNamePatterns = [
     { pattern: /drawing\s*data\s*:?\s*(.+?)(?:\n|$)/i, priority: 100, label: 'drawing data' },
     { pattern: /drawing\s*title\s*:?\s*(.+?)(?:\n|$)/i, priority: 90, label: 'drawing title' },
@@ -509,8 +510,8 @@ async function extractSheetInfoFromOCRText(ocrText: string, pageNumber: number):
   
   // Invalid patterns that should be rejected
   const invalidSheetNamePatterns = [
-    /^revisions\s*:?\s*project\s*info$/i,
-    /^project\s*info$/i,
+    /^revisions\s*:?\s*project\s*info/i, // Match "revisions :project info" (with optional trailing chars)
+    /^project\s*info/i, // Match "project info" at start
     /^revisions?$/i,
     /revision\s*date/i,
     /revision\s*issuance/i,
@@ -631,6 +632,15 @@ async function extractSheetInfoFromOCRText(ocrText: string, pageNumber: number):
         let nameText = match[1].trim();
         // Clean up: remove extra whitespace, trailing punctuation
         nameText = nameText.replace(/\s+/g, ' ').replace(/[.,;:]+$/, '');
+        
+        // Additional validation: reject if it contains "revisions" or "project info" even after cleanup
+        if (nameText.toLowerCase().includes('revisions') || nameText.toLowerCase().includes('project info')) {
+          if (pageNumber <= 3) {
+            console.log(`[Page ${pageNumber}] Pattern "${label}" matched but contains invalid keywords: "${nameText}"`);
+          }
+          continue; // Try next pattern
+        }
+        
         if (isValidSheetName(nameText)) {
           sheetName = nameText;
           if (pageNumber <= 3) {
@@ -651,7 +661,12 @@ async function extractSheetInfoFromOCRText(ocrText: string, pageNumber: number):
         if (testMatch) {
           foundAnyMatch = true;
           const testName = testMatch[1]?.trim() || '';
-          console.log(`[Page ${pageNumber}] Pattern "${label}" matched but result was invalid: "${testName}"`);
+          // Check if it's the revisions issue
+          if (testName.toLowerCase().includes('revisions') || testName.toLowerCase().includes('project info')) {
+            console.log(`[Page ${pageNumber}] Pattern "${label}" matched but contains invalid keywords: "${testName}"`);
+          } else {
+            console.log(`[Page ${pageNumber}] Pattern "${label}" matched but result was invalid: "${testName}"`);
+          }
         }
       }
       if (!foundAnyMatch) {
