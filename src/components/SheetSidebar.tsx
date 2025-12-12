@@ -1440,6 +1440,22 @@ export function SheetSidebar({
 
   return (
     <div className="w-96 bg-white border-l flex flex-col h-full">
+      {/* DEBUG: Visible version indicator - remove after confirming deployment works */}
+      {process.env.NODE_ENV === 'production' && (
+        <div style={{ 
+          position: 'absolute', 
+          top: 0, 
+          right: 0, 
+          zIndex: 9999, 
+          background: 'red', 
+          color: 'white', 
+          padding: '2px 6px', 
+          fontSize: '10px',
+          fontFamily: 'monospace'
+        }}>
+          v2-2025-12-12
+        </div>
+      )}
       {/* Header */}
       <div className="p-4 border-b relative">
         <div className="flex items-center justify-between mb-4">
