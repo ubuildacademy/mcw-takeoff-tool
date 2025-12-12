@@ -634,7 +634,30 @@ export function TakeoffWorkspace() {
       }
 
       console.log('[Titleblock] Calling backend extraction API...');
+      
+      // Start progress estimation timer
+      const startTime = Date.now();
+      const estimatedDuration = totalPages * 2000; // Estimate 2 seconds per page
+      let progressInterval: NodeJS.Timeout | null = null;
+      
+      // Update progress estimate while waiting
+      progressInterval = setInterval(() => {
+        const elapsed = Date.now() - startTime;
+        const estimatedProgress = Math.min(90, Math.round((elapsed / estimatedDuration) * 90)); // Cap at 90% until done
+        setTitleblockExtractionStatus(prev => prev ? {
+          ...prev,
+          progress: estimatedProgress,
+          processedPages: Math.round((estimatedProgress / 100) * totalPages),
+        } : null);
+      }, 500); // Update every 500ms
+      
       const result = await titleblockService.extractTitleblock(projectId, targetDocumentIds, finalConfig);
+      
+      // Clear progress interval
+      if (progressInterval) {
+        clearInterval(progressInterval);
+      }
+      
       console.log('[Titleblock] Backend extraction response:', result);
 
       // Update status based on results

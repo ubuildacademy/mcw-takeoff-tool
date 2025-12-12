@@ -127,17 +127,24 @@ router.post('/extract', async (req, res) => {
       });
 
       // Extract text from each region separately and use LLM to extract values
+      // Pass a progress callback to update status during extraction
       const extractedSheets = await extractTitleblockWithLLM(
         pdfPath,
         pageNumbers,
         sheetNumberRegion,
-        sheetNameRegion
+        sheetNameRegion,
+        (currentBatch: number, totalBatches: number, processedPages: number) => {
+          // Calculate progress: 10% for setup, 80% for extraction, 10% for saving
+          const extractionProgress = 10 + Math.round((processedPages / totalPages) * 80);
+          console.log(`[Titleblock] Progress update: batch ${currentBatch}/${totalBatches}, pages ${processedPages}/${totalPages}, progress ${extractionProgress}%`);
+        }
       );
 
       console.log('[Titleblock] LLM extraction result:', {
         documentId,
         sheetsCount: extractedSheets.length,
         firstFewSheets: extractedSheets.slice(0, 3),
+        extractedCount: extractedSheets.filter(s => s.sheetNumber !== 'Unknown' || s.sheetName !== 'Unknown').length,
       });
 
       if (!extractedSheets.length) {
@@ -180,14 +187,20 @@ router.post('/extract', async (req, res) => {
           updatedAt: new Date().toISOString(),
         };
 
+        // Always update with extracted values, even if "Unknown" (to clear bad data)
+        // But prefer non-Unknown values if available
         const updatedSheet: StoredSheet = {
           ...baseSheet,
           sheetNumber: sheet.sheetNumber && sheet.sheetNumber !== 'Unknown'
             ? sheet.sheetNumber
-            : baseSheet.sheetNumber,
+            : (baseSheet.sheetNumber && baseSheet.sheetNumber !== 'DRAW1NG' && baseSheet.sheetNumber !== 'revisions :project info')
+              ? baseSheet.sheetNumber  // Keep existing if it's not a known bad value
+              : sheet.sheetNumber || undefined,  // Use extracted value (even if Unknown) to clear bad data
           sheetName: sheet.sheetName && sheet.sheetName !== 'Unknown'
             ? sheet.sheetName
-            : baseSheet.sheetName,
+            : (baseSheet.sheetName && baseSheet.sheetName !== 'DRAW1NG' && baseSheet.sheetName !== 'revisions :project info')
+              ? baseSheet.sheetName  // Keep existing if it's not a known bad value
+              : sheet.sheetName || undefined,  // Use extracted value (even if Unknown) to clear bad data
           titleblockConfig: titleblockConfig,
           updatedAt: new Date().toISOString(),
         };
@@ -242,7 +255,8 @@ async function extractTitleblockWithLLM(
   pdfPath: string,
   pageNumbers: number[],
   sheetNumberRegion: NormalizedBox,
-  sheetNameRegion: NormalizedBox
+  sheetNameRegion: NormalizedBox,
+  onProgress?: (currentBatch: number, totalBatches: number, processedPages: number) => void
 ): Promise<Array<{ pageNumber: number; sheetNumber: string; sheetName: string }>> {
   const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'https://ollama.com';
   const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || '';
@@ -252,9 +266,12 @@ async function extractTitleblockWithLLM(
 
   // Process pages in batches
   const BATCH_SIZE = 5; // Smaller batches for LLM processing
+  const totalBatches = Math.ceil(pageNumbers.length / BATCH_SIZE);
+  
   for (let i = 0; i < pageNumbers.length; i += BATCH_SIZE) {
     const batch = pageNumbers.slice(i, i + BATCH_SIZE);
-    console.log(`[Titleblock LLM] Processing batch: pages ${batch.join(',')}`);
+    const currentBatch = Math.floor(i / BATCH_SIZE) + 1;
+    console.log(`[Titleblock LLM] Processing batch ${currentBatch}/${totalBatches}: pages ${batch.join(',')}`);
 
     try {
       // Extract text from each region for all pages in batch
@@ -279,6 +296,13 @@ async function extractTitleblockWithLLM(
           sheetNameRegion
         );
 
+        console.log(`[Titleblock LLM] Page ${pageNumber} extracted text:`, {
+          sheetNumberText: sheetNumberText?.substring(0, 100) || '(empty)',
+          sheetNameText: sheetNameText?.substring(0, 100) || '(empty)',
+          sheetNumberLength: sheetNumberText?.length || 0,
+          sheetNameLength: sheetNameText?.length || 0,
+        });
+
         batchTexts.push({
           pageNumber,
           sheetNumberText: sheetNumberText || '',
@@ -287,10 +311,21 @@ async function extractTitleblockWithLLM(
       }
 
       // Send to LLM for extraction
+      console.log(`[Titleblock LLM] Sending batch ${currentBatch} to LLM with ${batchTexts.length} pages`);
       const batchResults = await extractWithLLM(batchTexts, OLLAMA_BASE_URL, OLLAMA_API_KEY, OLLAMA_MODEL);
+      console.log(`[Titleblock LLM] Batch ${currentBatch} results:`, batchResults.map(r => ({
+        page: r.pageNumber,
+        sheetNumber: r.sheetNumber,
+        sheetName: r.sheetName,
+      })));
       results.push(...batchResults);
+      
+      // Update progress
+      if (onProgress) {
+        onProgress(currentBatch, totalBatches, results.length);
+      }
     } catch (error) {
-      console.error(`[Titleblock LLM] Error processing batch ${batch.join(',')}:`, error);
+      console.error(`[Titleblock LLM] Error processing batch ${currentBatch} (pages ${batch.join(',')}):`, error);
       // Add Unknown entries for failed batch
       for (const pageNumber of batch) {
         results.push({
@@ -298,6 +333,11 @@ async function extractTitleblockWithLLM(
           sheetNumber: 'Unknown',
           sheetName: 'Unknown',
         });
+      }
+      
+      // Update progress even on error
+      if (onProgress) {
+        onProgress(currentBatch, totalBatches, results.length);
       }
     }
   }
@@ -392,6 +432,17 @@ Examples:
     context += `SHEET_NUMBER_REGION:\n${sheetNumberText || '(empty)'}\n\n`;
     context += `SHEET_NAME_REGION:\n${sheetNameText || '(empty)'}\n\n`;
   });
+  
+  // Log sample of what we're sending to LLM
+  if (batchTexts.length > 0) {
+    const sample = batchTexts[0];
+    console.log(`[Titleblock LLM] Sample input for page ${sample.pageNumber}:`, {
+      sheetNumberTextLength: sample.sheetNumberText.length,
+      sheetNameTextLength: sample.sheetNameText.length,
+      sheetNumberPreview: sample.sheetNumberText.substring(0, 200),
+      sheetNamePreview: sample.sheetNameText.substring(0, 200),
+    });
+  }
 
   const systemPrompt = `You are an expert at extracting construction document sheet information. 
 Extract sheet numbers and names from the provided text regions using the instructions provided.
@@ -450,6 +501,10 @@ Use "Unknown" if a value cannot be determined.`;
 
   const aiResponse = response.data.message?.content || '';
   console.log(`[Titleblock LLM] AI response preview:`, aiResponse.substring(0, 500));
+  console.log(`[Titleblock LLM] Full AI response length:`, aiResponse.length);
+  
+  // Log the input context for debugging
+  console.log(`[Titleblock LLM] Input context preview:`, context.substring(0, 500));
 
   try {
     // Parse JSON from response
