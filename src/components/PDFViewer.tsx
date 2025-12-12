@@ -2447,6 +2447,107 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   };
 
   // Handle mouse move - direct coordinate conversion
+  // Handle mouse down for titleblock/visual search selection (start selection)
+  const handleMouseDown = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
+    if (!pdfCanvasRef.current) return;
+    
+    // Only handle mousedown for titleblock/visual search selection
+    if (!(visualSearchMode || !!titleblockSelectionMode) || !isSelectingSymbol) {
+      return;
+    }
+    
+    // Get CSS pixel coordinates
+    const rect = pdfCanvasRef.current.getBoundingClientRect();
+    let cssX = event.clientX - rect.left;
+    let cssY = event.clientY - rect.top;
+    const interactiveScale = (viewState.scale || 1) / (lastRenderedScaleRef.current || 1);
+    if (Math.abs(interactiveScale - 1) > 0.0001) {
+      cssX = cssX / interactiveScale;
+      cssY = cssY / interactiveScale;
+    }
+    
+    // Start selection
+    setSelectionStart({ x: cssX, y: cssY });
+    setSelectionBox(null);
+    event.preventDefault();
+    event.stopPropagation();
+  }, [visualSearchMode, titleblockSelectionMode, isSelectingSymbol, viewState.scale]);
+
+  // Handle mouse up for titleblock/visual search selection (complete selection)
+  const handleMouseUp = useCallback(async (event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
+    if (!pdfCanvasRef.current) return;
+    
+    // Only handle mouseup for titleblock/visual search selection
+    if (!(visualSearchMode || !!titleblockSelectionMode) || !isSelectingSymbol || !selectionStart) {
+      return;
+    }
+    
+    // Get viewport
+    let viewport = currentViewport;
+    if (!viewport && pdfPageRef.current) {
+      viewport = pdfPageRef.current.getViewport({ 
+        scale: viewState.scale, 
+        rotation: viewState.rotation 
+      });
+    }
+    
+    if (!viewport) {
+      console.warn('[PDFViewer] No viewport available for selection completion');
+      setSelectionStart(null);
+      setSelectionBox(null);
+      return;
+    }
+    
+    // Get CSS pixel coordinates
+    const rect = pdfCanvasRef.current.getBoundingClientRect();
+    let cssX = event.clientX - rect.left;
+    let cssY = event.clientY - rect.top;
+    const interactiveScale = (viewState.scale || 1) / (lastRenderedScaleRef.current || 1);
+    if (Math.abs(interactiveScale - 1) > 0.0001) {
+      cssX = cssX / interactiveScale;
+      cssY = cssY / interactiveScale;
+    }
+    
+    // Complete selection
+    const width = Math.abs(cssX - selectionStart.x);
+    const height = Math.abs(cssY - selectionStart.y);
+    const x = Math.min(cssX, selectionStart.x);
+    const y = Math.min(cssY, selectionStart.y);
+    
+    // Only complete if the box has minimum size (to avoid accidental clicks)
+    if (width < 5 && height < 5) {
+      // Too small, treat as click - reset
+      setSelectionStart(null);
+      setSelectionBox(null);
+      return;
+    }
+    
+    const finalSelectionBox = { x, y, width, height };
+    setSelectionBox(finalSelectionBox);
+    
+    // Convert to PDF coordinates (0-1 scale)
+    const pdfSelectionBox = {
+      x: x / viewport.width,
+      y: y / viewport.height,
+      width: width / viewport.width,
+      height: height / viewport.height
+    };
+    
+    // Reset selection state
+    setSelectionStart(null);
+    setIsSelectingSymbol(false);
+    
+    // Call the appropriate completion handler
+    if (titleblockSelectionMode && onTitleblockSelectionComplete) {
+      onTitleblockSelectionComplete(titleblockSelectionMode, pdfSelectionBox);
+    } else if (visualSearchMode && onVisualSearchComplete) {
+      onVisualSearchComplete(pdfSelectionBox);
+    }
+    
+    event.preventDefault();
+    event.stopPropagation();
+  }, [visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionStart, currentViewport, viewState.scale, viewState.rotation, onTitleblockSelectionComplete, onVisualSearchComplete]);
+
   const handleMouseMove = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
     // Basic checks - allow interactions even during loading
     if (!pdfCanvasRef.current) {
@@ -2624,7 +2725,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
       }
     }
-  }, [annotationTool, isCalibrating, calibrationPoints, isMeasuring, selectedConditionId, mousePosition, isContinuousDrawing, activePoints, rubberBandElement, currentViewport, calculateRunningLength, isDeselecting, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionStart, viewState, setPageViewports, currentPage]);
+  }, [annotationTool, isCalibrating, calibrationPoints, isMeasuring, selectedConditionId, mousePosition, isContinuousDrawing, activePoints, rubberBandElement, currentViewport, calculateRunningLength, isDeselecting, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionStart, viewState, setPageViewports, currentPage, pdfPageRef]);
 
   // Handle click - direct coordinate conversion
   const handleClick = useCallback(async (event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
@@ -2694,38 +2795,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       cssY = cssY / interactiveScale;
     }
 
-    // Handle visual search or titleblock selection
+    // Note: Visual search and titleblock selection now use mousedown/mouseup instead of click
+    // Skip click handling for these modes to avoid conflicts
     if ((visualSearchMode || !!titleblockSelectionMode) && isSelectingSymbol) {
-      if (!selectionStart) {
-        // Start selection
-        setSelectionStart({ x: cssX, y: cssY });
-        setSelectionBox(null);
-      } else {
-        // Complete selection
-        const width = Math.abs(cssX - selectionStart.x);
-        const height = Math.abs(cssY - selectionStart.y);
-        const x = Math.min(cssX, selectionStart.x);
-        const y = Math.min(cssY, selectionStart.y);
-        
-        const finalSelectionBox = { x, y, width, height };
-        setSelectionBox(finalSelectionBox);
-        setIsSelectingSymbol(false);
-        
-        // Convert to PDF coordinates (0-1 scale)
-        const pdfSelectionBox = {
-          x: x / viewport.width,
-          y: y / viewport.height,
-          width: width / viewport.width,
-          height: height / viewport.height
-        };
-        
-        // Call the appropriate completion handler
-        if (titleblockSelectionMode && onTitleblockSelectionComplete) {
-          onTitleblockSelectionComplete(titleblockSelectionMode, pdfSelectionBox);
-        } else if (visualSearchMode && onVisualSearchComplete) {
-          onVisualSearchComplete(pdfSelectionBox);
-        }
-      }
       return;
     }
     
@@ -4357,6 +4429,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 outline: 'none'
               }}
               onClick={handleClick}
+              onMouseDown={handleMouseDown}
+              onMouseUp={handleMouseUp}
               onDoubleClick={(e) => {
                 // Only handle double-click for non-annotation cases
                 if (!annotationTool) {
@@ -4396,6 +4470,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 pointerEvents: (isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol)) ? 'auto' : 'none' // Allow clicks in selection, calibration, annotation, visual search, or titleblock selection mode (measurements handled by canvas)
               }}
               onMouseMove={handleMouseMove}
+              onMouseDown={handleMouseDown}
+              onMouseUp={handleMouseUp}
               onMouseLeave={() => setMousePosition(null)}
               onClick={(e) => {
                 // Handle clicks in selection mode, calibration mode, annotation mode, or visual search mode

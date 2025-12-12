@@ -548,7 +548,11 @@ export function TakeoffWorkspace() {
     field: TitleblockField,
     selectionBox: NormalizedBox
   ) => {
+    console.log('[Titleblock] Selection complete:', { field, selectionBox, hasContext: !!titleblockSelectionContext });
+    
     if (!titleblockSelectionContext) {
+      console.error('[Titleblock] No selection context available - extraction cannot proceed');
+      alert('Titleblock selection context is missing. Please try again.');
       return;
     }
 
@@ -560,51 +564,71 @@ export function TakeoffWorkspace() {
         : { sheetNameField: selectionBox }),
     };
     setPendingTitleblockConfig(nextConfig);
+    console.log('[Titleblock] Updated config:', nextConfig);
 
     if (field === 'sheetNumber') {
       // Step 1 complete - prompt user for sheet name region next
+      console.log('[Titleblock] Sheet number selected, prompting for sheet name');
       setTitleblockSelectionMode('sheetName');
       return;
     }
 
     // Step 2 complete - we have both regions (or at least the name region now)
+    console.log('[Titleblock] Sheet name selected, starting extraction');
     setTitleblockSelectionMode(null);
 
     const finalConfig = {
       sheetNumberField: nextConfig.sheetNumberField || selectionBox,
       sheetNameField: nextConfig.sheetNameField || selectionBox,
     };
+    
+    // Validate that we have both fields
+    if (!finalConfig.sheetNumberField || !finalConfig.sheetNameField) {
+      console.error('[Titleblock] Missing required fields:', finalConfig);
+      alert('Both sheet number and sheet name regions must be selected. Please try again.');
+      setTitleblockSelectionContext(null);
+      setPendingTitleblockConfig(null);
+      return;
+    }
+    
     const targetDocumentIds =
       titleblockSelectionContext.scope === 'single'
         ? [titleblockSelectionContext.documentId]
         : documents.map((d) => d.id);
+
+    console.log('[Titleblock] Starting extraction:', {
+      projectId,
+      documentIds: targetDocumentIds,
+      config: finalConfig,
+      scope: titleblockSelectionContext.scope,
+    });
 
     try {
       if (!projectId) {
         throw new Error('Project ID is missing');
       }
 
-      if (isDev) {
-        console.log('[Titleblock] Calling backend extraction with config:', {
-          projectId,
-          documentIds: targetDocumentIds,
-          finalConfig,
-        });
-      }
-
-      await titleblockService.extractTitleblock(projectId, targetDocumentIds, finalConfig);
+      console.log('[Titleblock] Calling backend extraction API...');
+      const result = await titleblockService.extractTitleblock(projectId, targetDocumentIds, finalConfig);
+      console.log('[Titleblock] Backend extraction response:', result);
 
       // Reload documents to pick up updated sheet labels
+      console.log('[Titleblock] Reloading documents...');
       await loadProjectDocuments();
+      console.log('[Titleblock] Documents reloaded successfully');
 
-      if (isDev) {
-        console.log('[Titleblock] Extraction complete and documents reloaded');
-      }
+      alert(`Titleblock extraction completed successfully for ${targetDocumentIds.length} document(s).`);
     } catch (error) {
-      console.error('Titleblock extraction failed:', error);
-      alert('Titleblock extraction failed. Please try again.');
+      console.error('[Titleblock] Extraction failed with error:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('[Titleblock] Error details:', {
+        message: errorMessage,
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      alert(`Titleblock extraction failed: ${errorMessage}. Please check the console for details.`);
     } finally {
       // Clear context after selection flow completes
+      console.log('[Titleblock] Clearing selection context');
       setTitleblockSelectionContext(null);
       setPendingTitleblockConfig(null);
     }
