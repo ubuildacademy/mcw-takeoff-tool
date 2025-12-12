@@ -1426,6 +1426,13 @@ export function SheetSidebar({
 
   const filteredDocuments = getFilteredAndSortedDocuments();
 
+  // Debug: Log component version on mount
+  useEffect(() => {
+    console.log('[SheetSidebar] Component version: 2025-12-12-v2 - Settings icon and Extract Titleblock menu enabled');
+    console.log('[SheetSidebar] Has onExtractTitleblockForDocument:', !!onExtractTitleblockForDocument);
+    console.log('[SheetSidebar] Has onBulkExtractTitleblock:', !!onBulkExtractTitleblock);
+  }, []);
+
   return (
     <div className="w-96 bg-white border-l flex flex-col h-full">
       {/* Header */}
@@ -1454,11 +1461,12 @@ export function SheetSidebar({
                 variant="outline" 
                 onClick={(e) => {
                   e.stopPropagation();
+                  console.log('[SheetSidebar] Bulk actions menu clicked, opening menu');
                   setOpenBulkActionsMenu(!openBulkActionsMenu);
                 }}
                 title="Document Actions"
               >
-                <Settings className="w-4 h-4" />
+                <Settings className="w-4 h-4" data-testid="bulk-actions-settings-icon" />
               </Button>
               
               {openBulkActionsMenu && (
@@ -1598,18 +1606,22 @@ export function SheetSidebar({
                           </Button>
                           
                           {openDocumentMenu === document.id && (
-                            <div className="absolute right-0 top-full mt-1 w-56 bg-white border rounded-lg shadow-lg z-50 py-1">
+                            <div className="absolute right-0 top-full mt-1 w-56 bg-white border rounded-lg shadow-lg z-50 py-1" data-testid="document-menu-dropdown">
                               {/* Extract Titleblock Info option */}
                               <button
                                 className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 text-blue-600 flex items-center gap-2"
                                 onClick={(e) => {
                                   e.preventDefault();
                                   e.stopPropagation();
+                                  console.log('[SheetSidebar] Extract Titleblock Info clicked for document:', document.id);
                                   if (onExtractTitleblockForDocument) {
                                     onExtractTitleblockForDocument(document.id);
+                                  } else {
+                                    console.warn('[SheetSidebar] onExtractTitleblockForDocument prop not provided!');
                                   }
                                   setOpenDocumentMenu(null);
                                 }}
+                                data-testid="extract-titleblock-button"
                               >
                                 <Tag className="w-4 h-4" />
                                 Extract Titleblock Info
