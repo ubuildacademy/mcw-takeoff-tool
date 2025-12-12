@@ -133,12 +133,28 @@ router.post('/extract', async (req, res) => {
       const pageNumbers = Array.from({ length: totalPages }, (_, idx) => idx + 1);
 
       // Run Python-based extraction constrained to the combined region
+      console.log('[Titleblock] Starting extraction for document:', {
+        documentId,
+        totalPages,
+        combinedRegion,
+        sheetNumberField: titleblockConfig.sheetNumberField,
+        sheetNameField: titleblockConfig.sheetNameField,
+      });
+      
       const extractionResult = await titleblockExtractionService.extractSheets(
         pdfPath,
         pageNumbers,
         10,
         combinedRegion
       );
+
+      console.log('[Titleblock] Extraction result:', {
+        documentId,
+        success: extractionResult.success,
+        sheetsCount: extractionResult.sheets.length,
+        error: extractionResult.error,
+        firstFewSheets: extractionResult.sheets.slice(0, 3),
+      });
 
       if (!extractionResult.success || !extractionResult.sheets.length) {
         console.warn('Titleblock extraction: no sheets extracted', {
@@ -193,7 +209,22 @@ router.post('/extract', async (req, res) => {
           updatedAt: new Date().toISOString(),
         };
 
+        console.log('[Titleblock] Saving sheet:', {
+          sheetId,
+          pageNumber: sheet.pageNumber,
+          extracted: { sheetNumber: sheet.sheetNumber, sheetName: sheet.sheetName },
+          before: { sheetNumber: baseSheet.sheetNumber, sheetName: baseSheet.sheetName },
+          after: { sheetNumber: updatedSheet.sheetNumber, sheetName: updatedSheet.sheetName },
+        });
+
         const saved = await storage.saveSheet(updatedSheet);
+        
+        console.log('[Titleblock] Sheet saved:', {
+          sheetId: saved.id,
+          sheetNumber: saved.sheetNumber,
+          sheetName: saved.sheetName,
+        });
+        
         savedSheets.push({
           pageNumber: saved.pageNumber,
           sheetNumber: saved.sheetNumber || 'Unknown',
