@@ -1426,11 +1426,16 @@ export function SheetSidebar({
 
   const filteredDocuments = getFilteredAndSortedDocuments();
 
-  // Debug: Log component version on mount
+  // Debug: Log component version on mount - CRITICAL FOR DEBUGGING DEPLOYMENT
   useEffect(() => {
-    console.log('[SheetSidebar] Component version: 2025-12-12-v2 - Settings icon and Extract Titleblock menu enabled');
+    console.log('🔍🔍🔍 [SheetSidebar] Component version: 2025-12-12-v2 - Settings icon and Extract Titleblock menu enabled 🔍🔍🔍');
     console.log('[SheetSidebar] Has onExtractTitleblockForDocument:', !!onExtractTitleblockForDocument);
     console.log('[SheetSidebar] Has onBulkExtractTitleblock:', !!onBulkExtractTitleblock);
+    console.log('[SheetSidebar] Documents count:', documents.length);
+    console.log('[SheetSidebar] If you see this message, the NEW code is running. If you see a Brain icon, OLD code is running.');
+    
+    // Also log to window for easy access
+    (window as any).__sheetSidebarVersion = '2025-12-12-v2';
   }, []);
 
   return (
@@ -1466,7 +1471,7 @@ export function SheetSidebar({
                 }}
                 title="Document Actions"
               >
-                <Settings className="w-4 h-4" data-testid="bulk-actions-settings-icon" />
+                <Settings className="w-4 h-4" data-testid="bulk-actions-settings-icon" data-version="2025-12-12-v2" />
               </Button>
               
               {openBulkActionsMenu && (
