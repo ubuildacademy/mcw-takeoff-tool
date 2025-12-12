@@ -1468,12 +1468,21 @@ export function SheetSidebar({
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
+                      setOpenBulkActionsMenu(false);
+                      
+                      const confirmed = window.confirm(
+                        `Extract titleblock information for all ${documents.length} document(s)? This will process all pages.`
+                      );
+                      
+                      if (!confirmed) {
+                        return;
+                      }
+                      
                       if (onBulkExtractTitleblock) {
                         onBulkExtractTitleblock();
                       } else {
                         handleLabelAllUnlabeledPages();
                       }
-                      setOpenBulkActionsMenu(false);
                     }}
                   >
                     <Tag className="w-4 h-4" />
