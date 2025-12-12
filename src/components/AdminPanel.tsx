@@ -34,8 +34,9 @@ export function AdminPanel({ isOpen, onClose, projectId }: AdminPanelProps) {
   const [availableModels, setAvailableModels] = useState<OllamaModel[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>('gpt-oss:120b-cloud');
   const [fallbackModel, setFallbackModel] = useState<string>('llama3.1:8b');
-  // Using simple OCR + AI approach
-  const [customPrompt, setCustomPrompt] = useState<string>('');
+  // Titleblock extraction prompts (separate for sheet number and sheet name)
+  const [sheetNumberPrompt, setSheetNumberPrompt] = useState<string>('');
+  const [sheetNamePrompt, setSheetNamePrompt] = useState<string>('');
   const [chatPrompt, setChatPrompt] = useState<string>('');
   
   // User management state
@@ -62,85 +63,52 @@ export function AdminPanel({ isOpen, onClose, projectId }: AdminPanelProps) {
     setActiveTab('overview');
   };
 
-  // Get the editable part of the AI prompt (without JSON formatting)
-  const getEditablePrompt = () => {
-    return `You are an expert construction document analyst. Your task is to analyze construction drawings and identify sheet information from title blocks.
+  // Get default prompt for sheet number extraction
+  const getDefaultSheetNumberPrompt = () => {
+    return `You are an expert at extracting sheet numbers from construction document titleblocks.
 
-CRITICAL INSTRUCTIONS:
-- Focus EXCLUSIVELY on title block information
-- IGNORE detail callouts that start with numbers (like "01 Patio Trellis - Enlarged Floor Plan" or "25 Sun Shade - Connection Detail")
-- IGNORE drawing annotations and labels that are clearly detail references
-- ONLY look for the main sheet title and sheet number from the title block
-- IMPORTANT: Use the EXACT page order as provided - do not reorder sheet numbers based on numerical patterns
-- IMPORTANT: Do NOT ignore legitimate sheet titles that contain words like "details", "sections", "typical", etc.
+Your task is to extract the sheet number from the provided text region. The text was extracted from a specific region of the titleblock that should contain the sheet number.
 
-For each page, identify ONLY:
-1. Sheet number (e.g., A0.01, A0.02, A1.01, A9.02, etc.) - use the EXACT sheet number found in the title block
-2. Sheet name/description - capture the COMPLETE title from the drawing data field
+INSTRUCTIONS:
+- Look for alphanumeric codes like "A4.21", "A0.01", "S0.02", "M1.15", etc.
+- Common patterns: Letter(s) followed by numbers, often with dots (e.g., A4.21, S0.02)
+- May appear with labels like "sheet number:", "sheet #:", "dwg no:", or standalone
+- Fix minor OCR errors (O→0, I→1, l→1, etc.)
+- Return ONLY the sheet number, nothing else
+- If you cannot find a sheet number, return "Unknown"
 
-Look specifically for text near these title block labels:
-- "sheet number:" followed by the sheet number (use exactly as found)
-- "drawing data:" followed by the COMPLETE sheet title (capture the full title, not just the first part)
-- "drawing title:" followed by the COMPLETE sheet title
-- "sheet name:" followed by the sheet name
-
-IMPORTANT: 
-- Do NOT reorder sheet numbers based on numerical patterns (A3.02 can come before A3.01 if it appears that way in the document set)
-- Capture the COMPLETE drawing title from the "drawing data:" field, including all descriptive text
-- Use the page order exactly as provided in the input
-
-Common sheet number patterns:
-- A0.01, A0.02, A1.01, A1.02, A9.02 (Architectural)
-- S0.01, S0.02 (Structural) 
-- M0.01, M0.02 (Mechanical)
-- E0.01, E0.02 (Electrical)
-- P0.01, P0.02 (Plumbing)
-- Sheet numbers may be in formats not listed here; usually in easily identified patterns. 
-
-Common sheet names:
-- "Cover Sheet", "Title Sheet", "Index"
-- "Ground Floor Plan", "First Floor Plan", "Second Floor Plan"
-- "Roof Plan", "Elevations", "Exterior Elevations"
-- "Enlarged Patio Trellis", "Details", "Schedules"
-- "Specifications", "Wall Types", "Finishes"
-
-IMPORTANT: 
-- Do NOT use detail callout titles like "01 Patio Trellis - Enlarged Floor Plan" as the sheet name
-- DO use legitimate sheet titles like "Typical Wall Details", "Section Details", "Enlarged Plans", etc.
-- Look for the main sheet title in the title block, such as "Enlarged Patio Trellis" or "Typical Details"
-
-EXAMPLE: If you see "drawing data: Overall Reflected Ceiling Plans - Third thru Sixth & Int. Roof Level", 
-use the COMPLETE title "Overall Reflected Ceiling Plans - Third thru Sixth & Int. Roof Level", not just "Overall Reflected Ceiling Plans".`;
+Examples:
+- "sheet number: A4.21" → "A4.21"
+- "A4.2l" (OCR error) → "A4.21"
+- "Sheet # S0.02" → "S0.02"
+- "DWG NO: M1.15" → "M1.15"
+- Empty or unclear text → "Unknown"`;
   };
 
-  // Get the fixed JSON formatting section
-  const getJsonFormatting = () => {
-    return `Return your analysis as a JSON array with this exact format for the pages in this batch:
-[
-  {
-    "pageNumber": 1,
-    "sheetNumber": "A0.01",
-    "sheetName": "Cover Sheet"
-  },
-  {
-    "pageNumber": 2,
-    "sheetNumber": "A9.02", 
-    "sheetName": "Enlarged Patio Trellis"
-  },
-  {
-    "pageNumber": 13,
-    "sheetNumber": "A3.02",
-    "sheetName": "Overall Reflected Ceiling Plans - Third thru Sixth & Int. Roof Level"
-  },
-  {
-    "pageNumber": 14,
-    "sheetNumber": "A3.01",
-    "sheetName": "Overall Reflected Ceiling Plans - First & Second Level"
-  }
-]
+  // Get default prompt for sheet name extraction
+  const getDefaultSheetNamePrompt = () => {
+    return `You are an expert at extracting sheet names/titles from construction document titleblocks.
 
-If you cannot determine a sheet number or name for a page, use "Unknown" as the value. Be as accurate as possible based ONLY on the title block information.`;
+Your task is to extract the sheet name from the provided text region. The text was extracted from a specific region of the titleblock that should contain the sheet name/title.
+
+INSTRUCTIONS:
+- Look for drawing titles, names, or descriptions
+- May appear with labels like "drawing data:", "drawing title:", "sheet title:", "sheet name:", or standalone
+- Capture the COMPLETE title, including all descriptive text
+- Sheet names can span multiple lines - capture everything until you hit another label or empty line
+- Fix minor OCR errors (O→0, I→1, l→1, etc.)
+- Return ONLY the sheet name, nothing else
+- Do NOT include the label itself (e.g., don't include "drawing data:" in the result)
+- If you cannot find a sheet name, return "Unknown"
+
+Examples:
+- "drawing data: Enlarged Floor Plan - Ground Floor - East Side" → "Enlarged Floor Plan - Ground Floor - East Side"
+- "drawing title: Overall Reflected Ceiling Plans - Third thru Sixth & Int. Roof Level" → "Overall Reflected Ceiling Plans - Third thru Sixth & Int. Roof Level"
+- "sheet name: Cover Sheet" → "Cover Sheet"
+- "Floor Plan\nGround Level" (multi-line) → "Floor Plan Ground Level"
+- Empty or unclear text → "Unknown"`;
   };
+
 
   // Get the default chat assistant prompt
   const getDefaultChatPrompt = () => {
@@ -159,46 +127,15 @@ When answering questions:
     try {
       setIsLoading(true);
       
-      // Combine editable prompt with fixed JSON formatting
-      const fullPrompt = customPrompt + '\n\n' + getJsonFormatting();
-      
-      try {
-        // Save to API (database)
-        await settingsService.updateSetting('ai-page-labeling-prompt', fullPrompt);
-      } catch (apiError) {
-        console.warn('Failed to save to API, using localStorage fallback:', apiError);
-        // Fallback to localStorage for backward compatibility
-        localStorage.setItem('ai-page-labeling-prompt', fullPrompt);
-      }
-      
-      // Also save to localStorage as backup
-      localStorage.setItem('ai-page-labeling-prompt', fullPrompt);
-      
-      // Show success message
-      alert('✅ AI prompt saved successfully!');
-    } catch (error) {
-      console.error('Error saving prompt:', error);
-      alert('❌ Failed to save prompt');
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
-  // Load custom prompt from API (with localStorage fallback)
-  const loadCustomPrompt = async () => {
+  // Load sheet number prompt from API (with localStorage fallback)
+  const loadSheetNumberPrompt = async () => {
     try {
       // Try to load from API first
       try {
-        const response = await settingsService.getSetting('ai-page-labeling-prompt');
+        const response = await settingsService.getSetting('titleblock-sheet-number-prompt');
         if (response?.value) {
-          const saved = response.value;
-          // Extract just the editable part (remove JSON formatting section)
-          const jsonStart = saved.indexOf('Return your analysis as a JSON array');
-          if (jsonStart !== -1) {
-            setCustomPrompt(saved.substring(0, jsonStart).trim());
-          } else {
-            setCustomPrompt(saved);
-          }
+          setSheetNumberPrompt(response.value);
           return;
         }
       } catch (apiError) {
@@ -206,21 +143,42 @@ When answering questions:
       }
       
       // Fallback to localStorage
-      const saved = localStorage.getItem('ai-page-labeling-prompt');
+      const saved = localStorage.getItem('titleblock-sheet-number-prompt');
       if (saved) {
-        // Extract just the editable part (remove JSON formatting section)
-        const jsonStart = saved.indexOf('Return your analysis as a JSON array');
-        if (jsonStart !== -1) {
-          setCustomPrompt(saved.substring(0, jsonStart).trim());
-        } else {
-          setCustomPrompt(saved);
-        }
+        setSheetNumberPrompt(saved);
       } else {
-        setCustomPrompt(getEditablePrompt());
+        setSheetNumberPrompt(getDefaultSheetNumberPrompt());
       }
     } catch (error) {
       console.error('Error loading prompt:', error);
-      setCustomPrompt(getEditablePrompt());
+      setSheetNumberPrompt(getDefaultSheetNumberPrompt());
+    }
+  };
+
+  // Load sheet name prompt from API (with localStorage fallback)
+  const loadSheetNamePrompt = async () => {
+    try {
+      // Try to load from API first
+      try {
+        const response = await settingsService.getSetting('titleblock-sheet-name-prompt');
+        if (response?.value) {
+          setSheetNamePrompt(response.value);
+          return;
+        }
+      } catch (apiError) {
+        console.warn('Failed to load from API, trying localStorage:', apiError);
+      }
+      
+      // Fallback to localStorage
+      const saved = localStorage.getItem('titleblock-sheet-name-prompt');
+      if (saved) {
+        setSheetNamePrompt(saved);
+      } else {
+        setSheetNamePrompt(getDefaultSheetNamePrompt());
+      }
+    } catch (error) {
+      console.error('Error loading prompt:', error);
+      setSheetNamePrompt(getDefaultSheetNamePrompt());
     }
   };
 
@@ -327,7 +285,8 @@ When answering questions:
       loadAvailableModels();
     }
     if (activeTab === 'ai-prompt' && isUnlocked) {
-      loadCustomPrompt();
+      loadSheetNumberPrompt();
+      loadSheetNamePrompt();
       loadChatPrompt();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -601,53 +560,88 @@ When answering questions:
                   </div>
                   
                   <div className="space-y-6">
-                    {/* Page Labeling Prompt */}
+                    {/* Titleblock Extraction Prompts */}
                     <div className="border rounded-lg p-6">
                       <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-lg font-semibold">Page Labeling Prompt</h3>
-                        <div className="flex gap-2">
-                          <Button 
-                            onClick={() => {
-                              // Reset to default prompt
-                              setCustomPrompt(getEditablePrompt());
-                            }}
-                            variant="outline"
-                            size="sm"
-                          >
-                            <RefreshCw className="w-4 h-4 mr-2" />
-                            Reset to Default
-                          </Button>
-                          <Button 
-                            onClick={saveCustomPrompt}
-                            disabled={isLoading}
-                            size="sm"
-                          >
-                            <CheckCircle className="w-4 h-4 mr-2" />
-                            Save Prompt
-                          </Button>
-                        </div>
+                        <h3 className="text-lg font-semibold">Titleblock Extraction Prompts</h3>
                       </div>
                       <p className="text-gray-600 mb-4">
-                        Edit the AI prompt used for automatic page labeling. The JSON formatting section is fixed and cannot be modified.
+                        Edit the AI prompts used for titleblock extraction. Each region (sheet number and sheet name) has its own prompt that the LLM uses to extract values from the OCR text.
                       </p>
                       
-                      <div className="space-y-4">
-                        <div>
-                          <Label htmlFor="custom-prompt">Editable Prompt Instructions</Label>
+                      <div className="space-y-6">
+                        {/* Sheet Number Prompt */}
+                        <div className="border rounded-lg p-4">
+                          <div className="flex items-center justify-between mb-4">
+                            <h4 className="text-md font-semibold">Sheet Number Extraction Prompt</h4>
+                            <div className="flex gap-2">
+                              <Button 
+                                onClick={() => {
+                                  setSheetNumberPrompt(getDefaultSheetNumberPrompt());
+                                }}
+                                variant="outline"
+                                size="sm"
+                              >
+                                <RefreshCw className="w-4 h-4 mr-2" />
+                                Reset to Default
+                              </Button>
+                              <Button 
+                                onClick={saveSheetNumberPrompt}
+                                disabled={isLoading}
+                                size="sm"
+                              >
+                                <CheckCircle className="w-4 h-4 mr-2" />
+                                Save
+                              </Button>
+                            </div>
+                          </div>
+                          <p className="text-sm text-gray-500 mb-2">
+                            This prompt is used to extract sheet numbers from the sheet number region of the titleblock.
+                          </p>
                           <textarea
-                            id="custom-prompt"
-                            value={customPrompt}
-                            onChange={(e) => setCustomPrompt(e.target.value)}
-                            className="w-full h-80 p-3 border rounded-md font-mono text-sm"
-                            placeholder="Enter your custom AI prompt instructions here..."
+                            id="sheet-number-prompt"
+                            value={sheetNumberPrompt}
+                            onChange={(e) => setSheetNumberPrompt(e.target.value)}
+                            className="w-full h-64 p-3 border rounded-md font-mono text-sm"
+                            placeholder="Enter prompt for sheet number extraction..."
                           />
                         </div>
-                        
-                        <div>
-                          <Label>JSON Formatting (Fixed)</Label>
-                          <div className="w-full h-32 p-3 bg-gray-100 border rounded-md font-mono text-sm text-gray-600 overflow-auto">
-                            {getJsonFormatting()}
+
+                        {/* Sheet Name Prompt */}
+                        <div className="border rounded-lg p-4">
+                          <div className="flex items-center justify-between mb-4">
+                            <h4 className="text-md font-semibold">Sheet Name Extraction Prompt</h4>
+                            <div className="flex gap-2">
+                              <Button 
+                                onClick={() => {
+                                  setSheetNamePrompt(getDefaultSheetNamePrompt());
+                                }}
+                                variant="outline"
+                                size="sm"
+                              >
+                                <RefreshCw className="w-4 h-4 mr-2" />
+                                Reset to Default
+                              </Button>
+                              <Button 
+                                onClick={saveSheetNamePrompt}
+                                disabled={isLoading}
+                                size="sm"
+                              >
+                                <CheckCircle className="w-4 h-4 mr-2" />
+                                Save
+                              </Button>
+                            </div>
                           </div>
+                          <p className="text-sm text-gray-500 mb-2">
+                            This prompt is used to extract sheet names/titles from the sheet name region of the titleblock.
+                          </p>
+                          <textarea
+                            id="sheet-name-prompt"
+                            value={sheetNamePrompt}
+                            onChange={(e) => setSheetNamePrompt(e.target.value)}
+                            className="w-full h-64 p-3 border rounded-md font-mono text-sm"
+                            placeholder="Enter prompt for sheet name extraction..."
+                          />
                         </div>
                       </div>
                     </div>
@@ -699,7 +693,7 @@ When answering questions:
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                       <h4 className="font-medium text-blue-800 mb-2">ℹ️ How it works:</h4>
                       <ul className="text-sm text-blue-700 space-y-1">
-                        <li>• <strong>Page Labeling Prompt:</strong> Used for automatic sheet number and name extraction from documents</li>
+                        <li>• <strong>Titleblock Extraction Prompts:</strong> Used for extracting sheet numbers and names from titleblock regions (separate prompts for each field)</li>
                         <li>• <strong>Chat Assistant Prompt:</strong> Used for AI responses in the chat tab</li>
                         <li>• The JSON formatting for page labeling is automatically appended and cannot be changed</li>
                         <li>• Test changes on a small document first</li>

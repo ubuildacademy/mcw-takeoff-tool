@@ -314,18 +314,78 @@ async function extractWithLLM(
   ollamaApiKey: string,
   model: string
 ): Promise<Array<{ pageNumber: number; sheetNumber: string; sheetName: string }>> {
+  // Load custom prompts from settings
+  let sheetNumberPrompt: string | null = null;
+  let sheetNamePrompt: string | null = null;
+  
+  try {
+    const { supabase, TABLES } = await import('../supabase');
+    const { data: settings } = await supabase
+      .from(TABLES.APP_SETTINGS)
+      .select('key, value')
+      .in('key', ['titleblock-sheet-number-prompt', 'titleblock-sheet-name-prompt']);
+    
+    if (settings) {
+      const numberSetting = settings.find(s => s.key === 'titleblock-sheet-number-prompt');
+      const nameSetting = settings.find(s => s.key === 'titleblock-sheet-name-prompt');
+      sheetNumberPrompt = numberSetting?.value || null;
+      sheetNamePrompt = nameSetting?.value || null;
+    }
+  } catch (error) {
+    console.warn('[Titleblock LLM] Failed to load custom prompts, using defaults:', error);
+  }
+
+  // Use default prompts if custom ones aren't available
+  const defaultSheetNumberPrompt = `You are an expert at extracting sheet numbers from construction document titleblocks.
+
+Your task is to extract the sheet number from the provided text region. The text was extracted from a specific region of the titleblock that should contain the sheet number.
+
+INSTRUCTIONS:
+- Look for alphanumeric codes like "A4.21", "A0.01", "S0.02", "M1.15", etc.
+- Common patterns: Letter(s) followed by numbers, often with dots (e.g., A4.21, S0.02)
+- May appear with labels like "sheet number:", "sheet #:", "dwg no:", or standalone
+- Fix minor OCR errors (O→0, I→1, l→1, etc.)
+- Return ONLY the sheet number, nothing else
+- If you cannot find a sheet number, return "Unknown"
+
+Examples:
+- "sheet number: A4.21" → "A4.21"
+- "A4.2l" (OCR error) → "A4.21"
+- "Sheet # S0.02" → "S0.02"
+- "DWG NO: M1.15" → "M1.15"
+- Empty or unclear text → "Unknown"`;
+
+  const defaultSheetNamePrompt = `You are an expert at extracting sheet names/titles from construction document titleblocks.
+
+Your task is to extract the sheet name from the provided text region. The text was extracted from a specific region of the titleblock that should contain the sheet name/title.
+
+INSTRUCTIONS:
+- Look for drawing titles, names, or descriptions
+- May appear with labels like "drawing data:", "drawing title:", "sheet title:", "sheet name:", or standalone
+- Capture the COMPLETE title, including all descriptive text
+- Sheet names can span multiple lines - capture everything until you hit another label or empty line
+- Fix minor OCR errors (O→0, I→1, l→1, etc.)
+- Return ONLY the sheet name, nothing else
+- Do NOT include the label itself (e.g., don't include "drawing data:" in the result)
+- If you cannot find a sheet name, return "Unknown"
+
+Examples:
+- "drawing data: Enlarged Floor Plan - Ground Floor - East Side" → "Enlarged Floor Plan - Ground Floor - East Side"
+- "drawing title: Overall Reflected Ceiling Plans - Third thru Sixth & Int. Roof Level" → "Overall Reflected Ceiling Plans - Third thru Sixth & Int. Roof Level"
+- "sheet name: Cover Sheet" → "Cover Sheet"
+- "Floor Plan\nGround Level" (multi-line) → "Floor Plan Ground Level"
+- Empty or unclear text → "Unknown"`;
+
+  const finalSheetNumberPrompt = sheetNumberPrompt || defaultSheetNumberPrompt;
+  const finalSheetNamePrompt = sheetNamePrompt || defaultSheetNamePrompt;
+
   // Build context for LLM
   let context = 'Extract sheet numbers and names from the following titleblock text regions.\n\n';
   context += 'For each page, I will provide two text regions:\n';
   context += '1. SHEET_NUMBER_REGION: Text extracted from the sheet number field\n';
   context += '2. SHEET_NAME_REGION: Text extracted from the sheet name field\n\n';
-  context += 'Your task is to extract:\n';
-  context += '- Sheet number: Look for alphanumeric codes like "A4.21", "A0.01", "S0.02", etc.\n';
-  context += '- Sheet name: Look for drawing titles, names, or descriptions\n\n';
-  context += 'Rules:\n';
-  context += '- Fix minor OCR errors (O→0, I→1, l→1)\n';
-  context += '- Use "Unknown" if you cannot find a value\n';
-  context += '- Return EXACT text, do not reword or shorten\n\n';
+  context += `SHEET NUMBER EXTRACTION INSTRUCTIONS:\n${finalSheetNumberPrompt}\n\n`;
+  context += `SHEET NAME EXTRACTION INSTRUCTIONS:\n${finalSheetNamePrompt}\n\n`;
 
   batchTexts.forEach(({ pageNumber, sheetNumberText, sheetNameText }) => {
     context += `--- PAGE ${pageNumber} ---\n`;
@@ -334,7 +394,7 @@ async function extractWithLLM(
   });
 
   const systemPrompt = `You are an expert at extracting construction document sheet information. 
-Extract sheet numbers and names from the provided text regions. 
+Extract sheet numbers and names from the provided text regions using the instructions provided.
 Return a JSON array with format: [{"pageNumber": 1, "sheetNumber": "A4.21", "sheetName": "Floor Plan"}, ...]
 Use "Unknown" if a value cannot be determined.`;
 
