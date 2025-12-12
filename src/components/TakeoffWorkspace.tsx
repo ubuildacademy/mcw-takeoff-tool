@@ -105,6 +105,16 @@ export function TakeoffWorkspace() {
     sheetNameField?: NormalizedBox;
   } | null>(null);
   
+  // Titleblock extraction status
+  const [titleblockExtractionStatus, setTitleblockExtractionStatus] = useState<{
+    status: 'idle' | 'processing' | 'completed' | 'failed';
+    currentDocument?: string;
+    processedPages?: number;
+    totalPages?: number;
+    progress?: number;
+    error?: string;
+  } | null>(null);
+  
   // Store integration
   const { 
     setCurrentProject, 
@@ -603,6 +613,21 @@ export function TakeoffWorkspace() {
       scope: titleblockSelectionContext.scope,
     });
 
+    // Calculate total pages for progress tracking
+    const totalPages = targetDocumentIds.reduce((sum, docId) => {
+      const doc = documents.find(d => d.id === docId);
+      return sum + (doc?.pages?.length || 0);
+    }, 0);
+
+    // Initialize extraction status
+    setTitleblockExtractionStatus({
+      status: 'processing',
+      currentDocument: documents.find(d => d.id === targetDocumentIds[0])?.filename || 'Unknown',
+      processedPages: 0,
+      totalPages,
+      progress: 0,
+    });
+
     try {
       if (!projectId) {
         throw new Error('Project ID is missing');
@@ -612,12 +637,28 @@ export function TakeoffWorkspace() {
       const result = await titleblockService.extractTitleblock(projectId, targetDocumentIds, finalConfig);
       console.log('[Titleblock] Backend extraction response:', result);
 
-      // Reload documents to pick up updated sheet labels
-      console.log('[Titleblock] Reloading documents...');
-      await loadProjectDocuments();
-      console.log('[Titleblock] Documents reloaded successfully');
+      // Update status based on results
+      if (result.success && result.results) {
+        const totalProcessed = result.results.reduce((sum: number, r: any) => sum + (r.sheets?.length || 0), 0);
+        setTitleblockExtractionStatus({
+          status: 'completed',
+          processedPages: totalProcessed,
+          totalPages,
+          progress: 100,
+        });
 
-      alert(`Titleblock extraction completed successfully for ${targetDocumentIds.length} document(s).`);
+        // Reload documents to pick up updated sheet labels
+        console.log('[Titleblock] Reloading documents...');
+        await loadProjectDocuments();
+        console.log('[Titleblock] Documents reloaded successfully');
+
+        // Clear status after a delay
+        setTimeout(() => {
+          setTitleblockExtractionStatus(null);
+        }, 3000);
+      } else {
+        throw new Error(result.error || 'Extraction returned unsuccessful result');
+      }
     } catch (error) {
       console.error('[Titleblock] Extraction failed with error:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -625,7 +666,19 @@ export function TakeoffWorkspace() {
         message: errorMessage,
         stack: error instanceof Error ? error.stack : undefined,
       });
-      alert(`Titleblock extraction failed: ${errorMessage}. Please check the console for details.`);
+      
+      setTitleblockExtractionStatus({
+        status: 'failed',
+        error: errorMessage,
+        processedPages: 0,
+        totalPages,
+        progress: 0,
+      });
+
+      // Clear failed status after a delay
+      setTimeout(() => {
+        setTitleblockExtractionStatus(null);
+      }, 5000);
     } finally {
       // Clear context after selection flow completes
       console.log('[Titleblock] Clearing selection context');
@@ -1921,6 +1974,62 @@ export function TakeoffWorkspace() {
                     {exportStatus.progress}%
                   </span>
                 </div>
+              </div>
+            </div>
+          ) : titleblockExtractionStatus && titleblockExtractionStatus.status === 'processing' ? (
+            <div className="flex items-center gap-3 bg-blue-50 px-3 py-2 rounded-lg border border-blue-200">
+              <div className="animate-spin w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full"></div>
+              <div className="flex flex-col">
+                <span className="text-sm font-medium text-blue-700">
+                  Extracting Titleblocks
+                  {titleblockExtractionStatus.currentDocument && `: ${titleblockExtractionStatus.currentDocument}`}
+                  {titleblockExtractionStatus.processedPages !== undefined && titleblockExtractionStatus.totalPages !== undefined 
+                    ? ` (${titleblockExtractionStatus.processedPages}/${titleblockExtractionStatus.totalPages} pages)`
+                    : titleblockExtractionStatus.totalPages !== undefined 
+                      ? ` (0/${titleblockExtractionStatus.totalPages} pages)`
+                      : ''}
+                </span>
+                <div className="flex items-center gap-2 mt-1">
+                  <div className="w-32 h-2 bg-blue-200 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-blue-500 transition-all duration-300 ease-out rounded-full"
+                      style={{ width: `${titleblockExtractionStatus.progress || 0}%` }}
+                    ></div>
+                  </div>
+                  <span className="text-xs text-blue-600 font-medium">
+                    {titleblockExtractionStatus.progress || 0}%
+                  </span>
+                </div>
+              </div>
+            </div>
+          ) : titleblockExtractionStatus && titleblockExtractionStatus.status === 'completed' ? (
+            <div className="flex items-center gap-3 bg-green-50 px-3 py-2 rounded-lg border border-green-200">
+              <div className="w-5 h-5 border-2 border-green-500 rounded-full flex items-center justify-center">
+                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-sm font-medium text-green-700">
+                  Titleblock Extraction Complete
+                  {titleblockExtractionStatus.processedPages !== undefined && titleblockExtractionStatus.totalPages !== undefined 
+                    ? ` (${titleblockExtractionStatus.processedPages}/${titleblockExtractionStatus.totalPages} pages)`
+                    : ''}
+                </span>
+              </div>
+            </div>
+          ) : titleblockExtractionStatus && titleblockExtractionStatus.status === 'failed' ? (
+            <div className="flex items-center gap-3 bg-red-50 px-3 py-2 rounded-lg border border-red-200">
+              <div className="w-5 h-5 border-2 border-red-500 rounded-full flex items-center justify-center">
+                <span className="text-red-500 text-xs font-bold">×</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-sm font-medium text-red-700">
+                  Titleblock Extraction Failed
+                </span>
+                {titleblockExtractionStatus.error && (
+                  <span className="text-xs text-red-600 mt-1">
+                    {titleblockExtractionStatus.error}
+                  </span>
+                )}
               </div>
             </div>
           ) : labelingJob && labelingJob.status === 'processing' ? (
