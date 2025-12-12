@@ -108,6 +108,9 @@ export function SheetSidebar({
   // Page menu state (for gear icon on pages)
   const [openPageMenu, setOpenPageMenu] = useState<string | null>(null);
   
+  // Bulk actions menu state (for gear icon in header)
+  const [openBulkActionsMenu, setOpenBulkActionsMenu] = useState(false);
+  
   // Rename dialog state
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [renamingPage, setRenamingPage] = useState<{documentId: string, pageNumber: number, currentName: string} | null>(null);
@@ -144,13 +147,16 @@ export function SheetSidebar({
       if (openPageMenu) {
         setOpenPageMenu(null);
       }
+      if (openBulkActionsMenu) {
+        setOpenBulkActionsMenu(false);
+      }
     };
 
-    if (openDocumentMenu || openPageMenu) {
+    if (openDocumentMenu || openPageMenu || openBulkActionsMenu) {
       document.addEventListener('click', handleClickOutside);
       return () => document.removeEventListener('click', handleClickOutside);
     }
-  }, [openDocumentMenu, openPageMenu]);
+  }, [openDocumentMenu, openPageMenu, openBulkActionsMenu]);
 
   // Store integration
   const { getProjectTakeoffMeasurements } = useTakeoffStore();
@@ -299,6 +305,36 @@ export function SheetSidebar({
     } catch (error) {
       console.error('Error deleting document:', error);
       alert('Failed to delete document. Please try again.');
+    }
+  };
+
+  // Delete all documents
+  const handleDeleteAllDocuments = async () => {
+    if (!documents || documents.length === 0) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Are you sure you want to delete all ${documents.length} document(s)? This action cannot be undone.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      // Delete all documents in parallel
+      await Promise.all(documents.map(doc => fileService.deletePDF(doc.id)));
+      
+      // Reload documents from server to ensure list is up to date
+      if (onReloadDocuments) {
+        await onReloadDocuments();
+      }
+      
+      setOpenBulkActionsMenu(false);
+    } catch (error) {
+      console.error('Error deleting all documents:', error);
+      alert('Failed to delete some documents. Please try again.');
     }
   };
 
@@ -1412,20 +1448,51 @@ export function SheetSidebar({
                 </Button>
               </label>
             )}
-            <Button 
-              size="sm" 
-              variant="outline" 
-              onClick={() => {
-                if (onBulkExtractTitleblock) {
-                  onBulkExtractTitleblock();
-                } else {
-                  handleLabelAllUnlabeledPages();
-                }
-              }}
-              title="Bulk extract titleblock info across all documents"
-            >
-              <Brain className="w-4 h-4" />
-            </Button>
+            <div className="relative">
+              <Button 
+                size="sm" 
+                variant="outline" 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOpenBulkActionsMenu(!openBulkActionsMenu);
+                }}
+                title="Document Actions"
+              >
+                <Settings className="w-4 h-4" />
+              </Button>
+              
+              {openBulkActionsMenu && (
+                <div className="absolute right-0 top-full mt-1 w-56 bg-white border rounded-lg shadow-lg z-50 py-1">
+                  <button
+                    className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 text-blue-600 flex items-center gap-2"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (onBulkExtractTitleblock) {
+                        onBulkExtractTitleblock();
+                      } else {
+                        handleLabelAllUnlabeledPages();
+                      }
+                      setOpenBulkActionsMenu(false);
+                    }}
+                  >
+                    <Tag className="w-4 h-4" />
+                    Extract Titleblock Info (All)
+                  </button>
+                  <button
+                    className="w-full px-3 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center gap-2"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleDeleteAllDocuments();
+                    }}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Delete All Documents
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
         
@@ -1490,197 +1557,245 @@ export function SheetSidebar({
         ) : (
           <div className="p-4 space-y-2">
             {filteredDocuments.map((document) => {
-              // Single-page PDFs: show as flat item without expansion
+              // Single-page PDFs: show with document header and page content
               if (document.totalPages === 1) {
                 const page = document.pages[0];
                 return (
-                  <div
-                    key={document.id}
-                    className={`border rounded-lg p-3 cursor-pointer transition-colors ${
-                      selectedDocumentId === document.id && selectedPageNumber === page.pageNumber
-                        ? 'bg-primary/10 border-l-4 border-primary'
-                        : 'hover:bg-accent/30'
-                    }`}
-                    onClick={() => handlePageClick(document.id, page.pageNumber)}
-                  >
-                    <div className="flex items-start gap-3">
-                      <FileText className="w-4 h-4 text-muted-foreground mt-0.5" />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex justify-between mb-1">
-                          <div className="flex-1 min-w-0 pr-2">
-                            {editingSheetId === `${document.id}-${page.pageNumber}` ? (
-                              <div className="flex items-center gap-1">
-                                <Input
-                                  value={editingSheetName}
-                                  onChange={(e) => setEditingSheetName(e.target.value)}
-                                  onKeyDown={handleSheetNameKeyDown}
-                                  className="h-6 text-sm px-2 py-1"
-                                  autoFocus
-                                  onBlur={(e) => {
-                                    e.stopPropagation();
-                                    saveSheetName();
-                                  }}
-                                />
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    saveSheetName();
-                                  }}
-                                  className="h-6 w-6 p-0 text-green-600 hover:text-green-700"
-                                  title="Save"
-                                >
-                                  <Check className="w-3 h-3" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    cancelEditingSheetName();
-                                  }}
-                                  className="h-6 w-6 p-0 text-red-600 hover:text-red-700"
-                                  title="Cancel"
-                                >
-                                  <X className="w-3 h-3" />
-                                </Button>
-                              </div>
-                            ) : (
-                              <div className="flex items-start gap-2">
-                                <span className="font-medium text-sm break-words leading-tight">
-                                  {page.sheetName || document.name || `Page ${page.pageNumber}`}
-                                </span>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    startEditingSheetName(document.id, page.pageNumber, page.sheetName || '');
-                                  }}
-                                  className="h-6 w-6 p-0 text-gray-400 hover:text-gray-600 flex-shrink-0 mt-0.5"
-                                  title="Edit sheet name"
-                                >
-                                  <Edit2 className="w-3 h-3" />
-                                </Button>
-                              </div>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-1 flex-shrink-0">
-                            {editingSheetNumberId === `${document.id}-${page.pageNumber}` ? (
-                              <div className="flex items-center gap-1">
-                                <Input
-                                  value={editingSheetNumber}
-                                  onChange={(e) => setEditingSheetNumber(e.target.value)}
-                                  onKeyDown={handleSheetNumberKeyDown}
-                                  className="h-5 text-xs w-16"
-                                  autoFocus
-                                  placeholder="Sheet #"
-                                />
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    saveSheetNumber();
-                                  }}
-                                  className="h-5 w-5 p-0 text-green-600 hover:text-green-700"
-                                  title="Save sheet number"
-                                >
-                                  <Check className="w-3 h-3" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    cancelEditingSheetNumber();
-                                  }}
-                                  className="h-5 w-5 p-0 text-red-600 hover:text-red-700"
-                                  title="Cancel editing"
-                                >
-                                  <X className="w-3 h-3" />
-                                </Button>
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-1">
-                                {page.sheetNumber ? (
-                                  <Badge variant="secondary" className="text-xs">
-                                    {page.sheetNumber}
-                                  </Badge>
-                                ) : (
-                                  <span className="text-xs text-gray-400 italic">No sheet #</span>
-                                )}
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    startEditingSheetNumber(document.id, page.pageNumber, page.sheetNumber || '');
-                                  }}
-                                  className="h-5 w-5 p-0 text-gray-400 hover:text-gray-600"
-                                  title={page.sheetNumber ? "Edit sheet number" : "Add sheet number"}
-                                >
-                                  <Edit2 className="w-3 h-3" />
-                                </Button>
-                              </div>
-                            )}
-                          </div>
+                  <div key={document.id} className="border rounded-lg">
+                    {/* Document Header */}
+                    <div
+                      className="p-3 cursor-pointer hover:bg-accent/50 transition-colors"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-muted-foreground" />
+                          <span className="font-medium text-sm">{document.name}</span>
+                          <Badge variant="outline" className="text-xs">
+                            1 page
+                          </Badge>
                         </div>
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <span>{document.name}</span>
-                          {page.hasTakeoffs && (
-                            <Badge variant="outline" className="text-xs">
-                              {page.takeoffCount} takeoffs
-                            </Badge>
+                        <div className="relative">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenDocumentMenu(openDocumentMenu === document.id ? null : document.id);
+                            }}
+                            className="h-6 w-6 p-0"
+                            title="Document Options"
+                          >
+                            <Settings className="w-3 h-3" />
+                          </Button>
+                          
+                          {openDocumentMenu === document.id && (
+                            <div className="absolute right-0 top-full mt-1 w-56 bg-white border rounded-lg shadow-lg z-50 py-1">
+                              {/* Extract Titleblock Info option */}
+                              <button
+                                className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 text-blue-600 flex items-center gap-2"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  if (onExtractTitleblockForDocument) {
+                                    onExtractTitleblockForDocument(document.id);
+                                  }
+                                  setOpenDocumentMenu(null);
+                                }}
+                              >
+                                <Tag className="w-4 h-4" />
+                                Extract Titleblock Info
+                              </button>
+                              <button
+                                className="w-full px-3 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center gap-2"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  handleDeleteDocument(document.id);
+                                  setOpenDocumentMenu(null);
+                                }}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                                Delete Document
+                              </button>
+                            </div>
                           )}
                         </div>
                       </div>
-                      <div className="relative">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const menuKey = `${document.id}-${page.pageNumber}`;
-                            setOpenPageMenu(openPageMenu === menuKey ? null : menuKey);
-                          }}
-                          className="h-6 w-6 p-0"
-                          title="Page Options"
-                        >
-                          <Settings className="w-3 h-3" />
-                        </Button>
-                        
-                        {openPageMenu === `${document.id}-${page.pageNumber}` && (
-                          <div className="absolute right-0 top-full mt-1 w-48 bg-white border rounded-lg shadow-lg z-50 py-1">
-                            <button
-                              className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 text-blue-600 flex items-center gap-2"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                if (onExtractTitleblockForDocument) {
-                                  onExtractTitleblockForDocument(document.id);
-                                }
-                                setOpenPageMenu(null);
-                              }}
-                            >
-                              <Tag className="w-4 h-4" />
-                              Extract Titleblock Info
-                            </button>
-                            <button
-                              className="w-full px-3 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center gap-2"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                handleDeletePage(document.id);
-                                setOpenPageMenu(null);
-                              }}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                              Delete
-                            </button>
+                    </div>
+
+                    {/* Page Content */}
+                    <div
+                      className={`border-t p-3 cursor-pointer transition-colors ${
+                        selectedDocumentId === document.id && selectedPageNumber === page.pageNumber
+                          ? 'bg-primary/10 border-l-4 border-primary'
+                          : 'hover:bg-accent/30'
+                      }`}
+                      onClick={() => handlePageClick(document.id, page.pageNumber)}
+                    >
+                      <div className="flex items-start gap-3">
+                        <FileText className="w-4 h-4 text-muted-foreground mt-0.5" />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex justify-between mb-1">
+                            <div className="flex-1 min-w-0 pr-2">
+                              {editingSheetId === `${document.id}-${page.pageNumber}` ? (
+                                <div className="flex items-center gap-1">
+                                  <Input
+                                    value={editingSheetName}
+                                    onChange={(e) => setEditingSheetName(e.target.value)}
+                                    onKeyDown={handleSheetNameKeyDown}
+                                    className="h-6 text-sm px-2 py-1"
+                                    autoFocus
+                                    onBlur={(e) => {
+                                      e.stopPropagation();
+                                      saveSheetName();
+                                    }}
+                                  />
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      saveSheetName();
+                                    }}
+                                    className="h-6 w-6 p-0 text-green-600 hover:text-green-700"
+                                    title="Save"
+                                  >
+                                    <Check className="w-3 h-3" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      cancelEditingSheetName();
+                                    }}
+                                    className="h-6 w-6 p-0 text-red-600 hover:text-red-700"
+                                    title="Cancel"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </Button>
+                                </div>
+                              ) : (
+                                <div className="flex items-start gap-2">
+                                  <span className="font-medium text-sm break-words leading-tight">
+                                    {page.sheetName || document.name || `Page ${page.pageNumber}`}
+                                  </span>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      startEditingSheetName(document.id, page.pageNumber, page.sheetName || '');
+                                    }}
+                                    className="h-6 w-6 p-0 text-gray-400 hover:text-gray-600 flex-shrink-0 mt-0.5"
+                                    title="Edit sheet name"
+                                  >
+                                    <Edit2 className="w-3 h-3" />
+                                  </Button>
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                              {editingSheetNumberId === `${document.id}-${page.pageNumber}` ? (
+                                <div className="flex items-center gap-1">
+                                  <Input
+                                    value={editingSheetNumber}
+                                    onChange={(e) => setEditingSheetNumber(e.target.value)}
+                                    onKeyDown={handleSheetNumberKeyDown}
+                                    className="h-5 text-xs w-16"
+                                    autoFocus
+                                    placeholder="Sheet #"
+                                  />
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      saveSheetNumber();
+                                    }}
+                                    className="h-5 w-5 p-0 text-green-600 hover:text-green-700"
+                                    title="Save sheet number"
+                                  >
+                                    <Check className="w-3 h-3" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      cancelEditingSheetNumber();
+                                    }}
+                                    className="h-5 w-5 p-0 text-red-600 hover:text-red-700"
+                                    title="Cancel editing"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </Button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-1">
+                                  {page.sheetNumber ? (
+                                    <Badge variant="secondary" className="text-xs">
+                                      {page.sheetNumber}
+                                    </Badge>
+                                  ) : (
+                                    <span className="text-xs text-gray-400 italic">No sheet #</span>
+                                  )}
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      startEditingSheetNumber(document.id, page.pageNumber, page.sheetNumber || '');
+                                    }}
+                                    className="h-5 w-5 p-0 text-gray-400 hover:text-gray-600"
+                                    title={page.sheetNumber ? "Edit sheet number" : "Add sheet number"}
+                                  >
+                                    <Edit2 className="w-3 h-3" />
+                                  </Button>
+                                </div>
+                              )}
+                            </div>
                           </div>
-                        )}
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            {page.hasTakeoffs && (
+                              <Badge variant="outline" className="text-xs">
+                                {page.takeoffCount} takeoffs
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                        <div className="relative">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const menuKey = `${document.id}-${page.pageNumber}`;
+                              setOpenPageMenu(openPageMenu === menuKey ? null : menuKey);
+                            }}
+                            className="h-6 w-6 p-0"
+                            title="Page Options"
+                          >
+                            <Settings className="w-3 h-3" />
+                          </Button>
+                          
+                          {openPageMenu === `${document.id}-${page.pageNumber}` && (
+                            <div className="absolute right-0 top-full mt-1 w-48 bg-white border rounded-lg shadow-lg z-50 py-1">
+                              <button
+                                className="w-full px-3 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center gap-2"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  handleDeletePage(document.id);
+                                  setOpenPageMenu(null);
+                                }}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                                Delete
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
