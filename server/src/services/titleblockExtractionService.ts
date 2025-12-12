@@ -328,6 +328,85 @@ class TitleblockExtractionService {
       };
     }
   }
+
+  /**
+   * Extract raw text from a specific region of a PDF page
+   * Returns the extracted text as a string
+   */
+  async extractTextFromRegion(
+    pdfPath: string,
+    pageNumber: number,
+    region: { x: number; y: number; width: number; height: number }
+  ): Promise<string | null> {
+    try {
+      const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
+      
+      // Create a temporary script that extracts text from a specific region
+      const tempScriptPath = path.join(this.tempDir, `extract_region_${Date.now()}.py`);
+      const extractScript = `
+import sys
+import fitz  # PyMuPDF
+import json
+
+pdf_path = sys.argv[1]
+page_num = int(sys.argv[2])
+region_x = float(sys.argv[3])
+region_y = float(sys.argv[4])
+region_w = float(sys.argv[5])
+region_h = float(sys.argv[6])
+
+try:
+    doc = fitz.open(pdf_path)
+    if page_num > len(doc):
+        print("", end="")
+        sys.exit(0)
+    
+    page = doc[page_num - 1]
+    page_width = page.rect.width
+    page_height = page.rect.height
+    
+    # Convert normalized region to absolute coordinates
+    x0 = region_x * page_width
+    y0 = region_y * page_height
+    x1 = (region_x + region_w) * page_width
+    y1 = (region_y + region_h) * page_height
+    
+    region_rect = fitz.Rect(x0, y0, x1, y1)
+    
+    # Extract text from the region
+    text = page.get_text("text", clip=region_rect)
+    
+    print(text.strip(), end="")
+    doc.close()
+except Exception as e:
+    print("", end="")
+    sys.exit(0)
+`;
+
+      await fs.writeFile(tempScriptPath, extractScript);
+
+      const enhancedPath = this.getEnhancedPath();
+      const command = `${pythonCommand} "${tempScriptPath}" "${pdfPath}" "${pageNumber}" "${region.x}" "${region.y}" "${region.width}" "${region.height}"`;
+
+      const execResult = await execAsync(command, {
+        timeout: 30000,
+        maxBuffer: 1024 * 1024, // 1MB
+        env: {
+          ...process.env,
+          PATH: enhancedPath,
+        },
+      });
+
+      // Clean up temp script
+      await fs.remove(tempScriptPath).catch(() => {});
+
+      const text = execResult.stdout.trim();
+      return text || null;
+    } catch (error) {
+      console.error(`[Titleblock] Error extracting text from region for page ${pageNumber}:`, error);
+      return null;
+    }
+  }
 }
 
 export const titleblockExtractionService = new TitleblockExtractionService();

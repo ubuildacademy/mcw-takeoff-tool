@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs-extra';
+import axios from 'axios';
 import { supabase, TABLES } from '../supabase';
 import { storage, StoredSheet } from '../storage';
 import { titleblockExtractionService } from '../services/titleblockExtractionService';
@@ -58,23 +59,9 @@ router.post('/extract', async (req, res) => {
       return res.status(400).json({ error: 'titleblockConfig with sheetNumberField and sheetNameField is required' });
     }
 
-    // Compute a single combined region that covers both fields.
-    const boxes: NormalizedBox[] = [
-      titleblockConfig.sheetNumberField,
-      titleblockConfig.sheetNameField,
-    ];
-
-    const minX = Math.max(0, Math.min(...boxes.map(b => b.x)));
-    const minY = Math.max(0, Math.min(...boxes.map(b => b.y)));
-    const maxX = Math.min(1, Math.max(...boxes.map(b => b.x + b.width)));
-    const maxY = Math.min(1, Math.max(...boxes.map(b => b.y + b.height)));
-
-    const combinedRegion: NormalizedBox = {
-      x: minX,
-      y: minY,
-      width: Math.max(0, maxX - minX),
-      height: Math.max(0, maxY - minY),
-    };
+    // Keep both regions separate for individual extraction
+    const sheetNumberRegion = titleblockConfig.sheetNumberField;
+    const sheetNameRegion = titleblockConfig.sheetNameField;
 
     const results: Array<{
       documentId: string;
@@ -132,35 +119,31 @@ router.post('/extract', async (req, res) => {
 
       const pageNumbers = Array.from({ length: totalPages }, (_, idx) => idx + 1);
 
-      // Run Python-based extraction constrained to the combined region
-      console.log('[Titleblock] Starting extraction for document:', {
+      console.log('[Titleblock] Starting LLM-based extraction for document:', {
         documentId,
         totalPages,
-        combinedRegion,
-        sheetNumberField: titleblockConfig.sheetNumberField,
-        sheetNameField: titleblockConfig.sheetNameField,
+        sheetNumberRegion,
+        sheetNameRegion,
       });
-      
-      const extractionResult = await titleblockExtractionService.extractSheets(
+
+      // Extract text from each region separately and use LLM to extract values
+      const extractedSheets = await extractTitleblockWithLLM(
         pdfPath,
         pageNumbers,
-        10,
-        combinedRegion
+        sheetNumberRegion,
+        sheetNameRegion
       );
 
-      console.log('[Titleblock] Extraction result:', {
+      console.log('[Titleblock] LLM extraction result:', {
         documentId,
-        success: extractionResult.success,
-        sheetsCount: extractionResult.sheets.length,
-        error: extractionResult.error,
-        firstFewSheets: extractionResult.sheets.slice(0, 3),
+        sheetsCount: extractedSheets.length,
+        firstFewSheets: extractedSheets.slice(0, 3),
       });
 
-      if (!extractionResult.success || !extractionResult.sheets.length) {
+      if (!extractedSheets.length) {
         console.warn('Titleblock extraction: no sheets extracted', {
           documentId,
           pdfPath,
-          error: extractionResult.error,
         });
         continue;
       }
@@ -168,7 +151,7 @@ router.post('/extract', async (req, res) => {
       // Persist sheet info and titleblockConfig to DB
       const savedSheets: Array<{ pageNumber: number; sheetNumber: string; sheetName: string }> = [];
 
-      for (const sheet of extractionResult.sheets) {
+      for (const sheet of extractedSheets) {
         const sheetId = `${documentId}-${sheet.pageNumber}`;
 
         let existingSheet: StoredSheet | null = null;
@@ -251,6 +234,216 @@ router.post('/extract', async (req, res) => {
     });
   }
 });
+
+/**
+ * Extract titleblock information using LLM for each region separately
+ */
+async function extractTitleblockWithLLM(
+  pdfPath: string,
+  pageNumbers: number[],
+  sheetNumberRegion: NormalizedBox,
+  sheetNameRegion: NormalizedBox
+): Promise<Array<{ pageNumber: number; sheetNumber: string; sheetName: string }>> {
+  const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'https://ollama.com';
+  const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || '';
+  const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'gpt-oss:120b';
+
+  const results: Array<{ pageNumber: number; sheetNumber: string; sheetName: string }> = [];
+
+  // Process pages in batches
+  const BATCH_SIZE = 5; // Smaller batches for LLM processing
+  for (let i = 0; i < pageNumbers.length; i += BATCH_SIZE) {
+    const batch = pageNumbers.slice(i, i + BATCH_SIZE);
+    console.log(`[Titleblock LLM] Processing batch: pages ${batch.join(',')}`);
+
+    try {
+      // Extract text from each region for all pages in batch
+      const batchTexts: Array<{
+        pageNumber: number;
+        sheetNumberText: string;
+        sheetNameText: string;
+      }> = [];
+
+      for (const pageNumber of batch) {
+        // Extract text from sheet number region
+        const sheetNumberText = await titleblockExtractionService.extractTextFromRegion(
+          pdfPath,
+          pageNumber,
+          sheetNumberRegion
+        );
+
+        // Extract text from sheet name region
+        const sheetNameText = await titleblockExtractionService.extractTextFromRegion(
+          pdfPath,
+          pageNumber,
+          sheetNameRegion
+        );
+
+        batchTexts.push({
+          pageNumber,
+          sheetNumberText: sheetNumberText || '',
+          sheetNameText: sheetNameText || '',
+        });
+      }
+
+      // Send to LLM for extraction
+      const batchResults = await extractWithLLM(batchTexts, OLLAMA_BASE_URL, OLLAMA_API_KEY, OLLAMA_MODEL);
+      results.push(...batchResults);
+    } catch (error) {
+      console.error(`[Titleblock LLM] Error processing batch ${batch.join(',')}:`, error);
+      // Add Unknown entries for failed batch
+      for (const pageNumber of batch) {
+        results.push({
+          pageNumber,
+          sheetNumber: 'Unknown',
+          sheetName: 'Unknown',
+        });
+      }
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Use LLM to extract sheet numbers and names from extracted text
+ */
+async function extractWithLLM(
+  batchTexts: Array<{ pageNumber: number; sheetNumberText: string; sheetNameText: string }>,
+  ollamaBaseUrl: string,
+  ollamaApiKey: string,
+  model: string
+): Promise<Array<{ pageNumber: number; sheetNumber: string; sheetName: string }>> {
+  // Build context for LLM
+  let context = 'Extract sheet numbers and names from the following titleblock text regions.\n\n';
+  context += 'For each page, I will provide two text regions:\n';
+  context += '1. SHEET_NUMBER_REGION: Text extracted from the sheet number field\n';
+  context += '2. SHEET_NAME_REGION: Text extracted from the sheet name field\n\n';
+  context += 'Your task is to extract:\n';
+  context += '- Sheet number: Look for alphanumeric codes like "A4.21", "A0.01", "S0.02", etc.\n';
+  context += '- Sheet name: Look for drawing titles, names, or descriptions\n\n';
+  context += 'Rules:\n';
+  context += '- Fix minor OCR errors (O→0, I→1, l→1)\n';
+  context += '- Use "Unknown" if you cannot find a value\n';
+  context += '- Return EXACT text, do not reword or shorten\n\n';
+
+  batchTexts.forEach(({ pageNumber, sheetNumberText, sheetNameText }) => {
+    context += `--- PAGE ${pageNumber} ---\n`;
+    context += `SHEET_NUMBER_REGION:\n${sheetNumberText || '(empty)'}\n\n`;
+    context += `SHEET_NAME_REGION:\n${sheetNameText || '(empty)'}\n\n`;
+  });
+
+  const systemPrompt = `You are an expert at extracting construction document sheet information. 
+Extract sheet numbers and names from the provided text regions. 
+Return a JSON array with format: [{"pageNumber": 1, "sheetNumber": "A4.21", "sheetName": "Floor Plan"}, ...]
+Use "Unknown" if a value cannot be determined.`;
+
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: context },
+  ];
+
+  const models = [model, 'gpt-oss:20b', 'gpt-oss:7b', 'llama3.1:8b'];
+  let response;
+  let lastError;
+
+  for (const tryModel of models) {
+    try {
+      console.log(`[Titleblock LLM] Trying model: ${tryModel}`);
+      response = await axios.post(
+        `${ollamaBaseUrl}/api/chat`,
+        {
+          model: tryModel,
+          messages,
+          stream: false,
+          options: {
+            temperature: 0.3,
+            top_p: 0.9,
+          },
+        },
+        {
+          headers: {
+            ...(ollamaApiKey ? { Authorization: `Bearer ${ollamaApiKey}` } : {}),
+            'Content-Type': 'application/json',
+          },
+          timeout: 60000,
+        }
+      );
+      console.log(`[Titleblock LLM] Success with model: ${tryModel}`);
+      break;
+    } catch (error) {
+      console.error(`[Titleblock LLM] Model ${tryModel} failed:`, error instanceof Error ? error.message : 'Unknown error');
+      lastError = error;
+      continue;
+    }
+  }
+
+  if (!response) {
+    console.error('[Titleblock LLM] All models failed');
+    // Return Unknown for all pages
+    return batchTexts.map(({ pageNumber }) => ({
+      pageNumber,
+      sheetNumber: 'Unknown',
+      sheetName: 'Unknown',
+    }));
+  }
+
+  const aiResponse = response.data.message?.content || '';
+  console.log(`[Titleblock LLM] AI response preview:`, aiResponse.substring(0, 500));
+
+  try {
+    // Parse JSON from response
+    const jsonMatch = aiResponse.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) {
+      throw new Error('No JSON array found in response');
+    }
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (!Array.isArray(parsed)) {
+      throw new Error('Response is not an array');
+    }
+
+    // Validate and map results
+    const results: Array<{ pageNumber: number; sheetNumber: string; sheetName: string }> = [];
+    const expectedPages = new Set(batchTexts.map((b) => b.pageNumber));
+
+    for (const item of parsed) {
+      if (
+        typeof item.pageNumber === 'number' &&
+        typeof item.sheetNumber === 'string' &&
+        typeof item.sheetName === 'string' &&
+        expectedPages.has(item.pageNumber)
+      ) {
+        results.push({
+          pageNumber: item.pageNumber,
+          sheetNumber: item.sheetNumber.trim() || 'Unknown',
+          sheetName: item.sheetName.trim() || 'Unknown',
+        });
+      }
+    }
+
+    // Ensure all pages are represented
+    for (const { pageNumber } of batchTexts) {
+      if (!results.find((r) => r.pageNumber === pageNumber)) {
+        results.push({
+          pageNumber,
+          sheetNumber: 'Unknown',
+          sheetName: 'Unknown',
+        });
+      }
+    }
+
+    return results.sort((a, b) => a.pageNumber - b.pageNumber);
+  } catch (error) {
+    console.error('[Titleblock LLM] Failed to parse LLM response:', error);
+    // Return Unknown for all pages
+    return batchTexts.map(({ pageNumber }) => ({
+      pageNumber,
+      sheetNumber: 'Unknown',
+      sheetName: 'Unknown',
+    }));
+  }
+}
 
 export default router;
 
