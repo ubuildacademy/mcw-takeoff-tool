@@ -858,8 +858,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       renderSVGCurrentCutout(svgOverlay, viewport);
     }
     
-    // Draw visual search selection box (only if on the page being rendered)
-    if (visualSearchMode && isSelectingSymbol && selectionBox && pageNum === currentPage) {
+    // Draw visual search or titleblock selection box (only if on the page being rendered)
+    if ((visualSearchMode || !!titleblockSelectionMode) && isSelectingSymbol && selectionBox && pageNum === currentPage) {
       renderSVGSelectionBox(svgOverlay, selectionBox, viewport);
     }
     
@@ -892,13 +892,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       renderRunningLengthDisplay(svgOverlay, viewport);
     }
     
-  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, selectedMarkupId, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, cutoutMode, currentCutout, visualSearchMode, isSelectingSymbol, selectionBox]);
+  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, selectedMarkupId, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, cutoutMode, currentCutout, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionBox]);
 
   // Re-render annotations when measurements or interaction state changes
   useEffect(() => {
     if (pdfDocument && currentViewport && !isRenderingRef.current) {
       // Only render if we have measurements, annotations, or if we're in measuring/annotation/visual search mode
-      if (localTakeoffMeasurements.length > 0 || isMeasuring || isCalibrating || currentMeasurement.length > 0 || isAnnotating || localAnnotations.length > 0 || (visualSearchMode && isSelectingSymbol)) {
+      if (localTakeoffMeasurements.length > 0 || isMeasuring || isCalibrating || currentMeasurement.length > 0 || isAnnotating || localAnnotations.length > 0 || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol)) {
         renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
       } else {
         // LAYER THRASH PREVENTION: Clear overlay when measurements are empty to prevent stale renderings
@@ -908,7 +908,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
       }
     }
-  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, selectedMarkupId, isSelectionMode, renderTakeoffAnnotations, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, isSelectingSymbol, currentAnnotation]);
+  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, selectedMarkupId, isSelectionMode, renderTakeoffAnnotations, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentAnnotation]);
   
   // CRITICAL: Trigger re-render of annotations after measurements are loaded
   // This ensures markups appear immediately when returning to a page
@@ -1036,7 +1036,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // When measuring, set pointer-events to 'none' so clicks pass through to canvas
       // This allows proper double-click detection on the canvas
       // For other modes, set to 'all' to capture clicks for selection/annotation/etc.
-      const shouldCaptureClicks = isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol);
+      const shouldCaptureClicks = isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
       hitArea.setAttribute('pointer-events', shouldCaptureClicks ? 'all' : 'none');
     }
     
@@ -1046,7 +1046,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (isSelectionMode && currentViewport && pdfPageRef.current) {
       renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
     }
-  }, [isMeasuring, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, isSelectingSymbol, currentViewport, currentPage, renderTakeoffAnnotations]);
+  }, [isMeasuring, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentViewport, currentPage, renderTakeoffAnnotations]);
 
   // Page visibility handler - ensures overlay is properly initialized when page becomes visible
   const onPageShown = useCallback((pageNum: number, viewport: any) => {
@@ -1080,7 +1080,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // This ensures clicks pass through to canvas when measuring (for double-click support)
     const hitArea = svgOverlay.querySelector('#hit-area') as SVGRectElement;
     if (hitArea) {
-      const shouldCaptureClicks = isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol);
+      const shouldCaptureClicks = isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
       hitArea.setAttribute('pointer-events', shouldCaptureClicks ? 'all' : 'none');
     }
     
@@ -1097,7 +1097,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     // Note: If no measurements, the reactive useEffect will handle rendering when they load
     // The reactive useEffect watches allTakeoffMeasurements and will trigger render when measurements arrive
-  }, [renderTakeoffAnnotations, localTakeoffMeasurements, currentProjectId, file?.id, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, isSelectingSymbol]);
+  }, [renderTakeoffAnnotations, localTakeoffMeasurements, currentProjectId, file?.id, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol]);
 
   // PDF render function with page-specific viewport isolation
   const renderPDFPage = useCallback(async (pageNum: number) => {
@@ -2479,8 +2479,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       setIsDeselecting(false);
     }
     
-    // Handle visual search selection box drawing
-    if (visualSearchMode && isSelectingSymbol && selectionStart) {
+    // Handle visual search or titleblock selection box drawing
+    if ((visualSearchMode || !!titleblockSelectionMode) && isSelectingSymbol && selectionStart) {
       if (!pdfCanvasRef.current) return;
       
       const rect = pdfCanvasRef.current.getBoundingClientRect();
@@ -2624,7 +2624,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
       }
     }
-  }, [annotationTool, isCalibrating, calibrationPoints, isMeasuring, selectedConditionId, mousePosition, isContinuousDrawing, activePoints, rubberBandElement, currentViewport, calculateRunningLength, isDeselecting, visualSearchMode, isSelectingSymbol, selectionStart, viewState, setPageViewports, currentPage]);
+  }, [annotationTool, isCalibrating, calibrationPoints, isMeasuring, selectedConditionId, mousePosition, isContinuousDrawing, activePoints, rubberBandElement, currentViewport, calculateRunningLength, isDeselecting, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionStart, viewState, setPageViewports, currentPage]);
 
   // Handle click - direct coordinate conversion
   const handleClick = useCallback(async (event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
@@ -2997,7 +2997,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       }
       // Area and volume measurements will be completed on double-click
     }
-  }, [isCalibrating, calibrationPoints, measurementType, currentMeasurement, isContinuousDrawing, activePoints, calculateRunningLength, currentViewport, isSelectionMode, selectedMarkupId, isOrthoSnapping, isMeasuring, mousePosition, cutoutMode, currentCutout, isDeselecting, visualSearchMode, isSelectingSymbol, selectionStart, annotationTool, currentProjectId, file, currentPage, addAnnotation, annotationColor, onAnnotationToolChange, viewState, setPageViewports, pdfDocument]);
+  }, [isCalibrating, calibrationPoints, measurementType, currentMeasurement, isContinuousDrawing, activePoints, calculateRunningLength, currentViewport, isSelectionMode, selectedMarkupId, isOrthoSnapping, isMeasuring, mousePosition, cutoutMode, currentCutout, isDeselecting, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionStart, annotationTool, currentProjectId, file, currentPage, addAnnotation, annotationColor, onAnnotationToolChange, viewState, setPageViewports, pdfDocument]);
 
   // Create rubber band element for continuous linear drawing
   const createRubberBandElement = useCallback(() => {
@@ -4380,7 +4380,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               style={{
                 cursor: cutoutMode 
                   ? 'crosshair' 
-                  : (visualSearchMode && isSelectingSymbol)
+                  : ((visualSearchMode || !!titleblockSelectionMode) && isSelectingSymbol)
                   ? 'crosshair'
                   : (annotationTool ? 'crosshair' : (isCalibrating ? 'crosshair' : (isMeasuring ? 'crosshair' : (isSelectionMode ? 'pointer' : 'default')))),
                 display: 'block',
@@ -4393,7 +4393,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 padding: 0,
                 border: 'none',
                 outline: 'none',
-                pointerEvents: (isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol)) ? 'auto' : 'none' // Allow clicks in selection, calibration, annotation, or visual search mode (measurements handled by canvas)
+                pointerEvents: (isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol)) ? 'auto' : 'none' // Allow clicks in selection, calibration, annotation, visual search, or titleblock selection mode (measurements handled by canvas)
               }}
               onMouseMove={handleMouseMove}
               onMouseLeave={() => setMousePosition(null)}
@@ -4401,7 +4401,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 // Handle clicks in selection mode, calibration mode, annotation mode, or visual search mode
                 // Note: Measurement clicks pass through to canvas (hit-area has pointer-events: 'none')
                 // This allows proper double-click detection on the canvas
-                if (isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol)) {
+                if (isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol)) {
                   const target = e.target as SVGElement;
                   
                   // Check if target or any parent has markup data attributes

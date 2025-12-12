@@ -1426,36 +1426,8 @@ export function SheetSidebar({
 
   const filteredDocuments = getFilteredAndSortedDocuments();
 
-  // Debug: Log component version on mount - CRITICAL FOR DEBUGGING DEPLOYMENT
-  useEffect(() => {
-    console.log('🔍🔍🔍 [SheetSidebar] Component version: 2025-12-12-v2 - Settings icon and Extract Titleblock menu enabled 🔍🔍🔍');
-    console.log('[SheetSidebar] Has onExtractTitleblockForDocument:', !!onExtractTitleblockForDocument);
-    console.log('[SheetSidebar] Has onBulkExtractTitleblock:', !!onBulkExtractTitleblock);
-    console.log('[SheetSidebar] Documents count:', documents.length);
-    console.log('[SheetSidebar] If you see this message, the NEW code is running. If you see a Brain icon, OLD code is running.');
-    
-    // Also log to window for easy access
-    (window as any).__sheetSidebarVersion = '2025-12-12-v2';
-  }, []);
-
   return (
     <div className="w-96 bg-white border-l flex flex-col h-full">
-      {/* DEBUG: Visible version indicator - remove after confirming deployment works */}
-      {process.env.NODE_ENV === 'production' && (
-        <div style={{ 
-          position: 'absolute', 
-          top: 0, 
-          right: 0, 
-          zIndex: 9999, 
-          background: 'red', 
-          color: 'white', 
-          padding: '2px 6px', 
-          fontSize: '10px',
-          fontFamily: 'monospace'
-        }}>
-          v2-2025-12-12
-        </div>
-      )}
       {/* Header */}
       <div className="p-4 border-b relative">
         <div className="flex items-center justify-between mb-4">
@@ -1482,12 +1454,11 @@ export function SheetSidebar({
                 variant="outline" 
                 onClick={(e) => {
                   e.stopPropagation();
-                  console.log('[SheetSidebar] Bulk actions menu clicked, opening menu');
                   setOpenBulkActionsMenu(!openBulkActionsMenu);
                 }}
                 title="Document Actions"
               >
-                <Settings className="w-4 h-4" data-testid="bulk-actions-settings-icon" data-version="2025-12-12-v2" />
+                <Settings className="w-4 h-4" />
               </Button>
               
               {openBulkActionsMenu && (
@@ -1627,22 +1598,18 @@ export function SheetSidebar({
                           </Button>
                           
                           {openDocumentMenu === document.id && (
-                            <div className="absolute right-0 top-full mt-1 w-56 bg-white border rounded-lg shadow-lg z-50 py-1" data-testid="document-menu-dropdown">
+                            <div className="absolute right-0 top-full mt-1 w-56 bg-white border rounded-lg shadow-lg z-50 py-1">
                               {/* Extract Titleblock Info option */}
                               <button
                                 className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 text-blue-600 flex items-center gap-2"
                                 onClick={(e) => {
                                   e.preventDefault();
                                   e.stopPropagation();
-                                  console.log('[SheetSidebar] Extract Titleblock Info clicked for document:', document.id);
                                   if (onExtractTitleblockForDocument) {
                                     onExtractTitleblockForDocument(document.id);
-                                  } else {
-                                    console.warn('[SheetSidebar] onExtractTitleblockForDocument prop not provided!');
                                   }
                                   setOpenDocumentMenu(null);
                                 }}
-                                data-testid="extract-titleblock-button"
                               >
                                 <Tag className="w-4 h-4" />
                                 Extract Titleblock Info
