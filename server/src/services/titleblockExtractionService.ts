@@ -363,14 +363,20 @@ import os
 
 # Configure pytesseract to find tesseract binary that actually works
 # Try multiple locations and test each one
+# Priority: apt-get installed (/usr/bin) > PATH > Nix locations
 tesseract_candidates = []
 
-# 1. Try PATH first
+# 1. Try apt-get installed location first (most compatible with system GLIBC)
+apt_tesseract = '/usr/bin/tesseract'
+if os.path.exists(apt_tesseract) and os.access(apt_tesseract, os.X_OK):
+    tesseract_candidates.append(apt_tesseract)
+
+# 2. Try PATH (may also point to /usr/bin/tesseract)
 path_tesseract = shutil.which('tesseract')
-if path_tesseract:
+if path_tesseract and path_tesseract not in tesseract_candidates:
     tesseract_candidates.append(path_tesseract)
 
-# 2. Try nix profile locations (these are usually compatible)
+# 3. Try nix profile locations (fallback, may have GLIBC issues)
 nix_profile_paths = [
     '/root/.nix-profile/bin/tesseract',
     '/nix/var/nix/profiles/default/bin/tesseract',

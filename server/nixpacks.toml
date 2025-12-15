@@ -10,8 +10,13 @@ providers = ["node", "python"]
 # Note: PDF processing now uses PyMuPDF (pure Python, no system dependencies)
 # bash is needed for sharp package to build native bindings
 # tesseract is required for OCR-based room detection
+# IMPORTANT: Install Tesseract via apt-get instead of Nix to avoid GLIBC version conflicts
+# Nix Tesseract packages require GLIBC 2.38, but Railway's base image has GLIBC 2.37
 [phases.install]
-nixPkgs = ["libGL", "glib", "libGLU", "pkg-config", "bash", "tesseract"]
+nixPkgs = ["libGL", "glib", "libGLU", "pkg-config", "bash"]
+cmds = [
+  "apt-get update && apt-get install -y tesseract-ocr tesseract-ocr-eng && echo 'Tesseract installed via apt-get'"
+]
 
 # Build phase: Build TypeScript (keep it lean for faster deploys)
 [phases.build]
@@ -27,7 +32,7 @@ cmds = [
 # We need to ensure these are in PATH at both build time and runtime
 # Note: nix-env creates symlinks in /nix/var/nix/profiles/default/bin
 # Include /bin and /usr/bin early so bash/sh are available for npm install
-PATH = "/nix/var/nix/profiles/default/bin:/root/.nix-profile/bin:/usr/bin:/bin:$PATH"
+PATH = "/usr/bin:/bin:/nix/var/nix/profiles/default/bin:/root/.nix-profile/bin:$PATH"
 # Ensure SHELL is set so npm can find shell for native builds (sharp package)
 SHELL = "/bin/bash"
 # Python venv will be available at runtime via the python provider
