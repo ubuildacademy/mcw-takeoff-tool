@@ -471,12 +471,23 @@ except Exception as e:
           length: text.length,
           preview: text.substring(0, 200) || '(empty)',
           hasStderr: !!execResult.stderr?.trim(),
+          stderrPreview: execResult.stderr?.trim().substring(0, 200),
         });
+      }
+      
+      // If we got empty text, log a warning
+      if (!text) {
+        console.warn(`[Titleblock OCR] Page ${pageNumber} returned empty text. Stderr:`, execResult.stderr?.trim() || '(none)');
       }
       
       return text || null;
     } catch (error) {
-      console.error(`[Titleblock] Error extracting text from region for page ${pageNumber}:`, error);
+      console.error(`[Titleblock OCR] Error extracting text from region for page ${pageNumber}:`, {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        region,
+        pdfPath,
+      });
       return null;
     }
   }

@@ -143,17 +143,49 @@ router.post('/extract', async (req, res) => {
 
       // Extract text from each region separately and use LLM to extract values
       // Pass a progress callback to update status during extraction
-      const extractedSheets = await extractTitleblockWithLLM(
-        pdfPath,
-        pageNumbers,
-        sheetNumberRegion,
-        sheetNameRegion,
-        (currentBatch: number, totalBatches: number, processedPages: number) => {
-          // Calculate progress: 10% for setup, 80% for extraction, 10% for saving
-          const extractionProgress = 10 + Math.round((processedPages / totalPages) * 80);
-          console.log(`[Titleblock] Progress update: batch ${currentBatch}/${totalBatches}, pages ${processedPages}/${totalPages}, progress ${extractionProgress}%`);
-        }
-      );
+      let extractedSheets: Array<{ pageNumber: number; sheetNumber: string; sheetName: string }> = [];
+      
+      try {
+        console.log('[Titleblock] About to call extractTitleblockWithLLM with:', {
+          pdfPath,
+          pageCount: pageNumbers.length,
+          sheetNumberRegion,
+          sheetNameRegion,
+        });
+        
+        extractedSheets = await extractTitleblockWithLLM(
+          pdfPath,
+          pageNumbers,
+          sheetNumberRegion,
+          sheetNameRegion,
+          (currentBatch: number, totalBatches: number, processedPages: number) => {
+            // Calculate progress: 10% for setup, 80% for extraction, 10% for saving
+            const extractionProgress = 10 + Math.round((processedPages / totalPages) * 80);
+            console.log(`[Titleblock] Progress update: batch ${currentBatch}/${totalBatches}, pages ${processedPages}/${totalPages}, progress ${extractionProgress}%`);
+          }
+        );
+        
+        console.log('[Titleblock] extractTitleblockWithLLM completed, got results:', {
+          documentId,
+          sheetsCount: extractedSheets.length,
+          firstFewSheets: extractedSheets.slice(0, 3),
+          extractedCount: extractedSheets.filter(s => s.sheetNumber !== 'Unknown' || s.sheetName !== 'Unknown').length,
+        });
+      } catch (extractionError) {
+        console.error('[Titleblock] ERROR in extractTitleblockWithLLM:', {
+          error: extractionError,
+          message: extractionError instanceof Error ? extractionError.message : String(extractionError),
+          stack: extractionError instanceof Error ? extractionError.stack : undefined,
+          documentId,
+          pdfPath,
+        });
+        // Create Unknown entries for all pages as fallback
+        extractedSheets = pageNumbers.map(pageNum => ({
+          pageNumber: pageNum,
+          sheetNumber: 'Unknown',
+          sheetName: 'Unknown',
+        }));
+      }
 
       console.log('[Titleblock] LLM extraction result:', {
         documentId,
