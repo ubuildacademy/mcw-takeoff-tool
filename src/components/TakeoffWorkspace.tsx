@@ -644,11 +644,23 @@ export function TakeoffWorkspace() {
       progressInterval = setInterval(() => {
         const elapsed = Date.now() - startTime;
         const estimatedProgress = Math.min(90, Math.round((elapsed / estimatedDuration) * 90)); // Cap at 90% until done
-        setTitleblockExtractionStatus(prev => prev ? {
-          ...prev,
-          progress: estimatedProgress,
-          processedPages: Math.round((estimatedProgress / 100) * totalPages),
-        } : null);
+        const processedPages = Math.max(1, Math.round((estimatedProgress / 100) * totalPages)); // At least 1 to show progress
+        
+        console.log('[Titleblock] Progress update:', {
+          elapsed,
+          estimatedProgress,
+          processedPages,
+          totalPages
+        });
+        
+        setTitleblockExtractionStatus(prev => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            progress: estimatedProgress,
+            processedPages: processedPages,
+          };
+        });
       }, 500); // Update every 500ms
       
       const result = await titleblockService.extractTitleblock(projectId, targetDocumentIds, finalConfig);
