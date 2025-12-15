@@ -341,12 +341,14 @@ class TitleblockExtractionService {
     try {
       const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
       
-      // Create a temporary script that extracts text from a specific region
+      // Create a temporary script that extracts text from a specific region using OCR
       const tempScriptPath = path.join(this.tempDir, `extract_region_${Date.now()}.py`);
       const extractScript = `
 import sys
 import fitz  # PyMuPDF
-import json
+import io
+import pytesseract
+from PIL import Image
 
 pdf_path = sys.argv[1]
 page_num = int(sys.argv[2])
@@ -365,20 +367,35 @@ try:
     page_width = page.rect.width
     page_height = page.rect.height
     
-    # Convert normalized region to absolute coordinates
-    x0 = region_x * page_width
-    y0 = region_y * page_height
-    x1 = (region_x + region_w) * page_width
-    y1 = (region_y + region_h) * page_height
+    # Convert normalized region to absolute coordinates (clamp to page bounds)
+    def clamp(value, min_value, max_value):
+        return max(min_value, min(value, max_value))
+
+    x0 = clamp(region_x, 0.0, 1.0) * page_width
+    y0 = clamp(region_y, 0.0, 1.0) * page_height
+    x1 = clamp(region_x + region_w, 0.0, 1.0) * page_width
+    y1 = clamp(region_y + region_h, 0.0, 1.0) * page_height
     
     region_rect = fitz.Rect(x0, y0, x1, y1)
     
-    # Extract text from the region
-    text = page.get_text("text", clip=region_rect)
+    # Render the clipped region to an image for OCR
+    DPI = 300  # High-enough resolution for crisp text
+    zoom = DPI / 72  # 72 points per inch baseline
+    matrix = fitz.Matrix(zoom, zoom)
+    pix = page.get_pixmap(matrix=matrix, clip=region_rect, alpha=False)
+
+    img_bytes = pix.tobytes("png")
+    image = Image.open(io.BytesIO(img_bytes))
+
+    # Perform OCR on the rendered image
+    # PSM 6: Assume a block of text; OEM 3: default LSTM
+    text = pytesseract.image_to_string(image, lang="eng", config="--oem 3 --psm 6")
     
     print(text.strip(), end="")
     doc.close()
 except Exception as e:
+    # Log error to stderr for debugging, but return empty string to caller
+    print(f"Error extracting text from region: {e}", file=sys.stderr)
     print("", end="")
     sys.exit(0)
 `;
