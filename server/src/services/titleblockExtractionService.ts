@@ -349,6 +349,30 @@ import fitz  # PyMuPDF
 import io
 import pytesseract
 from PIL import Image
+import shutil
+import subprocess
+
+# Configure pytesseract to find tesseract binary
+tesseract_path = shutil.which('tesseract')
+if not tesseract_path:
+    # Try to find in common Nix store locations (for Railway/Nixpacks)
+    try:
+        result = subprocess.run(
+            ['find', '/nix/store', '-name', 'tesseract', '-type', 'f', '-executable'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            tesseract_path = result.stdout.strip().split('\\n')[0]
+    except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+        pass
+
+if tesseract_path:
+    pytesseract.pytesseract.tesseract_cmd = tesseract_path
+    print(f"Configured pytesseract to use: {tesseract_path}", file=sys.stderr)
+else:
+    print("Warning: tesseract binary not found, OCR may fail", file=sys.stderr)
 
 pdf_path = sys.argv[1]
 page_num = int(sys.argv[2])
@@ -395,7 +419,9 @@ try:
     doc.close()
 except Exception as e:
     # Log error to stderr for debugging, but return empty string to caller
+    import traceback
     print(f"Error extracting text from region: {e}", file=sys.stderr)
+    print(traceback.format_exc(), file=sys.stderr)
     print("", end="")
     sys.exit(0)
 `;
@@ -417,7 +443,22 @@ except Exception as e:
       // Clean up temp script
       await fs.remove(tempScriptPath).catch(() => {});
 
+      // Log stderr if present (Python errors/OCR issues)
+      if (execResult.stderr && execResult.stderr.trim()) {
+        console.error(`[Titleblock OCR] Page ${pageNumber} stderr:`, execResult.stderr.trim());
+      }
+
       const text = execResult.stdout.trim();
+      
+      // Log extracted text for debugging (first few pages and empty results)
+      if (pageNumber <= 3 || !text) {
+        console.log(`[Titleblock OCR] Page ${pageNumber} extracted text:`, {
+          length: text.length,
+          preview: text.substring(0, 200) || '(empty)',
+          hasStderr: !!execResult.stderr?.trim(),
+        });
+      }
+      
       return text || null;
     } catch (error) {
       console.error(`[Titleblock] Error extracting text from region for page ${pageNumber}:`, error);
