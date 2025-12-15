@@ -1112,7 +1112,9 @@ export function TakeoffWorkspace() {
       
       // Log summary of loaded documents and labels
       const totalPagesWithLabels = documents.reduce((sum, doc) => {
-        return sum + (doc.pages?.filter(p => p.sheetName || p.sheetNumber).length || 0);
+        return sum + (doc.pages?.filter(p => 
+          (p.sheetName && p.sheetName !== 'Unknown') || (p.sheetNumber && p.sheetNumber !== 'Unknown')
+        ).length || 0);
       }, 0);
       const totalPages = documents.reduce((sum, doc) => sum + (doc.pages?.length || 0), 0);
       console.log(`[LoadDocuments] Loaded ${documents.length} documents, ${totalPagesWithLabels}/${totalPages} pages have labels`);
