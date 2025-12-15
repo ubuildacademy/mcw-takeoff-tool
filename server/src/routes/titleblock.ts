@@ -125,6 +125,21 @@ router.post('/extract', async (req, res) => {
         sheetNumberRegion,
         sheetNameRegion,
       });
+      
+      // Validate regions
+      if (!sheetNumberRegion || !sheetNameRegion) {
+        console.error('[Titleblock] Missing regions:', { sheetNumberRegion, sheetNameRegion });
+        throw new Error('Missing required titleblock regions');
+      }
+      
+      if (sheetNumberRegion.width <= 0 || sheetNumberRegion.height <= 0 || 
+          sheetNameRegion.width <= 0 || sheetNameRegion.height <= 0) {
+        console.error('[Titleblock] Invalid region dimensions:', {
+          sheetNumberRegion,
+          sheetNameRegion,
+        });
+        throw new Error('Invalid region dimensions - regions must have width and height > 0');
+      }
 
       // Extract text from each region separately and use LLM to extract values
       // Pass a progress callback to update status during extraction

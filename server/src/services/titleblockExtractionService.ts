@@ -338,6 +338,14 @@ class TitleblockExtractionService {
     pageNumber: number,
     region: { x: number; y: number; width: number; height: number }
   ): Promise<string | null> {
+    console.log(`[Titleblock OCR] extractTextFromRegion called: page ${pageNumber}, region:`, region);
+    
+    // Validate region
+    if (!region || region.width <= 0 || region.height <= 0) {
+      console.error(`[Titleblock OCR] Invalid region for page ${pageNumber}:`, region);
+      return null;
+    }
+    
     try {
       const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
       
@@ -430,6 +438,13 @@ except Exception as e:
 
       const enhancedPath = this.getEnhancedPath();
       const command = `${pythonCommand} "${tempScriptPath}" "${pdfPath}" "${pageNumber}" "${region.x}" "${region.y}" "${region.width}" "${region.height}"`;
+      
+      console.log(`[Titleblock OCR] Executing OCR for page ${pageNumber}:`, {
+        scriptPath: tempScriptPath,
+        pdfPath,
+        region,
+        command: command.substring(0, 200) + '...',
+      });
 
       const execResult = await execAsync(command, {
         timeout: 30000,
