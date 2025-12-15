@@ -359,28 +359,61 @@ import pytesseract
 from PIL import Image
 import shutil
 import subprocess
+import os
 
-# Configure pytesseract to find tesseract binary
-tesseract_path = shutil.which('tesseract')
-if not tesseract_path:
-    # Try to find in common Nix store locations (for Railway/Nixpacks)
+# Configure pytesseract to find tesseract binary that actually works
+# Try multiple locations and test each one
+tesseract_candidates = []
+
+# 1. Try PATH first
+path_tesseract = shutil.which('tesseract')
+if path_tesseract:
+    tesseract_candidates.append(path_tesseract)
+
+# 2. Try nix profile locations (these are usually compatible)
+nix_profile_paths = [
+    '/root/.nix-profile/bin/tesseract',
+    '/nix/var/nix/profiles/default/bin/tesseract',
+]
+for candidate in nix_profile_paths:
+    if os.path.exists(candidate) and os.access(candidate, os.X_OK):
+        tesseract_candidates.append(candidate)
+
+# 3. Try finding in nix store (but test compatibility)
+try:
+    result = subprocess.run(
+        ['find', '/nix/store', '-name', 'tesseract', '-type', 'f', '-executable'],
+        capture_output=True,
+        text=True,
+        timeout=5
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        # Try all found binaries, use first one that works
+        found_paths = result.stdout.strip().split('\\n')
+        tesseract_candidates.extend(found_paths[:5])  # Limit to first 5 to avoid too many tests
+except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+    pass
+
+# Test each candidate to find one that actually works
+tesseract_path = None
+for candidate in tesseract_candidates:
     try:
-        result = subprocess.run(
-            ['find', '/nix/store', '-name', 'tesseract', '-type', 'f', '-executable'],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            tesseract_path = result.stdout.strip().split('\\n')[0]
-    except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
-        pass
+        # Set candidate and test with pytesseract (this will catch GLIBC issues)
+        pytesseract.pytesseract.tesseract_cmd = candidate
+        # Test by getting version - this will fail if binary doesn't work
+        version = pytesseract.get_tesseract_version()
+        tesseract_path = candidate
+        print(f"Found working tesseract {candidate} (version: {version})", file=sys.stderr)
+        break
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError, Exception) as e:
+        # This binary doesn't work, try next one
+        print(f"Tesseract candidate {candidate} failed: {str(e)[:200]}", file=sys.stderr)
+        continue
 
-if tesseract_path:
-    pytesseract.pytesseract.tesseract_cmd = tesseract_path
-    print(f"Configured pytesseract to use: {tesseract_path}", file=sys.stderr)
-else:
-    print("Warning: tesseract binary not found, OCR may fail", file=sys.stderr)
+if not tesseract_path:
+    print("ERROR: No working tesseract binary found! OCR will fail.", file=sys.stderr)
+    print(f"Tried {len(tesseract_candidates)} candidates", file=sys.stderr)
+    # Don't set tesseract_cmd - let pytesseract try to find one itself as last resort
 
 pdf_path = sys.argv[1]
 page_num = int(sys.argv[2])
