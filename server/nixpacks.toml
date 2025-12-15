@@ -15,7 +15,8 @@ providers = ["node", "python"]
 [phases.install]
 nixPkgs = ["libGL", "glib", "libGLU", "pkg-config", "bash"]
 cmds = [
-  "apt-get update && apt-get install -y tesseract-ocr tesseract-ocr-eng && echo 'Tesseract installed via apt-get'"
+  "apt-get update && apt-get install -y tesseract-ocr tesseract-ocr-eng && echo 'Tesseract installed via apt-get'",
+  "npm install"
 ]
 
 # Build phase: Build TypeScript (keep it lean for faster deploys)
