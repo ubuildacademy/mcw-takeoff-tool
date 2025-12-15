@@ -663,6 +663,22 @@ export function TakeoffWorkspace() {
       // Update status based on results
       if (result.success && result.results) {
         const totalProcessed = result.results.reduce((sum: number, r: any) => sum + (r.sheets?.length || 0), 0);
+        const successfulLabels = result.results.reduce((sum: number, r: any) => {
+          return sum + (r.sheets?.filter((s: any) => s.sheetNumber !== 'Unknown' || s.sheetName !== 'Unknown').length || 0);
+        }, 0);
+        
+        console.log('[Titleblock] Extraction completed:', {
+          totalProcessed,
+          successfulLabels,
+          totalPages,
+          results: result.results.map((r: any) => ({
+            documentId: r.documentId,
+            sheetsCount: r.sheets?.length || 0,
+            successful: r.sheets?.filter((s: any) => s.sheetNumber !== 'Unknown' || s.sheetName !== 'Unknown').length || 0,
+            sampleSheets: r.sheets?.slice(0, 3)
+          }))
+        });
+        
         setTitleblockExtractionStatus({
           status: 'completed',
           processedPages: totalProcessed,
@@ -670,10 +686,23 @@ export function TakeoffWorkspace() {
           progress: 100,
         });
 
+        // Wait a moment to ensure all database saves have completed
+        console.log('[Titleblock] Waiting 2 seconds for database saves to complete...');
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
         // Reload documents to pick up updated sheet labels
-        console.log('[Titleblock] Reloading documents...');
+        console.log('[Titleblock] Reloading documents to display updated labels...');
         await loadProjectDocuments();
-        console.log('[Titleblock] Documents reloaded successfully');
+        
+        // Force a state refresh by updating documents state
+        console.log('[Titleblock] Forcing state refresh...');
+        setDocuments(prev => {
+          const updated = prev.map(doc => ({ ...doc }));
+          console.log('[Titleblock] State refreshed, documents:', updated.length);
+          return updated;
+        });
+        
+        console.log('[Titleblock] Documents reloaded successfully, labels should now be visible');
 
         // Clear status after a delay
         setTimeout(() => {
@@ -927,7 +956,7 @@ export function TakeoffWorkspace() {
                   const { sheetService } = await import('../services/apiService');
                   const sheetData = await sheetService.getSheet(sheetId);
                   if (sheetData && sheetData.sheet) {
-                    return {
+                    const pageData = {
                       pageNumber,
                       hasTakeoffs: sheetData.sheet.hasTakeoffs || false,
                       takeoffCount: sheetData.sheet.takeoffCount || 0,
@@ -936,6 +965,14 @@ export function TakeoffWorkspace() {
                       sheetNumber: sheetData.sheet.sheetNumber,
                       ocrProcessed: false
                     };
+                    // Log when we find sheet labels (for debugging)
+                    if (sheetData.sheet.sheetName || sheetData.sheet.sheetNumber) {
+                      console.log(`[LoadDocuments] Found sheet data for ${sheetId}:`, {
+                        sheetNumber: sheetData.sheet.sheetNumber,
+                        sheetName: sheetData.sheet.sheetName
+                      });
+                    }
+                    return pageData;
                   }
                 } catch (error) {
                   // Sheet doesn't exist in database yet, use defaults
@@ -1060,6 +1097,13 @@ export function TakeoffWorkspace() {
           }
         })
         .filter((doc): doc is PDFDocument => doc !== null && doc !== undefined);
+      
+      // Log summary of loaded documents and labels
+      const totalPagesWithLabels = documents.reduce((sum, doc) => {
+        return sum + (doc.pages?.filter(p => p.sheetName || p.sheetNumber).length || 0);
+      }, 0);
+      const totalPages = documents.reduce((sum, doc) => sum + (doc.pages?.length || 0), 0);
+      console.log(`[LoadDocuments] Loaded ${documents.length} documents, ${totalPagesWithLabels}/${totalPages} pages have labels`);
       
       setDocuments(documents);
       setDocumentsLoading(false);
