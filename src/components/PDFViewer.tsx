@@ -176,9 +176,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const [selectionBox, setSelectionBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const [selectionStart, setSelectionStart] = useState<{ x: number; y: number } | null>(null);
   
-  // Selection state for deleting markups
-  const [selectedMarkupId, setSelectedMarkupId] = useState<string | null>(null);
+  // Selection state for deleting markups (multi-select support)
+  const [selectedMarkupIds, setSelectedMarkupIds] = useState<Set<string>>(new Set());
   const [isSelectionMode, setIsSelectionMode] = useState(false);
+  
+  // Clipboard state for copy-paste
+  const [copiedMarkups, setCopiedMarkups] = useState<Array<{
+    measurement?: Measurement;
+    annotation?: Annotation;
+  }>>([]);
   
   // Continuous linear drawing state
   const [isContinuousDrawing, setIsContinuousDrawing] = useState(false);
@@ -191,6 +197,37 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   
   // Track last fully rendered PDF scale to support interactive CSS zoom while blocking renders
   const lastRenderedScaleRef = useRef(1.0);
+  
+  // Helper functions for multi-select
+  const toggleMarkupSelection = useCallback((id: string, event?: React.MouseEvent | MouseEvent) => {
+    setSelectedMarkupIds(prev => {
+      const newSet = new Set(prev);
+      if (event?.ctrlKey || event?.metaKey) {
+        // Ctrl/Cmd click: toggle selection
+        if (newSet.has(id)) {
+          newSet.delete(id);
+        } else {
+          newSet.add(id);
+        }
+      } else {
+        // Regular click: replace selection
+        newSet.clear();
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  }, []);
+  
+  const clearSelection = useCallback(() => {
+    setSelectedMarkupIds(new Set());
+  }, []);
+  
+  const selectAllMarkups = useCallback(() => {
+    const allIds = new Set<string>();
+    localTakeoffMeasurements.forEach(m => allIds.add(m.id));
+    localAnnotations.forEach(a => allIds.add(a.id));
+    setSelectedMarkupIds(allIds);
+  }, [localTakeoffMeasurements, localAnnotations]);
   
   // Helper to apply/remove interactive CSS zoom transforms when renders are blocked
   const applyInteractiveZoomTransforms = useCallback(() => {
@@ -892,7 +929,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       renderRunningLengthDisplay(svgOverlay, viewport);
     }
     
-  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, selectedMarkupId, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, cutoutMode, currentCutout, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionBox]);
+  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, selectedMarkupIds, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, cutoutMode, currentCutout, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionBox]);
 
   // Re-render annotations when measurements or interaction state changes
   useEffect(() => {
@@ -908,7 +945,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
       }
     }
-  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, selectedMarkupId, isSelectionMode, renderTakeoffAnnotations, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentAnnotation]);
+  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, selectedMarkupIds, isSelectionMode, renderTakeoffAnnotations, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentAnnotation]);
   
   // CRITICAL: Trigger re-render of annotations after measurements are loaded
   // This ensures markups appear immediately when returning to a page
@@ -1321,7 +1358,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       };
     });
     
-    const isSelected = selectedMarkupId === measurement.id;
+    const isSelected = selectedMarkupIds.has(measurement.id);
     const strokeColor = isSelected ? '#ff0000' : (measurement.color || measurement.conditionColor || '#000000');
     const strokeWidth = isSelected ? '4' : '2';
     
@@ -1345,7 +1382,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           polyline.style.cursor = 'pointer';
           polyline.addEventListener('click', (e) => {
             e.stopPropagation();
-            setSelectedMarkupId(measurement.id);
+            toggleMarkupSelection(measurement.id, e);
           });
           
           // Add invisible hit area for easier selection
@@ -1357,7 +1394,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           hitArea.style.cursor = 'pointer';
           hitArea.addEventListener('click', (e) => {
             e.stopPropagation();
-            setSelectedMarkupId(measurement.id);
+            toggleMarkupSelection(measurement.id, e);
           });
           svg.appendChild(hitArea);
         }
@@ -1425,7 +1462,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               compoundPath.style.cursor = 'pointer';
               compoundPath.addEventListener('click', (e) => {
                 e.stopPropagation();
-                setSelectedMarkupId(measurement.id);
+                toggleMarkupSelection(measurement.id, e);
               });
             }
             
@@ -1443,7 +1480,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               polygon.style.cursor = 'pointer';
               polygon.addEventListener('click', (e) => {
                 e.stopPropagation();
-                setSelectedMarkupId(measurement.id);
+                toggleMarkupSelection(measurement.id, e);
               });
               
               // Add invisible hit area for easier selection
@@ -1455,7 +1492,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               hitArea.style.cursor = 'pointer';
               hitArea.addEventListener('click', (e) => {
                 e.stopPropagation();
-                setSelectedMarkupId(measurement.id);
+                toggleMarkupSelection(measurement.id, e);
               });
               svg.appendChild(hitArea);
             }
@@ -1531,7 +1568,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               compoundPath.style.cursor = 'pointer';
               compoundPath.addEventListener('click', (e) => {
                 e.stopPropagation();
-                setSelectedMarkupId(measurement.id);
+                toggleMarkupSelection(measurement.id, e);
               });
             }
             
@@ -1549,7 +1586,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               polygon.style.cursor = 'pointer';
               polygon.addEventListener('click', (e) => {
                 e.stopPropagation();
-                setSelectedMarkupId(measurement.id);
+                toggleMarkupSelection(measurement.id, e);
               });
               
               // Add invisible hit area for easier selection
@@ -1561,7 +1598,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               hitArea.style.cursor = 'pointer';
               hitArea.addEventListener('click', (e) => {
                 e.stopPropagation();
-                setSelectedMarkupId(measurement.id);
+                toggleMarkupSelection(measurement.id, e);
               });
               svg.appendChild(hitArea);
             }
@@ -1952,7 +1989,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       return { x: canvasX, y: canvasY };
     });
     
-    const isSelected = selectedMarkupId === annotation.id;
+    const isSelected = selectedMarkupIds.has(annotation.id);
     const strokeWidth = isSelected ? '5' : '3';
     const strokeColor = isSelected ? '#00ff00' : annotation.color; // Green when selected
     
@@ -2804,9 +2841,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Handle deselection in selection mode when clicking on blank space
     // NOTE: This only applies to blank space clicks, not markup clicks
     // Markup clicks are handled by their own click handlers and won't reach here
-    if (isSelectionMode && selectedMarkupId && !isMeasuring && !isCalibrating && !annotationTool) {
-      // If we're in selection mode and have a selected markup, deselect it when clicking blank space
-      setSelectedMarkupId(null);
+    if (isSelectionMode && selectedMarkupIds.size > 0 && !isMeasuring && !isCalibrating && !annotationTool) {
+      // If we're in selection mode and have selected markups, deselect them when clicking blank space
+      clearSelection();
       return;
     }
     
@@ -3069,7 +3106,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       }
       // Area and volume measurements will be completed on double-click
     }
-  }, [isCalibrating, calibrationPoints, measurementType, currentMeasurement, isContinuousDrawing, activePoints, calculateRunningLength, currentViewport, isSelectionMode, selectedMarkupId, isOrthoSnapping, isMeasuring, mousePosition, cutoutMode, currentCutout, isDeselecting, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionStart, annotationTool, currentProjectId, file, currentPage, addAnnotation, annotationColor, onAnnotationToolChange, viewState, setPageViewports, pdfDocument]);
+  }, [isCalibrating, calibrationPoints, measurementType, currentMeasurement, isContinuousDrawing, activePoints, calculateRunningLength, currentViewport, isSelectionMode, selectedMarkupIds, isOrthoSnapping, isMeasuring, mousePosition, cutoutMode, currentCutout, isDeselecting, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionStart, annotationTool, currentProjectId, file, currentPage, addAnnotation, annotationColor, onAnnotationToolChange, viewState, setPageViewports, pdfDocument, clearSelection]);
 
   // Create rubber band element for continuous linear drawing
   const createRubberBandElement = useCallback(() => {
@@ -4056,78 +4093,154 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           return newMeasurement;
         });
       }
-    } else if ((event.key === 'Delete' || event.key === 'Backspace') && selectedMarkupId && isSelectionMode) {
+    } else if ((event.key === 'Delete' || event.key === 'Backspace') && selectedMarkupIds.size > 0 && isSelectionMode) {
       event.preventDefault();
       
-      // Check if it's an annotation or a measurement
-      const isAnnotation = localAnnotations.some(a => a.id === selectedMarkupId);
+      const { deleteTakeoffMeasurement, deleteAnnotation } = useTakeoffStore.getState();
+      const idsToDelete = Array.from(selectedMarkupIds);
       
-      if (isAnnotation) {
-        // Delete annotation
+      // Clear selection immediately
+      clearSelection();
+      
+      // Delete all selected markups
+      const deletePromises = idsToDelete.map(async (id) => {
+        const isAnnotation = localAnnotations.some(a => a.id === id);
         
-        // Clear selection immediately
-        const deletedId = selectedMarkupId;
-        setSelectedMarkupId(null);
+        if (isAnnotation) {
+          deleteAnnotation(id);
+        } else if (currentProjectId && file?.id) {
+          try {
+            await deleteTakeoffMeasurement(id);
+          } catch (error: any) {
+            console.error(`Failed to delete markup ${id}:`, error);
+          }
+        }
+      });
+      
+      await Promise.all(deletePromises);
+      
+      // Get updated annotations from store after deletion
+      const { annotations: updatedAnnotations } = useTakeoffStore.getState();
+      const filteredAnnotations = updatedAnnotations.filter(
+        a => a.projectId === currentProjectId && a.sheetId === file.id
+      );
+      setLocalAnnotations(filteredAnnotations);
+      
+      // Force immediate re-render
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (currentViewport) {
+            renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+          }
+        });
+      });
+    } else if ((event.ctrlKey || event.metaKey) && event.key === 'c' && selectedMarkupIds.size > 0 && isSelectionMode) {
+      // Copy selected markups (Ctrl+C or Cmd+C)
+      event.preventDefault();
+      
+      const markupsToCopy: Array<{
+        measurement?: Measurement;
+        annotation?: Annotation;
+      }> = [];
+      
+      selectedMarkupIds.forEach(id => {
+        const measurement = localTakeoffMeasurements.find(m => m.id === id);
+        const annotation = localAnnotations.find(a => a.id === id);
         
-        // Delete annotation from store
-        const { deleteAnnotation } = useTakeoffStore.getState();
-        deleteAnnotation(deletedId);
+        if (measurement) {
+          markupsToCopy.push({ measurement });
+        } else if (annotation) {
+          markupsToCopy.push({ annotation });
+        }
+      });
+      
+      setCopiedMarkups(markupsToCopy);
+      console.log(`📋 Copied ${markupsToCopy.length} markup(s)`);
+    } else if ((event.ctrlKey || event.metaKey) && event.key === 'v' && copiedMarkups.length > 0 && currentProjectId && file?.id) {
+      // Paste markups to current page (Ctrl+V or Cmd+V)
+      event.preventDefault();
+      
+      const { addTakeoffMeasurement, addAnnotation } = useTakeoffStore.getState();
+      
+      const pastePromises = copiedMarkups.map(async (item) => {
+        if (item.measurement) {
+          // Create a new measurement with same coordinates but new page
+          const newMeasurement: Omit<import('../types').TakeoffMeasurement, 'id' | 'timestamp'> = {
+            projectId: currentProjectId,
+            sheetId: file.id,
+            conditionId: item.measurement.conditionId,
+            type: item.measurement.type,
+            points: [...item.measurement.points], // Copy points array
+            calculatedValue: item.measurement.calculatedValue,
+            unit: item.measurement.unit,
+            pdfPage: currentPage,
+            pdfCoordinates: [...item.measurement.pdfCoordinates], // Copy coordinates - same position on new page
+            conditionColor: item.measurement.conditionColor,
+            conditionName: item.measurement.conditionName,
+            perimeterValue: item.measurement.perimeterValue,
+            cutouts: item.measurement.cutouts ? item.measurement.cutouts.map(c => ({
+              ...c,
+              points: [...c.points],
+              pdfCoordinates: [...c.pdfCoordinates]
+            })) : undefined,
+            netCalculatedValue: item.measurement.netCalculatedValue
+          };
+          
+          try {
+            await addTakeoffMeasurement(newMeasurement);
+          } catch (error: any) {
+            console.error('Failed to paste measurement:', error);
+          }
+        } else if (item.annotation) {
+          // Create a new annotation with same coordinates but new page
+          const newAnnotation: Omit<Annotation, 'id' | 'timestamp'> = {
+            projectId: currentProjectId,
+            sheetId: file.id,
+            pageNumber: currentPage,
+            type: item.annotation.type,
+            points: [...item.annotation.points], // Copy points - same position on new page
+            color: item.annotation.color,
+            text: item.annotation.text
+          };
+          
+          addAnnotation(newAnnotation);
+        }
+      });
+      
+      await Promise.all(pastePromises);
+      
+      // Refresh local measurements and annotations after a brief delay to allow store to update
+      setTimeout(() => {
+        const { takeoffMeasurements: allMeasurements, annotations: allAnnotations } = useTakeoffStore.getState();
+        const filteredMeasurements = allMeasurements.filter(
+          m => m.projectId === currentProjectId && m.sheetId === file.id && m.pdfPage === currentPage
+        );
+        setLocalTakeoffMeasurements(filteredMeasurements);
         
-        // Get updated annotations from store after deletion
-        const { annotations: updatedAnnotations } = useTakeoffStore.getState();
-        
-        // Immediately update local annotations to reflect the deletion
-        const filteredAnnotations = updatedAnnotations.filter(
-          a => a.projectId === currentProjectId && a.sheetId === file.id
+        const filteredAnnotations = allAnnotations.filter(
+          a => a.projectId === currentProjectId && a.sheetId === file.id && a.pageNumber === currentPage
         );
         setLocalAnnotations(filteredAnnotations);
         
-        // Force immediate re-render using requestAnimationFrame to ensure state is processed
+        // Force re-render
         requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            // Immediately re-render the SVG overlay to show the deletion
-            if (currentViewport) {
-              renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
-            }
-            
-            // Trigger PDF render after annotation deletion
-          });
+          if (currentViewport) {
+            renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+          }
         });
-      } else if (currentProjectId && file?.id) {
-        // Delete measurement
-        const { deleteTakeoffMeasurement } = useTakeoffStore.getState();
-        
-        try {
-          // Clear selection immediately
-          const deletedId = selectedMarkupId;
-          setSelectedMarkupId(null);
-          
-          // Delete from store (async operation)
-          await deleteTakeoffMeasurement(deletedId);
-          
-          // The reactive useEffect (line 493) will automatically update localTakeoffMeasurements
-          // when allTakeoffMeasurements changes, so we don't need to manually update here
-          // Just force a re-render after a brief delay to ensure store state has updated
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-              // Re-render the SVG overlay to show the deletion
-              if (currentViewport) {
-                renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
-              }
-              
-              // Trigger PDF render after measurement deletion
-            });
-          });
-        } catch (error: any) {
-          console.error(`Failed to delete markup:`, error);
-        }
-      }
+      }, 100);
+      
+      console.log(`📋 Pasted ${copiedMarkups.length} markup(s) to page ${currentPage}`);
+    } else if ((event.ctrlKey || event.metaKey) && event.key === 'a' && isSelectionMode) {
+      // Select all markups on current page (Ctrl+A or Cmd+A)
+      event.preventDefault();
+      selectAllMarkups();
     } else if (event.key === 'Control' && (isMeasuring || isCalibrating)) {
       // Toggle ortho snapping when Ctrl is pressed during measurement or calibration
       event.preventDefault();
       setIsOrthoSnapping(prev => !prev);
     }
-  }, [annotationTool, currentAnnotation, onAnnotationToolChange, localAnnotations, isMeasuring, isCalibrating, calibrationPoints.length, currentMeasurement.length, selectedMarkupId, isSelectionMode, currentProjectId, file?.id, currentPage, renderPDFPage, measurementType, isContinuousDrawing, activePoints.length, isOrthoSnapping]);
+  }, [annotationTool, currentAnnotation, onAnnotationToolChange, localAnnotations, isMeasuring, isCalibrating, calibrationPoints.length, currentMeasurement.length, selectedMarkupIds, isSelectionMode, currentProjectId, file?.id, currentPage, renderPDFPage, measurementType, isContinuousDrawing, activePoints.length, isOrthoSnapping, copiedMarkups, localTakeoffMeasurements, clearSelection, selectAllMarkups, toggleMarkupSelection, currentViewport, renderTakeoffAnnotations]);
 
   // Add keyboard event listener
   useEffect(() => {
@@ -4218,7 +4331,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       if (condition) {
         setIsMeasuring(true);
         setIsSelectionMode(false);
-        setSelectedMarkupId(null);
+        clearSelection();
         setIsDeselecting(false); // Clear deselection state
         
         if (condition.unit === 'EA' || condition.unit === 'each') {
@@ -4243,7 +4356,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         // This doesn't trigger renders (just state updates) and respects guard logic
         setIsMeasuring(false);
         setIsSelectionMode(true);
-        setSelectedMarkupId(null);
+        clearSelection();
         // DON'T set isDeselecting here - that's only for explicit deselection
         // DON'T clear selectedConditionId in store - let the UI handle that
         // This prevents flicker while allowing the UI to show the selection state
@@ -4276,7 +4389,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (annotationTool) {
       setIsAnnotating(true);
       setIsSelectionMode(false);
-      setSelectedMarkupId(null);
+      clearSelection();
       setIsDeselecting(false); // Clear deselection state
     } else {
       setIsAnnotating(false);
@@ -4512,7 +4625,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                   // Handle annotation selection
                   if (annotationId && isSelectionMode) {
                     e.stopPropagation();
-                    setSelectedMarkupId(annotationId);
+                    toggleMarkupSelection(annotationId, e);
                     return;
                   }
                   
@@ -4520,7 +4633,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                   // But we can also handle it here as a fallback
                   if (measurementId && isSelectionMode) {
                     e.stopPropagation();
-                    setSelectedMarkupId(measurementId);
+                    toggleMarkupSelection(measurementId, e);
                     return;
                   }
                   
