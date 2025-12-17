@@ -115,6 +115,15 @@
   position: relative;
 }
 
+/* SVG markup selection styles - CSS-based to avoid re-renders */
+[data-selected="true"] {
+  stroke: #ff0000 !important;
+  stroke-width: 4 !important;
+}
+[data-selected="true"] text {
+  fill: #ff0000 !important;
+}
+
 
 
 

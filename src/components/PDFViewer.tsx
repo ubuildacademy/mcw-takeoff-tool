@@ -229,6 +229,34 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setSelectedMarkupIds(allIds);
   }, [localTakeoffMeasurements, localAnnotations]);
   
+  // Lightweight function to update selection visual state via data attributes (no re-render)
+  const updateSelectionVisuals = useCallback(() => {
+    if (!svgOverlayRef.current) return;
+    
+    // Update measurements
+    const measurementElements = svgOverlayRef.current.querySelectorAll('[data-measurement-id]');
+    measurementElements.forEach(el => {
+      const id = el.getAttribute('data-measurement-id');
+      if (id) {
+        el.setAttribute('data-selected', selectedMarkupIds.has(id) ? 'true' : 'false');
+      }
+    });
+    
+    // Update annotations
+    const annotationElements = svgOverlayRef.current.querySelectorAll('[data-annotation-id]');
+    annotationElements.forEach(el => {
+      const id = el.getAttribute('data-annotation-id');
+      if (id) {
+        el.setAttribute('data-selected', selectedMarkupIds.has(id) ? 'true' : 'false');
+      }
+    });
+  }, [selectedMarkupIds]);
+  
+  // Update selection visuals when selection changes (lightweight, no SVG re-render)
+  useEffect(() => {
+    updateSelectionVisuals();
+  }, [selectedMarkupIds, updateSelectionVisuals]);
+  
   // Helper to apply/remove interactive CSS zoom transforms when renders are blocked
   const applyInteractiveZoomTransforms = useCallback(() => {
     const canvas = pdfCanvasRef.current as HTMLCanvasElement | null;
@@ -929,7 +957,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       renderRunningLengthDisplay(svgOverlay, viewport);
     }
     
-  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, selectedMarkupIds, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, cutoutMode, currentCutout, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionBox]);
+  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, cutoutMode, currentCutout, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionBox]);
 
   // Re-render annotations when measurements or interaction state changes
   useEffect(() => {
@@ -1358,9 +1386,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       };
     });
     
-    const isSelected = selectedMarkupIds.has(measurement.id);
-    const strokeColor = isSelected ? '#ff0000' : (measurement.color || measurement.conditionColor || '#000000');
-    const strokeWidth = isSelected ? '4' : '2';
+    // Store original color as data attribute for CSS-based selection styling
+    const baseColor = measurement.color || measurement.conditionColor || '#000000';
+    const strokeColor = baseColor;
+    const strokeWidth = '2';
     
     switch (measurement.type) {
       case 'linear':
