@@ -200,6 +200,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   
   // Helper functions for multi-select
   const toggleMarkupSelection = useCallback((id: string, event?: React.MouseEvent | MouseEvent) => {
+    const isDev = import.meta.env.DEV;
+    if (isDev) {
+      console.log('🎯 toggleMarkupSelection called:', { id, ctrlKey: event?.ctrlKey, metaKey: event?.metaKey });
+    }
     setSelectedMarkupIds(prev => {
       const newSet = new Set(prev);
       if (event?.ctrlKey || event?.metaKey) {
@@ -214,6 +218,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         newSet.clear();
         newSet.add(id);
       }
+      if (isDev) {
+        console.log('🎯 Selection updated:', Array.from(newSet));
+      }
       return newSet;
     });
   }, []);
@@ -226,6 +233,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     const allIds = new Set<string>();
     localTakeoffMeasurements.forEach(m => allIds.add(m.id));
     localAnnotations.forEach(a => allIds.add(a.id));
+    const isDev = import.meta.env.DEV;
+    if (isDev) {
+      console.log('🎯 selectAllMarkups: selecting', allIds.size, 'markups:', Array.from(allIds));
+    }
     setSelectedMarkupIds(allIds);
   }, [localTakeoffMeasurements, localAnnotations]);
   
@@ -783,9 +794,35 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       svgOverlay.setAttribute('viewBox', `0 0 ${viewport.width} ${viewport.height}`);
     }
     
+    // LAYERED APPROACH: Use a persistent hit-area and a markups group to minimize flicker
+    // 1. Ensure hit-area exists (at the bottom layer)
+    let hitArea = svgOverlay.querySelector('#hit-area') as SVGRectElement;
+    if (!hitArea) {
+      hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      hitArea.setAttribute('id', 'hit-area');
+      hitArea.setAttribute('width', '100%');
+      hitArea.setAttribute('height', '100%');
+      hitArea.setAttribute('fill', 'transparent');
+      // Insert at the beginning so it's behind everything
+      svgOverlay.insertBefore(hitArea, svgOverlay.firstChild);
+    }
     
-    // Clear existing annotations completely - this ensures no cross-page contamination
-    svgOverlay.innerHTML = '';
+    // Update hit-area pointer-events based on current mode
+    // In selection mode: 'all' to capture clicks on empty space (for deselection)
+    // But markups themselves have pointer-events: auto so they receive clicks first
+    const shouldCaptureClicks = isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
+    hitArea.setAttribute('pointer-events', shouldCaptureClicks ? 'all' : 'none');
+    
+    // 2. Get or create the markups group (above hit-area)
+    let markupsGroup = svgOverlay.querySelector('#markups-layer') as SVGGElement;
+    if (!markupsGroup) {
+      markupsGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      markupsGroup.setAttribute('id', 'markups-layer');
+      svgOverlay.appendChild(markupsGroup);
+    }
+    
+    // Clear only the markups layer, not the entire SVG (preserves hit-area, reduces flicker)
+    markupsGroup.innerHTML = '';
     
     // CRITICAL: Only render measurements for the specific page being rendered
     // Filter by page BEFORE iterating to prevent any cross-page contamination
@@ -793,9 +830,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       (measurement) => measurement.pdfPage === pageNum
     );
     
+    // Render measurements into the markups group (not directly to svgOverlay)
     pageMeasurements.forEach((measurement) => {
-      // Removed verbose logging - was causing console spam
-      renderSVGMeasurement(svgOverlay, measurement, viewport, page);
+      renderSVGMeasurement(markupsGroup as unknown as SVGSVGElement, measurement, viewport, page);
     });
 
     // Draw calibration validator overlay if present for this page
@@ -815,7 +852,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       line.setAttribute('stroke-width', '2');
       line.setAttribute('stroke-dasharray', '6,4');
       line.setAttribute('vector-effect', 'non-scaling-stroke');
-      svgOverlay.appendChild(line);
+      markupsGroup.appendChild(line);
 
       const midX = (x1 + x2) / 2;
       const midY = (y1 + y2) / 2;
@@ -828,7 +865,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       text.setAttribute('text-anchor', 'middle');
       text.setAttribute('vector-effect', 'non-scaling-stroke');
       text.textContent = calibrationValidation.display;
-      svgOverlay.appendChild(text);
+      markupsGroup.appendChild(text);
     }
 
     // Draw measurement debug overlay if present
@@ -843,7 +880,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       bg.setAttribute('height', '54');
       bg.setAttribute('fill', 'rgba(0,0,0,0.65)');
       bg.setAttribute('rx', '6');
-      svgOverlay.appendChild(bg);
+      markupsGroup.appendChild(bg);
       const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       t.setAttribute('x', midX.toString());
       t.setAttribute('y', (midY - 42).toString());
@@ -852,7 +889,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       t.setAttribute('font-family', 'Arial');
       t.setAttribute('text-anchor', 'middle');
       t.textContent = `dx=${dxNorm.toFixed(4)} dy=${dyNorm.toFixed(4)} base=(${baseW.toFixed(1)},${baseH.toFixed(1)})`;
-      svgOverlay.appendChild(t);
+      markupsGroup.appendChild(t);
       const t2 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       t2.setAttribute('x', midX.toString());
       t2.setAttribute('y', (midY - 26).toString());
@@ -861,7 +898,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       t2.setAttribute('font-family', 'Arial');
       t2.setAttribute('text-anchor', 'middle');
       t2.textContent = `px(valid)=${pixelDistanceValidator.toFixed(2)} px(meas)=${pixelDistanceMeasure.toFixed(2)} sf=${scaleFactorUsed.toExponential(6)}`;
-      svgOverlay.appendChild(t2);
+      markupsGroup.appendChild(t2);
       const t3 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       t3.setAttribute('x', midX.toString());
       t3.setAttribute('y', (midY - 10).toString());
@@ -870,7 +907,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       t3.setAttribute('font-family', 'Arial');
       t3.setAttribute('text-anchor', 'middle');
       t3.textContent = `${formatFeetAndInches(distanceValidatorFt)} vs ${formatFeetAndInches(distanceMeasureFt)}`;
-      svgOverlay.appendChild(t3);
+      markupsGroup.appendChild(t3);
     }
     
     // Draw current measurement being created (only if on the page being rendered)
@@ -885,48 +922,48 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         // Always render preview for linear, area, and volume from first point
         // Only count measurements need to wait for completion
         if (measurementType !== 'count') {
-          renderSVGCurrentMeasurement(svgOverlay, viewport);
+          renderSVGCurrentMeasurement(markupsGroup as unknown as SVGSVGElement, viewport);
         }
       }
     }
     
     // Draw current cut-out being created (only if on the page being rendered)
     if (cutoutMode && currentCutout.length > 0 && pageNum === currentPage) {
-      renderSVGCurrentCutout(svgOverlay, viewport);
+      renderSVGCurrentCutout(markupsGroup as unknown as SVGSVGElement, viewport);
     }
     
     // Draw visual search or titleblock selection box (only if on the page being rendered)
     if ((visualSearchMode || !!titleblockSelectionMode) && isSelectingSymbol && selectionBox && pageNum === currentPage) {
-      renderSVGSelectionBox(svgOverlay, selectionBox, viewport);
+      renderSVGSelectionBox(markupsGroup as unknown as SVGSVGElement, selectionBox, viewport);
     }
     
     // Render completed annotations for this page
     localAnnotations.forEach(annotation => {
       // Double-check that this annotation belongs to the page being rendered
       if (annotation.pageNumber === pageNum) {
-        renderSVGAnnotation(svgOverlay, annotation, viewport);
+        renderSVGAnnotation(markupsGroup as unknown as SVGSVGElement, annotation, viewport);
       }
     });
     
     // Draw current annotation being created (only if on the page being rendered)
     // Show preview even with no points yet (for initial mouse tracking)
     if (annotationTool && pageNum === currentPage) {
-      renderSVGCurrentAnnotation(svgOverlay, viewport);
+      renderSVGCurrentAnnotation(markupsGroup as unknown as SVGSVGElement, viewport);
     }
     
     // Draw calibration points (only if on the page being rendered)
     if (isCalibrating && calibrationPoints.length > 0 && pageNum === currentPage) {
-      renderSVGCalibrationPoints(svgOverlay);
+      renderSVGCalibrationPoints(markupsGroup as unknown as SVGSVGElement);
     }
     
     // Draw crosshair if measuring, calibrating, or annotating (only if on the page being rendered)
     if (mousePosition && (isMeasuring || isCalibrating || annotationTool) && pageNum === currentPage) {
-      renderSVGCrosshair(svgOverlay, mousePosition, viewport, isCalibrating);
+      renderSVGCrosshair(markupsGroup as unknown as SVGSVGElement, mousePosition, viewport, isCalibrating);
     }
     
     // Draw running length display for continuous linear drawing
     if (isContinuousDrawing && activePoints.length > 0 && pageNum === currentPage) {
-      renderRunningLengthDisplay(svgOverlay, viewport);
+      renderRunningLengthDisplay(markupsGroup as unknown as SVGSVGElement, viewport);
     }
     
   }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, selectedMarkupIds, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, cutoutMode, currentCutout, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionBox]);
@@ -1064,25 +1101,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
   }, [viewState.scale, viewState.rotation, pdfDocument, currentViewport, localTakeoffMeasurements, localAnnotations, currentPage, renderTakeoffAnnotations]);
 
-  // Update hit-area pointer-events when mode changes
+  // Re-render markups when mode changes to ensure click handlers and hit-area are updated
+  // This is CRITICAL: markups rendered while isSelectionMode was false won't have click handlers
   useEffect(() => {
-    if (!svgOverlayRef.current) return;
+    if (!svgOverlayRef.current || !currentViewport || !pdfPageRef.current) return;
     
-    const hitArea = svgOverlayRef.current.querySelector('#hit-area') as SVGRectElement;
-    if (hitArea) {
-      // When measuring, set pointer-events to 'none' so clicks pass through to canvas
-      // This allows proper double-click detection on the canvas
-      // For other modes, set to 'all' to capture clicks for selection/annotation/etc.
-      const shouldCaptureClicks = isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
-      hitArea.setAttribute('pointer-events', shouldCaptureClicks ? 'all' : 'none');
-    }
-    
-    // CRITICAL FIX: Re-render markups when selection mode changes
-    // This ensures markups get click handlers when entering selection mode
-    // Markups rendered while isSelectionMode was false won't have click handlers
-    if (isSelectionMode && currentViewport && pdfPageRef.current) {
-      renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
-    }
+    // Always re-render when mode changes - this updates:
+    // 1. Hit-area pointer-events (managed inside renderTakeoffAnnotations)
+    // 2. Click handlers on markups (only added when isSelectionMode is true)
+    renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
   }, [isMeasuring, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentViewport, currentPage, renderTakeoffAnnotations]);
 
   // Page visibility handler - ensures overlay is properly initialized when page becomes visible
@@ -1099,27 +1126,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     svgOverlay.setAttribute('viewBox', `0 0 ${viewport.width} ${viewport.height}`);
     svgOverlay.setAttribute('overflow', 'visible');
     
-    // Add a transparent hit area for pointer events
-    // CRITICAL FIX: Set hit-area pointer-events based on current mode
-    // When measuring, set to 'none' so clicks pass through to canvas for proper double-click handling
-    // For other modes (selection, calibration, annotation, visual search), set to 'all' to capture clicks
-    const existingHitArea = svgOverlay.querySelector('#hit-area');
-    if (!existingHitArea) {
-      const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-      hitArea.setAttribute('id', 'hit-area');
-      hitArea.setAttribute('width', '100%');
-      hitArea.setAttribute('height', '100%');
-      hitArea.setAttribute('fill', 'transparent');
-      svgOverlay.appendChild(hitArea);
-    }
-    
-    // Update hit-area pointer-events based on current mode
-    // This ensures clicks pass through to canvas when measuring (for double-click support)
-    const hitArea = svgOverlay.querySelector('#hit-area') as SVGRectElement;
-    if (hitArea) {
-      const shouldCaptureClicks = isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
-      hitArea.setAttribute('pointer-events', shouldCaptureClicks ? 'all' : 'none');
-    }
+    // Note: hit-area and markups-layer are now created/managed by renderTakeoffAnnotations
+    // This prevents duplication and ensures consistent layering
     
     // Always re-render all annotations for this page, regardless of current state
     // This ensures takeoffs are visible immediately when the page loads
@@ -1128,13 +1136,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       (m) => m.projectId === currentProjectId && m.sheetId === file?.id && m.pdfPage === pageNum
     );
     
-    // Render immediately if we have measurements
+    // Render immediately if we have measurements (this will also set up the layers)
     if (currentMeasurements.length > 0 || localTakeoffMeasurements.length > 0) {
       renderTakeoffAnnotations(pageNum, viewport, pdfPageRef.current);
     }
     // Note: If no measurements, the reactive useEffect will handle rendering when they load
     // The reactive useEffect watches allTakeoffMeasurements and will trigger render when measurements arrive
-  }, [renderTakeoffAnnotations, localTakeoffMeasurements, currentProjectId, file?.id, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol]);
+  }, [renderTakeoffAnnotations, localTakeoffMeasurements, currentProjectId, file?.id]);
 
   // PDF render function with page-specific viewport isolation
   const renderPDFPage = useCallback(async (pageNum: number) => {
@@ -4234,6 +4242,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     } else if ((event.ctrlKey || event.metaKey) && event.key === 'a' && isSelectionMode) {
       // Select all markups on current page (Ctrl+A or Cmd+A)
       event.preventDefault();
+      const isDev = import.meta.env.DEV;
+      if (isDev) {
+        console.log('🎯 Ctrl+A pressed in selection mode, selecting all markups');
+      }
       selectAllMarkups();
     } else if (event.key === 'Control' && (isMeasuring || isCalibrating)) {
       // Toggle ortho snapping when Ctrl is pressed during measurement or calibration
