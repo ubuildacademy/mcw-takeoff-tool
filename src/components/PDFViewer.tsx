@@ -200,10 +200,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   
   // Helper functions for multi-select
   const toggleMarkupSelection = useCallback((id: string, event?: React.MouseEvent | MouseEvent) => {
-    const isDev = import.meta.env.DEV;
-    if (isDev) {
-      console.log('🎯 toggleMarkupSelection called:', { id, ctrlKey: event?.ctrlKey, metaKey: event?.metaKey });
-    }
+    console.log('🎯 toggleMarkupSelection called:', { id, ctrlKey: event?.ctrlKey, metaKey: event?.metaKey });
     setSelectedMarkupIds(prev => {
       const newSet = new Set(prev);
       if (event?.ctrlKey || event?.metaKey) {
@@ -218,9 +215,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         newSet.clear();
         newSet.add(id);
       }
-      if (isDev) {
-        console.log('🎯 Selection updated:', Array.from(newSet));
-      }
+      console.log('🎯 Selection updated:', Array.from(newSet));
       return newSet;
     });
   }, []);
@@ -233,10 +228,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     const allIds = new Set<string>();
     localTakeoffMeasurements.forEach(m => allIds.add(m.id));
     localAnnotations.forEach(a => allIds.add(a.id));
-    const isDev = import.meta.env.DEV;
-    if (isDev) {
-      console.log('🎯 selectAllMarkups: selecting', allIds.size, 'markups:', Array.from(allIds));
-    }
+    console.log('🎯 selectAllMarkups: selecting', allIds.size, 'markups:', Array.from(allIds));
     setSelectedMarkupIds(allIds);
   }, [localTakeoffMeasurements, localAnnotations]);
   
@@ -1104,13 +1096,38 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Re-render markups when mode changes to ensure click handlers and hit-area are updated
   // This is CRITICAL: markups rendered while isSelectionMode was false won't have click handlers
   useEffect(() => {
-    if (!svgOverlayRef.current || !currentViewport || !pdfPageRef.current) return;
+    if (!svgOverlayRef.current || !pdfPageRef.current || !currentViewport) {
+      console.log('🎯 Mode change but viewport not ready', {
+        hasSvg: !!svgOverlayRef.current,
+        hasPage: !!pdfPageRef.current,
+        hasViewport: !!currentViewport,
+        isSelectionMode,
+        isMeasuring,
+        isCalibrating,
+        annotationToolActive: !!annotationTool
+      });
+      return;
+    }
     
+    console.log('🎯 Mode change re-render', {
+      isSelectionMode,
+      isMeasuring,
+      isCalibrating,
+      annotationToolActive: !!annotationTool,
+      visualSearchMode,
+      titleblockSelectionMode,
+      isSelectingSymbol
+    });
     // Always re-render when mode changes - this updates:
     // 1. Hit-area pointer-events (managed inside renderTakeoffAnnotations)
     // 2. Click handlers on markups (only added when isSelectionMode is true)
     renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
   }, [isMeasuring, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentViewport, currentPage, renderTakeoffAnnotations]);
+
+  // Log selection mode transitions in production for diagnostics
+  useEffect(() => {
+    console.log('🎯 isSelectionMode changed:', isSelectionMode);
+  }, [isSelectionMode]);
 
   // Page visibility handler - ensures overlay is properly initialized when page becomes visible
   const onPageShown = useCallback((pageNum: number, viewport: any) => {
@@ -4242,10 +4259,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     } else if ((event.ctrlKey || event.metaKey) && event.key === 'a' && isSelectionMode) {
       // Select all markups on current page (Ctrl+A or Cmd+A)
       event.preventDefault();
-      const isDev = import.meta.env.DEV;
-      if (isDev) {
-        console.log('🎯 Ctrl+A pressed in selection mode, selecting all markups');
-      }
+      console.log('🎯 Ctrl+A pressed in selection mode, selecting all markups');
       selectAllMarkups();
     } else if (event.key === 'Control' && (isMeasuring || isCalibrating)) {
       // Toggle ortho snapping when Ctrl is pressed during measurement or calibration
