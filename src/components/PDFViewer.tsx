@@ -894,9 +894,113 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       renderRunningLengthDisplay(svgOverlay, viewport);
     }
     
-  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, selectedMarkupId, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, cutoutMode, currentCutout, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionBox]);
+  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, cutoutMode, currentCutout, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionBox]);
+
+  // OPTIMIZED: Update only visual styling of markups when selection changes (no full re-render)
+  const updateMarkupSelection = useCallback((newSelectedId: string | null, previousSelectedId: string | null) => {
+    if (!svgOverlayRef.current) return;
+    
+    const svg = svgOverlayRef.current;
+    
+    // Update previously selected markup (deselect)
+    if (previousSelectedId) {
+      // Find measurement elements (main shape elements, not hit areas)
+      const prevMeasurementElements = svg.querySelectorAll(`[data-measurement-id="${previousSelectedId}"]`);
+      prevMeasurementElements.forEach((el) => {
+        const element = el as SVGElement;
+        const measurement = localTakeoffMeasurements.find(m => m.id === previousSelectedId);
+        if (measurement) {
+          const defaultColor = measurement.color || measurement.conditionColor || '#000000';
+          const defaultStrokeWidth = '2';
+          
+          // Update stroke color and width for shape elements
+          if (element.tagName === 'polyline' || element.tagName === 'polygon' || element.tagName === 'path') {
+            element.setAttribute('stroke', defaultColor);
+            element.setAttribute('stroke-width', defaultStrokeWidth);
+          } else if (element.tagName === 'circle') {
+            element.setAttribute('stroke', '#ffffff');
+            element.setAttribute('stroke-width', '2');
+          }
+        }
+      });
+      
+      // Find and update text elements for measurements (search by traversing siblings)
+      const prevMeasurement = localTakeoffMeasurements.find(m => m.id === previousSelectedId);
+      if (prevMeasurement) {
+        const defaultColor = prevMeasurement.color || prevMeasurement.conditionColor || '#000000';
+        // Find text elements that follow measurement shapes
+        const allTextElements = svg.querySelectorAll('text');
+        allTextElements.forEach((textEl) => {
+          // Check if this text is associated with the measurement by checking nearby elements
+          const prevSibling = textEl.previousElementSibling;
+          if (prevSibling && prevSibling.getAttribute('data-measurement-id') === previousSelectedId) {
+            textEl.setAttribute('fill', defaultColor);
+          }
+        });
+      }
+      
+      // Find annotation elements
+      const prevAnnotationElements = svg.querySelectorAll(`[data-annotation-id="${previousSelectedId}"]`);
+      prevAnnotationElements.forEach((el) => {
+        const element = el as SVGElement;
+        const annotation = localAnnotations.find(a => a.id === previousSelectedId);
+        if (annotation) {
+          const defaultColor = annotation.color;
+          const defaultStrokeWidth = '3';
+          
+          if (element.tagName === 'line' || element.tagName === 'rect' || element.tagName === 'ellipse') {
+            element.setAttribute('stroke', defaultColor);
+            element.setAttribute('stroke-width', defaultStrokeWidth);
+          } else if (element.tagName === 'text') {
+            element.setAttribute('fill', defaultColor);
+          }
+        }
+      });
+    }
+    
+    // Update newly selected markup (select)
+    if (newSelectedId) {
+      // Find measurement elements (main shape elements, not hit areas)
+      const newMeasurementElements = svg.querySelectorAll(`[data-measurement-id="${newSelectedId}"]`);
+      newMeasurementElements.forEach((el) => {
+        const element = el as SVGElement;
+        
+        // Update stroke color and width for selected state
+        if (element.tagName === 'polyline' || element.tagName === 'polygon' || element.tagName === 'path') {
+          element.setAttribute('stroke', '#ff0000');
+          element.setAttribute('stroke-width', '4');
+        } else if (element.tagName === 'circle') {
+          element.setAttribute('stroke', '#ff0000');
+          element.setAttribute('stroke-width', '3');
+        }
+      });
+      
+      // Find and update text elements for measurements
+      const allTextElements = svg.querySelectorAll('text');
+      allTextElements.forEach((textEl) => {
+        const prevSibling = textEl.previousElementSibling;
+        if (prevSibling && prevSibling.getAttribute('data-measurement-id') === newSelectedId) {
+          textEl.setAttribute('fill', '#ff0000');
+        }
+      });
+      
+      // Find annotation elements
+      const newAnnotationElements = svg.querySelectorAll(`[data-annotation-id="${newSelectedId}"]`);
+      newAnnotationElements.forEach((el) => {
+        const element = el as SVGElement;
+        
+        if (element.tagName === 'line' || element.tagName === 'rect' || element.tagName === 'ellipse') {
+          element.setAttribute('stroke', '#00ff00');
+          element.setAttribute('stroke-width', '5');
+        } else if (element.tagName === 'text') {
+          element.setAttribute('fill', '#00ff00');
+        }
+      });
+    }
+  }, [localTakeoffMeasurements, localAnnotations]);
 
   // Re-render annotations when measurements or interaction state changes
+  // NOTE: selectedMarkupId is removed from dependencies to prevent full re-renders on selection changes
   useEffect(() => {
     if (pdfDocument && currentViewport && !isRenderingRef.current) {
       // Only render if we have measurements, annotations, or if we're in measuring/annotation/visual search mode
@@ -910,7 +1014,20 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
       }
     }
-  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, selectedMarkupId, isSelectionMode, renderTakeoffAnnotations, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentAnnotation]);
+  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, renderTakeoffAnnotations, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentAnnotation]);
+
+  // OPTIMIZED: Update only visual styling when selection changes (prevents flicker)
+  const prevSelectedMarkupIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    // Only update if selection actually changed and overlay exists with content
+    if (selectedMarkupId !== prevSelectedMarkupIdRef.current) {
+      // Safety check: only update if overlay exists and has content (not being cleared)
+      if (svgOverlayRef.current && svgOverlayRef.current.children.length > 0 && !isRenderingRef.current) {
+        updateMarkupSelection(selectedMarkupId, prevSelectedMarkupIdRef.current);
+      }
+      prevSelectedMarkupIdRef.current = selectedMarkupId;
+    }
+  }, [selectedMarkupId, updateMarkupSelection]);
   
   // CRITICAL: Trigger re-render of annotations after measurements are loaded
   // This ensures markups appear immediately when returning to a page
