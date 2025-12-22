@@ -1019,13 +1019,46 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // OPTIMIZED: Update only visual styling when selection changes (prevents flicker)
   const prevSelectedMarkupIdRef = useRef<string | null>(null);
   useEffect(() => {
-    // Only update if selection actually changed and overlay exists with content
+    // Only update if selection actually changed
     if (selectedMarkupId !== prevSelectedMarkupIdRef.current) {
-      // Safety check: only update if overlay exists and has content (not being cleared)
-      if (svgOverlayRef.current && svgOverlayRef.current.children.length > 0 && !isRenderingRef.current) {
-        updateMarkupSelection(selectedMarkupId, prevSelectedMarkupIdRef.current);
-      }
+      const previousId = prevSelectedMarkupIdRef.current;
       prevSelectedMarkupIdRef.current = selectedMarkupId;
+      
+      // Use requestAnimationFrame to ensure DOM is ready and avoid race conditions
+      // Add retry mechanism in case elements aren't found immediately
+      const attemptUpdate = (retryCount = 0) => {
+        if (!svgOverlayRef.current) {
+          // Overlay doesn't exist yet, retry after a short delay
+          if (retryCount < 3) {
+            setTimeout(() => attemptUpdate(retryCount + 1), 50);
+          }
+          return;
+        }
+        
+        // Safety check: only update if overlay has content and not being cleared
+        if (svgOverlayRef.current.children.length > 0 && !isRenderingRef.current) {
+          // Verify elements exist before updating
+          const hasElements = selectedMarkupId 
+            ? (svgOverlayRef.current.querySelector(`[data-measurement-id="${selectedMarkupId}"]`) || 
+               svgOverlayRef.current.querySelector(`[data-annotation-id="${selectedMarkupId}"]`))
+            : true; // Deselecting doesn't need elements to exist
+          
+          if (hasElements || !selectedMarkupId) {
+            updateMarkupSelection(selectedMarkupId, previousId);
+          } else if (retryCount < 3) {
+            // Elements not found yet, retry after a short delay
+            setTimeout(() => attemptUpdate(retryCount + 1), 50);
+          }
+        } else if (retryCount < 3) {
+          // Overlay might be rebuilding, retry after a short delay
+          setTimeout(() => attemptUpdate(retryCount + 1), 50);
+        }
+      };
+      
+      // Use requestAnimationFrame to ensure DOM updates are complete
+      requestAnimationFrame(() => {
+        attemptUpdate();
+      });
     }
   }, [selectedMarkupId, updateMarkupSelection]);
   
@@ -1543,6 +1576,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             compoundPath.setAttribute('fill', (measurement.color || measurement.conditionColor || '#000000') + '40');
             compoundPath.setAttribute('stroke', strokeColor);
             compoundPath.setAttribute('stroke-width', strokeWidth);
+            compoundPath.setAttribute('data-measurement-id', measurement.id);
             
             // Add click handler for selection
             if (isSelectionMode) {
@@ -1561,6 +1595,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             polygon.setAttribute('fill', (measurement.color || measurement.conditionColor || '#000000') + '40');
             polygon.setAttribute('stroke', strokeColor);
             polygon.setAttribute('stroke-width', strokeWidth);
+            polygon.setAttribute('data-measurement-id', measurement.id);
             
             // Add click handler for selection
             if (isSelectionMode) {
@@ -1649,6 +1684,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             compoundPath.setAttribute('fill', (measurement.color || measurement.conditionColor || '#000000') + '40');
             compoundPath.setAttribute('stroke', strokeColor);
             compoundPath.setAttribute('stroke-width', strokeWidth);
+            compoundPath.setAttribute('data-measurement-id', measurement.id);
             
             // Add click handler for selection
             if (isSelectionMode) {
@@ -1667,6 +1703,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             polygon.setAttribute('fill', (measurement.color || measurement.conditionColor || '#000000') + '40');
             polygon.setAttribute('stroke', strokeColor);
             polygon.setAttribute('stroke-width', strokeWidth);
+            polygon.setAttribute('data-measurement-id', measurement.id);
             
             // Add click handler for selection
             if (isSelectionMode) {
@@ -1733,6 +1770,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         circle.setAttribute('fill', measurement.color || measurement.conditionColor || '#74b9ff');
         circle.setAttribute('stroke', isSelected ? '#ff0000' : '#ffffff');
         circle.setAttribute('stroke-width', isSelected ? '3' : '2');
+        circle.setAttribute('data-measurement-id', measurement.id);
         
         // Add click handler for selection
         if (isSelectionMode) {
