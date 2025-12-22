@@ -55,12 +55,16 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
   // Auto-switch unit when includeHeight changes for linear conditions
   useEffect(() => {
     if (formData.type === 'linear') {
-      if (formData.includeHeight && formData.unit !== 'SF' && formData.unit !== 'SY' && formData.unit !== 'SM') {
-        // Switch to SF when height is enabled
-        setFormData(prev => ({ ...prev, unit: 'SF' }));
-      } else if (!formData.includeHeight && formData.unit !== 'LF' && formData.unit !== 'LY' && formData.unit !== 'LM') {
-        // Switch back to LF when height is disabled
-        setFormData(prev => ({ ...prev, unit: 'LF' }));
+      if (formData.includeHeight) {
+        // Switch to SF when height is enabled (if not already an area unit)
+        if (formData.unit !== 'SF' && formData.unit !== 'SY' && formData.unit !== 'SM') {
+          setFormData(prev => ({ ...prev, unit: 'SF' }));
+        }
+      } else {
+        // Switch back to LF when height is disabled (if currently an area unit)
+        if (formData.unit === 'SF' || formData.unit === 'SY' || formData.unit === 'SM') {
+          setFormData(prev => ({ ...prev, unit: 'LF' }));
+        }
       }
     }
   }, [formData.includeHeight, formData.type]);

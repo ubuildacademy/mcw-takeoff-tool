@@ -4235,14 +4235,27 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         setSelectedMarkupId(null);
         setIsDeselecting(false); // Clear deselection state
         
-        if (condition.unit === 'EA' || condition.unit === 'each') {
+        // Always use condition.type first - linear conditions with height stay as linear
+        if (condition.type === 'count' || condition.type === 'visual-search') {
           setMeasurementType('count');
-        } else if (condition.unit === 'SF' || condition.unit === 'sq ft') {
-          setMeasurementType('area');
-        } else if (condition.unit === 'CY' || condition.unit === 'cu yd') {
+        } else if (condition.type === 'volume') {
           setMeasurementType('volume');
-        } else {
+        } else if (condition.type === 'area') {
+          setMeasurementType('area');
+        } else if (condition.type === 'linear') {
+          // Linear conditions always stay as linear, even with height enabled
           setMeasurementType('linear');
+        } else {
+          // Fallback to unit-based detection for legacy conditions
+          if (condition.unit === 'EA' || condition.unit === 'each') {
+            setMeasurementType('count');
+          } else if (condition.unit === 'SF' || condition.unit === 'sq ft') {
+            setMeasurementType('area');
+          } else if (condition.unit === 'CY' || condition.unit === 'cu yd') {
+            setMeasurementType('volume');
+          } else {
+            setMeasurementType('linear');
+          }
         }
       } else {
         // VALIDATION FIX: Condition ID exists but condition object is missing
