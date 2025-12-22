@@ -71,6 +71,7 @@ interface Measurement {
   conditionColor: string;
   conditionName: string;
   perimeterValue?: number;
+  areaValue?: number;
   cutouts?: Array<{
     id: string;
     points: Array<{ x: number; y: number }>;

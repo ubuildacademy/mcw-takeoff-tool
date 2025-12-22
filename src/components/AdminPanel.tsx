@@ -122,11 +122,59 @@ When answering questions:
 - Be concise but thorough in your responses`;
   };
 
-  // Save custom prompt to API (with localStorage fallback)
-  const saveCustomPrompt = async () => {
+  // Save sheet number prompt to API (with localStorage fallback)
+  const saveSheetNumberPrompt = async () => {
     try {
       setIsLoading(true);
       
+      try {
+        // Save to API (database)
+        await settingsService.updateSetting('titleblock-sheet-number-prompt', sheetNumberPrompt);
+      } catch (apiError) {
+        console.warn('Failed to save to API, using localStorage fallback:', apiError);
+        // Fallback to localStorage for backward compatibility
+        localStorage.setItem('titleblock-sheet-number-prompt', sheetNumberPrompt);
+      }
+      
+      // Also save to localStorage as backup
+      localStorage.setItem('titleblock-sheet-number-prompt', sheetNumberPrompt);
+      
+      // Show success message
+      alert('✅ Sheet number prompt saved successfully!');
+    } catch (error) {
+      console.error('Error saving sheet number prompt:', error);
+      alert('❌ Failed to save sheet number prompt');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Save sheet name prompt to API (with localStorage fallback)
+  const saveSheetNamePrompt = async () => {
+    try {
+      setIsLoading(true);
+      
+      try {
+        // Save to API (database)
+        await settingsService.updateSetting('titleblock-sheet-name-prompt', sheetNamePrompt);
+      } catch (apiError) {
+        console.warn('Failed to save to API, using localStorage fallback:', apiError);
+        // Fallback to localStorage for backward compatibility
+        localStorage.setItem('titleblock-sheet-name-prompt', sheetNamePrompt);
+      }
+      
+      // Also save to localStorage as backup
+      localStorage.setItem('titleblock-sheet-name-prompt', sheetNamePrompt);
+      
+      // Show success message
+      alert('✅ Sheet name prompt saved successfully!');
+    } catch (error) {
+      console.error('Error saving sheet name prompt:', error);
+      alert('❌ Failed to save sheet name prompt');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   // Load sheet number prompt from API (with localStorage fallback)
   const loadSheetNumberPrompt = async () => {
