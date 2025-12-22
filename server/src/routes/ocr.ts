@@ -219,27 +219,36 @@ router.get('/results/:documentId', async (req, res) => {
   }
 
   try {
-    console.log(`🔍 Backend: Getting OCR results for document ${documentId} in project ${projectId}`);
+    // Only log in development to reduce production log noise
+    const isDev = process.env.NODE_ENV !== 'production';
+    if (isDev) {
+      console.log(`🔍 Backend: Getting OCR results for document ${documentId} in project ${projectId}`);
+    }
+    
     const results = await simpleOcrService.getDocumentOCRResults(projectId, documentId);
     
     // CRITICAL FIX: Safely build sampleResults with null checks to prevent TypeError
     // Filter out null/undefined entries before mapping
     const safeResults = Array.isArray(results) ? results.filter(r => r != null) : [];
-    const sampleResults = safeResults
-      .slice(0, 3)
-      .filter(r => r && r.pageNumber != null)
-      .map(r => ({
-        pageNumber: r.pageNumber,
-        textLength: r.text?.length || 0,
-        textPreview: r.text?.substring(0, 100) + '...'
-      }));
     
-    console.log(`📊 Backend: OCR results retrieved:`, {
-      documentId,
-      projectId,
-      resultsCount: safeResults.length,
-      sampleResults: sampleResults
-    });
+    // Only log detailed results in development
+    if (isDev) {
+      const sampleResults = safeResults
+        .slice(0, 3)
+        .filter(r => r && r.pageNumber != null)
+        .map(r => ({
+          pageNumber: r.pageNumber,
+          textLength: r.text?.length || 0,
+          textPreview: r.text?.substring(0, 100) + '...'
+        }));
+      
+      console.log(`📊 Backend: OCR results retrieved:`, {
+        documentId,
+        projectId,
+        resultsCount: safeResults.length,
+        sampleResults: sampleResults
+      });
+    }
     
     res.json({
       documentId,

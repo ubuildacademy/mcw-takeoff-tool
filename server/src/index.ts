@@ -30,12 +30,18 @@ import { supabase } from './supabase';
 const app = express();
 const PORT = parseInt(process.env.PORT || '4000', 10);
 
+// CORS configuration - define before middleware
+const isProduction = process.env.NODE_ENV === 'production';
+
 // CRITICAL: Handle OPTIONS FIRST - before any other middleware is registered
 // Express processes middleware in order, so this MUST be first to catch preflight
 // Railway's Caddy edge intercepts OPTIONS, so this needs to be extremely early
 app.use((req, res, next) => {
   if (req.method === 'OPTIONS') {
-    console.log('🚨 OPTIONS PREFLIGHT CAUGHT:', req.path, 'Origin:', req.headers.origin || 'none');
+    // Only log in development to reduce production log noise
+    if (!isProduction) {
+      console.log('🚨 OPTIONS PREFLIGHT CAUGHT:', req.path, 'Origin:', req.headers.origin || 'none');
+    }
     // Set CORS headers immediately - allow all origins temporarily for testing
     const origin = req.headers.origin;
     
@@ -50,14 +56,12 @@ app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Access-Control-Max-Age', '86400');
     
-    console.log('✅ OPTIONS response sent with status 204');
     return res.status(204).end(); // Use end() instead of send() for OPTIONS
   }
   next();
 });
 
-// CORS configuration - allow Vercel deployments (define before middleware)
-const isProduction = process.env.NODE_ENV === 'production';
+// CORS configuration - allow Vercel deployments
 const allowedOrigins = isProduction
   ? [
       'https://mcw-takeoff-tool.vercel.app',
@@ -71,50 +75,9 @@ const allowedOrigins = isProduction
     ]
   : true; // Allow all origins in development
 
-// CRITICAL: Handle ALL OPTIONS requests FIRST - before ANY other middleware
-// This MUST be the very first middleware to catch OPTIONS before CORS or routes
+// Note: OPTIONS requests are already handled above, so this middleware
+// only processes non-OPTIONS requests
 app.use((req, res, next) => {
-  // Log all requests for debugging
-  if (req.method === 'OPTIONS') {
-    console.log('🔄 OPTIONS PREFLIGHT:', req.method, req.path, 'Origin:', req.headers.origin);
-    const origin = req.headers.origin;
-    
-    // Always allow OPTIONS in development
-    if (!isProduction) {
-      if (origin) {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-      }
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
-      res.setHeader('Access-Control-Max-Age', '86400');
-      return res.status(204).send();
-    }
-    
-    // Production mode - check origin
-    if (typeof allowedOrigins !== 'boolean') {
-      const isAllowed = allowedOrigins.some(allowed => {
-        if (typeof allowed === 'string') {
-          return allowed === origin;
-        } else if (allowed instanceof RegExp) {
-          return origin ? allowed.test(origin) : false;
-        }
-        return false;
-      });
-      
-      if (origin && isAllowed) {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-        res.setHeader('Access-Control-Allow-Credentials', 'true');
-        res.setHeader('Access-Control-Max-Age', '86400');
-        return res.status(204).send();
-      }
-    }
-    
-    // Origin not allowed - reject but don't break
-    return res.status(403).json({ error: 'Origin not allowed' });
-  }
   next();
 });
 

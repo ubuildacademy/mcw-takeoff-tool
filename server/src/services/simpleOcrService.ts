@@ -403,7 +403,11 @@ class SimpleOCRService {
   // Get OCR results for a document
   async getDocumentOCRResults(projectId: string, documentId: string): Promise<SimpleOCRResult[]> {
     try {
-      console.log(`🔍 Database: Querying OCR results for document ${documentId} in project ${projectId}`);
+      // Only log in development to reduce production log noise
+      const isDev = process.env.NODE_ENV !== 'production';
+      if (isDev) {
+        console.log(`🔍 Database: Querying OCR results for document ${documentId} in project ${projectId}`);
+      }
       
       const { data, error } = await supabase
         .from('ocr_results')
@@ -417,14 +421,9 @@ class SimpleOCRService {
         throw error;
       }
 
-      console.log(`📊 Database: Found ${data?.length || 0} OCR results for document ${documentId}`);
-      if (data && data.length > 0) {
-        console.log(`📄 Sample OCR data:`, {
-          firstPage: data[0]?.page_number,
-          lastPage: data[data.length - 1]?.page_number,
-          totalRows: data.length,
-          sampleText: data[0]?.text_content?.substring(0, 100) + '...'
-        });
+      // Only log summary in development
+      if (isDev && data) {
+        console.log(`📊 Database: Found ${data.length} OCR results for document ${documentId}`);
       }
 
       // CRITICAL FIX: Filter out null/undefined rows and ensure page_number exists

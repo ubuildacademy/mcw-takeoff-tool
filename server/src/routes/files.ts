@@ -362,7 +362,8 @@ router.get('/:fileId', async (req, res) => {
       console.log(`📄 [FILE REQUEST] Sending PDF file: ${meta.originalName} (${fileSizeMB} MB) - took ${elapsedMs}ms`);
       
       // Check if file is too large for free tier (warn but still try)
-      if (buffer.length > 50 * 1024 * 1024) { // 50MB
+      // Only warn in development to reduce production log noise
+      if (buffer.length > 50 * 1024 * 1024 && process.env.NODE_ENV !== 'production') { // 50MB
         console.warn(`⚠️ [FILE REQUEST] Large file detected (${fileSizeMB} MB) - may cause issues on Railway free tier`);
       }
       
