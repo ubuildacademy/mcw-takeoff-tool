@@ -131,9 +131,14 @@ async function drawMeasurement(
       };
 
       // Format value - match viewer formatting
-      const displayValue = (measurement.unit === 'ft' || measurement.unit === 'feet' || measurement.unit === 'LF' || measurement.unit === 'lf')
+      const linearValue = (measurement.unit === 'ft' || measurement.unit === 'feet' || measurement.unit === 'LF' || measurement.unit === 'lf')
         ? formatFeetAndInches(measurement.calculatedValue)
         : `${measurement.calculatedValue.toFixed(2)} ${measurement.unit}`;
+      
+      // Show both linear and area if areaValue is present
+      const displayValue = measurement.areaValue
+        ? `${linearValue} LF / ${measurement.areaValue.toFixed(0)} SF`
+        : linearValue;
 
       // Calculate text width to center it (pdf-lib doesn't support text-anchor)
       const fontSize = 12;

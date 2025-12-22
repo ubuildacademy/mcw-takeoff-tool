@@ -62,6 +62,8 @@ export interface StoredCondition {
   equipmentCost?: number;
   includePerimeter?: boolean;
   depth?: number;
+  includeHeight?: boolean;
+  height?: number;
   // Visual search specific fields
   searchImage?: string;
   searchImageId?: string;
@@ -84,6 +86,7 @@ export interface StoredTakeoffMeasurement {
   conditionColor: string;
   conditionName: string;
   perimeterValue?: number;
+  areaValue?: number;
   cutouts?: Array<{
     id: string;
     points: Array<{ x: number; y: number }>;
@@ -419,6 +422,8 @@ class SupabaseStorage {
       equipment_cost: condition.equipmentCost,
       include_perimeter: condition.includePerimeter,
       depth: condition.depth,
+      include_height: condition.includeHeight,
+      height: condition.height,
       search_image: condition.searchImage,
       search_image_id: condition.searchImageId,
       search_threshold: condition.searchThreshold,
@@ -456,6 +461,8 @@ class SupabaseStorage {
       equipmentCost: data.equipment_cost,
       includePerimeter: data.include_perimeter ?? false,
       depth: data.depth,
+      includeHeight: data.include_height ?? false,
+      height: data.height,
       searchImage: data.search_image,
       searchImageId: data.search_image_id,
       searchThreshold: data.search_threshold,
@@ -534,6 +541,7 @@ class SupabaseStorage {
       conditionColor: item.condition_color,
       conditionName: item.condition_name,
       perimeterValue: item.perimeter_value,
+      areaValue: item.area_value,
       cutouts: item.cutouts,
       netCalculatedValue: item.net_calculated_value
     }));
@@ -567,6 +575,7 @@ class SupabaseStorage {
       conditionColor: item.condition_color,
       conditionName: item.condition_name,
       perimeterValue: item.perimeter_value,
+      areaValue: item.area_value,
       cutouts: item.cutouts,
       netCalculatedValue: item.net_calculated_value
     }));
@@ -600,6 +609,7 @@ class SupabaseStorage {
       conditionColor: item.condition_color,
       conditionName: item.condition_name,
       perimeterValue: item.perimeter_value,
+      areaValue: item.area_value,
       cutouts: item.cutouts,
       netCalculatedValue: item.net_calculated_value
     }));
@@ -634,6 +644,7 @@ class SupabaseStorage {
       conditionColor: item.condition_color,
       conditionName: item.condition_name,
       perimeterValue: item.perimeter_value,
+      areaValue: item.area_value,
       cutouts: item.cutouts,
       netCalculatedValue: item.net_calculated_value
     }));
@@ -656,6 +667,7 @@ class SupabaseStorage {
       condition_color: measurement.conditionColor,
       condition_name: measurement.conditionName,
       perimeter_value: measurement.perimeterValue,
+      area_value: measurement.areaValue,
       cutouts: measurement.cutouts,
       net_calculated_value: measurement.netCalculatedValue
     };
@@ -695,6 +707,7 @@ class SupabaseStorage {
       conditionColor: data.condition_color,
       conditionName: data.condition_name,
       perimeterValue: data.perimeter_value,
+      areaValue: data.area_value,
       cutouts: data.cutouts,
       netCalculatedValue: data.net_calculated_value
     };
@@ -724,6 +737,7 @@ class SupabaseStorage {
       condition_color: measurement.conditionColor,
       condition_name: measurement.conditionName,
       perimeter_value: measurement.perimeterValue,
+      area_value: measurement.areaValue,
       cutouts: measurement.cutouts,
       net_calculated_value: measurement.netCalculatedValue
     }));
@@ -768,10 +782,11 @@ class SupabaseStorage {
         conditionColor: item.condition_color,
         conditionName: item.condition_name,
         perimeterValue: item.perimeter_value,
+        areaValue: item.area_value,
         cutouts: item.cutouts,
         netCalculatedValue: item.net_calculated_value
       }));
-
+      
       results.push(...mappedResults);
       
       // Small delay between batches to avoid overwhelming the database

@@ -1450,10 +1450,22 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                         return sum + (value || 0);
                       }, 0);
                       const totalPerimeter = currentDocumentMeasurements.reduce((sum, m) => sum + (m.perimeterValue || 0), 0);
+                      const totalAreaValue = currentDocumentMeasurements.reduce((sum, m) => sum + (m.areaValue || 0), 0);
                       
                       if (totalValue > 0) {
+                        // For linear measurements with height, show both linear and area
+                        if (condition.type === 'linear' && condition.includeHeight && totalAreaValue > 0) {
+                          return (
+                            <div className="space-y-1">
+                              <div>{formatFeetAndInches(totalValue)} LF</div>
+                              <div className="text-xs text-gray-500">
+                                {totalAreaValue.toFixed(0)} SF
+                              </div>
+                            </div>
+                          );
+                        }
                         // For linear measurements (feet), use feet and inches format
-                        if (condition.unit === 'ft' || condition.unit === 'feet') {
+                        if (condition.unit === 'ft' || condition.unit === 'feet' || (condition.type === 'linear' && (condition.unit === 'LF' || condition.unit === 'lf'))) {
                           return formatFeetAndInches(totalValue);
                         }
                         // For area measurements, show area and perimeter separately if perimeter exists

@@ -128,6 +128,8 @@ router.post('/', async (req, res) => {
       equipmentCost,
       includePerimeter,
       depth,
+      includeHeight,
+      height,
       // Note: aiGenerated column doesn't exist in database, so it's not included
       // Visual search specific fields
       searchImage,
@@ -207,6 +209,43 @@ router.post('/', async (req, res) => {
       validatedDepth = depthValue;
     }
 
+    // Validate height for linear conditions with height enabled
+    let validatedHeight = height;
+    if (type === 'linear' && includeHeight) {
+      console.log('🔍 Validating height for linear condition:', { height, heightType: typeof height });
+      
+      // Handle height - it should already be a number from frontend, but handle string case
+      let heightValue: number;
+      if (typeof height === 'string') {
+        // Try to parse as number
+        heightValue = parseFloat(height);
+        if (isNaN(heightValue)) {
+          console.error('❌ Height is not a valid number:', height);
+          return res.status(400).json({ 
+            error: 'Height must be a valid number greater than 0' 
+          });
+        }
+      } else if (typeof height === 'number') {
+        heightValue = height;
+      } else {
+        console.error('❌ Height is missing or invalid type:', height);
+        return res.status(400).json({ 
+          error: 'Height is required when height calculation is enabled and must be greater than 0' 
+        });
+      }
+      
+      if (!heightValue || isNaN(heightValue) || heightValue <= 0) {
+        console.error('❌ Height validation failed:', { heightValue, isNaN: isNaN(heightValue), isPositive: heightValue > 0 });
+        return res.status(400).json({ 
+          error: 'Height is required when height calculation is enabled and must be greater than 0' 
+        });
+      }
+      
+      console.log('✅ Height validation passed:', heightValue);
+      // Use the numeric value
+      validatedHeight = heightValue;
+    }
+
     const id = uuidv4();
     const now = new Date().toISOString();
     
@@ -224,6 +263,8 @@ router.post('/', async (req, res) => {
       equipmentCost,
       includePerimeter: includePerimeter !== undefined ? includePerimeter : false,
       depth: validatedDepth,
+      includeHeight: includeHeight !== undefined ? includeHeight : false,
+      height: validatedHeight,
       // Note: aiGenerated is not included as the column doesn't exist in the database
       // aiGenerated,
       // Visual search specific fields
@@ -293,6 +334,8 @@ router.put('/:id', async (req, res) => {
       materialCost,
       includePerimeter,
       depth,
+      includeHeight,
+      height,
       // Note: aiGenerated column doesn't exist in database, so it's not included
       // Visual search specific fields
       searchImage,
@@ -318,6 +361,42 @@ router.put('/:id', async (req, res) => {
     const finalWasteFactor = (type !== undefined && (type === 'count' || type === 'visual-search')) ? 0 : 
                             (wasteFactor !== undefined ? wasteFactor : existingCondition.wasteFactor);
 
+    // Validate height for linear conditions with height enabled
+    let validatedHeight = height;
+    if ((type === 'linear' || existingCondition.type === 'linear') && (includeHeight !== undefined ? includeHeight : existingCondition.includeHeight)) {
+      const heightToValidate = height !== undefined ? height : existingCondition.height;
+      
+      if (heightToValidate === undefined || heightToValidate === null) {
+        return res.status(400).json({ 
+          error: 'Height is required when height calculation is enabled and must be greater than 0' 
+        });
+      }
+      
+      let heightValue: number;
+      if (typeof heightToValidate === 'string') {
+        heightValue = parseFloat(heightToValidate);
+        if (isNaN(heightValue)) {
+          return res.status(400).json({ 
+            error: 'Height must be a valid number greater than 0' 
+          });
+        }
+      } else if (typeof heightToValidate === 'number') {
+        heightValue = heightToValidate;
+      } else {
+        return res.status(400).json({ 
+          error: 'Height must be a valid number greater than 0' 
+        });
+      }
+      
+      if (!heightValue || isNaN(heightValue) || heightValue <= 0) {
+        return res.status(400).json({ 
+          error: 'Height is required when height calculation is enabled and must be greater than 0' 
+        });
+      }
+      
+      validatedHeight = heightValue;
+    }
+
     // Update the condition
     const updatedCondition = {
       ...existingCondition,
@@ -331,6 +410,8 @@ router.put('/:id', async (req, res) => {
       ...(materialCost !== undefined && { materialCost }),
       ...(includePerimeter !== undefined && { includePerimeter }),
       ...(depth !== undefined && { depth }),
+      ...(includeHeight !== undefined && { includeHeight }),
+      ...(height !== undefined && { height: validatedHeight }),
       // Note: aiGenerated not included as column doesn't exist in database
       // Visual search specific fields
       ...(searchImage !== undefined && { searchImage }),

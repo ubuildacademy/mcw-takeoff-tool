@@ -31,6 +31,8 @@ export interface TakeoffCondition {
   description: string;
   includePerimeter?: boolean; // For area and volume measurements, include perimeter calculation
   depth?: number; // For volume measurements, depth in feet
+  includeHeight?: boolean; // For linear measurements, include height for area calculation
+  height?: number; // For linear measurements with height, height in feet
   materialCost?: number; // Material cost per unit
   equipmentCost?: number; // Fixed equipment cost for the condition
   laborCost?: number; // Labor cost per unit
@@ -57,6 +59,7 @@ export interface TakeoffMeasurement {
   conditionName: string;
   description?: string; // Optional description for the measurement
   perimeterValue?: number; // Perimeter in linear feet for area measurements
+  areaValue?: number; // Area in square feet for linear measurements with height
   cutouts?: Array<{
     id: string;
     points: Array<{ x: number; y: number }>;

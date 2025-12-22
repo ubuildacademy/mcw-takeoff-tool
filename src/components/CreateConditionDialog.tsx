@@ -30,6 +30,8 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
     equipmentCost: editingCondition?.equipmentCost?.toString() || '',
     includePerimeter: editingCondition?.includePerimeter || false,
     depth: editingCondition?.depth ? formatDepthOutput(editingCondition.depth) : '',
+    includeHeight: editingCondition?.includeHeight || false,
+    height: editingCondition?.height ? formatDepthOutput(editingCondition.height) : '',
     // Visual search specific fields
     searchImage: editingCondition?.searchImage || '',
     searchImageId: editingCondition?.searchImageId || '',
@@ -37,6 +39,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
   });
   const [loading, setLoading] = useState(false);
   const [depthError, setDepthError] = useState<string>('');
+  const [heightError, setHeightError] = useState<string>('');
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
 
@@ -86,6 +89,35 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
         }
       }
 
+      // Parse height value (supports both decimal feet and feet/inches format)
+      // Height is required when includeHeight is checked for linear conditions
+      let parsedHeight: number | null | undefined;
+      if (formData.type === 'linear' && formData.includeHeight) {
+        if (!formData.height || formData.height.trim() === '') {
+          setHeightError('Height is required when height calculation is enabled');
+          setLoading(false);
+          return;
+        }
+        parsedHeight = parseDepthInput(formData.height);
+        if (parsedHeight === null) {
+          setHeightError('Invalid height format. Use decimal feet (e.g., 1.5) or feet/inches (e.g., 1\'6")');
+          setLoading(false);
+          return;
+        }
+        if (parsedHeight <= 0) {
+          setHeightError('Height must be greater than 0');
+          setLoading(false);
+          return;
+        }
+      } else if (formData.height && formData.height.trim() !== '') {
+        parsedHeight = parseDepthInput(formData.height);
+        if (parsedHeight === null) {
+          setHeightError('Invalid height format. Use decimal feet (e.g., 1.5) or feet/inches (e.g., 1\'6")');
+          setLoading(false);
+          return;
+        }
+      }
+
       const conditionData = {
         projectId,
         name: formData.name,
@@ -98,6 +130,8 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
         equipmentCost: formData.equipmentCost ? parseFloat(formData.equipmentCost) : undefined,
         includePerimeter: formData.includePerimeter,
         depth: parsedDepth === null || parsedDepth === undefined ? undefined : parsedDepth,
+        includeHeight: formData.includeHeight,
+        height: parsedHeight === null || parsedHeight === undefined ? undefined : parsedHeight,
         // Visual search specific fields
         ...(formData.type === 'visual-search' && {
           searchImage: formData.searchImage,
@@ -143,11 +177,30 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
   };
 
   const handleInputChange = (field: string, value: string | number | boolean) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    setFormData(prev => {
+      const newData = { ...prev, [field]: value };
+      
+      // Auto-switch unit to SF when includeHeight is checked for linear conditions
+      if (field === 'includeHeight' && value === true && prev.type === 'linear') {
+        newData.unit = 'SF';
+      }
+      // Reset unit to LF and clear height when includeHeight is unchecked for linear conditions
+      if (field === 'includeHeight' && value === false && prev.type === 'linear') {
+        newData.unit = 'LF';
+        newData.height = '';
+      }
+      
+      return newData;
+    });
     
     // Clear depth error when user starts typing
     if (field === 'depth' && depthError) {
       setDepthError('');
+    }
+    
+    // Clear height error when user starts typing
+    if (field === 'height' && heightError) {
+      setHeightError('');
     }
   };
 
@@ -159,7 +212,10 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
         type: value as 'area' | 'volume' | 'linear' | 'count',
         unit: defaultUnit,
         // Set waste factor to 0 for count conditions since they don't have waste
-        wasteFactor: value === 'count' ? 0 : prev.wasteFactor
+        wasteFactor: value === 'count' ? 0 : prev.wasteFactor,
+        // Reset height-related fields when type changes
+        includeHeight: false,
+        height: ''
       };
       return newData;
     });
@@ -233,9 +289,19 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
                   )}
                   {formData.type === 'linear' && (
                     <>
-                      <SelectItem value="LF">LF (Linear Feet)</SelectItem>
-                      <SelectItem value="LY">LY (Linear Yards)</SelectItem>
-                      <SelectItem value="LM">LM (Linear Meters)</SelectItem>
+                      {formData.includeHeight ? (
+                        <>
+                          <SelectItem value="SF">SF (Square Feet)</SelectItem>
+                          <SelectItem value="SY">SY (Square Yards)</SelectItem>
+                          <SelectItem value="SM">SM (Square Meters)</SelectItem>
+                        </>
+                      ) : (
+                        <>
+                          <SelectItem value="LF">LF (Linear Feet)</SelectItem>
+                          <SelectItem value="LY">LY (Linear Yards)</SelectItem>
+                          <SelectItem value="LM">LM (Linear Meters)</SelectItem>
+                        </>
+                      )}
                     </>
                   )}
                   {formData.type === 'volume' && (
@@ -279,6 +345,21 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
             </div>
           )}
 
+          {formData.type === 'linear' && (
+            <div>
+              <Label htmlFor="includeHeight" className="flex items-center space-x-2">
+                <input
+                  id="includeHeight"
+                  type="checkbox"
+                  checked={formData.includeHeight}
+                  onChange={(e) => handleInputChange('includeHeight', e.target.checked)}
+                  className="rounded"
+                />
+                <span>Include height for area calculation (SF)</span>
+              </Label>
+            </div>
+          )}
+
           {formData.type === 'volume' && (
             <div>
               <Label htmlFor="depth">Depth</Label>
@@ -295,6 +376,26 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
               )}
               <p className="text-xs text-gray-500 mt-1">
                 Enter depth as decimal feet (1.5) or feet/inches (1'6&quot;)
+              </p>
+            </div>
+          )}
+
+          {formData.type === 'linear' && formData.includeHeight && (
+            <div>
+              <Label htmlFor="height">Height</Label>
+              <Input
+                id="height"
+                type="text"
+                value={formData.height}
+                onChange={(e) => handleInputChange('height', e.target.value)}
+                placeholder="e.g., 1.5 or 1'6&quot;"
+                className={heightError ? 'border-red-500' : ''}
+              />
+              {heightError && (
+                <p className="text-sm text-red-500 mt-1">{heightError}</p>
+              )}
+              <p className="text-xs text-gray-500 mt-1">
+                Enter height as decimal feet (1.5) or feet/inches (1'6&quot;)
               </p>
             </div>
           )}

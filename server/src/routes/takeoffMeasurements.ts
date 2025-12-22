@@ -133,7 +133,8 @@ router.post('/', async (req, res) => {
       pdfCoordinates,
       conditionColor,
       conditionName,
-      perimeterValue
+      perimeterValue,
+      areaValue
     } = req.body;
 
     // Validation
@@ -166,7 +167,8 @@ router.post('/', async (req, res) => {
       pdfCoordinates: pdfCoordinates || [],
       conditionColor: conditionColor || '#000000',
       conditionName: conditionName || 'Unknown',
-      perimeterValue
+      perimeterValue,
+      areaValue
     };
     
     const savedMeasurement = await storage.saveTakeoffMeasurement(newMeasurement);

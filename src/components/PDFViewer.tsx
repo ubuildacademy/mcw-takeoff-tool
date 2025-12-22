@@ -519,6 +519,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           pdfPage: apiMeasurement.pdfPage,
           pdfCoordinates: apiMeasurement.pdfCoordinates,
           perimeterValue: apiMeasurement.perimeterValue || null,
+          areaValue: apiMeasurement.areaValue || null,
           cutouts: apiMeasurement.cutouts || null,
           netCalculatedValue: apiMeasurement.netCalculatedValue || null
         };
@@ -1380,9 +1381,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         text.setAttribute('font-family', 'Arial');
         text.setAttribute('text-anchor', 'middle');
         
-        const displayValue = (measurement.unit === 'ft' || measurement.unit === 'feet' || measurement.unit === 'LF' || measurement.unit === 'lf') 
+        const linearValue = (measurement.unit === 'ft' || measurement.unit === 'feet' || measurement.unit === 'LF' || measurement.unit === 'lf') 
           ? formatFeetAndInches(measurement.calculatedValue)
           : `${measurement.calculatedValue.toFixed(2)} ${measurement.unit}`;
+        
+        // Show both linear and area if areaValue is present
+        const displayValue = measurement.areaValue
+          ? `${linearValue} LF / ${measurement.areaValue.toFixed(0)} SF`
+          : linearValue;
         text.textContent = displayValue;
         svg.appendChild(text);
         break;
@@ -3199,12 +3205,17 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     let measurementResult;
     let perimeterValue: number | undefined;
+    let areaValue: number | undefined;
     
     switch (measurementType) {
       case 'linear':
         measurementResult = MeasurementCalculator.calculateLinear(viewportPoints, scaleInfo, 1.0);
         calculatedValue = measurementResult.calculatedValue;
         unit = measurementResult.unit;
+        // Calculate area if height is provided
+        if (selectedCondition.includeHeight && selectedCondition.height) {
+          areaValue = calculatedValue * selectedCondition.height;
+        }
         break;
       case 'area':
         measurementResult = MeasurementCalculator.calculateArea(viewportPoints, scaleInfo, 1.0);
@@ -3270,7 +3281,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         conditionColor: selectedCondition.color,
         conditionName: selectedCondition.name,
         // Only include perimeterValue if the condition requires it
-        ...(selectedCondition.includePerimeter && { perimeterValue })
+        ...(selectedCondition.includePerimeter && { perimeterValue }),
+        // Only include areaValue if the condition requires it (linear with height)
+        ...(selectedCondition.includeHeight && areaValue !== undefined && { areaValue })
       }).then(savedMeasurementId => {
         // The new measurement will automatically appear via the useEffect that watches takeoffMeasurements
         // No need for complex manual state management - just like annotations!
