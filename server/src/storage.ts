@@ -398,6 +398,8 @@ class SupabaseStorage {
       equipmentCost: item.equipment_cost,
       includePerimeter: item.include_perimeter ?? false,
       depth: item.depth,
+      includeHeight: item.include_height ?? false,
+      height: item.height,
       searchImage: item.search_image,
       searchImageId: item.search_image_id,
       searchThreshold: item.search_threshold,

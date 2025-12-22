@@ -3216,6 +3216,18 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         // Calculate area if height is provided
         if (selectedCondition.includeHeight && selectedCondition.height) {
           areaValue = calculatedValue * selectedCondition.height;
+          console.log('📐 Linear with height calculation:', {
+            linearValue: calculatedValue,
+            height: selectedCondition.height,
+            areaValue: areaValue,
+            conditionName: selectedCondition.name
+          });
+        } else {
+          console.log('⚠️ Linear condition without height:', {
+            includeHeight: selectedCondition.includeHeight,
+            height: selectedCondition.height,
+            conditionName: selectedCondition.name
+          });
         }
         break;
       case 'area':
