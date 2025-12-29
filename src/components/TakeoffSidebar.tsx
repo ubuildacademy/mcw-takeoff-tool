@@ -581,243 +581,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
 
       onExportStatusUpdate?.('excel', 15);
 
-      // 2. ENHANCED QUANTITY SUMMARY SHEET
-      const summarySheet = workbook.addWorksheet('Quantity Summary');
-      
-      // Enhanced header - NO page columns, only totals
-      // Material Cost and Equipment Cost will be in separate total rows, not columns
-      const headerRow = [
-        'Condition', 
-        'Type', 
-        'Unit', 
-        'Description',
-        'Total Quantity', 
-        'Area Value (SF)', 
-        'Total Cost',
-        'Cost per Unit'
-      ];
-      
-      // Set column widths
-      summarySheet.getColumn(1).width = 25; // Condition
-      summarySheet.getColumn(2).width = 10; // Type
-      summarySheet.getColumn(3).width = 8;  // Unit
-      summarySheet.getColumn(4).width = 30; // Description
-      summarySheet.getColumn(5).width = 15; // Total Quantity
-      summarySheet.getColumn(6).width = 15; // Area Value
-      summarySheet.getColumn(7).width = 15; // Total Cost
-      summarySheet.getColumn(8).width = 15; // Cost per Unit
-      
-      // Add header row
-      const headerRowNum = 1;
-      headerRow.forEach((header, colIdx) => {
-        const cell = summarySheet.getCell(headerRowNum, colIdx + 1);
-        cell.value = header;
-        cell.style = headerStyle;
-      });
-      
-      // Calculate area values for conditions (sum of areaValue from linear measurements with height)
-      // For linear conditions with height, if areaValue is missing, calculate it as length * height
-      const conditionAreaValues: Record<string, number> = {};
-      conditionIds.forEach(conditionId => {
-        const conditionData = reportData[conditionId];
-        const condition = conditionData.condition;
-        let totalArea = 0;
-        Object.values(conditionData.pages).forEach(pageData => {
-          pageData.measurements.forEach(measurement => {
-            if (measurement.areaValue) {
-              // Use stored areaValue if available
-              totalArea += measurement.areaValue;
-            } else if (condition.type === 'linear' && condition.includeHeight && condition.height) {
-              // Calculate areaValue if missing: length * height
-              const areaValue = (measurement.netCalculatedValue || measurement.calculatedValue) * condition.height;
-              totalArea += areaValue;
-            }
-          });
-        });
-        conditionAreaValues[conditionId] = totalArea;
-      });
-      
-      // Get cost breakdown for equipment costs
-      const costAnalysis = getCostAnalysisData();
-      
-      // Data rows with enhanced formatting
-      let dataRowNum = 2;
-      conditionIds.forEach(conditionId => {
-        const conditionData = reportData[conditionId];
-        const costInfo = costAnalysis.costData[conditionId];
-        const condition = conditionData.condition;
-        const breakdown = getConditionCostBreakdown(conditionId);
-        
-        if (!conditionData || !conditionData.condition) {
-          console.warn(`Missing condition data for ID: ${conditionId}`);
-          return;
-        }
-        
-        const isEven = dataRowNum % 2 === 0;
-        const rowStyle = isEven ? dataEvenStyle : dataOddStyle;
-        
-        // Condition
-        let col = 1;
-        summarySheet.getCell(dataRowNum, col++).value = condition.name || 'Unknown';
-        summarySheet.getCell(dataRowNum, col++).value = condition.type || 'Unknown';
-        summarySheet.getCell(dataRowNum, col++).value = condition.unit || 'Unknown';
-        summarySheet.getCell(dataRowNum, col++).value = condition.description || 'No description provided';
-        
-        // Total Quantity (no page breakdown)
-        const totalQtyCell = summarySheet.getCell(dataRowNum, col++);
-        totalQtyCell.value = conditionData.grandTotal || 0;
-        totalQtyCell.numFmt = '#,##0.00';
-        totalQtyCell.style = rowStyle;
-        
-        // Area Value (for linear conditions with height)
-        const areaCell = summarySheet.getCell(dataRowNum, col++);
-        if (condition.type === 'linear' && condition.includeHeight) {
-          // Always show area value for linear conditions with height, even if 0
-          areaCell.value = conditionAreaValues[conditionId] || 0;
-          areaCell.numFmt = '#,##0.00';
-        } else if (conditionAreaValues[conditionId] > 0) {
-          // Show area value for other conditions if it exists
-          areaCell.value = conditionAreaValues[conditionId];
-          areaCell.numFmt = '#,##0.00';
-        }
-        areaCell.style = rowStyle;
-        
-        // Total Cost
-        const totalCostCell = summarySheet.getCell(dataRowNum, col++);
-        if (costInfo?.hasCosts) {
-          totalCostCell.value = costInfo.totalCost;
-          totalCostCell.numFmt = '"$"#,##0.00';
-        }
-        totalCostCell.style = rowStyle;
-        
-        // Cost per Unit
-        const costPerUnitCell = summarySheet.getCell(dataRowNum, col++);
-        if (costInfo?.hasCosts && conditionData.grandTotal > 0) {
-          costPerUnitCell.value = costInfo.totalCost / conditionData.grandTotal;
-          costPerUnitCell.numFmt = '"$"#,##0.00';
-        }
-        costPerUnitCell.style = rowStyle;
-        
-        // Apply row style to all cells
-        for (let c = 1; c <= headerRow.length; c++) {
-          const cell = summarySheet.getCell(dataRowNum, c);
-          if (!cell.style) {
-            cell.style = rowStyle;
-          }
-        }
-        
-        dataRowNum++;
-      });
-      
-      // Add cost summary rows (Material Cost and Equipment Cost totals)
-      // Calculate totals
-      const totalMaterialCost = conditionIds.reduce((sum, id) => {
-        const conditionData = reportData[id];
-        const costInfo = costAnalysis.costData[id];
-        if (costInfo?.materialCostPerUnit && conditionData.grandTotal > 0) {
-          return sum + (costInfo.materialCostPerUnit * conditionData.grandTotal);
-        }
-        return sum;
-      }, 0);
-      
-      const totalEquipmentCost = conditionIds.reduce((sum, id) => {
-        const breakdown = getConditionCostBreakdown(id);
-        return sum + (breakdown?.equipmentCost || 0);
-      }, 0);
-      
-      // Material Cost Total Row
-      if (totalMaterialCost > 0) {
-        let costRowCol = 1;
-        summarySheet.getCell(dataRowNum, costRowCol++).value = 'Total Material Cost';
-        summarySheet.getCell(dataRowNum, costRowCol++).value = '';
-        summarySheet.getCell(dataRowNum, costRowCol++).value = '';
-        summarySheet.getCell(dataRowNum, costRowCol++).value = '';
-        summarySheet.getCell(dataRowNum, costRowCol++).value = '';
-        summarySheet.getCell(dataRowNum, costRowCol++).value = '';
-        const materialTotalCell = summarySheet.getCell(dataRowNum, costRowCol++);
-        materialTotalCell.value = totalMaterialCost;
-        materialTotalCell.numFmt = '"$"#,##0.00';
-        materialTotalCell.style = totalsStyle;
-        summarySheet.getCell(dataRowNum, costRowCol++).value = '';
-        // Apply style to all cells
-        for (let c = 1; c <= headerRow.length; c++) {
-          const cell = summarySheet.getCell(dataRowNum, c);
-          if (!cell.style || Object.keys(cell.style).length === 0) {
-            cell.style = totalsStyle;
-          }
-        }
-        dataRowNum++;
-      }
-      
-      // Equipment Cost Total Row
-      if (totalEquipmentCost > 0) {
-        let costRowCol = 1;
-        summarySheet.getCell(dataRowNum, costRowCol++).value = 'Total Equipment Cost';
-        summarySheet.getCell(dataRowNum, costRowCol++).value = '';
-        summarySheet.getCell(dataRowNum, costRowCol++).value = '';
-        summarySheet.getCell(dataRowNum, costRowCol++).value = '';
-        summarySheet.getCell(dataRowNum, costRowCol++).value = '';
-        summarySheet.getCell(dataRowNum, costRowCol++).value = '';
-        const equipmentTotalCell = summarySheet.getCell(dataRowNum, costRowCol++);
-        equipmentTotalCell.value = totalEquipmentCost;
-        equipmentTotalCell.numFmt = '"$"#,##0.00';
-        equipmentTotalCell.style = totalsStyle;
-        summarySheet.getCell(dataRowNum, costRowCol++).value = '';
-        // Apply style to all cells
-        for (let c = 1; c <= headerRow.length; c++) {
-          const cell = summarySheet.getCell(dataRowNum, c);
-          if (!cell.style || Object.keys(cell.style).length === 0) {
-            cell.style = totalsStyle;
-          }
-        }
-        dataRowNum++;
-      }
-      
-      // Total Project Cost Row
-      if (costBreakdown.summary.totalCost > 0) {
-        let costRowCol = 1;
-        summarySheet.getCell(dataRowNum, costRowCol++).value = 'Total Project Cost';
-        summarySheet.getCell(dataRowNum, costRowCol++).value = '';
-        summarySheet.getCell(dataRowNum, costRowCol++).value = '';
-        summarySheet.getCell(dataRowNum, costRowCol++).value = '';
-        summarySheet.getCell(dataRowNum, costRowCol++).value = '';
-        summarySheet.getCell(dataRowNum, costRowCol++).value = '';
-        const projectTotalCell = summarySheet.getCell(dataRowNum, costRowCol++);
-        projectTotalCell.value = costBreakdown.summary.totalCost;
-        projectTotalCell.numFmt = '"$"#,##0.00';
-        projectTotalCell.style = {
-          ...totalsStyle,
-          font: { ...totalsStyle.font, size: 12, bold: true }
-        };
-        summarySheet.getCell(dataRowNum, costRowCol++).value = '';
-        // Apply style to all cells
-        for (let c = 1; c <= headerRow.length; c++) {
-          const cell = summarySheet.getCell(dataRowNum, c);
-          if (!cell.style || Object.keys(cell.style).length === 0) {
-            cell.style = totalsStyle;
-          }
-        }
-      }
-      
-      // Freeze panes (freeze first row and first 4 columns)
-      summarySheet.views = [{
-        state: 'frozen',
-        xSplit: 4,
-        ySplit: 1,
-        topLeftCell: 'E2',
-        activeCell: 'E2'
-      }];
-      
-      // Print settings
-      summarySheet.pageSetup = {
-        margins: { left: 0.7, right: 0.7, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 },
-        printOptions: { gridLines: true, horizontalCentered: false },
-        repeatRows: '1:1'
-      };
-
-      onExportStatusUpdate?.('excel', 35);
-
-      // 3. DETAILED MEASUREMENTS SHEET
+      // 2. QUANTITIES SHEET (formerly Detailed Measurements, Quantity Summary removed)
       // Collect all measurements with their data, sorted by condition, then page, then timestamp
       const allMeasurements: Array<{
         conditionId: string;
@@ -853,7 +617,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         return timeA - timeB;
       });
       
-      const detailSheet = workbook.addWorksheet('Detailed Measurements');
+      const detailSheet = workbook.addWorksheet('Quantities');
       
       // Set column widths - reorganized to group related columns
       detailSheet.getColumn(1).width = 25; // Condition (A)
@@ -1066,19 +830,57 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         const condition = conditionGroup.condition;
         const conditionStartRow = detailRowNum;
         
+        // Count measurements for this condition to determine formula range
+        const measurementCount = Object.values(conditionGroup.sheets).reduce((sum, sheet) => sum + sheet.measurements.length, 0);
+        const measurementEndRow = detailRowNum + measurementCount; // Will be updated after measurements are written
+        
         // Condition summary row (Level 0) - make it clear it's a TOTAL
         let col = 1;
         detailSheet.getCell(detailRowNum, col++).value = `${condition.name} - TOTAL`;
         detailSheet.getCell(detailRowNum, col++).value = condition.type;
-        const conditionTotalCell = detailSheet.getCell(detailRowNum, col++);
-        conditionTotalCell.value = conditionGroup.total;
-        conditionTotalCell.numFmt = '#,##0.00';
-        conditionTotalCell.style = conditionSummaryStyle;
+        
+        // Value - will be formula, set after measurements are written
+        const valueCol = col++;
         detailSheet.getCell(detailRowNum, col++).value = condition.unit;
         detailSheet.getCell(detailRowNum, col++).value = ''; // Measurement Unit
+        detailSheet.getCell(detailRowNum, col++).value = ''; // Sheet Number
+        detailSheet.getCell(detailRowNum, col++).value = ''; // Sheet Name
+        detailSheet.getCell(detailRowNum, col++).value = ''; // Page Reference
+        
+        // Area Value (SF) - formula if condition has includeHeight
+        const areaValueCol = col++;
+        const areaValueCell = detailSheet.getCell(detailRowNum, areaValueCol);
+        areaValueCell.style = conditionSummaryStyle;
+        
+        // Perimeter (LF) - formula if condition has includePerimeter
+        const perimeterCol = col++;
+        const perimeterCell = detailSheet.getCell(detailRowNum, perimeterCol);
+        perimeterCell.style = conditionSummaryStyle;
+        
+        // Height (LF) - show constant value if condition has includeHeight
+        const heightCol = col++;
+        const heightCell = detailSheet.getCell(detailRowNum, heightCol);
+        if (condition.type === 'linear' && condition.includeHeight && condition.height) {
+          heightCell.value = condition.height;
+          heightCell.numFmt = '#,##0.00';
+        }
+        heightCell.style = conditionSummaryStyle;
+        
+        // Skip Timestamp, Description for totals
+        col += 2;
+        
+        // Waste Factor, Material Cost, Equipment Cost, Field Notes
+        detailSheet.getCell(detailRowNum, col++).value = condition.wasteFactor || 0;
+        detailSheet.getCell(detailRowNum, col++).value = condition.materialCost || '';
+        detailSheet.getCell(detailRowNum, col++).value = condition.equipmentCost || '';
+        detailSheet.getCell(detailRowNum, col++).value = '';
+        
         // Fill rest of row with condition summary style
-        for (let c = col; c <= detailHeaders.length; c++) {
-          detailSheet.getCell(detailRowNum, c).style = conditionSummaryStyle;
+        for (let c = 1; c <= detailHeaders.length; c++) {
+          const cell = detailSheet.getCell(detailRowNum, c);
+          if (!cell.style || Object.keys(cell.style).length === 0) {
+            cell.style = conditionSummaryStyle;
+          }
         }
         detailSheet.getRow(detailRowNum).outlineLevel = 0;
         detailRowNum++;
@@ -1091,12 +893,38 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
             detailRowNum++;
           });
         });
+        
+        // Now set formulas for condition totals (after measurements are written)
+        const measurementStartRow = conditionStartRow + 1;
+        const measurementEndRowActual = detailRowNum - 1;
+        
+        // Value formula (Column C)
+        const valueColLetter = colIndexToLetter(valueCol);
+        const valueFormulaCell = detailSheet.getCell(conditionStartRow, valueCol);
+        valueFormulaCell.value = { formula: `SUM(${valueColLetter}${measurementStartRow}:${valueColLetter}${measurementEndRowActual})` };
+        valueFormulaCell.numFmt = '#,##0.00';
+        valueFormulaCell.style = conditionSummaryStyle;
+        
+        // Area Value formula (Column I) - only if condition has includeHeight
+        if (condition.type === 'linear' && condition.includeHeight) {
+          const areaValueColLetter = colIndexToLetter(areaValueCol);
+          areaValueCell.value = { formula: `SUM(${areaValueColLetter}${measurementStartRow}:${areaValueColLetter}${measurementEndRowActual})` };
+          areaValueCell.numFmt = '#,##0.00';
+        }
+        
+        // Perimeter formula (Column J) - only if condition has includePerimeter
+        if ((condition.type === 'area' || condition.type === 'volume') && condition.includePerimeter) {
+          const perimeterColLetter = colIndexToLetter(perimeterCol);
+          perimeterCell.value = { formula: `SUM(${perimeterColLetter}${measurementStartRow}:${perimeterColLetter}${measurementEndRowActual})` };
+          perimeterCell.numFmt = '#,##0.00';
+        }
       });
       
       // Enable grouping/outlining on the sheet
       detailSheet.properties.outlineLevelRow = 1;
       detailSheet.properties.summaryBelow = false;
       detailSheet.properties.summaryRight = false;
+      
       
       // Freeze panes (freeze first row and first 3 columns)
       detailSheet.views = [{
