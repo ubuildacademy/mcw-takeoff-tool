@@ -483,15 +483,20 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       // 1. EXECUTIVE SUMMARY SHEET
       const executiveSheet = workbook.addWorksheet('Executive Summary');
       executiveSheet.getColumn(1).width = 30;
-      executiveSheet.getColumn(2).width = 40;
+      executiveSheet.getColumn(2).width = 60; // Increased width for title
       
       let row = 1;
       
-      // Title - merged and styled
+      // Title - merged and styled with wrap text
       executiveSheet.mergeCells(`A${row}:B${row}`);
       const titleCell = executiveSheet.getCell(`A${row}`);
       titleCell.value = 'MERIDIAN TAKEOFF - PROFESSIONAL CONSTRUCTION TAKEOFF REPORT';
-      titleCell.style = titleStyle;
+      titleCell.style = {
+        ...titleStyle,
+        alignment: { ...titleStyle.alignment, wrapText: true, vertical: 'top' }
+      };
+      // Set row height to accommodate wrapped text
+      executiveSheet.getRow(row).height = 30;
       row += 2;
       
       // Executive Summary header
@@ -579,17 +584,12 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       // 2. ENHANCED QUANTITY SUMMARY SHEET
       const summarySheet = workbook.addWorksheet('Quantity Summary');
       
-      // Enhanced header with professional formatting
+      // Enhanced header - NO page columns, only totals
       const headerRow = [
         'Condition', 
         'Type', 
         'Unit', 
         'Description',
-        ...sortedPages.map(p => {
-          const sheetNum = p.sheetNumber ? ` (${p.sheetNumber})` : '';
-          const hasCustomName = p.sheetName && p.sheetName !== `Page ${p.pageNumber}`;
-          return hasCustomName ? `${p.sheetName}${sheetNum} (P.${p.pageNumber})` : `Page ${p.pageNumber}${sheetNum}`;
-        }), 
         'Total Quantity', 
         'Area Value (SF)', 
         'Material Cost/Unit', 
@@ -603,17 +603,12 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       summarySheet.getColumn(2).width = 10; // Type
       summarySheet.getColumn(3).width = 8;  // Unit
       summarySheet.getColumn(4).width = 30; // Description
-      sortedPages.forEach((_, idx) => {
-        summarySheet.getColumn(5 + idx).width = 15; // Page columns
-      });
-      const pageColsStart = 5;
-      const pageColsEnd = pageColsStart + sortedPages.length - 1;
-      summarySheet.getColumn(pageColsEnd + 1).width = 15; // Total Quantity
-      summarySheet.getColumn(pageColsEnd + 2).width = 15; // Area Value
-      summarySheet.getColumn(pageColsEnd + 3).width = 18; // Material Cost/Unit
-      summarySheet.getColumn(pageColsEnd + 4).width = 18; // Equipment Cost
-      summarySheet.getColumn(pageColsEnd + 5).width = 12; // Total Cost
-      summarySheet.getColumn(pageColsEnd + 6).width = 12; // Cost per Unit
+      summarySheet.getColumn(5).width = 15; // Total Quantity
+      summarySheet.getColumn(6).width = 15; // Area Value
+      summarySheet.getColumn(7).width = 18; // Material Cost/Unit
+      summarySheet.getColumn(8).width = 18; // Equipment Cost
+      summarySheet.getColumn(9).width = 15; // Total Cost
+      summarySheet.getColumn(10).width = 15; // Cost per Unit
       
       // Add header row
       const headerRowNum = 1;
@@ -624,14 +619,21 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       });
       
       // Calculate area values for conditions (sum of areaValue from linear measurements with height)
+      // For linear conditions with height, if areaValue is missing, calculate it as length * height
       const conditionAreaValues: Record<string, number> = {};
       conditionIds.forEach(conditionId => {
         const conditionData = reportData[conditionId];
+        const condition = conditionData.condition;
         let totalArea = 0;
         Object.values(conditionData.pages).forEach(pageData => {
           pageData.measurements.forEach(measurement => {
             if (measurement.areaValue) {
+              // Use stored areaValue if available
               totalArea += measurement.areaValue;
+            } else if (condition.type === 'linear' && condition.includeHeight && condition.height) {
+              // Calculate areaValue if missing: length * height
+              const areaValue = (measurement.netCalculatedValue || measurement.calculatedValue) * condition.height;
+              totalArea += areaValue;
             }
           });
         });
@@ -664,29 +666,20 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         summarySheet.getCell(dataRowNum, col++).value = condition.unit || 'Unknown';
         summarySheet.getCell(dataRowNum, col++).value = condition.description || 'No description provided';
         
-        // Page columns
-        sortedPages.forEach(page => {
-          const pageKey = Object.keys(conditionData.pages || {}).find(key => 
-            conditionData.pages[key].pageNumber === page.pageNumber
-          );
-          const pageData = pageKey ? conditionData.pages[pageKey] : null;
-          const cell = summarySheet.getCell(dataRowNum, col++);
-          if (pageData) {
-            cell.value = parseFloat(pageData.total.toFixed(2));
-            cell.numFmt = '#,##0.00';
-          }
-          cell.style = rowStyle;
-        });
-        
-        // Total Quantity
+        // Total Quantity (no page breakdown)
         const totalQtyCell = summarySheet.getCell(dataRowNum, col++);
         totalQtyCell.value = conditionData.grandTotal || 0;
         totalQtyCell.numFmt = '#,##0.00';
         totalQtyCell.style = rowStyle;
         
-        // Area Value
+        // Area Value (for linear conditions with height)
         const areaCell = summarySheet.getCell(dataRowNum, col++);
-        if (conditionAreaValues[conditionId] > 0) {
+        if (condition.type === 'linear' && condition.includeHeight) {
+          // Always show area value for linear conditions with height, even if 0
+          areaCell.value = conditionAreaValues[conditionId] || 0;
+          areaCell.numFmt = '#,##0.00';
+        } else if (conditionAreaValues[conditionId] > 0) {
+          // Show area value for other conditions if it exists
           areaCell.value = conditionAreaValues[conditionId];
           areaCell.numFmt = '#,##0.00';
         }
@@ -744,33 +737,18 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       summarySheet.getCell(totalsRowNum, totalsCol++).value = '';
       summarySheet.getCell(totalsRowNum, totalsCol++).value = '';
       
-      // Page column totals (formulas)
-      sortedPages.forEach((page, idx) => {
-        const pageColNum = 5 + idx; // Page columns start at column 5 (E)
-        const colLetter = colIndexToLetter(pageColNum);
-        const cell = summarySheet.getCell(totalsRowNum, totalsCol++);
-        cell.value = { formula: `SUM(${colLetter}2:${colLetter}${dataRowNum - 1})` };
-        cell.numFmt = '#,##0.00';
-        cell.style = totalsStyle;
-      });
-      
-      // Total Quantity (formula)
-      const totalQtyColNum = 5 + sortedPages.length; // After all page columns
-      const totalQtyColLetter = colIndexToLetter(totalQtyColNum);
+      // Total Quantity (formula) - Column E
+      const totalQtyColLetter = colIndexToLetter(5);
       const totalQtyCell = summarySheet.getCell(totalsRowNum, totalsCol++);
       totalQtyCell.value = { formula: `SUM(${totalQtyColLetter}2:${totalQtyColLetter}${dataRowNum - 1})` };
       totalQtyCell.numFmt = '#,##0.00';
       totalQtyCell.style = totalsStyle;
       
-      // Area Value (formula if applicable)
-      const areaColNum = totalQtyColNum + 1;
-      const areaColLetter = colIndexToLetter(areaColNum);
+      // Area Value (formula) - Column F
+      const areaColLetter = colIndexToLetter(6);
       const areaCell = summarySheet.getCell(totalsRowNum, totalsCol++);
-      const totalAreaValue = Object.values(conditionAreaValues).reduce((sum, val) => sum + val, 0);
-      if (totalAreaValue > 0) {
-        areaCell.value = { formula: `SUM(${areaColLetter}2:${areaColLetter}${dataRowNum - 1})` };
-        areaCell.numFmt = '#,##0.00';
-      }
+      areaCell.value = { formula: `SUM(${areaColLetter}2:${areaColLetter}${dataRowNum - 1})` };
+      areaCell.numFmt = '#,##0.00';
       areaCell.style = totalsStyle;
       
       // Material Cost/Unit (empty)
@@ -861,41 +839,39 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       
       const detailSheet = workbook.addWorksheet('Detailed Measurements');
       
-      // Set column widths
+      // Set column widths - reorganized to group related columns
       detailSheet.getColumn(1).width = 25; // Condition (A)
       detailSheet.getColumn(2).width = 10; // Type
-      detailSheet.getColumn(3).width = 8;  // Unit
-      detailSheet.getColumn(4).width = 15; // Sheet Number (D)
-      detailSheet.getColumn(5).width = 20; // Sheet Name (E)
-      detailSheet.getColumn(6).width = 12; // Page Reference (F)
-      detailSheet.getColumn(7).width = 12; // Value
-      detailSheet.getColumn(8).width = 18; // Net Value
+      detailSheet.getColumn(3).width = 15; // Value (with cutouts already calculated)
+      detailSheet.getColumn(4).width = 8;  // Unit
+      detailSheet.getColumn(5).width = 15; // Measurement Unit (renamed from Measurement Type)
+      detailSheet.getColumn(6).width = 15; // Sheet Number
+      detailSheet.getColumn(7).width = 35; // Sheet Name - increased width with wrap text
+      detailSheet.getColumn(8).width = 12; // Page Reference
       detailSheet.getColumn(9).width = 15; // Area Value (SF)
       detailSheet.getColumn(10).width = 15; // Perimeter (LF)
-      detailSheet.getColumn(11).width = 15; // Height (FT)
+      detailSheet.getColumn(11).width = 15; // Height (LF)
       detailSheet.getColumn(12).width = 20; // Timestamp
-      detailSheet.getColumn(13).width = 15; // Measurement Type
-      detailSheet.getColumn(14).width = 30; // Description
-      detailSheet.getColumn(15).width = 15; // Waste Factor (%)
-      detailSheet.getColumn(16).width = 18; // Material Cost/Unit
-      detailSheet.getColumn(17).width = 18; // Equipment Cost/Unit
-      detailSheet.getColumn(18).width = 30; // Field Notes/Comments
+      detailSheet.getColumn(13).width = 30; // Description
+      detailSheet.getColumn(14).width = 15; // Waste Factor (%)
+      detailSheet.getColumn(15).width = 18; // Material Cost/Unit
+      detailSheet.getColumn(16).width = 18; // Equipment Cost/Unit
+      detailSheet.getColumn(17).width = 30; // Field Notes/Comments
       
-      // Header row
+      // Header row - reorganized columns
       const detailHeaders = [
         'Condition', 
         'Type',
+        'Value',
         'Unit',
+        'Measurement Unit',
         'Sheet Number',
         'Sheet Name', 
         'Page Reference', 
-        'Value', 
-        'Net Value (after cutouts)',
         'Area Value (SF)',
         'Perimeter (LF)',
-        'Height (FT)',
+        'Height (LF)',
         'Timestamp',
-        'Measurement Type',
         'Description',
         'Waste Factor (%)',
         'Material Cost/Unit',
@@ -908,90 +884,162 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         const cell = detailSheet.getCell(detailHeaderRowNum, colIdx + 1);
         cell.value = header;
         cell.style = headerStyle;
+        // Enable wrap text for Sheet Name column (column 7, 0-indexed = 6)
+        if (colIdx === 6) {
+          cell.style = {
+            ...headerStyle,
+            alignment: { ...headerStyle.alignment, wrapText: true }
+          };
+        }
       });
       
-      // Data rows with styling and grouping
-      let detailRowNum = 2;
-      let currentConditionId: string | null = null;
-      let conditionStartRow = detailRowNum;
-      const groupRanges: Array<{ start: number; end: number }> = [];
+      // Create hierarchical structure: Condition → Sheet → Measurements
+      // Group measurements by condition, then by sheet
+      const conditionGroups: Record<string, {
+        condition: TakeoffCondition;
+        sheets: Record<string, {
+          pageData: { pageNumber: number; sheetName: string; sheetNumber: string | null; sheetId: string };
+          measurements: Array<{ conditionId: string; condition: TakeoffCondition; pageData: any; measurement: any }>;
+          total: number;
+        }>;
+        total: number;
+      }> = {};
       
       allMeasurements.forEach(({ conditionId, condition, pageData, measurement }) => {
-        // Check if condition changed (new group)
-        if (currentConditionId !== null && currentConditionId !== conditionId) {
-          // End previous group
-          if (detailRowNum > conditionStartRow) {
-            groupRanges.push({ start: conditionStartRow, end: detailRowNum - 1 });
-          }
-          conditionStartRow = detailRowNum;
+        if (!conditionGroups[conditionId]) {
+          conditionGroups[conditionId] = {
+            condition,
+            sheets: {},
+            total: 0
+          };
         }
-        if (currentConditionId === null) {
-          conditionStartRow = detailRowNum;
+        
+        const sheetKey = `${pageData.sheetId}-${pageData.pageNumber}`;
+        if (!conditionGroups[conditionId].sheets[sheetKey]) {
+          conditionGroups[conditionId].sheets[sheetKey] = {
+            pageData,
+            measurements: [],
+            total: 0
+          };
         }
-        currentConditionId = conditionId;
         
-        const isEven = detailRowNum % 2 === 0;
-        const rowStyle = isEven ? dataEvenStyle : dataOddStyle;
-        
+        const value = measurement.netCalculatedValue || measurement.calculatedValue;
+        conditionGroups[conditionId].sheets[sheetKey].measurements.push({ conditionId, condition, pageData, measurement });
+        conditionGroups[conditionId].sheets[sheetKey].total += value;
+        conditionGroups[conditionId].total += value;
+      });
+      
+      // Data rows with hierarchical grouping
+      let detailRowNum = 2;
+      const conditionSummaryStyle = {
+        font: { bold: true, size: 11, color: { argb: 'FF111827' } },
+        fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E7EB' } },
+        border: {
+          top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+          bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+          left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+          right: { style: 'thin', color: { argb: 'FFD1D5DB' } }
+        }
+      };
+      
+      const sheetSummaryStyle = {
+        font: { bold: true, size: 10, color: { argb: 'FF374151' } },
+        fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F4F6' } },
+        border: {
+          top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+        }
+      };
+      
+      // Helper function to write a data row
+      const writeMeasurementRow = (rowNum: number, condition: TakeoffCondition, pageData: any, measurement: any, isSummary: boolean = false) => {
+        const rowStyle = isSummary ? sheetSummaryStyle : (rowNum % 2 === 0 ? dataEvenStyle : dataOddStyle);
         let col = 1;
         
         // Condition
-        detailSheet.getCell(detailRowNum, col++).value = condition.name;
-        detailSheet.getCell(detailRowNum, col++).value = condition.type;
-        detailSheet.getCell(detailRowNum, col++).value = condition.unit;
-        detailSheet.getCell(detailRowNum, col++).value = pageData.sheetNumber || '';
-        detailSheet.getCell(detailRowNum, col++).value = pageData.sheetName;
-        detailSheet.getCell(detailRowNum, col++).value = `P${pageData.pageNumber}`;
+        detailSheet.getCell(rowNum, col++).value = condition.name;
+        detailSheet.getCell(rowNum, col++).value = condition.type;
         
         // Value
-        const valueCell = detailSheet.getCell(detailRowNum, col++);
-        valueCell.value = measurement.calculatedValue;
-        valueCell.numFmt = '#,##0.00';
+        const valueCell = detailSheet.getCell(rowNum, col++);
+        if (!isSummary) {
+          valueCell.value = measurement.netCalculatedValue || measurement.calculatedValue;
+          valueCell.numFmt = '#,##0.00';
+        }
         valueCell.style = rowStyle;
         
-        // Net Value
-        const netValueCell = detailSheet.getCell(detailRowNum, col++);
-        netValueCell.value = measurement.netCalculatedValue || measurement.calculatedValue;
-        netValueCell.numFmt = '#,##0.00';
-        netValueCell.style = rowStyle;
+        // Unit
+        detailSheet.getCell(rowNum, col++).value = condition.unit;
         
-        // Area Value
-        const areaValueCell = detailSheet.getCell(detailRowNum, col++);
-        if (measurement.areaValue) {
+        // Measurement Unit (renamed from Measurement Type)
+        detailSheet.getCell(rowNum, col++).value = measurement.type;
+        
+        // Sheet Number
+        detailSheet.getCell(rowNum, col++).value = pageData.sheetNumber || '';
+        
+        // Sheet Name with wrap text
+        const sheetNameCell = detailSheet.getCell(rowNum, col++);
+        sheetNameCell.value = pageData.sheetName;
+        sheetNameCell.style = {
+          ...rowStyle,
+          alignment: { ...rowStyle.alignment, wrapText: true, vertical: 'top' }
+        };
+        
+        // Page Reference
+        detailSheet.getCell(rowNum, col++).value = `P${pageData.pageNumber}`;
+        
+        // Area Value (for linear conditions with height)
+        const areaValueCell = detailSheet.getCell(rowNum, col++);
+        if (!isSummary && measurement.areaValue) {
           areaValueCell.value = measurement.areaValue;
+          areaValueCell.numFmt = '#,##0.00';
+        } else if (!isSummary && condition.type === 'linear' && condition.includeHeight && condition.height) {
+          const calculatedArea = (measurement.netCalculatedValue || measurement.calculatedValue) * condition.height;
+          areaValueCell.value = calculatedArea;
           areaValueCell.numFmt = '#,##0.00';
         }
         areaValueCell.style = rowStyle;
         
         // Perimeter
-        const perimeterCell = detailSheet.getCell(detailRowNum, col++);
-        if (measurement.perimeterValue) {
+        const perimeterCell = detailSheet.getCell(rowNum, col++);
+        if (!isSummary && measurement.perimeterValue) {
           perimeterCell.value = measurement.perimeterValue;
           perimeterCell.numFmt = '#,##0.00';
         }
         perimeterCell.style = rowStyle;
         
         // Height (for linear conditions with height)
-        const heightCell = detailSheet.getCell(detailRowNum, col++);
-        if (condition.type === 'linear' && condition.includeHeight && condition.height) {
+        const heightCell = detailSheet.getCell(rowNum, col++);
+        if (!isSummary && condition.type === 'linear' && condition.includeHeight && condition.height) {
           heightCell.value = condition.height;
           heightCell.numFmt = '#,##0.00';
         }
         heightCell.style = rowStyle;
         
         // Timestamp
-        detailSheet.getCell(detailRowNum, col++).value = formatTimestamp(measurement.timestamp);
-        detailSheet.getCell(detailRowNum, col++).value = measurement.type;
-        detailSheet.getCell(detailRowNum, col++).value = measurement.description || '';
+        if (!isSummary) {
+          detailSheet.getCell(rowNum, col++).value = formatTimestamp(measurement.timestamp);
+        } else {
+          col++; // Skip timestamp for summary rows
+        }
+        
+        // Description
+        if (!isSummary) {
+          detailSheet.getCell(rowNum, col++).value = measurement.description || '';
+        } else {
+          col++; // Skip description for summary rows
+        }
         
         // Waste Factor
-        const wasteFactorCell = detailSheet.getCell(detailRowNum, col++);
+        const wasteFactorCell = detailSheet.getCell(rowNum, col++);
         wasteFactorCell.value = condition.wasteFactor || 0;
         wasteFactorCell.numFmt = '0.00"%"';
         wasteFactorCell.style = rowStyle;
         
         // Material Cost/Unit
-        const materialCostCell = detailSheet.getCell(detailRowNum, col++);
+        const materialCostCell = detailSheet.getCell(rowNum, col++);
         if (condition.materialCost) {
           materialCostCell.value = condition.materialCost;
           materialCostCell.numFmt = '"$"#,##0.00';
@@ -999,7 +1047,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         materialCostCell.style = rowStyle;
         
         // Equipment Cost/Unit
-        const equipmentCostCell = detailSheet.getCell(detailRowNum, col++);
+        const equipmentCostCell = detailSheet.getCell(rowNum, col++);
         if (condition.equipmentCost) {
           equipmentCostCell.value = condition.equipmentCost;
           equipmentCostCell.numFmt = '"$"#,##0.00';
@@ -1007,34 +1055,79 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         equipmentCostCell.style = rowStyle;
         
         // Field Notes/Comments
-        detailSheet.getCell(detailRowNum, col++).value = '';
+        detailSheet.getCell(rowNum, col++).value = '';
         
         // Apply row style to all cells
         for (let c = 1; c <= detailHeaders.length; c++) {
-          const cell = detailSheet.getCell(detailRowNum, c);
+          const cell = detailSheet.getCell(rowNum, c);
           if (!cell.style || Object.keys(cell.style).length === 0) {
             cell.style = rowStyle;
           }
         }
+      };
+      
+      // Write hierarchical structure
+      Object.entries(conditionGroups).forEach(([conditionId, conditionGroup]) => {
+        const condition = conditionGroup.condition;
+        const conditionStartRow = detailRowNum;
         
-        detailRowNum++;
-      });
-      
-      // Close last group
-      if (detailRowNum > conditionStartRow) {
-        groupRanges.push({ start: conditionStartRow, end: detailRowNum - 1 });
-      }
-      
-      // Add grouping by condition (ExcelJS grouping)
-      groupRanges.forEach(({ start, end }) => {
-        // Group rows for this condition
-        for (let row = start; row <= end; row++) {
-          detailSheet.getRow(row).outlineLevel = 1;
+        // Condition summary row (Level 0)
+        let col = 1;
+        detailSheet.getCell(detailRowNum, col++).value = condition.name;
+        detailSheet.getCell(detailRowNum, col++).value = condition.type;
+        const conditionTotalCell = detailSheet.getCell(detailRowNum, col++);
+        conditionTotalCell.value = conditionGroup.total;
+        conditionTotalCell.numFmt = '#,##0.00';
+        conditionTotalCell.style = conditionSummaryStyle;
+        // Fill rest of row with condition summary style
+        for (let c = col; c <= detailHeaders.length; c++) {
+          detailSheet.getCell(detailRowNum, c).style = conditionSummaryStyle;
         }
+        detailSheet.getRow(detailRowNum).outlineLevel = 0;
+        detailRowNum++;
+        
+        // Sheet summaries and measurements (Level 1 and 2)
+        Object.entries(conditionGroup.sheets).forEach(([sheetKey, sheetData]) => {
+          const sheetStartRow = detailRowNum;
+          
+          // Sheet summary row (Level 1)
+          col = 1;
+          detailSheet.getCell(detailRowNum, col++).value = condition.name;
+          detailSheet.getCell(detailRowNum, col++).value = condition.type;
+          const sheetTotalCell = detailSheet.getCell(detailRowNum, col++);
+          sheetTotalCell.value = sheetData.total;
+          sheetTotalCell.numFmt = '#,##0.00';
+          sheetTotalCell.style = sheetSummaryStyle;
+          detailSheet.getCell(detailRowNum, col++).value = condition.unit;
+          detailSheet.getCell(detailRowNum, col++).value = ''; // Measurement Unit
+          detailSheet.getCell(detailRowNum, col++).value = sheetData.pageData.sheetNumber || '';
+          const sheetNameCell = detailSheet.getCell(detailRowNum, col++);
+          sheetNameCell.value = sheetData.pageData.sheetName;
+          sheetNameCell.style = {
+            ...sheetSummaryStyle,
+            alignment: { ...sheetSummaryStyle.alignment, wrapText: true }
+          };
+          detailSheet.getCell(detailRowNum, col++).value = `P${sheetData.pageData.pageNumber}`;
+          // Fill rest of row
+          for (let c = col; c <= detailHeaders.length; c++) {
+            detailSheet.getCell(detailRowNum, c).style = sheetSummaryStyle;
+          }
+          detailSheet.getRow(detailRowNum).outlineLevel = 1;
+          detailRowNum++;
+          
+          // Individual measurement rows (Level 2)
+          sheetData.measurements.forEach(({ measurement }) => {
+            writeMeasurementRow(detailRowNum, condition, sheetData.pageData, measurement, false);
+            detailSheet.getRow(detailRowNum).outlineLevel = 2;
+            detailRowNum++;
+          });
+        });
       });
       
-      // Set outline properties
-      detailSheet.properties.outlineLevelRow = 1;
+      // Enable grouping/outlining on the sheet
+      detailSheet.properties.outlineLevelRow = 2;
+      detailSheet.properties.summaryBelow = false;
+      detailSheet.properties.summaryRight = false;
       
       // Freeze panes (freeze first row and first 3 columns)
       detailSheet.views = [{
