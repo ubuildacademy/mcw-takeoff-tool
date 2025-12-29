@@ -849,42 +849,40 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       
       const detailSheet = workbook.addWorksheet('Quantities');
       
-      // Set column widths - reorganized to group quantity columns together
+      // Set column widths - minimized for short text columns
       detailSheet.getColumn(1).width = 25; // Condition (A)
-      detailSheet.getColumn(2).width = 10; // Type
-      detailSheet.getColumn(3).width = 15; // Value (with cutouts already calculated)
-      detailSheet.getColumn(4).width = 8;  // Unit
-      detailSheet.getColumn(5).width = 15; // Area Value (SF) - moved here
-      detailSheet.getColumn(6).width = 15; // Perimeter (LF) - moved here
-      detailSheet.getColumn(7).width = 15; // Height (LF) - moved here
-      detailSheet.getColumn(8).width = 15; // Sheet Number
-      detailSheet.getColumn(9).width = 35; // Sheet Name - increased width with wrap text
-      detailSheet.getColumn(10).width = 12; // Page Reference
-      detailSheet.getColumn(11).width = 20; // Timestamp
-      detailSheet.getColumn(12).width = 15; // Waste Factor (%)
-      detailSheet.getColumn(13).width = 15; // Waste Amount
-      detailSheet.getColumn(14).width = 18; // Material Cost/Unit
-      detailSheet.getColumn(15).width = 18; // Equipment Cost
-      detailSheet.getColumn(16).width = 30; // Description
+      detailSheet.getColumn(2).width = 12; // Quantity (minimized)
+      detailSheet.getColumn(3).width = 6;  // Unit (minimized)
+      detailSheet.getColumn(4).width = 15; // Area Value (SF)
+      detailSheet.getColumn(5).width = 15; // Perimeter (LF)
+      detailSheet.getColumn(6).width = 15; // Height (LF)
+      detailSheet.getColumn(7).width = 12; // Sheet Number (minimized)
+      detailSheet.getColumn(8).width = 35; // Sheet Name - increased width with wrap text
+      detailSheet.getColumn(9).width = 10; // Page Reference (minimized)
+      detailSheet.getColumn(10).width = 12; // Waste Factor (%) (minimized)
+      detailSheet.getColumn(11).width = 15; // Waste Amount
+      detailSheet.getColumn(12).width = 18; // Material Cost/Unit
+      detailSheet.getColumn(13).width = 18; // Equipment Cost
+      detailSheet.getColumn(14).width = 30; // Description
+      detailSheet.getColumn(15).width = 20; // Timestamp (moved to end)
       
-      // Header row - reorganized to group quantity columns together
+      // Header row - Type column removed, Value renamed to Quantity, Timestamp moved to end
       const detailHeaders = [
         'Condition', 
-        'Type',
-        'Value',
+        'Quantity',
         'Unit',
         'Area Value (SF)',
         'Perimeter (LF)',
         'Height (LF)',
         'Sheet Number',
         'Sheet Name', 
-        'Page Reference', 
-        'Timestamp',
+        'Page Reference',
         'Waste Factor (%)',
         'Waste Amount',
         'Material Cost/Unit',
         'Equipment Cost',
-        'Description'
+        'Description',
+        'Timestamp'
       ];
       
       const detailHeaderRowNum = 1;
@@ -892,8 +890,8 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         const cell = detailSheet.getCell(detailHeaderRowNum, colIdx + 1);
         cell.value = header;
         cell.style = headerStyle;
-        // Enable wrap text for Sheet Name column (column 9, 0-indexed = 8)
-        if (colIdx === 8) {
+        // Enable wrap text for Sheet Name column (column 8, 0-indexed = 7)
+        if (colIdx === 7) {
           cell.style = {
             ...headerStyle,
             alignment: { ...headerStyle.alignment, wrapText: true }
@@ -957,18 +955,17 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         
         // Condition
         detailSheet.getCell(rowNum, col++).value = condition.name;
-        detailSheet.getCell(rowNum, col++).value = condition.type;
         
-        // Value
-        const valueCell = detailSheet.getCell(rowNum, col++);
-        valueCell.value = measurement.netCalculatedValue || measurement.calculatedValue;
-        valueCell.numFmt = '#,##0.00';
-        valueCell.style = rowStyle;
+        // Quantity (renamed from Value)
+        const quantityCell = detailSheet.getCell(rowNum, col++);
+        quantityCell.value = measurement.netCalculatedValue || measurement.calculatedValue;
+        quantityCell.numFmt = '#,##0.00';
+        quantityCell.style = rowStyle;
         
         // Unit
         detailSheet.getCell(rowNum, col++).value = condition.unit;
         
-        // Area Value (for linear conditions with height) - moved next to Unit
+        // Area Value (for linear conditions with height)
         const areaValueCell = detailSheet.getCell(rowNum, col++);
         if (measurement.areaValue) {
           areaValueCell.value = measurement.areaValue;
@@ -980,7 +977,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         }
         areaValueCell.style = rowStyle;
         
-        // Perimeter - moved next to Unit
+        // Perimeter
         const perimeterCell = detailSheet.getCell(rowNum, col++);
         if (measurement.perimeterValue) {
           perimeterCell.value = measurement.perimeterValue;
@@ -988,7 +985,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         }
         perimeterCell.style = rowStyle;
         
-        // Height (for linear conditions with height) - moved next to Unit
+        // Height (for linear conditions with height)
         const heightCell = detailSheet.getCell(rowNum, col++);
         if (condition.type === 'linear' && condition.includeHeight && condition.height) {
           heightCell.value = condition.height;
@@ -1009,9 +1006,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         
         // Page Reference
         detailSheet.getCell(rowNum, col++).value = `P${pageData.pageNumber}`;
-        
-        // Timestamp - use condition creation date
-        detailSheet.getCell(rowNum, col++).value = formatTimestamp(condition.createdAt);
         
         // Waste Factor (%)
         const wasteFactorCell = detailSheet.getCell(rowNum, col++);
@@ -1048,6 +1042,9 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         // Description - use condition description
         detailSheet.getCell(rowNum, col++).value = condition.description || '';
         
+        // Timestamp - moved to end (last column)
+        detailSheet.getCell(rowNum, col++).value = formatTimestamp(condition.createdAt);
+        
         // Apply row style to all cells
         for (let c = 1; c <= detailHeaders.length; c++) {
           const cell = detailSheet.getCell(rowNum, c);
@@ -1069,23 +1066,22 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         // Condition summary row (Level 0) - make it clear it's a TOTAL
         let col = 1;
         detailSheet.getCell(detailRowNum, col++).value = `${condition.name} - TOTAL`;
-        detailSheet.getCell(detailRowNum, col++).value = condition.type;
         
-        // Value - will be formula, set after measurements are written
-        const valueCol = col++;
+        // Quantity - will be formula, set after measurements are written (Column B)
+        const quantityCol = col++;
         detailSheet.getCell(detailRowNum, col++).value = condition.unit;
         
-        // Area Value (SF) - formula if condition has includeHeight
+        // Area Value (SF) - formula if condition has includeHeight (Column D)
         const areaValueCol = col++;
         const areaValueCell = detailSheet.getCell(detailRowNum, areaValueCol);
         areaValueCell.style = conditionSummaryStyle;
         
-        // Perimeter (LF) - formula if condition has includePerimeter
+        // Perimeter (LF) - formula if condition has includePerimeter (Column E)
         const perimeterCol = col++;
         const perimeterCell = detailSheet.getCell(detailRowNum, perimeterCol);
         perimeterCell.style = conditionSummaryStyle;
         
-        // Height (LF) - show constant value if condition has includeHeight
+        // Height (LF) - show constant value if condition has includeHeight (Column F)
         const heightCol = col++;
         const heightCell = detailSheet.getCell(detailRowNum, heightCol);
         if (condition.type === 'linear' && condition.includeHeight && condition.height) {
@@ -1098,9 +1094,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         detailSheet.getCell(detailRowNum, col++).value = '';
         detailSheet.getCell(detailRowNum, col++).value = '';
         detailSheet.getCell(detailRowNum, col++).value = '';
-        
-        // Skip Timestamp for totals
-        col++;
         
         // Waste Factor (%)
         detailSheet.getCell(detailRowNum, col++).value = condition.wasteFactor || 0;
@@ -1115,6 +1108,9 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         detailSheet.getCell(detailRowNum, col++).value = condition.equipmentCost || '';
         
         // Description (skip for totals)
+        col++;
+        
+        // Timestamp (skip for totals, moved to end)
         col++;
         
         // Fill rest of row with condition summary style
@@ -1140,21 +1136,21 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         const measurementStartRow = conditionStartRow + 1;
         const measurementEndRowActual = detailRowNum - 1;
         
-        // Value formula (Column C)
-        const valueColLetter = colIndexToLetter(valueCol);
-        const valueFormulaCell = detailSheet.getCell(conditionStartRow, valueCol);
-        valueFormulaCell.value = { formula: `SUM(${valueColLetter}${measurementStartRow}:${valueColLetter}${measurementEndRowActual})` };
-        valueFormulaCell.numFmt = '#,##0.00';
-        valueFormulaCell.style = conditionSummaryStyle;
+        // Quantity formula (Column B)
+        const quantityColLetter = colIndexToLetter(quantityCol);
+        const quantityFormulaCell = detailSheet.getCell(conditionStartRow, quantityCol);
+        quantityFormulaCell.value = { formula: `SUM(${quantityColLetter}${measurementStartRow}:${quantityColLetter}${measurementEndRowActual})` };
+        quantityFormulaCell.numFmt = '#,##0.00';
+        quantityFormulaCell.style = conditionSummaryStyle;
         
-        // Area Value formula (Column E) - only if condition has includeHeight
+        // Area Value formula (Column D) - only if condition has includeHeight
         if (condition.type === 'linear' && condition.includeHeight) {
           const areaValueColLetter = colIndexToLetter(areaValueCol);
           areaValueCell.value = { formula: `SUM(${areaValueColLetter}${measurementStartRow}:${areaValueColLetter}${measurementEndRowActual})` };
           areaValueCell.numFmt = '#,##0.00';
         }
         
-        // Perimeter formula (Column F) - only if condition has includePerimeter
+        // Perimeter formula (Column E) - only if condition has includePerimeter
         if ((condition.type === 'area' || condition.type === 'volume') && condition.includePerimeter) {
           const perimeterColLetter = colIndexToLetter(perimeterCol);
           perimeterCell.value = { formula: `SUM(${perimeterColLetter}${measurementStartRow}:${perimeterColLetter}${measurementEndRowActual})` };
@@ -1175,14 +1171,15 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       detailSheet.properties.summaryRight = false;
       
       
-      // Freeze panes (freeze first row and first 3 columns)
+      // Freeze panes (freeze first row and first 4 columns: Condition, Quantity, Unit, Area Value)
       // ySplit: 1 means freeze the first row (header row)
+      // xSplit: 4 means freeze columns A through D
       detailSheet.views = [{
         state: 'frozen',
-        xSplit: 3,
+        xSplit: 4,
         ySplit: 1, // This freezes row 1 (header row)
-        topLeftCell: 'D2',
-        activeCell: 'D2'
+        topLeftCell: 'E2',
+        activeCell: 'E2'
       }];
       
       // No auto-filter (removed per user request)
