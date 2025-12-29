@@ -514,18 +514,24 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         'Net Value (after cutouts)',
         'Perimeter (LF)',
         'Timestamp',
-        'Measurement Type'
+        'Measurement Type',
+        'Description',
+        'Waste Factor (%)',
+        'Material Cost/Unit',
+        'Equipment Cost/Unit',
+        'Field Notes/Comments'
       ]);
       
       conditionIds.forEach(conditionId => {
         const conditionData = reportData[conditionId];
+        const condition = conditionData.condition;
         
         Object.values(conditionData.pages).forEach(pageData => {
           pageData.measurements.forEach((measurement, idx) => {
             detailData.push([
-              conditionData.condition.name,
-              conditionData.condition.type,
-              conditionData.condition.unit,
+              condition.name,
+              condition.type,
+              condition.unit,
               pageData.sheetName,
               `P${pageData.pageNumber}`,
               idx + 1,
@@ -533,7 +539,12 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
               (measurement.netCalculatedValue || measurement.calculatedValue).toFixed(2),
               measurement.perimeterValue ? measurement.perimeterValue.toFixed(2) : 'N/A',
               new Date(measurement.timestamp).toLocaleString(),
-              measurement.type
+              measurement.type,
+              measurement.description || '',
+              condition.wasteFactor ? `${condition.wasteFactor}%` : '0%',
+              condition.materialCost ? `$${condition.materialCost.toFixed(2)}` : 'N/A',
+              condition.equipmentCost ? `$${condition.equipmentCost.toFixed(2)}` : 'N/A',
+              '' // Field Notes/Comments placeholder
             ]);
           });
         });
@@ -553,175 +564,16 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         { wch: 18 }, // Net Value
         { wch: 15 }, // Perimeter
         { wch: 20 }, // Timestamp
-        { wch: 15 }  // Measurement Type
+        { wch: 15 }, // Measurement Type
+        { wch: 30 }, // Description
+        { wch: 15 }, // Waste Factor (%)
+        { wch: 18 }, // Material Cost/Unit
+        { wch: 18 }, // Equipment Cost/Unit
+        { wch: 30 }  // Field Notes/Comments
       ];
       detailSheet['!cols'] = detailColWidths;
       
       XLSX.utils.book_append_sheet(workbook, detailSheet, 'Detailed Measurements');
-
-      onExportStatusUpdate?.('excel', 55);
-
-      // 4. COMPREHENSIVE COST ANALYSIS SHEET
-      const { costData, summary } = getCostAnalysisData();
-      const costConditionIds = Object.keys(costData);
-      const costBreakdown = getProjectCostBreakdown(projectId);
-      
-      if (summary.conditionsWithCosts > 0) {
-        const costAnalysisData = [];
-        
-        // Project Cost Summary Section
-        costAnalysisData.push(['COMPREHENSIVE COST ANALYSIS', '']);
-        costAnalysisData.push(['', '']);
-        costAnalysisData.push(['PROJECT COST SUMMARY', '']);
-        costAnalysisData.push(['Total Material Cost', `$${costBreakdown.summary.totalMaterialCost.toFixed(2)}`]);
-        costAnalysisData.push(['Total Equipment Cost', `$${costBreakdown.summary.totalEquipmentCost.toFixed(2)}`]);
-        costAnalysisData.push(['Total Waste Factor Cost', `$${costBreakdown.summary.totalWasteCost.toFixed(2)}`]);
-        costAnalysisData.push(['Subtotal', `$${costBreakdown.summary.subtotal.toFixed(2)}`]);
-        costAnalysisData.push(['Profit Margin (%)', `${costBreakdown.summary.profitMarginPercent}%`]);
-        costAnalysisData.push(['Profit Margin Amount', `$${costBreakdown.summary.profitMarginAmount.toFixed(2)}`]);
-        costAnalysisData.push(['TOTAL PROJECT COST', `$${costBreakdown.summary.totalCost.toFixed(2)}`]);
-        costAnalysisData.push(['', '']);
-        
-        // Cost Breakdown by Condition Section
-        costAnalysisData.push(['COST BREAKDOWN BY CONDITION', '']);
-        costAnalysisData.push(['', '']);
-        costAnalysisData.push([
-          'Condition', 
-          'Type', 
-          'Unit', 
-          'Description',
-          'Quantity', 
-          'Material Cost/Unit', 
-          'Equipment Cost/Unit',
-          'Waste Factor %',
-          'Total Material Cost', 
-          'Total Equipment Cost',
-          'Total Waste Cost',
-          'Subtotal',
-          'Cost per Unit'
-        ]);
-        
-        // Data rows for conditions with costs
-        costConditionIds.forEach(conditionId => {
-          const data = costData[conditionId];
-          if (data.hasCosts) {
-            const breakdown = getConditionCostBreakdown(conditionId);
-            if (breakdown) {
-              const equipmentCostPerUnit = breakdown.quantity > 0 ? (breakdown.equipmentCost || 0) / breakdown.quantity : 0;
-              const wasteFactor = breakdown.condition.wasteFactor || 0;
-              
-              costAnalysisData.push([
-                breakdown.condition.name,
-                breakdown.condition.type,
-                breakdown.condition.unit,
-                breakdown.condition.description || 'No description provided',
-                breakdown.quantity.toFixed(2),
-                data.materialCostPerUnit > 0 ? `$${data.materialCostPerUnit.toFixed(2)}` : 'N/A',
-                equipmentCostPerUnit > 0 ? `$${equipmentCostPerUnit.toFixed(2)}` : 'N/A',
-                `${wasteFactor}%`,
-                breakdown.materialCost > 0 ? `$${breakdown.materialCost.toFixed(2)}` : '$0.00',
-                breakdown.equipmentCost > 0 ? `$${breakdown.equipmentCost.toFixed(2)}` : '$0.00',
-                breakdown.wasteCost > 0 ? `$${breakdown.wasteCost.toFixed(2)}` : '$0.00',
-                `$${breakdown.subtotal.toFixed(2)}`,
-                `$${breakdown.quantity > 0 ? (breakdown.subtotal / breakdown.quantity).toFixed(2) : '0.00'}`
-              ]);
-            }
-          }
-        });
-        
-        // Add project totals row
-        costAnalysisData.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '']);
-        costAnalysisData.push([
-          'PROJECT TOTALS', 
-          '', 
-          '', 
-          '', 
-          '', 
-          '', 
-          '', 
-          '', 
-          `$${costBreakdown.summary.totalMaterialCost.toFixed(2)}`, 
-          `$${costBreakdown.summary.totalEquipmentCost.toFixed(2)}`,
-          `$${costBreakdown.summary.totalWasteCost.toFixed(2)}`,
-          `$${costBreakdown.summary.totalCost.toFixed(2)}`,
-          ''
-        ]);
-        
-        // Add cost analysis metrics
-        costAnalysisData.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '']);
-        costAnalysisData.push(['COST ANALYSIS METRICS', '', '', '', '', '', '', '', '', '', '', '', '', '']);
-        costAnalysisData.push(['Total Conditions with Costs', costBreakdown.summary.conditionsWithCosts, '', '', '', '', '', '', '', '', '', '', '', '']);
-        costAnalysisData.push(['Total Conditions', costBreakdown.summary.totalConditions, '', '', '', '', '', '', '', '', '', '', '', '']);
-        costAnalysisData.push(['Average Cost per Condition', `$${costBreakdown.summary.conditionsWithCosts > 0 ? (costBreakdown.summary.totalCost / costBreakdown.summary.conditionsWithCosts).toFixed(2) : '0.00'}`, '', '', '', '', '', '', '', '', '', '', '', '']);
-        costAnalysisData.push(['Highest Cost Condition', Object.values(costData).reduce((max, curr) => 
-          curr.totalCost > max.totalCost ? curr : max, { totalCost: 0, condition: { name: 'N/A' } }
-        ).condition.name, '', '', '', '', '', '', '', '', '', '', '', '']);
-        
-        const costAnalysisSheet = XLSX.utils.aoa_to_sheet(costAnalysisData);
-        
-        // Set column widths for comprehensive cost analysis sheet
-        const costColWidths = [
-          { wch: 25 }, // Condition
-          { wch: 10 }, // Type
-          { wch: 8 },  // Unit
-          { wch: 30 }, // Description
-          { wch: 12 }, // Quantity
-          { wch: 18 }, // Material Cost/Unit
-          { wch: 18 }, // Equipment Cost/Unit
-          { wch: 12 }, // Waste Factor %
-          { wch: 18 }, // Total Material Cost
-          { wch: 18 }, // Total Equipment Cost
-          { wch: 15 }, // Total Waste Cost
-          { wch: 12 }, // Subtotal
-          { wch: 12 }  // Cost per Unit
-        ];
-        costAnalysisSheet['!cols'] = costColWidths;
-        
-        XLSX.utils.book_append_sheet(workbook, costAnalysisSheet, 'Cost Analysis');
-      }
-
-      onExportStatusUpdate?.('excel', 75);
-
-      // 5. PROJECT INFORMATION SHEET
-      const projectInfoData = [
-        ['PROJECT INFORMATION', ''],
-        ['', ''],
-        ['Project Details', ''],
-        ['Project Name', currentProject?.name || 'Unknown Project'],
-        ['Client', currentProject?.client || 'N/A'],
-        ['Location', currentProject?.location || 'N/A'],
-        ['Project Type', currentProject?.projectType || 'N/A'],
-        ['Status', currentProject?.status || 'N/A'],
-        ['Contact Person', currentProject?.contactPerson || 'N/A'],
-        ['Contact Email', currentProject?.contactEmail || 'N/A'],
-        ['Contact Phone', currentProject?.contactPhone || 'N/A'],
-        ['Estimated Value', currentProject?.estimatedValue ? `$${currentProject.estimatedValue.toFixed(2)}` : 'N/A'],
-        ['Start Date', currentProject?.startDate || 'N/A'],
-        ['Created', currentProject?.createdAt ? new Date(currentProject.createdAt).toLocaleDateString() : 'N/A'],
-        ['Last Modified', currentProject?.lastModified ? new Date(currentProject.lastModified).toLocaleDateString() : 'N/A'],
-        ['', ''],
-        ['Report Information', ''],
-        ['Generated On', new Date().toLocaleString()],
-        ['Report Version', '2.0 - Enhanced Professional'],
-        ['Software', 'Meridian Takeoff Professional'],
-        ['Standards Compliance', 'Industry Best Practices'],
-        ['', ''],
-        ['Quality Assurance', ''],
-        ['All measurements verified against calibrated scales', ''],
-        ['Cost calculations include material and equipment components', ''],
-        ['Report follows industry-standard formatting', ''],
-        ['Data integrity verified through automated checks', ''],
-        ['', ''],
-        ['Disclaimer', ''],
-        ['This report is generated by Meridian Takeoff software and follows industry standards.', ''],
-        ['All measurements and calculations should be verified by qualified professionals.', ''],
-        ['Cost estimates are based on provided rates and should be updated as needed.', '']
-      ];
-      
-
-      const projectInfoSheet = XLSX.utils.aoa_to_sheet(projectInfoData);
-      projectInfoSheet['!cols'] = [{ wch: 25 }, { wch: 40 }];
-      XLSX.utils.book_append_sheet(workbook, projectInfoSheet, 'Project Information');
 
       onExportStatusUpdate?.('excel', 90);
 
