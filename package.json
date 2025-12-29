@@ -18,6 +18,7 @@
     "axios": "^1.6.2",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.0.0",
+    "exceljs": "^4.4.0",
     "jspdf": "^3.0.3",
     "lucide-react": "^0.294.0",
     "pdf-lib": "^1.17.1",
@@ -37,9 +38,9 @@
   "devDependencies": {
     "@playwright/test": "^1.56.1",
     "@types/node": "^20.0.0",
+    "@types/pdfjs-dist": "^2.10.377",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
-    "@types/pdfjs-dist": "^2.10.377",
     "@typescript-eslint/eslint-plugin": "^6.13.0",
     "@typescript-eslint/parser": "^6.13.0",
     "@vitejs/plugin-react": "^4.1.1",
