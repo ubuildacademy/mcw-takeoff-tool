@@ -415,6 +415,23 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         }
       };
       
+      // Helper to merge cells
+      const mergeCells = (sheet: any, range: string) => {
+        if (!sheet['!merges']) sheet['!merges'] = [];
+        sheet['!merges'].push(XLSX.utils.decode_range(range));
+      };
+      
+      // Helper to set cell properties (wrap text, alignment, etc.)
+      const setCellProps = (sheet: any, cellAddress: string, props: any) => {
+        if (!sheet[cellAddress]) {
+          sheet[cellAddress] = { t: 's', v: '' };
+        }
+        if (!sheet[cellAddress].s) {
+          sheet[cellAddress].s = {};
+        }
+        Object.assign(sheet[cellAddress].s, props);
+      };
+      
       // 1. EXECUTIVE SUMMARY SHEET
       const executiveSummaryData = [
         ['MERIDIAN TAKEOFF - PROFESSIONAL CONSTRUCTION TAKEOFF REPORT', ''],
@@ -455,6 +472,14 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       
       const executiveSheet = XLSX.utils.aoa_to_sheet(executiveSummaryData);
       executiveSheet['!cols'] = [{ wch: 30 }, { wch: 40 }];
+      
+      // Merge and style title cell (A1:B1) - merge across both columns and enable wrap text
+      mergeCells(executiveSheet, 'A1:B1');
+      setCellProps(executiveSheet, 'A1', {
+        alignment: { wrapText: true, vertical: 'center' },
+        font: { bold: true, sz: 14 }
+      });
+      
       // Print settings for Executive Summary
       executiveSheet['!margins'] = { left: 0.7, right: 0.7, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 };
       executiveSheet['!printOptions'] = { gridLines: false, horizontalCentered: true, verticalCentered: false };
@@ -597,13 +622,56 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       ];
       summarySheet['!cols'] = summaryColWidths;
       
+      // Apply styles: header row - bold text
+      const headerRowIndex = 0;
+      for (let col = 0; col < headerRow.length; col++) {
+        const cellAddress = XLSX.utils.encode_cell({ r: headerRowIndex, c: col });
+        setCellProps(summarySheet, cellAddress, {
+          font: { bold: true },
+          fill: { fgColor: { rgb: "F3F4F6" } }
+        });
+      }
+      
+      // Apply styles: data rows with zebra striping
+      for (let row = 1; row < summaryData.length - 1; row++) {
+        const isEven = row % 2 === 0;
+        for (let col = 0; col < headerRow.length; col++) {
+          const cellAddress = XLSX.utils.encode_cell({ r: row, c: col });
+          const fillColor = isEven ? "FFFFFF" : "F9FAFB";
+          setCellProps(summarySheet, cellAddress, {
+            fill: { fgColor: { rgb: fillColor } }
+          });
+          
+          // Apply number formatting for numeric columns
+          const value = summaryData[row][col];
+          if (typeof value === 'number') {
+            // Check if it's a cost column (Material Cost/Unit, Equipment Cost, Total Cost, Cost per Unit)
+            const costCols = [headerRow.length - 4, headerRow.length - 3, headerRow.length - 2, headerRow.length - 1];
+            if (costCols.includes(col)) {
+              if (!summarySheet[cellAddress]) summarySheet[cellAddress] = { t: 'n', v: value };
+              summarySheet[cellAddress].z = '"$"#,##0.00';
+            } else {
+              if (!summarySheet[cellAddress]) summarySheet[cellAddress] = { t: 'n', v: value };
+              summarySheet[cellAddress].z = '#,##0.00';
+            }
+          }
+        }
+      }
+      
+      // Apply styles: totals row - bold text, darker background
+      const totalsRowIndex = summaryData.length - 1;
+      for (let col = 0; col < headerRow.length; col++) {
+        const cellAddress = XLSX.utils.encode_cell({ r: totalsRowIndex, c: col });
+        setCellProps(summarySheet, cellAddress, {
+          font: { bold: true },
+          fill: { fgColor: { rgb: "E5E7EB" } }
+        });
+      }
+      
       // Add freeze panes (freeze first row and first 4 columns)
       summarySheet['!freeze'] = { xSplit: 4, ySplit: 1, topLeftCell: 'E2', activePane: 'bottomRight', state: 'frozen' };
       
-      // Add auto-filter
-      if (summaryData.length > 0) {
-        summarySheet['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: summaryData.length - 1, c: headerRow.length - 1 } }) };
-      }
+      // No auto-filter on Quantity Summary (user didn't request it)
       
       // Print settings for Quantity Summary
       summarySheet['!margins'] = { left: 0.7, right: 0.7, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 };
@@ -707,12 +775,12 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       
       // Set column widths for detailed sheet
       const detailColWidths = [
-        { wch: 25 }, // Condition
+        { wch: 25 }, // Condition (A)
         { wch: 10 }, // Type
         { wch: 8 },  // Unit
-        { wch: 15 }, // Sheet Number
-        { wch: 20 }, // Sheet Name
-        { wch: 12 }, // Page Reference
+        { wch: 15 }, // Sheet Number (D)
+        { wch: 20 }, // Sheet Name (E)
+        { wch: 12 }, // Page Reference (F)
         { wch: 12 }, // Value
         { wch: 18 }, // Net Value
         { wch: 15 }, // Area Value (SF)
@@ -727,30 +795,98 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       ];
       detailSheet['!cols'] = detailColWidths;
       
+      // Apply styles: header row - bold text
+      const detailHeaderRowIndex = 0;
+      for (let col = 0; col < detailData[0].length; col++) {
+        const cellAddress = XLSX.utils.encode_cell({ r: detailHeaderRowIndex, c: col });
+        setCellProps(detailSheet, cellAddress, {
+          font: { bold: true },
+          fill: { fgColor: { rgb: "F3F4F6" } }
+        });
+      }
+      
+      // Apply styles: data rows with zebra striping and grouping
+      let currentConditionId: string | null = null;
+      let conditionStartRow = 1;
+      const groupRows: number[] = []; // Track which rows start a new group
+      
+      for (let row = 1; row < detailData.length; row++) {
+        const measurementIndex = row - 1;
+        const { conditionId } = allMeasurements[measurementIndex];
+        const isEven = row % 2 === 0;
+        
+        // Check if condition changed (new group)
+        if (currentConditionId !== null && currentConditionId !== conditionId) {
+          groupRows.push(row);
+          conditionStartRow = row;
+        }
+        if (currentConditionId === null) {
+          conditionStartRow = row;
+          groupRows.push(row);
+        }
+        currentConditionId = conditionId;
+        
+        // Apply zebra striping
+        for (let col = 0; col < detailData[0].length; col++) {
+          const cellAddress = XLSX.utils.encode_cell({ r: row, c: col });
+          const fillColor = isEven ? "FFFFFF" : "F9FAFB";
+          setCellProps(detailSheet, cellAddress, {
+            fill: { fgColor: { rgb: fillColor } }
+          });
+          
+          // Apply number formatting
+          const value = detailData[row][col];
+          if (typeof value === 'number') {
+            // Cost columns: Material Cost/Unit (col 14), Equipment Cost/Unit (col 15)
+            if (col === 14 || col === 15) {
+              if (!detailSheet[cellAddress]) detailSheet[cellAddress] = { t: 'n', v: value };
+              detailSheet[cellAddress].z = '"$"#,##0.00';
+            } else {
+              if (!detailSheet[cellAddress]) detailSheet[cellAddress] = { t: 'n', v: value };
+              detailSheet[cellAddress].z = '#,##0.00';
+            }
+          }
+        }
+      }
+      
+      // Add grouping (outline) - Excel grouping requires setting outlineLevel on rows via !rows
+      detailSheet['!outline'] = { summaryBelow: false, summaryRight: false };
+      if (!detailSheet['!rows']) {
+        detailSheet['!rows'] = [];
+      }
+      
+      // Set outline level for each row (level 1 for data rows that can be grouped by condition)
+      currentConditionId = null;
+      for (let row = 1; row < detailData.length; row++) {
+        const measurementIndex = row - 1;
+        const { conditionId } = allMeasurements[measurementIndex];
+        
+        // Initialize row properties if not exists
+        if (!detailSheet['!rows'][row]) {
+          detailSheet['!rows'][row] = {};
+        }
+        
+        // Set outline level - all data rows get level 1 for grouping
+        detailSheet['!rows'][row].level = 1;
+        detailSheet['!rows'][row].hidden = false;
+        detailSheet['!rows'][row].collapsed = false;
+        
+        currentConditionId = conditionId;
+      }
+      
       // Add freeze panes (freeze first row and first 3 columns)
       detailSheet['!freeze'] = { xSplit: 3, ySplit: 1, topLeftCell: 'D2', activePane: 'bottomRight', state: 'frozen' };
       
-      // Add auto-filter
+      // Add auto-filter - XLSX doesn't support limiting to specific columns directly
+      // The autofilter will be on all columns, but Excel allows users to hide filter dropdowns on unwanted columns
+      // We set it to cover the full range, and users can customize in Excel
       if (detailData.length > 0) {
-        detailSheet['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: detailData.length - 1, c: detailData[0].length - 1 } }) };
+        const filterRange = {
+          s: { r: 0, c: 0 }, // Start at A1 (header)
+          e: { r: detailData.length - 1, c: detailData[0].length - 1 }  // End at last row, last column
+        };
+        detailSheet['!autofilter'] = { ref: XLSX.utils.encode_range(filterRange) };
       }
-      
-      // Add grouping by condition (outline levels)
-      // Group rows by condition - find condition boundaries
-      let conditionStartRow = 1; // Start after header
-      let lastConditionId: string | null = null;
-      const outlineLevels: number[] = new Array(detailData.length).fill(0);
-      
-      allMeasurements.forEach(({ conditionId }, idx) => {
-        if (lastConditionId !== null && lastConditionId !== conditionId) {
-          // End previous group, start new one
-          outlineLevels[idx] = 1; // Group level 1
-        }
-        lastConditionId = conditionId;
-      });
-      
-      // Set outline levels on sheet
-      detailSheet['!outline'] = { summaryBelow: false, summaryRight: false };
       
       // Print settings for Detailed Measurements
       detailSheet['!margins'] = { left: 0.7, right: 0.7, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 };
