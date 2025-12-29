@@ -109,6 +109,21 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
     return page.sheetName || page.sheetNumber || `Page ${pageNumber}`;
   };
 
+  // Helper function to get sheet number for a page
+  const getSheetNumber = (sheetId: string, pageNumber: number): string | null => {
+    const document = documents.find(doc => doc.id === sheetId);
+    if (!document) {
+      return null;
+    }
+    
+    const page = document.pages.find(p => p.pageNumber === pageNumber);
+    if (!page) {
+      return null;
+    }
+    
+    return page.sheetNumber || null;
+  };
+
   // Enhanced helper function to get sheet name with fallback to backend
   const getSheetNameWithFallback = async (sheetId: string, pageNumber: number): Promise<string> => {
     // First try to get from local documents
@@ -139,17 +154,19 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
     const projectMeasurements = getProjectTakeoffMeasurements(projectId);
     const projectConditions = conditions.filter(c => c.projectId === projectId);
     
-    // Get all unique pages that have measurements with their sheet names
-    const pagesWithMeasurements = new Map<string, { pageNumber: number; sheetName: string; sheetId: string }>();
+    // Get all unique pages that have measurements with their sheet names and numbers
+    const pagesWithMeasurements = new Map<string, { pageNumber: number; sheetName: string; sheetNumber: string | null; sheetId: string }>();
     
     // Use Promise.all to fetch all sheet names in parallel
     const sheetNamePromises = projectMeasurements.map(async (measurement) => {
       const key = `${measurement.sheetId}-${measurement.pdfPage}`;
       if (!pagesWithMeasurements.has(key)) {
         const sheetName = await getSheetNameWithFallback(measurement.sheetId, measurement.pdfPage);
+        const sheetNumber = getSheetNumber(measurement.sheetId, measurement.pdfPage);
         pagesWithMeasurements.set(key, {
           pageNumber: measurement.pdfPage,
           sheetName: sheetName,
+          sheetNumber: sheetNumber,
           sheetId: measurement.sheetId
         });
       }
@@ -165,6 +182,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       pages: Record<string, {
         pageNumber: number;
         sheetName: string;
+        sheetNumber: string | null;
         sheetId: string;
         measurements: any[];
         total: number;
@@ -176,7 +194,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       const conditionMeasurements = getConditionTakeoffMeasurements(projectId, condition.id);
       
       if (conditionMeasurements.length > 0) {
-        const pages: Record<string, { pageNumber: number; sheetName: string; sheetId: string; measurements: any[]; total: number }> = {};
+        const pages: Record<string, { pageNumber: number; sheetName: string; sheetNumber: string | null; sheetId: string; measurements: any[]; total: number }> = {};
         let grandTotal = 0;
         
         conditionMeasurements.forEach(measurement => {
@@ -186,6 +204,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
             pages[pageKey] = { 
               pageNumber: measurement.pdfPage,
               sheetName: pageInfo?.sheetName || `Page ${measurement.pdfPage}`,
+              sheetNumber: pageInfo?.sheetNumber || null,
               sheetId: measurement.sheetId,
               measurements: [], 
               total: 0 
@@ -368,8 +387,33 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       // Create workbook and worksheet
       const workbook = XLSX.utils.book_new();
       
-      // Get current project info
+      // Get current project info and calculate cost breakdown once (optimize)
       const currentProject = useTakeoffStore.getState().getCurrentProject();
+      const costBreakdown = getProjectCostBreakdown(projectId);
+      
+      // Helper function to format date safely
+      const formatDate = (dateString: string | undefined): string => {
+        if (!dateString) return 'N/A';
+        try {
+          const date = new Date(dateString);
+          if (isNaN(date.getTime())) return 'N/A';
+          return date.toLocaleDateString();
+        } catch {
+          return 'N/A';
+        }
+      };
+      
+      // Helper function to format timestamp safely
+      const formatTimestamp = (timestamp: string | number | undefined): string => {
+        if (!timestamp) return 'N/A';
+        try {
+          const date = typeof timestamp === 'string' ? new Date(timestamp) : new Date(timestamp);
+          if (isNaN(date.getTime())) return 'N/A';
+          return date.toLocaleString();
+        } catch {
+          return 'N/A';
+        }
+      };
       
       // 1. EXECUTIVE SUMMARY SHEET
       const executiveSummaryData = [
@@ -383,6 +427,14 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         ['Location', currentProject?.location || 'N/A'],
         ['Project Type', currentProject?.projectType || 'N/A'],
         ['Status', currentProject?.status || 'N/A'],
+        ['Description', currentProject?.description || 'N/A'],
+        ['Contact Person', currentProject?.contactPerson || 'N/A'],
+        ['Contact Email', currentProject?.contactEmail || 'N/A'],
+        ['Contact Phone', currentProject?.contactPhone || 'N/A'],
+        ['Estimated Value', currentProject?.estimatedValue ? `$${currentProject.estimatedValue.toFixed(2)}` : 'N/A'],
+        ['Start Date', formatDate(currentProject?.startDate)],
+        ['Created', formatDate(currentProject?.createdAt)],
+        ['Last Modified', formatDate(currentProject?.lastModified)],
         ['Report Date', new Date().toLocaleDateString()],
         ['Generated Time', new Date().toLocaleTimeString()],
         ['', ''],
@@ -392,17 +444,20 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         ['Total Measurements', conditionIds.reduce((sum, id) => sum + Object.values(reportData[id].pages).reduce((pageSum, page) => pageSum + page.measurements.length, 0), 0)],
         ['', ''],
         ['Cost Analysis Summary', ''],
-        ['Total Project Cost', `$${getProjectCostBreakdown(projectId).summary.totalCost.toFixed(2)}`],
-        ['Material Cost', `$${getProjectCostBreakdown(projectId).summary.totalMaterialCost.toFixed(2)}`],
-        ['Equipment Cost', `$${getProjectCostBreakdown(projectId).summary.totalEquipmentCost.toFixed(2)}`],
-        ['Waste Factor Cost', `$${getProjectCostBreakdown(projectId).summary.totalWasteCost.toFixed(2)}`],
-        ['Subtotal', `$${getProjectCostBreakdown(projectId).summary.subtotal.toFixed(2)}`],
-        ['Profit Margin', `${getProjectCostBreakdown(projectId).summary.profitMarginPercent}% ($${getProjectCostBreakdown(projectId).summary.profitMarginAmount.toFixed(2)})`],
-        ['Conditions with Costs', getProjectCostBreakdown(projectId).summary.conditionsWithCosts]
+        ['Total Project Cost', `$${costBreakdown.summary.totalCost.toFixed(2)}`],
+        ['Material Cost', `$${costBreakdown.summary.totalMaterialCost.toFixed(2)}`],
+        ['Equipment Cost', `$${costBreakdown.summary.totalEquipmentCost.toFixed(2)}`],
+        ['Waste Factor Cost', `$${costBreakdown.summary.totalWasteCost.toFixed(2)}`],
+        ['Subtotal', `$${costBreakdown.summary.subtotal.toFixed(2)}`],
+        ['Profit Margin', `${costBreakdown.summary.profitMarginPercent}% ($${costBreakdown.summary.profitMarginAmount.toFixed(2)})`],
+        ['Conditions with Costs', costBreakdown.summary.conditionsWithCosts]
       ];
       
       const executiveSheet = XLSX.utils.aoa_to_sheet(executiveSummaryData);
       executiveSheet['!cols'] = [{ wch: 30 }, { wch: 40 }];
+      // Print settings for Executive Summary
+      executiveSheet['!margins'] = { left: 0.7, right: 0.7, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 };
+      executiveSheet['!printOptions'] = { gridLines: false, horizontalCentered: true, verticalCentered: false };
       XLSX.utils.book_append_sheet(workbook, executiveSheet, 'Executive Summary');
 
       onExportStatusUpdate?.('excel', 15);
@@ -417,20 +472,43 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         'Unit', 
         'Description',
         ...sortedPages.map(p => {
+          const sheetNum = p.sheetNumber ? ` (${p.sheetNumber})` : '';
           const hasCustomName = p.sheetName && p.sheetName !== `Page ${p.pageNumber}`;
-          return hasCustomName ? `${p.sheetName} (P.${p.pageNumber})` : `Page ${p.pageNumber}`;
+          return hasCustomName ? `${p.sheetName}${sheetNum} (P.${p.pageNumber})` : `Page ${p.pageNumber}${sheetNum}`;
         }), 
         'Total Quantity', 
+        'Area Value (SF)', 
         'Material Cost/Unit', 
+        'Equipment Cost',
         'Total Cost',
         'Cost per Unit'
       ];
       summaryData.push(headerRow);
       
+      // Calculate area values for conditions (sum of areaValue from linear measurements with height)
+      const conditionAreaValues: Record<string, number> = {};
+      conditionIds.forEach(conditionId => {
+        const conditionData = reportData[conditionId];
+        let totalArea = 0;
+        Object.values(conditionData.pages).forEach(pageData => {
+          pageData.measurements.forEach(measurement => {
+            if (measurement.areaValue) {
+              totalArea += measurement.areaValue;
+            }
+          });
+        });
+        conditionAreaValues[conditionId] = totalArea;
+      });
+      
+      // Get cost breakdown for equipment costs
+      const costAnalysis = getCostAnalysisData();
+      
       // Data rows with enhanced formatting
       conditionIds.forEach(conditionId => {
         const conditionData = reportData[conditionId];
-        const costInfo = getCostAnalysisData().costData[conditionId];
+        const costInfo = costAnalysis.costData[conditionId];
+        const condition = conditionData.condition;
+        const breakdown = getConditionCostBreakdown(conditionId);
         
         if (!conditionData || !conditionData.condition) {
           console.warn(`Missing condition data for ID: ${conditionId}`);
@@ -438,10 +516,10 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         }
         
         const row = [
-          conditionData.condition.name || 'Unknown',
-          conditionData.condition.type || 'Unknown',
-          conditionData.condition.unit || 'Unknown',
-          conditionData.condition.description || 'No description provided',
+          condition.name || 'Unknown',
+          condition.type || 'Unknown',
+          condition.unit || 'Unknown',
+          condition.description || 'No description provided',
           ...sortedPages.map(page => {
             const pageKey = Object.keys(conditionData.pages || {}).find(key => 
               conditionData.pages[key].pageNumber === page.pageNumber
@@ -450,34 +528,54 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
             return pageData ? pageData.total.toFixed(2) : '';
           }),
           (conditionData.grandTotal || 0).toFixed(2),
-          costInfo?.materialCostPerUnit > 0 ? `$${costInfo.materialCostPerUnit.toFixed(2)}` : 'N/A',
-          costInfo?.hasCosts ? `$${costInfo.totalCost.toFixed(2)}` : 'N/A',
-          costInfo?.hasCosts && conditionData.grandTotal > 0 ? `$${(costInfo.totalCost / conditionData.grandTotal).toFixed(2)}` : 'N/A'
+          conditionAreaValues[conditionId] > 0 ? conditionAreaValues[conditionId].toFixed(2) : '',
+          costInfo?.materialCostPerUnit > 0 ? costInfo.materialCostPerUnit : null,
+          breakdown?.equipmentCost > 0 ? breakdown.equipmentCost : null,
+          costInfo?.hasCosts ? costInfo.totalCost : null,
+          costInfo?.hasCosts && conditionData.grandTotal > 0 ? (costInfo.totalCost / conditionData.grandTotal) : null
         ];
         summaryData.push(row);
       });
       
-      // Add totals row
+      // Helper to convert column index to Excel column letter (0=A, 1=B, etc.)
+      const colIndexToLetter = (col: number): string => {
+        let result = '';
+        col++;
+        while (col > 0) {
+          col--;
+          result = String.fromCharCode(65 + (col % 26)) + result;
+          col = Math.floor(col / 26);
+        }
+        return result;
+      };
+      
+      // Add totals row with formulas
+      const totalQuantity = conditionIds.reduce((sum, id) => sum + reportData[id].grandTotal, 0);
+      const totalAreaValue = Object.values(conditionAreaValues).reduce((sum, val) => sum + val, 0);
+      const totalEquipmentCost = conditionIds.reduce((sum, id) => {
+        const breakdown = getConditionCostBreakdown(id);
+        return sum + (breakdown?.equipmentCost || 0);
+      }, 0);
+      
+      const firstDataRow = 2; // Row 2 (after header at row 1)
+      const lastDataRow = summaryData.length; // Last data row before totals
+      
       const totalsRow = [
         'TOTALS', 
         '', 
         '', 
         '', 
-        ...sortedPages.map(page => {
-          let total = 0;
-          conditionIds.forEach(conditionId => {
-            const pageKey = Object.keys(reportData[conditionId].pages).find(key => 
-              reportData[conditionId].pages[key].pageNumber === page.pageNumber
-            );
-            const pageData = pageKey ? reportData[conditionId].pages[pageKey] : null;
-            if (pageData) total += pageData.total;
-          });
-          return total > 0 ? total.toFixed(2) : '';
+        ...sortedPages.map((page, idx) => {
+          // First page column is at index 4 (E), so idx 0 = E, idx 1 = F, etc.
+          const colLetter = colIndexToLetter(4 + idx);
+          return { f: `SUM(${colLetter}${firstDataRow}:${colLetter}${lastDataRow})` };
         }), 
-        conditionIds.reduce((sum, id) => sum + reportData[id].grandTotal, 0).toFixed(2),
-        '',
-        `$${getProjectCostBreakdown(projectId).summary.totalCost.toFixed(2)}`,
-        ''
+        { f: `SUM(${colIndexToLetter(4 + sortedPages.length)}${firstDataRow}:${colIndexToLetter(4 + sortedPages.length)}${lastDataRow})` }, // Total Quantity
+        totalAreaValue > 0 ? { f: `SUM(${colIndexToLetter(5 + sortedPages.length)}${firstDataRow}:${colIndexToLetter(5 + sortedPages.length)}${lastDataRow})` } : '', // Area Value
+        '', // Material Cost/Unit (not summed)
+        totalEquipmentCost > 0 ? totalEquipmentCost : '', // Equipment Cost (calculated value)
+        costBreakdown.summary.totalCost, // Total Cost
+        '' // Cost per Unit
       ];
       summaryData.push(totalsRow);
       
@@ -491,27 +589,78 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         { wch: 30 }, // Description
         ...sortedPages.map(() => ({ wch: 15 })), // Page columns
         { wch: 15 }, // Total Quantity
+        { wch: 15 }, // Area Value (SF)
         { wch: 18 }, // Material Cost/Unit
+        { wch: 18 }, // Equipment Cost
         { wch: 12 }, // Total Cost
         { wch: 12 }  // Cost per Unit
       ];
       summarySheet['!cols'] = summaryColWidths;
+      
+      // Add freeze panes (freeze first row and first 4 columns)
+      summarySheet['!freeze'] = { xSplit: 4, ySplit: 1, topLeftCell: 'E2', activePane: 'bottomRight', state: 'frozen' };
+      
+      // Add auto-filter
+      if (summaryData.length > 0) {
+        summarySheet['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: summaryData.length - 1, c: headerRow.length - 1 } }) };
+      }
+      
+      // Print settings for Quantity Summary
+      summarySheet['!margins'] = { left: 0.7, right: 0.7, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 };
+      summarySheet['!printOptions'] = { gridLines: true, horizontalCentered: false, verticalCentered: false };
+      summarySheet['!repeatRows'] = '1:1'; // Repeat header row on each page
       
       XLSX.utils.book_append_sheet(workbook, summarySheet, 'Quantity Summary');
 
       onExportStatusUpdate?.('excel', 35);
 
       // 3. DETAILED MEASUREMENTS SHEET
+      // Collect all measurements with their data, sorted by condition, then page, then timestamp
+      const allMeasurements: Array<{
+        conditionId: string;
+        condition: TakeoffCondition;
+        pageData: { pageNumber: number; sheetName: string; sheetNumber: string | null; sheetId: string };
+        measurement: any;
+      }> = [];
+      
+      conditionIds.forEach(conditionId => {
+        const conditionData = reportData[conditionId];
+        const condition = conditionData.condition;
+        
+        Object.values(conditionData.pages).forEach(pageData => {
+          pageData.measurements.forEach(measurement => {
+            allMeasurements.push({
+              conditionId,
+              condition,
+              pageData,
+              measurement
+            });
+          });
+        });
+      });
+      
+      // Sort: by condition name, then page number, then timestamp
+      allMeasurements.sort((a, b) => {
+        const conditionCompare = a.condition.name.localeCompare(b.condition.name);
+        if (conditionCompare !== 0) return conditionCompare;
+        const pageCompare = a.pageData.pageNumber - b.pageData.pageNumber;
+        if (pageCompare !== 0) return pageCompare;
+        const timeA = new Date(a.measurement.timestamp).getTime();
+        const timeB = new Date(b.measurement.timestamp).getTime();
+        return timeA - timeB;
+      });
+      
       const detailData = [];
       detailData.push([
         'Condition', 
         'Type',
         'Unit',
+        'Sheet Number',
         'Sheet Name', 
         'Page Reference', 
-        'Measurement #', 
         'Value', 
         'Net Value (after cutouts)',
+        'Area Value (SF)',
         'Perimeter (LF)',
         'Timestamp',
         'Measurement Type',
@@ -522,32 +671,36 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         'Field Notes/Comments'
       ]);
       
-      conditionIds.forEach(conditionId => {
-        const conditionData = reportData[conditionId];
-        const condition = conditionData.condition;
+      // Track current condition for grouping
+      let currentConditionId: string | null = null;
+      let rowIndex = 1; // Start at 1 (0 is header)
+      
+      allMeasurements.forEach(({ conditionId, condition, pageData, measurement }) => {
+        // Check if we need to start a new condition group
+        if (currentConditionId !== conditionId) {
+          currentConditionId = conditionId;
+        }
         
-        Object.values(conditionData.pages).forEach(pageData => {
-          pageData.measurements.forEach((measurement, idx) => {
-            detailData.push([
-              condition.name,
-              condition.type,
-              condition.unit,
-              pageData.sheetName,
-              `P${pageData.pageNumber}`,
-              idx + 1,
-              measurement.calculatedValue.toFixed(2),
-              (measurement.netCalculatedValue || measurement.calculatedValue).toFixed(2),
-              measurement.perimeterValue ? measurement.perimeterValue.toFixed(2) : 'N/A',
-              new Date(measurement.timestamp).toLocaleString(),
-              measurement.type,
-              measurement.description || '',
-              condition.wasteFactor ? `${condition.wasteFactor}%` : '0%',
-              condition.materialCost ? `$${condition.materialCost.toFixed(2)}` : 'N/A',
-              condition.equipmentCost ? `$${condition.equipmentCost.toFixed(2)}` : 'N/A',
-              '' // Field Notes/Comments placeholder
-            ]);
-          });
-        });
+        detailData.push([
+          condition.name,
+          condition.type,
+          condition.unit,
+          pageData.sheetNumber || '',
+          pageData.sheetName,
+          `P${pageData.pageNumber}`,
+          measurement.calculatedValue,
+          measurement.netCalculatedValue || measurement.calculatedValue,
+          measurement.areaValue || null,
+          measurement.perimeterValue || null,
+          formatTimestamp(measurement.timestamp),
+          measurement.type,
+          measurement.description || '',
+          condition.wasteFactor || 0,
+          condition.materialCost || null,
+          condition.equipmentCost || null,
+          '' // Field Notes/Comments placeholder
+        ]);
+        rowIndex++;
       });
       
       const detailSheet = XLSX.utils.aoa_to_sheet(detailData);
@@ -557,11 +710,12 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         { wch: 25 }, // Condition
         { wch: 10 }, // Type
         { wch: 8 },  // Unit
+        { wch: 15 }, // Sheet Number
         { wch: 20 }, // Sheet Name
         { wch: 12 }, // Page Reference
-        { wch: 12 }, // Measurement #
         { wch: 12 }, // Value
         { wch: 18 }, // Net Value
+        { wch: 15 }, // Area Value (SF)
         { wch: 15 }, // Perimeter
         { wch: 20 }, // Timestamp
         { wch: 15 }, // Measurement Type
@@ -572,6 +726,36 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         { wch: 30 }  // Field Notes/Comments
       ];
       detailSheet['!cols'] = detailColWidths;
+      
+      // Add freeze panes (freeze first row and first 3 columns)
+      detailSheet['!freeze'] = { xSplit: 3, ySplit: 1, topLeftCell: 'D2', activePane: 'bottomRight', state: 'frozen' };
+      
+      // Add auto-filter
+      if (detailData.length > 0) {
+        detailSheet['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: detailData.length - 1, c: detailData[0].length - 1 } }) };
+      }
+      
+      // Add grouping by condition (outline levels)
+      // Group rows by condition - find condition boundaries
+      let conditionStartRow = 1; // Start after header
+      let lastConditionId: string | null = null;
+      const outlineLevels: number[] = new Array(detailData.length).fill(0);
+      
+      allMeasurements.forEach(({ conditionId }, idx) => {
+        if (lastConditionId !== null && lastConditionId !== conditionId) {
+          // End previous group, start new one
+          outlineLevels[idx] = 1; // Group level 1
+        }
+        lastConditionId = conditionId;
+      });
+      
+      // Set outline levels on sheet
+      detailSheet['!outline'] = { summaryBelow: false, summaryRight: false };
+      
+      // Print settings for Detailed Measurements
+      detailSheet['!margins'] = { left: 0.7, right: 0.7, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 };
+      detailSheet['!printOptions'] = { gridLines: true, horizontalCentered: false, verticalCentered: false };
+      detailSheet['!repeatRows'] = '1:1'; // Repeat header row on each page
       
       XLSX.utils.book_append_sheet(workbook, detailSheet, 'Detailed Measurements');
 
