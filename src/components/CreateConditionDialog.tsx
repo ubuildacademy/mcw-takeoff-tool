@@ -144,7 +144,10 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
         color: formData.color,
         description: formData.description,
         materialCost: formData.materialCost && formData.materialCost.trim() !== '' ? parseFloat(formData.materialCost) : undefined,
-        equipmentCost: formData.equipmentCost && formData.equipmentCost.trim() !== '' ? parseFloat(formData.equipmentCost) : undefined,
+        // Always send equipmentCost, even if 0 or empty, to ensure it persists
+        equipmentCost: formData.equipmentCost !== '' && formData.equipmentCost !== null && formData.equipmentCost !== undefined 
+          ? (formData.equipmentCost.trim() !== '' ? parseFloat(formData.equipmentCost) : 0)
+          : 0,
         includePerimeter: formData.includePerimeter,
         depth: parsedDepth === null || parsedDepth === undefined ? undefined : parsedDepth,
         includeHeight: formData.includeHeight,

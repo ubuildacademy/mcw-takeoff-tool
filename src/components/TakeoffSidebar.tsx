@@ -151,6 +151,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
 
   // Quantity Reports Data Aggregation (async version for exports)
   const getQuantityReportDataAsync = async () => {
+    // Get ALL measurements for the project - no filtering by selectedDocumentId
     const projectMeasurements = getProjectTakeoffMeasurements(projectId);
     const projectConditions = conditions.filter(c => c.projectId === projectId);
     
@@ -191,6 +192,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
     }> = {};
     
     projectConditions.forEach(condition => {
+      // Get ALL measurements for this condition - no filtering by selectedDocumentId
       const conditionMeasurements = getConditionTakeoffMeasurements(projectId, condition.id);
       
       if (conditionMeasurements.length > 0) {
@@ -545,7 +547,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         ['Client', currentProject?.client || 'N/A'],
         ['Location', currentProject?.location || 'N/A'],
         ['Project Type', currentProject?.projectType || 'N/A'],
-        ['Status', currentProject?.status || 'N/A'],
         ['Description', currentProject?.description || 'N/A'],
         ['Contact Person', currentProject?.contactPerson || 'N/A'],
         ['Contact Email', currentProject?.contactEmail || 'N/A'],
@@ -613,9 +614,18 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       executiveSheet.getRow(row).height = 22;
       row++;
       
+      // Calculate unique pages with measurements across all conditions
+      const uniquePagesSet = new Set<string>();
+      conditionIds.forEach(id => {
+        Object.keys(reportData[id].pages).forEach(pageKey => {
+          uniquePagesSet.add(pageKey);
+        });
+      });
+      
       const kpiData = [
         ['Total Conditions', conditionIds.length],
-        ['Total Pages with Measurements', sortedPages.length],
+        ['Conditions with Costs', costBreakdown.summary.conditionsWithCosts],
+        ['Total Pages with Measurements', uniquePagesSet.size],
         ['Total Measurements', conditionIds.reduce((sum, id) => sum + Object.values(reportData[id].pages).reduce((pageSum, page) => pageSum + page.measurements.length, 0), 0)]
       ];
       
@@ -638,6 +648,10 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         };
         
         valueCell.value = value;
+        // "Conditions with Costs" should be plain number, not currency
+        if (label === 'Conditions with Costs') {
+          valueCell.numFmt = '#,##0';
+        }
         valueCell.style = {
           font: { size: 11, color: { argb: 'FF111827' }, bold: true },
           alignment: { horizontal: 'left', vertical: 'middle' },
@@ -674,23 +688,24 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       executiveSheet.getRow(row).height = 22;
       row++;
       
+      // Store row numbers for formula references
+      const costStartRow = row;
       const costInfo = [
-        ['Material Cost', costBreakdown.summary.totalMaterialCost],
-        ['Equipment Cost', costBreakdown.summary.totalEquipmentCost],
-        ['Waste Factor Cost', costBreakdown.summary.totalWasteCost],
-        ['Subtotal', costBreakdown.summary.subtotal],
-        ['Profit Margin', costBreakdown.summary.profitMarginAmount, `${costBreakdown.summary.profitMarginPercent}%`],
-        ['Total Project Cost', costBreakdown.summary.totalCost, true], // true = highlight this row
-        ['Conditions with Costs', costBreakdown.summary.conditionsWithCosts]
+        { label: 'Material Cost', formula: null, value: costBreakdown.summary.totalMaterialCost },
+        { label: 'Equipment Cost', formula: null, value: costBreakdown.summary.totalEquipmentCost },
+        { label: 'Waste Factor Cost', formula: null, value: costBreakdown.summary.totalWasteCost },
+        { label: 'Subtotal', formula: `SUM(B${costStartRow}:B${costStartRow + 2})`, value: null },
+        { label: 'Profit Margin', formula: null, value: costBreakdown.summary.profitMarginAmount, percent: costBreakdown.summary.profitMarginPercent },
+        { label: 'Total Project Cost', formula: `B${costStartRow + 3}+B${costStartRow + 4}`, value: null, isHighlighted: true }
       ];
       
-      costInfo.forEach(([label, value, extra, isHighlighted], index) => {
+      costInfo.forEach((item, index) => {
         const isEven = index % 2 === 0;
-        const isTotalRow = isHighlighted;
+        const isTotalRow = item.isHighlighted;
         const labelCell = executiveSheet.getCell(`A${row}`);
         const valueCell = executiveSheet.getCell(`B${row}`);
         
-        labelCell.value = label;
+        labelCell.value = item.label;
         labelCell.style = {
           font: { size: 11, color: { argb: isTotalRow ? 'FF111827' : 'FF6B7280' }, bold: isTotalRow },
           alignment: { horizontal: 'left', vertical: 'middle' },
@@ -703,16 +718,19 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
           }
         };
         
-        if (label === 'Profit Margin' && extra) {
-          valueCell.value = `${extra} ($${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`;
-        } else if (typeof value === 'number') {
-          valueCell.value = `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-        } else {
-          valueCell.value = value;
+        // Set value or formula
+        if (item.formula) {
+          valueCell.value = { formula: item.formula };
+          valueCell.numFmt = '"$"#,##0.00';
+        } else if (item.label === 'Profit Margin' && item.percent) {
+          valueCell.value = `${item.percent}% ($${item.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`;
+        } else if (item.value !== null && item.value !== undefined) {
+          valueCell.value = item.value;
+          valueCell.numFmt = '"$"#,##0.00';
         }
         
         valueCell.style = {
-          font: { size: 11, color: { argb: isTotalRow ? 'FF111827' : 'FF111827' }, bold: isTotalRow || label === 'Profit Margin' },
+          font: { size: 11, color: { argb: isTotalRow ? 'FF111827' : 'FF111827' }, bold: isTotalRow || item.label === 'Profit Margin' },
           alignment: { horizontal: 'left', vertical: 'middle' },
           fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: isTotalRow ? 'FFE5E7EB' : (isEven ? 'FFFFFFFF' : 'FFF9FAFB') } },
           border: {
@@ -729,6 +747,54 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       
       // Bottom margin spacing
       executiveSheet.getRow(row).height = 15;
+      
+      // Add thick border around entire report
+      const reportStartRow = 2; // After top margin
+      const reportEndRow = row - 1; // Before bottom margin
+      const reportStartCol = 1; // Column A
+      const reportEndCol = 2; // Column B
+      
+      const thickBorderStyle = { style: 'thick' as const, color: { argb: 'FF1F2937' } };
+      
+      // Top border
+      for (let col = reportStartCol; col <= reportEndCol; col++) {
+        const cell = executiveSheet.getCell(reportStartRow, col);
+        const existingBorder = cell.border || {};
+        cell.border = {
+          ...existingBorder,
+          top: thickBorderStyle
+        };
+      }
+      
+      // Bottom border
+      for (let col = reportStartCol; col <= reportEndCol; col++) {
+        const cell = executiveSheet.getCell(reportEndRow, col);
+        const existingBorder = cell.border || {};
+        cell.border = {
+          ...existingBorder,
+          bottom: thickBorderStyle
+        };
+      }
+      
+      // Left border
+      for (let r = reportStartRow; r <= reportEndRow; r++) {
+        const cell = executiveSheet.getCell(r, reportStartCol);
+        const existingBorder = cell.border || {};
+        cell.border = {
+          ...existingBorder,
+          left: thickBorderStyle
+        };
+      }
+      
+      // Right border
+      for (let r = reportStartRow; r <= reportEndRow; r++) {
+        const cell = executiveSheet.getCell(r, reportEndCol);
+        const existingBorder = cell.border || {};
+        cell.border = {
+          ...existingBorder,
+          right: thickBorderStyle
+        };
+      }
       
       // Print settings - Professional layout
       executiveSheet.pageSetup = {
@@ -798,9 +864,8 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       detailSheet.getColumn(12).width = 15; // Waste Factor (%)
       detailSheet.getColumn(13).width = 15; // Waste Amount
       detailSheet.getColumn(14).width = 18; // Material Cost/Unit
-      detailSheet.getColumn(15).width = 18; // Equipment Cost/Unit
+      detailSheet.getColumn(15).width = 18; // Equipment Cost
       detailSheet.getColumn(16).width = 30; // Description
-      detailSheet.getColumn(17).width = 30; // Field Notes/Comments
       
       // Header row - reorganized to group quantity columns together
       const detailHeaders = [
@@ -818,9 +883,8 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         'Waste Factor (%)',
         'Waste Amount',
         'Material Cost/Unit',
-        'Equipment Cost/Unit',
-        'Description',
-        'Field Notes/Comments'
+        'Equipment Cost',
+        'Description'
       ];
       
       const detailHeaderRowNum = 1;
@@ -946,8 +1010,8 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         // Page Reference
         detailSheet.getCell(rowNum, col++).value = `P${pageData.pageNumber}`;
         
-        // Timestamp
-        detailSheet.getCell(rowNum, col++).value = formatTimestamp(measurement.timestamp);
+        // Timestamp - use condition creation date
+        detailSheet.getCell(rowNum, col++).value = formatTimestamp(condition.createdAt);
         
         // Waste Factor (%)
         const wasteFactorCell = detailSheet.getCell(rowNum, col++);
@@ -973,7 +1037,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         }
         materialCostCell.style = rowStyle;
         
-        // Equipment Cost/Unit
+        // Equipment Cost
         const equipmentCostCell = detailSheet.getCell(rowNum, col++);
         if (condition.equipmentCost) {
           equipmentCostCell.value = condition.equipmentCost;
@@ -981,11 +1045,8 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         }
         equipmentCostCell.style = rowStyle;
         
-        // Description
-        detailSheet.getCell(rowNum, col++).value = measurement.description || '';
-        
-        // Field Notes/Comments
-        detailSheet.getCell(rowNum, col++).value = '';
+        // Description - use condition description
+        detailSheet.getCell(rowNum, col++).value = condition.description || '';
         
         // Apply row style to all cells
         for (let c = 1; c <= detailHeaders.length; c++) {
@@ -1055,9 +1116,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         
         // Description (skip for totals)
         col++;
-        
-        // Field Notes/Comments
-        detailSheet.getCell(detailRowNum, col++).value = '';
         
         // Fill rest of row with condition summary style
         for (let c = 1; c <= detailHeaders.length; c++) {
