@@ -171,7 +171,9 @@ export function ChatTab({
   // Add initial system message
   useEffect(() => {
     if (messages.length === 0 && isOllamaAvailable) {
-      const greeting = userName ? `Hello ${userName}!` : 'Hello!';
+      // Extract first name from full name (split by space and take first part)
+      const firstName = userName ? userName.split(' ')[0] : null;
+      const greeting = firstName ? `Hello ${firstName}!` : 'Hello!';
       const systemMessage: ChatMessage = {
         id: 'system-welcome',
         role: 'assistant',
