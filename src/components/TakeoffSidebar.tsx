@@ -1171,15 +1171,15 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       detailSheet.properties.summaryRight = false;
       
       
-      // Freeze panes (freeze first row and first 4 columns: Condition, Quantity, Unit, Area Value)
+      // Freeze panes (freeze first row and first 3 columns: Condition, Quantity, Unit)
       // ySplit: 1 means freeze the first row (header row)
-      // xSplit: 4 means freeze columns A through D
+      // xSplit: 3 means freeze columns A through C
       detailSheet.views = [{
         state: 'frozen',
-        xSplit: 4,
+        xSplit: 3,
         ySplit: 1, // This freezes row 1 (header row)
-        topLeftCell: 'E2',
-        activeCell: 'E2'
+        topLeftCell: 'D2',
+        activeCell: 'D2'
       }];
       
       // No auto-filter (removed per user request)
