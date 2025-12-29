@@ -407,7 +407,11 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       const formatTimestamp = (timestamp: string | number | undefined): string => {
         if (!timestamp) return 'N/A';
         try {
-          const date = typeof timestamp === 'string' ? new Date(timestamp) : new Date(timestamp);
+          // Timestamps are stored as Unix milliseconds as strings (e.g., "1703123456789")
+          // Convert string to number first, then create Date
+          const timestampNum = typeof timestamp === 'string' ? parseInt(timestamp, 10) : timestamp;
+          if (isNaN(timestampNum)) return 'N/A';
+          const date = new Date(timestampNum);
           if (isNaN(date.getTime())) return 'N/A';
           return date.toLocaleString();
         } catch {
@@ -480,33 +484,60 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         }
       };
       
-      // 1. EXECUTIVE SUMMARY SHEET
+      // 1. EXECUTIVE SUMMARY SHEET - Professional Layout
       const executiveSheet = workbook.addWorksheet('Executive Summary');
-      executiveSheet.getColumn(1).width = 30;
-      executiveSheet.getColumn(2).width = 60; // Increased width for title
+      executiveSheet.getColumn(1).width = 28;
+      executiveSheet.getColumn(2).width = 50;
       
       let row = 1;
       
-      // Title - merged and styled with wrap text
+      // Top margin spacing
+      executiveSheet.getRow(row).height = 15;
+      row++;
+      
+      // Title - Professional centered header
       executiveSheet.mergeCells(`A${row}:B${row}`);
       const titleCell = executiveSheet.getCell(`A${row}`);
-      titleCell.value = 'MERIDIAN TAKEOFF - PROFESSIONAL CONSTRUCTION TAKEOFF REPORT';
+      titleCell.value = 'MERIDIAN TAKEOFF - TAKEOFF REPORT';
       titleCell.style = {
-        ...titleStyle,
-        alignment: { ...titleStyle.alignment, wrapText: true, vertical: 'top' }
+        font: { bold: true, size: 18, color: { argb: 'FF1F2937' } },
+        alignment: { horizontal: 'center', vertical: 'middle' },
+        fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } }
       };
-      // Set row height to accommodate wrapped text
-      executiveSheet.getRow(row).height = 30;
+      executiveSheet.getRow(row).height = 35;
       row += 2;
       
-      // Executive Summary header
-      executiveSheet.getCell(`A${row}`).value = 'EXECUTIVE SUMMARY';
-      executiveSheet.getCell(`A${row}`).style = sectionHeaderStyle;
+      // Executive Summary header with underline effect
+      executiveSheet.mergeCells(`A${row}:B${row}`);
+      const summaryHeaderCell = executiveSheet.getCell(`A${row}`);
+      summaryHeaderCell.value = 'EXECUTIVE SUMMARY';
+      summaryHeaderCell.style = {
+        font: { bold: true, size: 14, color: { argb: 'FF111827' } },
+        alignment: { horizontal: 'left', vertical: 'middle' },
+        fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F4F6' } },
+        border: {
+          bottom: { style: 'medium', color: { argb: 'FF3B82F6' } }
+        }
+      };
+      executiveSheet.getRow(row).height = 25;
       row += 2;
       
-      // Project Information section
-      executiveSheet.getCell(`A${row}`).value = 'Project Information';
-      executiveSheet.getCell(`A${row}`).style = sectionHeaderStyle;
+      // Project Information section - Professional table format
+      executiveSheet.mergeCells(`A${row}:B${row}`);
+      const projectInfoHeader = executiveSheet.getCell(`A${row}`);
+      projectInfoHeader.value = 'Project Information';
+      projectInfoHeader.style = {
+        font: { bold: true, size: 12, color: { argb: 'FF374151' } },
+        alignment: { horizontal: 'left', vertical: 'middle' },
+        fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9FAFB' } },
+        border: {
+          top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+        }
+      };
+      executiveSheet.getRow(row).height = 22;
       row++;
       
       const projectInfo = [
@@ -519,65 +550,198 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         ['Contact Person', currentProject?.contactPerson || 'N/A'],
         ['Contact Email', currentProject?.contactEmail || 'N/A'],
         ['Contact Phone', currentProject?.contactPhone || 'N/A'],
-        ['Estimated Value', currentProject?.estimatedValue ? `$${currentProject.estimatedValue.toFixed(2)}` : 'N/A'],
+        ['Estimated Value', currentProject?.estimatedValue ? `$${currentProject.estimatedValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'N/A'],
         ['Start Date', formatDate(currentProject?.startDate)],
         ['Created', formatDate(currentProject?.createdAt)],
         ['Last Modified', formatDate(currentProject?.lastModified)],
-        ['Report Date', new Date().toLocaleDateString()],
-        ['Generated Time', new Date().toLocaleTimeString()]
+        ['Report Date', new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })],
+        ['Generated Time', new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })]
       ];
       
-      projectInfo.forEach(([label, value]) => {
-        executiveSheet.getCell(`A${row}`).value = label;
-        executiveSheet.getCell(`B${row}`).value = value;
+      projectInfo.forEach(([label, value], index) => {
+        const isEven = index % 2 === 0;
+        const labelCell = executiveSheet.getCell(`A${row}`);
+        const valueCell = executiveSheet.getCell(`B${row}`);
+        
+        labelCell.value = label;
+        labelCell.style = {
+          font: { size: 11, color: { argb: 'FF6B7280' } },
+          alignment: { horizontal: 'left', vertical: 'middle' },
+          fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: isEven ? 'FFFFFFFF' : 'FFF9FAFB' } },
+          border: {
+            top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+          }
+        };
+        
+        valueCell.value = value;
+        valueCell.style = {
+          font: { size: 11, color: { argb: 'FF111827' }, bold: label === 'Project Name' || label === 'Estimated Value' },
+          alignment: { horizontal: 'left', vertical: 'middle' },
+          fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: isEven ? 'FFFFFFFF' : 'FFF9FAFB' } },
+          border: {
+            top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+          }
+        };
+        
+        executiveSheet.getRow(row).height = 20;
         row++;
       });
       
       row++;
       
-      // Key Performance Indicators
-      executiveSheet.getCell(`A${row}`).value = 'Key Performance Indicators';
-      executiveSheet.getCell(`A${row}`).style = sectionHeaderStyle;
+      // Key Performance Indicators - Professional table format
+      executiveSheet.mergeCells(`A${row}:B${row}`);
+      const kpiHeader = executiveSheet.getCell(`A${row}`);
+      kpiHeader.value = 'Key Performance Indicators';
+      kpiHeader.style = {
+        font: { bold: true, size: 12, color: { argb: 'FF374151' } },
+        alignment: { horizontal: 'left', vertical: 'middle' },
+        fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9FAFB' } },
+        border: {
+          top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+        }
+      };
+      executiveSheet.getRow(row).height = 22;
       row++;
       
-      executiveSheet.getCell(`A${row}`).value = 'Total Conditions';
-      executiveSheet.getCell(`B${row}`).value = conditionIds.length;
+      const kpiData = [
+        ['Total Conditions', conditionIds.length],
+        ['Total Pages with Measurements', sortedPages.length],
+        ['Total Measurements', conditionIds.reduce((sum, id) => sum + Object.values(reportData[id].pages).reduce((pageSum, page) => pageSum + page.measurements.length, 0), 0)]
+      ];
+      
+      kpiData.forEach(([label, value], index) => {
+        const isEven = index % 2 === 0;
+        const labelCell = executiveSheet.getCell(`A${row}`);
+        const valueCell = executiveSheet.getCell(`B${row}`);
+        
+        labelCell.value = label;
+        labelCell.style = {
+          font: { size: 11, color: { argb: 'FF6B7280' } },
+          alignment: { horizontal: 'left', vertical: 'middle' },
+          fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: isEven ? 'FFFFFFFF' : 'FFF9FAFB' } },
+          border: {
+            top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+          }
+        };
+        
+        valueCell.value = value;
+        valueCell.style = {
+          font: { size: 11, color: { argb: 'FF111827' }, bold: true },
+          alignment: { horizontal: 'left', vertical: 'middle' },
+          fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: isEven ? 'FFFFFFFF' : 'FFF9FAFB' } },
+          border: {
+            top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+          }
+        };
+        
+        executiveSheet.getRow(row).height = 20;
+        row++;
+      });
+      
       row++;
       
-      executiveSheet.getCell(`A${row}`).value = 'Total Pages with Measurements';
-      executiveSheet.getCell(`B${row}`).value = sortedPages.length;
-      row++;
-      
-      executiveSheet.getCell(`A${row}`).value = 'Total Measurements';
-      executiveSheet.getCell(`B${row}`).value = conditionIds.reduce((sum, id) => sum + Object.values(reportData[id].pages).reduce((pageSum, page) => pageSum + page.measurements.length, 0), 0);
-      row += 2;
-      
-      // Cost Analysis Summary
-      executiveSheet.getCell(`A${row}`).value = 'Cost Analysis Summary';
-      executiveSheet.getCell(`A${row}`).style = sectionHeaderStyle;
+      // Cost Analysis Summary - Professional table format
+      executiveSheet.mergeCells(`A${row}:B${row}`);
+      const costHeader = executiveSheet.getCell(`A${row}`);
+      costHeader.value = 'Cost Analysis Summary';
+      costHeader.style = {
+        font: { bold: true, size: 12, color: { argb: 'FF374151' } },
+        alignment: { horizontal: 'left', vertical: 'middle' },
+        fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9FAFB' } },
+        border: {
+          top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+        }
+      };
+      executiveSheet.getRow(row).height = 22;
       row++;
       
       const costInfo = [
-        ['Total Project Cost', `$${costBreakdown.summary.totalCost.toFixed(2)}`],
-        ['Material Cost', `$${costBreakdown.summary.totalMaterialCost.toFixed(2)}`],
-        ['Equipment Cost', `$${costBreakdown.summary.totalEquipmentCost.toFixed(2)}`],
-        ['Waste Factor Cost', `$${costBreakdown.summary.totalWasteCost.toFixed(2)}`],
-        ['Subtotal', `$${costBreakdown.summary.subtotal.toFixed(2)}`],
-        ['Profit Margin', `${costBreakdown.summary.profitMarginPercent}% ($${costBreakdown.summary.profitMarginAmount.toFixed(2)})`],
+        ['Material Cost', costBreakdown.summary.totalMaterialCost],
+        ['Equipment Cost', costBreakdown.summary.totalEquipmentCost],
+        ['Waste Factor Cost', costBreakdown.summary.totalWasteCost],
+        ['Subtotal', costBreakdown.summary.subtotal],
+        ['Profit Margin', costBreakdown.summary.profitMarginAmount, `${costBreakdown.summary.profitMarginPercent}%`],
+        ['Total Project Cost', costBreakdown.summary.totalCost, true], // true = highlight this row
         ['Conditions with Costs', costBreakdown.summary.conditionsWithCosts]
       ];
       
-      costInfo.forEach(([label, value]) => {
-        executiveSheet.getCell(`A${row}`).value = label;
-        executiveSheet.getCell(`B${row}`).value = value;
+      costInfo.forEach(([label, value, extra, isHighlighted], index) => {
+        const isEven = index % 2 === 0;
+        const isTotalRow = isHighlighted;
+        const labelCell = executiveSheet.getCell(`A${row}`);
+        const valueCell = executiveSheet.getCell(`B${row}`);
+        
+        labelCell.value = label;
+        labelCell.style = {
+          font: { size: 11, color: { argb: isTotalRow ? 'FF111827' : 'FF6B7280' }, bold: isTotalRow },
+          alignment: { horizontal: 'left', vertical: 'middle' },
+          fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: isTotalRow ? 'FFE5E7EB' : (isEven ? 'FFFFFFFF' : 'FFF9FAFB') } },
+          border: {
+            top: { style: isTotalRow ? 'medium' : 'thin', color: { argb: isTotalRow ? 'FF3B82F6' : 'FFE5E7EB' } },
+            bottom: { style: isTotalRow ? 'medium' : 'thin', color: { argb: isTotalRow ? 'FF3B82F6' : 'FFE5E7EB' } },
+            left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+          }
+        };
+        
+        if (label === 'Profit Margin' && extra) {
+          valueCell.value = `${extra} ($${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`;
+        } else if (typeof value === 'number') {
+          valueCell.value = `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        } else {
+          valueCell.value = value;
+        }
+        
+        valueCell.style = {
+          font: { size: 11, color: { argb: isTotalRow ? 'FF111827' : 'FF111827' }, bold: isTotalRow || label === 'Profit Margin' },
+          alignment: { horizontal: 'left', vertical: 'middle' },
+          fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: isTotalRow ? 'FFE5E7EB' : (isEven ? 'FFFFFFFF' : 'FFF9FAFB') } },
+          border: {
+            top: { style: isTotalRow ? 'medium' : 'thin', color: { argb: isTotalRow ? 'FF3B82F6' : 'FFE5E7EB' } },
+            bottom: { style: isTotalRow ? 'medium' : 'thin', color: { argb: isTotalRow ? 'FF3B82F6' : 'FFE5E7EB' } },
+            left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+          }
+        };
+        
+        executiveSheet.getRow(row).height = isTotalRow ? 25 : 20;
         row++;
       });
       
-      // Print settings
+      // Bottom margin spacing
+      executiveSheet.getRow(row).height = 15;
+      
+      // Print settings - Professional layout
       executiveSheet.pageSetup = {
-        margins: { left: 0.7, right: 0.7, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 },
-        printOptions: { gridLines: false, horizontalCentered: true }
+        margins: { left: 0.5, right: 0.5, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 },
+        printOptions: { gridLines: false, horizontalCentered: true, verticalCentered: false },
+        paperSize: 9, // A4
+        fitToPage: false,
+        scale: 100
       };
+      
+      // Set print area to exclude excessive whitespace
+      const lastRow = row - 1;
+      executiveSheet.pageSetup.printArea = `A1:B${lastRow}`;
 
       onExportStatusUpdate?.('excel', 15);
 
@@ -619,43 +783,43 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       
       const detailSheet = workbook.addWorksheet('Quantities');
       
-      // Set column widths - reorganized to group related columns
+      // Set column widths - reorganized to group quantity columns together
       detailSheet.getColumn(1).width = 25; // Condition (A)
       detailSheet.getColumn(2).width = 10; // Type
       detailSheet.getColumn(3).width = 15; // Value (with cutouts already calculated)
       detailSheet.getColumn(4).width = 8;  // Unit
-      detailSheet.getColumn(5).width = 15; // Measurement Unit (renamed from Measurement Type)
-      detailSheet.getColumn(6).width = 15; // Sheet Number
-      detailSheet.getColumn(7).width = 35; // Sheet Name - increased width with wrap text
-      detailSheet.getColumn(8).width = 12; // Page Reference
-      detailSheet.getColumn(9).width = 15; // Area Value (SF)
-      detailSheet.getColumn(10).width = 15; // Perimeter (LF)
-      detailSheet.getColumn(11).width = 15; // Height (LF)
-      detailSheet.getColumn(12).width = 20; // Timestamp
-      detailSheet.getColumn(13).width = 30; // Description
-      detailSheet.getColumn(14).width = 15; // Waste Factor (%)
-      detailSheet.getColumn(15).width = 18; // Material Cost/Unit
-      detailSheet.getColumn(16).width = 18; // Equipment Cost/Unit
+      detailSheet.getColumn(5).width = 15; // Area Value (SF) - moved here
+      detailSheet.getColumn(6).width = 15; // Perimeter (LF) - moved here
+      detailSheet.getColumn(7).width = 15; // Height (LF) - moved here
+      detailSheet.getColumn(8).width = 15; // Sheet Number
+      detailSheet.getColumn(9).width = 35; // Sheet Name - increased width with wrap text
+      detailSheet.getColumn(10).width = 12; // Page Reference
+      detailSheet.getColumn(11).width = 20; // Timestamp
+      detailSheet.getColumn(12).width = 15; // Waste Factor (%)
+      detailSheet.getColumn(13).width = 15; // Waste Amount
+      detailSheet.getColumn(14).width = 18; // Material Cost/Unit
+      detailSheet.getColumn(15).width = 18; // Equipment Cost/Unit
+      detailSheet.getColumn(16).width = 30; // Description
       detailSheet.getColumn(17).width = 30; // Field Notes/Comments
       
-      // Header row - reorganized columns
+      // Header row - reorganized to group quantity columns together
       const detailHeaders = [
         'Condition', 
         'Type',
         'Value',
         'Unit',
-        'Measurement Unit',
-        'Sheet Number',
-        'Sheet Name', 
-        'Page Reference', 
         'Area Value (SF)',
         'Perimeter (LF)',
         'Height (LF)',
+        'Sheet Number',
+        'Sheet Name', 
+        'Page Reference', 
         'Timestamp',
-        'Description',
         'Waste Factor (%)',
+        'Waste Amount',
         'Material Cost/Unit',
         'Equipment Cost/Unit',
+        'Description',
         'Field Notes/Comments'
       ];
       
@@ -664,8 +828,8 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         const cell = detailSheet.getCell(detailHeaderRowNum, colIdx + 1);
         cell.value = header;
         cell.style = headerStyle;
-        // Enable wrap text for Sheet Name column (column 7, 0-indexed = 6)
-        if (colIdx === 6) {
+        // Enable wrap text for Sheet Name column (column 9, 0-indexed = 8)
+        if (colIdx === 8) {
           cell.style = {
             ...headerStyle,
             alignment: { ...headerStyle.alignment, wrapText: true }
@@ -740,8 +904,33 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         // Unit
         detailSheet.getCell(rowNum, col++).value = condition.unit;
         
-        // Measurement Unit (renamed from Measurement Type)
-        detailSheet.getCell(rowNum, col++).value = measurement.type;
+        // Area Value (for linear conditions with height) - moved next to Unit
+        const areaValueCell = detailSheet.getCell(rowNum, col++);
+        if (measurement.areaValue) {
+          areaValueCell.value = measurement.areaValue;
+          areaValueCell.numFmt = '#,##0.00';
+        } else if (condition.type === 'linear' && condition.includeHeight && condition.height) {
+          const calculatedArea = (measurement.netCalculatedValue || measurement.calculatedValue) * condition.height;
+          areaValueCell.value = calculatedArea;
+          areaValueCell.numFmt = '#,##0.00';
+        }
+        areaValueCell.style = rowStyle;
+        
+        // Perimeter - moved next to Unit
+        const perimeterCell = detailSheet.getCell(rowNum, col++);
+        if (measurement.perimeterValue) {
+          perimeterCell.value = measurement.perimeterValue;
+          perimeterCell.numFmt = '#,##0.00';
+        }
+        perimeterCell.style = rowStyle;
+        
+        // Height (for linear conditions with height) - moved next to Unit
+        const heightCell = detailSheet.getCell(rowNum, col++);
+        if (condition.type === 'linear' && condition.includeHeight && condition.height) {
+          heightCell.value = condition.height;
+          heightCell.numFmt = '#,##0.00';
+        }
+        heightCell.style = rowStyle;
         
         // Sheet Number
         detailSheet.getCell(rowNum, col++).value = pageData.sheetNumber || '';
@@ -757,45 +946,24 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         // Page Reference
         detailSheet.getCell(rowNum, col++).value = `P${pageData.pageNumber}`;
         
-        // Area Value (for linear conditions with height)
-        const areaValueCell = detailSheet.getCell(rowNum, col++);
-        if (measurement.areaValue) {
-          areaValueCell.value = measurement.areaValue;
-          areaValueCell.numFmt = '#,##0.00';
-        } else if (condition.type === 'linear' && condition.includeHeight && condition.height) {
-          const calculatedArea = (measurement.netCalculatedValue || measurement.calculatedValue) * condition.height;
-          areaValueCell.value = calculatedArea;
-          areaValueCell.numFmt = '#,##0.00';
-        }
-        areaValueCell.style = rowStyle;
-        
-        // Perimeter
-        const perimeterCell = detailSheet.getCell(rowNum, col++);
-        if (measurement.perimeterValue) {
-          perimeterCell.value = measurement.perimeterValue;
-          perimeterCell.numFmt = '#,##0.00';
-        }
-        perimeterCell.style = rowStyle;
-        
-        // Height (for linear conditions with height)
-        const heightCell = detailSheet.getCell(rowNum, col++);
-        if (condition.type === 'linear' && condition.includeHeight && condition.height) {
-          heightCell.value = condition.height;
-          heightCell.numFmt = '#,##0.00';
-        }
-        heightCell.style = rowStyle;
-        
         // Timestamp
         detailSheet.getCell(rowNum, col++).value = formatTimestamp(measurement.timestamp);
         
-        // Description
-        detailSheet.getCell(rowNum, col++).value = measurement.description || '';
-        
-        // Waste Factor
+        // Waste Factor (%)
         const wasteFactorCell = detailSheet.getCell(rowNum, col++);
         wasteFactorCell.value = condition.wasteFactor || 0;
         wasteFactorCell.numFmt = '0.00"%"';
         wasteFactorCell.style = rowStyle;
+        
+        // Waste Amount (calculated waste quantity)
+        const wasteAmountCell = detailSheet.getCell(rowNum, col++);
+        const value = measurement.netCalculatedValue || measurement.calculatedValue;
+        if (condition.wasteFactor && condition.wasteFactor > 0 && value > 0) {
+          const wasteAmount = value * (condition.wasteFactor / 100);
+          wasteAmountCell.value = wasteAmount;
+          wasteAmountCell.numFmt = '#,##0.00';
+        }
+        wasteAmountCell.style = rowStyle;
         
         // Material Cost/Unit
         const materialCostCell = detailSheet.getCell(rowNum, col++);
@@ -812,6 +980,9 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
           equipmentCostCell.numFmt = '"$"#,##0.00';
         }
         equipmentCostCell.style = rowStyle;
+        
+        // Description
+        detailSheet.getCell(rowNum, col++).value = measurement.description || '';
         
         // Field Notes/Comments
         detailSheet.getCell(rowNum, col++).value = '';
@@ -842,10 +1013,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         // Value - will be formula, set after measurements are written
         const valueCol = col++;
         detailSheet.getCell(detailRowNum, col++).value = condition.unit;
-        detailSheet.getCell(detailRowNum, col++).value = ''; // Measurement Unit
-        detailSheet.getCell(detailRowNum, col++).value = ''; // Sheet Number
-        detailSheet.getCell(detailRowNum, col++).value = ''; // Sheet Name
-        detailSheet.getCell(detailRowNum, col++).value = ''; // Page Reference
         
         // Area Value (SF) - formula if condition has includeHeight
         const areaValueCol = col++;
@@ -866,13 +1033,30 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         }
         heightCell.style = conditionSummaryStyle;
         
-        // Skip Timestamp, Description for totals
-        col += 2;
+        // Sheet Number, Sheet Name, Page Reference (empty for totals)
+        detailSheet.getCell(detailRowNum, col++).value = '';
+        detailSheet.getCell(detailRowNum, col++).value = '';
+        detailSheet.getCell(detailRowNum, col++).value = '';
         
-        // Waste Factor, Material Cost, Equipment Cost, Field Notes
+        // Skip Timestamp for totals
+        col++;
+        
+        // Waste Factor (%)
         detailSheet.getCell(detailRowNum, col++).value = condition.wasteFactor || 0;
+        
+        // Waste Amount - will be formula, set after measurements are written
+        const wasteAmountCol = col++;
+        const wasteAmountCell = detailSheet.getCell(detailRowNum, wasteAmountCol);
+        wasteAmountCell.style = conditionSummaryStyle;
+        
+        // Material Cost, Equipment Cost
         detailSheet.getCell(detailRowNum, col++).value = condition.materialCost || '';
         detailSheet.getCell(detailRowNum, col++).value = condition.equipmentCost || '';
+        
+        // Description (skip for totals)
+        col++;
+        
+        // Field Notes/Comments
         detailSheet.getCell(detailRowNum, col++).value = '';
         
         // Fill rest of row with condition summary style
@@ -905,18 +1089,25 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         valueFormulaCell.numFmt = '#,##0.00';
         valueFormulaCell.style = conditionSummaryStyle;
         
-        // Area Value formula (Column I) - only if condition has includeHeight
+        // Area Value formula (Column E) - only if condition has includeHeight
         if (condition.type === 'linear' && condition.includeHeight) {
           const areaValueColLetter = colIndexToLetter(areaValueCol);
           areaValueCell.value = { formula: `SUM(${areaValueColLetter}${measurementStartRow}:${areaValueColLetter}${measurementEndRowActual})` };
           areaValueCell.numFmt = '#,##0.00';
         }
         
-        // Perimeter formula (Column J) - only if condition has includePerimeter
+        // Perimeter formula (Column F) - only if condition has includePerimeter
         if ((condition.type === 'area' || condition.type === 'volume') && condition.includePerimeter) {
           const perimeterColLetter = colIndexToLetter(perimeterCol);
           perimeterCell.value = { formula: `SUM(${perimeterColLetter}${measurementStartRow}:${perimeterColLetter}${measurementEndRowActual})` };
           perimeterCell.numFmt = '#,##0.00';
+        }
+        
+        // Waste Amount formula - sum of waste amounts from measurements
+        if (condition.wasteFactor && condition.wasteFactor > 0) {
+          const wasteAmountColLetter = colIndexToLetter(wasteAmountCol);
+          wasteAmountCell.value = { formula: `SUM(${wasteAmountColLetter}${measurementStartRow}:${wasteAmountColLetter}${measurementEndRowActual})` };
+          wasteAmountCell.numFmt = '#,##0.00';
         }
       });
       
@@ -927,10 +1118,11 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       
       
       // Freeze panes (freeze first row and first 3 columns)
+      // ySplit: 1 means freeze the first row (header row)
       detailSheet.views = [{
         state: 'frozen',
         xSplit: 3,
-        ySplit: 1,
+        ySplit: 1, // This freezes row 1 (header row)
         topLeftCell: 'D2',
         activeCell: 'D2'
       }];
