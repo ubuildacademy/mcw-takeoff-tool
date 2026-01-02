@@ -735,9 +735,12 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
           valueCell.value = { formula: item.formula };
         } else if (item.value !== null && item.value !== undefined) {
           valueCell.value = item.value;
+        } else {
+          valueCell.value = 0;
         }
         
-        // Apply currency formatting - use quoted dollar sign format (consistent with rest of code)
+        // Apply currency formatting BEFORE style to ensure it's set correctly
+        // Using Excel's standard currency format with quoted dollar sign
         valueCell.numFmt = '"$"#,##0.00';
         
         valueCell.style = {
