@@ -690,13 +690,20 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       
       // Store row numbers for formula references
       const costStartRow = row;
+      const materialCostRow = costStartRow;
+      const equipmentCostRow = costStartRow + 1;
+      const wasteCostRow = costStartRow + 2;
+      const subtotalRow = costStartRow + 3;
+      const profitMarginRow = costStartRow + 4;
+      const totalCostRow = costStartRow + 5;
+      
       const costInfo = [
-        { label: 'Material Cost', formula: null, value: costBreakdown.summary.totalMaterialCost },
-        { label: 'Equipment Cost', formula: null, value: costBreakdown.summary.totalEquipmentCost },
-        { label: 'Waste Factor Cost', formula: null, value: costBreakdown.summary.totalWasteCost },
-        { label: 'Subtotal', formula: `SUM(B${costStartRow}:B${costStartRow + 2})`, value: null },
-        { label: 'Profit Margin', formula: null, value: costBreakdown.summary.profitMarginAmount, percent: costBreakdown.summary.profitMarginPercent },
-        { label: 'Total Project Cost', formula: `B${costStartRow + 3}+B${costStartRow + 4}`, value: null, isHighlighted: true }
+        { label: 'Material Cost', formula: null, value: costBreakdown.summary.totalMaterialCost, row: materialCostRow },
+        { label: 'Equipment Cost', formula: null, value: costBreakdown.summary.totalEquipmentCost, row: equipmentCostRow },
+        { label: 'Waste Factor Cost', formula: null, value: costBreakdown.summary.totalWasteCost, row: wasteCostRow },
+        { label: 'Subtotal', formula: `SUM(B${materialCostRow}:B${wasteCostRow})`, value: null, row: subtotalRow },
+        { label: 'Profit Margin', formula: `B${subtotalRow}*${(costBreakdown.summary.profitMarginPercent || 0) / 100}`, value: costBreakdown.summary.profitMarginAmount, percent: costBreakdown.summary.profitMarginPercent, row: profitMarginRow },
+        { label: 'Total Project Cost', formula: `B${subtotalRow}+B${profitMarginRow}`, value: null, isHighlighted: true, row: totalCostRow }
       ];
       
       costInfo.forEach((item, index) => {
@@ -705,7 +712,12 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         const labelCell = executiveSheet.getCell(`A${row}`);
         const valueCell = executiveSheet.getCell(`B${row}`);
         
-        labelCell.value = item.label;
+        // For Profit Margin, include percentage in the label
+        const displayLabel = item.label === 'Profit Margin' && item.percent 
+          ? `Profit Margin (${item.percent}%)`
+          : item.label;
+        
+        labelCell.value = displayLabel;
         labelCell.style = {
           font: { size: 11, color: { argb: isTotalRow ? 'FF111827' : 'FF6B7280' }, bold: isTotalRow },
           alignment: { horizontal: 'left', vertical: 'middle' },
@@ -718,12 +730,10 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
           }
         };
         
-        // Set value or formula
+        // Set value or formula - all currency values should be numeric
         if (item.formula) {
           valueCell.value = { formula: item.formula };
           valueCell.numFmt = '"$"#,##0.00';
-        } else if (item.label === 'Profit Margin' && item.percent) {
-          valueCell.value = `${item.percent}% ($${item.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`;
         } else if (item.value !== null && item.value !== undefined) {
           valueCell.value = item.value;
           valueCell.numFmt = '"$"#,##0.00';
@@ -731,7 +741,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         
         valueCell.style = {
           font: { size: 11, color: { argb: isTotalRow ? 'FF111827' : 'FF111827' }, bold: isTotalRow || item.label === 'Profit Margin' },
-          alignment: { horizontal: 'left', vertical: 'middle' },
+          alignment: { horizontal: 'right', vertical: 'middle' },
           fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: isTotalRow ? 'FFE5E7EB' : (isEven ? 'FFFFFFFF' : 'FFF9FAFB') } },
           border: {
             top: { style: isTotalRow ? 'medium' : 'thin', color: { argb: isTotalRow ? 'FF3B82F6' : 'FFE5E7EB' } },
