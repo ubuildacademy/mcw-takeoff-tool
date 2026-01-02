@@ -733,11 +733,12 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         // Set value or formula - all currency values should be numeric
         if (item.formula) {
           valueCell.value = { formula: item.formula };
-          valueCell.numFmt = '"$"#,##0.00';
         } else if (item.value !== null && item.value !== undefined) {
           valueCell.value = item.value;
-          valueCell.numFmt = '"$"#,##0.00';
         }
+        
+        // Apply currency formatting - use Excel's built-in currency format
+        valueCell.numFmt = '$#,##0.00';
         
         valueCell.style = {
           font: { size: 11, color: { argb: isTotalRow ? 'FF111827' : 'FF111827' }, bold: isTotalRow || item.label === 'Profit Margin' },
