@@ -246,6 +246,17 @@ router.post('/', async (req, res) => {
       validatedHeight = heightValue;
     }
 
+    // Normalize equipmentCost - convert to number or null
+    let normalizedEquipmentCost: number | null | undefined = equipmentCost;
+    if (equipmentCost !== undefined) {
+      if (equipmentCost === null || equipmentCost === '') {
+        normalizedEquipmentCost = null;
+      } else {
+        const numValue = typeof equipmentCost === 'string' ? parseFloat(equipmentCost) : equipmentCost;
+        normalizedEquipmentCost = isNaN(numValue) ? null : numValue;
+      }
+    }
+
     const id = uuidv4();
     const now = new Date().toISOString();
     
@@ -260,7 +271,7 @@ router.post('/', async (req, res) => {
       description,
       laborCost,
       materialCost,
-      equipmentCost,
+      equipmentCost: normalizedEquipmentCost,
       includePerimeter: includePerimeter !== undefined ? includePerimeter : false,
       depth: validatedDepth,
       includeHeight: includeHeight !== undefined ? includeHeight : false,
@@ -398,6 +409,17 @@ router.put('/:id', async (req, res) => {
       validatedHeight = heightValue;
     }
 
+    // Normalize equipmentCost - convert to number or null, handle 0 explicitly
+    let normalizedEquipmentCost: number | null | undefined = equipmentCost;
+    if (equipmentCost !== undefined) {
+      if (equipmentCost === null || equipmentCost === '') {
+        normalizedEquipmentCost = null;
+      } else {
+        const numValue = typeof equipmentCost === 'string' ? parseFloat(equipmentCost) : equipmentCost;
+        normalizedEquipmentCost = isNaN(numValue) ? null : numValue;
+      }
+    }
+
     // Update the condition
     const updatedCondition = {
       ...existingCondition,
@@ -409,7 +431,7 @@ router.put('/:id', async (req, res) => {
       ...(description !== undefined && { description }),
       ...(laborCost !== undefined && { laborCost }),
       ...(materialCost !== undefined && { materialCost }),
-      ...(equipmentCost !== undefined && { equipmentCost }),
+      ...(normalizedEquipmentCost !== undefined && { equipmentCost: normalizedEquipmentCost }),
       ...(includePerimeter !== undefined && { includePerimeter }),
       ...(depth !== undefined && { depth }),
       ...(includeHeight !== undefined && { includeHeight }),
@@ -427,9 +449,22 @@ router.put('/:id', async (req, res) => {
       success: true, 
       condition: savedCondition 
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error updating condition:', error);
-    return res.status(500).json({ error: 'Failed to update condition' });
+    // Log more details for debugging
+    if (error.message) {
+      console.error('Error message:', error.message);
+    }
+    if (error.details) {
+      console.error('Error details:', error.details);
+    }
+    if (error.hint) {
+      console.error('Error hint:', error.hint);
+    }
+    return res.status(500).json({ 
+      error: 'Failed to update condition',
+      details: error.message || 'Unknown error'
+    });
   }
 });
 
