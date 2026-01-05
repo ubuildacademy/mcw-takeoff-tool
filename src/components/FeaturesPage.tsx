@@ -301,7 +301,7 @@ const FeaturesPage: React.FC = () => {
                 Smart Cost Calculations
               </h3>
               <p className="text-lg text-slate-600 mb-6">
-                Build accurate project budgets with waste factors, material costs, and equipment costs. 
+                Build accurate project budgets with waste factors and material costs. 
                 Our intelligent calculations help you price competitively while maintaining profitability.
               </p>
               <div className="space-y-4">
@@ -312,8 +312,8 @@ const FeaturesPage: React.FC = () => {
                     </svg>
                   </div>
                   <div>
-                    <h4 className="font-semibold text-slate-900">Material & Equipment Costs</h4>
-                    <p className="text-slate-600">Track material costs per unit and equipment costs for accurate budgeting</p>
+                    <h4 className="font-semibold text-slate-900">Material Costs</h4>
+                    <p className="text-slate-600">Track material costs per unit for accurate budgeting</p>
                   </div>
                 </div>
                 <div className="flex items-start space-x-3">
@@ -350,29 +350,21 @@ const FeaturesPage: React.FC = () => {
                       <span className="text-sm font-medium text-slate-900">$8,640</span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-sm text-slate-600">Labor (32 hours)</span>
-                      <span className="text-sm font-medium text-slate-900">$2,560</span>
-                    </div>
-                    <div className="flex justify-between items-center">
                       <span className="text-sm text-slate-600">Waste Factor (5%)</span>
-                      <span className="text-sm font-medium text-slate-900">$560</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-slate-600">Equipment</span>
-                      <span className="text-sm font-medium text-slate-900">$800</span>
+                      <span className="text-sm font-medium text-slate-900">$432</span>
                     </div>
                     <div className="border-t border-slate-200 pt-3">
                       <div className="flex justify-between items-center">
                         <span className="font-semibold text-slate-900">Subtotal</span>
-                        <span className="font-semibold text-slate-900">$12,560</span>
+                        <span className="font-semibold text-slate-900">$9,072</span>
                       </div>
                       <div className="flex justify-between items-center">
                         <span className="text-sm text-slate-600">Profit Margin (15%)</span>
-                        <span className="text-sm text-green-600 font-medium">$1,884</span>
+                        <span className="text-sm text-green-600 font-medium">$1,361</span>
                       </div>
                       <div className="flex justify-between items-center pt-2 border-t border-slate-200">
                         <span className="text-lg font-bold text-slate-900">Total Cost</span>
-                        <span className="text-lg font-bold text-blue-600">$14,444</span>
+                        <span className="text-lg font-bold text-blue-600">$10,433</span>
                       </div>
                     </div>
                   </div>
@@ -469,7 +461,7 @@ const FeaturesPage: React.FC = () => {
               </div>
               <h3 className="text-xl font-semibold text-slate-900 mb-3">Custom Conditions</h3>
               <p className="text-slate-600">
-                Create custom takeoff conditions with waste factors, material costs, and equipment costs. 
+                Create custom takeoff conditions with waste factors and material costs. 
                 Build a comprehensive library for each project type.
               </p>
             </div>

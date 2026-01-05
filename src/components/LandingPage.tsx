@@ -248,7 +248,7 @@ const LandingPage: React.FC = () => {
               </div>
               <h3 className="text-xl font-semibold text-slate-900 mb-2">Smart Calculations</h3>
               <p className="text-slate-600">
-                Automated quantity calculations with labor rates, waste factors, and cost analysis. Build accurate project budgets with customizable formulas.
+                Automated quantity calculations with waste factors, material costs, and profit margins. Build accurate project budgets with customizable formulas.
               </p>
             </div>
 
