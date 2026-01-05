@@ -26,8 +26,8 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
     wasteFactor: editingCondition?.wasteFactor?.toString() || '',
     color: editingCondition?.color || generateRandomColor(),
     description: editingCondition?.description || '',
-    materialCost: editingCondition?.materialCost?.toString() || '',
-    equipmentCost: editingCondition?.equipmentCost?.toString() || '',
+    materialCost: editingCondition?.materialCost != null ? editingCondition.materialCost.toString() : '',
+    equipmentCost: editingCondition?.equipmentCost != null ? editingCondition.equipmentCost.toString() : '',
     includePerimeter: editingCondition?.includePerimeter || false,
     depth: editingCondition?.depth ? formatDepthOutput(editingCondition.depth) : '',
     includeHeight: editingCondition?.includeHeight || false,
@@ -509,8 +509,11 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
               type="number"
               min="0"
               step="0.01"
-              value={formData.materialCost}
-              onChange={(e) => handleInputChange('materialCost', e.target.value)}
+              value={formData.materialCost || ''}
+              onChange={(e) => {
+                const value = e.target.value;
+                handleInputChange('materialCost', value === '' ? '' : value);
+              }}
               placeholder="0.00"
             />
           </div>
@@ -522,8 +525,11 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
               type="number"
               min="0"
               step="0.01"
-              value={formData.equipmentCost}
-              onChange={(e) => handleInputChange('equipmentCost', e.target.value)}
+              value={formData.equipmentCost || ''}
+              onChange={(e) => {
+                const value = e.target.value;
+                handleInputChange('equipmentCost', value === '' ? '' : value);
+              }}
               placeholder="0.00"
             />
             <p className="text-xs text-gray-500 mt-1">
