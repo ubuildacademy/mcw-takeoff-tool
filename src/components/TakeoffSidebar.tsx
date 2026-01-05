@@ -739,10 +739,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
           valueCell.value = 0;
         }
         
-        // Apply currency formatting BEFORE style to ensure it's set correctly
-        // Using Excel's standard currency format with quoted dollar sign
-        valueCell.numFmt = '"$"#,##0.00';
-        
         valueCell.style = {
           font: { size: 11, color: { argb: isTotalRow ? 'FF111827' : 'FF111827' }, bold: isTotalRow || item.label === 'Profit Margin' },
           alignment: { horizontal: 'right', vertical: 'middle' },
@@ -754,6 +750,10 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
             right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
           }
         };
+        
+        // Apply currency formatting AFTER style to ensure it persists
+        // Using Excel's standard currency format
+        valueCell.numFmt = '$#,##0.00';
         
         executiveSheet.getRow(row).height = isTotalRow ? 25 : 20;
         row++;
