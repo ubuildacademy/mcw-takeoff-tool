@@ -514,15 +514,17 @@ export async function exportPagesWithMeasurementsToPDF(
           const baseViewportHeight = baseViewport.height;
           
           // Draw measurements on UNROTATED page using base viewport dimensions
-          // Coordinates are normalized to rotation 0, so use base dimensions
+          // Coordinates are normalized to rotation 0, so use base dimensions for scaling
+          // BUT use originalHeight for Y-flip (pdf-lib uses actual page dimensions)
           for (const measurement of pageMeasurement.measurements) {
-            await drawMeasurement(addedPage, measurement, baseViewportHeight, baseViewportWidth, baseViewportHeight);
+            await drawMeasurement(addedPage, measurement, originalHeight, baseViewportWidth, baseViewportHeight);
           }
 
           // Draw annotations on the page
+          // Use originalHeight for Y-flip, baseViewport dimensions for coordinate scaling
           if (pageMeasurement.annotations && pageMeasurement.annotations.length > 0) {
             for (const annotation of pageMeasurement.annotations) {
-              await drawAnnotation(addedPage, annotation, baseViewportHeight, baseViewportWidth, baseViewportHeight);
+              await drawAnnotation(addedPage, annotation, originalHeight, baseViewportWidth, baseViewportHeight);
             }
           }
 
