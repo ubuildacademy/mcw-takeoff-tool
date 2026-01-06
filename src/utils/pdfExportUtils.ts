@@ -445,6 +445,422 @@ async function drawAnnotation(
 }
 
 /**
+ * Transform normalized coordinates (0-1) to viewport coordinates based on rotation
+ */
+function transformCoordinates(
+  point: { x: number; y: number },
+  viewport: { width: number; height: number },
+  rotation: number
+): { x: number; y: number } {
+  const normalizedX = point.x;
+  const normalizedY = point.y;
+  
+  let canvasX: number, canvasY: number;
+  
+  if (rotation === 0) {
+    canvasX = normalizedX * viewport.width;
+    canvasY = normalizedY * viewport.height;
+  } else if (rotation === 90) {
+    canvasX = viewport.width * (1 - normalizedY);
+    canvasY = viewport.height * normalizedX;
+  } else if (rotation === 180) {
+    canvasX = viewport.width * (1 - normalizedX);
+    canvasY = viewport.height * (1 - normalizedY);
+  } else if (rotation === 270) {
+    canvasX = viewport.width * normalizedY;
+    canvasY = viewport.height * (1 - normalizedX);
+  } else {
+    canvasX = normalizedX * viewport.width;
+    canvasY = normalizedY * viewport.height;
+  }
+  
+  return { x: canvasX, y: canvasY };
+}
+
+/**
+ * Render a measurement to SVG element
+ */
+function renderMeasurementToSVG(
+  svg: SVGSVGElement,
+  measurement: TakeoffMeasurement,
+  viewport: { width: number; height: number },
+  rotation: number
+): void {
+  if (!measurement.pdfCoordinates || measurement.pdfCoordinates.length === 0) return;
+  
+  const transformedPoints = measurement.pdfCoordinates.map(p => 
+    transformCoordinates(p, viewport, rotation)
+  );
+  
+  const strokeColor = measurement.conditionColor || '#000000';
+  const strokeWidth = '2';
+  
+  switch (measurement.type) {
+    case 'linear':
+      if (transformedPoints.length >= 2) {
+        // Draw polyline
+        const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+        const pointString = transformedPoints.map(p => `${p.x},${p.y}`).join(' ');
+        polyline.setAttribute('points', pointString);
+        polyline.setAttribute('stroke', strokeColor);
+        polyline.setAttribute('stroke-width', strokeWidth);
+        polyline.setAttribute('fill', 'none');
+        svg.appendChild(polyline);
+        
+        // Draw dots
+        transformedPoints.forEach(point => {
+          const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          circle.setAttribute('cx', point.x.toString());
+          circle.setAttribute('cy', point.y.toString());
+          circle.setAttribute('r', '4');
+          circle.setAttribute('fill', strokeColor);
+          svg.appendChild(circle);
+        });
+        
+        // Add text
+        const startPoint = transformedPoints[0];
+        const endPoint = transformedPoints[transformedPoints.length - 1];
+        const midPoint = {
+          x: (startPoint.x + endPoint.x) / 2,
+          y: (startPoint.y + endPoint.y) / 2
+        };
+        
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('x', midPoint.x.toString());
+        text.setAttribute('y', (midPoint.y - 5).toString());
+        text.setAttribute('fill', strokeColor);
+        text.setAttribute('font-size', '12');
+        text.setAttribute('font-family', 'Arial');
+        text.setAttribute('text-anchor', 'middle');
+        
+        const linearValue = (measurement.unit === 'ft' || measurement.unit === 'feet' || measurement.unit === 'LF' || measurement.unit === 'lf')
+          ? formatFeetAndInches(measurement.calculatedValue)
+          : `${measurement.calculatedValue.toFixed(2)} ${measurement.unit}`;
+        
+        const displayValue = measurement.areaValue
+          ? `${linearValue} LF / ${measurement.areaValue.toFixed(0)} SF`
+          : linearValue;
+        text.textContent = displayValue;
+        svg.appendChild(text);
+      }
+      break;
+      
+    case 'area':
+    case 'volume':
+      if (transformedPoints.length >= 3) {
+        const pointString = transformedPoints.map(p => `${p.x},${p.y}`).join(' ');
+        
+        // Handle cutouts
+        if (measurement.cutouts && measurement.cutouts.length > 0) {
+          const compoundPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          let pathData = `M ${pointString.split(' ')[0]} L ${pointString.split(' ').slice(1).join(' L ')} Z`;
+          
+          measurement.cutouts.forEach((cutout) => {
+            if (cutout.pdfCoordinates && cutout.pdfCoordinates.length >= 3) {
+              const cutoutPoints = cutout.pdfCoordinates.map(p => 
+                transformCoordinates(p, viewport, rotation)
+              );
+              const cutoutPointString = cutoutPoints.map(p => `${p.x},${p.y}`).join(' ');
+              pathData += ` M ${cutoutPointString.split(' ')[0]} L ${cutoutPointString.split(' ').slice(1).join(' L ')} Z`;
+            }
+          });
+          
+          compoundPath.setAttribute('d', pathData);
+          compoundPath.setAttribute('fill-rule', 'evenodd');
+          compoundPath.setAttribute('fill', strokeColor + '40');
+          compoundPath.setAttribute('stroke', strokeColor);
+          compoundPath.setAttribute('stroke-width', strokeWidth);
+          svg.appendChild(compoundPath);
+        } else {
+          const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+          polygon.setAttribute('points', pointString);
+          polygon.setAttribute('fill', strokeColor + '40');
+          polygon.setAttribute('stroke', strokeColor);
+          polygon.setAttribute('stroke-width', strokeWidth);
+          svg.appendChild(polygon);
+        }
+        
+        // Draw dots
+        transformedPoints.forEach(point => {
+          const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          circle.setAttribute('cx', point.x.toString());
+          circle.setAttribute('cy', point.y.toString());
+          circle.setAttribute('r', '4');
+          circle.setAttribute('fill', strokeColor);
+          svg.appendChild(circle);
+        });
+        
+        // Add text
+        const centerX = transformedPoints.reduce((sum, p) => sum + p.x, 0) / transformedPoints.length;
+        const centerY = transformedPoints.reduce((sum, p) => sum + p.y, 0) / transformedPoints.length;
+        
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('x', centerX.toString());
+        text.setAttribute('y', centerY.toString());
+        text.setAttribute('fill', strokeColor);
+        text.setAttribute('font-size', '12');
+        text.setAttribute('font-family', 'Arial');
+        text.setAttribute('font-weight', 'bold');
+        text.setAttribute('text-anchor', 'middle');
+        text.setAttribute('dominant-baseline', 'middle');
+        
+        const displayValue = measurement.netCalculatedValue !== undefined && measurement.netCalculatedValue !== null
+          ? measurement.netCalculatedValue
+          : measurement.calculatedValue;
+        
+        let finalDisplayValue: string;
+        if (measurement.type === 'area') {
+          const areaValue = `${displayValue.toFixed(0)} SF`;
+          finalDisplayValue = measurement.perimeterValue
+            ? `${areaValue} / ${formatFeetAndInches(measurement.perimeterValue)} LF`
+            : areaValue;
+        } else {
+          const volumeValue = `${displayValue.toFixed(0)} CY`;
+          finalDisplayValue = measurement.perimeterValue
+            ? `${volumeValue} / ${formatFeetAndInches(measurement.perimeterValue)} LF`
+            : volumeValue;
+        }
+        text.textContent = finalDisplayValue;
+        svg.appendChild(text);
+      }
+      break;
+      
+    case 'count':
+      if (transformedPoints.length >= 1) {
+        const point = transformedPoints[0];
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', point.x.toString());
+        circle.setAttribute('cy', point.y.toString());
+        circle.setAttribute('r', '8');
+        circle.setAttribute('fill', strokeColor);
+        circle.setAttribute('stroke', '#ffffff');
+        circle.setAttribute('stroke-width', '2');
+        svg.appendChild(circle);
+        
+        // Add count text
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('x', point.x.toString());
+        text.setAttribute('y', (point.y + 4).toString());
+        text.setAttribute('fill', '#ffffff');
+        text.setAttribute('font-size', '14');
+        text.setAttribute('font-family', 'Arial');
+        text.setAttribute('font-weight', 'bold');
+        text.setAttribute('text-anchor', 'middle');
+        text.setAttribute('dominant-baseline', 'middle');
+        
+        const countValue = measurement.calculatedValue >= 1 
+          ? Math.round(measurement.calculatedValue).toString()
+          : '1';
+        text.textContent = countValue;
+        svg.appendChild(text);
+      }
+      break;
+  }
+}
+
+/**
+ * Render an annotation to SVG element
+ */
+function renderAnnotationToSVG(
+  svg: SVGSVGElement,
+  annotation: Annotation,
+  viewport: { width: number; height: number },
+  rotation: number
+): void {
+  if (!annotation.points || annotation.points.length === 0) return;
+  
+  const points = annotation.points.map(p => 
+    transformCoordinates(p, viewport, rotation)
+  );
+  
+  const strokeColor = annotation.color || '#ff0000';
+  const strokeWidth = '3';
+  
+  if (annotation.type === 'text' && annotation.text) {
+    const point = points[0];
+    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    text.setAttribute('x', point.x.toString());
+    text.setAttribute('y', point.y.toString());
+    text.setAttribute('fill', strokeColor);
+    text.setAttribute('font-size', '14');
+    text.setAttribute('font-weight', 'bold');
+    text.textContent = annotation.text;
+    svg.appendChild(text);
+  } else if (annotation.type === 'arrow' && points.length === 2) {
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', points[0].x.toString());
+    line.setAttribute('y1', points[0].y.toString());
+    line.setAttribute('x2', points[1].x.toString());
+    line.setAttribute('y2', points[1].y.toString());
+    line.setAttribute('stroke', strokeColor);
+    line.setAttribute('stroke-width', strokeWidth);
+    svg.appendChild(line);
+    
+    // Draw arrowhead
+    const angle = Math.atan2(points[1].y - points[0].y, points[1].x - points[0].x);
+    const arrowSize = 10;
+    const arrowAngle = Math.PI / 6;
+    
+    const arrowPoint1 = {
+      x: points[1].x - arrowSize * Math.cos(angle - arrowAngle),
+      y: points[1].y - arrowSize * Math.sin(angle - arrowAngle)
+    };
+    const arrowPoint2 = {
+      x: points[1].x - arrowSize * Math.cos(angle + arrowAngle),
+      y: points[1].y - arrowSize * Math.sin(angle + arrowAngle)
+    };
+    
+    const arrowLine1 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    arrowLine1.setAttribute('x1', points[1].x.toString());
+    arrowLine1.setAttribute('y1', points[1].y.toString());
+    arrowLine1.setAttribute('x2', arrowPoint1.x.toString());
+    arrowLine1.setAttribute('y2', arrowPoint1.y.toString());
+    arrowLine1.setAttribute('stroke', strokeColor);
+    arrowLine1.setAttribute('stroke-width', strokeWidth);
+    svg.appendChild(arrowLine1);
+    
+    const arrowLine2 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    arrowLine2.setAttribute('x1', points[1].x.toString());
+    arrowLine2.setAttribute('y1', points[1].y.toString());
+    arrowLine2.setAttribute('x2', arrowPoint2.x.toString());
+    arrowLine2.setAttribute('y2', arrowPoint2.y.toString());
+    arrowLine2.setAttribute('stroke', strokeColor);
+    arrowLine2.setAttribute('stroke-width', strokeWidth);
+    svg.appendChild(arrowLine2);
+  } else if (annotation.type === 'rectangle' && points.length === 2) {
+    const x = Math.min(points[0].x, points[1].x);
+    const y = Math.min(points[0].y, points[1].y);
+    const width = Math.abs(points[1].x - points[0].x);
+    const height = Math.abs(points[1].y - points[0].y);
+    
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', x.toString());
+    rect.setAttribute('y', y.toString());
+    rect.setAttribute('width', width.toString());
+    rect.setAttribute('height', height.toString());
+    rect.setAttribute('stroke', strokeColor);
+    rect.setAttribute('stroke-width', strokeWidth);
+    rect.setAttribute('fill', 'none');
+    svg.appendChild(rect);
+  } else if (annotation.type === 'circle' && points.length === 2) {
+    const cx = (points[0].x + points[1].x) / 2;
+    const cy = (points[0].y + points[1].y) / 2;
+    const rx = Math.abs(points[1].x - points[0].x) / 2;
+    const ry = Math.abs(points[1].y - points[0].y) / 2;
+    
+    const ellipse = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
+    ellipse.setAttribute('cx', cx.toString());
+    ellipse.setAttribute('cy', cy.toString());
+    ellipse.setAttribute('rx', rx.toString());
+    ellipse.setAttribute('ry', ry.toString());
+    ellipse.setAttribute('stroke', strokeColor);
+    ellipse.setAttribute('stroke-width', strokeWidth);
+    ellipse.setAttribute('fill', 'none');
+    svg.appendChild(ellipse);
+  } else if (annotation.type === 'freehand' && points.length >= 2) {
+    const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    const pointString = points.map(p => `${p.x},${p.y}`).join(' ');
+    polyline.setAttribute('points', pointString);
+    polyline.setAttribute('stroke', strokeColor);
+    polyline.setAttribute('stroke-width', strokeWidth);
+    polyline.setAttribute('fill', 'none');
+    svg.appendChild(polyline);
+  }
+}
+
+/**
+ * Render PDF page with markups to canvas and return as image
+ */
+async function renderPageWithMarkupsToCanvas(
+  pdfBytes: Uint8Array,
+  pageNumber: number,
+  measurements: TakeoffMeasurement[],
+  annotations: Annotation[],
+  documentRotation: number,
+  scale: number = 2.0
+): Promise<{ imageData: Uint8Array; width: number; height: number }> {
+  // Load PDF with pdf.js
+  const pdfJsDoc = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
+  const pdfJsPage = await pdfJsDoc.getPage(pageNumber);
+  
+  // Get viewport with rotation applied (matches what user sees)
+  const viewport = pdfJsPage.getViewport({ scale, rotation: documentRotation });
+  
+  // Create off-screen canvas
+  const canvas = document.createElement('canvas');
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    throw new Error('Failed to get canvas context');
+  }
+  
+  // Render PDF page to canvas
+  const renderContext = {
+    canvasContext: ctx,
+    viewport: viewport
+  };
+  
+  await pdfJsPage.render(renderContext).promise;
+  
+  // Create SVG overlay for markups
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('width', viewport.width.toString());
+  svg.setAttribute('height', viewport.height.toString());
+  svg.setAttribute('viewBox', `0 0 ${viewport.width} ${viewport.height}`);
+  
+  // Get base viewport for coordinate transformation
+  const baseViewport = pdfJsPage.getViewport({ scale: 1, rotation: 0 });
+  
+  // Render measurements
+  measurements.forEach(measurement => {
+    renderMeasurementToSVG(svg, measurement, baseViewport, documentRotation);
+  });
+  
+  // Render annotations
+  annotations.forEach(annotation => {
+    renderAnnotationToSVG(svg, annotation, baseViewport, documentRotation);
+  });
+  
+  // Render SVG to canvas by converting to image and drawing
+  // This uses the browser's native SVG rendering
+  const svgBlob = new Blob([svg.outerHTML], { type: 'image/svg+xml;charset=utf-8' });
+  const svgUrl = URL.createObjectURL(svgBlob);
+  const img = new Image();
+  
+  await new Promise<void>((resolve, reject) => {
+    img.onload = () => {
+      ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(svgUrl);
+      resolve();
+    };
+    img.onerror = (error) => {
+      URL.revokeObjectURL(svgUrl);
+      reject(new Error('Failed to render SVG to canvas'));
+    };
+    img.src = svgUrl;
+  });
+  
+  // Convert canvas to PNG
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error('Failed to convert canvas to blob'));
+        return;
+      }
+      
+      blob.arrayBuffer().then(buffer => {
+        resolve({
+          imageData: new Uint8Array(buffer),
+          width: canvas.width,
+          height: canvas.height
+        });
+      }).catch(reject);
+    }, 'image/png');
+  });
+}
+
+/**
  * Export pages with measurements to PDF
  */
 export interface ExportResult {
@@ -494,46 +910,34 @@ export async function exportPagesWithMeasurementsToPDF(
         for (const pageMeasurement of pages) {
           const pageIndex = pageMeasurement.pageNumber - 1; // Convert to 0-based index
 
-          // Copy the page from source PDF first
-          const [copiedPage] = await outputPdf.copyPages(sourcePdf, [pageIndex]);
-          const addedPage = outputPdf.addPage(copiedPage);
-
-          // Get ORIGINAL page dimensions BEFORE rotation (these match base viewport)
-          const { width: originalWidth, height: originalHeight } = addedPage.getSize();
-
-          // Get viewport from pdf.js at rotation 0, scale 1 (matches how coordinates are normalized)
-          const pdfJsPage = await pdfJsDoc.getPage(pageMeasurement.pageNumber);
-          const baseViewport = pdfJsPage.getViewport({ scale: 1, rotation: 0 });
-          
           // Get document rotation if available
           const documentRotation = documentRotations?.get(sheetId) || 0;
           
-          // CRITICAL: Use ORIGINAL (unrotated) dimensions for coordinate transformation
-          // Coordinates are normalized to rotation 0, so we must use base dimensions
-          const baseViewportWidth = baseViewport.width;
-          const baseViewportHeight = baseViewport.height;
+          // Render page with markups to canvas (uses same rendering pipeline as viewer)
+          const { imageData, width, height } = await renderPageWithMarkupsToCanvas(
+            pdfBytes,
+            pageMeasurement.pageNumber,
+            pageMeasurement.measurements,
+            pageMeasurement.annotations || [],
+            documentRotation,
+            2.0 // 2x scale for high quality (144 DPI)
+          );
           
-          // Draw measurements on UNROTATED page using base viewport dimensions
-          // Coordinates are normalized to rotation 0, so use base dimensions for scaling
-          // BUT use originalHeight for Y-flip (pdf-lib uses actual page dimensions)
-          for (const measurement of pageMeasurement.measurements) {
-            await drawMeasurement(addedPage, measurement, originalHeight, baseViewportWidth, baseViewportHeight);
-          }
-
-          // Draw annotations on the page
-          // Use originalHeight for Y-flip, baseViewport dimensions for coordinate scaling
-          if (pageMeasurement.annotations && pageMeasurement.annotations.length > 0) {
-            for (const annotation of pageMeasurement.annotations) {
-              await drawAnnotation(addedPage, annotation, originalHeight, baseViewportWidth, baseViewportHeight);
-            }
-          }
-
-          // CRITICAL: Rotate the page LAST (after drawing) to match what the user saw in the viewer
-          // pdf-lib rotates the entire page including all drawn content
-          // This ensures measurements rotate WITH the page content
-          if (documentRotation !== 0) {
-            addedPage.setRotation(degrees(documentRotation));
-          }
+          // Get original page dimensions for sizing
+          const sourcePage = sourcePdf.getPage(pageIndex);
+          const { width: pageWidth, height: pageHeight } = sourcePage.getSize();
+          
+          // Embed the rendered image as a new page
+          const pngImage = await outputPdf.embedPng(imageData);
+          const addedPage = outputPdf.addPage([pageWidth, pageHeight]);
+          
+          // Draw the image to fill the page
+          addedPage.drawImage(pngImage, {
+            x: 0,
+            y: 0,
+            width: pageWidth,
+            height: pageHeight,
+          });
 
           processedPages++;
           onProgress?.(10 + (processedPages / totalPages) * 70);
