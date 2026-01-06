@@ -903,9 +903,6 @@ export async function exportPagesWithMeasurementsToPDF(
         const pdfBytes = await fetchPDFBytes(sheetId);
         const sourcePdf = await PDFDocument.load(pdfBytes);
 
-        // Load PDF with pdf.js to get accurate viewport dimensions (matches viewer)
-        const pdfJsDoc = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
-
         // Process each page
         for (const pageMeasurement of pages) {
           const pageIndex = pageMeasurement.pageNumber - 1; // Convert to 0-based index
@@ -913,9 +910,14 @@ export async function exportPagesWithMeasurementsToPDF(
           // Get document rotation if available
           const documentRotation = documentRotations?.get(sheetId) || 0;
           
+          // Clone bytes for pdf.js rendering to avoid ArrayBuffer detachment issues
+          // pdf.js transfers the ArrayBuffer to a worker, which detaches it
+          // Creating a new Uint8Array creates a copy with a new underlying ArrayBuffer
+          const pdfBytesForRender = new Uint8Array(pdfBytes);
+          
           // Render page with markups to canvas (uses same rendering pipeline as viewer)
           const { imageData, width, height } = await renderPageWithMarkupsToCanvas(
-            pdfBytes,
+            pdfBytesForRender,
             pageMeasurement.pageNumber,
             pageMeasurement.measurements,
             pageMeasurement.annotations || [],
