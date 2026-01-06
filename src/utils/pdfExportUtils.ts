@@ -769,6 +769,296 @@ function renderAnnotationToSVG(
 }
 
 /**
+ * Draw a measurement directly to canvas
+ */
+function drawMeasurementToCanvas(
+  ctx: CanvasRenderingContext2D,
+  measurement: TakeoffMeasurement,
+  viewport: { width: number; height: number },
+  rotation: number
+): void {
+  if (!measurement.pdfCoordinates || measurement.pdfCoordinates.length === 0) return;
+  
+  const transformedPoints = measurement.pdfCoordinates.map(p => 
+    transformCoordinates(p, viewport, rotation)
+  );
+  
+  const strokeColor = measurement.conditionColor || '#000000';
+  
+  // Parse hex color to RGB
+  const hexToRgb = (hex: string) => {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result
+      ? {
+          r: parseInt(result[1], 16),
+          g: parseInt(result[2], 16),
+          b: parseInt(result[3], 16),
+        }
+      : { r: 0, g: 0, b: 0 };
+  };
+  
+  const rgb = hexToRgb(strokeColor);
+  ctx.strokeStyle = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+  ctx.fillStyle = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+  ctx.lineWidth = 2;
+  
+  switch (measurement.type) {
+    case 'linear':
+      if (transformedPoints.length >= 2) {
+        // Draw polyline
+        ctx.beginPath();
+        ctx.moveTo(transformedPoints[0].x, transformedPoints[0].y);
+        for (let i = 1; i < transformedPoints.length; i++) {
+          ctx.lineTo(transformedPoints[i].x, transformedPoints[i].y);
+        }
+        ctx.stroke();
+        
+        // Draw dots
+        transformedPoints.forEach(point => {
+          ctx.beginPath();
+          ctx.arc(point.x, point.y, 4, 0, 2 * Math.PI);
+          ctx.fill();
+        });
+        
+        // Add text
+        const startPoint = transformedPoints[0];
+        const endPoint = transformedPoints[transformedPoints.length - 1];
+        const midPoint = {
+          x: (startPoint.x + endPoint.x) / 2,
+          y: (startPoint.y + endPoint.y) / 2
+        };
+        
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        
+        const linearValue = (measurement.unit === 'ft' || measurement.unit === 'feet' || measurement.unit === 'LF' || measurement.unit === 'lf')
+          ? formatFeetAndInches(measurement.calculatedValue)
+          : `${measurement.calculatedValue.toFixed(2)} ${measurement.unit}`;
+        
+        const displayValue = measurement.areaValue
+          ? `${linearValue} LF / ${measurement.areaValue.toFixed(0)} SF`
+          : linearValue;
+        
+        ctx.fillText(displayValue, midPoint.x, midPoint.y - 5);
+      }
+      break;
+      
+    case 'area':
+    case 'volume':
+      if (transformedPoints.length >= 3) {
+        // Draw polygon with fill
+        ctx.beginPath();
+        ctx.moveTo(transformedPoints[0].x, transformedPoints[0].y);
+        for (let i = 1; i < transformedPoints.length; i++) {
+          ctx.lineTo(transformedPoints[i].x, transformedPoints[i].y);
+        }
+        ctx.closePath();
+        
+        // Fill with opacity
+        ctx.globalAlpha = 0.25;
+        ctx.fill();
+        ctx.globalAlpha = 1.0;
+        
+        // Draw outline
+        ctx.stroke();
+        
+        // Draw dots
+        transformedPoints.forEach(point => {
+          ctx.beginPath();
+          ctx.arc(point.x, point.y, 4, 0, 2 * Math.PI);
+          ctx.fill();
+        });
+        
+        // Handle cutouts
+        if (measurement.cutouts && measurement.cutouts.length > 0) {
+          ctx.strokeStyle = 'rgb(255, 0, 0)';
+          ctx.fillStyle = 'rgb(255, 0, 0)';
+          measurement.cutouts.forEach((cutout) => {
+            if (cutout.pdfCoordinates && cutout.pdfCoordinates.length >= 3) {
+              const cutoutPoints = cutout.pdfCoordinates.map(p => 
+                transformCoordinates(p, viewport, rotation)
+              );
+              ctx.beginPath();
+              ctx.moveTo(cutoutPoints[0].x, cutoutPoints[0].y);
+              for (let i = 1; i < cutoutPoints.length; i++) {
+                ctx.lineTo(cutoutPoints[i].x, cutoutPoints[i].y);
+              }
+              ctx.closePath();
+              ctx.stroke();
+              
+              cutoutPoints.forEach(point => {
+                ctx.beginPath();
+                ctx.arc(point.x, point.y, 3, 0, 2 * Math.PI);
+                ctx.fill();
+              });
+            }
+          });
+          // Reset color
+          ctx.strokeStyle = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+          ctx.fillStyle = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+        }
+        
+        // Add text
+        const centerX = transformedPoints.reduce((sum, p) => sum + p.x, 0) / transformedPoints.length;
+        const centerY = transformedPoints.reduce((sum, p) => sum + p.y, 0) / transformedPoints.length;
+        
+        ctx.font = 'bold 12px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        
+        const displayValue = measurement.netCalculatedValue !== undefined && measurement.netCalculatedValue !== null
+          ? measurement.netCalculatedValue
+          : measurement.calculatedValue;
+        
+        let finalDisplayValue: string;
+        if (measurement.type === 'area') {
+          const areaValue = `${displayValue.toFixed(0)} SF`;
+          finalDisplayValue = measurement.perimeterValue
+            ? `${areaValue} / ${formatFeetAndInches(measurement.perimeterValue)} LF`
+            : areaValue;
+        } else {
+          const volumeValue = `${displayValue.toFixed(0)} CY`;
+          finalDisplayValue = measurement.perimeterValue
+            ? `${volumeValue} / ${formatFeetAndInches(measurement.perimeterValue)} LF`
+            : volumeValue;
+        }
+        
+        ctx.fillText(finalDisplayValue, centerX, centerY);
+      }
+      break;
+      
+    case 'count':
+      if (transformedPoints.length >= 1) {
+        const point = transformedPoints[0];
+        
+        // Draw circle with white border
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, 8, 0, 2 * Math.PI);
+        ctx.fill();
+        
+        ctx.strokeStyle = 'rgb(255, 255, 255)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.strokeStyle = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+        ctx.lineWidth = 2;
+        
+        // Add count text
+        ctx.font = 'bold 14px Arial';
+        ctx.fillStyle = 'rgb(255, 255, 255)';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        
+        const countValue = measurement.calculatedValue >= 1 
+          ? Math.round(measurement.calculatedValue).toString()
+          : '1';
+        
+        ctx.fillText(countValue, point.x, point.y);
+      }
+      break;
+  }
+}
+
+/**
+ * Draw an annotation directly to canvas
+ */
+function drawAnnotationToCanvas(
+  ctx: CanvasRenderingContext2D,
+  annotation: Annotation,
+  viewport: { width: number; height: number },
+  rotation: number
+): void {
+  if (!annotation.points || annotation.points.length === 0) return;
+  
+  const points = annotation.points.map(p => 
+    transformCoordinates(p, viewport, rotation)
+  );
+  
+  const strokeColor = annotation.color || '#ff0000';
+  
+  // Parse hex color to RGB
+  const hexToRgb = (hex: string) => {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result
+      ? {
+          r: parseInt(result[1], 16),
+          g: parseInt(result[2], 16),
+          b: parseInt(result[3], 16),
+        }
+      : { r: 255, g: 0, b: 0 };
+  };
+  
+  const rgb = hexToRgb(strokeColor);
+  ctx.strokeStyle = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+  ctx.fillStyle = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+  ctx.lineWidth = 3;
+  ctx.globalAlpha = 0.8;
+  
+  if (annotation.type === 'text' && annotation.text) {
+    const point = points[0];
+    ctx.font = 'bold 14px Arial';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(annotation.text, point.x, point.y);
+  } else if (annotation.type === 'arrow' && points.length === 2) {
+    // Draw line
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    ctx.lineTo(points[1].x, points[1].y);
+    ctx.stroke();
+    
+    // Draw arrowhead
+    const angle = Math.atan2(points[1].y - points[0].y, points[1].x - points[0].x);
+    const arrowSize = 10;
+    const arrowAngle = Math.PI / 6;
+    
+    const arrowPoint1 = {
+      x: points[1].x - arrowSize * Math.cos(angle - arrowAngle),
+      y: points[1].y - arrowSize * Math.sin(angle - arrowAngle)
+    };
+    const arrowPoint2 = {
+      x: points[1].x - arrowSize * Math.cos(angle + arrowAngle),
+      y: points[1].y - arrowSize * Math.sin(angle + arrowAngle)
+    };
+    
+    ctx.beginPath();
+    ctx.moveTo(points[1].x, points[1].y);
+    ctx.lineTo(arrowPoint1.x, arrowPoint1.y);
+    ctx.stroke();
+    
+    ctx.beginPath();
+    ctx.moveTo(points[1].x, points[1].y);
+    ctx.lineTo(arrowPoint2.x, arrowPoint2.y);
+    ctx.stroke();
+  } else if (annotation.type === 'rectangle' && points.length === 2) {
+    const x = Math.min(points[0].x, points[1].x);
+    const y = Math.min(points[0].y, points[1].y);
+    const width = Math.abs(points[1].x - points[0].x);
+    const height = Math.abs(points[1].y - points[0].y);
+    
+    ctx.strokeRect(x, y, width, height);
+  } else if (annotation.type === 'circle' && points.length === 2) {
+    const cx = (points[0].x + points[1].x) / 2;
+    const cy = (points[0].y + points[1].y) / 2;
+    const rx = Math.abs(points[1].x - points[0].x) / 2;
+    const ry = Math.abs(points[1].y - points[0].y) / 2;
+    
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, 2 * Math.PI);
+    ctx.stroke();
+  } else if (annotation.type === 'freehand' && points.length >= 2) {
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) {
+      ctx.lineTo(points[i].x, points[i].y);
+    }
+    ctx.stroke();
+  }
+  
+  ctx.globalAlpha = 1.0;
+}
+
+/**
  * Render PDF page with markups to canvas and return as image
  */
 async function renderPageWithMarkupsToCanvas(
@@ -803,42 +1093,17 @@ async function renderPageWithMarkupsToCanvas(
   
   await pdfJsPage.render(renderContext).promise;
   
-  // Create SVG overlay for markups
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('width', viewport.width.toString());
-  svg.setAttribute('height', viewport.height.toString());
-  svg.setAttribute('viewBox', `0 0 ${viewport.width} ${viewport.height}`);
-  
   // Get base viewport for coordinate transformation
   const baseViewport = pdfJsPage.getViewport({ scale: 1, rotation: 0 });
   
-  // Render measurements
+  // Draw measurements directly to canvas
   measurements.forEach(measurement => {
-    renderMeasurementToSVG(svg, measurement, baseViewport, documentRotation);
+    drawMeasurementToCanvas(ctx, measurement, baseViewport, documentRotation);
   });
   
-  // Render annotations
+  // Draw annotations directly to canvas
   annotations.forEach(annotation => {
-    renderAnnotationToSVG(svg, annotation, baseViewport, documentRotation);
-  });
-  
-  // Render SVG to canvas by converting to image and drawing
-  // This uses the browser's native SVG rendering
-  const svgBlob = new Blob([svg.outerHTML], { type: 'image/svg+xml;charset=utf-8' });
-  const svgUrl = URL.createObjectURL(svgBlob);
-  const img = new Image();
-  
-  await new Promise<void>((resolve, reject) => {
-    img.onload = () => {
-      ctx.drawImage(img, 0, 0);
-      URL.revokeObjectURL(svgUrl);
-      resolve();
-    };
-    img.onerror = (error) => {
-      URL.revokeObjectURL(svgUrl);
-      reject(new Error('Failed to render SVG to canvas'));
-    };
-    img.src = svgUrl;
+    drawAnnotationToCanvas(ctx, annotation, baseViewport, documentRotation);
   });
   
   // Convert canvas to PNG
