@@ -1181,18 +1181,8 @@ export async function exportPagesWithMeasurementsToPDF(
           // Creating a new Uint8Array creates a copy with a new underlying ArrayBuffer
           const pdfBytesForRender = new Uint8Array(pdfBytes);
           
-          // Get original page dimensions first
-          const sourcePage = sourcePdf.getPage(pageIndex);
-          let { width: pageWidth, height: pageHeight } = sourcePage.getSize();
-          
-          // If page is rotated 90° or 270°, swap dimensions to match viewport
-          // The viewport dimensions are swapped when rotated, so we need to match that
-          if (documentRotation === 90 || documentRotation === 270) {
-            [pageWidth, pageHeight] = [pageHeight, pageWidth];
-          }
-          
-          // Render page with markups to canvas at scale 1.0 to match PDF page dimensions exactly
-          // This avoids scaling issues and ensures markups are positioned correctly
+          // Render page with markups to canvas at scale 1.0
+          // Use the canvas dimensions directly to ensure perfect aspect ratio match
           const { imageData, width, height } = await renderPageWithMarkupsToCanvas(
             pdfBytesForRender,
             pageMeasurement.pageNumber,
@@ -1203,15 +1193,16 @@ export async function exportPagesWithMeasurementsToPDF(
           );
           
           // Embed the rendered image as a new page
+          // Use canvas dimensions directly to ensure aspect ratio matches exactly
           const pngImage = await outputPdf.embedPng(imageData);
-          const addedPage = outputPdf.addPage([pageWidth, pageHeight]);
+          const addedPage = outputPdf.addPage([width, height]);
           
-          // Draw the image to fill the page exactly (should match dimensions at scale 1.0)
+          // Draw the image to fill the page exactly (dimensions match canvas)
           addedPage.drawImage(pngImage, {
             x: 0,
             y: 0,
-            width: pageWidth,
-            height: pageHeight,
+            width: width,
+            height: height,
           });
 
           processedPages++;
