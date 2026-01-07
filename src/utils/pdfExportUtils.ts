@@ -1183,7 +1183,13 @@ export async function exportPagesWithMeasurementsToPDF(
           
           // Get original page dimensions first
           const sourcePage = sourcePdf.getPage(pageIndex);
-          const { width: pageWidth, height: pageHeight } = sourcePage.getSize();
+          let { width: pageWidth, height: pageHeight } = sourcePage.getSize();
+          
+          // If page is rotated 90° or 270°, swap dimensions to match viewport
+          // The viewport dimensions are swapped when rotated, so we need to match that
+          if (documentRotation === 90 || documentRotation === 270) {
+            [pageWidth, pageHeight] = [pageHeight, pageWidth];
+          }
           
           // Render page with markups to canvas at scale 1.0 to match PDF page dimensions exactly
           // This avoids scaling issues and ensures markups are positioned correctly
