@@ -1073,13 +1073,11 @@ async function renderPageWithMarkupsToCanvas(
   const pdfJsDoc = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
   const pdfJsPage = await pdfJsDoc.getPage(pageNumber);
   
-  // Get base viewport (unrotated, scale 1) for coordinate transformation
-  const baseViewport = pdfJsPage.getViewport({ scale: 1, rotation: 0 });
-  
   // Get viewport with rotation applied at the desired scale (for rendering)
+  // This is the SAME viewport we'll use for both PDF rendering and markup rendering
   const viewport = pdfJsPage.getViewport({ scale, rotation: documentRotation });
   
-  // Create off-screen canvas at the scaled size
+  // Create off-screen canvas at the viewport size
   const canvas = document.createElement('canvas');
   canvas.width = viewport.width;
   canvas.height = viewport.height;
@@ -1088,7 +1086,7 @@ async function renderPageWithMarkupsToCanvas(
     throw new Error('Failed to get canvas context');
   }
   
-  // Render PDF page to canvas
+  // Render PDF page to canvas using the viewport
   const renderContext = {
     canvasContext: ctx,
     viewport: viewport
@@ -1096,21 +1094,17 @@ async function renderPageWithMarkupsToCanvas(
   
   await pdfJsPage.render(renderContext).promise;
   
-  // For coordinate transformation, use viewport dimensions that match the canvas
-  // If scale is 1.0, baseViewport matches canvas. If scale > 1, scale up.
-  const transformViewport = {
-    width: baseViewport.width * scale,
-    height: baseViewport.height * scale
-  };
-  
+  // Use the SAME viewport for coordinate transformation
+  // The transformCoordinates function will convert normalized (0-1) coordinates
+  // to pixel coordinates matching this viewport (with rotation already applied)
   // Draw measurements directly to canvas
   measurements.forEach(measurement => {
-    drawMeasurementToCanvas(ctx, measurement, transformViewport, documentRotation);
+    drawMeasurementToCanvas(ctx, measurement, viewport, documentRotation);
   });
   
   // Draw annotations directly to canvas
   annotations.forEach(annotation => {
-    drawAnnotationToCanvas(ctx, annotation, transformViewport, documentRotation);
+    drawAnnotationToCanvas(ctx, annotation, viewport, documentRotation);
   });
   
   // Convert canvas to PNG
