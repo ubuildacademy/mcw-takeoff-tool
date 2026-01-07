@@ -409,9 +409,6 @@ export function TakeoffWorkspace() {
     if (projectId) {
       // Set current project first (this clears old measurements)
       setCurrentProject(projectId);
-      // NOTE: Measurements are now loaded per-page on-demand in PDFViewer for better performance
-      // Full project loading is only needed for reports/aggregations, which will load on-demand when needed
-      // This prevents loading all measurements upfront for large documents (e.g., 80-page PDFs)
       
       // Load calibrations from database and sync to store
       const loadCalibrations = async () => {
@@ -451,9 +448,21 @@ export function TakeoffWorkspace() {
         }
       };
       
+      // Load all project measurements upfront so reports always have complete data
+      // This ensures the reports tab shows all pages with markups immediately
+      const loadMeasurements = async () => {
+        try {
+          await loadProjectTakeoffMeasurements(projectId);
+        } catch (error) {
+          console.error('❌ Failed to load project measurements:', error);
+        }
+      };
+      
+      // Load both calibrations and measurements in parallel
       loadCalibrations();
+      loadMeasurements();
     }
-  }, [projectId]); // Only depend on projectId to prevent infinite loops
+  }, [projectId, loadProjectTakeoffMeasurements]); // Include loadProjectTakeoffMeasurements in dependencies
 
   // Listen for profit margin dialog open event
   useEffect(() => {
