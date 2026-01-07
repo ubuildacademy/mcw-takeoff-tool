@@ -1073,10 +1073,13 @@ async function renderPageWithMarkupsToCanvas(
   const pdfJsDoc = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
   const pdfJsPage = await pdfJsDoc.getPage(pageNumber);
   
-  // Get viewport with rotation applied (matches what user sees)
+  // Get base viewport (unrotated, scale 1) for coordinate transformation
+  const baseViewport = pdfJsPage.getViewport({ scale: 1, rotation: 0 });
+  
+  // Get viewport with rotation applied at the desired scale (for rendering)
   const viewport = pdfJsPage.getViewport({ scale, rotation: documentRotation });
   
-  // Create off-screen canvas
+  // Create off-screen canvas at the scaled size
   const canvas = document.createElement('canvas');
   canvas.width = viewport.width;
   canvas.height = viewport.height;
@@ -1093,17 +1096,21 @@ async function renderPageWithMarkupsToCanvas(
   
   await pdfJsPage.render(renderContext).promise;
   
-  // Get base viewport for coordinate transformation
-  const baseViewport = pdfJsPage.getViewport({ scale: 1, rotation: 0 });
+  // For coordinate transformation, use viewport dimensions that match the canvas
+  // If scale is 1.0, baseViewport matches canvas. If scale > 1, scale up.
+  const transformViewport = {
+    width: baseViewport.width * scale,
+    height: baseViewport.height * scale
+  };
   
   // Draw measurements directly to canvas
   measurements.forEach(measurement => {
-    drawMeasurementToCanvas(ctx, measurement, baseViewport, documentRotation);
+    drawMeasurementToCanvas(ctx, measurement, transformViewport, documentRotation);
   });
   
   // Draw annotations directly to canvas
   annotations.forEach(annotation => {
-    drawAnnotationToCanvas(ctx, annotation, baseViewport, documentRotation);
+    drawAnnotationToCanvas(ctx, annotation, transformViewport, documentRotation);
   });
   
   // Convert canvas to PNG
@@ -1180,25 +1187,26 @@ export async function exportPagesWithMeasurementsToPDF(
           // Creating a new Uint8Array creates a copy with a new underlying ArrayBuffer
           const pdfBytesForRender = new Uint8Array(pdfBytes);
           
-          // Render page with markups to canvas (uses same rendering pipeline as viewer)
+          // Get original page dimensions first
+          const sourcePage = sourcePdf.getPage(pageIndex);
+          const { width: pageWidth, height: pageHeight } = sourcePage.getSize();
+          
+          // Render page with markups to canvas at scale 1.0 to match PDF page dimensions exactly
+          // This avoids scaling issues and ensures markups are positioned correctly
           const { imageData, width, height } = await renderPageWithMarkupsToCanvas(
             pdfBytesForRender,
             pageMeasurement.pageNumber,
             pageMeasurement.measurements,
             pageMeasurement.annotations || [],
             documentRotation,
-            2.0 // 2x scale for high quality (144 DPI)
+            1.0 // Use scale 1.0 to match PDF page dimensions
           );
-          
-          // Get original page dimensions for sizing
-          const sourcePage = sourcePdf.getPage(pageIndex);
-          const { width: pageWidth, height: pageHeight } = sourcePage.getSize();
           
           // Embed the rendered image as a new page
           const pngImage = await outputPdf.embedPng(imageData);
           const addedPage = outputPdf.addPage([pageWidth, pageHeight]);
           
-          // Draw the image to fill the page
+          // Draw the image to fill the page exactly (should match dimensions at scale 1.0)
           addedPage.drawImage(pngImage, {
             x: 0,
             y: 0,
