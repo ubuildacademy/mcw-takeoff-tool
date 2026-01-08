@@ -309,13 +309,20 @@ router.post('/', async (req, res) => {
         console.error('❌ Database error code:', (saveError as any).code);
         console.error('❌ Database error details:', (saveError as any).details);
         console.error('❌ Database error hint:', (saveError as any).hint);
+        console.error('❌ Database error message:', (saveError as any).message);
       }
+      
+      // Log the condition data that failed to save (for debugging)
+      console.error('❌ Condition data that failed:', JSON.stringify(newCondition, null, 2));
       
       return res.status(500).json({ 
         error: 'Failed to save condition to database',
         details: saveErrorMessage,
         code: (saveError as any)?.code,
-        hint: (saveError as any)?.hint
+        hint: (saveError as any)?.hint,
+        message: (saveError as any)?.message,
+        // Include condition type in error for debugging
+        conditionType: type
       });
     }
   } catch (error) {

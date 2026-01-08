@@ -426,15 +426,23 @@ class SupabaseStorage {
       depth: condition.depth,
       include_height: condition.includeHeight,
       height: condition.height,
-      search_image: condition.searchImage,
-      search_image_id: condition.searchImageId,
-      search_threshold: condition.searchThreshold,
       created_at: condition.createdAt
     };
     
     // Only include ai_generated if it exists (column might not exist in all database schemas)
     if ((condition as any).aiGenerated !== undefined) {
       dbCondition.ai_generated = (condition as any).aiGenerated;
+    }
+    
+    // Only include visual search fields if they exist (columns might not exist if migration hasn't run)
+    if (condition.searchImage !== undefined) {
+      dbCondition.search_image = condition.searchImage;
+    }
+    if (condition.searchImageId !== undefined) {
+      dbCondition.search_image_id = condition.searchImageId;
+    }
+    if (condition.searchThreshold !== undefined) {
+      dbCondition.search_threshold = condition.searchThreshold;
     }
     
     const { data, error } = await supabase
