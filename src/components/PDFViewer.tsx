@@ -754,9 +754,42 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // CRITICAL: Only render measurements for the specific page being rendered
     // Filter by page BEFORE iterating to prevent any cross-page contamination
-    const pageMeasurements = localTakeoffMeasurements.filter(
+    // Use localTakeoffMeasurements first, but fallback to store measurements if local is empty
+    let pageMeasurements = localTakeoffMeasurements.filter(
       (measurement) => measurement.pdfPage === pageNum
     );
+    
+    // Fallback: If local measurements are empty, check store measurements
+    // This ensures markups render even if local measurements haven't loaded yet
+    if (pageMeasurements.length === 0 && currentProjectId && file?.id) {
+      const storeMeasurements = getPageTakeoffMeasurements(currentProjectId, file.id, pageNum);
+      if (storeMeasurements.length > 0) {
+        // Convert store measurements to display format
+        pageMeasurements = storeMeasurements.map(apiMeasurement => {
+          try {
+            return {
+              id: apiMeasurement.id,
+              type: apiMeasurement.type,
+              points: apiMeasurement.points,
+              calculatedValue: apiMeasurement.calculatedValue,
+              unit: apiMeasurement.unit,
+              conditionId: apiMeasurement.conditionId,
+              conditionName: apiMeasurement.conditionName,
+              color: apiMeasurement.conditionColor,
+              timestamp: new Date(apiMeasurement.timestamp).getTime(),
+              pdfPage: apiMeasurement.pdfPage,
+              pdfCoordinates: apiMeasurement.pdfCoordinates,
+              perimeterValue: apiMeasurement.perimeterValue || null,
+              cutouts: apiMeasurement.cutouts || null,
+              netCalculatedValue: apiMeasurement.netCalculatedValue || null
+            };
+          } catch (error) {
+            console.error('Error processing store measurement:', error, apiMeasurement);
+            return null;
+          }
+        }).filter(Boolean);
+      }
+    }
     
     pageMeasurements.forEach((measurement) => {
       // Removed verbose logging - was causing console spam
@@ -894,7 +927,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       renderRunningLengthDisplay(svgOverlay, viewport);
     }
     
-  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, cutoutMode, currentCutout, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionBox]);
+  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, cutoutMode, currentCutout, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionBox, currentProjectId, file?.id, getPageTakeoffMeasurements]);
 
   // OPTIMIZED: Update only visual styling of markups when selection changes (no full re-render)
   const updateMarkupSelection = useCallback((newSelectedId: string | null, previousSelectedId: string | null) => {
@@ -1001,20 +1034,41 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Re-render annotations when measurements or interaction state changes
   // NOTE: selectedMarkupId is removed from dependencies to prevent full re-renders on selection changes
+  // CRITICAL: This effect ensures markups render when measurements load, even if they load after PDF rendering
   useEffect(() => {
-    if (pdfDocument && currentViewport && !isRenderingRef.current) {
+    // Don't render during PDF rendering to prevent flickering
+    if (isRenderingRef.current) {
+      return;
+    }
+    
+    if (pdfDocument && currentViewport) {
+      // Check both local measurements and store measurements
+      // This ensures markups render even if local measurements haven't loaded yet
+      const hasLocalMeasurements = localTakeoffMeasurements.length > 0;
+      const hasStoreMeasurements = currentProjectId && file?.id 
+        ? getPageTakeoffMeasurements(currentProjectId, file.id, currentPage).length > 0
+        : false;
+      const hasAnyMeasurements = hasLocalMeasurements || hasStoreMeasurements;
+      
       // Only render if we have measurements, annotations, or if we're in measuring/annotation/visual search mode
-      if (localTakeoffMeasurements.length > 0 || isMeasuring || isCalibrating || currentMeasurement.length > 0 || isAnnotating || localAnnotations.length > 0 || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol)) {
-        renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+      if (hasAnyMeasurements || isMeasuring || isCalibrating || currentMeasurement.length > 0 || isAnnotating || localAnnotations.length > 0 || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol)) {
+        // Use requestAnimationFrame to batch renders and prevent flickering
+        requestAnimationFrame(() => {
+          // Double-check we're still not rendering and viewport is still valid
+          if (!isRenderingRef.current && currentViewport && pdfPageRef.current) {
+            renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+          }
+        });
       } else {
         // LAYER THRASH PREVENTION: Clear overlay when measurements are empty to prevent stale renderings
         // This ensures clean state when switching projects or when measurements are cleared
-        if (svgOverlayRef.current) {
+        // Only clear if we're sure there are no measurements (check both local and store)
+        if (svgOverlayRef.current && !hasStoreMeasurements) {
           svgOverlayRef.current.innerHTML = '';
         }
       }
     }
-  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, renderTakeoffAnnotations, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentAnnotation]);
+  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, renderTakeoffAnnotations, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentAnnotation, currentProjectId, file?.id, getPageTakeoffMeasurements]);
 
   // OPTIMIZED: Update only visual styling when selection changes (prevents flicker)
   const prevSelectedMarkupIdRef = useRef<string | null>(null);
@@ -1365,13 +1419,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Use requestAnimationFrame to ensure DOM is ready after overlay was cleared
       requestAnimationFrame(() => {
         try {
-          // Get current measurements for this page from store (may have loaded after PDF render started)
-          const currentMeasurements = useTakeoffStore.getState().takeoffMeasurements.filter(
-            (m) => m.projectId === currentProjectId && m.sheetId === file?.id && m.pdfPage === pageNum
-          );
+          // Check both local measurements and store measurements
+          // This ensures markups render even if local measurements haven't loaded yet
+          const hasLocalMeasurements = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0;
+          const hasStoreMeasurements = currentProjectId && file?.id 
+            ? getPageTakeoffMeasurements(currentProjectId, file.id, pageNum).length > 0
+            : false;
           
-          // Always render if we have measurements or annotations for this page
-          if (currentMeasurements.length > 0 || localTakeoffMeasurements.length > 0 || localAnnotations.length > 0) {
+          // Always render if we have any measurements or annotations for this page
+          if (hasLocalMeasurements || hasStoreMeasurements) {
             renderTakeoffAnnotations(pageNum, viewport, page);
           }
         } catch (error) {
@@ -1399,7 +1455,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     } finally {
       isRenderingRef.current = false;
     }
-  }, [pdfDocument, viewState, updateCanvasDimensions, onPageShown, isComponentMounted, isMeasuring, isCalibrating, currentMeasurement, isDeselecting, isAnnotating]);
+  }, [pdfDocument, viewState, updateCanvasDimensions, onPageShown, isComponentMounted, isMeasuring, isCalibrating, currentMeasurement, isDeselecting, isAnnotating, localTakeoffMeasurements, localAnnotations, currentProjectId, file?.id, getPageTakeoffMeasurements, renderTakeoffAnnotations]);
 
   // No coordinate conversions needed - SVG viewBox matches viewport exactly
   // CSS pixels = SVG pixels = viewport pixels (1:1 mapping)
@@ -4348,20 +4404,42 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Page visibility handler - ensures overlays are rendered when returning to a page
   // This effect runs when currentViewport becomes available (set by updateCanvasDimensions in renderPDFPage)
+  // CRITICAL: Wait for PDF rendering to complete before rendering markups to prevent flickering
   useEffect(() => {
-    if (pdfDocument && currentViewport && !isRenderingRef.current) {
-      // Use the dedicated page shown handler to ensure proper overlay initialization
-      onPageShown(currentPage, currentViewport);
+    if (pdfDocument && currentViewport) {
+      // Wait for PDF rendering to complete before rendering markups
+      // This prevents flickering from rendering markups while PDF is still rendering
+      const checkAndRender = () => {
+        if (isRenderingRef.current) {
+          // PDF is still rendering, wait a bit and try again
+          setTimeout(checkAndRender, 50);
+          return;
+        }
+        
+        // PDF rendering is complete, safe to render markups
+        // Use the dedicated page shown handler to ensure proper overlay initialization
+        onPageShown(currentPage, currentViewport);
+        
+        // Check both local and store measurements to ensure we render even if local hasn't loaded
+        const hasLocalMeasurements = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0;
+        const hasStoreMeasurements = currentProjectId && file?.id 
+          ? getPageTakeoffMeasurements(currentProjectId, file.id, currentPage).length > 0
+          : false;
+        
+        // Render markups if we have any measurements or annotations
+        if (pdfPageRef.current && (hasLocalMeasurements || hasStoreMeasurements)) {
+          requestAnimationFrame(() => {
+            // Double-check rendering is still complete
+            if (!isRenderingRef.current && currentViewport) {
+              renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+            }
+          });
+        }
+      };
       
-      // Render markups immediately when viewport becomes available
-      // This happens after renderPDFPage has cleared the overlay and set the viewport
-      if (pdfPageRef.current && (localTakeoffMeasurements.length > 0 || localAnnotations.length > 0)) {
-        requestAnimationFrame(() => {
-          renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
-        });
-      }
+      checkAndRender();
     }
-  }, [currentPage, currentViewport, onPageShown, localTakeoffMeasurements, localAnnotations, renderTakeoffAnnotations, pdfDocument]);
+  }, [currentPage, currentViewport, onPageShown, localTakeoffMeasurements, localAnnotations, renderTakeoffAnnotations, pdfDocument, currentProjectId, file?.id, getPageTakeoffMeasurements]);
 
   // Clear current measurement state when page changes
   useEffect(() => {
