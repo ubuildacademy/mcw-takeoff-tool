@@ -1101,52 +1101,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
   }, [localTakeoffMeasurements, pdfDocument, currentViewport, currentPage, renderTakeoffAnnotations]);
 
-  // CRITICAL: Ensure viewport is calculated when page changes
-  // This ensures markups can render immediately when turning to a page
-  useEffect(() => {
-    if (!pdfDocument || !isComponentMounted) return;
-    
-    // Load the page if needed and calculate viewport
-    const loadPageAndSetViewport = async () => {
-      try {
-        // Load the page (this is fast if already cached)
-        const page = await pdfDocument.getPage(currentPage);
-        
-        // Create viewport with current scale and rotation (same calculation as renderPDFPage)
-        // This ensures markups use the exact same viewport that will be used for PDF rendering
-        const freshViewport = page.getViewport({ 
-          scale: viewState.scale, 
-          rotation: viewState.rotation 
-        });
-        
-        // Update pageViewports so currentViewport becomes available
-        // This triggers the effect below to render markups immediately
-        setPageViewports(prev => {
-          const existing = prev[currentPage];
-          if (existing && 
-              existing.width === freshViewport.width && 
-              existing.height === freshViewport.height &&
-              existing.scale === freshViewport.scale &&
-              existing.rotation === freshViewport.rotation) {
-            return prev; // No change
-          }
-          
-          return {
-            ...prev,
-            [currentPage]: freshViewport
-          };
-        });
-      } catch (error) {
-        if (process.env.NODE_ENV === 'development') {
-          console.warn('Error loading page for viewport calculation:', error);
-        }
-      }
-    };
-    
-    loadPageAndSetViewport();
-  }, [pdfDocument, currentPage, viewState.scale, viewState.rotation, isComponentMounted]);
-
-  // Update pageViewports immediately when scale/rotation changes (but not page)
+  // Update pageViewports immediately when scale/rotation changes
   // This ensures currentViewport is always current even when PDF rendering is blocked
   useEffect(() => {
     if (pdfDocument && pdfPageRef.current) {
@@ -1288,13 +1243,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       (m) => m.projectId === currentProjectId && m.sheetId === file?.id && m.pdfPage === pageNum
     );
     
-    // Render immediately if we have measurements
-    if (currentMeasurements.length > 0 || localTakeoffMeasurements.length > 0) {
-      renderTakeoffAnnotations(pageNum, viewport, pdfPageRef.current);
+    // CRITICAL: Always render markups if we have any measurements or annotations for this page
+    // Use requestAnimationFrame to ensure DOM is ready after overlay was cleared
+    if (currentMeasurements.length > 0 || localTakeoffMeasurements.length > 0 || localAnnotations.length > 0) {
+      requestAnimationFrame(() => {
+        renderTakeoffAnnotations(pageNum, viewport, pdfPageRef.current);
+      });
     }
     // Note: If no measurements, the reactive useEffect will handle rendering when they load
     // The reactive useEffect watches allTakeoffMeasurements and will trigger render when measurements arrive
-  }, [renderTakeoffAnnotations, localTakeoffMeasurements, currentProjectId, file?.id, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol]);
+  }, [renderTakeoffAnnotations, localTakeoffMeasurements, localAnnotations, currentProjectId, file?.id, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol]);
 
   // PDF render function with page-specific viewport isolation
   const renderPDFPage = useCallback(async (pageNum: number) => {
@@ -1386,6 +1344,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       await renderTask.promise;
       
       // After PDF is rendered, ensure overlay is properly initialized and render takeoff annotations
+      // CRITICAL: Always render markups after clearing overlay to ensure they appear immediately
       onPageShown(pageNum, viewport);
       
       // Record the scale at which the PDF canvas was actually rendered
@@ -1400,23 +1359,27 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         svgOverlayRef.current.style.transform = '';
         svgOverlayRef.current.style.transformOrigin = '';
       }
-      // Post-zoom settle: ensure overlay is refreshed immediately after canvas render
-      // CRITICAL: Also check if measurements are loaded and render them
-      // This handles the case where measurements load after the PDF renders
-      try {
-        // Get current measurements for this page from store (may have loaded after PDF render started)
-        const currentMeasurements = useTakeoffStore.getState().takeoffMeasurements.filter(
-          (m) => m.projectId === currentProjectId && m.sheetId === file?.id && m.pdfPage === pageNum
-        );
-        
-        if (currentMeasurements.length > 0 || localTakeoffMeasurements.length > 0) {
-          renderTakeoffAnnotations(pageNum, viewport, page);
-          // And one more pass on next frame to catch late layout and ensure measurements are visible
-          requestAnimationFrame(() => {
+      
+      // CRITICAL: Always render markups after PDF render completes
+      // This ensures markups appear immediately when turning to a page
+      // Use requestAnimationFrame to ensure DOM is ready after overlay was cleared
+      requestAnimationFrame(() => {
+        try {
+          // Get current measurements for this page from store (may have loaded after PDF render started)
+          const currentMeasurements = useTakeoffStore.getState().takeoffMeasurements.filter(
+            (m) => m.projectId === currentProjectId && m.sheetId === file?.id && m.pdfPage === pageNum
+          );
+          
+          // Always render if we have measurements or annotations for this page
+          if (currentMeasurements.length > 0 || localTakeoffMeasurements.length > 0 || localAnnotations.length > 0) {
             renderTakeoffAnnotations(pageNum, viewport, page);
-          });
+          }
+        } catch (error) {
+          if (process.env.NODE_ENV === 'development') {
+            console.warn('Error rendering markups after PDF render:', error);
+          }
         }
-      } catch {}
+      });
       
       // Removed verbose logging - was causing console spam
       
@@ -4384,26 +4347,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   }, [pdfDocument, currentPage, renderPDFPage, isComponentMounted]);
 
   // Page visibility handler - ensures overlays are rendered when returning to a page
+  // This effect runs when currentViewport becomes available (set by updateCanvasDimensions in renderPDFPage)
   useEffect(() => {
     if (pdfDocument && currentViewport && !isRenderingRef.current) {
       // Use the dedicated page shown handler to ensure proper overlay initialization
       onPageShown(currentPage, currentViewport);
       
-      // CRITICAL: Render markups immediately when viewport becomes available
-      // The viewport is now guaranteed to be set by the page change effect above
-      // Use requestAnimationFrame to ensure DOM is ready
-      requestAnimationFrame(() => {
-        // Load page if needed for rendering (should be fast if already cached)
-        pdfDocument.getPage(currentPage).then(page => {
-          if (localTakeoffMeasurements.length > 0 || localAnnotations.length > 0) {
-            renderTakeoffAnnotations(currentPage, currentViewport, page);
-          }
-        }).catch(err => {
-          if (process.env.NODE_ENV === 'development') {
-            console.warn('Error loading page for markup rendering:', err);
-          }
+      // Render markups immediately when viewport becomes available
+      // This happens after renderPDFPage has cleared the overlay and set the viewport
+      if (pdfPageRef.current && (localTakeoffMeasurements.length > 0 || localAnnotations.length > 0)) {
+        requestAnimationFrame(() => {
+          renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
         });
-      });
+      }
     }
   }, [currentPage, currentViewport, onPageShown, localTakeoffMeasurements, localAnnotations, renderTakeoffAnnotations, pdfDocument]);
 
