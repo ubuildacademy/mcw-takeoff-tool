@@ -86,11 +86,21 @@ router.post('/complete-search', async (req, res) => {
     }
 
     console.log('🔍 Starting complete visual search workflow...');
+    console.log('📋 Request details:', {
+      conditionId,
+      pdfFileId,
+      pageNumber,
+      selectionBox,
+      projectId,
+      sheetId,
+      options
+    });
 
     // Check if condition already has measurements (prevent re-running)
     const measurements = await storage.getTakeoffMeasurements();
     const existingMeasurements = measurements.filter(m => m.conditionId === conditionId);
     if (existingMeasurements.length > 0) {
+      console.log(`⚠️ Condition ${conditionId} already has ${existingMeasurements.length} measurements`);
       return res.status(400).json({
         error: 'This condition already has measurements. Please delete the condition and recreate it to run a new search.',
         existingCount: existingMeasurements.length
@@ -101,16 +111,22 @@ router.post('/complete-search', async (req, res) => {
     const conditions = await storage.getConditions();
     const condition = conditions.find(c => c.id === conditionId);
     if (!condition) {
+      console.error(`❌ Condition ${conditionId} not found`);
       return res.status(404).json({ error: 'Condition not found' });
     }
 
+    console.log(`✅ Found condition: ${condition.name} (type: ${condition.type})`);
+
     // Step 1: Extract symbol template (pass projectId for PDF download)
+    console.log('📦 Step 1: Extracting symbol template from selection box...');
+    console.log('📐 Selection box:', selectionBox);
     const template = await visualSearchService.extractSymbolTemplate(
       pdfFileId,
       pageNumber,
       selectionBox,
       projectId
     );
+    console.log(`✅ Template extracted: ${template.id}, image path: ${template.imageData}`);
 
     // Step 2: Save template image to condition (as base64 reference)
     // Read the template image file and convert to base64
@@ -136,6 +152,8 @@ router.post('/complete-search', async (req, res) => {
     }
 
     // Step 3: Search for matching symbols (pass pageNumber and projectId)
+    console.log('🔎 Step 3: Searching for matching symbols on page...');
+    console.log('⚙️ Search options:', options);
     const searchResult = await visualSearchService.searchForSymbols(
       conditionId,
       pdfFileId,
@@ -144,8 +162,15 @@ router.post('/complete-search', async (req, res) => {
       pageNumber,
       projectId
     );
+    console.log(`✅ Search complete: Found ${searchResult.totalMatches} matches`);
+    console.log('📊 Match details:', searchResult.matches.slice(0, 5).map(m => ({
+      id: m.id,
+      confidence: m.confidence,
+      pageNumber: m.pageNumber
+    })));
 
     // Step 4: Create count measurements with condition's color and name
+    console.log(`📝 Step 4: Creating ${searchResult.matches.length} count measurements...`);
     await visualSearchService.createCountMeasurements(
       conditionId,
       searchResult.matches,
@@ -156,7 +181,7 @@ router.post('/complete-search', async (req, res) => {
       condition.unit
     );
 
-    console.log(`✅ Visual search workflow complete: ${searchResult.totalMatches} matches found`);
+    console.log(`✅ Visual search workflow complete: ${searchResult.totalMatches} matches found and ${searchResult.totalMatches} measurements created`);
 
     return res.json({
       success: true,

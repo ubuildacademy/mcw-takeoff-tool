@@ -398,7 +398,13 @@ print(json.dumps({"success": True, "output": output_path}))
       const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
       const command = `${pythonCommand} "${this.pythonScriptPath}" "${fullPageImagePath}" "${template.imageData}" ${opts.confidenceThreshold}`;
 
-      console.log(`🔧 Executing visual search: ${command}`);
+      console.log(`🔧 Executing visual search command:`);
+      console.log(`   Python: ${pythonCommand}`);
+      console.log(`   Script: ${this.pythonScriptPath}`);
+      console.log(`   Full page image: ${fullPageImagePath}`);
+      console.log(`   Template image: ${template.imageData}`);
+      console.log(`   Confidence threshold: ${opts.confidenceThreshold}`);
+      console.log(`   Max matches: ${opts.maxMatches}`);
 
       const enhancedPath = this.getEnhancedPath();
       const enhancedLdPath = await this.getEnhancedLdLibraryPath();
@@ -438,15 +444,24 @@ print(json.dumps({"success": True, "output": output_path}))
       let result: PythonVisualSearchResult;
       try {
         const trimmedOutput = stdout.trim();
+        console.log(`📥 Python script output length: ${trimmedOutput.length} characters`);
+        console.log(`📥 Python script output (first 500 chars): ${trimmedOutput.substring(0, 500)}`);
         result = JSON.parse(trimmedOutput);
+        console.log(`✅ Parsed Python result: success=${result.success}, matches=${result.matches?.length || 0}`);
       } catch (parseError) {
-        console.error('❌ Failed to parse Python output:', stdout.substring(0, 500));
+        console.error('❌ Failed to parse Python output');
+        console.error('❌ Parse error:', parseError);
+        console.error('❌ Raw stdout (first 1000 chars):', stdout.substring(0, 1000));
+        console.error('❌ Raw stderr:', stderr);
         throw new Error(`Failed to parse visual search results: ${parseError instanceof Error ? parseError.message : 'Invalid JSON'}`);
       }
 
       if (!result.success) {
+        console.error(`❌ Python script returned error: ${result.error}`);
         throw new Error(result.error || 'Visual search failed');
       }
+      
+      console.log(`✅ Python script found ${result.matches?.length || 0} raw matches`);
 
       // Convert Python matches to VisualSearchMatch format
       const matches: VisualSearchMatch[] = (result.matches || []).map((match, index) => ({

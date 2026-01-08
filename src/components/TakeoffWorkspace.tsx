@@ -523,10 +523,19 @@ export function TakeoffWorkspace() {
 
   const handleVisualSearchComplete = async (selectionBox: {x: number, y: number, width: number, height: number}) => {
     if (visualSearchCondition && currentPdfFile && selectedSheet && projectId) {
-      if (isDev) console.log('Visual search selection completed:', selectionBox);
+      console.log('🔍 Visual search selection completed:', {
+        selectionBox,
+        conditionId: visualSearchCondition.id,
+        conditionName: visualSearchCondition.name,
+        pdfFileId: currentPdfFile.id,
+        pageNumber: selectedSheet.pageNumber,
+        projectId,
+        sheetId: selectedSheet.id
+      });
       
       // Prevent multiple simultaneous searches
       if (visualSearchLoading) {
+        console.warn('⚠️ Visual search already in progress, ignoring duplicate request');
         return;
       }
       
@@ -536,6 +545,13 @@ export function TakeoffWorkspace() {
         // Import the visual search service
         const { visualSearchService } = await import('../services/visualSearchService');
         
+        const searchOptions = {
+          confidenceThreshold: visualSearchCondition.searchThreshold || 0.7,
+          maxMatches: 100
+        };
+        
+        console.log('🚀 Starting visual search with options:', searchOptions);
+        
         // Complete the visual search workflow
         const result = await visualSearchService.completeSearch(
           visualSearchCondition.id,
@@ -544,22 +560,31 @@ export function TakeoffWorkspace() {
           selectionBox,
           projectId,
           selectedSheet.id,
-          {
-            confidenceThreshold: visualSearchCondition.searchThreshold || 0.7,
-            maxMatches: 100
-          }
+          searchOptions
         );
         
-        if (isDev) console.log(`✅ Visual search complete: ${result.measurementsCreated} matches found and marked`);
+        console.log(`✅ Visual search API call complete:`, {
+          measurementsCreated: result.measurementsCreated,
+          totalMatches: result.result?.totalMatches,
+          searchTime: result.result?.searchTime
+        });
         
         // Refresh the takeoff measurements to show the new count measurements
+        console.log('🔄 Refreshing takeoff measurements...');
         await loadProjectTakeoffMeasurements(projectId);
+        
+        // Get updated count to verify
+        const store = useTakeoffStore.getState();
+        const conditionMeasurements = store.takeoffMeasurements.filter(
+          m => m.conditionId === visualSearchCondition.id
+        );
+        console.log(`📊 Condition now has ${conditionMeasurements.length} measurements`);
         
         // Show success message
         if (result.measurementsCreated > 0) {
-          alert(`Visual search complete! Found ${result.measurementsCreated} matching items.`);
+          alert(`Visual search complete! Found ${result.measurementsCreated} matching items and created ${conditionMeasurements.length} count measurements.`);
         } else {
-          alert('Visual search complete, but no matching items were found. Try adjusting the confidence threshold or selecting a different symbol.');
+          alert(`Visual search complete, but no matching items were found (confidence threshold: ${searchOptions.confidenceThreshold}). Try:\n- Lowering the confidence threshold (currently ${searchOptions.confidenceThreshold})\n- Selecting a more distinctive symbol\n- Ensuring the symbol appears multiple times on the page`);
         }
         
         // Exit visual search mode
