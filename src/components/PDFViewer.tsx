@@ -2764,10 +2764,27 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setIsSelectingSymbol(false);
     
     // Call the appropriate completion handler
+    console.log('[PDFViewer] Selection box completed:', {
+      visualSearchMode,
+      titleblockSelectionMode,
+      hasVisualSearchCallback: !!onVisualSearchComplete,
+      hasTitleblockCallback: !!onTitleblockSelectionComplete,
+      pdfSelectionBox
+    });
+    
     if (titleblockSelectionMode && onTitleblockSelectionComplete) {
+      console.log('[PDFViewer] Calling titleblock selection complete handler');
       onTitleblockSelectionComplete(titleblockSelectionMode, pdfSelectionBox);
     } else if (visualSearchMode && onVisualSearchComplete) {
+      console.log('[PDFViewer] Calling visual search complete handler with box:', pdfSelectionBox);
       onVisualSearchComplete(pdfSelectionBox);
+    } else {
+      console.warn('[PDFViewer] No completion handler available!', {
+        visualSearchMode,
+        titleblockSelectionMode,
+        hasVisualSearchCallback: !!onVisualSearchComplete,
+        hasTitleblockCallback: !!onTitleblockSelectionComplete
+      });
     }
     
     event.preventDefault();

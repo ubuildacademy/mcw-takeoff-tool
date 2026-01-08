@@ -522,6 +522,50 @@ export function TakeoffWorkspace() {
   };
 
   const handleVisualSearchComplete = async (selectionBox: {x: number, y: number, width: number, height: number}) => {
+    console.log('🎯 handleVisualSearchComplete CALLED with:', {
+      selectionBox,
+      hasVisualSearchCondition: !!visualSearchCondition,
+      hasCurrentPdfFile: !!currentPdfFile,
+      hasSelectedSheet: !!selectedSheet,
+      hasProjectId: !!projectId,
+      visualSearchLoading,
+      visualSearchConditionId: visualSearchCondition?.id,
+      currentPdfFileId: currentPdfFile?.id,
+      selectedSheetId: selectedSheet?.id,
+      projectId
+    });
+    
+    // Set loading immediately, even before validation
+    setVisualSearchLoading(true);
+    
+    if (!visualSearchCondition) {
+      console.error('❌ No visual search condition set');
+      alert('Visual search condition is missing. Please select a visual-search condition.');
+      setVisualSearchLoading(false);
+      return;
+    }
+    
+    if (!currentPdfFile) {
+      console.error('❌ No PDF file selected');
+      alert('No PDF file is open. Please open a PDF file first.');
+      setVisualSearchLoading(false);
+      return;
+    }
+    
+    if (!selectedSheet) {
+      console.error('❌ No sheet selected');
+      alert('No sheet is selected. Please select a sheet first.');
+      setVisualSearchLoading(false);
+      return;
+    }
+    
+    if (!projectId) {
+      console.error('❌ No project ID');
+      alert('Project ID is missing. Please refresh the page.');
+      setVisualSearchLoading(false);
+      return;
+    }
+    
     if (visualSearchCondition && currentPdfFile && selectedSheet && projectId) {
       console.log('🔍 Visual search selection completed:', {
         selectionBox,
@@ -533,13 +577,11 @@ export function TakeoffWorkspace() {
         sheetId: selectedSheet.id
       });
       
-      // Prevent multiple simultaneous searches
+      // Prevent multiple simultaneous searches (but loading is already set above)
       if (visualSearchLoading) {
         console.warn('⚠️ Visual search already in progress, ignoring duplicate request');
         return;
       }
-      
-      setVisualSearchLoading(true);
       
       try {
         // Import the visual search service
