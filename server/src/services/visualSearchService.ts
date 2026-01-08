@@ -489,7 +489,10 @@ print(json.dumps({"success": True, "output": output_path}))
     conditionId: string,
     matches: VisualSearchMatch[],
     projectId: string,
-    sheetId: string
+    sheetId: string,
+    conditionColor: string = '#3B82F6',
+    conditionName: string = 'Visual Search Match',
+    conditionUnit: string = 'EA'
   ): Promise<void> {
     try {
       console.log(`📊 Creating ${matches.length} count measurements...`);
@@ -499,15 +502,20 @@ print(json.dumps({"success": True, "output": output_path}))
         const centerX = match.boundingBox.x + (match.boundingBox.width / 2);
         const centerY = match.boundingBox.y + (match.boundingBox.height / 2);
         
+        // Generate unique ID using timestamp and random string
+        const timestamp = Date.now();
+        const randomStr = Math.random().toString(36).substr(2, 9);
+        const measurementId = `measurement_${timestamp}_${randomStr}`;
+        
         const measurement = {
-          id: `measurement_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          id: measurementId,
           projectId,
           sheetId,
           conditionId,
           type: 'count' as const,
           points: [{ x: centerX, y: centerY }],
           calculatedValue: 1,
-          unit: 'EA',
+          unit: conditionUnit,
           timestamp: new Date().toISOString(),
           pdfPage: match.pageNumber,
           pdfCoordinates: [
@@ -516,8 +524,8 @@ print(json.dumps({"success": True, "output": output_path}))
               y: (match.pdfCoordinates?.y || 0) + ((match.pdfCoordinates?.height || 0) / 2) 
             }
           ],
-          conditionColor: '#3B82F6',
-          conditionName: 'Visual Search Match'
+          conditionColor: conditionColor,
+          conditionName: conditionName
         };
         
         await storage.saveTakeoffMeasurement(measurement);

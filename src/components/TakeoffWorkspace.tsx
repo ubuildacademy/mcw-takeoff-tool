@@ -91,6 +91,7 @@ export function TakeoffWorkspace() {
   const [visualSearchMode, setVisualSearchMode] = useState(false);
   const [visualSearchCondition, setVisualSearchCondition] = useState<TakeoffCondition | null>(null);
   const [selectionBox, setSelectionBox] = useState<{x: number, y: number, width: number, height: number} | null>(null);
+  const [visualSearchLoading, setVisualSearchLoading] = useState(false);
 
   // Titleblock selection state (user-taught regions for sheet number/name)
   type TitleblockField = 'sheetNumber' | 'sheetName';
@@ -524,6 +525,13 @@ export function TakeoffWorkspace() {
     if (visualSearchCondition && currentPdfFile && selectedSheet && projectId) {
       if (isDev) console.log('Visual search selection completed:', selectionBox);
       
+      // Prevent multiple simultaneous searches
+      if (visualSearchLoading) {
+        return;
+      }
+      
+      setVisualSearchLoading(true);
+      
       try {
         // Import the visual search service
         const { visualSearchService } = await import('../services/visualSearchService');
@@ -547,14 +555,31 @@ export function TakeoffWorkspace() {
         // Refresh the takeoff measurements to show the new count measurements
         await loadProjectTakeoffMeasurements(projectId);
         
+        // Show success message
+        if (result.measurementsCreated > 0) {
+          alert(`Visual search complete! Found ${result.measurementsCreated} matching items.`);
+        } else {
+          alert('Visual search complete, but no matching items were found. Try adjusting the confidence threshold or selecting a different symbol.');
+        }
+        
         // Exit visual search mode
         setVisualSearchMode(false);
         setVisualSearchCondition(null);
         setSelectionBox(null);
         
-      } catch (error) {
+      } catch (error: any) {
         if (isDev) console.error('❌ Visual search failed:', error);
-        alert('Visual search failed. Please try again.');
+        
+        // Handle specific error cases
+        const errorMessage = error?.message || 'Visual search failed. Please try again.';
+        
+        if (errorMessage.includes('already has measurements')) {
+          alert('This condition already has measurements. Please delete the condition and recreate it to run a new search.');
+        } else {
+          alert(`Visual search failed: ${errorMessage}`);
+        }
+      } finally {
+        setVisualSearchLoading(false);
       }
     }
   };
@@ -1817,16 +1842,33 @@ export function TakeoffWorkspace() {
         <div className="flex-1 flex flex-col h-full overflow-hidden">
           {/* Mode indicator banner */}
           {visualSearchMode && visualSearchCondition && (
-            <div className="bg-indigo-100 border-b border-indigo-200 p-3 flex items-center justify-between">
+            <div className={`border-b p-3 flex items-center justify-between ${
+              visualSearchLoading 
+                ? 'bg-yellow-100 border-yellow-200' 
+                : 'bg-indigo-100 border-indigo-200'
+            }`}>
               <div className="flex items-center space-x-2">
-                <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></div>
-                <span className="text-sm font-medium text-indigo-900">
-                  Visual Search Mode: {visualSearchCondition.name}
-                </span>
+                {visualSearchLoading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                    <span className="text-sm font-medium text-yellow-900">
+                      Searching for matches...
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></div>
+                    <span className="text-sm font-medium text-indigo-900">
+                      Visual Search Mode: {visualSearchCondition.name}
+                    </span>
+                  </>
+                )}
               </div>
-              <div className="text-xs text-indigo-700">
-                Draw a box around a symbol to find and count similar items
-              </div>
+              {!visualSearchLoading && (
+                <div className="text-xs text-indigo-700">
+                  Draw a box around a symbol to find and count similar items
+                </div>
+              )}
             </div>
           )}
           {titleblockSelectionMode && (

@@ -87,6 +87,23 @@ router.post('/complete-search', async (req, res) => {
 
     console.log('🔍 Starting complete visual search workflow...');
 
+    // Check if condition already has measurements (prevent re-running)
+    const measurements = await storage.getTakeoffMeasurements();
+    const existingMeasurements = measurements.filter(m => m.conditionId === conditionId);
+    if (existingMeasurements.length > 0) {
+      return res.status(400).json({
+        error: 'This condition already has measurements. Please delete the condition and recreate it to run a new search.',
+        existingCount: existingMeasurements.length
+      });
+    }
+
+    // Get condition info for color and name
+    const conditions = await storage.getConditions();
+    const condition = conditions.find(c => c.id === conditionId);
+    if (!condition) {
+      return res.status(404).json({ error: 'Condition not found' });
+    }
+
     // Step 1: Extract symbol template (pass projectId for PDF download)
     const template = await visualSearchService.extractSymbolTemplate(
       pdfFileId,
@@ -95,7 +112,30 @@ router.post('/complete-search', async (req, res) => {
       projectId
     );
 
-    // Step 2: Search for matching symbols (pass pageNumber and projectId)
+    // Step 2: Save template image to condition (as base64 reference)
+    // Read the template image file and convert to base64
+    try {
+      const fs = require('fs-extra');
+      if (await fs.pathExists(template.imageData)) {
+        const imageBuffer = await fs.readFile(template.imageData);
+        const base64Image = imageBuffer.toString('base64');
+        const dataUrl = `data:image/png;base64,${base64Image}`;
+        
+        // Update condition with search image
+        const updatedCondition = {
+          ...condition,
+          searchImage: dataUrl,
+          searchThreshold: condition.searchThreshold || options?.confidenceThreshold || 0.7
+        };
+        await storage.saveCondition(updatedCondition);
+        console.log('✅ Saved search template image to condition');
+      }
+    } catch (templateError) {
+      console.warn('⚠️ Could not save template image to condition:', templateError);
+      // Continue anyway - template saving is not critical
+    }
+
+    // Step 3: Search for matching symbols (pass pageNumber and projectId)
     const searchResult = await visualSearchService.searchForSymbols(
       conditionId,
       pdfFileId,
@@ -105,12 +145,15 @@ router.post('/complete-search', async (req, res) => {
       projectId
     );
 
-    // Step 3: Create count measurements
+    // Step 4: Create count measurements with condition's color and name
     await visualSearchService.createCountMeasurements(
       conditionId,
       searchResult.matches,
       projectId,
-      sheetId
+      sheetId,
+      condition.color,
+      condition.name,
+      condition.unit
     );
 
     console.log(`✅ Visual search workflow complete: ${searchResult.totalMatches} matches found`);
@@ -122,7 +165,10 @@ router.post('/complete-search', async (req, res) => {
     });
   } catch (error) {
     console.error('Error in complete visual search workflow:', error);
-    return res.status(500).json({ error: 'Visual search workflow failed' });
+    return res.status(500).json({ 
+      error: 'Visual search workflow failed',
+      details: error instanceof Error ? error.message : String(error)
+    });
   }
 });
 
