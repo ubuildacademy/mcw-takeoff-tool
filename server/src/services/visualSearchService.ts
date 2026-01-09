@@ -215,6 +215,13 @@ class VisualSearchService {
       };
     } catch (error) {
       console.error('❌ Failed to extract symbol template:', error);
+      console.error('❌ Error details:', {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : 'No stack trace',
+        pdfFileId,
+        pageNumber,
+        selectionBox
+      });
       throw new Error(`Failed to extract symbol template: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -350,7 +357,13 @@ print(json.dumps({"success": True, "output": output_path}))
 
       return pdfPath;
     } catch (error) {
-      console.error(`Error getting PDF file path:`, error);
+      console.error(`❌ Error getting PDF file path:`, error);
+      console.error(`❌ Error details:`, {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : 'No stack trace',
+        pdfFileId,
+        projectId
+      });
       throw new Error(`Failed to get PDF file path: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }

@@ -122,7 +122,10 @@ export class VisualSearchService {
 
     if (!response.ok) {
       const error = await response.json();
-      throw new Error(error.error || 'Visual search workflow failed');
+      const errorMessage = error.details 
+        ? `${error.error || 'Visual search workflow failed'}: ${error.details}`
+        : error.error || 'Visual search workflow failed';
+      throw new Error(errorMessage);
     }
 
     const result = await response.json();
