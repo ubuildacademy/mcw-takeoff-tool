@@ -478,9 +478,6 @@ print(json.dumps({"success": True, "output": output_path}))
         throw new Error(result.error || 'Visual search failed');
       }
       
-      console.log(`✅ Python script found ${result.matches?.length || 0} raw matches`);
-      console.log(`📐 Image dimensions: ${result.imageWidth}x${result.imageHeight}`);
-
       // Get image dimensions for coordinate normalization
       const imageWidth = result.imageWidth || 1;
       const imageHeight = result.imageHeight || 1;
@@ -491,24 +488,14 @@ print(json.dumps({"success": True, "output": output_path}))
         // Normalize pdfCoordinates from pixel space to 0-1 normalized coordinates
         let normalizedPdfCoordinates = match.pdfCoordinates;
         if (match.pdfCoordinates && imageWidth > 0 && imageHeight > 0) {
-          const originalCoords = match.pdfCoordinates;
           normalizedPdfCoordinates = {
-            x: originalCoords.x / imageWidth,
-            y: originalCoords.y / imageHeight,
-            width: originalCoords.width / imageWidth,
-            height: originalCoords.height / imageHeight
+            x: match.pdfCoordinates.x / imageWidth,
+            y: match.pdfCoordinates.y / imageHeight,
+            width: match.pdfCoordinates.width / imageWidth,
+            height: match.pdfCoordinates.height / imageHeight
           };
-          
-          // Log normalization for first match as example
-          if (index === 0) {
-            console.log(`📐 Coordinate normalization example (match 0):`, {
-              original: { x: originalCoords.x, y: originalCoords.y, width: originalCoords.width, height: originalCoords.height },
-              normalized: normalizedPdfCoordinates,
-              imageDimensions: { width: imageWidth, height: imageHeight }
-            });
-          }
         } else {
-          console.warn(`⚠️ Match ${index} missing image dimensions or pdfCoordinates, cannot normalize`);
+          console.warn(`Match ${index} missing image dimensions or pdfCoordinates, cannot normalize`);
         }
         
         return {
@@ -586,7 +573,6 @@ print(json.dumps({"success": True, "output": output_path}))
             
             // Validate coordinates are in 0-1 range
             if (centerPdf.x < 0 || centerPdf.x > 1 || centerPdf.y < 0 || centerPdf.y > 1) {
-              console.warn(`⚠️ Match ${i} has out-of-range normalized coordinates:`, centerPdf);
               // Clamp to valid range
               centerPdf.x = Math.max(0, Math.min(1, centerPdf.x));
               centerPdf.y = Math.max(0, Math.min(1, centerPdf.y));
@@ -594,7 +580,7 @@ print(json.dumps({"success": True, "output": output_path}))
           } else {
             // Fallback: use bounding box center (image pixel coordinates)
             // This shouldn't happen if Python script is working correctly
-            console.warn(`⚠️ Match ${i} missing pdfCoordinates, using boundingBox center`);
+            console.warn(`Match ${i} missing pdfCoordinates, using boundingBox center`);
             centerPdf = {
               x: match.boundingBox.x + (match.boundingBox.width / 2),
               y: match.boundingBox.y + (match.boundingBox.height / 2)
@@ -620,38 +606,21 @@ print(json.dumps({"success": True, "output": output_path}))
             conditionName: conditionName
           };
           
-          console.log(`📝 Creating measurement ${i + 1}/${matches.length}:`, {
-            id: measurementId,
-            pdfPage: measurement.pdfPage,
-            pdfCoordinates: centerPdf,
-            conditionId,
-            sheetId
-          });
-          
           await storage.saveTakeoffMeasurement(measurement);
           successCount++;
         } catch (matchError) {
           errorCount++;
-          console.error(`❌ Failed to create measurement ${i + 1}/${matches.length}:`, matchError);
-          console.error(`❌ Match details:`, {
-            id: match.id,
-            confidence: match.confidence,
-            pageNumber: match.pageNumber,
-            hasPdfCoordinates: !!match.pdfCoordinates,
-            pdfCoordinates: match.pdfCoordinates
-          });
+          console.error(`Failed to create measurement ${i + 1}/${matches.length}:`, matchError);
           // Continue with other matches instead of failing completely
         }
       }
       
       if (errorCount > 0) {
-        console.warn(`⚠️ Created ${successCount} measurements, ${errorCount} failed`);
+        console.warn(`Created ${successCount} measurements, ${errorCount} failed`);
         if (successCount === 0) {
           throw new Error(`Failed to create any count measurements. ${errorCount} errors occurred.`);
         }
       }
-      
-      console.log(`✅ Successfully created ${successCount} count measurements`);
     } catch (error) {
       console.error('❌ Failed to create count measurements:', error);
       console.error('❌ Error details:', {

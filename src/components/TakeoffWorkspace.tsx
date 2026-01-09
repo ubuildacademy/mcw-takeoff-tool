@@ -478,49 +478,27 @@ export function TakeoffWorkspace() {
   }, []);
 
   const handleConditionSelect = (condition: TakeoffCondition | null) => {
-    console.log('🔵 [TakeoffWorkspace] handleConditionSelect called:', {
-      condition: condition ? { id: condition.id, name: condition.name, type: condition.type } : null
-    });
-    
     if (condition === null) {
-      console.log('🔵 [TakeoffWorkspace] Clearing condition selection');
       setSelectedCondition(null);
       // Also clear in the store
       useTakeoffStore.getState().setSelectedCondition(null);
       setVisualSearchMode(false);
       setVisualSearchCondition(null);
     } else {
-      console.log('🔵 [TakeoffWorkspace] Setting condition:', {
-        id: condition.id,
-        name: condition.name,
-        type: condition.type
-      });
       setSelectedCondition(condition.id);
       // Also set in the store
       useTakeoffStore.getState().setSelectedCondition(condition.id);
       
       // Check if this is a visual search condition
       if (condition.type === 'visual-search') {
-        console.log('🔵 [TakeoffWorkspace] ✅ Visual search condition detected! Setting visualSearchMode=true');
         setVisualSearchMode(true);
         setVisualSearchCondition(condition);
       } else {
-        console.log('🔵 [TakeoffWorkspace] Not a visual search condition, disabling visual search mode');
         setVisualSearchMode(false);
         setVisualSearchCondition(null);
       }
     }
   };
-
-  // Track visual search mode changes
-  useEffect(() => {
-    console.log('🔵 [TakeoffWorkspace] visualSearchMode state changed:', {
-      visualSearchMode,
-      hasCondition: !!visualSearchCondition,
-      conditionId: visualSearchCondition?.id,
-      conditionName: visualSearchCondition?.name
-    });
-  }, [visualSearchMode, visualSearchCondition]);
 
   // Global Spacebar handler to deselect current condition
   useEffect(() => {
@@ -544,19 +522,6 @@ export function TakeoffWorkspace() {
   };
 
   const handleVisualSearchComplete = async (selectionBox: {x: number, y: number, width: number, height: number}) => {
-    console.log('🎯 handleVisualSearchComplete CALLED with:', {
-      selectionBox,
-      hasVisualSearchCondition: !!visualSearchCondition,
-      hasCurrentPdfFile: !!currentPdfFile,
-      hasSelectedSheet: !!selectedSheet,
-      hasProjectId: !!projectId,
-      visualSearchLoading,
-      visualSearchConditionId: visualSearchCondition?.id,
-      currentPdfFileId: currentPdfFile?.id,
-      selectedSheetId: selectedSheet?.id,
-      projectId
-    });
-    
     // Set loading immediately, even before validation
     setVisualSearchLoading(true);
     
@@ -592,21 +557,10 @@ export function TakeoffWorkspace() {
       takeoffCount: 0
     };
     
-    console.log('🔍 Visual search selection completed:', {
-      selectionBox,
-      conditionId: visualSearchCondition.id,
-      conditionName: visualSearchCondition.name,
-      pdfFileId: currentPdfFile.id,
-      pageNumber: effectiveSheet.pageNumber,
-      projectId,
-      sheetId: effectiveSheet.id,
-      sheetWasDerived: !selectedSheet
-    });
-    
     if (visualSearchCondition && currentPdfFile && projectId) {
       // Prevent multiple simultaneous searches (but loading is already set above)
       if (visualSearchLoading) {
-        console.warn('⚠️ Visual search already in progress, ignoring duplicate request');
+        console.warn('Visual search already in progress, ignoring duplicate request');
         return;
       }
       
@@ -619,8 +573,6 @@ export function TakeoffWorkspace() {
           maxMatches: 100
         };
         
-        console.log('🚀 Starting visual search with options:', searchOptions);
-        
         // Complete the visual search workflow
         const result = await visualSearchService.completeSearch(
           visualSearchCondition.id,
@@ -632,14 +584,7 @@ export function TakeoffWorkspace() {
           searchOptions
         );
         
-        console.log(`✅ Visual search API call complete:`, {
-          measurementsCreated: result.measurementsCreated,
-          totalMatches: result.result?.totalMatches,
-          searchTime: result.result?.searchTime
-        });
-        
         // Refresh the takeoff measurements to show the new count measurements
-        console.log('🔄 Refreshing takeoff measurements...');
         await loadProjectTakeoffMeasurements(projectId);
         
         // Get updated count to verify
@@ -647,7 +592,6 @@ export function TakeoffWorkspace() {
         const conditionMeasurements = store.takeoffMeasurements.filter(
           m => m.conditionId === visualSearchCondition.id
         );
-        console.log(`📊 Condition now has ${conditionMeasurements.length} measurements`);
         
         // Show success message
         if (result.measurementsCreated > 0) {
