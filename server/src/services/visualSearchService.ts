@@ -75,6 +75,10 @@ interface PythonVisualSearchResult {
     pageNumber: number;
   }>;
   totalMatches?: number;
+  imageWidth?: number;
+  imageHeight?: number;
+  templateWidth?: number;
+  templateHeight?: number;
   error?: string;
 }
 
@@ -475,16 +479,47 @@ print(json.dumps({"success": True, "output": output_path}))
       }
       
       console.log(`✅ Python script found ${result.matches?.length || 0} raw matches`);
+      console.log(`📐 Image dimensions: ${result.imageWidth}x${result.imageHeight}`);
+
+      // Get image dimensions for coordinate normalization
+      const imageWidth = result.imageWidth || 1;
+      const imageHeight = result.imageHeight || 1;
 
       // Convert Python matches to VisualSearchMatch format
-      const matches: VisualSearchMatch[] = (result.matches || []).map((match, index) => ({
-        id: match.id || `match_${Date.now()}_${index}`,
-        confidence: match.confidence,
-        boundingBox: match.boundingBox,
-        pageNumber: searchPageNumber,
-        pdfCoordinates: match.pdfCoordinates,
-        description: `Match for ${template.description || 'symbol'}`
-      }));
+      // Normalize PDF coordinates from pixel space to 0-1 range (required by frontend renderer)
+      const matches: VisualSearchMatch[] = (result.matches || []).map((match, index) => {
+        // Normalize pdfCoordinates from pixel space to 0-1 normalized coordinates
+        let normalizedPdfCoordinates = match.pdfCoordinates;
+        if (match.pdfCoordinates && imageWidth > 0 && imageHeight > 0) {
+          const originalCoords = match.pdfCoordinates;
+          normalizedPdfCoordinates = {
+            x: originalCoords.x / imageWidth,
+            y: originalCoords.y / imageHeight,
+            width: originalCoords.width / imageWidth,
+            height: originalCoords.height / imageHeight
+          };
+          
+          // Log normalization for first match as example
+          if (index === 0) {
+            console.log(`📐 Coordinate normalization example (match 0):`, {
+              original: { x: originalCoords.x, y: originalCoords.y, width: originalCoords.width, height: originalCoords.height },
+              normalized: normalizedPdfCoordinates,
+              imageDimensions: { width: imageWidth, height: imageHeight }
+            });
+          }
+        } else {
+          console.warn(`⚠️ Match ${index} missing image dimensions or pdfCoordinates, cannot normalize`);
+        }
+        
+        return {
+          id: match.id || `match_${Date.now()}_${index}`,
+          confidence: match.confidence,
+          boundingBox: match.boundingBox,
+          pageNumber: searchPageNumber,
+          pdfCoordinates: normalizedPdfCoordinates,
+          description: `Match for ${template.description || 'symbol'}`
+        };
+      });
 
       // Limit to maxMatches
       const limitedMatches = matches
@@ -542,11 +577,20 @@ print(json.dumps({"success": True, "output": output_path}))
           let centerPdf: { x: number; y: number };
           
           if (match.pdfCoordinates && match.pdfCoordinates.x !== undefined && match.pdfCoordinates.y !== undefined) {
-            // Calculate center from PDF coordinates (these are in PDF space)
+            // Calculate center from PDF coordinates (these are already normalized 0-1)
+            // pdfCoordinates are normalized, so we can use them directly
             centerPdf = {
               x: match.pdfCoordinates.x + (match.pdfCoordinates.width / 2),
               y: match.pdfCoordinates.y + (match.pdfCoordinates.height / 2)
             };
+            
+            // Validate coordinates are in 0-1 range
+            if (centerPdf.x < 0 || centerPdf.x > 1 || centerPdf.y < 0 || centerPdf.y > 1) {
+              console.warn(`⚠️ Match ${i} has out-of-range normalized coordinates:`, centerPdf);
+              // Clamp to valid range
+              centerPdf.x = Math.max(0, Math.min(1, centerPdf.x));
+              centerPdf.y = Math.max(0, Math.min(1, centerPdf.y));
+            }
           } else {
             // Fallback: use bounding box center (image pixel coordinates)
             // This shouldn't happen if Python script is working correctly
