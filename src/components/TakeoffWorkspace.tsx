@@ -574,13 +574,6 @@ export function TakeoffWorkspace() {
       return;
     }
     
-    if (!selectedSheet) {
-      console.error('❌ No sheet selected');
-      alert('No sheet is selected. Please select a sheet first.');
-      setVisualSearchLoading(false);
-      return;
-    }
-    
     if (!projectId) {
       console.error('❌ No project ID');
       alert('Project ID is missing. Please refresh the page.');
@@ -588,17 +581,29 @@ export function TakeoffWorkspace() {
       return;
     }
     
-    if (visualSearchCondition && currentPdfFile && selectedSheet && projectId) {
-      console.log('🔍 Visual search selection completed:', {
-        selectionBox,
-        conditionId: visualSearchCondition.id,
-        conditionName: visualSearchCondition.name,
-        pdfFileId: currentPdfFile.id,
-        pageNumber: selectedSheet.pageNumber,
-        projectId,
-        sheetId: selectedSheet.id
-      });
-      
+    // Derive sheet from current PDF file and page if not explicitly selected
+    // This allows visual search to work even if user hasn't explicitly selected a sheet
+    const effectiveSheet: Sheet = selectedSheet || {
+      id: currentPdfFile.id,
+      name: currentPdfFile.name || `Page ${currentPage}`,
+      pageNumber: currentPage,
+      isVisible: true,
+      hasTakeoffs: false,
+      takeoffCount: 0
+    };
+    
+    console.log('🔍 Visual search selection completed:', {
+      selectionBox,
+      conditionId: visualSearchCondition.id,
+      conditionName: visualSearchCondition.name,
+      pdfFileId: currentPdfFile.id,
+      pageNumber: effectiveSheet.pageNumber,
+      projectId,
+      sheetId: effectiveSheet.id,
+      sheetWasDerived: !selectedSheet
+    });
+    
+    if (visualSearchCondition && currentPdfFile && projectId) {
       // Prevent multiple simultaneous searches (but loading is already set above)
       if (visualSearchLoading) {
         console.warn('⚠️ Visual search already in progress, ignoring duplicate request');
@@ -620,10 +625,10 @@ export function TakeoffWorkspace() {
         const result = await visualSearchService.completeSearch(
           visualSearchCondition.id,
           currentPdfFile.id,
-          selectedSheet.pageNumber,
+          effectiveSheet.pageNumber,
           selectionBox,
           projectId,
-          selectedSheet.id,
+          effectiveSheet.id,
           searchOptions
         );
         
