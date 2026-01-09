@@ -561,11 +561,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Handle visual search mode
   useEffect(() => {
+    console.log('🟢 [PDFViewer] Visual search mode useEffect triggered:', {
+      visualSearchMode,
+      titleblockSelectionMode,
+      willEnableSelection: !!(visualSearchMode || !!titleblockSelectionMode)
+    });
+    
     if (visualSearchMode || !!titleblockSelectionMode) {
+      console.log('🟢 [PDFViewer] ✅ Enabling symbol selection (isSelectingSymbol = true)');
       setIsSelectingSymbol(true);
       setSelectionBox(null);
       setSelectionStart(null);
     } else {
+      console.log('🟢 [PDFViewer] ❌ Disabling symbol selection (isSelectingSymbol = false)');
       setIsSelectingSymbol(false);
       setSelectionBox(null);
       setSelectionStart(null);
@@ -2675,12 +2683,26 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Handle mouse move - direct coordinate conversion
   // Handle mouse down for titleblock/visual search selection (start selection)
   const handleMouseDown = useCallback((event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
-    if (!pdfCanvasRef.current) return;
+    console.log('🟡 [PDFViewer] handleMouseDown called:', {
+      hasPdfCanvas: !!pdfCanvasRef.current,
+      visualSearchMode,
+      titleblockSelectionMode,
+      isSelectingSymbol,
+      willHandle: !!(visualSearchMode || !!titleblockSelectionMode) && isSelectingSymbol
+    });
+    
+    if (!pdfCanvasRef.current) {
+      console.log('🟡 [PDFViewer] ❌ No PDF canvas ref, returning early');
+      return;
+    }
     
     // Only handle mousedown for titleblock/visual search selection
     if (!(visualSearchMode || !!titleblockSelectionMode) || !isSelectingSymbol) {
+      console.log('🟡 [PDFViewer] ❌ Not in visual search/titleblock mode or isSelectingSymbol is false, returning early');
       return;
     }
+    
+    console.log('🟡 [PDFViewer] ✅ Starting selection box...');
     
     // Get CSS pixel coordinates
     const rect = pdfCanvasRef.current.getBoundingClientRect();
@@ -2693,6 +2715,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     
     // Start selection
+    console.log('🟡 [PDFViewer] Setting selection start at:', { x: cssX, y: cssY });
     setSelectionStart({ x: cssX, y: cssY });
     setSelectionBox(null);
     event.preventDefault();
@@ -2701,12 +2724,27 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Handle mouse up for titleblock/visual search selection (complete selection)
   const handleMouseUp = useCallback(async (event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
-    if (!pdfCanvasRef.current) return;
+    console.log('🟣 [PDFViewer] handleMouseUp called:', {
+      hasPdfCanvas: !!pdfCanvasRef.current,
+      visualSearchMode,
+      titleblockSelectionMode,
+      isSelectingSymbol,
+      hasSelectionStart: !!selectionStart,
+      willHandle: !!(visualSearchMode || !!titleblockSelectionMode) && isSelectingSymbol && !!selectionStart
+    });
+    
+    if (!pdfCanvasRef.current) {
+      console.log('🟣 [PDFViewer] ❌ No PDF canvas ref, returning early');
+      return;
+    }
     
     // Only handle mouseup for titleblock/visual search selection
     if (!(visualSearchMode || !!titleblockSelectionMode) || !isSelectingSymbol || !selectionStart) {
+      console.log('🟣 [PDFViewer] ❌ Not in visual search/titleblock mode, isSelectingSymbol is false, or no selectionStart, returning early');
       return;
     }
+    
+    console.log('🟣 [PDFViewer] ✅ Completing selection box...');
     
     // Get viewport
     let viewport = currentViewport;
@@ -2743,10 +2781,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Only complete if the box has minimum size (to avoid accidental clicks)
     if (width < 5 && height < 5) {
       // Too small, treat as click - reset
+      console.log('🟣 [PDFViewer] ❌ Selection box too small (treated as click):', { width, height });
       setSelectionStart(null);
       setSelectionBox(null);
       return;
     }
+    
+    console.log('🟣 [PDFViewer] Selection box size OK:', { width, height });
     
     const finalSelectionBox = { x, y, width, height };
     setSelectionBox(finalSelectionBox);
@@ -2759,12 +2800,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       height: height / viewport.height
     };
     
+    console.log('🟣 [PDFViewer] Converted to PDF coordinates:', pdfSelectionBox);
+    
     // Reset selection state
     setSelectionStart(null);
     setIsSelectingSymbol(false);
     
     // Call the appropriate completion handler
-    console.log('[PDFViewer] Selection box completed:', {
+    console.log('🟣 [PDFViewer] Selection box completed:', {
       visualSearchMode,
       titleblockSelectionMode,
       hasVisualSearchCallback: !!onVisualSearchComplete,
@@ -2773,13 +2816,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     });
     
     if (titleblockSelectionMode && onTitleblockSelectionComplete) {
-      console.log('[PDFViewer] Calling titleblock selection complete handler');
+      console.log('🟣 [PDFViewer] ✅ Calling titleblock selection complete handler');
       onTitleblockSelectionComplete(titleblockSelectionMode, pdfSelectionBox);
     } else if (visualSearchMode && onVisualSearchComplete) {
-      console.log('[PDFViewer] Calling visual search complete handler with box:', pdfSelectionBox);
+      console.log('🟣 [PDFViewer] ✅ Calling visual search complete handler with box:', pdfSelectionBox);
       onVisualSearchComplete(pdfSelectionBox);
     } else {
-      console.warn('[PDFViewer] No completion handler available!', {
+      console.warn('🟣 [PDFViewer] ❌ No completion handler available!', {
         visualSearchMode,
         titleblockSelectionMode,
         hasVisualSearchCallback: !!onVisualSearchComplete,
@@ -2841,6 +2884,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const height = Math.abs(cssY - selectionStart.y);
       const x = Math.min(cssX, selectionStart.x);
       const y = Math.min(cssY, selectionStart.y);
+      
+      // Only log occasionally to avoid spam during drag
+      if (Math.random() < 0.01) { // Log ~1% of the time during drag
+        console.log('🔵 [PDFViewer] Updating selection box during drag:', { x, y, width, height });
+      }
       
       setSelectionBox({ x, y, width, height });
       return;

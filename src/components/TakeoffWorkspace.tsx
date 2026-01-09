@@ -478,27 +478,49 @@ export function TakeoffWorkspace() {
   }, []);
 
   const handleConditionSelect = (condition: TakeoffCondition | null) => {
+    console.log('🔵 [TakeoffWorkspace] handleConditionSelect called:', {
+      condition: condition ? { id: condition.id, name: condition.name, type: condition.type } : null
+    });
+    
     if (condition === null) {
+      console.log('🔵 [TakeoffWorkspace] Clearing condition selection');
       setSelectedCondition(null);
       // Also clear in the store
       useTakeoffStore.getState().setSelectedCondition(null);
       setVisualSearchMode(false);
       setVisualSearchCondition(null);
     } else {
+      console.log('🔵 [TakeoffWorkspace] Setting condition:', {
+        id: condition.id,
+        name: condition.name,
+        type: condition.type
+      });
       setSelectedCondition(condition.id);
       // Also set in the store
       useTakeoffStore.getState().setSelectedCondition(condition.id);
       
       // Check if this is a visual search condition
       if (condition.type === 'visual-search') {
+        console.log('🔵 [TakeoffWorkspace] ✅ Visual search condition detected! Setting visualSearchMode=true');
         setVisualSearchMode(true);
         setVisualSearchCondition(condition);
       } else {
+        console.log('🔵 [TakeoffWorkspace] Not a visual search condition, disabling visual search mode');
         setVisualSearchMode(false);
         setVisualSearchCondition(null);
       }
     }
   };
+
+  // Track visual search mode changes
+  useEffect(() => {
+    console.log('🔵 [TakeoffWorkspace] visualSearchMode state changed:', {
+      visualSearchMode,
+      hasCondition: !!visualSearchCondition,
+      conditionId: visualSearchCondition?.id,
+      conditionName: visualSearchCondition?.name
+    });
+  }, [visualSearchMode, visualSearchCondition]);
 
   // Global Spacebar handler to deselect current condition
   useEffect(() => {
