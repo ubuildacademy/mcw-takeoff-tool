@@ -525,44 +525,100 @@ print(json.dumps({"success": True, "output": output_path}))
     try {
       console.log(`📊 Creating ${matches.length} count measurements...`);
       
-      for (const match of matches) {
-        // Calculate the center point of the bounding box for the dot
-        const centerX = match.boundingBox.x + (match.boundingBox.width / 2);
-        const centerY = match.boundingBox.y + (match.boundingBox.height / 2);
-        
-        // Generate unique ID using timestamp and random string
-        const timestamp = Date.now();
-        const randomStr = Math.random().toString(36).substr(2, 9);
-        const measurementId = `measurement_${timestamp}_${randomStr}`;
-        
-        const measurement = {
-          id: measurementId,
-          projectId,
-          sheetId,
-          conditionId,
-          type: 'count' as const,
-          points: [{ x: centerX, y: centerY }],
-          calculatedValue: 1,
-          unit: conditionUnit,
-          timestamp: new Date().toISOString(),
-          pdfPage: match.pageNumber,
-          pdfCoordinates: [
-            { 
-              x: (match.pdfCoordinates?.x || 0) + ((match.pdfCoordinates?.width || 0) / 2), 
-              y: (match.pdfCoordinates?.y || 0) + ((match.pdfCoordinates?.height || 0) / 2) 
-            }
-          ],
-          conditionColor: conditionColor,
-          conditionName: conditionName
-        };
-        
-        await storage.saveTakeoffMeasurement(measurement);
+      if (matches.length === 0) {
+        console.log('⚠️ No matches to create measurements for');
+        return;
       }
       
-      console.log(`✅ Created ${matches.length} count measurements`);
+      let successCount = 0;
+      let errorCount = 0;
+      
+      for (let i = 0; i < matches.length; i++) {
+        const match = matches[i];
+        
+        try {
+          // Use PDF coordinates if available, otherwise fall back to bounding box
+          // PDF coordinates are in PDF space (0-1 normalized or pixels), which is what we need
+          let centerPdf: { x: number; y: number };
+          
+          if (match.pdfCoordinates && match.pdfCoordinates.x !== undefined && match.pdfCoordinates.y !== undefined) {
+            // Calculate center from PDF coordinates (these are in PDF space)
+            centerPdf = {
+              x: match.pdfCoordinates.x + (match.pdfCoordinates.width / 2),
+              y: match.pdfCoordinates.y + (match.pdfCoordinates.height / 2)
+            };
+          } else {
+            // Fallback: use bounding box center (image pixel coordinates)
+            // This shouldn't happen if Python script is working correctly
+            console.warn(`⚠️ Match ${i} missing pdfCoordinates, using boundingBox center`);
+            centerPdf = {
+              x: match.boundingBox.x + (match.boundingBox.width / 2),
+              y: match.boundingBox.y + (match.boundingBox.height / 2)
+            };
+          }
+          
+          // Generate unique ID using UUID format (consistent with other services)
+          const measurementId = uuidv4();
+          
+          const measurement = {
+            id: measurementId,
+            projectId,
+            sheetId,
+            conditionId,
+            type: 'count' as const,
+            points: [centerPdf], // Use PDF coordinates for points
+            calculatedValue: 1,
+            unit: conditionUnit,
+            timestamp: Date.now().toString(), // Use Unix timestamp string format (consistent with other services)
+            pdfPage: match.pageNumber || 1,
+            pdfCoordinates: [centerPdf], // Same as points for count measurements
+            conditionColor: conditionColor,
+            conditionName: conditionName
+          };
+          
+          console.log(`📝 Creating measurement ${i + 1}/${matches.length}:`, {
+            id: measurementId,
+            pdfPage: measurement.pdfPage,
+            pdfCoordinates: centerPdf,
+            conditionId,
+            sheetId
+          });
+          
+          await storage.saveTakeoffMeasurement(measurement);
+          successCount++;
+        } catch (matchError) {
+          errorCount++;
+          console.error(`❌ Failed to create measurement ${i + 1}/${matches.length}:`, matchError);
+          console.error(`❌ Match details:`, {
+            id: match.id,
+            confidence: match.confidence,
+            pageNumber: match.pageNumber,
+            hasPdfCoordinates: !!match.pdfCoordinates,
+            pdfCoordinates: match.pdfCoordinates
+          });
+          // Continue with other matches instead of failing completely
+        }
+      }
+      
+      if (errorCount > 0) {
+        console.warn(`⚠️ Created ${successCount} measurements, ${errorCount} failed`);
+        if (successCount === 0) {
+          throw new Error(`Failed to create any count measurements. ${errorCount} errors occurred.`);
+        }
+      }
+      
+      console.log(`✅ Successfully created ${successCount} count measurements`);
     } catch (error) {
       console.error('❌ Failed to create count measurements:', error);
-      throw new Error('Failed to create count measurements');
+      console.error('❌ Error details:', {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : 'No stack trace',
+        matchesCount: matches.length,
+        conditionId,
+        projectId,
+        sheetId
+      });
+      throw new Error(`Failed to create count measurements: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 }
