@@ -827,6 +827,10 @@ export function TakeoffWorkspace() {
     const selectedFile = projectFiles.find(file => file.id === sheet.id);
     if (selectedFile) {
       setCurrentPdfFile(selectedFile);
+      setSelectedDocumentId(selectedFile.id);
+      
+      // Update last viewed document ID when document changes
+      setLastViewedDocumentId?.(selectedFile.id);
       
       // Restore scale, rotation, page, and location for this document if they exist
       const savedScale = getDocumentScale(selectedFile.id);
@@ -860,6 +864,9 @@ export function TakeoffWorkspace() {
     const selectedFile = projectFiles.find(file => file.id === documentId);
     if (selectedFile) {
       setCurrentPdfFile(selectedFile);
+      
+      // Update last viewed document ID when document changes
+      setLastViewedDocumentId?.(selectedFile.id);
       
       // Restore scale, rotation, and location for this document if they exist
       const savedScale = getDocumentScale(selectedFile.id);
@@ -1557,6 +1564,9 @@ export function TakeoffWorkspace() {
       // Set the first successfully uploaded file as current
       if (uploadedFiles.length > 0) {
         setCurrentPdfFile(uploadedFiles[0]);
+        setSelectedDocumentId(uploadedFiles[0].id);
+        // Update last viewed document ID when a new file is uploaded and set as current
+        setLastViewedDocumentId?.(uploadedFiles[0].id);
       }
       
       // Show summary if there were failures
