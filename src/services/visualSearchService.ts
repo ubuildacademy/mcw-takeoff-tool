@@ -174,21 +174,22 @@ export class AutoCountService {
 
                 const { done, value } = await reader.read();
                 
+                // Decode any new data
+                if (value) {
+                  buffer += decoder.decode(value, { stream: !done });
+                }
+                
+                // Process all complete lines in buffer
+                const lines = buffer.split('\n');
                 if (done) {
-                  if (finalResult) {
-                    resolve(finalResult);
-                  } else {
-                    reject(new Error('Search completed but no result received'));
-                  }
-                  return;
+                  // Process remaining buffer when stream ends
+                  buffer = '';
+                } else {
+                  buffer = lines.pop() || ''; // Keep incomplete line in buffer
                 }
 
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || ''; // Keep incomplete line in buffer
-
                 for (const line of lines) {
-                  if (line.startsWith('data: ')) {
+                  if (line.trim() && line.startsWith('data: ')) {
                     try {
                       const data = JSON.parse(line.slice(6));
                       
@@ -219,6 +220,16 @@ export class AutoCountService {
                       console.warn('Failed to parse SSE data:', line, parseError);
                     }
                   }
+                }
+                
+                // Check if stream is done after processing buffer
+                if (done) {
+                  if (finalResult) {
+                    resolve(finalResult);
+                  } else {
+                    reject(new Error('Search completed but no result received'));
+                  }
+                  return;
                 }
               }
             } catch (error) {

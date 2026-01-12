@@ -103,8 +103,24 @@ router.post('/complete-search', async (req, res) => {
   
   const sendComplete = (result: any) => {
     if (wantsSSE) {
-      res.write(`data: ${JSON.stringify({ type: 'complete', ...result })}\n\n`);
-      res.end();
+      try {
+        const completeData = JSON.stringify({ type: 'complete', ...result });
+        res.write(`data: ${completeData}\n\n`);
+        // Ensure data is flushed before ending
+        if (res.flushHeaders) {
+          res.flushHeaders();
+        }
+        res.end();
+      } catch (error) {
+        console.error('Error sending complete event:', error);
+        // Try to send error instead
+        try {
+          res.write(`data: ${JSON.stringify({ type: 'error', error: 'Failed to send completion' })}\n\n`);
+          res.end();
+        } catch (e) {
+          // Connection already closed
+        }
+      }
     }
   };
   
@@ -256,6 +272,7 @@ router.post('/complete-search', async (req, res) => {
         result: searchResult,
         measurementsCreated: searchResult.totalMatches
       });
+      return; // Important: return after sending SSE completion
     } else {
       return res.json({
         success: true,
