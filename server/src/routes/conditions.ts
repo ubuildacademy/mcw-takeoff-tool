@@ -131,10 +131,11 @@ router.post('/', async (req, res) => {
       includeHeight,
       height,
       // Note: aiGenerated column doesn't exist in database, so it's not included
-      // Visual search specific fields
+      // Auto-count specific fields
       searchImage,
       searchImageId,
-      searchThreshold
+      searchThreshold,
+      searchScope
     } = req.body;
 
     // Validation
@@ -163,12 +164,12 @@ router.post('/', async (req, res) => {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
 
-    // Count and visual-search conditions should not have waste factors
-    const finalWasteFactor = (type === 'count' || type === 'visual-search') ? 0 : wasteFactor;
+    // Count and auto-count conditions should not have waste factors
+    const finalWasteFactor = (type === 'count' || type === 'auto-count') ? 0 : wasteFactor;
 
-    if (!['area', 'volume', 'linear', 'count', 'visual-search'].includes(type)) {
-      return res.status(400).json({ 
-        error: 'Invalid type. Must be one of: area, volume, linear, count, visual-search' 
+    if (!['area', 'volume', 'linear', 'count', 'auto-count'].includes(type)) {
+      return res.status(400).json({
+        error: 'Invalid type. Must be one of: area, volume, linear, count, auto-count'
       });
     }
 
@@ -278,11 +279,12 @@ router.post('/', async (req, res) => {
       height: validatedHeight,
       // Note: aiGenerated is not included as the column doesn't exist in the database
       // aiGenerated,
-      // Visual search specific fields
-      ...(type === 'visual-search' && {
+      // Auto-count specific fields
+      ...(type === 'auto-count' && {
         searchImage,
         searchImageId,
-        searchThreshold: searchThreshold || 0.7
+        searchThreshold: searchThreshold || 0.7,
+        searchScope: searchScope || 'current-page'
       }),
       createdAt: now
     };
@@ -356,9 +358,9 @@ router.put('/:id', async (req, res) => {
     } = req.body;
 
     // Validation
-    if (type && !['area', 'volume', 'linear', 'count', 'visual-search'].includes(type)) {
-      return res.status(400).json({ 
-        error: 'Invalid type. Must be one of: area, volume, linear, count, visual-search' 
+    if (type && !['area', 'volume', 'linear', 'count', 'auto-count'].includes(type)) {
+      return res.status(400).json({
+        error: 'Invalid type. Must be one of: area, volume, linear, count, auto-count'
       });
     }
 
@@ -369,8 +371,8 @@ router.put('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Condition not found' });
     }
     
-    // Count and visual-search conditions should not have waste factors
-    const finalWasteFactor = (type !== undefined && (type === 'count' || type === 'visual-search')) ? 0 : 
+    // Count and auto-count conditions should not have waste factors
+    const finalWasteFactor = (type !== undefined && (type === 'count' || type === 'auto-count')) ? 0 : 
                             (wasteFactor !== undefined ? wasteFactor : existingCondition.wasteFactor);
 
     // Validate height for linear conditions with height enabled
@@ -437,10 +439,11 @@ router.put('/:id', async (req, res) => {
       ...(includeHeight !== undefined && { includeHeight }),
       ...(height !== undefined && { height: validatedHeight }),
       // Note: aiGenerated not included as column doesn't exist in database
-      // Visual search specific fields
+      // Auto-count specific fields
       ...(searchImage !== undefined && { searchImage }),
       ...(searchImageId !== undefined && { searchImageId }),
-      ...(searchThreshold !== undefined && { searchThreshold })
+      ...(searchThreshold !== undefined && { searchThreshold }),
+      ...(searchScope !== undefined && { searchScope })
     };
     
     const savedCondition = await storage.saveCondition(updatedCondition);

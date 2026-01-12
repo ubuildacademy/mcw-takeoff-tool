@@ -3339,10 +3339,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       cssY = cssY / interactiveScale;
     }
 
-    // Note: Visual search and titleblock selection now use mousedown/mouseup instead of click
+    // Note: Auto-count and titleblock selection now use mousedown/mouseup instead of click
     // Skip click handling for these modes to avoid conflicts
-    if ((visualSearchMode || !!titleblockSelectionMode) && isSelectingSymbol) {
-      return;
+    // IMPORTANT: Also prevent measurement clicks when auto-count mode is active (even if not currently selecting)
+    // This prevents manual count measurements from being created while waiting for auto-count to complete
+    if (visualSearchMode || !!titleblockSelectionMode) {
+      if (isSelectingSymbol) {
+        return; // Currently drawing selection box - let mousedown/mouseup handle it
+      }
+      // Auto-count mode active but not selecting - prevent measurement clicks
+      // User should wait for auto-count to complete or exit auto-count mode
+      if (visualSearchMode) {
+        return; // Don't allow manual measurements during auto-count mode
+      }
     }
     
     // Handle deselection in selection mode when clicking on blank space
@@ -4838,13 +4847,26 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (selectedConditionId) {
       const condition = getSelectedCondition();
       if (condition) {
+        // Auto-count conditions use box selection, NOT measurement mode
+        // Check this FIRST before enabling measurement mode
+        if (condition.type === 'auto-count') {
+          setIsMeasuring(false); // Disable measuring mode - auto-count uses box selection
+          setIsSelectionMode(false);
+          setSelectedMarkupId(null);
+          setIsDeselecting(false);
+          setMeasurementType('count'); // Set type but don't enable measuring
+          // Auto-count box selection is handled by visualSearchMode prop and isSelectingSymbol state
+          return; // Exit early - don't enable measurement mode
+        }
+        
+        // All other condition types use measurement mode
         setIsMeasuring(true);
         setIsSelectionMode(false);
         setSelectedMarkupId(null);
         setIsDeselecting(false); // Clear deselection state
         
         // Always use condition.type first - linear conditions with height stay as linear
-        if (condition.type === 'count' || condition.type === 'visual-search') {
+        if (condition.type === 'count' || condition.type === 'auto-count') {
           setMeasurementType('count');
         } else if (condition.type === 'volume') {
           setMeasurementType('volume');

@@ -288,7 +288,7 @@ export interface Database {
           id: string
           project_id: string
           name: string
-          type: 'area' | 'volume' | 'linear' | 'count'
+          type: 'area' | 'volume' | 'linear' | 'count' | 'auto-count'
           unit: string
           waste_factor: number
           color: string
@@ -302,7 +302,7 @@ export interface Database {
           id?: string
           project_id: string
           name: string
-          type: 'area' | 'volume' | 'linear' | 'count'
+          type: 'area' | 'volume' | 'linear' | 'count' | 'auto-count'
           unit: string
           waste_factor?: number
           color: string

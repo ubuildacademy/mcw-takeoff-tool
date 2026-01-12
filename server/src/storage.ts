@@ -52,7 +52,7 @@ export interface StoredCondition {
   id: string;
   projectId: string;
   name: string;
-  type: 'area' | 'volume' | 'linear' | 'count' | 'visual-search';
+  type: 'area' | 'volume' | 'linear' | 'count' | 'auto-count';
   unit: string;
   wasteFactor: number;
   color: string;
@@ -64,10 +64,11 @@ export interface StoredCondition {
   depth?: number;
   includeHeight?: boolean;
   height?: number;
-  // Visual search specific fields
+  // Auto-count specific fields
   searchImage?: string;
   searchImageId?: string;
   searchThreshold?: number;
+  searchScope?: 'current-page' | 'entire-document' | 'entire-project';
   createdAt: string;
 }
 
@@ -403,6 +404,7 @@ class SupabaseStorage {
       searchImage: item.search_image,
       searchImageId: item.search_image_id,
       searchThreshold: item.search_threshold,
+      searchScope: item.search_scope,
       createdAt: item.created_at,
       ...(item.ai_generated !== undefined && { aiGenerated: item.ai_generated })
     }));
@@ -437,6 +439,20 @@ class SupabaseStorage {
       dbCondition.ai_generated = (condition as any).aiGenerated;
     }
     
+    // Only include auto-count fields if they exist (columns might not exist if migration hasn't run)
+    if (condition.searchImage !== undefined) {
+      dbCondition.search_image = condition.searchImage;
+    }
+    if (condition.searchImageId !== undefined) {
+      dbCondition.search_image_id = condition.searchImageId;
+    }
+    if (condition.searchThreshold !== undefined) {
+      dbCondition.search_threshold = condition.searchThreshold;
+    }
+    if (condition.searchScope !== undefined) {
+      dbCondition.search_scope = condition.searchScope;
+    }
+    
     const { data, error } = await supabase
       .from(TABLES.CONDITIONS)
       .upsert(dbCondition)
@@ -468,6 +484,7 @@ class SupabaseStorage {
       searchImage: data.search_image,
       searchImageId: data.search_image_id,
       searchThreshold: data.search_threshold,
+      searchScope: data.search_scope,
       createdAt: data.created_at,
       ...(data.ai_generated !== undefined && { aiGenerated: data.ai_generated })
     };

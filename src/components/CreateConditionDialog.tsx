@@ -21,7 +21,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
 
   const [formData, setFormData] = useState({
     name: editingCondition?.name || '',
-    type: (editingCondition?.type || 'area') as 'area' | 'volume' | 'linear' | 'count' | 'visual-search',
+    type: (editingCondition?.type || 'area') as 'area' | 'volume' | 'linear' | 'count' | 'auto-count',
     unit: editingCondition?.unit || 'SF', // Initialize with default unit for 'area' type
     wasteFactor: editingCondition?.wasteFactor?.toString() || '',
     color: editingCondition?.color || generateRandomColor(),
@@ -32,10 +32,11 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
     depth: editingCondition?.depth ? formatDepthOutput(editingCondition.depth) : '',
     includeHeight: editingCondition?.includeHeight || false,
     height: editingCondition?.height ? formatDepthOutput(editingCondition.height) : '',
-    // Visual search specific fields
+    // Auto-count specific fields
     searchImage: editingCondition?.searchImage || '',
     searchImageId: editingCondition?.searchImageId || '',
-    searchThreshold: editingCondition?.searchThreshold?.toString() || '0.7'
+    searchThreshold: editingCondition?.searchThreshold?.toString() || '0.7',
+    searchScope: editingCondition?.searchScope || 'current-page' as 'current-page' | 'entire-document' | 'entire-project'
   });
   const [loading, setLoading] = useState(false);
   const [depthError, setDepthError] = useState<string>('');
@@ -152,11 +153,12 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
         depth: parsedDepth === null || parsedDepth === undefined ? undefined : parsedDepth,
         includeHeight: formData.includeHeight,
         height: parsedHeight === null || parsedHeight === undefined ? undefined : parsedHeight,
-        // Visual search specific fields
-        ...(formData.type === 'visual-search' && {
+        // Auto-count specific fields
+        ...(formData.type === 'auto-count' && {
           searchImage: formData.searchImage,
           searchImageId: formData.searchImageId,
-          searchThreshold: formData.searchThreshold ? parseFloat(formData.searchThreshold) : 0.7
+          searchThreshold: formData.searchThreshold ? parseFloat(formData.searchThreshold) : 0.7,
+          searchScope: formData.searchScope || 'current-page'
         })
       };
       
@@ -180,8 +182,8 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
       // Call the callback with the result
       onConditionCreated(result);
       
-      // Auto-select visual-search conditions after creation to enable selection mode
-      if (!editingCondition && createdCondition && createdCondition.type === 'visual-search' && onConditionSelect) {
+      // Auto-select auto-count conditions after creation to enable selection mode
+      if (!editingCondition && createdCondition && createdCondition.type === 'auto-count' && onConditionSelect) {
         // Small delay to ensure condition is fully created and UI is updated
         setTimeout(() => {
           onConditionSelect(createdCondition);
@@ -247,7 +249,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
       case 'volume': return 'CY';
       case 'linear': return 'LF';
       case 'count': return 'EA';
-      case 'visual-search': return 'EA';
+      case 'auto-count': return 'EA';
       default: return '';
     }
   };
@@ -286,7 +288,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
                   <SelectItem value="volume">Volume</SelectItem>
                   <SelectItem value="linear">Linear</SelectItem>
                   <SelectItem value="count">Count</SelectItem>
-                  <SelectItem value="visual-search">Visual Search</SelectItem>
+                  <SelectItem value="auto-count">Auto-Count</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -338,7 +340,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
                       <SelectItem value="LS">LS (Lump Sum)</SelectItem>
                     </>
                   )}
-                  {formData.type === 'visual-search' && (
+                  {formData.type === 'auto-count' && (
                     <>
                       <SelectItem value="EA">EA (Each)</SelectItem>
                       <SelectItem value="PC">PC (Piece)</SelectItem>
@@ -460,7 +462,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
             />
           </div>
 
-          {formData.type === 'visual-search' && (
+          {formData.type === 'auto-count' && (
             <>
               <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
                 <div className="flex items-start space-x-2">
@@ -470,15 +472,35 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
                     </div>
                   </div>
                   <div className="flex-1">
-                    <h4 className="text-sm font-medium text-indigo-900 mb-1">Visual Search Condition</h4>
+                    <h4 className="text-sm font-medium text-indigo-900 mb-1">Auto-Count Condition</h4>
                     <p className="text-sm text-indigo-700 mb-2">
                       After creating this condition, you'll be able to draw a selection box around a symbol on the drawing to define what to search for.
                     </p>
                     <p className="text-xs text-indigo-600">
-                      The system will use AI to automatically find and count all similar symbols throughout the plans.
+                      The system will use AI to automatically find and count all similar symbols based on your selected scope.
                     </p>
                   </div>
                 </div>
+              </div>
+
+              <div>
+                <Label htmlFor="searchScope">Search Scope</Label>
+                <Select 
+                  value={formData.searchScope} 
+                  onValueChange={(value) => handleInputChange('searchScope', value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="current-page">Current Page</SelectItem>
+                    <SelectItem value="entire-document">Entire Document</SelectItem>
+                    <SelectItem value="entire-project">Entire Project</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-gray-500 mt-1">
+                  Select where to search for matching symbols: current page only, all pages in the current document, or all pages in all documents.
+                </p>
               </div>
 
               <div>
