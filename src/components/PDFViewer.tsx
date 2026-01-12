@@ -1251,10 +1251,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // CRITICAL FIX: Re-render markups when selection mode changes
     // This ensures markups get click handlers when entering selection mode
     // Markups rendered while isSelectionMode was false won't have click handlers
-    if (isSelectionMode && currentViewport && pdfPageRef.current) {
+    // Also re-render when isDeselecting becomes false to ensure markups are clickable
+    if (isSelectionMode && currentViewport && pdfPageRef.current && !isDeselecting) {
       renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
     }
-  }, [isMeasuring, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentViewport, currentPage, renderTakeoffAnnotations]);
+  }, [isMeasuring, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentViewport, currentPage, renderTakeoffAnnotations, isDeselecting]);
 
   // Page visibility handler - ensures overlay is properly initialized when page becomes visible
   const onPageShown = useCallback((pageNum: number, viewport: any) => {
@@ -4565,6 +4566,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // This prevents the effect from triggering during condition refreshes when already deselected
       const wasSelected = prevSelectedConditionIdRef.current !== null;
       const isTransitioningToDeselected = wasSelected && selectedConditionId === null;
+      const isInitialLoad = prevSelectedConditionIdRef.current === null && selectedConditionId === null;
       
       setIsMeasuring(false);
       setIsSelectionMode(true);
@@ -4583,13 +4585,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           deselectionTimeoutRef.current = null;
         }, 5000); // 5 second cooldown after deselection
       } else {
-        // Already deselected - preserve existing isDeselecting state if timeout is still active
-        // This prevents clearing flickering protection prematurely during condition refreshes
-        // Only clear if there's no active timeout (meaning we're truly just refreshing, not in cooldown)
-        if (!deselectionTimeoutRef.current) {
+        // Already deselected or initial load - ensure isDeselecting is false
+        // On initial load, we want selection mode to work immediately
+        // During condition refreshes, only preserve isDeselecting if timeout is active
+        if (isInitialLoad || !deselectionTimeoutRef.current) {
           setIsDeselecting(false);
+          // Note: Markup re-render will happen automatically via the useEffect at line 1254
+          // when isSelectionMode becomes true and isDeselecting becomes false
         }
-        // If timeout is active, leave isDeselecting as-is to maintain flickering protection
+        // If timeout is active and not initial load, leave isDeselecting as-is to maintain flickering protection
       }
       
       prevSelectedConditionIdRef.current = selectedConditionId;
