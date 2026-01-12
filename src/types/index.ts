@@ -24,7 +24,7 @@ export interface TakeoffCondition {
   id: string;
   projectId: string;
   name: string;
-  type: 'area' | 'volume' | 'linear' | 'count' | 'visual-search';
+  type: 'area' | 'volume' | 'linear' | 'count' | 'auto-count';
   unit: string;
   wasteFactor: number;
   color: string;
@@ -37,10 +37,11 @@ export interface TakeoffCondition {
   equipmentCost?: number; // Fixed equipment cost for the condition
   laborCost?: number; // Labor cost per unit
   aiGenerated?: boolean; // NEW: Flag for AI-generated conditions
-  // Visual search specific fields
+  // Auto-count specific fields
   searchImage?: string; // Base64 encoded image or image URL
   searchImageId?: string; // Reference to uploaded image file
   searchThreshold?: number; // Confidence threshold for matches (0-1)
+  searchScope?: 'current-page' | 'entire-document' | 'entire-project'; // Search scope for auto-count
 }
 
 export interface TakeoffMeasurement {
@@ -201,7 +202,7 @@ export interface ProjectCostBreakdown {
   };
 }
 
-export interface VisualSearchMatch {
+export interface AutoCountMatch {
   id: string;
   pageNumber: number;
   documentId: string;
@@ -221,9 +222,9 @@ export interface VisualSearchMatch {
   description?: string;
 }
 
-export interface VisualSearchResult {
+export interface AutoCountResult {
   conditionId: string;
-  matches: VisualSearchMatch[];
+  matches: AutoCountMatch[];
   totalMatches: number;
   searchImageId: string;
   processingTime: number;

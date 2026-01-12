@@ -1648,7 +1648,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       case 'volume': return <Package className="w-4 h-4" />;
       case 'linear': return <Ruler className="w-4 h-4" />;
       case 'count': return <Hash className="w-4 h-4" />;
-      case 'visual-search': return <Search className="w-4 h-4" />;
+      case 'auto-count': return <Search className="w-4 h-4" />;
       default: return <Calculator className="w-4 h-4" />;
     }
   };
@@ -1659,7 +1659,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       case 'volume': return 'bg-green-100 text-green-800';
       case 'linear': return 'bg-purple-100 text-purple-800';
       case 'count': return 'bg-orange-100 text-orange-800';
-      case 'visual-search': return 'bg-indigo-100 text-indigo-800';
+      case 'auto-count': return 'bg-indigo-100 text-indigo-800';
       default: return 'bg-gray-100 text-gray-800';
     }
   };
@@ -1845,6 +1845,18 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                           </div>
                         )}
                       </div>
+                      {/* Show searched image for auto-count conditions */}
+                      {condition.type === 'auto-count' && condition.searchImage && (
+                        <div className="mt-2 p-2 bg-indigo-50 border border-indigo-200 rounded-lg">
+                          <div className="text-xs font-medium text-indigo-900 mb-1">Searched Symbol:</div>
+                          <img 
+                            src={condition.searchImage} 
+                            alt="Searched symbol" 
+                            className="max-w-full h-auto max-h-24 rounded border border-indigo-300"
+                            style={{ imageRendering: 'crisp-edges' }}
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0 ml-2">

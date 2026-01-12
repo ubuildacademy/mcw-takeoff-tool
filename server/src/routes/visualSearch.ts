@@ -1,11 +1,11 @@
 /**
- * Visual Search API Routes
+ * Auto-Count API Routes
  * 
- * Handles visual search operations for symbol detection and matching
+ * Handles auto-count operations for symbol detection and matching
  */
 
 import { Router } from 'express';
-import { visualSearchService } from '../services/visualSearchService';
+import { autoCountService } from '../services/visualSearchService';
 import { storage } from '../storage';
 
 const router = Router();
@@ -21,7 +21,7 @@ router.post('/extract-template', async (req, res) => {
       });
     }
 
-    const template = await visualSearchService.extractSymbolTemplate(
+    const template = await autoCountService.extractSymbolTemplate(
       pdfFileId,
       pageNumber,
       selectionBox
@@ -48,7 +48,7 @@ router.post('/search-symbols', async (req, res) => {
       });
     }
 
-    const result = await visualSearchService.searchForSymbols(
+    const result = await autoCountService.searchForSymbols(
       conditionId,
       pdfFileId,
       template,
@@ -66,8 +66,48 @@ router.post('/search-symbols', async (req, res) => {
   }
 });
 
-// Complete visual search workflow: extract template, search, and create measurements
+// Complete auto-count workflow with Server-Sent Events for real-time progress
 router.post('/complete-search', async (req, res) => {
+  // Check if client wants SSE (via Accept header or query param)
+  const wantsSSE = req.headers.accept?.includes('text/event-stream') || req.query.sse === 'true';
+  
+  if (wantsSSE) {
+    // Set up SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+    
+    // Send initial connection message
+    res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
+    
+    // Handle client disconnect
+    req.on('close', () => {
+      console.log('Client disconnected from SSE stream');
+      res.end();
+    });
+  }
+  
+  const sendProgress = (progress: { current: number; total: number; currentPage?: number; currentDocument?: string }) => {
+    if (wantsSSE) {
+      res.write(`data: ${JSON.stringify({ type: 'progress', ...progress })}\n\n`);
+    }
+  };
+  
+  const sendError = (error: string) => {
+    if (wantsSSE) {
+      res.write(`data: ${JSON.stringify({ type: 'error', error })}\n\n`);
+      res.end();
+    }
+  };
+  
+  const sendComplete = (result: any) => {
+    if (wantsSSE) {
+      res.write(`data: ${JSON.stringify({ type: 'complete', ...result })}\n\n`);
+      res.end();
+    }
+  };
+  
   try {
     const { 
       conditionId, 
@@ -85,7 +125,7 @@ router.post('/complete-search', async (req, res) => {
       });
     }
 
-    console.log('🔍 Starting complete visual search workflow...');
+    console.log('🔍 Starting complete auto-count workflow...');
     console.log('📋 Request details:', {
       conditionId,
       pdfFileId,
@@ -101,8 +141,13 @@ router.post('/complete-search', async (req, res) => {
     const existingMeasurements = measurements.filter(m => m.conditionId === conditionId);
     if (existingMeasurements.length > 0) {
       console.log(`⚠️ Condition ${conditionId} already has ${existingMeasurements.length} measurements`);
+      const errorMsg = 'This condition already has measurements. Please delete the condition and recreate it to run a new search.';
+      if (wantsSSE) {
+        sendError(errorMsg);
+        return;
+      }
       return res.status(400).json({
-        error: 'This condition already has measurements. Please delete the condition and recreate it to run a new search.',
+        error: errorMsg,
         existingCount: existingMeasurements.length
       });
     }
@@ -112,7 +157,12 @@ router.post('/complete-search', async (req, res) => {
     const condition = conditions.find(c => c.id === conditionId);
     if (!condition) {
       console.error(`❌ Condition ${conditionId} not found`);
-      return res.status(404).json({ error: 'Condition not found' });
+      const errorMsg = 'Condition not found';
+      if (wantsSSE) {
+        sendError(errorMsg);
+        return;
+      }
+      return res.status(404).json({ error: errorMsg });
     }
 
     console.log(`✅ Found condition: ${condition.name} (type: ${condition.type})`);
@@ -120,7 +170,7 @@ router.post('/complete-search', async (req, res) => {
     // Step 1: Extract symbol template (pass projectId for PDF download)
     console.log('📦 Step 1: Extracting symbol template from selection box...');
     console.log('📐 Selection box:', selectionBox);
-    const template = await visualSearchService.extractSymbolTemplate(
+    const template = await autoCountService.extractSymbolTemplate(
       pdfFileId,
       pageNumber,
       selectionBox,
@@ -151,16 +201,25 @@ router.post('/complete-search', async (req, res) => {
       // Continue anyway - template saving is not critical
     }
 
-    // Step 3: Search for matching symbols (pass pageNumber and projectId)
-    console.log('🔎 Step 3: Searching for matching symbols on page...');
+    // Step 3: Search for matching symbols (pass pageNumber, projectId, and searchScope)
+    const searchScope = condition.searchScope || 'current-page';
+    console.log(`🔎 Step 3: Searching for matching symbols (scope: ${searchScope})...`);
     console.log('⚙️ Search options:', options);
-    const searchResult = await visualSearchService.searchForSymbols(
+    
+    // Send initial progress update
+    if (wantsSSE) {
+      sendProgress({ current: 0, total: 1, currentPage: pageNumber });
+    }
+    
+    const searchResult = await autoCountService.searchForSymbols(
       conditionId,
       pdfFileId,
       template,
       options,
       pageNumber,
-      projectId
+      projectId,
+      searchScope as 'current-page' | 'entire-document' | 'entire-project',
+      sendProgress // Pass the SSE progress function
     );
     console.log(`✅ Search complete: Found ${searchResult.totalMatches} matches`);
     console.log('📊 Match details:', searchResult.matches.slice(0, 5).map(m => ({
@@ -171,7 +230,14 @@ router.post('/complete-search', async (req, res) => {
 
     // Step 4: Create count measurements with condition's color and name
     console.log(`📝 Step 4: Creating ${searchResult.matches.length} count measurements...`);
-    await visualSearchService.createCountMeasurements(
+    if (wantsSSE) {
+      sendProgress({ 
+        current: searchResult.totalMatches, 
+        total: searchResult.totalMatches,
+        currentPage: pageNumber 
+      });
+    }
+    await autoCountService.createCountMeasurements(
       conditionId,
       searchResult.matches,
       projectId,
@@ -181,30 +247,44 @@ router.post('/complete-search', async (req, res) => {
       condition.unit
     );
 
-    console.log(`✅ Visual search workflow complete: ${searchResult.totalMatches} matches found and ${searchResult.totalMatches} measurements created`);
+    console.log(`✅ Auto-count workflow complete: ${searchResult.totalMatches} matches found and ${searchResult.totalMatches} measurements created`);
 
-    return res.json({
-      success: true,
-      result: searchResult,
-      measurementsCreated: searchResult.totalMatches
-    });
+    // Send completion via SSE or regular JSON
+    if (wantsSSE) {
+      sendComplete({
+        success: true,
+        result: searchResult,
+        measurementsCreated: searchResult.totalMatches
+      });
+    } else {
+      return res.json({
+        success: true,
+        result: searchResult,
+        measurementsCreated: searchResult.totalMatches
+      });
+    }
   } catch (error) {
-    console.error('❌ Error in complete visual search workflow:', error);
+    console.error('❌ Error in complete auto-count workflow:', error);
     console.error('❌ Error stack:', error instanceof Error ? error.stack : 'No stack trace');
     console.error('❌ Error details:', {
       message: error instanceof Error ? error.message : String(error),
       name: error instanceof Error ? error.name : 'Unknown',
       type: typeof error
     });
-    return res.status(500).json({ 
-      error: 'Visual search workflow failed',
-      details: error instanceof Error ? error.message : String(error),
-      stack: process.env.NODE_ENV === 'development' && error instanceof Error ? error.stack : undefined
-    });
+    
+    if (wantsSSE) {
+      sendError(error instanceof Error ? error.message : String(error));
+    } else {
+      return res.status(500).json({ 
+        error: 'Auto-count workflow failed',
+        details: error instanceof Error ? error.message : String(error),
+        stack: process.env.NODE_ENV === 'development' && error instanceof Error ? error.stack : undefined
+      });
+    }
   }
 });
 
-// Get visual search results for a condition
+// Get auto-count results for a condition
 router.get('/results/:conditionId', async (req, res) => {
   try {
     const { conditionId } = req.params;
@@ -219,8 +299,8 @@ router.get('/results/:conditionId', async (req, res) => {
       count: conditionMeasurements.length
     });
   } catch (error) {
-    console.error('Error getting visual search results:', error);
-    return res.status(500).json({ error: 'Failed to get visual search results' });
+    console.error('Error getting auto-count results:', error);
+    return res.status(500).json({ error: 'Failed to get auto-count results' });
   }
 });
 

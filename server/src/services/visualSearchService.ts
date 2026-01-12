@@ -1,8 +1,9 @@
 /**
- * Visual Search Service for Symbol Detection and Matching
+ * Auto-Count Service for Symbol Detection and Matching
  * 
  * This service uses OpenCV template matching (via Python) to detect and match symbols
  * in construction drawings based on user-selected reference symbols.
+ * Supports searching on current page, entire document, or entire project.
  */
 
 import { pythonPdfConverter } from './pythonPdfConverter';
@@ -16,7 +17,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 const execAsync = promisify(exec);
 
-export interface VisualSearchMatch {
+export interface AutoCountMatch {
   id: string;
   confidence: number;
   boundingBox: {
@@ -36,8 +37,8 @@ export interface VisualSearchMatch {
   description?: string;
 }
 
-export interface VisualSearchResult {
-  matches: VisualSearchMatch[];
+export interface AutoCountResult {
+  matches: AutoCountMatch[];
   totalMatches: number;
   searchTime: number;
   conditionId?: string;
@@ -58,9 +59,9 @@ export interface SymbolTemplate {
   description?: string;
 }
 
-export interface VisualSearchOptions {
+export interface AutoCountOptions {
   confidenceThreshold: number;
-  maxMatches: number;
+  maxMatches: number; // Increased limit for broader searches (default: 10000)
   searchRadius: number; // How far to search around the template (not used in template matching)
   scaleTolerance: number; // How much scale variation to allow (not used in template matching)
 }
@@ -82,10 +83,10 @@ interface PythonVisualSearchResult {
   error?: string;
 }
 
-class VisualSearchService {
-  private defaultOptions: VisualSearchOptions = {
+class AutoCountService {
+  private defaultOptions: AutoCountOptions = {
     confidenceThreshold: 0.7,
-    maxMatches: 100,
+    maxMatches: 10000, // Increased from 100 to support broader searches
     searchRadius: 0.1,
     scaleTolerance: 0.2
   };
@@ -311,6 +312,53 @@ print(json.dumps({"success": True, "output": output_path}))
   }
 
   /**
+   * Get PDF page count using PyMuPDF
+   */
+  private async getPDFPageCount(pdfPath: string): Promise<number> {
+    try {
+      const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
+      const script = `
+import fitz
+import sys
+import json
+
+pdf_path = sys.argv[1]
+try:
+    doc = fitz.open(pdf_path)
+    page_count = len(doc)
+    doc.close()
+    print(json.dumps({"success": True, "pageCount": page_count}))
+except Exception as e:
+    print(json.dumps({"success": False, "error": str(e)}))
+    sys.exit(1)
+`;
+      const scriptPath = path.join(this.tempDir, `get_page_count_${uuidv4()}.py`);
+      await fs.writeFile(scriptPath, script);
+      
+      const enhancedPath = this.getEnhancedPath();
+      const enhancedLdPath = await this.getEnhancedLdLibraryPath();
+      const command = `${pythonCommand} "${scriptPath}" "${pdfPath}"`;
+      
+      const { stdout } = await execAsync(command, {
+        timeout: 10000,
+        env: { ...process.env, PATH: enhancedPath, LD_LIBRARY_PATH: enhancedLdPath }
+      });
+      
+      await fs.remove(scriptPath).catch(() => {});
+      
+      const result = JSON.parse(stdout.trim());
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to get page count');
+      }
+      
+      return result.pageCount;
+    } catch (error) {
+      console.error('❌ Failed to get PDF page count:', error);
+      throw new Error(`Failed to get PDF page count: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
    * Get PDF file path (downloads from Supabase Storage if needed)
    * Matches the pattern used in cvTakeoffService
    */
@@ -373,30 +421,20 @@ print(json.dumps({"success": True, "output": output_path}))
   }
 
   /**
-   * Search for symbols matching the template using Python/OpenCV template matching
+   * Search for symbols matching the template on a single page
    */
-  async searchForSymbols(
-    conditionId: string,
-    pdfFileId: string,
+  private async searchPage(
+    pdfPath: string,
+    pageNumber: number,
     template: SymbolTemplate,
-    options: Partial<VisualSearchOptions> = {},
-    pageNumber?: number,
-    projectId?: string
-  ): Promise<VisualSearchResult> {
-    const opts = { ...this.defaultOptions, ...options };
-    const startTime = Date.now();
-
+    options: AutoCountOptions,
+    documentId?: string
+  ): Promise<AutoCountMatch[]> {
     try {
-      console.log(`🔍 Searching for symbols matching template ${template.id}...`);
-      
-      // Get PDF file path
-      const pdfPath = await this.getPDFFilePath(pdfFileId, projectId);
-      
-      // Use provided page number or default to 1
-      const searchPageNumber = pageNumber || 1;
+      console.log(`🔍 Searching page ${pageNumber} for symbols matching template ${template.id}...`);
       
       // Convert PDF page to image
-      const imageBuffer = await pythonPdfConverter.convertPageToBuffer(pdfPath, searchPageNumber, {
+      const imageBuffer = await pythonPdfConverter.convertPageToBuffer(pdfPath, pageNumber, {
         format: 'png',
         scale: 2.0,
         quality: 90
@@ -411,17 +449,9 @@ print(json.dumps({"success": True, "output": output_path}))
       const fullPageImagePath = path.join(this.tempDir, `search_${uuidv4()}.png`);
       await fs.writeFile(fullPageImagePath, imageBuffer);
 
-      // Call Python visual search script
+      // Call Python auto-count script
       const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
-      const command = `${pythonCommand} "${this.pythonScriptPath}" "${fullPageImagePath}" "${template.imageData}" ${opts.confidenceThreshold}`;
-
-      console.log(`🔧 Executing visual search command:`);
-      console.log(`   Python: ${pythonCommand}`);
-      console.log(`   Script: ${this.pythonScriptPath}`);
-      console.log(`   Full page image: ${fullPageImagePath}`);
-      console.log(`   Template image: ${template.imageData}`);
-      console.log(`   Confidence threshold: ${opts.confidenceThreshold}`);
-      console.log(`   Max matches: ${opts.maxMatches}`);
+      const command = `${pythonCommand} "${this.pythonScriptPath}" "${fullPageImagePath}" "${template.imageData}" ${options.confidenceThreshold}`;
 
       const enhancedPath = this.getEnhancedPath();
       const enhancedLdPath = await this.getEnhancedLdLibraryPath();
@@ -439,15 +469,7 @@ print(json.dumps({"success": True, "output": output_path}))
       } catch (execError: any) {
         // Clean up temp file
         await fs.remove(fullPageImagePath).catch(() => {});
-        
-        const errorDetails = {
-          command,
-          error: execError instanceof Error ? execError.message : 'Unknown error',
-          stdout: execError?.stdout || '',
-          stderr: execError?.stderr || ''
-        };
-        console.error('❌ Python visual search failed:', JSON.stringify(errorDetails, null, 2));
-        throw new Error(`Visual search failed: ${execError instanceof Error ? execError.message : 'Unknown error'}`);
+        throw new Error(`Auto-count failed: ${execError instanceof Error ? execError.message : 'Unknown error'}`);
       }
 
       // Clean up temp file
@@ -461,30 +483,21 @@ print(json.dumps({"success": True, "output": output_path}))
       let result: PythonVisualSearchResult;
       try {
         const trimmedOutput = stdout.trim();
-        console.log(`📥 Python script output length: ${trimmedOutput.length} characters`);
-        console.log(`📥 Python script output (first 500 chars): ${trimmedOutput.substring(0, 500)}`);
         result = JSON.parse(trimmedOutput);
-        console.log(`✅ Parsed Python result: success=${result.success}, matches=${result.matches?.length || 0}`);
       } catch (parseError) {
-        console.error('❌ Failed to parse Python output');
-        console.error('❌ Parse error:', parseError);
-        console.error('❌ Raw stdout (first 1000 chars):', stdout.substring(0, 1000));
-        console.error('❌ Raw stderr:', stderr);
-        throw new Error(`Failed to parse visual search results: ${parseError instanceof Error ? parseError.message : 'Invalid JSON'}`);
+        throw new Error(`Failed to parse auto-count results: ${parseError instanceof Error ? parseError.message : 'Invalid JSON'}`);
       }
 
       if (!result.success) {
-        console.error(`❌ Python script returned error: ${result.error}`);
-        throw new Error(result.error || 'Visual search failed');
+        throw new Error(result.error || 'Auto-count failed');
       }
       
       // Get image dimensions for coordinate normalization
       const imageWidth = result.imageWidth || 1;
       const imageHeight = result.imageHeight || 1;
 
-      // Convert Python matches to VisualSearchMatch format
-      // Normalize PDF coordinates from pixel space to 0-1 range (required by frontend renderer)
-      const matches: VisualSearchMatch[] = (result.matches || []).map((match, index) => {
+      // Convert Python matches to AutoCountMatch format
+      const matches: AutoCountMatch[] = (result.matches || []).map((match, index) => {
         // Normalize pdfCoordinates from pixel space to 0-1 normalized coordinates
         let normalizedPdfCoordinates = match.pdfCoordinates;
         if (match.pdfCoordinates && imageWidth > 0 && imageHeight > 0) {
@@ -494,28 +507,155 @@ print(json.dumps({"success": True, "output": output_path}))
             width: match.pdfCoordinates.width / imageWidth,
             height: match.pdfCoordinates.height / imageHeight
           };
-        } else {
-          console.warn(`Match ${index} missing image dimensions or pdfCoordinates, cannot normalize`);
         }
         
         return {
-          id: match.id || `match_${Date.now()}_${index}`,
+          id: match.id || `match_${Date.now()}_${pageNumber}_${index}`,
           confidence: match.confidence,
           boundingBox: match.boundingBox,
-          pageNumber: searchPageNumber,
+          pageNumber: pageNumber,
+          documentId: documentId,
           pdfCoordinates: normalizedPdfCoordinates,
           description: `Match for ${template.description || 'symbol'}`
         };
       });
 
-      // Limit to maxMatches
-      const limitedMatches = matches
-        .sort((a, b) => b.confidence - a.confidence)
-        .slice(0, opts.maxMatches);
+      return matches;
+    } catch (error) {
+      console.error(`❌ Auto-count failed on page ${pageNumber}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Search for symbols matching the template using Python/OpenCV template matching
+   * Supports multiple scopes: current-page, entire-document, entire-project
+   */
+  async searchForSymbols(
+    conditionId: string,
+    pdfFileId: string,
+    template: SymbolTemplate,
+    options: Partial<AutoCountOptions> = {},
+    pageNumber?: number,
+    projectId?: string,
+    searchScope: 'current-page' | 'entire-document' | 'entire-project' = 'current-page',
+    onProgress?: (progress: { current: number; total: number; currentPage?: number; currentDocument?: string }) => void
+  ): Promise<AutoCountResult> {
+    const opts = { ...this.defaultOptions, ...options };
+    const startTime = Date.now();
+    const allMatches: AutoCountMatch[] = [];
+
+    try {
+      console.log(`🔍 Starting auto-count search with scope: ${searchScope}`);
+      
+      if (searchScope === 'current-page') {
+        // Search only the current page
+        const pdfPath = await this.getPDFFilePath(pdfFileId, projectId);
+        const searchPageNum = pageNumber || 1;
+        
+        if (onProgress) {
+          onProgress({ current: 1, total: 1, currentPage: searchPageNum });
+        }
+        
+        const pageMatches = await this.searchPage(pdfPath, searchPageNum, template, opts, pdfFileId);
+        allMatches.push(...pageMatches);
+      } else if (searchScope === 'entire-document') {
+        // Search all pages in the current document
+        const pdfPath = await this.getPDFFilePath(pdfFileId, projectId);
+        const totalPages = await this.getPDFPageCount(pdfPath);
+        
+        console.log(`📄 Searching ${totalPages} pages in document ${pdfFileId}`);
+        
+        // Send initial progress with total pages
+        if (onProgress && totalPages > 0) {
+          onProgress({ current: 0, total: totalPages });
+        }
+        
+        for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+          if (onProgress) {
+            onProgress({ current: pageNum, total: totalPages, currentPage: pageNum });
+          }
+          
+          try {
+            const pageMatches = await this.searchPage(pdfPath, pageNum, template, opts, pdfFileId);
+            allMatches.push(...pageMatches);
+          } catch (pageError) {
+            console.warn(`⚠️ Failed to search page ${pageNum}, continuing...`, pageError);
+            // Continue with other pages
+          }
+        }
+      } else if (searchScope === 'entire-project') {
+        // Search all pages in all documents in the project
+        if (!projectId) {
+          throw new Error('Project ID is required for entire-project scope');
+        }
+        
+        const files = await storage.getFilesByProject(projectId);
+        const pdfFiles = files.filter(f => f.mimetype === 'application/pdf');
+        
+        console.log(`📚 Searching ${pdfFiles.length} documents in project ${projectId}`);
+        
+        let totalPages = 0;
+        let processedPages = 0;
+        
+        // First, count total pages for progress tracking
+        for (const file of pdfFiles) {
+          try {
+            const pdfPath = await this.getPDFFilePath(file.id, projectId);
+            const pageCount = await this.getPDFPageCount(pdfPath);
+            totalPages += pageCount;
+          } catch (error) {
+            console.warn(`⚠️ Failed to get page count for document ${file.id}, skipping...`, error);
+          }
+        }
+        
+        // Send initial progress with total pages
+        if (onProgress && totalPages > 0) {
+          onProgress({ current: 0, total: totalPages });
+        }
+        
+        // Now search all pages
+        for (const file of pdfFiles) {
+          try {
+            const pdfPath = await this.getPDFFilePath(file.id, projectId);
+            const pageCount = await this.getPDFPageCount(pdfPath);
+            
+            console.log(`📄 Searching ${pageCount} pages in document ${file.originalName || file.id}`);
+            
+            for (let pageNum = 1; pageNum <= pageCount; pageNum++) {
+              processedPages++;
+              
+              if (onProgress) {
+                onProgress({ 
+                  current: processedPages, 
+                  total: totalPages, 
+                  currentPage: pageNum,
+                  currentDocument: file.originalName || file.id
+                });
+              }
+              
+              try {
+                const pageMatches = await this.searchPage(pdfPath, pageNum, template, opts, file.id);
+                allMatches.push(...pageMatches);
+              } catch (pageError) {
+                console.warn(`⚠️ Failed to search page ${pageNum} of document ${file.id}, continuing...`, pageError);
+                // Continue with other pages
+              }
+            }
+          } catch (fileError) {
+            console.warn(`⚠️ Failed to process document ${file.id}, skipping...`, fileError);
+            // Continue with other documents
+          }
+        }
+      }
+
+      // Sort by confidence and limit to maxMatches
+      const sortedMatches = allMatches.sort((a, b) => b.confidence - a.confidence);
+      const limitedMatches = sortedMatches.slice(0, opts.maxMatches);
 
       const processingTime = Date.now() - startTime;
       
-      console.log(`✅ Visual search complete: ${limitedMatches.length} matches found in ${processingTime}ms`);
+      console.log(`✅ Auto-count complete: ${limitedMatches.length} matches found (from ${allMatches.length} total) in ${processingTime}ms`);
 
       return {
         conditionId,
@@ -527,21 +667,21 @@ print(json.dumps({"success": True, "output": output_path}))
         threshold: opts.confidenceThreshold
       };
     } catch (error) {
-      console.error('❌ Visual search failed:', error);
-      throw new Error(`Visual search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error('❌ Auto-count failed:', error);
+      throw new Error(`Auto-count failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
   /**
-   * Create count measurements from visual search matches
+   * Create count measurements from auto-count matches
    */
   async createCountMeasurements(
     conditionId: string,
-    matches: VisualSearchMatch[],
+    matches: AutoCountMatch[],
     projectId: string,
     sheetId: string,
     conditionColor: string = '#3B82F6',
-    conditionName: string = 'Visual Search Match',
+    conditionName: string = 'Auto-Count Match',
     conditionUnit: string = 'EA'
   ): Promise<void> {
     try {
@@ -636,4 +776,6 @@ print(json.dumps({"success": True, "output": output_path}))
   }
 }
 
-export const visualSearchService = new VisualSearchService();
+export const autoCountService = new AutoCountService();
+// Legacy export for backward compatibility during migration
+export const visualSearchService = autoCountService;

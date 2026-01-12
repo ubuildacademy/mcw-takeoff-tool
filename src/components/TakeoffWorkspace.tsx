@@ -9,6 +9,7 @@ import { SearchTab } from './SearchTab';
 import { OCRProcessingDialog } from './OCRProcessingDialog';
 import { ProfitMarginDialog } from './ProfitMarginDialog';
 import { CVTakeoffAgent } from './CVTakeoffAgent';
+import { AutoCountProgressDialog } from './AutoCountProgressDialog';
 
 import { useTakeoffStore } from '../store/useTakeoffStore';
 import type { TakeoffCondition, Sheet, ProjectFile, PDFDocument, Calibration, PDFPage } from '../types';
@@ -87,11 +88,20 @@ export function TakeoffWorkspace() {
   const [annotationTool, setAnnotationTool] = useState<'text' | 'arrow' | 'rectangle' | 'circle' | null>(null);
   const [annotationColor, setAnnotationColor] = useState<string>('#FF0000');
   
-  // Visual search states
+  // Auto-count states
   const [visualSearchMode, setVisualSearchMode] = useState(false);
   const [visualSearchCondition, setVisualSearchCondition] = useState<TakeoffCondition | null>(null);
   const [selectionBox, setSelectionBox] = useState<{x: number, y: number, width: number, height: number} | null>(null);
   const [visualSearchLoading, setVisualSearchLoading] = useState(false);
+  const [autoCountProgress, setAutoCountProgress] = useState<{
+    current: number;
+    total: number;
+    currentPage?: number;
+    currentDocument?: string;
+  } | null>(null);
+  const [showAutoCountProgress, setShowAutoCountProgress] = useState(false);
+  const [isCancellingAutoCount, setIsCancellingAutoCount] = useState(false);
+  const autoCountAbortControllerRef = useRef<AbortController | null>(null);
 
   // Titleblock selection state (user-taught regions for sheet number/name)
   type TitleblockField = 'sheetNumber' | 'sheetName';
@@ -489,10 +499,21 @@ export function TakeoffWorkspace() {
       // Also set in the store
       useTakeoffStore.getState().setSelectedCondition(condition.id);
       
-      // Check if this is a visual search condition
-      if (condition.type === 'visual-search') {
-        setVisualSearchMode(true);
-        setVisualSearchCondition(condition);
+      // Check if this is an auto-count condition
+      if (condition.type === 'auto-count') {
+        // Check if condition already has measurements - if so, don't allow box drawing
+        const store = useTakeoffStore.getState();
+        const existingMeasurements = store.takeoffMeasurements.filter(m => m.conditionId === condition.id);
+        
+        if (existingMeasurements.length > 0) {
+          // Condition already has measurements - show message and don't enable selection mode
+          alert(`This auto-count condition already has ${existingMeasurements.length} measurements. Please delete the condition and recreate it to run a new search.`);
+          setVisualSearchMode(false);
+          setVisualSearchCondition(null);
+        } else {
+          setVisualSearchMode(true);
+          setVisualSearchCondition(condition);
+        }
       } else {
         setVisualSearchMode(false);
         setVisualSearchCondition(null);
@@ -526,9 +547,20 @@ export function TakeoffWorkspace() {
     setVisualSearchLoading(true);
     
     if (!visualSearchCondition) {
-      console.error('❌ No visual search condition set');
-      alert('Visual search condition is missing. Please select a visual-search condition.');
+      console.error('❌ No auto-count condition set');
+      alert('Auto-count condition is missing. Please select an auto-count condition.');
       setVisualSearchLoading(false);
+      return;
+    }
+    
+    // Double-check that condition doesn't already have measurements
+    const store = useTakeoffStore.getState();
+    const existingMeasurements = store.takeoffMeasurements.filter(m => m.conditionId === visualSearchCondition.id);
+    if (existingMeasurements.length > 0) {
+      alert(`This auto-count condition already has ${existingMeasurements.length} measurements. Please delete the condition and recreate it to run a new search.`);
+      setVisualSearchLoading(false);
+      setVisualSearchMode(false);
+      setVisualSearchCondition(null);
       return;
     }
     
@@ -565,24 +597,51 @@ export function TakeoffWorkspace() {
       }
       
       try {
-        // Import the visual search service
-        const { visualSearchService } = await import('../services/visualSearchService');
+        // Import the auto-count service
+        const { autoCountService } = await import('../services/visualSearchService');
         
         const searchOptions = {
           confidenceThreshold: visualSearchCondition.searchThreshold || 0.7,
-          maxMatches: 100
+          maxMatches: 10000 // Increased limit for broader searches
         };
         
-        // Complete the visual search workflow
-        const result = await visualSearchService.completeSearch(
-          visualSearchCondition.id,
-          currentPdfFile.id,
-          effectiveSheet.pageNumber,
-          selectionBox,
-          projectId,
-          effectiveSheet.id,
-          searchOptions
-        );
+        const searchScope = visualSearchCondition.searchScope || 'current-page';
+        
+        // Create AbortController for cancellation
+        const abortController = new AbortController();
+        autoCountAbortControllerRef.current = abortController;
+        
+        // Show progress dialog - initial state, will be updated by real progress from server via SSE
+        setShowAutoCountProgress(true);
+        setAutoCountProgress({ current: 0, total: 1 });
+        setIsCancellingAutoCount(false);
+        
+        // Progress callback - update progress when received from SSE
+        const onProgress = (progress: { current: number; total: number; currentPage?: number; currentDocument?: string }) => {
+          if (!abortController.signal.aborted) {
+            setAutoCountProgress(progress);
+          }
+        };
+        
+        // Complete the auto-count workflow with real-time progress via SSE
+        let result;
+        try {
+          result = await autoCountService.completeSearch(
+            visualSearchCondition.id,
+            currentPdfFile.id,
+            effectiveSheet.pageNumber,
+            selectionBox,
+            projectId,
+            effectiveSheet.id,
+            searchOptions,
+            searchScope as 'current-page' | 'entire-document' | 'entire-project',
+            onProgress,
+            abortController.signal
+          );
+        } finally {
+          // Clear abort controller
+          autoCountAbortControllerRef.current = null;
+        }
         
         // Refresh the takeoff measurements to show the new count measurements
         await loadProjectTakeoffMeasurements(projectId);
@@ -593,28 +652,49 @@ export function TakeoffWorkspace() {
           m => m.conditionId === visualSearchCondition.id
         );
         
+        // Hide progress dialog
+        setShowAutoCountProgress(false);
+        setAutoCountProgress(null);
+        
         // Show success message
         if (result.measurementsCreated > 0) {
-          alert(`Visual search complete! Found ${result.measurementsCreated} matching items and created ${conditionMeasurements.length} count measurements.`);
+          alert(`Auto-count complete! Found ${result.measurementsCreated} matching items and created ${conditionMeasurements.length} count measurements.`);
         } else {
-          alert(`Visual search complete, but no matching items were found (confidence threshold: ${searchOptions.confidenceThreshold}). Try:\n- Lowering the confidence threshold (currently ${searchOptions.confidenceThreshold})\n- Selecting a more distinctive symbol\n- Ensuring the symbol appears multiple times on the page`);
+          alert(`Auto-count complete, but no matching items were found (confidence threshold: ${searchOptions.confidenceThreshold}). Try:\n- Lowering the confidence threshold (currently ${searchOptions.confidenceThreshold})\n- Selecting a more distinctive symbol\n- Ensuring the symbol appears multiple times`);
         }
         
-        // Exit visual search mode
+        // Exit auto-count mode
         setVisualSearchMode(false);
         setVisualSearchCondition(null);
         setSelectionBox(null);
         
       } catch (error: any) {
-        if (isDev) console.error('❌ Visual search failed:', error);
+        // Clear abort controller
+        autoCountAbortControllerRef.current = null;
+        
+        // Hide progress dialog
+        setShowAutoCountProgress(false);
+        setAutoCountProgress(null);
+        setIsCancellingAutoCount(false);
+        
+        if (isDev) console.error('❌ Auto-count failed:', error);
+        
+        // Handle cancellation
+        if (error?.name === 'AbortError' || error?.message?.includes('cancelled') || error?.message?.includes('aborted')) {
+          // User cancelled - don't show error, just exit
+          setVisualSearchMode(false);
+          setVisualSearchCondition(null);
+          setSelectionBox(null);
+          return;
+        }
         
         // Handle specific error cases
-        const errorMessage = error?.message || 'Visual search failed. Please try again.';
+        const errorMessage = error?.message || 'Auto-count failed. Please try again.';
         
         if (errorMessage.includes('already has measurements')) {
           alert('This condition already has measurements. Please delete the condition and recreate it to run a new search.');
         } else {
-          alert(`Visual search failed: ${errorMessage}`);
+          alert(`Auto-count failed: ${errorMessage}`);
         }
       } finally {
         setVisualSearchLoading(false);
@@ -2329,6 +2409,27 @@ export function TakeoffWorkspace() {
           loadProjectDocuments();
         }}
       />
+
+      {/* Auto-Count Progress Dialog */}
+      {visualSearchCondition && (
+        <AutoCountProgressDialog
+          isOpen={showAutoCountProgress}
+          onClose={() => {
+            setShowAutoCountProgress(false);
+            setAutoCountProgress(null);
+          }}
+          onCancel={() => {
+            if (autoCountAbortControllerRef.current) {
+              setIsCancellingAutoCount(true);
+              autoCountAbortControllerRef.current.abort();
+            }
+          }}
+          progress={autoCountProgress}
+          conditionName={visualSearchCondition.name}
+          searchScope={visualSearchCondition.searchScope || 'current-page'}
+          isCancelling={isCancellingAutoCount}
+        />
+      )}
 
       {/* Profit Margin Dialog */}
       {projectId && (
