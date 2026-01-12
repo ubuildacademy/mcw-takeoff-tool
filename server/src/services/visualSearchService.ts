@@ -538,8 +538,7 @@ except Exception as e:
     options: Partial<AutoCountOptions> = {},
     pageNumber?: number,
     projectId?: string,
-    searchScope: 'current-page' | 'entire-document' | 'entire-project' = 'current-page',
-    onProgress?: (progress: { current: number; total: number; currentPage?: number; currentDocument?: string }) => void
+    searchScope: 'current-page' | 'entire-document' | 'entire-project' = 'current-page'
   ): Promise<AutoCountResult> {
     const opts = { ...this.defaultOptions, ...options };
     const startTime = Date.now();
@@ -553,10 +552,6 @@ except Exception as e:
         const pdfPath = await this.getPDFFilePath(pdfFileId, projectId);
         const searchPageNum = pageNumber || 1;
         
-        if (onProgress) {
-          onProgress({ current: 1, total: 1, currentPage: searchPageNum });
-        }
-        
         const pageMatches = await this.searchPage(pdfPath, searchPageNum, template, opts, pdfFileId);
         allMatches.push(...pageMatches);
       } else if (searchScope === 'entire-document') {
@@ -566,16 +561,7 @@ except Exception as e:
         
         console.log(`📄 Searching ${totalPages} pages in document ${pdfFileId}`);
         
-        // Send initial progress with total pages
-        if (onProgress && totalPages > 0) {
-          onProgress({ current: 0, total: totalPages });
-        }
-        
         for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-          if (onProgress) {
-            onProgress({ current: pageNum, total: totalPages, currentPage: pageNum });
-          }
-          
           try {
             const pageMatches = await this.searchPage(pdfPath, pageNum, template, opts, pdfFileId);
             allMatches.push(...pageMatches);
@@ -595,25 +581,6 @@ except Exception as e:
         
         console.log(`📚 Searching ${pdfFiles.length} documents in project ${projectId}`);
         
-        let totalPages = 0;
-        let processedPages = 0;
-        
-        // First, count total pages for progress tracking
-        for (const file of pdfFiles) {
-          try {
-            const pdfPath = await this.getPDFFilePath(file.id, projectId);
-            const pageCount = await this.getPDFPageCount(pdfPath);
-            totalPages += pageCount;
-          } catch (error) {
-            console.warn(`⚠️ Failed to get page count for document ${file.id}, skipping...`, error);
-          }
-        }
-        
-        // Send initial progress with total pages
-        if (onProgress && totalPages > 0) {
-          onProgress({ current: 0, total: totalPages });
-        }
-        
         // Now search all pages
         for (const file of pdfFiles) {
           try {
@@ -623,17 +590,6 @@ except Exception as e:
             console.log(`📄 Searching ${pageCount} pages in document ${file.originalName || file.id}`);
             
             for (let pageNum = 1; pageNum <= pageCount; pageNum++) {
-              processedPages++;
-              
-              if (onProgress) {
-                onProgress({ 
-                  current: processedPages, 
-                  total: totalPages, 
-                  currentPage: pageNum,
-                  currentDocument: file.originalName || file.id
-                });
-              }
-              
               try {
                 const pageMatches = await this.searchPage(pdfPath, pageNum, template, opts, file.id);
                 allMatches.push(...pageMatches);

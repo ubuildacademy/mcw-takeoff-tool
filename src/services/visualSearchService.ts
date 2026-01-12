@@ -93,7 +93,7 @@ export class AutoCountService {
   }
 
   /**
-   * Complete auto-count workflow with Server-Sent Events for real-time progress
+   * Complete auto-count workflow
    */
   async completeSearch(
     conditionId: string,
@@ -107,10 +107,12 @@ export class AutoCountService {
     onProgress?: (progress: { current: number; total: number; currentPage?: number; currentDocument?: string }) => void,
     abortSignal?: AbortSignal
   ): Promise<{ result: AutoCountResult; measurementsCreated: number }> {
-    return new Promise((resolve, reject) => {
-      // First, send the request using fetch with POST
-      // We'll use a workaround: send POST data via query params and body, then switch to SSE
-      const requestBody = {
+    const response = await fetch(`${API_BASE_URL}/visual-search/complete-search`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
         conditionId,
         pdfFileId,
         pageNumber,
@@ -119,143 +121,23 @@ export class AutoCountService {
         sheetId,
         options,
         searchScope: searchScope || 'current-page'
-      };
-
-      // Create a unique job ID for this search
-      const jobId = `autocount_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
-      // Use fetch with POST to initiate the search, but request SSE response
-      fetch(`${API_BASE_URL}/visual-search/complete-search?sse=true`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'text/event-stream',
-        },
-        body: JSON.stringify(requestBody),
-        signal: abortSignal
-      }).then(async (response) => {
-        if (!response.ok) {
-          // If not SSE, try to parse as JSON error
-          try {
-            const error = await response.json();
-            const errorMessage = error.details 
-              ? `${error.error || 'Auto-count workflow failed'}: ${error.details}`
-              : error.error || 'Auto-count workflow failed';
-            reject(new Error(errorMessage));
-          } catch {
-            reject(new Error(`Auto-count failed with status ${response.status}`));
-          }
-          return;
-        }
-
-        // Check if response is SSE
-        const contentType = response.headers.get('content-type');
-        if (contentType?.includes('text/event-stream')) {
-          // Handle SSE stream
-          const reader = response.body?.getReader();
-          const decoder = new TextDecoder();
-          
-          if (!reader) {
-            reject(new Error('Failed to get response stream'));
-            return;
-          }
-
-          let buffer = '';
-          let finalResult: { result: AutoCountResult; measurementsCreated: number } | null = null;
-
-          const processChunk = async () => {
-            try {
-              while (true) {
-                if (abortSignal?.aborted) {
-                  reader.cancel();
-                  reject(new Error('Search cancelled'));
-                  return;
-                }
-
-                const { done, value } = await reader.read();
-                
-                // Decode any new data
-                if (value) {
-                  buffer += decoder.decode(value, { stream: !done });
-                }
-                
-                // Process all complete lines in buffer
-                const lines = buffer.split('\n');
-                if (done) {
-                  // Process remaining buffer when stream ends
-                  buffer = '';
-                } else {
-                  buffer = lines.pop() || ''; // Keep incomplete line in buffer
-                }
-
-                for (const line of lines) {
-                  if (line.trim() && line.startsWith('data: ')) {
-                    try {
-                      const data = JSON.parse(line.slice(6));
-                      
-                      if (data.type === 'connected') {
-                        // Connection established
-                        continue;
-                      } else if (data.type === 'progress') {
-                        // Update progress
-                        if (onProgress) {
-                          onProgress({
-                            current: data.current,
-                            total: data.total,
-                            currentPage: data.currentPage,
-                            currentDocument: data.currentDocument
-                          });
-                        }
-                      } else if (data.type === 'complete') {
-                        // Search complete
-                        finalResult = {
-                          result: data.result,
-                          measurementsCreated: data.measurementsCreated
-                        };
-                      } else if (data.type === 'error') {
-                        reject(new Error(data.error || 'Auto-count failed'));
-                        return;
-                      }
-                    } catch (parseError) {
-                      console.warn('Failed to parse SSE data:', line, parseError);
-                    }
-                  }
-                }
-                
-                // Check if stream is done after processing buffer
-                if (done) {
-                  if (finalResult) {
-                    resolve(finalResult);
-                  } else {
-                    reject(new Error('Search completed but no result received'));
-                  }
-                  return;
-                }
-              }
-            } catch (error) {
-              if (error instanceof Error && error.message !== 'Search cancelled') {
-                reject(error);
-              }
-            }
-          };
-
-          processChunk();
-        } else {
-          // Fallback to regular JSON response (for backwards compatibility)
-          const result = await response.json();
-          resolve({
-            result: result.result,
-            measurementsCreated: result.measurementsCreated
-          });
-        }
-      }).catch((error) => {
-        if (error.name === 'AbortError') {
-          reject(new Error('Search cancelled'));
-        } else {
-          reject(error);
-        }
-      });
+      }),
+      signal: abortSignal
     });
+
+    if (!response.ok) {
+      const error = await response.json();
+      const errorMessage = error.details 
+        ? `${error.error || 'Auto-count workflow failed'}: ${error.details}`
+        : error.error || 'Auto-count workflow failed';
+      throw new Error(errorMessage);
+    }
+
+    const result = await response.json();
+    return {
+      result: result.result,
+      measurementsCreated: result.measurementsCreated
+    };
   }
 
   /**

@@ -9,7 +9,6 @@ import { SearchTab } from './SearchTab';
 import { OCRProcessingDialog } from './OCRProcessingDialog';
 import { ProfitMarginDialog } from './ProfitMarginDialog';
 import { CVTakeoffAgent } from './CVTakeoffAgent';
-import { AutoCountProgressDialog } from './AutoCountProgressDialog';
 
 import { useTakeoffStore } from '../store/useTakeoffStore';
 import type { TakeoffCondition, Sheet, ProjectFile, PDFDocument, Calibration, PDFPage } from '../types';
@@ -93,14 +92,6 @@ export function TakeoffWorkspace() {
   const [visualSearchCondition, setVisualSearchCondition] = useState<TakeoffCondition | null>(null);
   const [selectionBox, setSelectionBox] = useState<{x: number, y: number, width: number, height: number} | null>(null);
   const [visualSearchLoading, setVisualSearchLoading] = useState(false);
-  const [autoCountProgress, setAutoCountProgress] = useState<{
-    current: number;
-    total: number;
-    currentPage?: number;
-    currentDocument?: string;
-  } | null>(null);
-  const [showAutoCountProgress, setShowAutoCountProgress] = useState(false);
-  const [isCancellingAutoCount, setIsCancellingAutoCount] = useState(false);
   const autoCountAbortControllerRef = useRef<AbortController | null>(null);
 
   // Titleblock selection state (user-taught regions for sheet number/name)
@@ -611,37 +602,22 @@ export function TakeoffWorkspace() {
         const abortController = new AbortController();
         autoCountAbortControllerRef.current = abortController;
         
-        // Show progress dialog - initial state, will be updated by real progress from server via SSE
-        setShowAutoCountProgress(true);
-        setAutoCountProgress({ current: 0, total: 1 });
-        setIsCancellingAutoCount(false);
+        // Complete the auto-count workflow
+        const result = await autoCountService.completeSearch(
+          visualSearchCondition.id,
+          currentPdfFile.id,
+          effectiveSheet.pageNumber,
+          selectionBox,
+          projectId,
+          effectiveSheet.id,
+          searchOptions,
+          searchScope as 'current-page' | 'entire-document' | 'entire-project',
+          undefined, // No progress callback needed
+          abortController.signal
+        );
         
-        // Progress callback - update progress when received from SSE
-        const onProgress = (progress: { current: number; total: number; currentPage?: number; currentDocument?: string }) => {
-          if (!abortController.signal.aborted) {
-            setAutoCountProgress(progress);
-          }
-        };
-        
-        // Complete the auto-count workflow with real-time progress via SSE
-        let result;
-        try {
-          result = await autoCountService.completeSearch(
-            visualSearchCondition.id,
-            currentPdfFile.id,
-            effectiveSheet.pageNumber,
-            selectionBox,
-            projectId,
-            effectiveSheet.id,
-            searchOptions,
-            searchScope as 'current-page' | 'entire-document' | 'entire-project',
-            onProgress,
-            abortController.signal
-          );
-        } finally {
-          // Clear abort controller
-          autoCountAbortControllerRef.current = null;
-        }
+        // Clear abort controller
+        autoCountAbortControllerRef.current = null;
         
         // Refresh the takeoff measurements to show the new count measurements
         await loadProjectTakeoffMeasurements(projectId);
@@ -651,10 +627,6 @@ export function TakeoffWorkspace() {
         const conditionMeasurements = store.takeoffMeasurements.filter(
           m => m.conditionId === visualSearchCondition.id
         );
-        
-        // Hide progress dialog
-        setShowAutoCountProgress(false);
-        setAutoCountProgress(null);
         
         // Show success message
         if (result.measurementsCreated > 0) {
@@ -671,11 +643,6 @@ export function TakeoffWorkspace() {
       } catch (error: any) {
         // Clear abort controller
         autoCountAbortControllerRef.current = null;
-        
-        // Hide progress dialog
-        setShowAutoCountProgress(false);
-        setAutoCountProgress(null);
-        setIsCancellingAutoCount(false);
         
         if (isDev) console.error('❌ Auto-count failed:', error);
         
@@ -1980,14 +1947,14 @@ export function TakeoffWorkspace() {
                   <>
                     <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
                     <span className="text-sm font-medium text-yellow-900">
-                      Searching for matches...
+                      Auto-counting matches...
                     </span>
                   </>
                 ) : (
                   <>
                     <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></div>
                     <span className="text-sm font-medium text-indigo-900">
-                      Visual Search Mode: {visualSearchCondition.name}
+                      Auto-Count Mode: {visualSearchCondition.name}
                     </span>
                   </>
                 )}
@@ -2338,7 +2305,12 @@ export function TakeoffWorkspace() {
           ) : (
             <span className="text-sm text-gray-600">
               {uploading ? 'Uploading…' : 
-               (isMeasuring || isCalibrating) ? (
+               visualSearchLoading ? (
+                 <span className="bg-indigo-600 text-white px-3 py-1 rounded-lg text-sm flex items-center gap-2">
+                   <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                   Auto-counting...
+                 </span>
+               ) : (isMeasuring || isCalibrating) ? (
                  <span className="bg-blue-600 text-white px-3 py-1 rounded-lg text-sm">
                    {isCalibrating ? 'Calibrating: Click two points to set scale' : `Measuring: ${measurementType} - Click to add points`}
                  </span>
@@ -2410,26 +2382,6 @@ export function TakeoffWorkspace() {
         }}
       />
 
-      {/* Auto-Count Progress Dialog */}
-      {visualSearchCondition && (
-        <AutoCountProgressDialog
-          isOpen={showAutoCountProgress}
-          onClose={() => {
-            setShowAutoCountProgress(false);
-            setAutoCountProgress(null);
-          }}
-          onCancel={() => {
-            if (autoCountAbortControllerRef.current) {
-              setIsCancellingAutoCount(true);
-              autoCountAbortControllerRef.current.abort();
-            }
-          }}
-          progress={autoCountProgress}
-          conditionName={visualSearchCondition.name}
-          searchScope={visualSearchCondition.searchScope || 'current-page'}
-          isCancelling={isCancellingAutoCount}
-        />
-      )}
 
       {/* Profit Margin Dialog */}
       {projectId && (
