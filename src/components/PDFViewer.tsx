@@ -1072,6 +1072,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // OPTIMIZED: Update only visual styling when selection changes (prevents flicker)
   const prevSelectedMarkupIdRef = useRef<string | null>(null);
+  const prevSelectedConditionIdRef = useRef<string | null>(null);
+  const deselectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   useEffect(() => {
     // Only update if selection actually changed
     if (selectedMarkupId !== prevSelectedMarkupIdRef.current) {
@@ -4490,6 +4492,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Set measurement type when condition is selected
   useEffect(() => {
     if (selectedConditionId) {
+      // Clear any existing deselection timeout when selecting a condition
+      if (deselectionTimeoutRef.current) {
+        clearTimeout(deselectionTimeoutRef.current);
+        deselectionTimeoutRef.current = null;
+      }
       const condition = getSelectedCondition();
       if (condition) {
         // Auto-count conditions use box selection, NOT measurement mode
@@ -4501,6 +4508,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           setIsDeselecting(false);
           setMeasurementType('count'); // Set type but don't enable measuring
           // Auto-count box selection is handled by visualSearchMode prop and isSelectingSymbol state
+          prevSelectedConditionIdRef.current = selectedConditionId;
           return; // Exit early - don't enable measurement mode
         }
         
@@ -4532,6 +4540,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             setMeasurementType('linear');
           }
         }
+        prevSelectedConditionIdRef.current = selectedConditionId;
       } else {
         // VALIDATION FIX: Condition ID exists but condition object is missing
         // This can happen during condition reload or if condition was deleted
@@ -4549,8 +4558,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         // DON'T set isDeselecting here - that's only for explicit deselection
         // DON'T clear selectedConditionId in store - let the UI handle that
         // This prevents flicker while allowing the UI to show the selection state
+        prevSelectedConditionIdRef.current = selectedConditionId;
       }
     } else {
+      // Only set isDeselecting when transitioning from selected (non-null) to deselected (null)
+      // This prevents the effect from triggering during condition refreshes when already deselected
+      const wasSelected = prevSelectedConditionIdRef.current !== null;
+      const isTransitioningToDeselected = wasSelected && selectedConditionId === null;
+      
       setIsMeasuring(false);
       setIsSelectionMode(true);
       setCurrentMeasurement([]);
@@ -4558,20 +4573,36 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       setMeasurements([]);
       
       // ANTI-FLICKER: Extended cooldown after deselection to prevent flicker storm
-      setIsDeselecting(true);
+      // Only set isDeselecting on actual transition from selected to deselected
+      if (isTransitioningToDeselected) {
+        setIsDeselecting(true);
+        
+        // Store timeout ID in ref so we can clear it if needed
+        deselectionTimeoutRef.current = setTimeout(() => {
+          setIsDeselecting(false);
+          deselectionTimeoutRef.current = null;
+        }, 5000); // 5 second cooldown after deselection
+      } else {
+        // Already deselected - preserve existing isDeselecting state if timeout is still active
+        // This prevents clearing flickering protection prematurely during condition refreshes
+        // Only clear if there's no active timeout (meaning we're truly just refreshing, not in cooldown)
+        if (!deselectionTimeoutRef.current) {
+          setIsDeselecting(false);
+        }
+        // If timeout is active, leave isDeselecting as-is to maintain flickering protection
+      }
       
-      // Store timeout ID so we can clear it if needed
-      const timeoutId = setTimeout(() => {
-        setIsDeselecting(false);
-      }, 5000); // 5 second cooldown after deselection
-      
-      // Clear timeout if component unmounts or condition changes
-      return () => {
-        clearTimeout(timeoutId);
-        setIsDeselecting(false);
-      };
+      prevSelectedConditionIdRef.current = selectedConditionId;
     }
-  }, [selectedConditionId, getSelectedCondition]);
+    
+    // Cleanup function to clear timeout on unmount or when condition changes
+    return () => {
+      if (deselectionTimeoutRef.current) {
+        clearTimeout(deselectionTimeoutRef.current);
+        deselectionTimeoutRef.current = null;
+      }
+    };
+  }, [selectedConditionId]); // Removed getSelectedCondition from dependencies - it's a store getter, not reactive state
 
   // Set annotation mode when annotation tool is selected
   useEffect(() => {
