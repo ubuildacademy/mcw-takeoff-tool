@@ -274,6 +274,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const isRenderingRef = useRef<boolean>(false);
   const [isComponentMounted, setIsComponentMounted] = useState(false);
   const prevCalibratingRef = useRef(false);
+  // Track pending render to prevent duplicate renders and flickering
+  const pendingRenderRef = useRef<{ page: number; timeoutId?: NodeJS.Timeout } | null>(null);
   
   // Notify parent component of measurement state changes
   useEffect(() => {
@@ -1051,30 +1053,69 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Re-render annotations when measurements or interaction state changes
   // NOTE: selectedMarkupId is removed from dependencies to prevent full re-renders on selection changes
   // CRITICAL: This effect ensures markups render when measurements load, even if they load after PDF rendering
+  // FIX: Watch store measurements for current page to trigger when measurements load asynchronously
+  // OPTIMIZATION: Only watch measurements for current page to prevent unnecessary re-renders
+  const currentPageStoreMeasurements = currentProjectId && file?.id 
+    ? getPageTakeoffMeasurements(currentProjectId, file.id, currentPage)
+    : [];
+  const currentPageStoreMeasurementsCount = currentPageStoreMeasurements.length;
+  
   useEffect(() => {
-    // Don't render during PDF rendering to prevent flickering
-    if (isRenderingRef.current) {
-      return;
-    }
-    
     if (pdfDocument && currentViewport) {
       // Check both local measurements and store measurements
       // This ensures markups render even if local measurements haven't loaded yet
       const hasLocalMeasurements = localTakeoffMeasurements.length > 0;
-      const hasStoreMeasurements = currentProjectId && file?.id 
-        ? getPageTakeoffMeasurements(currentProjectId, file.id, currentPage).length > 0
-        : false;
+      const hasStoreMeasurements = currentPageStoreMeasurementsCount > 0;
       const hasAnyMeasurements = hasLocalMeasurements || hasStoreMeasurements;
       
       // Only render if we have measurements, annotations, or if we're in measuring/annotation/visual search mode
       if (hasAnyMeasurements || isMeasuring || isCalibrating || currentMeasurement.length > 0 || isAnnotating || localAnnotations.length > 0 || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol)) {
-        // Use requestAnimationFrame to batch renders and prevent flickering
-        requestAnimationFrame(() => {
-          // Double-check we're still not rendering and viewport is still valid
-          if (!isRenderingRef.current && currentViewport && pdfPageRef.current) {
-            renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+        // Cancel any pending render for a different page to prevent flickering
+        if (pendingRenderRef.current && pendingRenderRef.current.page !== currentPage) {
+          if (pendingRenderRef.current.timeoutId) {
+            clearTimeout(pendingRenderRef.current.timeoutId);
           }
-        });
+          pendingRenderRef.current = null;
+        }
+        
+        // Use requestAnimationFrame to batch renders and prevent flickering
+        // CRITICAL FIX: Don't block rendering if PDF is still rendering - use a retry mechanism instead
+        // This ensures markups appear as soon as measurements load, even during PDF rendering
+        // This is especially important for single-page documents where measurements load asynchronously
+        // ANTI-FLICKER: Track pending renders to prevent duplicate renders
+        if (pendingRenderRef.current?.page === currentPage) {
+          // Already have a pending render for this page, skip to prevent flickering
+          return;
+        }
+        
+        pendingRenderRef.current = { page: currentPage };
+        let retryCount = 0;
+        const maxRetries = 20; // Max 1 second of retries (20 * 50ms)
+        const attemptRender = () => {
+          if (currentViewport && pdfPageRef.current) {
+            // If PDF is still rendering but we have a viewport, we can still render markups
+            // The renderTakeoffAnnotations function will handle the rendering safely
+            if (isRenderingRef.current && retryCount < maxRetries) {
+              // Retry after a short delay if PDF is still rendering
+              retryCount++;
+              pendingRenderRef.current!.timeoutId = setTimeout(attemptRender, 50);
+              return;
+            }
+            // Clear pending render before actually rendering
+            pendingRenderRef.current = null;
+            // Render markups - this is safe even if PDF is still rendering
+            renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+          } else if (isRenderingRef.current && retryCount < maxRetries) {
+            // Retry after a short delay if viewport isn't ready yet
+            retryCount++;
+            pendingRenderRef.current!.timeoutId = setTimeout(attemptRender, 50);
+          } else {
+            // Give up if we've exhausted retries or viewport isn't ready
+            pendingRenderRef.current = null;
+          }
+        };
+        
+        requestAnimationFrame(attemptRender);
       } else {
         // LAYER THRASH PREVENTION: Clear overlay when measurements are empty to prevent stale renderings
         // This ensures clean state when switching projects or when measurements are cleared
@@ -1084,7 +1125,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
       }
     }
-  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, renderTakeoffAnnotations, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentAnnotation, currentProjectId, file?.id, getPageTakeoffMeasurements]);
+  }, [localTakeoffMeasurements, currentPageStoreMeasurementsCount, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, renderTakeoffAnnotations, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentAnnotation, currentProjectId, file?.id, getPageTakeoffMeasurements]);
 
   // OPTIMIZED: Update only visual styling when selection changes (prevents flicker)
   const prevSelectedMarkupIdRef = useRef<string | null>(null);
@@ -1313,11 +1354,28 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       (m) => m.projectId === currentProjectId && m.sheetId === file?.id && m.pdfPage === pageNum
     );
     
+    // Also check store measurements using the getter function (more reliable)
+    const storeMeasurements = currentProjectId && file?.id 
+      ? getPageTakeoffMeasurements(currentProjectId, file.id, pageNum)
+      : [];
+    
     // CRITICAL: Always render markups if we have any measurements or annotations for this page
     // Use requestAnimationFrame to ensure DOM is ready after overlay was cleared
-    if (currentMeasurements.length > 0 || localTakeoffMeasurements.length > 0 || localAnnotations.length > 0) {
+    // FIX: Check both currentMeasurements (from store state) and storeMeasurements (from getter)
+    // This ensures we catch measurements even if they load asynchronously
+    if (currentMeasurements.length > 0 || storeMeasurements.length > 0 || localTakeoffMeasurements.length > 0 || localAnnotations.length > 0) {
       requestAnimationFrame(() => {
-        renderTakeoffAnnotations(pageNum, viewport, pdfPageRef.current);
+        // Don't block on PDF rendering - markups can render even if PDF is still rendering
+        if (pdfPageRef.current || !isRenderingRef.current) {
+          renderTakeoffAnnotations(pageNum, viewport, pdfPageRef.current);
+        } else {
+          // If PDF is still rendering, retry after a short delay
+          setTimeout(() => {
+            if (pdfPageRef.current || !isRenderingRef.current) {
+              renderTakeoffAnnotations(pageNum, viewport, pdfPageRef.current);
+            }
+          }, 100);
+        }
       });
     }
     // Note: If no measurements, the reactive useEffect will handle rendering when they load
