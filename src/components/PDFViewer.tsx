@@ -1642,10 +1642,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       return;
     }
     
-    // For count measurements, we only need 1 point
-    if (measurement.type === 'count' && points.length < 1) return;
+    // For count and auto-count measurements, we only need 1 point
+    if ((measurement.type === 'count' || measurement.type === 'auto-count') && points.length < 1) return;
     // For other measurements, we need at least 2 points
-    if (measurement.type !== 'count' && points.length < 2) {
+    if (measurement.type !== 'count' && measurement.type !== 'auto-count' && points.length < 2) {
       return;
     }
     
@@ -1955,10 +1955,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         break;
       }
         
-      case 'count': {
+      case 'count':
+      case 'auto-count': {
         const point = { x: transformedPoints[0].x, y: transformedPoints[0].y };
         
-        // Create circle for count measurement
+        // Create circle for count/auto-count measurement
         const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
         circle.setAttribute('cx', point.x.toString());
         circle.setAttribute('cy', point.y.toString());
@@ -1982,6 +1983,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         svg.appendChild(hitArea);
         
         svg.appendChild(circle);
+        break;
+      }
+      default: {
+        console.warn(`Unknown measurement type: ${measurement.type}`, measurement);
         break;
       }
     }
