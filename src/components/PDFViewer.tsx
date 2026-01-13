@@ -768,7 +768,24 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     
     // Clear existing annotations completely - this ensures no cross-page contamination
+    // CRITICAL: Save hit area before clearing if it exists, then restore it
+    const existingHitArea = svgOverlay.querySelector('#hit-area');
     svgOverlay.innerHTML = '';
+    
+    // CRITICAL FIX: Recreate hit area immediately after clearing to ensure pointer events work
+    // This is essential for selection mode to work immediately after markups are rendered
+    // Always create hit area if viewport is available
+    if (viewport) {
+      const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      hitArea.setAttribute('id', 'hit-area');
+      hitArea.setAttribute('width', '100%');
+      hitArea.setAttribute('height', '100%');
+      hitArea.setAttribute('fill', 'transparent');
+      const shouldCaptureClicks = isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
+      hitArea.setAttribute('pointer-events', shouldCaptureClicks ? 'all' : 'none');
+      // Insert at the beginning so it's behind markups
+      svgOverlay.appendChild(hitArea);
+    }
     
     // CRITICAL: Only render measurements for the specific page being rendered
     // Filter by page BEFORE iterating to prevent any cross-page contamination
@@ -945,13 +962,31 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       renderRunningLengthDisplay(svgOverlay, viewport);
     }
     
-    // CRITICAL FIX: Ensure hit area pointer-events are set correctly after rendering markups
+    // CRITICAL FIX: Ensure hit area exists and has correct pointer-events after rendering markups
     // This is especially important when markups are rendered asynchronously after page load
     // The hit area might have been created before selection mode was enabled
-    const hitArea = svgOverlay.querySelector('#hit-area') as SVGRectElement;
+    let hitArea = svgOverlay.querySelector('#hit-area') as SVGRectElement;
+    if (!hitArea) {
+      // Create hit area if it doesn't exist
+      hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      hitArea.setAttribute('id', 'hit-area');
+      hitArea.setAttribute('width', '100%');
+      hitArea.setAttribute('height', '100%');
+      hitArea.setAttribute('fill', 'transparent');
+      // Insert at the beginning so it's behind markups
+      svgOverlay.insertBefore(hitArea, svgOverlay.firstChild);
+    }
+    
     if (hitArea) {
       const shouldCaptureClicks = isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
       hitArea.setAttribute('pointer-events', shouldCaptureClicks ? 'all' : 'none');
+    }
+    
+    // CRITICAL FIX: Also update SVG overlay's pointer events directly
+    // This ensures clicks work even if React hasn't updated the style prop yet
+    if (svgOverlayRef.current) {
+      const shouldCaptureClicks = isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
+      svgOverlayRef.current.style.pointerEvents = shouldCaptureClicks ? 'auto' : 'none';
     }
     
   }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, cutoutMode, currentCutout, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionBox, currentProjectId, file?.id, getPageTakeoffMeasurements]);
@@ -1310,23 +1345,57 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
   }, [viewState.scale, viewState.rotation, pdfDocument, currentViewport, localTakeoffMeasurements, localAnnotations, currentPage, renderTakeoffAnnotations]);
 
-  // Update hit-area pointer-events when mode changes
+  // CRITICAL: Update SVG overlay and hit-area pointer-events immediately when mode changes
+  // This ensures selection works immediately when conditions are deselected
   useEffect(() => {
     if (!svgOverlayRef.current) return;
     
-    const hitArea = svgOverlayRef.current.querySelector('#hit-area') as SVGRectElement;
+    // Calculate if clicks should be captured
+    const shouldCaptureClicks = isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
+    
+    // CRITICAL FIX: Update SVG overlay's pointer events immediately via direct DOM manipulation
+    // React's style prop might not update fast enough, so we update it directly
+    svgOverlayRef.current.style.pointerEvents = shouldCaptureClicks ? 'auto' : 'none';
+    
+    // Ensure hit area exists and has correct pointer events
+    let hitArea = svgOverlayRef.current.querySelector('#hit-area') as SVGRectElement;
+    if (!hitArea && currentViewport) {
+      // Create hit area if it doesn't exist
+      hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      hitArea.setAttribute('id', 'hit-area');
+      hitArea.setAttribute('width', '100%');
+      hitArea.setAttribute('height', '100%');
+      hitArea.setAttribute('fill', 'transparent');
+      // Insert at the beginning so it's behind markups
+      svgOverlayRef.current.insertBefore(hitArea, svgOverlayRef.current.firstChild);
+    }
+    
     if (hitArea) {
       // When measuring, set pointer-events to 'none' so clicks pass through to canvas
       // This allows proper double-click detection on the canvas
       // For other modes, set to 'all' to capture clicks for selection/annotation/etc.
-      const shouldCaptureClicks = isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
       hitArea.setAttribute('pointer-events', shouldCaptureClicks ? 'all' : 'none');
     }
     
-    // Note: Markups no longer need re-rendering when selection mode changes
-    // Handlers are always added and check isSelectionMode at click time
-    // This prevents unnecessary re-renders and flickering
-  }, [isMeasuring, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol]);
+    // CRITICAL FIX: When selection mode is enabled, ensure markups are rendered with correct handlers
+    // This is especially important when switching from measurement mode to selection mode
+    // Use requestAnimationFrame to avoid blocking and prevent flickering
+    if (isSelectionMode && pdfDocument && currentViewport && pdfPageRef.current) {
+      requestAnimationFrame(() => {
+        // Check if we have markups that need to be rendered
+        const storeMeasurements = currentProjectId && file?.id 
+          ? getPageTakeoffMeasurements(currentProjectId, file.id, currentPage)
+          : [];
+        const hasMarkups = localTakeoffMeasurements.length > 0 || storeMeasurements.length > 0 || localAnnotations.length > 0;
+        
+        if (hasMarkups && svgOverlayRef.current) {
+          // Re-render markups to ensure click handlers are attached and pointer events are correct
+          // This is safe because renderTakeoffAnnotations clears and re-renders, ensuring fresh handlers
+          renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+        }
+      });
+    }
+  }, [isMeasuring, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentViewport, pdfDocument, currentPage, currentProjectId, file?.id, localTakeoffMeasurements, localAnnotations, getPageTakeoffMeasurements, renderTakeoffAnnotations]);
 
   // Page visibility handler - ensures overlay is properly initialized when page becomes visible
   const onPageShown = useCallback((pageNum: number, viewport: any) => {
@@ -4612,7 +4681,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       setMousePosition(null);
       setMeasurements([]);
       
-      // ANTI-FLICKER: Extended cooldown after deselection to prevent flicker storm
+      // ANTI-FLICKER: Minimal cooldown after deselection to prevent flicker storm
+      // CRITICAL FIX: Reduced from 5 seconds to 100ms to allow immediate selection
+      // The cooldown only blocks PDF re-renders, not markup interactions
       // Only set isDeselecting on actual transition from selected to deselected
       if (isTransitioningToDeselected) {
         setIsDeselecting(true);
@@ -4621,7 +4692,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         deselectionTimeoutRef.current = setTimeout(() => {
           setIsDeselecting(false);
           deselectionTimeoutRef.current = null;
-        }, 5000); // 5 second cooldown after deselection
+        }, 100); // Minimal cooldown - just enough to prevent flicker, not block interactions
       } else {
         // Already deselected or initial load - ensure isDeselecting is false
         // On initial load, we want selection mode to work immediately
