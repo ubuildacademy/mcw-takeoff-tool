@@ -1164,20 +1164,25 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               // - After auto-count
               // - On initial page load
               // - After creating a markup and deselecting
-              if (isSelectionMode) {
-                const allMarkups = svgOverlayRef.current.querySelectorAll('[data-measurement-id], [data-annotation-id]');
-                allMarkups.forEach((markup) => {
-                  (markup as SVGElement).style.pointerEvents = 'auto';
-                  (markup as SVGElement).style.cursor = 'pointer';
-                });
-              } else {
-                // When not in selection mode, ensure markups don't block clicks
-                const allMarkups = svgOverlayRef.current.querySelectorAll('[data-measurement-id], [data-annotation-id]');
-                allMarkups.forEach((markup) => {
-                  (markup as SVGElement).style.pointerEvents = 'none';
-                  (markup as SVGElement).style.cursor = 'default';
-                });
-              }
+              // Use requestAnimationFrame to ensure this runs after DOM updates
+              requestAnimationFrame(() => {
+                if (svgOverlayRef.current) {
+                  if (isSelectionMode) {
+                    const allMarkups = svgOverlayRef.current.querySelectorAll('[data-measurement-id], [data-annotation-id]');
+                    allMarkups.forEach((markup) => {
+                      (markup as SVGElement).style.pointerEvents = 'auto';
+                      (markup as SVGElement).style.cursor = 'pointer';
+                    });
+                  } else {
+                    // When not in selection mode, ensure markups don't block clicks
+                    const allMarkups = svgOverlayRef.current.querySelectorAll('[data-measurement-id], [data-annotation-id]');
+                    allMarkups.forEach((markup) => {
+                      (markup as SVGElement).style.pointerEvents = 'none';
+                      (markup as SVGElement).style.cursor = 'default';
+                    });
+                  }
+                }
+              });
             }
           } else if (isRenderingRef.current && retryCount < maxRetries) {
             // Retry after a short delay if viewport isn't ready yet
@@ -1526,10 +1531,18 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       if (process.env.NODE_ENV === 'development') {
         console.warn('PDF render skipped: missing dependencies', { pageNum });
       }
+      // Clear loading state if render is skipped
+      if (pageNum === currentPage && !isInitialRenderComplete) {
+        setIsPDFLoading(false);
+      }
       return;
     }
     
     if (isRenderingRef.current) {
+      // Clear loading state if render is blocked
+      if (pageNum === currentPage && !isInitialRenderComplete) {
+        setIsPDFLoading(false);
+      }
       return;
     }
     isRenderingRef.current = true;
@@ -1644,6 +1657,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     } catch (error: any) {
       if (error.name !== 'RenderingCancelledException') {
         console.error('Error rendering PDF page:', error);
+      }
+      // Clear loading state on error
+      if (pageNum === currentPage && !isInitialRenderComplete) {
+        setIsPDFLoading(false);
       }
     } finally {
       isRenderingRef.current = false;
@@ -4634,7 +4651,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Keep ref in sync with isSelectionMode state
   // Also trigger markup re-render when entering selection mode to ensure handlers are updated
   const prevIsSelectionModeRef = useRef<boolean>(false);
-  const hasRenderedInSelectionModeRef = useRef<boolean>(false);
+  const hasRenderedInSelectionModeRef = useRef<Map<number, boolean>>(new Map()); // Track per page
   useEffect(() => {
     const wasSelectionMode = prevIsSelectionModeRef.current;
     prevIsSelectionModeRef.current = isSelectionMode;
@@ -4646,35 +4663,45 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       : [];
     const hasMarkups = localTakeoffMeasurements.length > 0 || storeMeasurements.length > 0 || localAnnotations.length > 0;
     
+    // Check if we've already rendered markups in selection mode for this page
+    const hasRenderedForPage = hasRenderedInSelectionModeRef.current.get(currentPage) || false;
+    
     // Force re-render of markups when:
     // 1. Entering selection mode (transitioning from false to true) - after auto-count, after creating markup
     // 2. Already in selection mode and markups exist but haven't been rendered in selection mode yet - initial load
+    // 3. Page changed and we're in selection mode - ensure markups are rendered with handlers
     const shouldReRender = isSelectionMode && hasMarkups && pdfDocument && currentViewport && pdfPageRef.current && (
       (!wasSelectionMode && isSelectionMode) || // Transitioning to selection mode
-      (isSelectionMode && !hasRenderedInSelectionModeRef.current) // Initial load in selection mode
+      (isSelectionMode && !hasRenderedForPage) // Haven't rendered in selection mode for this page yet
     );
     
     if (shouldReRender) {
-      hasRenderedInSelectionModeRef.current = true;
-      // Use requestAnimationFrame for better timing and to avoid blocking
-      requestAnimationFrame(() => {
+      hasRenderedInSelectionModeRef.current.set(currentPage, true);
+      // Use a small delay to ensure all state is fully updated
+      const timeoutId = setTimeout(() => {
         if (currentViewport && pdfPageRef.current && svgOverlayRef.current) {
           // Re-render markups to ensure click handlers are attached and pointer events are correct
           renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
           
           // Explicitly update pointer events on all markups after re-render
-          const allMarkups = svgOverlayRef.current.querySelectorAll('[data-measurement-id], [data-annotation-id]');
-          allMarkups.forEach((markup) => {
-            (markup as SVGElement).style.pointerEvents = 'auto';
-            (markup as SVGElement).style.cursor = 'pointer';
+          requestAnimationFrame(() => {
+            if (svgOverlayRef.current) {
+              const allMarkups = svgOverlayRef.current.querySelectorAll('[data-measurement-id], [data-annotation-id]');
+              allMarkups.forEach((markup) => {
+                (markup as SVGElement).style.pointerEvents = 'auto';
+                (markup as SVGElement).style.cursor = 'pointer';
+              });
+            }
           });
         }
-      });
+      }, 100); // Small delay to ensure state is fully updated
+      
+      return () => clearTimeout(timeoutId);
     }
     
     // Reset flag when leaving selection mode
     if (!isSelectionMode) {
-      hasRenderedInSelectionModeRef.current = false;
+      hasRenderedInSelectionModeRef.current.delete(currentPage);
     }
   }, [isSelectionMode, pdfDocument, currentViewport, currentPage, renderTakeoffAnnotations, localTakeoffMeasurements, localAnnotations, currentProjectId, file?.id, getPageTakeoffMeasurements]);
 
