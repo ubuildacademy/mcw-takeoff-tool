@@ -1713,7 +1713,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     const strokeWidth = isSelected ? '4' : '2';
     
     switch (measurement.type) {
-      case 'linear':
+      case 'linear': {
         // Create polyline for linear measurement
         const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
         const pointString = transformedPoints.map(p => {
@@ -1768,8 +1768,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         text.textContent = displayValue;
         svg.appendChild(text);
         break;
+      }
         
-      case 'area':
+      case 'area': {
         if (transformedPoints.length >= 3) {
           const pointString = transformedPoints.map(p => {
             // Points are already in viewport pixels after scaling
@@ -1859,8 +1860,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           // Cutout outlines are now handled by the clipping path above
         }
         break;
+      }
         
-      case 'volume':
+      case 'volume': {
         if (transformedPoints.length >= 3) {
           const pointString = transformedPoints.map(p => {
             // Points are already in viewport pixels after scaling
@@ -1951,8 +1953,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           // Cutout outlines are now handled by the clipping path above
         }
         break;
+      }
         
-      case 'count':
+      case 'count': {
         const point = { x: transformedPoints[0].x, y: transformedPoints[0].y };
         
         // Create circle for count measurement
@@ -1980,6 +1983,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         
         svg.appendChild(circle);
         break;
+      }
     }
   };
 
