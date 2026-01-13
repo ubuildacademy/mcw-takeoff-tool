@@ -4695,31 +4695,33 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Also ensure existing markups have proper pointer events when selection mode is enabled
     // This is a safety net for cases where markups were rendered before selection mode was enabled
-    // Run this check whenever selection mode is true, regardless of transition
-    if (isSelectionMode && svgOverlayRef.current && hasMarkups) {
-      const timeoutId = setTimeout(() => {
+    // Run this check whenever selection mode is true AND we have markups
+    if (isSelectionMode && hasMarkups) {
+      // Use multiple checks at different intervals to catch markups at different stages
+      const ensureMarkupsSelectable = () => {
         if (svgOverlayRef.current && isSelectionModeRef.current) {
           const allMarkups = svgOverlayRef.current.querySelectorAll('[data-measurement-id], [data-annotation-id]');
-          if (allMarkups.length > 0) {
-            // If markups exist but don't have proper handlers, force a re-render
-            allMarkups.forEach((markup) => {
-              const element = markup as SVGElement;
-              if (element.style.pointerEvents !== 'auto' || element.style.cursor !== 'pointer') {
-                // Markups don't have proper handlers - force re-render
-                if (currentViewport && pdfPageRef.current) {
-                  renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
-                  return; // Exit early after triggering re-render
-                }
-              }
-              // Otherwise just update pointer events
-              element.style.pointerEvents = 'auto';
-              element.style.cursor = 'pointer';
-            });
-          }
+          allMarkups.forEach((markup) => {
+            const element = markup as SVGElement;
+            element.style.pointerEvents = 'auto';
+            element.style.cursor = 'pointer';
+          });
         }
-      }, 200); // Delay to check after potential re-renders
+      };
       
-      return () => clearTimeout(timeoutId);
+      // Check immediately
+      requestAnimationFrame(ensureMarkupsSelectable);
+      
+      // Check after a short delay
+      const timeoutId1 = setTimeout(ensureMarkupsSelectable, 100);
+      
+      // Check after a longer delay to catch late-rendered markups
+      const timeoutId2 = setTimeout(ensureMarkupsSelectable, 300);
+      
+      return () => {
+        clearTimeout(timeoutId1);
+        clearTimeout(timeoutId2);
+      };
     }
   }, [isSelectionMode, pdfDocument, currentViewport, currentPage, renderTakeoffAnnotations, localTakeoffMeasurements, localAnnotations, currentProjectId, file?.id, getPageTakeoffMeasurements]);
 
