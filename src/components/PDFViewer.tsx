@@ -990,6 +990,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       svgOverlayRef.current.style.pointerEvents = shouldCaptureClicks ? 'auto' : 'none';
     }
     
+    // CRITICAL: After rendering all markups, ensure they have proper selection handlers if in selection mode
+    // This is a safety net to ensure markups are always selectable when in selection mode
+    // Use requestAnimationFrame to ensure this runs after all markups are rendered
+    requestAnimationFrame(() => {
+      if (svgOverlay && isSelectionModeRef.current) {
+        const allMarkups = svgOverlay.querySelectorAll('[data-measurement-id], [data-annotation-id]');
+        allMarkups.forEach((markup) => {
+          (markup as SVGElement).style.pointerEvents = 'auto';
+          (markup as SVGElement).style.cursor = 'pointer';
+        });
+      }
+    });
+    
   }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, cutoutMode, currentCutout, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionBox, currentProjectId, file?.id, getPageTakeoffMeasurements]);
 
   // OPTIMIZED: Update only visual styling of markups when selection changes (no full re-render)
