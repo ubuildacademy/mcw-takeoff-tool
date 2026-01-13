@@ -828,7 +828,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     pageMeasurements.forEach((measurement) => {
       // Removed verbose logging - was causing console spam
-      renderSVGMeasurement(svgOverlay, measurement, viewport, page);
+      renderSVGMeasurement(svgOverlay, measurement, viewport, page, addSelectionHandler);
     });
 
     // Draw calibration validator overlay if present for this page
@@ -1632,7 +1632,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // CSS pixels = SVG pixels = viewport pixels (1:1 mapping)
 
   // Render individual measurement as SVG
-  const renderSVGMeasurement = (svg: SVGSVGElement, measurement: Measurement, viewport: any, page?: any) => {
+  const renderSVGMeasurement = (svg: SVGSVGElement, measurement: Measurement, viewport: any, page?: any, addSelectionHandler?: (element: SVGElement, markupId: string) => void) => {
     if (!measurement || !measurement.points || !viewport) {
       return;
     }
@@ -1728,16 +1728,18 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         polyline.setAttribute('data-measurement-id', measurement.id);
         
         // Always add click handler (checks isSelectionMode inside)
-        addSelectionHandler(polyline, measurement.id);
-        
-        // Always add invisible hit area for easier selection
-        const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-        hitArea.setAttribute('points', pointString);
-        hitArea.setAttribute('stroke', 'transparent');
-        hitArea.setAttribute('stroke-width', '20'); // Much larger hit area
-        hitArea.setAttribute('fill', 'none');
-        addSelectionHandler(hitArea, measurement.id);
-        svg.appendChild(hitArea);
+        if (addSelectionHandler) {
+          addSelectionHandler(polyline, measurement.id);
+          
+          // Always add invisible hit area for easier selection
+          const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+          hitArea.setAttribute('points', pointString);
+          hitArea.setAttribute('stroke', 'transparent');
+          hitArea.setAttribute('stroke-width', '20'); // Much larger hit area
+          hitArea.setAttribute('fill', 'none');
+          addSelectionHandler(hitArea, measurement.id);
+          svg.appendChild(hitArea);
+        }
         
         svg.appendChild(polyline);
         
@@ -1805,7 +1807,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             compoundPath.setAttribute('data-measurement-id', measurement.id);
             
             // Always add click handler (checks isSelectionMode inside)
-            addSelectionHandler(compoundPath, measurement.id);
+            if (addSelectionHandler) {
+              addSelectionHandler(compoundPath, measurement.id);
+            }
             
             svg.appendChild(compoundPath);
           } else {
@@ -1818,16 +1822,18 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             polygon.setAttribute('data-measurement-id', measurement.id);
             
             // Always add click handler (checks isSelectionMode inside)
-            addSelectionHandler(polygon, measurement.id);
-            
-            // Always add invisible hit area for easier selection
-            const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-            hitArea.setAttribute('points', pointString);
-            hitArea.setAttribute('fill', 'transparent');
-            hitArea.setAttribute('stroke', 'transparent');
-            hitArea.setAttribute('stroke-width', '10');
-            addSelectionHandler(hitArea, measurement.id);
-            svg.appendChild(hitArea);
+            if (addSelectionHandler) {
+              addSelectionHandler(polygon, measurement.id);
+              
+              // Always add invisible hit area for easier selection
+              const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+              hitArea.setAttribute('points', pointString);
+              hitArea.setAttribute('fill', 'transparent');
+              hitArea.setAttribute('stroke', 'transparent');
+              hitArea.setAttribute('stroke-width', '10');
+              addSelectionHandler(hitArea, measurement.id);
+              svg.appendChild(hitArea);
+            }
             
             svg.appendChild(polygon);
           }
@@ -1898,7 +1904,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             compoundPath.setAttribute('data-measurement-id', measurement.id);
             
             // Always add click handler (checks isSelectionMode inside)
-            addSelectionHandler(compoundPath, measurement.id);
+            if (addSelectionHandler) {
+              addSelectionHandler(compoundPath, measurement.id);
+            }
             
             svg.appendChild(compoundPath);
           } else {
@@ -1911,16 +1919,18 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             polygon.setAttribute('data-measurement-id', measurement.id);
             
             // Always add click handler (checks isSelectionMode inside)
-            addSelectionHandler(polygon, measurement.id);
-            
-            // Always add invisible hit area for easier selection
-            const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-            hitArea.setAttribute('points', pointString);
-            hitArea.setAttribute('fill', 'transparent');
-            hitArea.setAttribute('stroke', 'transparent');
-            hitArea.setAttribute('stroke-width', '10');
-            addSelectionHandler(hitArea, measurement.id);
-            svg.appendChild(hitArea);
+            if (addSelectionHandler) {
+              addSelectionHandler(polygon, measurement.id);
+              
+              // Always add invisible hit area for easier selection
+              const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+              hitArea.setAttribute('points', pointString);
+              hitArea.setAttribute('fill', 'transparent');
+              hitArea.setAttribute('stroke', 'transparent');
+              hitArea.setAttribute('stroke-width', '10');
+              addSelectionHandler(hitArea, measurement.id);
+              svg.appendChild(hitArea);
+            }
             
             svg.appendChild(polygon);
           }
@@ -1970,17 +1980,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         circle.setAttribute('data-measurement-id', measurement.id);
         
         // Always add click handler (checks isSelectionMode inside)
-        addSelectionHandler(circle, measurement.id);
-        
-        // Always add invisible hit area for easier selection (larger circle)
-        const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        hitArea.setAttribute('cx', point.x.toString());
-        hitArea.setAttribute('cy', point.y.toString());
-        hitArea.setAttribute('r', '20'); // Much larger hit area
-        hitArea.setAttribute('fill', 'transparent');
-        hitArea.setAttribute('stroke', 'transparent');
-        addSelectionHandler(hitArea, measurement.id);
-        svg.appendChild(hitArea);
+        if (addSelectionHandler) {
+          addSelectionHandler(circle, measurement.id);
+          
+          // Always add invisible hit area for easier selection (larger circle)
+          const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          hitArea.setAttribute('cx', point.x.toString());
+          hitArea.setAttribute('cy', point.y.toString());
+          hitArea.setAttribute('r', '20'); // Much larger hit area
+          hitArea.setAttribute('fill', 'transparent');
+          hitArea.setAttribute('stroke', 'transparent');
+          addSelectionHandler(hitArea, measurement.id);
+          svg.appendChild(hitArea);
+        }
         
         svg.appendChild(circle);
         break;
