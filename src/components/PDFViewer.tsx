@@ -945,6 +945,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       renderRunningLengthDisplay(svgOverlay, viewport);
     }
     
+    // CRITICAL FIX: Ensure hit area pointer-events are set correctly after rendering markups
+    // This is especially important when markups are rendered asynchronously after page load
+    // The hit area might have been created before selection mode was enabled
+    const hitArea = svgOverlay.querySelector('#hit-area') as SVGRectElement;
+    if (hitArea) {
+      const shouldCaptureClicks = isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
+      hitArea.setAttribute('pointer-events', shouldCaptureClicks ? 'all' : 'none');
+    }
+    
   }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, cutoutMode, currentCutout, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionBox, currentProjectId, file?.id, getPageTakeoffMeasurements]);
 
   // OPTIMIZED: Update only visual styling of markups when selection changes (no full re-render)
@@ -1055,17 +1064,17 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // CRITICAL: This effect ensures markups render when measurements load, even if they load after PDF rendering
   // FIX: Watch store measurements for current page to trigger when measurements load asynchronously
   // OPTIMIZATION: Only watch measurements for current page to prevent unnecessary re-renders
-  const currentPageStoreMeasurements = currentProjectId && file?.id 
-    ? getPageTakeoffMeasurements(currentProjectId, file.id, currentPage)
-    : [];
-  const currentPageStoreMeasurementsCount = currentPageStoreMeasurements.length;
-  
+  // CRITICAL: Compute store measurements inside effect to ensure reactivity to store changes
   useEffect(() => {
     if (pdfDocument && currentViewport) {
       // Check both local measurements and store measurements
       // This ensures markups render even if local measurements haven't loaded yet
+      // CRITICAL: Compute store measurements inside effect to ensure we get latest values
+      const storeMeasurements = currentProjectId && file?.id 
+        ? getPageTakeoffMeasurements(currentProjectId, file.id, currentPage)
+        : [];
       const hasLocalMeasurements = localTakeoffMeasurements.length > 0;
-      const hasStoreMeasurements = currentPageStoreMeasurementsCount > 0;
+      const hasStoreMeasurements = storeMeasurements.length > 0;
       const hasAnyMeasurements = hasLocalMeasurements || hasStoreMeasurements;
       
       // Only render if we have measurements, annotations, or if we're in measuring/annotation/visual search mode
@@ -1105,6 +1114,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             pendingRenderRef.current = null;
             // Render markups - this is safe even if PDF is still rendering
             renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+            
+            // CRITICAL FIX: Ensure SVG overlay pointer events are set correctly after rendering
+            // This is especially important when markups load asynchronously - the overlay's
+            // pointerEvents style might not have been updated yet
+            if (svgOverlayRef.current) {
+              const shouldCaptureClicks = isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
+              svgOverlayRef.current.style.pointerEvents = shouldCaptureClicks ? 'auto' : 'none';
+            }
           } else if (isRenderingRef.current && retryCount < maxRetries) {
             // Retry after a short delay if viewport isn't ready yet
             retryCount++;
@@ -1125,7 +1142,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
       }
     }
-  }, [localTakeoffMeasurements, currentPageStoreMeasurementsCount, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, renderTakeoffAnnotations, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentAnnotation, currentProjectId, file?.id, getPageTakeoffMeasurements]);
+  }, [localTakeoffMeasurements, allTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, renderTakeoffAnnotations, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentAnnotation, currentProjectId, file?.id, getPageTakeoffMeasurements]);
 
   // OPTIMIZED: Update only visual styling when selection changes (prevents flicker)
   const prevSelectedMarkupIdRef = useRef<string | null>(null);
@@ -1368,11 +1385,22 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         // Don't block on PDF rendering - markups can render even if PDF is still rendering
         if (pdfPageRef.current || !isRenderingRef.current) {
           renderTakeoffAnnotations(pageNum, viewport, pdfPageRef.current);
+          // CRITICAL FIX: Ensure SVG overlay pointer events are set correctly after rendering
+          // This is especially important when markups load asynchronously
+          if (svgOverlayRef.current) {
+            const shouldCaptureClicks = isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
+            svgOverlayRef.current.style.pointerEvents = shouldCaptureClicks ? 'auto' : 'none';
+          }
         } else {
           // If PDF is still rendering, retry after a short delay
           setTimeout(() => {
             if (pdfPageRef.current || !isRenderingRef.current) {
               renderTakeoffAnnotations(pageNum, viewport, pdfPageRef.current);
+              // CRITICAL FIX: Ensure SVG overlay pointer events are set correctly after rendering
+              if (svgOverlayRef.current) {
+                const shouldCaptureClicks = isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
+                svgOverlayRef.current.style.pointerEvents = shouldCaptureClicks ? 'auto' : 'none';
+              }
             }
           }, 100);
         }
