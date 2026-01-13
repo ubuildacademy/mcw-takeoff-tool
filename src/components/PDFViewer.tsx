@@ -1173,33 +1173,22 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               svgOverlayRef.current.style.pointerEvents = shouldCaptureClicks ? 'auto' : 'none';
               
               // CRITICAL: After rendering markups, if we're in selection mode, ensure all markups have proper handlers
-              // Use a double requestAnimationFrame to ensure this runs after all DOM updates
-              requestAnimationFrame(() => {
+              // This handles the case where markups are rendered while already in selection mode (initial load)
+              // Use multiple requestAnimationFrame calls to ensure this runs after all DOM updates
+              if (isSelectionMode) {
                 requestAnimationFrame(() => {
-                  if (svgOverlayRef.current && isSelectionModeRef.current) {
-                    const allMarkups = svgOverlayRef.current.querySelectorAll('[data-measurement-id], [data-annotation-id]');
-                    allMarkups.forEach((markup) => {
-                      const element = markup as SVGElement;
-                      element.style.pointerEvents = 'auto';
-                      element.style.cursor = 'pointer';
-                      // Ensure the element can receive clicks
-                      if (!element.hasAttribute('data-selection-handler-attached')) {
-                        element.setAttribute('data-selection-handler-attached', 'true');
-                        // Re-attach handler to ensure it works
-                        const markupId = element.getAttribute('data-measurement-id') || element.getAttribute('data-annotation-id');
-                        if (markupId) {
-                          element.addEventListener('click', (e) => {
-                            if (isSelectionModeRef.current) {
-                              e.stopPropagation();
-                              setSelectedMarkupId(markupId);
-                            }
-                          });
-                        }
-                      }
-                    });
-                  }
+                  requestAnimationFrame(() => {
+                    if (svgOverlayRef.current && isSelectionModeRef.current) {
+                      const allMarkups = svgOverlayRef.current.querySelectorAll('[data-measurement-id], [data-annotation-id]');
+                      allMarkups.forEach((markup) => {
+                        const element = markup as SVGElement;
+                        element.style.pointerEvents = 'auto';
+                        element.style.cursor = 'pointer';
+                      });
+                    }
+                  });
                 });
-              });
+              }
             }
           } else if (isRenderingRef.current && retryCount < maxRetries) {
             // Retry after a short delay if viewport isn't ready yet
@@ -4668,6 +4657,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Keep ref in sync with isSelectionMode state
   // Also trigger markup re-render when entering selection mode to ensure handlers are updated
   const prevIsSelectionModeRef = useRef<boolean>(false);
+  const lastSelectionModeRenderRef = useRef<Map<number, number>>(new Map()); // Track last render time per page
   useEffect(() => {
     const wasSelectionMode = prevIsSelectionModeRef.current;
     prevIsSelectionModeRef.current = isSelectionMode;
@@ -4682,21 +4672,27 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Force re-render of markups when entering selection mode (transitioning from false to true)
     // This handles: after auto-count, after creating markup, initial load if selection mode is enabled
     if (!wasSelectionMode && isSelectionMode && hasMarkups && pdfDocument && currentViewport && pdfPageRef.current) {
-      // Use a small delay to ensure all state is fully updated
-      const timeoutId = setTimeout(() => {
-        if (currentViewport && pdfPageRef.current && svgOverlayRef.current) {
-          // Re-render markups to ensure click handlers are attached and pointer events are correct
-          renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
-        }
-      }, 150); // Increased delay to ensure state is fully settled
-      
-      return () => clearTimeout(timeoutId);
+      const now = Date.now();
+      const lastRenderTime = lastSelectionModeRenderRef.current.get(currentPage) || 0;
+      // Only re-render if we haven't rendered in the last 500ms to avoid excessive re-renders
+      if (now - lastRenderTime > 500) {
+        lastSelectionModeRenderRef.current.set(currentPage, now);
+        // Use a small delay to ensure all state is fully updated
+        const timeoutId = setTimeout(() => {
+          if (currentViewport && pdfPageRef.current && svgOverlayRef.current) {
+            // Re-render markups to ensure click handlers are attached and pointer events are correct
+            renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+          }
+        }, 200); // Delay to ensure state is fully settled
+        
+        return () => clearTimeout(timeoutId);
+      }
     }
     
     // Also ensure existing markups have proper pointer events when selection mode is enabled
     // This is a safety net for cases where markups were rendered before selection mode was enabled
     // Run this check whenever selection mode is true AND we have markups
-    if (isSelectionMode && hasMarkups) {
+    if (isSelectionMode && hasMarkups && svgOverlayRef.current) {
       // Use multiple checks at different intervals to catch markups at different stages
       const ensureMarkupsSelectable = () => {
         if (svgOverlayRef.current && isSelectionModeRef.current) {
@@ -4713,10 +4709,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       requestAnimationFrame(ensureMarkupsSelectable);
       
       // Check after a short delay
-      const timeoutId1 = setTimeout(ensureMarkupsSelectable, 100);
+      const timeoutId1 = setTimeout(ensureMarkupsSelectable, 150);
       
       // Check after a longer delay to catch late-rendered markups
-      const timeoutId2 = setTimeout(ensureMarkupsSelectable, 300);
+      const timeoutId2 = setTimeout(ensureMarkupsSelectable, 400);
       
       return () => {
         clearTimeout(timeoutId1);
