@@ -179,7 +179,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   
   // Selection state for deleting markups
   const [selectedMarkupId, setSelectedMarkupId] = useState<string | null>(null);
-  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  // Initialize selection mode based on whether a condition is selected
+  // By default, no condition is selected, so selection mode should be active
+  const [isSelectionMode, setIsSelectionMode] = useState(() => {
+    // Check store state on initialization - if no condition is selected, start in selection mode
+    const storeState = useTakeoffStore.getState();
+    return storeState.selectedConditionId === null;
+  });
   
   // Continuous linear drawing state
   const [isContinuousDrawing, setIsContinuousDrawing] = useState(false);
@@ -733,39 +739,40 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   }, [file?.id]);
 
 
+  // Helper function to handle markup selection clicks
+  // Always adds handler, but checks isSelectionMode via ref to always get current value
+  // This allows future drag/move functionality and prevents closure issues
+  // Extracted to be reusable across multiple places
+  const addSelectionHandler = useCallback((element: SVGElement, markupId: string) => {
+    // Remove any existing handler to prevent duplicates
+    const existingHandler = (element as any).__selectionHandler;
+    if (existingHandler) {
+      element.removeEventListener('click', existingHandler);
+    }
+    
+    // Create new handler
+    const clickHandler = (e: MouseEvent) => {
+      // Check current selection mode via ref (always up-to-date, no closure issues)
+      if (!isSelectionModeRef.current) return;
+      e.stopPropagation();
+      setSelectedMarkupId(markupId);
+    };
+    
+    // Store handler reference for cleanup
+    (element as any).__selectionHandler = clickHandler;
+    element.addEventListener('click', clickHandler);
+    
+    // Set cursor and pointer events based on current selection mode
+    // Always set pointerEvents to 'auto' - the handler will check the ref
+    element.style.pointerEvents = 'auto';
+    element.style.cursor = isSelectionModeRef.current ? 'pointer' : 'default';
+  }, []);
+
   // SVG-based takeoff annotation renderer - Page-specific with viewport isolation
   const renderTakeoffAnnotations = useCallback((pageNum: number, viewport: any, page?: any) => {
     if (!viewport || !svgOverlayRef.current) return;
     
     const svgOverlay = svgOverlayRef.current;
-    
-    // Helper function to handle markup selection clicks
-    // Always adds handler, but checks isSelectionMode via ref to always get current value
-    // This allows future drag/move functionality and prevents closure issues
-    const addSelectionHandler = (element: SVGElement, markupId: string) => {
-      // Remove any existing handler to prevent duplicates
-      const existingHandler = (element as any).__selectionHandler;
-      if (existingHandler) {
-        element.removeEventListener('click', existingHandler);
-      }
-      
-      // Create new handler
-      const clickHandler = (e: MouseEvent) => {
-        // Check current selection mode via ref (always up-to-date, no closure issues)
-        if (!isSelectionModeRef.current) return;
-        e.stopPropagation();
-        setSelectedMarkupId(markupId);
-      };
-      
-      // Store handler reference for cleanup
-      (element as any).__selectionHandler = clickHandler;
-      element.addEventListener('click', clickHandler);
-      
-      // Set cursor and pointer events based on current selection mode
-      // Always set pointerEvents to 'auto' - the handler will check the ref
-      element.style.pointerEvents = 'auto';
-      element.style.cursor = isSelectionModeRef.current ? 'pointer' : 'default';
-    };
     
     // Ensure SVG overlay coordinate system matches the provided viewport
     // This prevents drift when re-rendering overlay without a full PDF re-render
@@ -1004,25 +1011,33 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // CRITICAL: After rendering all markups, ensure they have proper selection handlers if in selection mode
     // This is a safety net to ensure markups are always selectable when in selection mode
     // Use requestAnimationFrame to ensure this runs after all markups are rendered
+    // FIX: Check isSelectionMode state (via closure) in addition to ref to handle timing issues
     requestAnimationFrame(() => {
-      if (svgOverlay && isSelectionModeRef.current) {
+      // Check both the ref (for current state) and the closure value (isSelectionMode from dependencies)
+      // This ensures we catch cases where selection mode is active but ref hasn't updated yet
+      if (svgOverlay && (isSelectionModeRef.current || isSelectionMode)) {
         const allMarkups = svgOverlay.querySelectorAll('[data-measurement-id], [data-annotation-id]');
         allMarkups.forEach((markup) => {
           const element = markup as SVGElement;
-          element.style.pointerEvents = 'auto';
-          element.style.cursor = 'pointer';
-          
-          // Ensure handler is attached if not already present
           const markupId = element.getAttribute('data-measurement-id') || element.getAttribute('data-annotation-id');
-          if (markupId && !(element as any).__selectionHandler) {
-            // Handler wasn't attached during render - attach it now
-            addSelectionHandler(element, markupId);
+          
+          // Always attach handler if missing and selection mode is active (check both ref and state)
+          if (markupId && (isSelectionModeRef.current || isSelectionMode)) {
+            // Update pointer events and cursor
+            element.style.pointerEvents = 'auto';
+            element.style.cursor = 'pointer';
+            
+            // Ensure handler is attached if not already present
+            if (!(element as any).__selectionHandler) {
+              // Handler wasn't attached during render - attach it now
+              addSelectionHandler(element, markupId);
+            }
           }
         });
       }
     });
     
-  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, cutoutMode, currentCutout, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionBox, currentProjectId, file?.id, getPageTakeoffMeasurements]);
+  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, cutoutMode, currentCutout, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionBox, currentProjectId, file?.id, getPageTakeoffMeasurements, addSelectionHandler]);
 
   // OPTIMIZED: Update only visual styling of markups when selection changes (no full re-render)
   const updateMarkupSelection = useCallback((newSelectedId: string | null, previousSelectedId: string | null) => {
@@ -1265,6 +1280,23 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           
           if (hasElements || !selectedMarkupId) {
             updateMarkupSelection(selectedMarkupId, previousId);
+            
+            // FIX: After deselection (selectedMarkupId becomes null), ensure all markups still have handlers
+            // This handles the case where handlers might have been removed during re-render
+            if (!selectedMarkupId && isSelectionMode && isSelectionModeRef.current) {
+              requestAnimationFrame(() => {
+                if (svgOverlayRef.current && isSelectionModeRef.current) {
+                  const allMarkups = svgOverlayRef.current.querySelectorAll('[data-measurement-id], [data-annotation-id]');
+                  allMarkups.forEach((markup) => {
+                    const element = markup as SVGElement;
+                    const markupId = element.getAttribute('data-measurement-id') || element.getAttribute('data-annotation-id');
+                    if (markupId && !(element as any).__selectionHandler) {
+                      addSelectionHandler(element, markupId);
+                    }
+                  });
+                }
+              });
+            }
           } else if (retryCount < 3) {
             // Elements not found yet, retry after a short delay
             setTimeout(() => attemptUpdate(retryCount + 1), 50);
@@ -1280,7 +1312,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         attemptUpdate();
       });
     }
-  }, [selectedMarkupId, updateMarkupSelection]);
+  }, [selectedMarkupId, updateMarkupSelection, isSelectionMode, addSelectionHandler]);
   
   // CRITICAL: Trigger re-render of annotations after measurements are loaded
   // This ensures markups appear immediately when returning to a page
@@ -4680,7 +4712,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   useEffect(() => {
     isSelectionModeRef.current = isSelectionMode;
     
-    // Ensure markups have proper pointer events when selection mode changes
+    // Ensure markups have proper pointer events and handlers when selection mode changes
     // This is a lightweight safety net that runs whenever selection mode changes
     if (svgOverlayRef.current) {
       const allMarkups = svgOverlayRef.current.querySelectorAll('[data-measurement-id], [data-annotation-id]');
@@ -4691,19 +4723,28 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             const markups = svgOverlayRef.current.querySelectorAll('[data-measurement-id], [data-annotation-id]');
             markups.forEach((markup) => {
               const element = markup as SVGElement;
+              const markupId = element.getAttribute('data-measurement-id') || element.getAttribute('data-annotation-id');
+              
               if (isSelectionMode) {
                 element.style.pointerEvents = 'auto';
                 element.style.cursor = 'pointer';
+                
+                // FIX: Ensure handler is attached when entering selection mode
+                // This handles cases where markups were rendered before selection mode was active
+                if (markupId && !(element as any).__selectionHandler) {
+                  addSelectionHandler(element, markupId);
+                }
               } else {
                 element.style.pointerEvents = 'none';
                 element.style.cursor = 'default';
+                // Don't remove handlers when leaving selection mode - they check the ref at click time
               }
             });
           }
         });
       }
     }
-  }, [isSelectionMode]);
+  }, [isSelectionMode, addSelectionHandler]);
 
   // Set measurement type when condition is selected
   useEffect(() => {
