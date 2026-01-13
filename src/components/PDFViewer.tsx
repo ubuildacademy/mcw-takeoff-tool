@@ -1985,10 +1985,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         svg.appendChild(circle);
         break;
       }
-      default: {
-        console.warn(`Unknown measurement type: ${measurement.type}`, measurement);
-        break;
-      }
     }
   };
 
