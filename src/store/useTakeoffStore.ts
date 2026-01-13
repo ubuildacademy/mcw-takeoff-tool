@@ -755,8 +755,10 @@ export const useTakeoffStore = create<TakeoffStore>()(
           return sum + (value || 0);
         }, 0);
         
-        // Apply waste factor to get adjusted quantity
-        const adjustedQuantity = quantity * (1 + (condition.wasteFactor || 0) / 100);
+        // Apply waste factor to get adjusted quantity (count and auto-count conditions don't have waste)
+        const adjustedQuantity = (condition.type === 'count' || condition.type === 'auto-count')
+          ? quantity
+          : quantity * (1 + (condition.wasteFactor || 0) / 100);
         
         // Calculate costs
         const materialCostPerUnit = condition.materialCost || 0;

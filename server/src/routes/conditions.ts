@@ -380,7 +380,8 @@ router.put('/:id', async (req, res) => {
     }
     
     // Count and auto-count conditions should not have waste factors
-    const finalWasteFactor = (type !== undefined && (type === 'count' || type === 'auto-count')) ? 0 : 
+    const conditionType = type !== undefined ? type : existingCondition.type;
+    const finalWasteFactor = (conditionType === 'count' || conditionType === 'auto-count') ? 0 : 
                             (wasteFactor !== undefined ? wasteFactor : existingCondition.wasteFactor);
 
     // Validate height for linear conditions with height enabled

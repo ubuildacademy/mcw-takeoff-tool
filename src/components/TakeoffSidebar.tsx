@@ -1027,10 +1027,10 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         wasteFactorCell.numFmt = '0.00"%"';
         wasteFactorCell.style = rowStyle;
         
-        // Waste Amount (calculated waste quantity)
+        // Waste Amount (calculated waste quantity) - not applicable for count or auto-count
         const wasteAmountCell = detailSheet.getCell(rowNum, col++);
         const value = measurement.netCalculatedValue || measurement.calculatedValue;
-        if (condition.wasteFactor && condition.wasteFactor > 0 && value > 0) {
+        if (condition.wasteFactor && condition.wasteFactor > 0 && value > 0 && condition.type !== 'count' && condition.type !== 'auto-count') {
           const wasteAmount = value * (condition.wasteFactor / 100);
           wasteAmountCell.value = wasteAmount;
           wasteAmountCell.numFmt = '#,##0.00';
@@ -1171,8 +1171,8 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
           perimeterCell.numFmt = '#,##0.00';
         }
         
-        // Waste Amount formula - sum of waste amounts from measurements
-        if (condition.wasteFactor && condition.wasteFactor > 0) {
+        // Waste Amount formula - sum of waste amounts from measurements (not applicable for count or auto-count)
+        if (condition.wasteFactor && condition.wasteFactor > 0 && condition.type !== 'count' && condition.type !== 'auto-count') {
           const wasteAmountColLetter = colIndexToLetter(wasteAmountCol);
           wasteAmountCell.value = { formula: `SUM(${wasteAmountColLetter}${measurementStartRow}:${wasteAmountColLetter}${measurementEndRowActual})` };
           wasteAmountCell.numFmt = '#,##0.00';
@@ -1935,7 +1935,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                     />
                     <span>Color</span>
                   </div>
-                  {condition.type !== 'count' && (
+                  {condition.type !== 'count' && condition.type !== 'auto-count' && (
                     <span>Waste: {condition.wasteFactor}%</span>
                   )}
                   <div className="font-medium text-blue-600">
@@ -2243,7 +2243,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                               <span className="text-slate-600">Quantity</span>
                               <div className="text-right">
                                 <span className="font-medium">{condition.quantity.toFixed(2)} {condition.condition.unit}</span>
-                                {condition.condition.wasteFactor > 0 && (
+                                {condition.condition.wasteFactor > 0 && condition.condition.type !== 'auto-count' && (
                                   <div className="text-xs text-slate-500">
                                     + {condition.condition.wasteFactor}% waste = {condition.adjustedQuantity.toFixed(2)} {condition.condition.unit}
                                   </div>

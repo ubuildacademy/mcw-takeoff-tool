@@ -622,6 +622,9 @@ export function TakeoffWorkspace() {
         // Refresh the takeoff measurements to show the new count measurements
         await loadProjectTakeoffMeasurements(projectId);
         
+        // Refresh conditions to get the updated condition with searchImage
+        await loadProjectConditions(projectId);
+        
         // Get updated count to verify
         const store = useTakeoffStore.getState();
         const conditionMeasurements = store.takeoffMeasurements.filter(

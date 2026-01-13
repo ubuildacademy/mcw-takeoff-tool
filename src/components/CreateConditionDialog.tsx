@@ -22,7 +22,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
   const [formData, setFormData] = useState({
     name: editingCondition?.name || '',
     type: (editingCondition?.type || 'area') as 'area' | 'volume' | 'linear' | 'count' | 'auto-count',
-    unit: editingCondition?.unit || 'SF', // Initialize with default unit for 'area' type
+    unit: editingCondition?.type === 'auto-count' ? 'EA' : (editingCondition?.unit || 'SF'), // Auto-count always uses EA
     wasteFactor: editingCondition?.wasteFactor?.toString() || '',
     color: editingCondition?.color || generateRandomColor(),
     description: editingCondition?.description || '',
@@ -76,7 +76,8 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
 
     try {
       // Ensure unit is set - use formData.unit or fall back to default for the type
-      const unit = formData.unit || getDefaultUnit(formData.type);
+      // Auto-count conditions always use "EA"
+      const unit = formData.type === 'auto-count' ? 'EA' : (formData.unit || getDefaultUnit(formData.type));
       
       // Parse depth value (supports both decimal feet and feet/inches format)
       // Depth is required for volume conditions
@@ -136,12 +137,12 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
         }
       }
 
-      const conditionData = {
-        projectId,
-        name: formData.name,
-        type: formData.type,
-        unit: unit,
-        wasteFactor: formData.wasteFactor ? parseFloat(formData.wasteFactor) : 0,
+      const         conditionData = {
+          projectId,
+          name: formData.name,
+          type: formData.type,
+          unit: unit,
+          wasteFactor: (formData.type === 'auto-count' || formData.type === 'count') ? 0 : (formData.wasteFactor ? parseFloat(formData.wasteFactor) : 0),
         color: formData.color,
         description: formData.description,
         materialCost: formData.materialCost && formData.materialCost.trim() !== '' ? parseFloat(formData.materialCost) : undefined,
@@ -231,10 +232,10 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
     setFormData(prev => {
       const newData = { 
         ...prev, 
-        type: value as 'area' | 'volume' | 'linear' | 'count',
+        type: value as 'area' | 'volume' | 'linear' | 'count' | 'auto-count',
         unit: defaultUnit,
-        // Set waste factor to 0 for count conditions since they don't have waste
-        wasteFactor: value === 'count' ? 0 : prev.wasteFactor,
+        // Set waste factor to 0 for count and auto-count conditions since they don't have waste
+        wasteFactor: (value === 'count' || value === 'auto-count') ? 0 : prev.wasteFactor,
         // Reset height-related fields when type changes
         includeHeight: false,
         height: ''
@@ -276,7 +277,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className={formData.type === 'auto-count' ? '' : 'grid grid-cols-2 gap-4'}>
             <div>
               <Label htmlFor="type">Type *</Label>
               <Select value={formData.type} onValueChange={handleTypeChange}>
@@ -293,63 +294,58 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
               </Select>
             </div>
 
-            <div>
-              <Label htmlFor="unit">Unit *</Label>
-              <Select value={formData.unit || getDefaultUnit(formData.type)} onValueChange={(value) => {
-                handleInputChange('unit', value);
-              }}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select unit" />
-                </SelectTrigger>
-                <SelectContent>
-                  {formData.type === 'area' && (
-                    <>
-                      <SelectItem value="SF">SF (Square Feet)</SelectItem>
-                      <SelectItem value="SY">SY (Square Yards)</SelectItem>
-                      <SelectItem value="SM">SM (Square Meters)</SelectItem>
-                    </>
-                  )}
-                  {formData.type === 'linear' && (
-                    <>
-                      {formData.includeHeight ? (
-                        <>
-                          <SelectItem value="SF">SF (Square Feet)</SelectItem>
-                          <SelectItem value="SY">SY (Square Yards)</SelectItem>
-                          <SelectItem value="SM">SM (Square Meters)</SelectItem>
-                        </>
-                      ) : (
-                        <>
-                          <SelectItem value="LF">LF (Linear Feet)</SelectItem>
-                          <SelectItem value="LY">LY (Linear Yards)</SelectItem>
-                          <SelectItem value="LM">LM (Linear Meters)</SelectItem>
-                        </>
-                      )}
-                    </>
-                  )}
-                  {formData.type === 'volume' && (
-                    <>
-                      <SelectItem value="CY">CY (Cubic Yards)</SelectItem>
-                      <SelectItem value="CF">CF (Cubic Feet)</SelectItem>
-                      <SelectItem value="CM">CM (Cubic Meters)</SelectItem>
-                    </>
-                  )}
-                  {formData.type === 'count' && (
-                    <>
-                      <SelectItem value="EA">EA (Each)</SelectItem>
-                      <SelectItem value="PC">PC (Piece)</SelectItem>
-                      <SelectItem value="LS">LS (Lump Sum)</SelectItem>
-                    </>
-                  )}
-                  {formData.type === 'auto-count' && (
-                    <>
-                      <SelectItem value="EA">EA (Each)</SelectItem>
-                      <SelectItem value="PC">PC (Piece)</SelectItem>
-                      <SelectItem value="LS">LS (Lump Sum)</SelectItem>
-                    </>
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
+            {formData.type !== 'auto-count' && (
+              <div>
+                <Label htmlFor="unit">Unit *</Label>
+                <Select value={formData.unit || getDefaultUnit(formData.type)} onValueChange={(value) => {
+                  handleInputChange('unit', value);
+                }}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select unit" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {formData.type === 'area' && (
+                      <>
+                        <SelectItem value="SF">SF (Square Feet)</SelectItem>
+                        <SelectItem value="SY">SY (Square Yards)</SelectItem>
+                        <SelectItem value="SM">SM (Square Meters)</SelectItem>
+                      </>
+                    )}
+                    {formData.type === 'linear' && (
+                      <>
+                        {formData.includeHeight ? (
+                          <>
+                            <SelectItem value="SF">SF (Square Feet)</SelectItem>
+                            <SelectItem value="SY">SY (Square Yards)</SelectItem>
+                            <SelectItem value="SM">SM (Square Meters)</SelectItem>
+                          </>
+                        ) : (
+                          <>
+                            <SelectItem value="LF">LF (Linear Feet)</SelectItem>
+                            <SelectItem value="LY">LY (Linear Yards)</SelectItem>
+                            <SelectItem value="LM">LM (Linear Meters)</SelectItem>
+                          </>
+                        )}
+                      </>
+                    )}
+                    {formData.type === 'volume' && (
+                      <>
+                        <SelectItem value="CY">CY (Cubic Yards)</SelectItem>
+                        <SelectItem value="CF">CF (Cubic Feet)</SelectItem>
+                        <SelectItem value="CM">CM (Cubic Meters)</SelectItem>
+                      </>
+                    )}
+                    {formData.type === 'count' && (
+                      <>
+                        <SelectItem value="EA">EA (Each)</SelectItem>
+                        <SelectItem value="PC">PC (Piece)</SelectItem>
+                        <SelectItem value="LS">LS (Lump Sum)</SelectItem>
+                      </>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
 
           {(formData.type === 'area' || formData.type === 'volume') && (
@@ -423,7 +419,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
           )}
 
           <div className="grid grid-cols-2 gap-4">
-            {formData.type !== 'count' && (
+            {formData.type !== 'count' && formData.type !== 'auto-count' && (
               <div>
                 <Label htmlFor="wasteFactor">Waste Factor (%)</Label>
                 <Input
@@ -439,7 +435,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
               </div>
             )}
 
-            <div className={formData.type === 'count' ? 'col-span-2' : ''}>
+            <div className={(formData.type === 'count' || formData.type === 'auto-count') ? 'col-span-2' : ''}>
               <Label htmlFor="color">Color</Label>
               <Input
                 id="color"
@@ -473,11 +469,8 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
                   </div>
                   <div className="flex-1">
                     <h4 className="text-sm font-medium text-indigo-900 mb-1">Auto-Count Condition</h4>
-                    <p className="text-sm text-indigo-700 mb-2">
-                      After creating this condition, you'll be able to draw a selection box around a symbol on the drawing to define what to search for.
-                    </p>
-                    <p className="text-xs text-indigo-600">
-                      The system will use AI to automatically find and count all similar symbols based on your selected scope.
+                    <p className="text-sm text-indigo-700">
+                      Draw a selection box around a symbol to automatically find and count all similar symbols across your selected scope.
                     </p>
                   </div>
                 </div>
@@ -498,9 +491,6 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
                     <SelectItem value="entire-project">Entire Project</SelectItem>
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-gray-500 mt-1">
-                  Select where to search for matching symbols: current page only, all pages in the current document, or all pages in all documents.
-                </p>
               </div>
 
               <div>
@@ -516,7 +506,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
                   placeholder="0.7"
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  How confident the AI should be before counting a match (0.1 = very loose, 1.0 = very strict)
+                  How confident the system should be before counting a match (0.1 = very loose, 1.0 = very strict)
                 </p>
               </div>
             </>
