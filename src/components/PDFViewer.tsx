@@ -750,9 +750,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         setSelectedMarkupId(markupId);
       });
       
-      // Set cursor based on current selection mode
+      // Set cursor and pointer events based on current selection mode
       // For future drag/move, we can update this dynamically
       element.style.cursor = isSelectionModeRef.current ? 'pointer' : 'default';
+      element.style.pointerEvents = 'auto';
     };
     
     // Ensure SVG overlay coordinate system matches the provided viewport
@@ -1153,9 +1154,20 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             // CRITICAL FIX: Ensure SVG overlay pointer events are set correctly after rendering
             // This is especially important when markups load asynchronously - the overlay's
             // pointerEvents style might not have been updated yet
+            // Also ensure all markup elements have proper pointer events for selection
             if (svgOverlayRef.current) {
               const shouldCaptureClicks = isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
               svgOverlayRef.current.style.pointerEvents = shouldCaptureClicks ? 'auto' : 'none';
+              
+              // Ensure all measurement and annotation elements have pointer events enabled
+              // This is critical for selection to work, especially after auto-count
+              if (isSelectionMode) {
+                const allMarkups = svgOverlayRef.current.querySelectorAll('[data-measurement-id], [data-annotation-id]');
+                allMarkups.forEach((markup) => {
+                  (markup as SVGElement).style.pointerEvents = 'auto';
+                  (markup as SVGElement).style.cursor = 'pointer';
+                });
+              }
             }
           } else if (isRenderingRef.current && retryCount < maxRetries) {
             // Retry after a short delay if viewport isn't ready yet
@@ -4610,9 +4622,27 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
 
   // Keep ref in sync with isSelectionMode state
+  // Also trigger markup re-render when entering selection mode to ensure handlers are updated
+  const prevIsSelectionModeRef = useRef<boolean>(false);
   useEffect(() => {
+    const wasSelectionMode = prevIsSelectionModeRef.current;
+    prevIsSelectionModeRef.current = isSelectionMode;
     isSelectionModeRef.current = isSelectionMode;
-  }, [isSelectionMode]);
+    
+    // Force re-render of markups when entering selection mode (transitioning from false to true)
+    // This is especially important after auto-count when condition is deselected
+    // Only re-render on transition to avoid unnecessary renders
+    if (!wasSelectionMode && isSelectionMode && pdfDocument && currentViewport && svgOverlayRef.current) {
+      // Use a small delay to ensure state is fully updated
+      const timeoutId = setTimeout(() => {
+        if (currentViewport && pdfPageRef.current) {
+          renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+        }
+      }, 50);
+      
+      return () => clearTimeout(timeoutId);
+    }
+  }, [isSelectionMode, pdfDocument, currentViewport, currentPage, renderTakeoffAnnotations]);
 
   // Set measurement type when condition is selected
   useEffect(() => {
