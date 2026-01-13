@@ -738,18 +738,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     const svgOverlay = svgOverlayRef.current;
     
     // Helper function to handle markup selection clicks
-    // Always adds handler, but checks isSelectionMode inside to allow future drag/move functionality
+    // Always adds handler, but checks isSelectionMode via ref to always get current value
+    // This allows future drag/move functionality and prevents closure issues
     const addSelectionHandler = (element: SVGElement, markupId: string) => {
       element.addEventListener('click', (e) => {
-        // Only handle selection if in selection mode
-        if (!isSelectionMode) return;
+        // Check current selection mode via ref (always up-to-date, no closure issues)
+        if (!isSelectionModeRef.current) return;
         e.stopPropagation();
         setSelectedMarkupId(markupId);
       });
       
       // Set cursor based on current selection mode
       // For future drag/move, we can update this dynamically
-      element.style.cursor = isSelectionMode ? 'pointer' : 'default';
+      element.style.cursor = isSelectionModeRef.current ? 'pointer' : 'default';
     };
     
     // Ensure SVG overlay coordinate system matches the provided viewport
@@ -1089,6 +1090,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const prevSelectedMarkupIdRef = useRef<string | null>(null);
   const prevSelectedConditionIdRef = useRef<string | null>(null);
   const deselectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isSelectionModeRef = useRef<boolean>(false);
   useEffect(() => {
     // Only update if selection actually changed
     if (selectedMarkupId !== prevSelectedMarkupIdRef.current) {
@@ -2156,7 +2158,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       text.setAttribute('data-annotation-id', annotation.id);
       
       // Always set pointer events and cursor (selection handled via event delegation)
-      text.style.cursor = isSelectionMode ? 'pointer' : 'default';
+      // Use ref to get current value (no closure issues)
+      text.style.cursor = isSelectionModeRef.current ? 'pointer' : 'default';
       text.style.pointerEvents = 'auto';
       
       svg.appendChild(text);
@@ -2173,7 +2176,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       hitArea.setAttribute('fill', 'transparent');
       hitArea.setAttribute('stroke', 'transparent');
       hitArea.setAttribute('data-annotation-id', annotation.id);
-      hitArea.style.cursor = isSelectionMode ? 'pointer' : 'default';
+      hitArea.style.cursor = isSelectionModeRef.current ? 'pointer' : 'default';
       hitArea.style.pointerEvents = 'auto';
       svg.appendChild(hitArea);
     } else if (annotation.type === 'arrow' && points.length === 2) {
@@ -2188,7 +2191,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       line.setAttribute('data-annotation-id', annotation.id);
       
       // Always set pointer events and cursor (selection handled via event delegation)
-      line.style.cursor = isSelectionMode ? 'pointer' : 'default';
+      // Use ref to get current value (no closure issues)
+      line.style.cursor = isSelectionModeRef.current ? 'pointer' : 'default';
       line.style.pointerEvents = 'auto';
       
       svg.appendChild(line);
@@ -2203,7 +2207,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       hitArea.setAttribute('stroke-width', '20'); // Much larger hit area
       hitArea.setAttribute('fill', 'none');
       hitArea.setAttribute('data-annotation-id', annotation.id);
-      hitArea.style.cursor = isSelectionMode ? 'pointer' : 'default';
+      hitArea.style.cursor = isSelectionModeRef.current ? 'pointer' : 'default';
       hitArea.style.pointerEvents = 'auto';
       svg.appendChild(hitArea);
       
@@ -2254,7 +2258,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       hitArea.setAttribute('fill', 'transparent');
       hitArea.setAttribute('stroke', 'transparent');
       hitArea.setAttribute('data-annotation-id', annotation.id);
-      hitArea.style.cursor = isSelectionMode ? 'pointer' : 'default';
+      hitArea.style.cursor = isSelectionModeRef.current ? 'pointer' : 'default';
       hitArea.style.pointerEvents = 'auto';
       svg.appendChild(hitArea);
     } else if (annotation.type === 'circle' && points.length === 2) {
@@ -2273,7 +2277,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       ellipse.setAttribute('data-annotation-id', annotation.id);
       
       // Always set pointer events and cursor (selection handled via event delegation)
-      ellipse.style.cursor = isSelectionMode ? 'pointer' : 'default';
+      // Use ref to get current value (no closure issues)
+      ellipse.style.cursor = isSelectionModeRef.current ? 'pointer' : 'default';
       ellipse.style.pointerEvents = 'auto';
       
       svg.appendChild(ellipse);
@@ -2287,7 +2292,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       hitArea.setAttribute('fill', 'transparent');
       hitArea.setAttribute('stroke', 'transparent');
       hitArea.setAttribute('data-annotation-id', annotation.id);
-      hitArea.style.cursor = isSelectionMode ? 'pointer' : 'default';
+      hitArea.style.cursor = isSelectionModeRef.current ? 'pointer' : 'default';
       hitArea.style.pointerEvents = 'auto';
       svg.appendChild(hitArea);
     } else if (annotation.type === 'highlight' && points.length >= 2) {
@@ -2309,7 +2314,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       rect.setAttribute('data-annotation-id', annotation.id);
       
       // Always set pointer events and cursor (selection handled via event delegation)
-      rect.style.cursor = isSelectionMode ? 'pointer' : 'default';
+      // Use ref to get current value (no closure issues)
+      rect.style.cursor = isSelectionModeRef.current ? 'pointer' : 'default';
       rect.style.pointerEvents = 'auto';
       
       svg.appendChild(rect);
@@ -4431,6 +4437,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   }, [viewState, renderPDFPage, currentPage, isComponentMounted, isMeasuring, isCalibrating, currentMeasurement, currentViewport, renderTakeoffAnnotations, isDeselecting, isInitialRenderComplete, isAnnotating, showTextInput]);
 
 
+  // Keep ref in sync with isSelectionMode state
+  useEffect(() => {
+    isSelectionModeRef.current = isSelectionMode;
+  }, [isSelectionMode]);
+
   // Set measurement type when condition is selected
   useEffect(() => {
     if (selectedConditionId) {
@@ -4529,12 +4540,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         // Already deselected or initial load - ensure isDeselecting is false
         // On initial load, we want selection mode to work immediately
         // During condition refreshes, only preserve isDeselecting if timeout is active
+        // CRITICAL: Always clear isDeselecting when entering selection mode to allow immediate selection
+        // isDeselecting should only block renders, not user interaction
         if (isInitialLoad || !deselectionTimeoutRef.current) {
           setIsDeselecting(false);
-          // Note: Markup re-render will happen automatically via the useEffect at line 1254
-          // when isSelectionMode becomes true and isDeselecting becomes false
+        } else {
+          // If timeout is active, clear it immediately to allow selection
+          // The flickering protection isn't worth blocking user interaction
+          if (deselectionTimeoutRef.current) {
+            clearTimeout(deselectionTimeoutRef.current);
+            deselectionTimeoutRef.current = null;
+          }
+          setIsDeselecting(false);
         }
-        // If timeout is active and not initial load, leave isDeselecting as-is to maintain flickering protection
       }
       
       prevSelectedConditionIdRef.current = selectedConditionId;
