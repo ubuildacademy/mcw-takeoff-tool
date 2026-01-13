@@ -4657,7 +4657,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Keep ref in sync with isSelectionMode state
   // Also trigger markup re-render when entering selection mode to ensure handlers are updated
   const prevIsSelectionModeRef = useRef<boolean>(false);
-  const lastSelectionModeRenderRef = useRef<Map<number, number>>(new Map()); // Track last render time per page
   useEffect(() => {
     const wasSelectionMode = prevIsSelectionModeRef.current;
     prevIsSelectionModeRef.current = isSelectionMode;
@@ -4669,30 +4668,24 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       : [];
     const hasMarkups = localTakeoffMeasurements.length > 0 || storeMeasurements.length > 0 || localAnnotations.length > 0;
     
-    // Force re-render of markups when entering selection mode (transitioning from false to true)
+    // CRITICAL: When entering selection mode, ALWAYS re-render markups to ensure handlers are attached
     // This handles: after auto-count, after creating markup, initial load if selection mode is enabled
     if (!wasSelectionMode && isSelectionMode && hasMarkups && pdfDocument && currentViewport && pdfPageRef.current) {
-      const now = Date.now();
-      const lastRenderTime = lastSelectionModeRenderRef.current.get(currentPage) || 0;
-      // Only re-render if we haven't rendered in the last 500ms to avoid excessive re-renders
-      if (now - lastRenderTime > 500) {
-        lastSelectionModeRenderRef.current.set(currentPage, now);
-        // Use a small delay to ensure all state is fully updated
-        const timeoutId = setTimeout(() => {
-          if (currentViewport && pdfPageRef.current && svgOverlayRef.current) {
-            // Re-render markups to ensure click handlers are attached and pointer events are correct
-            renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
-          }
-        }, 200); // Delay to ensure state is fully settled
-        
-        return () => clearTimeout(timeoutId);
-      }
+      // Use a delay to ensure all state is fully updated
+      const timeoutId = setTimeout(() => {
+        if (currentViewport && pdfPageRef.current && svgOverlayRef.current) {
+          // Re-render markups to ensure click handlers are attached and pointer events are correct
+          renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+        }
+      }, 250); // Delay to ensure state is fully settled
+      
+      return () => clearTimeout(timeoutId);
     }
     
-    // Also ensure existing markups have proper pointer events when selection mode is enabled
+    // CRITICAL: Also ensure existing markups have proper pointer events whenever selection mode is enabled
     // This is a safety net for cases where markups were rendered before selection mode was enabled
     // Run this check whenever selection mode is true AND we have markups
-    if (isSelectionMode && hasMarkups && svgOverlayRef.current) {
+    if (isSelectionMode && hasMarkups) {
       // Use multiple checks at different intervals to catch markups at different stages
       const ensureMarkupsSelectable = () => {
         if (svgOverlayRef.current && isSelectionModeRef.current) {
@@ -4706,17 +4699,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       };
       
       // Check immediately
-      requestAnimationFrame(ensureMarkupsSelectable);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(ensureMarkupsSelectable);
+      });
       
-      // Check after a short delay
-      const timeoutId1 = setTimeout(ensureMarkupsSelectable, 150);
-      
-      // Check after a longer delay to catch late-rendered markups
-      const timeoutId2 = setTimeout(ensureMarkupsSelectable, 400);
+      // Check after delays to catch markups rendered at different times
+      const timeoutId1 = setTimeout(ensureMarkupsSelectable, 200);
+      const timeoutId2 = setTimeout(ensureMarkupsSelectable, 500);
+      const timeoutId3 = setTimeout(ensureMarkupsSelectable, 1000);
       
       return () => {
         clearTimeout(timeoutId1);
         clearTimeout(timeoutId2);
+        clearTimeout(timeoutId3);
       };
     }
   }, [isSelectionMode, pdfDocument, currentViewport, currentPage, renderTakeoffAnnotations, localTakeoffMeasurements, localAnnotations, currentProjectId, file?.id, getPageTakeoffMeasurements]);
