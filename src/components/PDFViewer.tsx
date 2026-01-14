@@ -669,43 +669,48 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
   }, [cutoutMode]);
 
-  // Track previous file ID to prevent unnecessary clearing
-  const prevFileIdRef = useRef<string | undefined>(undefined);
+  // Track previous file reference to detect file changes
+  const prevFileRef = useRef<any>(undefined);
   
   // Clear measurements and cleanup when file changes
   useEffect(() => {
-    const currentFileId = file?.id;
-    const prevFileId = prevFileIdRef.current;
+    const currentFile = file;
+    const prevFile = prevFileRef.current;
     
-    // Only clear if the file ID actually changed
-    if (currentFileId !== prevFileId) {
+    // Reset render state whenever file changes (including null to file or file to null)
+    // This ensures clean state when entering a project or switching files
+    if (currentFile !== prevFile) {
       setLocalTakeoffMeasurements([]);
-      prevFileIdRef.current = currentFileId;
-    }
-    
-    // Cancel any pending operations
-    if (renderTaskRef.current) {
-      renderTaskRef.current.cancel();
-      renderTaskRef.current = null;
-    }
-    
-    // Clear canvas context
-    if (pdfCanvasRef.current) {
-      const context = pdfCanvasRef.current.getContext('2d');
-      if (context) {
-        context.clearRect(0, 0, pdfCanvasRef.current.width, pdfCanvasRef.current.height);
-        context.setTransform(1, 0, 0, 1, 0, 0);
+      prevFileRef.current = currentFile;
+      // CRITICAL: Always reset render state when file changes
+      // This fixes the stuck loading state when first entering a project
+      setIsInitialRenderComplete(false);
+      setIsPDFLoading(false);
+      
+      // Cancel any pending operations
+      if (renderTaskRef.current) {
+        renderTaskRef.current.cancel();
+        renderTaskRef.current = null;
       }
+      
+      // Clear canvas context
+      if (pdfCanvasRef.current) {
+        const context = pdfCanvasRef.current.getContext('2d');
+        if (context) {
+          context.clearRect(0, 0, pdfCanvasRef.current.width, pdfCanvasRef.current.height);
+          context.setTransform(1, 0, 0, 1, 0, 0);
+        }
+      }
+      
+      // Clear SVG overlay
+      if (svgOverlayRef.current) {
+        svgOverlayRef.current.innerHTML = '';
+      }
+      
+      // Reset rendering flags
+      isRenderingRef.current = false;
     }
-    
-    // Clear SVG overlay
-    if (svgOverlayRef.current) {
-      svgOverlayRef.current.innerHTML = '';
-    }
-    
-    // Reset rendering flags
-    isRenderingRef.current = false;
-  }, [file?.id]);
+  }, [file]);
 
   // Page-specific canvas sizing with outputScale for crisp rendering
   const updateCanvasDimensions = useCallback((pageNum: number, viewport: any, outputScale: number, page?: any) => {
@@ -1575,6 +1580,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Block renders during interactive operations to prevent flicker
     const isInitialRender = !isInitialRenderComplete;
     if (!isInitialRender && (isMeasuring || isCalibrating || currentMeasurement.length > 0 || (isDeselecting && isInitialRenderComplete) || (isAnnotating && !showTextInput))) {
+      // If render is blocked and loading state is set, clear it
+      // This prevents stuck loading state if render is blocked after loading was set
+      if (isPDFLoading) {
+        setIsPDFLoading(false);
+      }
       return;
     }
     
@@ -1590,16 +1600,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       if (process.env.NODE_ENV === 'development') {
         console.warn('PDF render skipped: missing dependencies', { pageNum });
       }
-      // Clear loading state if render is skipped
-      if (pageNum === currentPage && !isInitialRenderComplete) {
+      // Clear loading state if render is skipped - clear for any page if it was an initial render
+      if (!isInitialRenderComplete) {
         setIsPDFLoading(false);
       }
       return;
     }
     
     if (isRenderingRef.current) {
-      // Clear loading state if render is blocked
-      if (pageNum === currentPage && !isInitialRenderComplete) {
+      // Clear loading state if render is blocked - clear for any page if it was an initial render
+      if (!isInitialRenderComplete) {
         setIsPDFLoading(false);
       }
       return;
@@ -1705,20 +1715,26 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Removed verbose logging - was causing console spam
       
       // Mark initial render as complete and notify parent
+      // Always clear loading state for the page that was rendered
+      // This prevents stuck loading state if currentPage changes during render
       if (pageNum === currentPage) {
         setIsInitialRenderComplete(true);
         setIsPDFLoading(false); // Hide loading indicator
         if (onPDFRendered) {
           onPDFRendered();
         }
+      } else if (!isInitialRenderComplete) {
+        // If we rendered a different page but it was an initial render, still clear loading
+        // This handles edge cases where currentPage might change during initial render
+        setIsPDFLoading(false);
       }
       
     } catch (error: any) {
       if (error.name !== 'RenderingCancelledException') {
         console.error('Error rendering PDF page:', error);
       }
-      // Clear loading state on error
-      if (pageNum === currentPage && !isInitialRenderComplete) {
+      // Clear loading state on error - clear for any page if it was an initial render
+      if (!isInitialRenderComplete) {
         setIsPDFLoading(false);
       }
     } finally {
@@ -4626,6 +4642,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           if (process.env.NODE_ENV === 'development') {
             console.warn('Canvas not ready after retries, skipping render');
           }
+          // Clear loading state if canvas never becomes ready
+          setIsPDFLoading(false);
         }
       };
       
