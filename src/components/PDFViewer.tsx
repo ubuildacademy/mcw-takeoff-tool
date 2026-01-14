@@ -1628,12 +1628,20 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const pdfCanvas = pdfCanvasRef.current;
       if (!pdfCanvas || !containerRef.current) {
         console.warn('PDF canvas or container unmounted during render, skipping');
+        // Clear loading state if this was an initial render
+        if (!isInitialRenderComplete) {
+          setIsPDFLoading(false);
+        }
         return;
       }
       
       const pdfContext = pdfCanvas.getContext('2d');
       if (!pdfContext) {
         console.warn('PDF canvas context is null, skipping render');
+        // Clear loading state if this was an initial render
+        if (!isInitialRenderComplete) {
+          setIsPDFLoading(false);
+        }
         return;
       }
 
@@ -1715,18 +1723,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Removed verbose logging - was causing console spam
       
       // Mark initial render as complete and notify parent
-      // Always clear loading state for the page that was rendered
-      // This prevents stuck loading state if currentPage changes during render
+      // CRITICAL: Always clear loading state when render completes successfully
+      // This prevents stuck loading state in all scenarios
+      setIsPDFLoading(false);
+      
       if (pageNum === currentPage) {
         setIsInitialRenderComplete(true);
-        setIsPDFLoading(false); // Hide loading indicator
         if (onPDFRendered) {
           onPDFRendered();
         }
       } else if (!isInitialRenderComplete) {
-        // If we rendered a different page but it was an initial render, still clear loading
+        // If we rendered a different page but it was an initial render, mark as complete
         // This handles edge cases where currentPage might change during initial render
-        setIsPDFLoading(false);
+        setIsInitialRenderComplete(true);
       }
       
     } catch (error: any) {
@@ -4648,6 +4657,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       };
       
       attemptRender();
+    } else if (pdfDocument && !isComponentMounted) {
+      // PDF loaded but component not mounted yet - clear loading state
+      // This prevents stuck loading state if component unmounts/remounts
+      setIsPDFLoading(false);
     }
   }, [pdfDocument, currentPage, renderPDFPage, isComponentMounted]);
 
