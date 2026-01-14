@@ -168,6 +168,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   
   // PDF loading state
   const [isPDFLoading, setIsPDFLoading] = useState(false);
+  const isPDFLoadingRef = useRef(false);
   
   // Cut-out state (using external props)
   const [currentCutout, setCurrentCutout] = useState<{ x: number; y: number }[]>([]);
@@ -336,6 +337,26 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   
   // Performance optimization: track if initial render is complete
   const [isInitialRenderComplete, setIsInitialRenderComplete] = useState(false);
+  const isInitialRenderCompleteRef = useRef(false);
+  const currentPageRef = useRef(currentPage);
+  const showTextInputRef = useRef(showTextInput);
+
+  // Keep refs synced to avoid stale-closure bugs inside long-lived callbacks (e.g., renderPDFPage)
+  useEffect(() => {
+    isPDFLoadingRef.current = isPDFLoading;
+  }, [isPDFLoading]);
+
+  useEffect(() => {
+    isInitialRenderCompleteRef.current = isInitialRenderComplete;
+  }, [isInitialRenderComplete]);
+
+  useEffect(() => {
+    currentPageRef.current = currentPage;
+  }, [currentPage]);
+
+  useEffect(() => {
+    showTextInputRef.current = showTextInput;
+  }, [showTextInput]);
   
   // Current page viewport (computed from page-specific state)
   const currentViewport = useMemo(() => {
@@ -1578,18 +1599,23 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // CRITICAL FIX: Allow initial render even if isMeasuring is true - this ensures the viewport
     // is set so clicks can work. Only block re-renders during measurement to prevent flicker.
     // Block renders during interactive operations to prevent flicker
-    const isInitialRender = !isInitialRenderComplete;
-    if (!isInitialRender && (isMeasuring || isCalibrating || currentMeasurement.length > 0 || (isDeselecting && isInitialRenderComplete) || (isAnnotating && !showTextInput))) {
-      // If render is blocked and loading state is set, clear it
-      // This prevents stuck loading state if render is blocked after loading was set
-      if (isPDFLoading) {
-        setIsPDFLoading(false);
-      }
+    const isInitialRender = !isInitialRenderCompleteRef.current;
+    if (
+      !isInitialRender &&
+      (isMeasuring ||
+        isCalibrating ||
+        currentMeasurement.length > 0 ||
+        (isDeselecting && isInitialRenderCompleteRef.current) ||
+        (isAnnotating && !showTextInputRef.current))
+    ) {
+      // If render is blocked, always clear the loading overlay to prevent it getting stuck.
+      // (renderPDFPage is long-lived; relying on captured state here can be wrong.)
+      setIsPDFLoading(false);
       return;
     }
     
     // Show loading indicator for initial renders
-    if (!isInitialRenderComplete) {
+    if (!isInitialRenderCompleteRef.current) {
       setIsPDFLoading(true);
     }
     
@@ -1601,7 +1627,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         console.warn('PDF render skipped: missing dependencies', { pageNum });
       }
       // Clear loading state if render is skipped - clear for any page if it was an initial render
-      if (!isInitialRenderComplete) {
+      if (!isInitialRenderCompleteRef.current) {
         setIsPDFLoading(false);
       }
       return;
@@ -1609,7 +1635,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     if (isRenderingRef.current) {
       // Clear loading state if render is blocked - clear for any page if it was an initial render
-      if (!isInitialRenderComplete) {
+      if (!isInitialRenderCompleteRef.current) {
         setIsPDFLoading(false);
       }
       return;
@@ -1629,7 +1655,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       if (!pdfCanvas || !containerRef.current) {
         console.warn('PDF canvas or container unmounted during render, skipping');
         // Clear loading state if this was an initial render
-        if (!isInitialRenderComplete) {
+        if (!isInitialRenderCompleteRef.current) {
           setIsPDFLoading(false);
         }
         return;
@@ -1639,7 +1665,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       if (!pdfContext) {
         console.warn('PDF canvas context is null, skipping render');
         // Clear loading state if this was an initial render
-        if (!isInitialRenderComplete) {
+        if (!isInitialRenderCompleteRef.current) {
           setIsPDFLoading(false);
         }
         return;
@@ -1727,12 +1753,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // This prevents stuck loading state in all scenarios
       setIsPDFLoading(false);
       
-      if (pageNum === currentPage) {
+      if (pageNum === currentPageRef.current) {
         setIsInitialRenderComplete(true);
         if (onPDFRendered) {
           onPDFRendered();
         }
-      } else if (!isInitialRenderComplete) {
+      } else if (!isInitialRenderCompleteRef.current) {
         // If we rendered a different page but it was an initial render, mark as complete
         // This handles edge cases where currentPage might change during initial render
         setIsInitialRenderComplete(true);
@@ -1743,13 +1769,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         console.error('Error rendering PDF page:', error);
       }
       // Clear loading state on error - clear for any page if it was an initial render
-      if (!isInitialRenderComplete) {
+      if (!isInitialRenderCompleteRef.current) {
         setIsPDFLoading(false);
       }
     } finally {
       isRenderingRef.current = false;
     }
-  }, [pdfDocument, viewState, updateCanvasDimensions, onPageShown, isComponentMounted, isMeasuring, isCalibrating, currentMeasurement, isDeselecting, isAnnotating, localTakeoffMeasurements, localAnnotations, currentProjectId, file?.id, getPageTakeoffMeasurements, renderTakeoffAnnotations]);
+  }, [pdfDocument, viewState, updateCanvasDimensions, onPageShown, isComponentMounted, isMeasuring, isCalibrating, currentMeasurement, isDeselecting, isAnnotating, localTakeoffMeasurements, localAnnotations, currentProjectId, file?.id, getPageTakeoffMeasurements, renderTakeoffAnnotations, onPDFRendered]);
 
   // No coordinate conversions needed - SVG viewBox matches viewport exactly
   // CSS pixels = SVG pixels = viewport pixels (1:1 mapping)
