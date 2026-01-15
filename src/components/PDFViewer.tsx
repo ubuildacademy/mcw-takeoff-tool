@@ -1185,8 +1185,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // FIX: Watch store measurements for current page to trigger when measurements load asynchronously
   // OPTIMIZATION: Only watch measurements for current page to prevent unnecessary re-renders
   // CRITICAL: Compute store measurements inside effect to ensure reactivity to store changes
+  // ANTI-FLICKER: Compute viewport inside effect instead of depending on currentViewport (prevents re-renders during panning)
   useEffect(() => {
-    if (pdfDocument && currentViewport) {
+    // Compute viewport inside effect to avoid dependency on currentViewport state
+    // This prevents re-renders when panning/scrolling (which doesn't change viewport dimensions)
+    const viewport = pdfPageRef.current 
+      ? pdfPageRef.current.getViewport({ scale: viewState.scale, rotation: viewState.rotation })
+      : (pageViewports[currentPage] || null);
+    
+    if (pdfDocument && viewport) {
       // Check both local measurements and store measurements
       // This ensures markups render even if local measurements haven't loaded yet
       // CRITICAL: Compute store measurements inside effect to ensure we get latest values
@@ -1223,6 +1230,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         let retryCount = 0;
         const maxRetries = 20; // Max 1 second of retries (20 * 50ms)
         const attemptRender = () => {
+          // Re-compute viewport in case it changed
+          const currentViewport = pdfPageRef.current 
+            ? pdfPageRef.current.getViewport({ scale: viewState.scale, rotation: viewState.rotation })
+            : null;
+            
           if (currentViewport && pdfPageRef.current) {
             // If PDF is still rendering but we have a viewport, we can still render markups
             // The renderTakeoffAnnotations function will handle the rendering safely
@@ -1283,7 +1295,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
       }
     }
-  }, [localTakeoffMeasurements, currentPageMeasurementIds, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, renderTakeoffAnnotations, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentAnnotation, currentProjectId, file?.id, getPageTakeoffMeasurements]);
+  }, [localTakeoffMeasurements, currentPageMeasurementIds, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, renderTakeoffAnnotations, currentPage, viewState.scale, viewState.rotation, isAnnotating, localAnnotations, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentAnnotation, currentProjectId, file?.id, getPageTakeoffMeasurements, pdfDocument, pdfPageRef, pageViewports]);
 
   // OPTIMIZED: Update only visual styling when selection changes (prevents flicker)
   const prevSelectedMarkupIdRef = useRef<string | null>(null);
@@ -1453,6 +1465,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   }, [pdfDocument, viewState.scale, viewState.rotation, localTakeoffMeasurements, localAnnotations, currentPage, renderTakeoffAnnotations]);
 
   // Force re-render measurements and annotations when viewport state changes (zoom, rotation)
+  // ANTI-FLICKER: Only depend on scale/rotation, not currentViewport (which can change during panning)
   useEffect(() => {
     const rendersBlocked = (isMeasuring || isCalibrating || currentMeasurement.length > 0 || isDeselecting || (isAnnotating && !showTextInput));
     if (rendersBlocked) {
@@ -1460,13 +1473,18 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       return;
     }
     const hasMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0;
-    if (pdfDocument && currentViewport && hasMarkups) {
+    // Get currentViewport inside effect to avoid dependency on it (prevents re-renders during panning)
+    const viewport = pdfPageRef.current ? pdfPageRef.current.getViewport({ 
+      scale: viewState.scale, 
+      rotation: viewState.rotation 
+    }) : null;
+    if (pdfDocument && viewport && hasMarkups) {
       // Use requestAnimationFrame to ensure the viewport state is fully updated
       requestAnimationFrame(() => {
-        renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+        renderTakeoffAnnotations(currentPage, viewport, pdfPageRef.current);
       });
     }
-  }, [viewState.scale, viewState.rotation, pdfDocument, currentViewport, localTakeoffMeasurements, localAnnotations, currentPage, renderTakeoffAnnotations]);
+  }, [viewState.scale, viewState.rotation, pdfDocument, localTakeoffMeasurements, localAnnotations, currentPage, renderTakeoffAnnotations]);
 
   // CRITICAL: Update SVG overlay and hit-area pointer-events immediately when mode changes
   // This ensures selection works immediately when conditions are deselected
@@ -4748,6 +4766,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   }, [currentPage]);
 
   // Optimized re-render when view state changes (zoom/rotation)
+  // ANTI-FLICKER: Only depend on scale and rotation, not the entire viewState object or currentViewport
+  // This prevents re-renders when panning/scrolling (which doesn't change scale/rotation)
   useEffect(() => {
     if (pdfDocument && isComponentMounted && isInitialRenderComplete) {
       // ANTI-FLICKER: Skip PDF re-render during interactive operations or deselection cooldown
@@ -4772,7 +4792,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       
       return () => clearTimeout(timeoutId);
     }
-  }, [viewState, renderPDFPage, currentPage, isComponentMounted, isMeasuring, isCalibrating, currentMeasurement, currentViewport, renderTakeoffAnnotations, isDeselecting, isInitialRenderComplete, isAnnotating, showTextInput]);
+  }, [viewState.scale, viewState.rotation, renderPDFPage, currentPage, isComponentMounted, isMeasuring, isCalibrating, currentMeasurement, isDeselecting, isInitialRenderComplete, isAnnotating, showTextInput]);
 
 
   // Keep ref in sync with isSelectionMode state
