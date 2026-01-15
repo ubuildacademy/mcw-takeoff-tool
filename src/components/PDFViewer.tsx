@@ -1691,12 +1691,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         return;
       }
       
-      const pdfContext = pdfCanvas.getContext('2d', {
-        // ANTI-FLICKER: Optimize canvas context for large canvases to prevent flickering during scroll
-        alpha: false, // Opaque canvas is faster to render
-        desynchronized: true, // Allow async rendering to prevent blocking
-        willReadFrequently: false // Optimize for GPU rendering, not CPU reads
-      });
+      const pdfContext = pdfCanvas.getContext('2d');
       if (!pdfContext) {
         console.warn('PDF canvas context is null, skipping render');
         // Clear loading state if this was an initial render
@@ -1705,11 +1700,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
         return;
       }
-      
-      // ANTI-FLICKER: Optimize canvas context settings for smooth scrolling
-      // These settings help the browser optimize rendering for large canvases
-      pdfContext.imageSmoothingEnabled = true;
-      pdfContext.imageSmoothingQuality = 'high';
 
       // Create page-specific viewport with current scale and rotation
       const viewport = page.getViewport({ 
@@ -5128,10 +5118,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         style={{ 
           cursor: cutoutMode 
             ? 'crosshair' 
-            : (isCalibrating ? 'crosshair' : (isMeasuring ? 'crosshair' : (isSelectionMode ? 'pointer' : 'default'))),
-          // ANTI-FLICKER: Optimize scroll container for large canvases
-          contain: 'layout style paint',
-          willChange: 'scroll-position' // Hint to browser to optimize scrolling
+            : (isCalibrating ? 'crosshair' : (isMeasuring ? 'crosshair' : (isSelectionMode ? 'pointer' : 'default')))
         }}
       >
         <div className="flex justify-start p-6 relative">
@@ -5143,10 +5130,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               margin: 0,
               padding: 0,
               border: 'none',
-              outline: 'none',
-              // ANTI-FLICKER: CSS containment hints to browser for better scroll performance
-              contain: 'layout style paint',
-              isolation: 'isolate' // Create new stacking context for GPU optimization
+              outline: 'none'
             }}
           >
             {/* PDF Canvas (Background Layer) */}
