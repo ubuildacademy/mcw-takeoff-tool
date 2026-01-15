@@ -449,6 +449,17 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Subscribe to store changes for takeoffMeasurements to reactively update when measurements are added/updated
   const allTakeoffMeasurements = useTakeoffStore(state => state.takeoffMeasurements);
   
+  // ANTI-FLICKER: Only track current page's measurement IDs to prevent re-renders when other pages change
+  // This memoized value only changes when measurements on the current page change, not other pages
+  const currentPageMeasurementIds = useMemo(() => {
+    if (!currentProjectId || !file?.id || !currentPage) {
+      return [];
+    }
+    const pageMeasurements = getPageTakeoffMeasurements(currentProjectId, file.id, currentPage);
+    // Return sorted IDs as a stable reference - only changes when current page measurements change
+    return pageMeasurements.map(m => m.id).sort();
+  }, [allTakeoffMeasurements, currentProjectId, file?.id, currentPage, getPageTakeoffMeasurements]);
+  
   // PER-PAGE LOADING: Load measurements for current page when page changes
   useEffect(() => {
     // CRITICAL: Clear measurements immediately when page changes to prevent cross-page contamination
@@ -572,7 +583,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       }
       return prev; // No change, return previous to prevent re-render
     });
-  }, [allTakeoffMeasurements, currentProjectId, file?.id, currentPage, getPageTakeoffMeasurements]);
+  }, [currentPageMeasurementIds, currentProjectId, file?.id, currentPage, getPageTakeoffMeasurements]);
 
   // Ensure component is mounted before rendering
   useEffect(() => {
@@ -1272,7 +1283,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
       }
     }
-  }, [localTakeoffMeasurements, allTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, renderTakeoffAnnotations, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentAnnotation, currentProjectId, file?.id, getPageTakeoffMeasurements]);
+  }, [localTakeoffMeasurements, currentPageMeasurementIds, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, renderTakeoffAnnotations, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentAnnotation, currentProjectId, file?.id, getPageTakeoffMeasurements]);
 
   // OPTIMIZED: Update only visual styling when selection changes (prevents flicker)
   const prevSelectedMarkupIdRef = useRef<string | null>(null);
