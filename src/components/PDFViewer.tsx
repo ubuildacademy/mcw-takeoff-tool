@@ -3093,11 +3093,21 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         scale: viewState.scale, 
         rotation: viewState.rotation 
       });
-      // Cache it for future use
-      setPageViewports(prev => ({
-        ...prev,
-        [currentPage]: viewport
-      }));
+      // Cache it for future use - only update if viewport actually changed to prevent flickering
+      setPageViewports(prev => {
+        const existing = prev[currentPage];
+        if (existing &&
+            existing.width === viewport.width &&
+            existing.height === viewport.height &&
+            existing.scale === viewport.scale &&
+            existing.rotation === viewport.rotation) {
+          return prev; // No change, return previous to prevent unnecessary re-renders
+        }
+        return {
+          ...prev,
+          [currentPage]: viewport
+        };
+      });
     }
     
     if (!viewport) {
@@ -3271,29 +3281,49 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (!viewport) {
       // Try to get viewport from cached page ref first
       if (pdfPageRef.current) {
-        viewport = pdfPageRef.current.getViewport({ 
-          scale: viewState.scale, 
-          rotation: viewState.rotation 
+        viewport = pdfPageRef.current.getViewport({
+          scale: viewState.scale,
+          rotation: viewState.rotation
         });
-        // Cache it for future use
-        setPageViewports(prev => ({
-          ...prev,
-          [currentPage]: viewport
-        }));
+        // Cache it for future use - only update if viewport actually changed to prevent flickering
+        setPageViewports(prev => {
+          const existing = prev[currentPage];
+          if (existing &&
+              existing.width === viewport.width &&
+              existing.height === viewport.height &&
+              existing.scale === viewport.scale &&
+              existing.rotation === viewport.rotation) {
+            return prev; // No change, return previous to prevent unnecessary re-renders
+          }
+          return {
+            ...prev,
+            [currentPage]: viewport
+          };
+        });
       } else if (pdfDocument) {
         // For new documents, page might not be loaded yet - load it on-demand
         try {
           const page = await pdfDocument.getPage(currentPage);
           pdfPageRef.current = page; // Cache the page for future use
-          viewport = page.getViewport({ 
-            scale: viewState.scale, 
-            rotation: viewState.rotation 
+          viewport = page.getViewport({
+            scale: viewState.scale,
+            rotation: viewState.rotation
           });
-          // Cache viewport for future use
-          setPageViewports(prev => ({
-            ...prev,
-            [currentPage]: viewport
-          }));
+          // Cache viewport for future use - only update if viewport actually changed
+          setPageViewports(prev => {
+            const existing = prev[currentPage];
+            if (existing &&
+                existing.width === viewport.width &&
+                existing.height === viewport.height &&
+                existing.scale === viewport.scale &&
+                existing.rotation === viewport.rotation) {
+              return prev; // No change, return previous to prevent unnecessary re-renders
+            }
+            return {
+              ...prev,
+              [currentPage]: viewport
+            };
+          });
         } catch (error) {
           console.error('Failed to load PDF page for click handler:', error);
           return;
