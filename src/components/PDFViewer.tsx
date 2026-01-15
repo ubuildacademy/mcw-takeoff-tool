@@ -209,20 +209,21 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     const renderedScale = lastRenderedScaleRef.current || 1.0;
     const targetScale = (viewState.scale || 1.0) / renderedScale;
     
-    // If targetScale is ~1, clear transforms
+    // If targetScale is ~1, clear scale but preserve translateZ(0) for GPU acceleration
     if (Math.abs(targetScale - 1) < 0.0001) {
-      canvas.style.transform = '';
-      svg.style.transform = '';
+      canvas.style.transform = 'translateZ(0)';
+      svg.style.transform = 'translateZ(0)';
       canvas.style.transformOrigin = '';
       svg.style.transformOrigin = '';
       return;
     }
     
     // Apply transform to both canvas and overlay to keep them in sync visually
+    // Preserve translateZ(0) for GPU acceleration layer
     canvas.style.transformOrigin = '0 0';
     svg.style.transformOrigin = '0 0';
-    canvas.style.transform = `scale(${targetScale})`;
-    svg.style.transform = `scale(${targetScale})`;
+    canvas.style.transform = `translateZ(0) scale(${targetScale})`;
+    svg.style.transform = `translateZ(0) scale(${targetScale})`;
   }, [viewState.scale]);
   
   // Page-scoped refs to prevent cross-page DOM issues
@@ -1743,12 +1744,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       lastRenderedScaleRef.current = viewState.scale;
       
       // Clear any interactive CSS transforms (no longer needed after full render)
+      // Preserve translateZ(0) for GPU acceleration to prevent flickering during scroll
       if (pdfCanvasRef.current) {
-        pdfCanvasRef.current.style.transform = '';
+        pdfCanvasRef.current.style.transform = 'translateZ(0)';
         pdfCanvasRef.current.style.transformOrigin = '';
       }
       if (svgOverlayRef.current) {
-        svgOverlayRef.current.style.transform = '';
+        svgOverlayRef.current.style.transform = 'translateZ(0)';
         svgOverlayRef.current.style.transformOrigin = '';
       }
       
@@ -4495,13 +4497,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (rendersBlocked) {
       applyInteractiveZoomTransforms();
     } else {
-      // Clear transforms if any
+      // Clear transforms if any, but preserve translateZ(0) for GPU acceleration
       if (pdfCanvasRef.current) {
-        pdfCanvasRef.current.style.transform = '';
+        pdfCanvasRef.current.style.transform = 'translateZ(0)';
         pdfCanvasRef.current.style.transformOrigin = '';
       }
       if (svgOverlayRef.current) {
-        svgOverlayRef.current.style.transform = '';
+        svgOverlayRef.current.style.transform = 'translateZ(0)';
         svgOverlayRef.current.style.transformOrigin = '';
       }
       
@@ -5116,7 +5118,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 margin: 0,
                 padding: 0,
                 border: 'none',
-                outline: 'none'
+                outline: 'none',
+                // ANTI-FLICKER: GPU acceleration hints to prevent flickering during scroll when zoomed
+                willChange: 'transform',
+                backfaceVisibility: 'hidden',
+                transform: 'translateZ(0)' // Force GPU acceleration layer
               }}
               onClick={handleClick}
               onMouseDown={handleMouseDown}
@@ -5155,6 +5161,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 // Ensure perfect overlay alignment
                 margin: 0,
                 padding: 0,
+                // ANTI-FLICKER: GPU acceleration hints to prevent flickering during scroll when zoomed
+                willChange: 'transform',
+                backfaceVisibility: 'hidden',
+                transform: 'translateZ(0)' // Force GPU acceleration layer
                 border: 'none',
                 outline: 'none',
                 pointerEvents: (isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol)) ? 'auto' : 'none' // Allow clicks in selection, calibration, annotation, visual search, or titleblock selection mode (measurements handled by canvas)
