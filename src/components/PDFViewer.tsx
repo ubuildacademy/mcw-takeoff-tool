@@ -1061,8 +1061,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (pdfDocument && currentViewport && !isRenderingRef.current) {
       // Only render if we have measurements, annotations, or if we're in measuring/annotation/visual search mode
       // CRITICAL FIX: Include activePoints.length check to ensure continuous linear preview renders
+      // CRITICAL: Also render when transitioning to selection mode to ensure markups are properly configured
       const hasActivePoints = isContinuousDrawing && activePoints.length > 0;
-      if (localTakeoffMeasurements.length > 0 || isMeasuring || isCalibrating || currentMeasurement.length > 0 || hasActivePoints || isAnnotating || localAnnotations.length > 0 || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol)) {
+      const shouldRender = localTakeoffMeasurements.length > 0 || isMeasuring || isCalibrating || currentMeasurement.length > 0 || hasActivePoints || isAnnotating || localAnnotations.length > 0 || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol) || isSelectionMode;
+      
+      if (shouldRender) {
+        // CRITICAL: Re-render markups when transitioning to selection mode, even during deselection cooldown
+        // The isDeselecting flag should only block PDF canvas renders, not markup overlay renders
         renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
       } else {
         // LAYER THRASH PREVENTION: Clear overlay when measurements are empty to prevent stale renderings
@@ -1292,6 +1297,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Also re-render markups when selection mode changes to ensure they're properly configured
     // This handles the case where markups were rendered before selection mode was enabled
+    // CRITICAL: Re-render even during deselection cooldown to ensure markups are selectable
     if (isSelectionMode && currentViewport && pdfPageRef.current) {
       // Use requestAnimationFrame to avoid race conditions with other renders
       requestAnimationFrame(() => {
@@ -4482,8 +4488,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
   }, [currentPage, currentViewport, onPageShown, localTakeoffMeasurements, renderTakeoffAnnotations, pdfDocument]);
 
-  // CRITICAL FIX: Update pointer-events on all markup elements after render
-  // This ensures markups are always selectable when in selection mode, even after page changes
+  // CRITICAL FIX: Update pointer-events on all markup elements after render or mode change
+  // This ensures markups are always selectable when in selection mode, even after page changes or mode transitions
   useEffect(() => {
     if (!svgOverlayRef.current || !isSelectionMode) return;
     
@@ -4491,20 +4497,42 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     requestAnimationFrame(() => {
       if (!svgOverlayRef.current) return;
       
-      // Update all measurement elements
+      // Update all measurement elements (excluding hit areas)
       const measurementElements = svgOverlayRef.current.querySelectorAll('[data-measurement-id]');
       measurementElements.forEach((el) => {
         const element = el as SVGElement;
-        element.style.pointerEvents = 'auto';
-        element.style.cursor = 'pointer';
+        // Skip hit areas - they have transparent fill/stroke or are much larger
+        const fill = element.getAttribute('fill');
+        const stroke = element.getAttribute('stroke');
+        const isHitArea = fill === 'transparent' || stroke === 'transparent';
+        
+        // For circles, also check radius - hit areas are much larger (r=20 vs r=8)
+        if (element.tagName === 'circle') {
+          const r = parseFloat(element.getAttribute('r') || '0');
+          if (r > 15) {
+            return; // Skip hit area
+          }
+        }
+        
+        if (!isHitArea) {
+          element.style.pointerEvents = 'auto';
+          element.style.cursor = 'pointer';
+        }
       });
       
-      // Update all annotation elements
+      // Update all annotation elements (excluding hit areas)
       const annotationElements = svgOverlayRef.current.querySelectorAll('[data-annotation-id]');
       annotationElements.forEach((el) => {
         const element = el as SVGElement;
-        element.style.pointerEvents = 'auto';
-        element.style.cursor = 'pointer';
+        // Skip hit areas
+        const fill = element.getAttribute('fill');
+        const stroke = element.getAttribute('stroke');
+        const isHitArea = fill === 'transparent' || stroke === 'transparent';
+        
+        if (!isHitArea) {
+          element.style.pointerEvents = 'auto';
+          element.style.cursor = 'pointer';
+        }
       });
     });
   }, [currentPage, localTakeoffMeasurements, localAnnotations, isSelectionMode]);
