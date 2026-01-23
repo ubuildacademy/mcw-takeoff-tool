@@ -1004,7 +1004,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   useEffect(() => {
     if (pdfDocument && currentViewport && !isRenderingRef.current) {
       // Only render if we have measurements, annotations, or if we're in measuring/annotation/visual search mode
-      if (localTakeoffMeasurements.length > 0 || isMeasuring || isCalibrating || currentMeasurement.length > 0 || isAnnotating || localAnnotations.length > 0 || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol)) {
+      // CRITICAL FIX: Include activePoints.length check to ensure continuous linear preview renders
+      const hasActivePoints = isContinuousDrawing && activePoints.length > 0;
+      if (localTakeoffMeasurements.length > 0 || isMeasuring || isCalibrating || currentMeasurement.length > 0 || hasActivePoints || isAnnotating || localAnnotations.length > 0 || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol)) {
         renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
       } else {
         // LAYER THRASH PREVENTION: Clear overlay when measurements are empty to prevent stale renderings
@@ -1014,7 +1016,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
       }
     }
-  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, renderTakeoffAnnotations, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentAnnotation]);
+  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, renderTakeoffAnnotations, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentAnnotation, isContinuousDrawing, activePoints]);
 
   // OPTIMIZED: Update only visual styling when selection changes (prevents flicker)
   const prevSelectedMarkupIdRef = useRef<string | null>(null);
@@ -1809,6 +1811,26 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Use red for cut-out mode, condition color for normal measurements
     const strokeColor = cutoutMode ? '#ff0000' : conditionColor;
     
+    // CRITICAL FIX: Remove any existing preview elements before creating new ones
+    // This prevents duplicate preview lines and ensures clean state
+    const previewId = `linear-preview-${currentPage}`;
+    const existingPreview = svg.querySelector(`#${previewId}`);
+    if (existingPreview && existingPreview.parentNode === svg) {
+      svg.removeChild(existingPreview);
+    }
+    
+    // Also remove any preview polylines without IDs (legacy cleanup)
+    const allPolylines = svg.querySelectorAll('polyline');
+    allPolylines.forEach((polyline) => {
+      const id = polyline.getAttribute('id');
+      // Remove preview polylines that match our pattern but might not have been cleaned up
+      if (id && id.startsWith('linear-preview-') && id !== previewId) {
+        if (polyline.parentNode === svg) {
+          svg.removeChild(polyline);
+        }
+      }
+    });
+    
     switch (measurementType) {
       case 'linear':
         if (isContinuousDrawing && activePoints.length > 0) {
@@ -1861,11 +1883,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             previewPolyline.setAttribute('fill', 'none');
             previewPolyline.setAttribute('stroke-dasharray', '5,5');
             previewPolyline.setAttribute('vector-effect', 'non-scaling-stroke');
-            previewPolyline.setAttribute('id', `linear-preview-${currentPage}`);
+            previewPolyline.setAttribute('id', previewId);
+            previewPolyline.setAttribute('pointer-events', 'none');
             svg.appendChild(previewPolyline);
           }
         } else if (currentMeasurement.length > 0) {
           // Render traditional linear measurement (non-continuous) with preview line
+          // Remove any existing preview for non-continuous linear measurements
+          const nonContinuousPreviewId = `linear-noncontinuous-preview-${currentPage}`;
+          const existingNonContinuousPreview = svg.querySelector(`#${nonContinuousPreviewId}`);
+          if (existingNonContinuousPreview && existingNonContinuousPreview.parentNode === svg) {
+            svg.removeChild(existingNonContinuousPreview);
+          }
+          
           const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
           let pointString = currentMeasurement.map(p => {
             // Points are stored in normalized coordinates (0-1), convert to viewport pixels
@@ -1885,12 +1915,26 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           polyline.setAttribute('fill', 'none');
           polyline.setAttribute('stroke-dasharray', '5,5');
           polyline.setAttribute('vector-effect', 'non-scaling-stroke');
+          polyline.setAttribute('id', nonContinuousPreviewId);
+          polyline.setAttribute('pointer-events', 'none');
           svg.appendChild(polyline);
         }
         break;
         
       case 'area':
         if (currentMeasurement.length > 0) {
+          // Remove any existing area preview elements
+          const areaPreviewId = `area-preview-${currentPage}`;
+          const areaPolygonId = `area-polygon-${currentPage}`;
+          const existingAreaPreview = svg.querySelector(`#${areaPreviewId}`);
+          const existingAreaPolygon = svg.querySelector(`#${areaPolygonId}`);
+          if (existingAreaPreview && existingAreaPreview.parentNode === svg) {
+            svg.removeChild(existingAreaPreview);
+          }
+          if (existingAreaPolygon && existingAreaPolygon.parentNode === svg) {
+            svg.removeChild(existingAreaPolygon);
+          }
+          
           // Create a polyline for the preview (including mouse position)
           const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
           let pointString = currentMeasurement.map(p => {
@@ -1908,6 +1952,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           polyline.setAttribute('stroke-width', '3');
           polyline.setAttribute('fill', 'none');
           polyline.setAttribute('stroke-dasharray', '5,5');
+          polyline.setAttribute('id', areaPreviewId);
+          polyline.setAttribute('pointer-events', 'none');
+          polyline.setAttribute('vector-effect', 'non-scaling-stroke');
           svg.appendChild(polyline);
           
           // If we have 3+ points, also show the filled polygon preview
@@ -1920,6 +1967,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             polygon.setAttribute('points', polygonPointString);
             polygon.setAttribute('fill', cutoutMode ? 'none' : (conditionColor + '40'));
             polygon.setAttribute('stroke', 'none');
+            polygon.setAttribute('id', areaPolygonId);
+            polygon.setAttribute('pointer-events', 'none');
             svg.appendChild(polygon);
           }
         }
@@ -1927,6 +1976,18 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         
       case 'volume':
         if (currentMeasurement.length > 0) {
+          // Remove any existing volume preview elements
+          const volumePreviewId = `volume-preview-${currentPage}`;
+          const volumePolygonId = `volume-polygon-${currentPage}`;
+          const existingVolumePreview = svg.querySelector(`#${volumePreviewId}`);
+          const existingVolumePolygon = svg.querySelector(`#${volumePolygonId}`);
+          if (existingVolumePreview && existingVolumePreview.parentNode === svg) {
+            svg.removeChild(existingVolumePreview);
+          }
+          if (existingVolumePolygon && existingVolumePolygon.parentNode === svg) {
+            svg.removeChild(existingVolumePolygon);
+          }
+          
           // Create a polyline for the preview (including mouse position)
           const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
           let pointString = currentMeasurement.map(p => {
@@ -1944,6 +2005,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           polyline.setAttribute('stroke-width', '3');
           polyline.setAttribute('fill', 'none');
           polyline.setAttribute('stroke-dasharray', '5,5');
+          polyline.setAttribute('id', volumePreviewId);
+          polyline.setAttribute('pointer-events', 'none');
+          polyline.setAttribute('vector-effect', 'non-scaling-stroke');
           svg.appendChild(polyline);
           
           // If we have 3+ points, also show the filled polygon preview
@@ -1956,6 +2020,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             polygon.setAttribute('points', polygonPointString);
             polygon.setAttribute('fill', cutoutMode ? 'none' : (conditionColor + '40'));
             polygon.setAttribute('stroke', 'none');
+            polygon.setAttribute('id', volumePolygonId);
+            polygon.setAttribute('pointer-events', 'none');
             svg.appendChild(polygon);
           }
         }
