@@ -1194,11 +1194,51 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       hitArea.setAttribute('pointer-events', shouldCaptureClicks ? 'all' : 'none');
     }
     
-    // CRITICAL FIX: Re-render markups when selection mode changes
-    // This ensures markups get click handlers when entering selection mode
-    // Markups rendered while isSelectionMode was false won't have click handlers
+    // CRITICAL FIX: Update pointer-events on all markup elements when selection mode changes
+    // This ensures markups are always selectable when in selection mode, regardless of when they were rendered
+    // We use event delegation via the SVG onClick handler, so we just need to ensure pointer-events are correct
+    const updateMarkupPointerEvents = () => {
+      if (!svgOverlayRef.current) return;
+      
+      // Update all measurement elements
+      const measurementElements = svgOverlayRef.current.querySelectorAll('[data-measurement-id]');
+      measurementElements.forEach((el) => {
+        const element = el as SVGElement;
+        if (isSelectionMode) {
+          element.style.pointerEvents = 'auto';
+          element.style.cursor = 'pointer';
+        } else {
+          element.style.pointerEvents = 'none';
+          element.style.cursor = 'default';
+        }
+      });
+      
+      // Update all annotation elements
+      const annotationElements = svgOverlayRef.current.querySelectorAll('[data-annotation-id]');
+      annotationElements.forEach((el) => {
+        const element = el as SVGElement;
+        if (isSelectionMode) {
+          element.style.pointerEvents = 'auto';
+          element.style.cursor = 'pointer';
+        } else {
+          element.style.pointerEvents = 'none';
+          element.style.cursor = 'default';
+        }
+      });
+    };
+    
+    // Update immediately
+    updateMarkupPointerEvents();
+    
+    // Also re-render markups when selection mode changes to ensure they're properly configured
+    // This handles the case where markups were rendered before selection mode was enabled
     if (isSelectionMode && currentViewport && pdfPageRef.current) {
-      renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+      // Use requestAnimationFrame to avoid race conditions with other renders
+      requestAnimationFrame(() => {
+        if (svgOverlayRef.current && currentViewport && pdfPageRef.current) {
+          renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+        }
+      });
     }
   }, [isMeasuring, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentViewport, currentPage, renderTakeoffAnnotations]);
 
@@ -1480,7 +1520,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     const strokeWidth = isSelected ? '4' : '2';
     
     switch (measurement.type) {
-      case 'linear':
+      case 'linear': {
         // Create polyline for linear measurement
         const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
         const pointString = transformedPoints.map(p => {
@@ -1494,27 +1534,20 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         polyline.setAttribute('fill', 'none');
         polyline.setAttribute('data-measurement-id', measurement.id);
         
-        // Add click handler for selection
-        if (isSelectionMode) {
-          polyline.style.cursor = 'pointer';
-          polyline.addEventListener('click', (e) => {
-            e.stopPropagation();
-            setSelectedMarkupId(measurement.id);
-          });
-          
-          // Add invisible hit area for easier selection
-          const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-          hitArea.setAttribute('points', pointString);
-          hitArea.setAttribute('stroke', 'transparent');
-          hitArea.setAttribute('stroke-width', '20'); // Much larger hit area
-          hitArea.setAttribute('fill', 'none');
-          hitArea.style.cursor = 'pointer';
-          hitArea.addEventListener('click', (e) => {
-            e.stopPropagation();
-            setSelectedMarkupId(measurement.id);
-          });
-          svg.appendChild(hitArea);
-        }
+        // Set pointer-events and cursor for selection (event delegation handles clicks)
+        polyline.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
+        polyline.style.cursor = isSelectionMode ? 'pointer' : 'default';
+        
+        // Add invisible hit area for easier selection
+        const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+        hitArea.setAttribute('points', pointString);
+        hitArea.setAttribute('stroke', 'transparent');
+        hitArea.setAttribute('stroke-width', '20'); // Much larger hit area
+        hitArea.setAttribute('fill', 'none');
+        hitArea.setAttribute('data-measurement-id', measurement.id);
+        hitArea.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
+        hitArea.style.cursor = isSelectionMode ? 'pointer' : 'default';
+        svg.appendChild(hitArea);
         
         svg.appendChild(polyline);
         
@@ -1545,6 +1578,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         text.textContent = displayValue;
         svg.appendChild(text);
         break;
+      }
         
       case 'area':
         if (transformedPoints.length >= 3) {
@@ -1580,14 +1614,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             compoundPath.setAttribute('stroke-width', strokeWidth);
             compoundPath.setAttribute('data-measurement-id', measurement.id);
             
-            // Add click handler for selection
-            if (isSelectionMode) {
-              compoundPath.style.cursor = 'pointer';
-              compoundPath.addEventListener('click', (e) => {
-                e.stopPropagation();
-                setSelectedMarkupId(measurement.id);
-              });
-            }
+            // Set pointer-events and cursor for selection (event delegation handles clicks)
+            compoundPath.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
+            compoundPath.style.cursor = isSelectionMode ? 'pointer' : 'default';
             
             svg.appendChild(compoundPath);
           } else {
@@ -1599,27 +1628,20 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             polygon.setAttribute('stroke-width', strokeWidth);
             polygon.setAttribute('data-measurement-id', measurement.id);
             
-            // Add click handler for selection
-            if (isSelectionMode) {
-              polygon.style.cursor = 'pointer';
-              polygon.addEventListener('click', (e) => {
-                e.stopPropagation();
-                setSelectedMarkupId(measurement.id);
-              });
-              
-              // Add invisible hit area for easier selection
-              const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-              hitArea.setAttribute('points', pointString);
-              hitArea.setAttribute('fill', 'transparent');
-              hitArea.setAttribute('stroke', 'transparent');
-              hitArea.setAttribute('stroke-width', '10');
-              hitArea.style.cursor = 'pointer';
-              hitArea.addEventListener('click', (e) => {
-                e.stopPropagation();
-                setSelectedMarkupId(measurement.id);
-              });
-              svg.appendChild(hitArea);
-            }
+            // Set pointer-events and cursor for selection (event delegation handles clicks)
+            polygon.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
+            polygon.style.cursor = isSelectionMode ? 'pointer' : 'default';
+            
+            // Add invisible hit area for easier selection
+            const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+            hitArea.setAttribute('points', pointString);
+            hitArea.setAttribute('fill', 'transparent');
+            hitArea.setAttribute('stroke', 'transparent');
+            hitArea.setAttribute('stroke-width', '10');
+            hitArea.setAttribute('data-measurement-id', measurement.id);
+            hitArea.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
+            hitArea.style.cursor = isSelectionMode ? 'pointer' : 'default';
+            svg.appendChild(hitArea);
             
             svg.appendChild(polygon);
           }
@@ -1688,14 +1710,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             compoundPath.setAttribute('stroke-width', strokeWidth);
             compoundPath.setAttribute('data-measurement-id', measurement.id);
             
-            // Add click handler for selection
-            if (isSelectionMode) {
-              compoundPath.style.cursor = 'pointer';
-              compoundPath.addEventListener('click', (e) => {
-                e.stopPropagation();
-                setSelectedMarkupId(measurement.id);
-              });
-            }
+            // Set pointer-events and cursor for selection (event delegation handles clicks)
+            compoundPath.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
+            compoundPath.style.cursor = isSelectionMode ? 'pointer' : 'default';
             
             svg.appendChild(compoundPath);
           } else {
@@ -1707,27 +1724,20 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             polygon.setAttribute('stroke-width', strokeWidth);
             polygon.setAttribute('data-measurement-id', measurement.id);
             
-            // Add click handler for selection
-            if (isSelectionMode) {
-              polygon.style.cursor = 'pointer';
-              polygon.addEventListener('click', (e) => {
-                e.stopPropagation();
-                setSelectedMarkupId(measurement.id);
-              });
-              
-              // Add invisible hit area for easier selection
-              const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-              hitArea.setAttribute('points', pointString);
-              hitArea.setAttribute('fill', 'transparent');
-              hitArea.setAttribute('stroke', 'transparent');
-              hitArea.setAttribute('stroke-width', '10');
-              hitArea.style.cursor = 'pointer';
-              hitArea.addEventListener('click', (e) => {
-                e.stopPropagation();
-                setSelectedMarkupId(measurement.id);
-              });
-              svg.appendChild(hitArea);
-            }
+            // Set pointer-events and cursor for selection (event delegation handles clicks)
+            polygon.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
+            polygon.style.cursor = isSelectionMode ? 'pointer' : 'default';
+            
+            // Add invisible hit area for easier selection
+            const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+            hitArea.setAttribute('points', pointString);
+            hitArea.setAttribute('fill', 'transparent');
+            hitArea.setAttribute('stroke', 'transparent');
+            hitArea.setAttribute('stroke-width', '10');
+            hitArea.setAttribute('data-measurement-id', measurement.id);
+            hitArea.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
+            hitArea.style.cursor = isSelectionMode ? 'pointer' : 'default';
+            svg.appendChild(hitArea);
             
             svg.appendChild(polygon);
           }
@@ -1761,7 +1771,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
         break;
         
-      case 'count':
+      case 'count': {
         const point = { x: transformedPoints[0].x, y: transformedPoints[0].y };
         
         // Create circle for count measurement
@@ -1774,31 +1784,25 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         circle.setAttribute('stroke-width', isSelected ? '3' : '2');
         circle.setAttribute('data-measurement-id', measurement.id);
         
-        // Add click handler for selection
-        if (isSelectionMode) {
-          circle.style.cursor = 'pointer';
-          circle.addEventListener('click', (e) => {
-            e.stopPropagation();
-            setSelectedMarkupId(measurement.id);
-          });
-          
-          // Add invisible hit area for easier selection (larger circle)
-          const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-          hitArea.setAttribute('cx', point.x.toString());
-          hitArea.setAttribute('cy', point.y.toString());
-          hitArea.setAttribute('r', '20'); // Much larger hit area
-          hitArea.setAttribute('fill', 'transparent');
-          hitArea.setAttribute('stroke', 'transparent');
-          hitArea.style.cursor = 'pointer';
-          hitArea.addEventListener('click', (e) => {
-            e.stopPropagation();
-            setSelectedMarkupId(measurement.id);
-          });
-          svg.appendChild(hitArea);
-        }
+        // Set pointer-events and cursor for selection (event delegation handles clicks)
+        circle.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
+        circle.style.cursor = isSelectionMode ? 'pointer' : 'default';
+        
+        // Add invisible hit area for easier selection (larger circle)
+        const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        hitArea.setAttribute('cx', point.x.toString());
+        hitArea.setAttribute('cy', point.y.toString());
+        hitArea.setAttribute('r', '20'); // Much larger hit area
+        hitArea.setAttribute('fill', 'transparent');
+        hitArea.setAttribute('stroke', 'transparent');
+        hitArea.setAttribute('data-measurement-id', measurement.id);
+        hitArea.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
+        hitArea.style.cursor = isSelectionMode ? 'pointer' : 'default';
+        svg.appendChild(hitArea);
         
         svg.appendChild(circle);
         break;
+      }
     }
   };
 
@@ -2195,31 +2199,27 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       text.textContent = annotation.text;
       text.setAttribute('data-annotation-id', annotation.id);
       
-      // Add click handler for selection
-      if (isSelectionMode) {
-        text.style.cursor = 'pointer';
-        text.style.pointerEvents = 'auto';
-      }
+      // Set pointer-events and cursor for selection (event delegation handles clicks)
+      text.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
+      text.style.cursor = isSelectionMode ? 'pointer' : 'default';
       
       svg.appendChild(text);
       
       // Add invisible hit area for text annotations (rectangle around text)
-      if (isSelectionMode) {
-        // Estimate text bounds (approximate)
-        const textWidth = annotation.text ? annotation.text.length * 8 : 50;
-        const textHeight = 16;
-        const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        hitArea.setAttribute('x', (point.x - 5).toString());
-        hitArea.setAttribute('y', (point.y - textHeight - 5).toString());
-        hitArea.setAttribute('width', (textWidth + 10).toString());
-        hitArea.setAttribute('height', (textHeight + 10).toString());
-        hitArea.setAttribute('fill', 'transparent');
-        hitArea.setAttribute('stroke', 'transparent');
-        hitArea.setAttribute('data-annotation-id', annotation.id);
-        hitArea.style.cursor = 'pointer';
-        hitArea.style.pointerEvents = 'auto';
-        svg.appendChild(hitArea);
-      }
+      // Estimate text bounds (approximate)
+      const textWidth = annotation.text ? annotation.text.length * 8 : 50;
+      const textHeight = 16;
+      const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      hitArea.setAttribute('x', (point.x - 5).toString());
+      hitArea.setAttribute('y', (point.y - textHeight - 5).toString());
+      hitArea.setAttribute('width', (textWidth + 10).toString());
+      hitArea.setAttribute('height', (textHeight + 10).toString());
+      hitArea.setAttribute('fill', 'transparent');
+      hitArea.setAttribute('stroke', 'transparent');
+      hitArea.setAttribute('data-annotation-id', annotation.id);
+      hitArea.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
+      hitArea.style.cursor = isSelectionMode ? 'pointer' : 'default';
+      svg.appendChild(hitArea);
     } else if (annotation.type === 'arrow' && points.length === 2) {
       const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
       line.setAttribute('x1', points[0].x.toString());
@@ -2231,29 +2231,25 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       line.setAttribute('marker-end', 'url(#arrowhead)');
       line.setAttribute('data-annotation-id', annotation.id);
       
-      // Add click handler for selection
-      if (isSelectionMode) {
-        line.style.cursor = 'pointer';
-        line.style.pointerEvents = 'auto';
-      }
+      // Set pointer-events and cursor for selection (event delegation handles clicks)
+      line.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
+      line.style.cursor = isSelectionMode ? 'pointer' : 'default';
       
       svg.appendChild(line);
       
       // Add invisible hit area for easier selection (like measurements have)
-      if (isSelectionMode) {
-        const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-        hitArea.setAttribute('x1', points[0].x.toString());
-        hitArea.setAttribute('y1', points[0].y.toString());
-        hitArea.setAttribute('x2', points[1].x.toString());
-        hitArea.setAttribute('y2', points[1].y.toString());
-        hitArea.setAttribute('stroke', 'transparent');
-        hitArea.setAttribute('stroke-width', '20'); // Much larger hit area
-        hitArea.setAttribute('fill', 'none');
-        hitArea.setAttribute('data-annotation-id', annotation.id);
-        hitArea.style.cursor = 'pointer';
-        hitArea.style.pointerEvents = 'auto';
-        svg.appendChild(hitArea);
-      }
+      const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      hitArea.setAttribute('x1', points[0].x.toString());
+      hitArea.setAttribute('y1', points[0].y.toString());
+      hitArea.setAttribute('x2', points[1].x.toString());
+      hitArea.setAttribute('y2', points[1].y.toString());
+      hitArea.setAttribute('stroke', 'transparent');
+      hitArea.setAttribute('stroke-width', '20'); // Much larger hit area
+      hitArea.setAttribute('fill', 'none');
+      hitArea.setAttribute('data-annotation-id', annotation.id);
+      hitArea.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
+      hitArea.style.cursor = isSelectionMode ? 'pointer' : 'default';
+      svg.appendChild(hitArea);
       
       // Create arrowhead marker if it doesn't exist
       if (!svg.querySelector('#arrowhead')) {
@@ -2287,28 +2283,24 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       rect.setAttribute('fill', 'none');
       rect.setAttribute('data-annotation-id', annotation.id);
       
-      // Add click handler for selection
-      if (isSelectionMode) {
-        rect.style.cursor = 'pointer';
-        rect.style.pointerEvents = 'auto';
-      }
+      // Set pointer-events and cursor for selection (event delegation handles clicks)
+      rect.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
+      rect.style.cursor = isSelectionMode ? 'pointer' : 'default';
       
       svg.appendChild(rect);
       
       // Add invisible hit area for easier selection (extends beyond stroke)
-      if (isSelectionMode) {
-        const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        hitArea.setAttribute('x', (x - 5).toString()); // Extend hit area
-        hitArea.setAttribute('y', (y - 5).toString());
-        hitArea.setAttribute('width', (width + 10).toString());
-        hitArea.setAttribute('height', (height + 10).toString());
-        hitArea.setAttribute('fill', 'transparent');
-        hitArea.setAttribute('stroke', 'transparent');
-        hitArea.setAttribute('data-annotation-id', annotation.id);
-        hitArea.style.cursor = 'pointer';
-        hitArea.style.pointerEvents = 'auto';
-        svg.appendChild(hitArea);
-      }
+      const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      hitArea.setAttribute('x', (x - 5).toString()); // Extend hit area
+      hitArea.setAttribute('y', (y - 5).toString());
+      hitArea.setAttribute('width', (width + 10).toString());
+      hitArea.setAttribute('height', (height + 10).toString());
+      hitArea.setAttribute('fill', 'transparent');
+      hitArea.setAttribute('stroke', 'transparent');
+      hitArea.setAttribute('data-annotation-id', annotation.id);
+      hitArea.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
+      hitArea.style.cursor = isSelectionMode ? 'pointer' : 'default';
+      svg.appendChild(hitArea);
     } else if (annotation.type === 'circle' && points.length === 2) {
       const cx = (points[0].x + points[1].x) / 2;
       const cy = (points[0].y + points[1].y) / 2;
@@ -2324,28 +2316,24 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       ellipse.setAttribute('fill', 'none');
       ellipse.setAttribute('data-annotation-id', annotation.id);
       
-      // Add click handler for selection
-      if (isSelectionMode) {
-        ellipse.style.cursor = 'pointer';
-        ellipse.style.pointerEvents = 'auto';
-      }
+      // Set pointer-events and cursor for selection (event delegation handles clicks)
+      ellipse.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
+      ellipse.style.cursor = isSelectionMode ? 'pointer' : 'default';
       
       svg.appendChild(ellipse);
       
       // Add invisible hit area for easier selection
-      if (isSelectionMode) {
-        const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
-        hitArea.setAttribute('cx', cx.toString());
-        hitArea.setAttribute('cy', cy.toString());
-        hitArea.setAttribute('rx', (rx + 10).toString()); // Extend hit area
-        hitArea.setAttribute('ry', (ry + 10).toString());
-        hitArea.setAttribute('fill', 'transparent');
-        hitArea.setAttribute('stroke', 'transparent');
-        hitArea.setAttribute('data-annotation-id', annotation.id);
-        hitArea.style.cursor = 'pointer';
-        hitArea.style.pointerEvents = 'auto';
-        svg.appendChild(hitArea);
-      }
+      const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
+      hitArea.setAttribute('cx', cx.toString());
+      hitArea.setAttribute('cy', cy.toString());
+      hitArea.setAttribute('rx', (rx + 10).toString()); // Extend hit area
+      hitArea.setAttribute('ry', (ry + 10).toString());
+      hitArea.setAttribute('fill', 'transparent');
+      hitArea.setAttribute('stroke', 'transparent');
+      hitArea.setAttribute('data-annotation-id', annotation.id);
+      hitArea.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
+      hitArea.style.cursor = isSelectionMode ? 'pointer' : 'default';
+      svg.appendChild(hitArea);
     } else if (annotation.type === 'highlight' && points.length >= 2) {
       // For highlight, we'll create a rectangle with semi-transparent fill
       const x = Math.min(...points.map(p => p.x));
@@ -2364,11 +2352,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       rect.setAttribute('stroke-width', '1');
       rect.setAttribute('data-annotation-id', annotation.id);
       
-      // Add click handler for selection
-      if (isSelectionMode) {
-        rect.style.cursor = 'pointer';
-        rect.style.pointerEvents = 'auto';
-      }
+      // Set pointer-events and cursor for selection (event delegation handles clicks)
+      rect.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
+      rect.style.cursor = isSelectionMode ? 'pointer' : 'default';
       
       svg.appendChild(rect);
     }
@@ -4423,6 +4409,33 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
   }, [currentPage, currentViewport, onPageShown, localTakeoffMeasurements, renderTakeoffAnnotations, pdfDocument]);
 
+  // CRITICAL FIX: Update pointer-events on all markup elements after render
+  // This ensures markups are always selectable when in selection mode, even after page changes
+  useEffect(() => {
+    if (!svgOverlayRef.current || !isSelectionMode) return;
+    
+    // Use requestAnimationFrame to ensure DOM is ready after render
+    requestAnimationFrame(() => {
+      if (!svgOverlayRef.current) return;
+      
+      // Update all measurement elements
+      const measurementElements = svgOverlayRef.current.querySelectorAll('[data-measurement-id]');
+      measurementElements.forEach((el) => {
+        const element = el as SVGElement;
+        element.style.pointerEvents = 'auto';
+        element.style.cursor = 'pointer';
+      });
+      
+      // Update all annotation elements
+      const annotationElements = svgOverlayRef.current.querySelectorAll('[data-annotation-id]');
+      annotationElements.forEach((el) => {
+        const element = el as SVGElement;
+        element.style.pointerEvents = 'auto';
+        element.style.cursor = 'pointer';
+      });
+    });
+  }, [currentPage, localTakeoffMeasurements, localAnnotations, isSelectionMode]);
+
   // Clear current measurement state when page changes
   useEffect(() => {
     setCurrentMeasurement([]);
@@ -4776,8 +4789,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                     return;
                   }
                   
-                  // Handle measurement selection (measurements have their own click handlers via addEventListener)
-                  // But we can also handle it here as a fallback
+                  // Handle measurement selection (event delegation handles all clicks)
                   if (measurementId && isSelectionMode) {
                     e.stopPropagation();
                     setSelectedMarkupId(measurementId);
