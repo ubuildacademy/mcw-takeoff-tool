@@ -752,6 +752,22 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Clear existing annotations completely - this ensures no cross-page contamination
     svgOverlay.innerHTML = '';
     
+    // CRITICAL: Add hit-area FIRST so it's behind markups in z-order
+    // This ensures markups can receive clicks even if hit-area is present
+    const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    hitArea.setAttribute('id', 'hit-area');
+    hitArea.setAttribute('width', '100%');
+    hitArea.setAttribute('height', '100%');
+    hitArea.setAttribute('fill', 'transparent');
+    // In selection mode, hit-area must have pointer-events: 'none' so clicks pass through to markup elements
+    if (isSelectionMode) {
+      hitArea.setAttribute('pointer-events', 'none');
+    } else {
+      const shouldCaptureClicks = isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
+      hitArea.setAttribute('pointer-events', shouldCaptureClicks ? 'all' : 'none');
+    }
+    svgOverlay.appendChild(hitArea);
+    
     // CRITICAL: Only render measurements for the specific page being rendered
     // Filter by page BEFORE iterating to prevent any cross-page contamination
     const pageMeasurements = localTakeoffMeasurements.filter(
@@ -918,8 +934,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             element.setAttribute('stroke', defaultColor);
             element.setAttribute('stroke-width', defaultStrokeWidth);
           } else if (element.tagName === 'circle') {
-            element.setAttribute('stroke', '#ffffff');
-            element.setAttribute('stroke-width', '2');
+            // Count markups: no stroke when not selected (only red stroke when selected)
+            element.setAttribute('stroke', 'none');
+            element.removeAttribute('stroke-width');
           }
         }
       });
@@ -1187,11 +1204,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     const hitArea = svgOverlayRef.current.querySelector('#hit-area') as SVGRectElement;
     if (hitArea) {
-      // When measuring, set pointer-events to 'none' so clicks pass through to canvas
-      // This allows proper double-click detection on the canvas
-      // For other modes, set to 'all' to capture clicks for selection/annotation/etc.
-      const shouldCaptureClicks = isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
-      hitArea.setAttribute('pointer-events', shouldCaptureClicks ? 'all' : 'none');
+      // CRITICAL: In selection mode, hit-area must have pointer-events: 'none' so clicks pass through to markup elements
+      // When measuring, hit-area has pointer-events: 'none' so clicks pass through to canvas for double-click support
+      // For annotation/calibration/visual search modes, hit-area captures clicks for drawing
+      if (isSelectionMode) {
+        hitArea.setAttribute('pointer-events', 'none');
+      } else {
+        const shouldCaptureClicks = isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
+        hitArea.setAttribute('pointer-events', shouldCaptureClicks ? 'all' : 'none');
+      }
     }
     
     // CRITICAL FIX: Update pointer-events on all markup elements when selection mode changes
@@ -1271,11 +1292,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     
     // Update hit-area pointer-events based on current mode
-    // This ensures clicks pass through to canvas when measuring (for double-click support)
+    // CRITICAL: In selection mode, hit-area must have pointer-events: 'none' so clicks pass through to markup elements
+    // When measuring, hit-area has pointer-events: 'none' so clicks pass through to canvas for double-click support
+    // For annotation/calibration/visual search modes, hit-area captures clicks for drawing
     const hitArea = svgOverlay.querySelector('#hit-area') as SVGRectElement;
     if (hitArea) {
-      const shouldCaptureClicks = isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
-      hitArea.setAttribute('pointer-events', shouldCaptureClicks ? 'all' : 'none');
+      // In selection mode, we want clicks to reach markup elements, so hit-area should not intercept
+      // In other interactive modes (calibration, annotation, visual search), hit-area captures clicks for drawing
+      if (isSelectionMode) {
+        hitArea.setAttribute('pointer-events', 'none');
+      } else {
+        const shouldCaptureClicks = isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
+        hitArea.setAttribute('pointer-events', shouldCaptureClicks ? 'all' : 'none');
+      }
     }
     
     // Always re-render all annotations for this page, regardless of current state
@@ -1780,8 +1809,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         circle.setAttribute('cy', point.y.toString());
         circle.setAttribute('r', '8');
         circle.setAttribute('fill', measurement.color || measurement.conditionColor || '#74b9ff');
-        circle.setAttribute('stroke', isSelected ? '#ff0000' : '#ffffff');
-        circle.setAttribute('stroke-width', isSelected ? '3' : '2');
+        // Only show red stroke when selected, no stroke when not selected
+        if (isSelected) {
+          circle.setAttribute('stroke', '#ff0000');
+          circle.setAttribute('stroke-width', '3');
+        } else {
+          circle.setAttribute('stroke', 'none');
+        }
         circle.setAttribute('data-measurement-id', measurement.id);
         
         // Set pointer-events and cursor for selection (event delegation handles clicks)
@@ -4748,8 +4782,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               onMouseLeave={() => setMousePosition(null)}
               onClick={(e) => {
                 // Handle clicks in selection mode, calibration mode, annotation mode, or visual search mode
-                // Note: Measurement clicks pass through to canvas (hit-area has pointer-events: 'none')
-                // This allows proper double-click detection on the canvas
+                // CRITICAL: In selection mode, hit-area has pointer-events: 'none' so clicks pass through to markup elements
+                // When measuring, hit-area also has pointer-events: 'none' so clicks pass through to canvas for double-click detection
                 if (isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol)) {
                   const target = e.target as SVGElement;
                   
