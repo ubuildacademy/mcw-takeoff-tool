@@ -921,9 +921,29 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Update previously selected markup (deselect)
     if (previousSelectedId) {
       // Find measurement elements (main shape elements, not hit areas)
+      // CRITICAL: Exclude hit areas by checking if element has transparent fill/stroke
       const prevMeasurementElements = svg.querySelectorAll(`[data-measurement-id="${previousSelectedId}"]`);
       prevMeasurementElements.forEach((el) => {
         const element = el as SVGElement;
+        
+        // Skip hit areas - they have transparent fill or are much larger than the main element
+        const fill = element.getAttribute('fill');
+        const stroke = element.getAttribute('stroke');
+        const isHitArea = fill === 'transparent' || stroke === 'transparent';
+        
+        // For circles, also check radius - hit areas are much larger (r=20 vs r=8)
+        if (element.tagName === 'circle') {
+          const r = parseFloat(element.getAttribute('r') || '0');
+          if (r > 15) { // Hit area circles have r=20, main circles have r=8
+            return; // Skip this element - it's a hit area
+          }
+        }
+        
+        // Skip if this is a hit area
+        if (isHitArea) {
+          return;
+        }
+        
         const measurement = localTakeoffMeasurements.find(m => m.id === previousSelectedId);
         if (measurement) {
           const defaultColor = measurement.color || measurement.conditionColor || '#000000';
@@ -978,9 +998,28 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Update newly selected markup (select)
     if (newSelectedId) {
       // Find measurement elements (main shape elements, not hit areas)
+      // CRITICAL: Exclude hit areas by checking if element has transparent fill/stroke (hit areas are always transparent)
       const newMeasurementElements = svg.querySelectorAll(`[data-measurement-id="${newSelectedId}"]`);
       newMeasurementElements.forEach((el) => {
         const element = el as SVGElement;
+        
+        // Skip hit areas - they have transparent fill or are much larger than the main element
+        const fill = element.getAttribute('fill');
+        const stroke = element.getAttribute('stroke');
+        const isHitArea = fill === 'transparent' || stroke === 'transparent';
+        
+        // For circles, also check radius - hit areas are much larger (r=20 vs r=8)
+        if (element.tagName === 'circle') {
+          const r = parseFloat(element.getAttribute('r') || '0');
+          if (r > 15) { // Hit area circles have r=20, main circles have r=8
+            return; // Skip this element - it's a hit area
+          }
+        }
+        
+        // Skip if this is a hit area
+        if (isHitArea) {
+          return;
+        }
         
         // Update stroke color and width for selected state
         if (element.tagName === 'polyline' || element.tagName === 'polygon' || element.tagName === 'path') {
