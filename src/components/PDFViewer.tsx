@@ -1115,22 +1115,29 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // CRITICAL FIX: Include activePoints.length check to ensure continuous linear preview renders
       // CRITICAL: Always render if we have markups OR are in an interactive mode
       const hasActivePoints = isContinuousDrawing && activePoints.length > 0;
-      const hasMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0;
       const isInteractiveMode = isMeasuring || isCalibrating || currentMeasurement.length > 0 || hasActivePoints || isAnnotating || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
+      
+      // CRITICAL: Check both local measurements AND store to handle race conditions
+      const storeMeasurements = getPageTakeoffMeasurements(currentProjectId || '', file?.id || '', currentPage);
+      const hasLocalMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0;
+      const hasStoreMarkups = storeMeasurements.length > 0;
+      const hasMarkups = hasLocalMarkups || hasStoreMarkups;
       const shouldRender = hasMarkups || isInteractiveMode;
       
       if (shouldRender) {
-        // CRITICAL: Always render markups if they exist, regardless of selection mode
+        // CRITICAL: Always render markups if they exist (in local state or store), regardless of selection mode
         // This ensures markups are visible on initial load and persist correctly
         renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
       } else {
         // LAYER THRASH PREVENTION: Clear overlay when measurements are empty to prevent stale renderings
         // CRITICAL: Don't clear if measurements are still loading - this prevents race conditions
-        // Only clear if we're sure there are no markups AND measurements have finished loading
+        // Only clear if we're absolutely sure there are no markups AND measurements have finished loading
+        // AND we've double-checked the store
         if (svgOverlayRef.current && pdfDocument && !measurementsLoading) {
-          // Double-check store to see if measurements might exist before clearing
-          const storeMeasurements = getPageTakeoffMeasurements(currentProjectId || '', file?.id || '', currentPage);
-          if (storeMeasurements.length === 0 && localAnnotations.length === 0) {
+          // Triple-check: local state, store, and annotations - all must be empty
+          if (localTakeoffMeasurements.length === 0 && 
+              storeMeasurements.length === 0 && 
+              localAnnotations.length === 0) {
             svgOverlayRef.current.innerHTML = '';
           }
         }
