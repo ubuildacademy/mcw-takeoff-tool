@@ -193,6 +193,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Track last fully rendered PDF scale to support interactive CSS zoom while blocking renders
   const lastRenderedScaleRef = useRef(1.0);
   
+  // Ref to track retry timeout for pointer-events updates (ensures proper cleanup)
+  const pointerEventsRetryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
   // Helper to apply/remove interactive CSS zoom transforms when renders are blocked
   const applyInteractiveZoomTransforms = useCallback(() => {
     const canvas = pdfCanvasRef.current as HTMLCanvasElement | null;
@@ -1331,50 +1334,106 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // This ensures markups are always selectable when in selection mode, regardless of when they were rendered
     // We use event delegation via the SVG onClick handler, so we just need to ensure pointer-events are correct
     const updateMarkupPointerEvents = () => {
-      if (!svgOverlayRef.current) return;
+      if (!svgOverlayRef.current) return 0; // Return count of updated elements
       
-      // Update all measurement elements
+      let updatedCount = 0;
+      
+      // Update all measurement elements (excluding hit areas)
       const measurementElements = svgOverlayRef.current.querySelectorAll('[data-measurement-id]');
       measurementElements.forEach((el) => {
         const element = el as SVGElement;
-        if (isSelectionMode) {
-          element.style.pointerEvents = 'auto';
-          element.style.cursor = 'pointer';
-        } else {
-          element.style.pointerEvents = 'none';
-          element.style.cursor = 'default';
+        
+        // Skip hit areas - they have transparent fill/stroke or are much larger
+        const fill = element.getAttribute('fill');
+        const stroke = element.getAttribute('stroke');
+        const isHitArea = fill === 'transparent' || stroke === 'transparent';
+        
+        // For circles, also check radius - hit areas are much larger (r=20 vs r=8)
+        if (element.tagName === 'circle') {
+          const r = parseFloat(element.getAttribute('r') || '0');
+          if (r > 15) {
+            return; // Skip hit area
+          }
+        }
+        
+        if (!isHitArea) {
+          // Set pointer-events based on selection mode
+          element.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
+          element.style.cursor = isSelectionMode ? 'pointer' : 'default';
+          updatedCount++;
         }
       });
       
-      // Update all annotation elements
+      // Update all annotation elements (excluding hit areas)
       const annotationElements = svgOverlayRef.current.querySelectorAll('[data-annotation-id]');
       annotationElements.forEach((el) => {
         const element = el as SVGElement;
-        if (isSelectionMode) {
-          element.style.pointerEvents = 'auto';
-          element.style.cursor = 'pointer';
-        } else {
-          element.style.pointerEvents = 'none';
-          element.style.cursor = 'default';
+        
+        // Skip hit areas
+        const fill = element.getAttribute('fill');
+        const stroke = element.getAttribute('stroke');
+        const isHitArea = fill === 'transparent' || stroke === 'transparent';
+        
+        if (!isHitArea) {
+          // Set pointer-events based on selection mode
+          element.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
+          element.style.cursor = isSelectionMode ? 'pointer' : 'default';
+          updatedCount++;
         }
       });
+      
+      return updatedCount;
     };
     
-    // Update immediately
-    updateMarkupPointerEvents();
+    // Use requestAnimationFrame to ensure DOM is ready before updating pointer-events
+    // This prevents race conditions where markups haven't been rendered yet
+    const rafId = requestAnimationFrame(() => {
+      if (!svgOverlayRef.current) return;
+      
+      const updatedCount = updateMarkupPointerEvents();
+      
+      // If we're in selection mode and expected markups but found none, retry after a short delay
+      // This handles the case where markups are rendered asynchronously after selection mode is enabled
+      // Only retry once to avoid infinite loops
+      if (isSelectionMode && updatedCount === 0 && (localTakeoffMeasurements.length > 0 || localAnnotations.length > 0)) {
+        // Clear any existing retry timeout before setting a new one
+        if (pointerEventsRetryTimeoutRef.current) {
+          clearTimeout(pointerEventsRetryTimeoutRef.current);
+        }
+        pointerEventsRetryTimeoutRef.current = setTimeout(() => {
+          if (svgOverlayRef.current) {
+            updateMarkupPointerEvents();
+          }
+          pointerEventsRetryTimeoutRef.current = null;
+        }, 100); // Small delay to allow async markup rendering
+      }
+    });
     
     // Also re-render markups when selection mode changes to ensure they're properly configured
     // This handles the case where markups were rendered before selection mode was enabled
     // CRITICAL: Re-render even during deselection cooldown to ensure markups are selectable
+    let reRenderRafId: number | null = null;
     if (isSelectionMode && currentViewport && pdfPageRef.current) {
       // Use requestAnimationFrame to avoid race conditions with other renders
-      requestAnimationFrame(() => {
+      reRenderRafId = requestAnimationFrame(() => {
         if (svgOverlayRef.current && currentViewport && pdfPageRef.current) {
           renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
         }
       });
     }
-  }, [isMeasuring, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentViewport, currentPage, renderTakeoffAnnotations]);
+    
+    // Cleanup: cancel pending requestAnimationFrame callbacks and clear retry timeout
+    return () => {
+      cancelAnimationFrame(rafId);
+      if (reRenderRafId !== null) {
+        cancelAnimationFrame(reRenderRafId);
+      }
+      if (pointerEventsRetryTimeoutRef.current) {
+        clearTimeout(pointerEventsRetryTimeoutRef.current);
+        pointerEventsRetryTimeoutRef.current = null;
+      }
+    };
+  }, [isMeasuring, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentViewport, currentPage, renderTakeoffAnnotations, localTakeoffMeasurements, localAnnotations]);
 
   // Page visibility handler - ensures overlay is properly initialized when page becomes visible
   const onPageShown = useCallback((pageNum: number, viewport: any) => {
