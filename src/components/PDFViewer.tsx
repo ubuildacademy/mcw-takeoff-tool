@@ -1061,23 +1061,26 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (pdfDocument && currentViewport && !isRenderingRef.current) {
       // Only render if we have measurements, annotations, or if we're in measuring/annotation/visual search mode
       // CRITICAL FIX: Include activePoints.length check to ensure continuous linear preview renders
-      // CRITICAL: Also render when transitioning to selection mode to ensure markups are properly configured
+      // CRITICAL: Always render if we have markups OR are in an interactive mode
       const hasActivePoints = isContinuousDrawing && activePoints.length > 0;
-      const shouldRender = localTakeoffMeasurements.length > 0 || isMeasuring || isCalibrating || currentMeasurement.length > 0 || hasActivePoints || isAnnotating || localAnnotations.length > 0 || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol) || isSelectionMode;
+      const hasMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0;
+      const isInteractiveMode = isMeasuring || isCalibrating || currentMeasurement.length > 0 || hasActivePoints || isAnnotating || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
+      const shouldRender = hasMarkups || isInteractiveMode;
       
       if (shouldRender) {
-        // CRITICAL: Re-render markups when transitioning to selection mode, even during deselection cooldown
-        // The isDeselecting flag should only block PDF canvas renders, not markup overlay renders
+        // CRITICAL: Always render markups if they exist, regardless of selection mode
+        // This ensures markups are visible on initial load and persist correctly
         renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
       } else {
         // LAYER THRASH PREVENTION: Clear overlay when measurements are empty to prevent stale renderings
         // This ensures clean state when switching projects or when measurements are cleared
-        if (svgOverlayRef.current) {
+        // BUT: Only clear if we're sure there are no markups (not just during initial load)
+        if (svgOverlayRef.current && pdfDocument) {
           svgOverlayRef.current.innerHTML = '';
         }
       }
     }
-  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, renderTakeoffAnnotations, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentAnnotation, isContinuousDrawing, activePoints]);
+  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, renderTakeoffAnnotations, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentAnnotation, isContinuousDrawing, activePoints, pdfDocument]);
 
   // OPTIMIZED: Update only visual styling when selection changes (prevents flicker)
   const prevSelectedMarkupIdRef = useRef<string | null>(null);
@@ -1126,7 +1129,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   }, [selectedMarkupId, updateMarkupSelection]);
   
   // CRITICAL: Trigger re-render of annotations after measurements are loaded
-  // This ensures markups appear immediately when returning to a page
+  // This ensures markups appear immediately when returning to a page or on initial load
   // Must be after renderTakeoffAnnotations is defined
   useEffect(() => {
     if (localTakeoffMeasurements.length > 0 && pdfDocument && !isRenderingRef.current) {
@@ -1138,6 +1141,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const renderWhenReady = () => {
         // Check if we're still on the same page and viewport is ready
         if (pdfPageRef.current && currentViewport) {
+          // CRITICAL: Always render markups when measurements are loaded, even during deselection cooldown
+          // This ensures markups are visible on initial load for both single-page and multi-page documents
           renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
           if (timeoutId) {
             clearTimeout(timeoutId);
@@ -4490,8 +4495,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // CRITICAL FIX: Update pointer-events on all markup elements after render or mode change
   // This ensures markups are always selectable when in selection mode, even after page changes or mode transitions
+  // Also ensures markups have correct pointer-events on initial load
   useEffect(() => {
-    if (!svgOverlayRef.current || !isSelectionMode) return;
+    if (!svgOverlayRef.current) return;
     
     // Use requestAnimationFrame to ensure DOM is ready after render
     requestAnimationFrame(() => {
@@ -4515,8 +4521,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
         
         if (!isHitArea) {
-          element.style.pointerEvents = 'auto';
-          element.style.cursor = 'pointer';
+          // Set pointer-events based on selection mode
+          element.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
+          element.style.cursor = isSelectionMode ? 'pointer' : 'default';
         }
       });
       
@@ -4530,8 +4537,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         const isHitArea = fill === 'transparent' || stroke === 'transparent';
         
         if (!isHitArea) {
-          element.style.pointerEvents = 'auto';
-          element.style.cursor = 'pointer';
+          // Set pointer-events based on selection mode
+          element.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
+          element.style.cursor = isSelectionMode ? 'pointer' : 'default';
         }
       });
     });
