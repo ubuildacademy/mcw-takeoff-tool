@@ -403,6 +403,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   
   // Load existing takeoff measurements for the current sheet - reactive to store changes
   const [localTakeoffMeasurements, setLocalTakeoffMeasurements] = useState<any[]>([]);
+  const [measurementsLoading, setMeasurementsLoading] = useState(false);
   
   // Load annotations for the entire sheet - reactive to store changes
   useEffect(() => {
@@ -424,8 +425,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   useEffect(() => {
     // CRITICAL: Clear measurements immediately when page changes to prevent cross-page contamination
     setLocalTakeoffMeasurements([]);
+    setMeasurementsLoading(true);
     
     if (!currentProjectId || !file?.id || !currentPage) {
+      setMeasurementsLoading(false);
       return;
     }
     
@@ -474,11 +477,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         // Final check before setting state
         if (!isCancelled) {
           setLocalTakeoffMeasurements(displayMeasurements);
+          setMeasurementsLoading(false);
         }
       } catch (error) {
         if (!isCancelled) {
           console.error('Error loading page measurements:', error);
           setLocalTakeoffMeasurements([]);
+          setMeasurementsLoading(false);
         }
       }
     };
@@ -488,6 +493,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Cleanup: mark as cancelled if page changes
     return () => {
       isCancelled = true;
+      setMeasurementsLoading(false);
     };
   }, [currentProjectId, file?.id, currentPage, loadPageTakeoffMeasurements, getPageTakeoffMeasurements]);
   
@@ -1073,14 +1079,18 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
       } else {
         // LAYER THRASH PREVENTION: Clear overlay when measurements are empty to prevent stale renderings
-        // This ensures clean state when switching projects or when measurements are cleared
-        // BUT: Only clear if we're sure there are no markups (not just during initial load)
-        if (svgOverlayRef.current && pdfDocument) {
-          svgOverlayRef.current.innerHTML = '';
+        // CRITICAL: Don't clear if measurements are still loading - this prevents race conditions
+        // Only clear if we're sure there are no markups AND measurements have finished loading
+        if (svgOverlayRef.current && pdfDocument && !measurementsLoading) {
+          // Double-check store to see if measurements might exist before clearing
+          const storeMeasurements = getPageTakeoffMeasurements(currentProjectId || '', file?.id || '', currentPage);
+          if (storeMeasurements.length === 0 && localAnnotations.length === 0) {
+            svgOverlayRef.current.innerHTML = '';
+          }
         }
       }
     }
-  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, renderTakeoffAnnotations, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentAnnotation, isContinuousDrawing, activePoints, pdfDocument]);
+  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, renderTakeoffAnnotations, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentAnnotation, isContinuousDrawing, activePoints, pdfDocument, measurementsLoading, currentProjectId, file?.id, getPageTakeoffMeasurements]);
 
   // OPTIMIZED: Update only visual styling when selection changes (prevents flicker)
   const prevSelectedMarkupIdRef = useRef<string | null>(null);
