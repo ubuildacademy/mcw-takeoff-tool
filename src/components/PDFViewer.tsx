@@ -754,8 +754,59 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       svgOverlay.setAttribute('viewBox', `0 0 ${viewport.width} ${viewport.height}`);
     }
     
+    // CRITICAL: Check store directly for measurements that might not be in localTakeoffMeasurements yet
+    // This prevents clearing markups during initial load race conditions
+    const storeMeasurements = getPageTakeoffMeasurements(currentProjectId || '', file?.id || '', pageNum);
+    
+    // CRITICAL: Only render measurements for the specific page being rendered
+    // Filter by page BEFORE iterating to prevent any cross-page contamination
+    // Use local measurements if available, otherwise fall back to store measurements
+    let pageMeasurements = localTakeoffMeasurements.filter(
+      (measurement) => measurement.pdfPage === pageNum
+    );
+    
+    // If local measurements are empty but store has measurements, convert store measurements to display format
+    if (pageMeasurements.length === 0 && storeMeasurements.length > 0) {
+      pageMeasurements = storeMeasurements.map(apiMeasurement => {
+        try {
+          return {
+            id: apiMeasurement.id,
+            type: apiMeasurement.type,
+            points: apiMeasurement.points,
+            calculatedValue: apiMeasurement.calculatedValue,
+            unit: apiMeasurement.unit,
+            conditionId: apiMeasurement.conditionId,
+            conditionName: apiMeasurement.conditionName,
+            color: apiMeasurement.conditionColor,
+            timestamp: new Date(apiMeasurement.timestamp).getTime(),
+            pdfPage: apiMeasurement.pdfPage,
+            pdfCoordinates: apiMeasurement.pdfCoordinates,
+            perimeterValue: apiMeasurement.perimeterValue || null,
+            areaValue: apiMeasurement.areaValue || null,
+            cutouts: apiMeasurement.cutouts || null,
+            netCalculatedValue: apiMeasurement.netCalculatedValue || null
+          };
+        } catch (error) {
+          console.error('Error processing measurement:', error, apiMeasurement);
+          return null;
+        }
+      }).filter(Boolean) as any[];
+    }
+    
+    const hasLocalMeasurements = pageMeasurements.length > 0;
+    const hasAnnotations = localAnnotations.filter(a => a.pageNumber === pageNum).length > 0;
+    const hasAnyMarkups = hasLocalMeasurements || hasAnnotations;
+    
+    // CRITICAL: Only clear overlay if we're sure there are no markups AND measurements have finished loading
+    // This prevents race conditions where measurements are loading but overlay gets cleared
+    if (!hasAnyMarkups && !measurementsLoading) {
+      // Only clear if we're certain there are no markups
+      svgOverlay.innerHTML = '';
+      return; // Early return - nothing to render
+    }
     
     // Clear existing annotations completely - this ensures no cross-page contamination
+    // We only reach here if we have markups to render
     svgOverlay.innerHTML = '';
     
     // CRITICAL: Add hit-area FIRST so it's behind markups in z-order
@@ -774,12 +825,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     svgOverlay.appendChild(hitArea);
     
-    // CRITICAL: Only render measurements for the specific page being rendered
-    // Filter by page BEFORE iterating to prevent any cross-page contamination
-    const pageMeasurements = localTakeoffMeasurements.filter(
-      (measurement) => measurement.pdfPage === pageNum
-    );
-    
+    // Render measurements for this page
     pageMeasurements.forEach((measurement) => {
       // Removed verbose logging - was causing console spam
       renderSVGMeasurement(svgOverlay, measurement, viewport, page);
@@ -916,7 +962,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       renderRunningLengthDisplay(svgOverlay, viewport);
     }
     
-  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, cutoutMode, currentCutout, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionBox]);
+  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, cutoutMode, currentCutout, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionBox, currentProjectId, file?.id, getPageTakeoffMeasurements, measurementsLoading]);
 
   // OPTIMIZED: Update only visual styling of markups when selection changes (no full re-render)
   const updateMarkupSelection = useCallback((newSelectedId: string | null, previousSelectedId: string | null) => {
