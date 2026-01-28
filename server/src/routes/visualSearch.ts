@@ -95,6 +95,26 @@ router.post('/complete-search', async (req, res) => {
       projectId
     );
 
+    // Step 1.5: Save the template image to the condition so it can be displayed in the UI
+    if (template.imageData) {
+      try {
+        const conditions = await storage.getConditions();
+        const existingCondition = conditions.find(c => c.id === conditionId);
+        if (existingCondition) {
+          const updatedCondition = {
+            ...existingCondition,
+            searchImage: template.imageData,
+            searchImageId: template.id
+          };
+          await storage.saveCondition(updatedCondition);
+          console.log('✅ Saved template image to condition');
+        }
+      } catch (error) {
+        console.error('⚠️ Failed to save template image to condition:', error);
+        // Don't fail the whole workflow if saving the image fails
+      }
+    }
+
     // Step 2: Search for matching symbols (pass pageNumber and projectId)
     const searchResult = await visualSearchService.searchForSymbols(
       conditionId,

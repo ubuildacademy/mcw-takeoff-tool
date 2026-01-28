@@ -1916,23 +1916,32 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                 </p>
                 
                 {/* Visual Search Image Preview */}
-                {condition.type === 'visual-search' && condition.searchImage && (
-                  <div className="mb-3">
-                    <div className="text-xs text-gray-500 mb-1">Search Image:</div>
-                    <div className="border border-gray-200 rounded-lg p-2 bg-gray-50 flex items-center justify-center min-h-[80px]">
-                      <img 
-                        src={condition.searchImage.startsWith('data:') || condition.searchImage.startsWith('http')
-                          ? condition.searchImage 
-                          : `data:image/png;base64,${condition.searchImage}`}
-                        alt="Search template"
-                        className="max-w-full max-h-32 object-contain rounded"
-                        onError={(e) => {
-                          // Hide image on error
-                          (e.target as HTMLImageElement).style.display = 'none';
-                        }}
-                      />
-                    </div>
-                  </div>
+                {condition.type === 'visual-search' && (
+                  <>
+                    {condition.searchImage ? (
+                      <div className="mb-3">
+                        <div className="text-xs text-gray-500 mb-1">Search Image:</div>
+                        <div className="border border-gray-200 rounded-lg p-2 bg-gray-50 flex items-center justify-center min-h-[80px]">
+                          <img 
+                            src={condition.searchImage.startsWith('data:') || condition.searchImage.startsWith('http')
+                              ? condition.searchImage 
+                              : `data:image/png;base64,${condition.searchImage}`}
+                            alt="Search template"
+                            className="max-w-full max-h-32 object-contain rounded"
+                            onError={(e) => {
+                              console.error('Failed to load search image:', condition.searchImage?.substring(0, 50));
+                              // Hide image on error
+                              (e.target as HTMLImageElement).style.display = 'none';
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mb-2 text-xs text-gray-400 italic">
+                        No search image set
+                      </div>
+                    )}
+                  </>
                 )}
                 
                 <div className="flex items-center gap-4 text-xs">

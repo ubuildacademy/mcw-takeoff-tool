@@ -547,6 +547,11 @@ export function TakeoffWorkspace() {
         // Refresh the takeoff measurements to show the new count measurements
         await loadProjectTakeoffMeasurements(projectId);
         
+        // Refresh conditions to get the updated condition with searchImage
+        if (projectId) {
+          await loadProjectConditions(projectId);
+        }
+        
         // Exit visual search mode
         setVisualSearchMode(false);
         setVisualSearchCondition(null);
