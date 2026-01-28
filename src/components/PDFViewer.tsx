@@ -193,9 +193,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Track last fully rendered PDF scale to support interactive CSS zoom while blocking renders
   const lastRenderedScaleRef = useRef(1.0);
   
-  // Ref to track retry timeout for pointer-events updates (ensures proper cleanup)
-  const pointerEventsRetryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  
   // Helper to apply/remove interactive CSS zoom transforms when renders are blocked
   const applyInteractiveZoomTransforms = useCallback(() => {
     const canvas = pdfCanvasRef.current as HTMLCanvasElement | null;
@@ -275,6 +272,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   } | null>(null);
   const renderTaskRef = useRef<any>(null);
   const isRenderingRef = useRef<boolean>(false);
+  const isMarkupRenderingRef = useRef<boolean>(false);
+  const pendingMarkupRenderRef = useRef<{ pageNum: number; viewport: any; page?: any } | null>(null);
+  const renderTakeoffAnnotationsRef = useRef<((pageNum: number, viewport: any, page?: any) => void) | null>(null);
   const [isComponentMounted, setIsComponentMounted] = useState(false);
   const prevCalibratingRef = useRef(false);
   
@@ -739,6 +739,94 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
   }, [file?.id]);
 
+  // Helper function to update pointer-events on all markup elements
+  // This is called synchronously after rendering to ensure markups are selectable
+  const updateMarkupPointerEvents = useCallback(() => {
+    if (!svgOverlayRef.current) return;
+    
+    // Update all measurement elements (excluding hit areas)
+    const measurementElements = svgOverlayRef.current.querySelectorAll('[data-measurement-id]');
+    measurementElements.forEach((el) => {
+      const element = el as SVGElement;
+      
+      // Skip hit areas - they have transparent fill/stroke or are much larger
+      const fill = element.getAttribute('fill');
+      const stroke = element.getAttribute('stroke');
+      const isHitArea = fill === 'transparent' || stroke === 'transparent';
+      
+      // For circles, also check radius - hit areas are much larger (r=20 vs r=8)
+      if (element.tagName === 'circle') {
+        const r = parseFloat(element.getAttribute('r') || '0');
+        if (r > 15) {
+          return; // Skip hit area
+        }
+      }
+      
+      if (!isHitArea) {
+        // Set pointer-events based on selection mode
+        element.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
+        element.style.cursor = isSelectionMode ? 'pointer' : 'default';
+      }
+    });
+    
+    // Update all annotation elements (excluding hit areas)
+    const annotationElements = svgOverlayRef.current.querySelectorAll('[data-annotation-id]');
+    annotationElements.forEach((el) => {
+      const element = el as SVGElement;
+      
+      // Skip hit areas
+      const fill = element.getAttribute('fill');
+      const stroke = element.getAttribute('stroke');
+      const isHitArea = fill === 'transparent' || stroke === 'transparent';
+      
+      if (!isHitArea) {
+        // Set pointer-events based on selection mode
+        element.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
+        element.style.cursor = isSelectionMode ? 'pointer' : 'default';
+      }
+    });
+  }, [isSelectionMode]);
+
+  // Unified renderer with debounce pattern - coordinates rendering and pointer-events updates
+  // Prevents cascading renders while ensuring eventual consistency
+  // Uses a ref to renderTakeoffAnnotations to avoid circular dependency issues
+  const renderMarkupsWithPointerEvents = useCallback(async (
+    pageNum: number, 
+    viewport: any, 
+    page?: any
+  ): Promise<void> => {
+    // Store latest intent if render is in progress
+    if (isMarkupRenderingRef.current) {
+      pendingMarkupRenderRef.current = { pageNum, viewport, page };
+      return;
+    }
+    
+    if (!svgOverlayRef.current || !viewport || !renderTakeoffAnnotationsRef.current) return;
+    
+    isMarkupRenderingRef.current = true;
+    
+    try {
+      // Perform synchronous DOM operations
+      renderTakeoffAnnotationsRef.current(pageNum, viewport, page);
+      
+      // Immediately update pointer-events synchronously after render
+      updateMarkupPointerEvents();
+    } finally {
+      isMarkupRenderingRef.current = false;
+      
+      // Process any pending render if one was requested during this render
+      if (pendingMarkupRenderRef.current) {
+        const nextParams = pendingMarkupRenderRef.current;
+        pendingMarkupRenderRef.current = null;
+        // Schedule next render on next tick to avoid blocking
+        setTimeout(() => renderMarkupsWithPointerEvents(
+          nextParams.pageNum, 
+          nextParams.viewport, 
+          nextParams.page
+        ), 0);
+      }
+    }
+  }, [updateMarkupPointerEvents]);
 
   // SVG-based takeoff annotation renderer - Page-specific with viewport isolation
   const renderTakeoffAnnotations = useCallback((pageNum: number, viewport: any, page?: any) => {
@@ -1130,7 +1218,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       if (shouldRender) {
         // CRITICAL: Always render markups if they exist (in local state or store), regardless of selection mode
         // This ensures markups are visible on initial load and persist correctly
-        renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+        renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current);
       } else {
         // LAYER THRASH PREVENTION: Clear overlay when measurements are empty to prevent stale renderings
         // CRITICAL: Don't clear if measurements are still loading - this prevents race conditions
@@ -1146,7 +1234,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
       }
     }
-  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, renderTakeoffAnnotations, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentAnnotation, isContinuousDrawing, activePoints, pdfDocument, measurementsLoading, currentProjectId, file?.id, getPageTakeoffMeasurements]);
+  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, renderMarkupsWithPointerEvents, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentAnnotation, isContinuousDrawing, activePoints, pdfDocument, measurementsLoading, currentProjectId, file?.id, getPageTakeoffMeasurements]);
 
   // OPTIMIZED: Update only visual styling when selection changes (prevents flicker)
   const prevSelectedMarkupIdRef = useRef<string | null>(null);
@@ -1209,7 +1297,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         if (pdfPageRef.current && currentViewport) {
           // CRITICAL: Always render markups when measurements are loaded, even during deselection cooldown
           // This ensures markups are visible on initial load for both single-page and multi-page documents
-          renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+          renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current);
           if (timeoutId) {
             clearTimeout(timeoutId);
             timeoutId = null;
@@ -1233,7 +1321,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
       };
     }
-  }, [localTakeoffMeasurements, pdfDocument, currentViewport, currentPage, renderTakeoffAnnotations]);
+  }, [localTakeoffMeasurements, pdfDocument, currentViewport, currentPage, renderMarkupsWithPointerEvents]);
+
+  // Update the ref whenever renderTakeoffAnnotations changes
+  useEffect(() => {
+    renderTakeoffAnnotationsRef.current = renderTakeoffAnnotations;
+  }, [renderTakeoffAnnotations]);
 
   // Update pageViewports immediately when scale/rotation changes
   // This ensures currentViewport is always current even when PDF rendering is blocked
@@ -1267,12 +1360,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // This ensures annotations stay aligned during zoom
       const hasMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0;
       if (hasMarkups) {
-        requestAnimationFrame(() => {
-          renderTakeoffAnnotations(currentPage, freshViewport, pdfPageRef.current);
-        });
+        renderMarkupsWithPointerEvents(currentPage, freshViewport, pdfPageRef.current);
       }
     }
-  }, [pdfDocument, viewState.scale, viewState.rotation, currentPage, localTakeoffMeasurements, localAnnotations, renderTakeoffAnnotations]);
+  }, [pdfDocument, viewState.scale, viewState.rotation, currentPage, localTakeoffMeasurements, localAnnotations, renderMarkupsWithPointerEvents]);
 
   // Force immediate re-render of markups when viewport changes
   const forceMarkupReRender = useCallback(() => {
@@ -1291,9 +1382,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       }));
       
       // Immediately re-render all markups
-      requestAnimationFrame(() => {
-        renderTakeoffAnnotations(currentPage, freshViewport, pdfPageRef.current);
-      });
+      renderMarkupsWithPointerEvents(currentPage, freshViewport, pdfPageRef.current);
     }
   }, [pdfDocument, viewState.scale, viewState.rotation, localTakeoffMeasurements, localAnnotations, currentPage, renderTakeoffAnnotations]);
 
@@ -1306,14 +1395,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     const hasMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0;
     if (pdfDocument && currentViewport && hasMarkups) {
-      // Use requestAnimationFrame to ensure the viewport state is fully updated
-      requestAnimationFrame(() => {
-        renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
-      });
+      // Render markups with updated viewport state
+      renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current);
     }
-  }, [viewState.scale, viewState.rotation, pdfDocument, currentViewport, localTakeoffMeasurements, localAnnotations, currentPage, renderTakeoffAnnotations]);
+  }, [viewState.scale, viewState.rotation, pdfDocument, currentViewport, localTakeoffMeasurements, localAnnotations, currentPage, renderMarkupsWithPointerEvents]);
 
   // Update hit-area pointer-events when mode changes
+  // This effect only handles the hit-area element, not individual markup elements
+  // Markup pointer-events are handled by renderMarkupsWithPointerEvents
   useEffect(() => {
     if (!svgOverlayRef.current) return;
     
@@ -1329,111 +1418,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         hitArea.setAttribute('pointer-events', shouldCaptureClicks ? 'all' : 'none');
       }
     }
-    
-    // CRITICAL FIX: Update pointer-events on all markup elements when selection mode changes
-    // This ensures markups are always selectable when in selection mode, regardless of when they were rendered
-    // We use event delegation via the SVG onClick handler, so we just need to ensure pointer-events are correct
-    const updateMarkupPointerEvents = () => {
-      if (!svgOverlayRef.current) return 0; // Return count of updated elements
-      
-      let updatedCount = 0;
-      
-      // Update all measurement elements (excluding hit areas)
-      const measurementElements = svgOverlayRef.current.querySelectorAll('[data-measurement-id]');
-      measurementElements.forEach((el) => {
-        const element = el as SVGElement;
-        
-        // Skip hit areas - they have transparent fill/stroke or are much larger
-        const fill = element.getAttribute('fill');
-        const stroke = element.getAttribute('stroke');
-        const isHitArea = fill === 'transparent' || stroke === 'transparent';
-        
-        // For circles, also check radius - hit areas are much larger (r=20 vs r=8)
-        if (element.tagName === 'circle') {
-          const r = parseFloat(element.getAttribute('r') || '0');
-          if (r > 15) {
-            return; // Skip hit area
-          }
-        }
-        
-        if (!isHitArea) {
-          // Set pointer-events based on selection mode
-          element.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
-          element.style.cursor = isSelectionMode ? 'pointer' : 'default';
-          updatedCount++;
-        }
-      });
-      
-      // Update all annotation elements (excluding hit areas)
-      const annotationElements = svgOverlayRef.current.querySelectorAll('[data-annotation-id]');
-      annotationElements.forEach((el) => {
-        const element = el as SVGElement;
-        
-        // Skip hit areas
-        const fill = element.getAttribute('fill');
-        const stroke = element.getAttribute('stroke');
-        const isHitArea = fill === 'transparent' || stroke === 'transparent';
-        
-        if (!isHitArea) {
-          // Set pointer-events based on selection mode
-          element.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
-          element.style.cursor = isSelectionMode ? 'pointer' : 'default';
-          updatedCount++;
-        }
-      });
-      
-      return updatedCount;
-    };
-    
-    // Use requestAnimationFrame to ensure DOM is ready before updating pointer-events
-    // This prevents race conditions where markups haven't been rendered yet
-    const rafId = requestAnimationFrame(() => {
-      if (!svgOverlayRef.current) return;
-      
-      const updatedCount = updateMarkupPointerEvents();
-      
-      // If we're in selection mode and expected markups but found none, retry after a short delay
-      // This handles the case where markups are rendered asynchronously after selection mode is enabled
-      // Only retry once to avoid infinite loops
-      if (isSelectionMode && updatedCount === 0 && (localTakeoffMeasurements.length > 0 || localAnnotations.length > 0)) {
-        // Clear any existing retry timeout before setting a new one
-        if (pointerEventsRetryTimeoutRef.current) {
-          clearTimeout(pointerEventsRetryTimeoutRef.current);
-        }
-        pointerEventsRetryTimeoutRef.current = setTimeout(() => {
-          if (svgOverlayRef.current) {
-            updateMarkupPointerEvents();
-          }
-          pointerEventsRetryTimeoutRef.current = null;
-        }, 100); // Small delay to allow async markup rendering
-      }
-    });
-    
-    // Also re-render markups when selection mode changes to ensure they're properly configured
-    // This handles the case where markups were rendered before selection mode was enabled
-    // CRITICAL: Re-render even during deselection cooldown to ensure markups are selectable
-    let reRenderRafId: number | null = null;
-    if (isSelectionMode && currentViewport && pdfPageRef.current) {
-      // Use requestAnimationFrame to avoid race conditions with other renders
-      reRenderRafId = requestAnimationFrame(() => {
-        if (svgOverlayRef.current && currentViewport && pdfPageRef.current) {
-          renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
-        }
-      });
-    }
-    
-    // Cleanup: cancel pending requestAnimationFrame callbacks and clear retry timeout
-    return () => {
-      cancelAnimationFrame(rafId);
-      if (reRenderRafId !== null) {
-        cancelAnimationFrame(reRenderRafId);
-      }
-      if (pointerEventsRetryTimeoutRef.current) {
-        clearTimeout(pointerEventsRetryTimeoutRef.current);
-        pointerEventsRetryTimeoutRef.current = null;
-      }
-    };
-  }, [isMeasuring, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentViewport, currentPage, renderTakeoffAnnotations, localTakeoffMeasurements, localAnnotations]);
+  }, [isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol]);
 
   // Page visibility handler - ensures overlay is properly initialized when page becomes visible
   const onPageShown = useCallback((pageNum: number, viewport: any) => {
@@ -1488,11 +1473,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Render immediately if we have measurements
     if (currentMeasurements.length > 0 || localTakeoffMeasurements.length > 0) {
-      renderTakeoffAnnotations(pageNum, viewport, pdfPageRef.current);
+      renderMarkupsWithPointerEvents(pageNum, viewport, pdfPageRef.current);
     }
     // Note: If no measurements, the reactive useEffect will handle rendering when they load
     // The reactive useEffect watches allTakeoffMeasurements and will trigger render when measurements arrive
-  }, [renderTakeoffAnnotations, localTakeoffMeasurements, currentProjectId, file?.id, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol]);
+  }, [renderMarkupsWithPointerEvents, localTakeoffMeasurements, currentProjectId, file?.id, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol]);
 
   // PDF render function with page-specific viewport isolation
   const renderPDFPage = useCallback(async (pageNum: number) => {
@@ -1608,11 +1593,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         );
         
         if (currentMeasurements.length > 0 || localTakeoffMeasurements.length > 0) {
-          renderTakeoffAnnotations(pageNum, viewport, page);
-          // And one more pass on next frame to catch late layout and ensure measurements are visible
-          requestAnimationFrame(() => {
-            renderTakeoffAnnotations(pageNum, viewport, page);
-          });
+          renderMarkupsWithPointerEvents(pageNum, viewport, page);
         }
       } catch {}
       
@@ -4396,12 +4377,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           scale: viewState.scale, 
           rotation: viewState.rotation 
         });
-        requestAnimationFrame(() => {
-          renderTakeoffAnnotations(currentPage, freshViewport, pdfPageRef.current);
-        });
+        renderMarkupsWithPointerEvents(currentPage, freshViewport, pdfPageRef.current);
       }
     }
-  }, [viewState.scale, isMeasuring, isCalibrating, currentMeasurement.length, isDeselecting, isAnnotating, showTextInput, applyInteractiveZoomTransforms, pdfDocument, localTakeoffMeasurements, localAnnotations, currentPage, renderTakeoffAnnotations]);
+  }, [viewState.scale, isMeasuring, isCalibrating, currentMeasurement.length, isDeselecting, isAnnotating, showTextInput, applyInteractiveZoomTransforms, pdfDocument, localTakeoffMeasurements, localAnnotations, currentPage, renderMarkupsWithPointerEvents]);
 
   // Handle escape key to back out vertices one-by-one and delete key to delete selected markup
   const handleKeyDown = useCallback(async (event: KeyboardEvent) => {
@@ -4526,7 +4505,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           requestAnimationFrame(() => {
             // Immediately re-render the SVG overlay to show the deletion
             if (currentViewport) {
-              renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+              renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current);
             }
             
             // Trigger PDF render after annotation deletion
@@ -4551,7 +4530,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             requestAnimationFrame(() => {
               // Re-render the SVG overlay to show the deletion
               if (currentViewport) {
-                renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+                renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current);
               }
               
               // Trigger PDF render after measurement deletion
@@ -4607,65 +4586,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Use a small delay to allow measurements to load, then render
       const renderTimer = setTimeout(() => {
         if (localTakeoffMeasurements.length > 0 && pdfPageRef.current && currentViewport) {
-          renderTakeoffAnnotations(currentPage, currentViewport, pdfPageRef.current);
+          renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current);
         }
       }, 100); // Small delay to allow async measurement loading
       
       return () => clearTimeout(renderTimer);
     }
-  }, [currentPage, currentViewport, onPageShown, localTakeoffMeasurements, renderTakeoffAnnotations, pdfDocument]);
+  }, [currentPage, currentViewport, onPageShown, localTakeoffMeasurements, renderMarkupsWithPointerEvents, pdfDocument]);
 
-  // CRITICAL FIX: Update pointer-events on all markup elements after render or mode change
-  // This ensures markups are always selectable when in selection mode, even after page changes or mode transitions
-  // Also ensures markups have correct pointer-events on initial load
-  useEffect(() => {
-    if (!svgOverlayRef.current) return;
-    
-    // Use requestAnimationFrame to ensure DOM is ready after render
-    requestAnimationFrame(() => {
-      if (!svgOverlayRef.current) return;
-      
-      // Update all measurement elements (excluding hit areas)
-      const measurementElements = svgOverlayRef.current.querySelectorAll('[data-measurement-id]');
-      measurementElements.forEach((el) => {
-        const element = el as SVGElement;
-        // Skip hit areas - they have transparent fill/stroke or are much larger
-        const fill = element.getAttribute('fill');
-        const stroke = element.getAttribute('stroke');
-        const isHitArea = fill === 'transparent' || stroke === 'transparent';
-        
-        // For circles, also check radius - hit areas are much larger (r=20 vs r=8)
-        if (element.tagName === 'circle') {
-          const r = parseFloat(element.getAttribute('r') || '0');
-          if (r > 15) {
-            return; // Skip hit area
-          }
-        }
-        
-        if (!isHitArea) {
-          // Set pointer-events based on selection mode
-          element.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
-          element.style.cursor = isSelectionMode ? 'pointer' : 'default';
-        }
-      });
-      
-      // Update all annotation elements (excluding hit areas)
-      const annotationElements = svgOverlayRef.current.querySelectorAll('[data-annotation-id]');
-      annotationElements.forEach((el) => {
-        const element = el as SVGElement;
-        // Skip hit areas
-        const fill = element.getAttribute('fill');
-        const stroke = element.getAttribute('stroke');
-        const isHitArea = fill === 'transparent' || stroke === 'transparent';
-        
-        if (!isHitArea) {
-          // Set pointer-events based on selection mode
-          element.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
-          element.style.cursor = isSelectionMode ? 'pointer' : 'default';
-        }
-      });
-    });
-  }, [currentPage, localTakeoffMeasurements, localAnnotations, isSelectionMode]);
 
   // Clear current measurement state when page changes
   useEffect(() => {
@@ -4699,7 +4627,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       
       return () => clearTimeout(timeoutId);
     }
-  }, [viewState, renderPDFPage, currentPage, isComponentMounted, isMeasuring, isCalibrating, currentMeasurement, currentViewport, renderTakeoffAnnotations, isDeselecting, isInitialRenderComplete, isAnnotating, showTextInput]);
+  }, [viewState, renderPDFPage, currentPage, isComponentMounted, isMeasuring, isCalibrating, currentMeasurement, currentViewport, renderMarkupsWithPointerEvents, isDeselecting, isInitialRenderComplete, isAnnotating, showTextInput]);
 
 
   // Set measurement type when condition is selected
