@@ -4667,22 +4667,36 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           // Wait for state update, then force immediate re-render
           await waitForStateUpdate();
           
-          // CRITICAL: Force immediate render (bypass debouncing) to ensure pointer-events are updated
-          // Use double requestAnimationFrame to ensure DOM is ready
-          requestAnimationFrame(() => {
+          // CRITICAL FIX: For single-page documents, call onPageShown to get full reset (same as multi-page docs)
+          // This ensures SVG overlay, hit-area, and pointer-events are all properly initialized
+          const isSinglePageDocument = totalPages === 1;
+          
+          if (isSinglePageDocument && isSelectionMode && currentViewport) {
+            // Call onPageShown to get full reset (same as page navigation for multi-page docs)
             requestAnimationFrame(() => {
-              if (currentViewport && svgOverlayRef.current) {
-                renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current, true);
-                // CRITICAL: Also explicitly call updateMarkupPointerEvents again after a brief delay
-                // to ensure pointer-events are set correctly
-                setTimeout(() => {
-                  if (svgOverlayRef.current && isSelectionMode) {
-                    updateMarkupPointerEvents();
-                  }
-                }, 50);
-              }
+              requestAnimationFrame(() => {
+                if (svgOverlayRef.current && currentViewport && pdfPageRef.current) {
+                  onPageShown(currentPage, currentViewport);
+                }
+              });
             });
-          });
+          } else {
+            // For multi-page documents or non-selection mode, just force immediate render
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                if (currentViewport && svgOverlayRef.current) {
+                  renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current, true);
+                  // CRITICAL: Also explicitly call updateMarkupPointerEvents again after a brief delay
+                  // to ensure pointer-events are set correctly
+                  setTimeout(() => {
+                    if (svgOverlayRef.current && isSelectionMode) {
+                      updateMarkupPointerEvents();
+                    }
+                  }, 50);
+                }
+              });
+            });
+          }
         } catch (error: any) {
           console.error(`Failed to delete markup:`, error);
         }
@@ -4692,7 +4706,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       event.preventDefault();
       setIsOrthoSnapping(prev => !prev);
     }
-  }, [annotationTool, currentAnnotation, onAnnotationToolChange, localAnnotations, isMeasuring, isCalibrating, calibrationPoints.length, currentMeasurement.length, selectedMarkupId, isSelectionMode, currentProjectId, file?.id, currentPage, renderPDFPage, measurementType, isContinuousDrawing, activePoints.length, isOrthoSnapping, renderMarkupsWithPointerEvents, currentViewport, getPageTakeoffMeasurements, localTakeoffMeasurements, updateMarkupPointerEvents]);
+  }, [annotationTool, currentAnnotation, onAnnotationToolChange, localAnnotations, isMeasuring, isCalibrating, calibrationPoints.length, currentMeasurement.length, selectedMarkupId, isSelectionMode, currentProjectId, file?.id, currentPage, renderPDFPage, measurementType, isContinuousDrawing, activePoints.length, isOrthoSnapping, renderMarkupsWithPointerEvents, currentViewport, getPageTakeoffMeasurements, localTakeoffMeasurements, updateMarkupPointerEvents, totalPages, onPageShown]);
 
   // Add keyboard event listener
   useEffect(() => {
