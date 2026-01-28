@@ -1200,6 +1200,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Re-render annotations when measurements or interaction state changes
   // NOTE: selectedMarkupId is removed from dependencies to prevent full re-renders on selection changes
+  // CRITICAL: Allow markup rendering even when isDeselecting is true - we need markups to be selectable
+  // isDeselecting only blocks PDF canvas renders, not markup overlay renders
   useEffect(() => {
     if (pdfDocument && currentViewport && !isRenderingRef.current) {
       // Only render if we have measurements, annotations, or if we're in measuring/annotation/visual search mode
@@ -1418,7 +1420,24 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         hitArea.setAttribute('pointer-events', shouldCaptureClicks ? 'all' : 'none');
       }
     }
-  }, [isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol]);
+    
+    // CRITICAL: When entering selection mode, ensure markups are re-rendered with correct pointer-events
+    // This is especially important after de-activating a condition or deleting a markup
+    // Even if isDeselecting is true, we need markups to be selectable
+    if (isSelectionMode && pdfDocument && currentViewport && pdfPageRef.current) {
+      const storeMeasurements = getPageTakeoffMeasurements(currentProjectId || '', file?.id || '', currentPage);
+      const hasMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0 || storeMeasurements.length > 0;
+      
+      if (hasMarkups) {
+        // Use requestAnimationFrame to ensure this runs after any other renders complete
+        requestAnimationFrame(() => {
+          if (svgOverlayRef.current && currentViewport && pdfPageRef.current) {
+            renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current);
+          }
+        });
+      }
+    }
+  }, [isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, pdfDocument, currentViewport, currentPage, localTakeoffMeasurements, localAnnotations, renderMarkupsWithPointerEvents, currentProjectId, file?.id, getPageTakeoffMeasurements]);
 
   // Page visibility handler - ensures overlay is properly initialized when page becomes visible
   const onPageShown = useCallback((pageNum: number, viewport: any) => {

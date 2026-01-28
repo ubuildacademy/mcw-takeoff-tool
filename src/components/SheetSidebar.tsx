@@ -222,17 +222,18 @@ export function SheetSidebar({
   }, [projectId, documents, documentsLoading]);
 
   // Update hasTakeoffs when takeoff measurements change (but preserve expansion state)
-  // This effect only runs when the takeoff measurements actually change, not on every render
+  // Subscribe to takeoffMeasurements changes from store to update counts when measurements are added/deleted
+  const takeoffMeasurements = useTakeoffStore((state) => state.takeoffMeasurements);
+  
   useEffect(() => {
     if (documents.length > 0) {
-      const takeoffMeasurements = getProjectTakeoffMeasurements(projectId);
       // Update documents through parent callback
       if (onDocumentsUpdate) {
         const updatedDocuments = updateHasTakeoffs(documents);
         onDocumentsUpdate(updatedDocuments);
       }
     }
-  }, [projectId]); // Only depend on projectId to avoid infinite loops
+  }, [projectId, takeoffMeasurements, documents, onDocumentsUpdate, updateHasTakeoffs]); // Watch measurements changes
 
 
 
