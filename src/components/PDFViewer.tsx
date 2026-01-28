@@ -276,6 +276,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const pendingMarkupRenderRef = useRef<{ pageNum: number; viewport: any; page?: any } | null>(null);
   const renderTakeoffAnnotationsRef = useRef<((pageNum: number, viewport: any, page?: any) => void) | null>(null);
   const [isComponentMounted, setIsComponentMounted] = useState(false);
+  const prevIsSelectionModeRef = useRef<boolean>(false);
   const prevCalibratingRef = useRef(false);
   
   // Notify parent component of measurement state changes
@@ -1477,25 +1478,33 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       }
     }
     
-    // CRITICAL: When entering selection mode, ensure markups are re-rendered with correct pointer-events
+    // CRITICAL: When entering selection mode (transitioning from false to true), ensure markups are re-rendered
     // This is especially important after de-activating a condition or deleting a markup
     // Even if isDeselecting is true, we need markups to be selectable
-    if (isSelectionMode && pdfDocument && currentViewport && pdfPageRef.current) {
+    const isEnteringSelectionMode = isSelectionMode && !prevIsSelectionModeRef.current;
+    prevIsSelectionModeRef.current = isSelectionMode;
+    
+    if (isEnteringSelectionMode && pdfDocument && currentViewport && pdfPageRef.current) {
       const storeMeasurements = getPageTakeoffMeasurements(currentProjectId || '', file?.id || '', currentPage);
       const hasMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0 || storeMeasurements.length > 0;
       
       if (hasMarkups) {
-        // CRITICAL FIX: Force immediate render (bypass debouncing) when entering selection mode
-        // This ensures markups are immediately selectable, especially for single-page documents
-        // Use requestAnimationFrame to ensure DOM is ready, but force immediate render
-        requestAnimationFrame(() => {
-          if (svgOverlayRef.current && currentViewport && pdfPageRef.current) {
-            renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current, true);
-          }
-        });
+        // CRITICAL FIX: For single-page documents, we need to trigger the same reset that multi-page
+        // documents get from page navigation. We'll do this in a separate useEffect after onPageShown is defined.
+        const isSinglePageDocument = totalPages === 1;
+        
+        if (!isSinglePageDocument) {
+          // For multi-page documents, just force immediate render (page navigation handles reset)
+          requestAnimationFrame(() => {
+            if (svgOverlayRef.current && currentViewport && pdfPageRef.current) {
+              renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current, true);
+            }
+          });
+        }
+        // Single-page document handling is done in a separate useEffect below (after onPageShown is defined)
       }
     }
-  }, [isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, pdfDocument, currentViewport, currentPage, localTakeoffMeasurements, localAnnotations, renderMarkupsWithPointerEvents, currentProjectId, file?.id, getPageTakeoffMeasurements]);
+  }, [isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, pdfDocument, currentViewport, currentPage, localTakeoffMeasurements, localAnnotations, renderMarkupsWithPointerEvents, currentProjectId, file?.id, getPageTakeoffMeasurements, totalPages]);
 
   // Page visibility handler - ensures overlay is properly initialized when page becomes visible
   const onPageShown = useCallback((pageNum: number, viewport: any) => {
@@ -1556,6 +1565,31 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Note: If no measurements, the reactive useEffect will handle rendering when they load
     // The reactive useEffect watches allTakeoffMeasurements and will trigger render when measurements arrive
   }, [renderMarkupsWithPointerEvents, localTakeoffMeasurements, currentProjectId, file?.id, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol]);
+
+  // CRITICAL FIX: For single-page documents, call onPageShown when entering selection mode
+  // This gives single-page documents the same reset behavior that multi-page documents get from page navigation
+  useEffect(() => {
+    const isEnteringSelectionMode = isSelectionMode && !prevIsSelectionModeRef.current;
+    const isSinglePageDocument = totalPages === 1;
+    
+    if (isEnteringSelectionMode && isSinglePageDocument && pdfDocument && currentViewport && pdfPageRef.current) {
+      const storeMeasurements = getPageTakeoffMeasurements(currentProjectId || '', file?.id || '', currentPage);
+      const hasMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0 || storeMeasurements.length > 0;
+      
+      if (hasMarkups) {
+        // Call onPageShown to get full reset (same as page navigation for multi-page docs)
+        // This ensures SVG overlay dimensions, hit-area, and pointer-events are all properly initialized
+        // Use double requestAnimationFrame to ensure all state updates have processed
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            if (svgOverlayRef.current && currentViewport && pdfPageRef.current) {
+              onPageShown(currentPage, currentViewport);
+            }
+          });
+        });
+      }
+    }
+  }, [isSelectionMode, totalPages, pdfDocument, currentViewport, currentPage, localTakeoffMeasurements, localAnnotations, currentProjectId, file?.id, getPageTakeoffMeasurements, onPageShown]);
 
   // PDF render function with page-specific viewport isolation
   const renderPDFPage = useCallback(async (pageNum: number) => {
