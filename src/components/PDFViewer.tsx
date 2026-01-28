@@ -793,10 +793,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const renderMarkupsWithPointerEvents = useCallback(async (
     pageNum: number, 
     viewport: any, 
-    page?: any
+    page?: any,
+    forceImmediate: boolean = false
   ): Promise<void> => {
-    // Store latest intent if render is in progress
-    if (isMarkupRenderingRef.current) {
+    // CRITICAL FIX: Allow bypassing debouncing for critical state transitions
+    // (e.g., after deletion or condition deactivation)
+    if (!forceImmediate && isMarkupRenderingRef.current) {
       pendingMarkupRenderRef.current = { pageNum, viewport, page };
       return;
     }
@@ -809,7 +811,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Perform synchronous DOM operations
       renderTakeoffAnnotationsRef.current(pageNum, viewport, page);
       
-      // Immediately update pointer-events synchronously after render
+      // CRITICAL: Always update pointer-events synchronously after render
+      // This ensures markups are immediately selectable after state changes
       updateMarkupPointerEvents();
     } finally {
       isMarkupRenderingRef.current = false;
@@ -822,7 +825,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         setTimeout(() => renderMarkupsWithPointerEvents(
           nextParams.pageNum, 
           nextParams.viewport, 
-          nextParams.page
+          nextParams.page,
+          false // Don't force immediate for pending renders
         ), 0);
       }
     }
@@ -1220,7 +1224,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       if (shouldRender) {
         // CRITICAL: Always render markups if they exist (in local state or store), regardless of selection mode
         // This ensures markups are visible on initial load and persist correctly
-        renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current);
+        // CRITICAL FIX: Force immediate render in selection mode to ensure pointer-events are updated
+        // This is especially important after deletion or condition deactivation
+        const forceImmediate = isSelectionMode && hasMarkups;
+        renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current, forceImmediate);
       } else {
         // LAYER THRASH PREVENTION: Clear overlay when measurements are empty to prevent stale renderings
         // CRITICAL: Don't clear if measurements are still loading - this prevents race conditions
@@ -1299,7 +1306,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         if (pdfPageRef.current && currentViewport) {
           // CRITICAL: Always render markups when measurements are loaded, even during deselection cooldown
           // This ensures markups are visible on initial load for both single-page and multi-page documents
-          renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current);
+          // CRITICAL FIX: Force immediate render if in selection mode to ensure pointer-events are updated
+          renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current, isSelectionMode);
           if (timeoutId) {
             clearTimeout(timeoutId);
             timeoutId = null;
@@ -1429,10 +1437,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const hasMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0 || storeMeasurements.length > 0;
       
       if (hasMarkups) {
-        // Use requestAnimationFrame to ensure this runs after any other renders complete
+        // CRITICAL FIX: Force immediate render (bypass debouncing) when entering selection mode
+        // This ensures markups are immediately selectable, especially for single-page documents
+        // Use requestAnimationFrame to ensure DOM is ready, but force immediate render
         requestAnimationFrame(() => {
           if (svgOverlayRef.current && currentViewport && pdfPageRef.current) {
-            renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current);
+            renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current, true);
           }
         });
       }
@@ -1491,8 +1501,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     );
     
     // Render immediately if we have measurements
+    // CRITICAL FIX: Force immediate render if in selection mode to ensure pointer-events are updated
     if (currentMeasurements.length > 0 || localTakeoffMeasurements.length > 0) {
-      renderMarkupsWithPointerEvents(pageNum, viewport, pdfPageRef.current);
+      renderMarkupsWithPointerEvents(pageNum, viewport, pdfPageRef.current, isSelectionMode);
     }
     // Note: If no measurements, the reactive useEffect will handle rendering when they load
     // The reactive useEffect watches allTakeoffMeasurements and will trigger render when measurements arrive
@@ -1611,8 +1622,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           (m) => m.projectId === currentProjectId && m.sheetId === file?.id && m.pdfPage === pageNum
         );
         
+        // CRITICAL FIX: Get current selection mode state (may have changed since callback was created)
+        // Force immediate render if in selection mode to ensure pointer-events are updated
+        const currentSelectionMode = isSelectionMode; // Capture from closure - will be current value
         if (currentMeasurements.length > 0 || localTakeoffMeasurements.length > 0) {
-          renderMarkupsWithPointerEvents(pageNum, viewport, page);
+          renderMarkupsWithPointerEvents(pageNum, viewport, page, currentSelectionMode);
         }
       } catch {}
       
@@ -1634,7 +1648,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     } finally {
       isRenderingRef.current = false;
     }
-  }, [pdfDocument, viewState, updateCanvasDimensions, onPageShown, isComponentMounted, isMeasuring, isCalibrating, currentMeasurement, isDeselecting, isAnnotating]);
+  }, [pdfDocument, viewState, updateCanvasDimensions, onPageShown, isComponentMounted, isMeasuring, isCalibrating, currentMeasurement, isDeselecting, isAnnotating, isSelectionMode, localTakeoffMeasurements, currentProjectId, file?.id, currentPage, renderMarkupsWithPointerEvents]);
 
   // No coordinate conversions needed - SVG viewBox matches viewport exactly
   // CSS pixels = SVG pixels = viewport pixels (1:1 mapping)
@@ -4519,17 +4533,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         );
         setLocalAnnotations(filteredAnnotations);
         
-        // Force immediate re-render using requestAnimationFrame to ensure state is processed
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            // Immediately re-render the SVG overlay to show the deletion
-            if (currentViewport) {
-              renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current);
-            }
-            
-            // Trigger PDF render after annotation deletion
-          });
-        });
+        // CRITICAL FIX: Force immediate re-render (bypass debouncing) to ensure pointer-events are updated
+        // State is already updated synchronously above, so we can render immediately
+        if (currentViewport) {
+          renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current, true);
+        }
       } else if (currentProjectId && file?.id) {
         // Delete measurement
         const { deleteTakeoffMeasurement } = useTakeoffStore.getState();
@@ -4542,19 +4550,35 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           // Delete from store (async operation)
           await deleteTakeoffMeasurement(deletedId);
           
-          // The reactive useEffect (line 493) will automatically update localTakeoffMeasurements
-          // when allTakeoffMeasurements changes, so we don't need to manually update here
-          // Just force a re-render after a brief delay to ensure store state has updated
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-              // Re-render the SVG overlay to show the deletion
-              if (currentViewport) {
-                renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current);
-              }
-              
-              // Trigger PDF render after measurement deletion
+          // CRITICAL FIX: Wait for reactive state update before rendering
+          // The reactive useEffect (line 506) will update localTakeoffMeasurements
+          // We need to wait for that update to complete before re-rendering
+          // Use a polling approach to check when state has updated
+          const waitForStateUpdate = (retries = 10): Promise<void> => {
+            return new Promise((resolve) => {
+              const checkState = () => {
+                // Check if the deleted measurement is gone from store
+                const storeMeasurements = getPageTakeoffMeasurements(currentProjectId, file.id, currentPage);
+                const stillExists = storeMeasurements.some(m => m.id === deletedId);
+                
+                if (!stillExists || retries === 0) {
+                  resolve();
+                } else {
+                  retries--;
+                  requestAnimationFrame(checkState);
+                }
+              };
+              requestAnimationFrame(checkState);
             });
-          });
+          };
+          
+          // Wait for state update, then force immediate re-render
+          await waitForStateUpdate();
+          
+          // CRITICAL: Force immediate render (bypass debouncing) to ensure pointer-events are updated
+          if (currentViewport) {
+            renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current, true);
+          }
         } catch (error: any) {
           console.error(`Failed to delete markup:`, error);
         }
@@ -4564,7 +4588,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       event.preventDefault();
       setIsOrthoSnapping(prev => !prev);
     }
-  }, [annotationTool, currentAnnotation, onAnnotationToolChange, localAnnotations, isMeasuring, isCalibrating, calibrationPoints.length, currentMeasurement.length, selectedMarkupId, isSelectionMode, currentProjectId, file?.id, currentPage, renderPDFPage, measurementType, isContinuousDrawing, activePoints.length, isOrthoSnapping]);
+  }, [annotationTool, currentAnnotation, onAnnotationToolChange, localAnnotations, isMeasuring, isCalibrating, calibrationPoints.length, currentMeasurement.length, selectedMarkupId, isSelectionMode, currentProjectId, file?.id, currentPage, renderPDFPage, measurementType, isContinuousDrawing, activePoints.length, isOrthoSnapping, renderMarkupsWithPointerEvents, currentViewport, getPageTakeoffMeasurements]);
 
   // Add keyboard event listener
   useEffect(() => {
@@ -4603,9 +4627,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // CRITICAL: Also render annotations after measurements load
       // This handles the case where we return to a page and measurements load asynchronously
       // Use a small delay to allow measurements to load, then render
+      // CRITICAL FIX: Force immediate render if in selection mode to ensure pointer-events are updated
       const renderTimer = setTimeout(() => {
         if (localTakeoffMeasurements.length > 0 && pdfPageRef.current && currentViewport) {
-          renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current);
+          renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current, isSelectionMode);
         }
       }, 100); // Small delay to allow async measurement loading
       
