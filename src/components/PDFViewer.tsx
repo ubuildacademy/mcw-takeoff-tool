@@ -814,6 +814,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // CRITICAL: Always update pointer-events synchronously after render
       // This ensures markups are immediately selectable after state changes
       updateMarkupPointerEvents();
+      
+      // CRITICAL FIX: Also update pointer-events after DOM settles (for async updates)
+      // This is especially important after deletions or state changes
+      if (isSelectionMode) {
+        requestAnimationFrame(() => {
+          if (svgOverlayRef.current) {
+            updateMarkupPointerEvents();
+          }
+        });
+      }
     } finally {
       isMarkupRenderingRef.current = false;
       
@@ -1244,6 +1254,44 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       }
     }
   }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, renderMarkupsWithPointerEvents, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentAnnotation, isContinuousDrawing, activePoints, pdfDocument, measurementsLoading, currentProjectId, file?.id, getPageTakeoffMeasurements, isSelectionMode]);
+
+  // CRITICAL FIX: Force re-render with pointer-events update when localTakeoffMeasurements changes in selection mode
+  // This ensures markups are selectable after deletion or other state changes
+  const prevLocalTakeoffMeasurementsRef = useRef<any[]>([]);
+  useEffect(() => {
+    // Only trigger if we're in selection mode and measurements actually changed
+    if (isSelectionMode && pdfDocument && currentViewport && pdfPageRef.current) {
+      const prevIds = new Set(prevLocalTakeoffMeasurementsRef.current.map((m: any) => m.id));
+      const currentIds = new Set(localTakeoffMeasurements.map((m: any) => m.id));
+      
+      // Check if measurements changed (added or removed)
+      const measurementsChanged = 
+        prevLocalTakeoffMeasurementsRef.current.length !== localTakeoffMeasurements.length ||
+        ![...prevIds].every(id => currentIds.has(id)) ||
+        ![...currentIds].every(id => prevIds.has(id));
+      
+      if (measurementsChanged && localTakeoffMeasurements.length > 0) {
+        // Force immediate re-render with pointer-events update
+        requestAnimationFrame(() => {
+          if (svgOverlayRef.current && currentViewport && pdfPageRef.current) {
+            renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current, true);
+            // Also explicitly update pointer-events after render completes
+            setTimeout(() => {
+              if (svgOverlayRef.current && isSelectionMode) {
+                updateMarkupPointerEvents();
+              }
+            }, 50);
+          }
+        });
+      }
+      
+      // Update ref for next comparison
+      prevLocalTakeoffMeasurementsRef.current = localTakeoffMeasurements;
+    } else {
+      // Update ref even if not in selection mode
+      prevLocalTakeoffMeasurementsRef.current = localTakeoffMeasurements;
+    }
+  }, [localTakeoffMeasurements, isSelectionMode, pdfDocument, currentViewport, currentPage, renderMarkupsWithPointerEvents, updateMarkupPointerEvents]);
 
   // OPTIMIZED: Update only visual styling when selection changes (prevents flicker)
   const prevSelectedMarkupIdRef = useRef<string | null>(null);
@@ -4550,25 +4598,35 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           // Delete from store (async operation)
           await deleteTakeoffMeasurement(deletedId);
           
-          // CRITICAL FIX: Wait for reactive state update before rendering
-          // The reactive useEffect (line 506) will update localTakeoffMeasurements
+          // CRITICAL FIX: Wait for localTakeoffMeasurements to update before rendering
+          // The reactive useEffect (line 506) will update localTakeoffMeasurements asynchronously
           // We need to wait for that update to complete before re-rendering
-          // Use a polling approach to check when state has updated
-          const waitForStateUpdate = (retries = 10): Promise<void> => {
+          // Use a polling approach that checks the store (which updates synchronously) and waits for React to process
+          const waitForStateUpdate = (retries = 30): Promise<void> => {
             return new Promise((resolve) => {
+              let attemptCount = 0;
               const checkState = () => {
+                attemptCount++;
                 // Check if the deleted measurement is gone from store
+                // Store updates synchronously, but React state updates asynchronously
                 const storeMeasurements = getPageTakeoffMeasurements(currentProjectId, file.id, currentPage);
-                const stillExists = storeMeasurements.some(m => m.id === deletedId);
+                const stillExistsInStore = storeMeasurements.some(m => m.id === deletedId);
                 
-                if (!stillExists || retries === 0) {
+                // If it's gone from store, wait a bit more for React to process the state update
+                // then resolve
+                if (!stillExistsInStore) {
+                  // Give React time to process the state update (useTakeoffMeasurements change triggers useEffect)
+                  setTimeout(() => resolve(), 50);
+                } else if (attemptCount >= retries) {
+                  // Timeout - proceed anyway
                   resolve();
                 } else {
-                  retries--;
-                  requestAnimationFrame(checkState);
+                  // Check again soon
+                  setTimeout(checkState, 10);
                 }
               };
-              requestAnimationFrame(checkState);
+              // Start checking after a brief delay to allow store update to propagate
+              setTimeout(checkState, 10);
             });
           };
           
@@ -4576,9 +4634,21 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           await waitForStateUpdate();
           
           // CRITICAL: Force immediate render (bypass debouncing) to ensure pointer-events are updated
-          if (currentViewport) {
-            renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current, true);
-          }
+          // Use double requestAnimationFrame to ensure DOM is ready
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              if (currentViewport && svgOverlayRef.current) {
+                renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current, true);
+                // CRITICAL: Also explicitly call updateMarkupPointerEvents again after a brief delay
+                // to ensure pointer-events are set correctly
+                setTimeout(() => {
+                  if (svgOverlayRef.current && isSelectionMode) {
+                    updateMarkupPointerEvents();
+                  }
+                }, 50);
+              }
+            });
+          });
         } catch (error: any) {
           console.error(`Failed to delete markup:`, error);
         }
@@ -4588,7 +4658,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       event.preventDefault();
       setIsOrthoSnapping(prev => !prev);
     }
-  }, [annotationTool, currentAnnotation, onAnnotationToolChange, localAnnotations, isMeasuring, isCalibrating, calibrationPoints.length, currentMeasurement.length, selectedMarkupId, isSelectionMode, currentProjectId, file?.id, currentPage, renderPDFPage, measurementType, isContinuousDrawing, activePoints.length, isOrthoSnapping, renderMarkupsWithPointerEvents, currentViewport, getPageTakeoffMeasurements]);
+  }, [annotationTool, currentAnnotation, onAnnotationToolChange, localAnnotations, isMeasuring, isCalibrating, calibrationPoints.length, currentMeasurement.length, selectedMarkupId, isSelectionMode, currentProjectId, file?.id, currentPage, renderPDFPage, measurementType, isContinuousDrawing, activePoints.length, isOrthoSnapping, renderMarkupsWithPointerEvents, currentViewport, getPageTakeoffMeasurements, localTakeoffMeasurements, updateMarkupPointerEvents]);
 
   // Add keyboard event listener
   useEffect(() => {
