@@ -742,8 +742,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Helper function to update pointer-events on all markup elements
   // This is called synchronously after rendering to ensure markups are selectable
-  const updateMarkupPointerEvents = useCallback(() => {
+  // CRITICAL FIX: Accept currentSelectionMode parameter to avoid stale closure values
+  const updateMarkupPointerEvents = useCallback((currentSelectionMode?: boolean) => {
     if (!svgOverlayRef.current) return;
+    
+    // Use provided value or fall back to current state (for backward compatibility)
+    const selectionMode = currentSelectionMode !== undefined ? currentSelectionMode : isSelectionMode;
     
     // Update all measurement elements (excluding hit areas)
     const measurementElements = svgOverlayRef.current.querySelectorAll('[data-measurement-id]');
@@ -765,8 +769,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       
       if (!isHitArea) {
         // Set pointer-events based on selection mode
-        element.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
-        element.style.cursor = isSelectionMode ? 'pointer' : 'default';
+        element.style.pointerEvents = selectionMode ? 'auto' : 'none';
+        element.style.cursor = selectionMode ? 'pointer' : 'default';
       }
     });
     
@@ -782,8 +786,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       
       if (!isHitArea) {
         // Set pointer-events based on selection mode
-        element.style.pointerEvents = isSelectionMode ? 'auto' : 'none';
-        element.style.cursor = isSelectionMode ? 'pointer' : 'default';
+        element.style.pointerEvents = selectionMode ? 'auto' : 'none';
+        element.style.cursor = selectionMode ? 'pointer' : 'default';
       }
     });
   }, [isSelectionMode]);
@@ -814,16 +818,25 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       
       // CRITICAL: Always update pointer-events synchronously after render
       // This ensures markups are immediately selectable after state changes
-      updateMarkupPointerEvents();
+      // Pass current isSelectionMode value explicitly to avoid stale closure
+      updateMarkupPointerEvents(isSelectionMode);
       
       // CRITICAL FIX: Also update pointer-events after DOM settles (for async updates)
       // This is especially important after deletions or state changes
+      // Use a small delay to ensure DOM is fully updated
       if (isSelectionMode) {
         requestAnimationFrame(() => {
           if (svgOverlayRef.current) {
-            updateMarkupPointerEvents();
+            // Get fresh isSelectionMode value to ensure it's current
+            updateMarkupPointerEvents(isSelectionMode);
           }
         });
+        // Double-check after a brief delay to catch any async DOM updates
+        setTimeout(() => {
+          if (svgOverlayRef.current) {
+            updateMarkupPointerEvents(isSelectionMode);
+          }
+        }, 50);
       }
     } finally {
       isMarkupRenderingRef.current = false;
@@ -1279,7 +1292,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             // Also explicitly update pointer-events after render completes
             setTimeout(() => {
               if (svgOverlayRef.current && isSelectionMode) {
-                updateMarkupPointerEvents();
+                updateMarkupPointerEvents(true); // Force selection mode
               }
             }, 50);
           }
@@ -1566,7 +1579,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // The reactive useEffect watches allTakeoffMeasurements and will trigger render when measurements arrive
   }, [renderMarkupsWithPointerEvents, localTakeoffMeasurements, currentProjectId, file?.id, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol]);
 
-  // CRITICAL FIX: For single-page documents, call onPageShown when entering selection mode
+  // CRITICAL FIX: For single-page documents, force complete refresh when entering selection mode
   // This gives single-page documents the same reset behavior that multi-page documents get from page navigation
   useEffect(() => {
     const isEnteringSelectionMode = isSelectionMode && !prevIsSelectionModeRef.current;
@@ -1577,19 +1590,34 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const hasMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0 || storeMeasurements.length > 0;
       
       if (hasMarkups) {
-        // Call onPageShown to get full reset (same as page navigation for multi-page docs)
-        // This ensures SVG overlay dimensions, hit-area, and pointer-events are all properly initialized
-        // Use double requestAnimationFrame to ensure all state updates have processed
+        // CRITICAL: Force complete refresh by calling onPageShown AND explicitly updating pointer-events
+        // Use multiple delays to ensure all state updates and DOM changes have processed
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
             if (svgOverlayRef.current && currentViewport && pdfPageRef.current) {
+              // Call onPageShown to get full reset (same as page navigation for multi-page docs)
               onPageShown(currentPage, currentViewport);
+              
+              // CRITICAL: Also explicitly update pointer-events after onPageShown completes
+              // This ensures all elements have correct pointer-events even if onPageShown timing is off
+              setTimeout(() => {
+                if (svgOverlayRef.current && isSelectionMode) {
+                  updateMarkupPointerEvents(true); // Force selection mode
+                }
+              }, 100);
+              
+              // Double-check after another delay to catch any async updates
+              setTimeout(() => {
+                if (svgOverlayRef.current && isSelectionMode) {
+                  updateMarkupPointerEvents(true); // Force selection mode
+                }
+              }, 200);
             }
           });
         });
       }
     }
-  }, [isSelectionMode, totalPages, pdfDocument, currentViewport, currentPage, localTakeoffMeasurements, localAnnotations, currentProjectId, file?.id, getPageTakeoffMeasurements, onPageShown]);
+  }, [isSelectionMode, totalPages, pdfDocument, currentViewport, currentPage, localTakeoffMeasurements, localAnnotations, currentProjectId, file?.id, getPageTakeoffMeasurements, onPageShown, updateMarkupPointerEvents]);
 
   // PDF render function with page-specific viewport isolation
   const renderPDFPage = useCallback(async (pageNum: number) => {
@@ -4667,7 +4695,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           // Wait for state update, then force immediate re-render
           await waitForStateUpdate();
           
-          // CRITICAL FIX: For single-page documents, call onPageShown to get full reset (same as multi-page docs)
+          // CRITICAL FIX: For single-page documents, force complete refresh after deletion
           // This ensures SVG overlay, hit-area, and pointer-events are all properly initialized
           const isSinglePageDocument = totalPages === 1;
           
@@ -4677,6 +4705,20 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               requestAnimationFrame(() => {
                 if (svgOverlayRef.current && currentViewport && pdfPageRef.current) {
                   onPageShown(currentPage, currentViewport);
+                  
+                  // CRITICAL: Also explicitly update pointer-events multiple times to ensure they're set
+                  // This handles any timing issues with DOM updates
+                  setTimeout(() => {
+                    if (svgOverlayRef.current && isSelectionMode) {
+                      updateMarkupPointerEvents(true); // Force selection mode
+                    }
+                  }, 100);
+                  
+                  setTimeout(() => {
+                    if (svgOverlayRef.current && isSelectionMode) {
+                      updateMarkupPointerEvents(true); // Force selection mode again
+                    }
+                  }, 200);
                 }
               });
             });
@@ -4686,11 +4728,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               requestAnimationFrame(() => {
                 if (currentViewport && svgOverlayRef.current) {
                   renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current, true);
-                  // CRITICAL: Also explicitly call updateMarkupPointerEvents again after a brief delay
-                  // to ensure pointer-events are set correctly
+                  // CRITICAL: Also explicitly call updateMarkupPointerEvents with explicit value
                   setTimeout(() => {
                     if (svgOverlayRef.current && isSelectionMode) {
-                      updateMarkupPointerEvents();
+                      updateMarkupPointerEvents(true); // Force selection mode
                     }
                   }, 50);
                 }
