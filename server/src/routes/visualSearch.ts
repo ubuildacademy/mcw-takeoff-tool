@@ -7,6 +7,8 @@
 import { Router } from 'express';
 import { visualSearchService } from '../services/visualSearchService';
 import { storage } from '../storage';
+import fs from 'fs-extra';
+import path from 'path';
 
 const router = Router();
 
@@ -96,18 +98,40 @@ router.post('/complete-search', async (req, res) => {
     );
 
     // Step 1.5: Save the template image to the condition so it can be displayed in the UI
+    // template.imageData is a file path, so we need to read it and convert to base64
     if (template.imageData) {
       try {
-        const conditions = await storage.getConditions();
-        const existingCondition = conditions.find(c => c.id === conditionId);
-        if (existingCondition) {
-          const updatedCondition = {
-            ...existingCondition,
-            searchImage: template.imageData,
-            searchImageId: template.id
-          };
-          await storage.saveCondition(updatedCondition);
-          console.log('✅ Saved template image to condition');
+        // Check if it's already base64 (starts with data: or is a long base64 string)
+        // or if it's a file path (starts with / or contains path separators)
+        let base64Image: string;
+        
+        if (template.imageData.startsWith('data:') || template.imageData.startsWith('/') || template.imageData.includes(path.sep)) {
+          // It's a file path, read and convert to base64
+          if (await fs.pathExists(template.imageData)) {
+            const imageBuffer = await fs.readFile(template.imageData);
+            base64Image = imageBuffer.toString('base64');
+          } else {
+            console.warn('⚠️ Template image file not found:', template.imageData);
+            // Skip saving if file doesn't exist
+            base64Image = '';
+          }
+        } else {
+          // Assume it's already base64
+          base64Image = template.imageData;
+        }
+        
+        if (base64Image) {
+          const conditions = await storage.getConditions();
+          const existingCondition = conditions.find(c => c.id === conditionId);
+          if (existingCondition) {
+            const updatedCondition = {
+              ...existingCondition,
+              searchImage: base64Image,
+              searchImageId: template.id
+            };
+            await storage.saveCondition(updatedCondition);
+            console.log('✅ Saved template image to condition (base64)');
+          }
         }
       } catch (error) {
         console.error('⚠️ Failed to save template image to condition:', error);
