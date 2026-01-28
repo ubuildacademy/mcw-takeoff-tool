@@ -86,6 +86,7 @@ export interface StoredTakeoffMeasurement {
   pdfCoordinates: Array<{ x: number; y: number }>;
   conditionColor: string;
   conditionName: string;
+  description?: string; // Optional description for the measurement
   perimeterValue?: number;
   areaValue?: number;
   cutouts?: Array<{

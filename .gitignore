@@ -66,3 +66,13 @@ server/models/*.ckpt
 Cubicasa5k/
 server/data/
 server/models/segformer_floorplan/
+
+# Python virtual environment
+server/venv/
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python

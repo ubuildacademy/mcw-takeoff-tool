@@ -351,10 +351,11 @@ router.put('/:id', async (req, res) => {
       includeHeight,
       height,
       // Note: aiGenerated column doesn't exist in database, so it's not included
-      // Visual search specific fields
+      // Auto-count specific fields
       searchImage,
       searchImageId,
-      searchThreshold
+      searchThreshold,
+      searchScope
     } = req.body;
 
     // Validation

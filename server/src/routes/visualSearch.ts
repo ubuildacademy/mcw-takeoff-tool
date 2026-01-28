@@ -85,8 +85,18 @@ router.post('/complete-search', async (req, res) => {
     
     // Handle client disconnect
     req.on('close', () => {
-      console.log('Client disconnected from SSE stream');
-      res.end();
+      console.log('⚠️ Client disconnected from SSE stream (connection closed by client)');
+      // Don't call res.end() here - it may already be closed
+    });
+    
+    // Handle errors on the response stream
+    res.on('error', (error) => {
+      console.error('❌ SSE response stream error:', error);
+    });
+    
+    // Handle response finish
+    res.on('finish', () => {
+      console.log('✅ SSE response stream finished');
     });
   }
   
@@ -105,8 +115,27 @@ router.post('/complete-search', async (req, res) => {
   
   const sendComplete = (result: any) => {
     if (wantsSSE) {
-      res.write(`data: ${JSON.stringify({ type: 'complete', ...result })}\n\n`);
-      res.end();
+      try {
+        const completeMessage = { type: 'complete', ...result };
+        console.log('📤 Sending SSE complete message:', JSON.stringify(completeMessage, null, 2));
+        const message = `data: ${JSON.stringify(completeMessage)}\n\n`;
+        res.write(message);
+        // Ensure the stream is properly flushed before ending
+        if (typeof res.flush === 'function') {
+          res.flush();
+        }
+        console.log('✅ SSE complete message sent, closing connection');
+        res.end();
+      } catch (error) {
+        console.error('❌ Error sending SSE complete message:', error);
+        // Try to send error instead
+        try {
+          res.write(`data: ${JSON.stringify({ type: 'error', error: 'Failed to send completion' })}\n\n`);
+          res.end();
+        } catch (e) {
+          console.error('❌ Failed to send error message:', e);
+        }
+      }
     }
   };
   
@@ -251,25 +280,44 @@ router.post('/complete-search', async (req, res) => {
         currentPage: pageNumber 
       });
     }
-    await autoCountService.createCountMeasurements(
-      conditionId,
-      searchResult.matches,
-      projectId,
-      sheetId,
-      condition.color,
-      condition.name,
-      condition.unit
-    );
+    
+    try {
+      await autoCountService.createCountMeasurements(
+        conditionId,
+        searchResult.matches,
+        projectId,
+        sheetId,
+        condition.color,
+        condition.name,
+        condition.unit
+      );
+    } catch (measurementError) {
+      console.error('❌ Error creating measurements:', measurementError);
+      // Even if measurement creation fails, we should still send the search results
+      // The user can see what was found even if we couldn't save it
+      if (wantsSSE) {
+        sendError(`Failed to create measurements: ${measurementError instanceof Error ? measurementError.message : String(measurementError)}`);
+        return;
+      } else {
+        return res.status(500).json({
+          error: 'Failed to create measurements',
+          details: measurementError instanceof Error ? measurementError.message : String(measurementError),
+          result: searchResult // Include search results even on error
+        });
+      }
+    }
 
     console.log(`✅ Auto-count workflow complete: ${searchResult.totalMatches} matches found and ${searchResult.totalMatches} measurements created`);
 
     // Send completion via SSE or regular JSON
     if (wantsSSE) {
+      console.log('📤 About to send complete message via SSE...');
       sendComplete({
         success: true,
         result: searchResult,
         measurementsCreated: searchResult.totalMatches
       });
+      console.log('✅ Complete message sent');
     } else {
       return res.json({
         success: true,
@@ -287,7 +335,17 @@ router.post('/complete-search', async (req, res) => {
     });
     
     if (wantsSSE) {
-      sendError(error instanceof Error ? error.message : String(error));
+      try {
+        sendError(error instanceof Error ? error.message : String(error));
+      } catch (sseError) {
+        console.error('❌ Failed to send SSE error message:', sseError);
+        // Connection might already be closed, try to end it gracefully
+        try {
+          res.end();
+        } catch (e) {
+          // Ignore - connection is already closed
+        }
+      }
     } else {
       return res.status(500).json({ 
         error: 'Auto-count workflow failed',
@@ -315,6 +373,33 @@ router.get('/results/:conditionId', async (req, res) => {
   } catch (error) {
     console.error('Error getting auto-count results:', error);
     return res.status(500).json({ error: 'Failed to get auto-count results' });
+  }
+});
+
+// Get match thumbnails for a visual search condition
+router.get('/thumbnails/:conditionId', async (req, res) => {
+  try {
+    const { conditionId } = req.params;
+    const { projectId } = req.query;
+    const maxThumbnails = parseInt(req.query.maxThumbnails as string) || 6;
+
+    if (!projectId || typeof projectId !== 'string') {
+      return res.status(400).json({ error: 'projectId query parameter is required' });
+    }
+
+    const thumbnails = await autoCountService.extractMatchThumbnails(
+      conditionId,
+      projectId,
+      maxThumbnails
+    );
+
+    return res.json({
+      success: true,
+      thumbnails
+    });
+  } catch (error) {
+    console.error('Error getting match thumbnails:', error);
+    return res.status(500).json({ error: 'Failed to get match thumbnails' });
   }
 });
 

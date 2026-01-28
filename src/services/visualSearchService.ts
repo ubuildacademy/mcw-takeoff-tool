@@ -175,10 +175,34 @@ export class AutoCountService {
                 const { done, value } = await reader.read();
                 
                 if (done) {
+                  // Process any remaining buffer before resolving/rejecting
+                  if (buffer.trim()) {
+                    const lines = buffer.split('\n');
+                    for (const line of lines) {
+                      if (line.startsWith('data: ')) {
+                        try {
+                          const data = JSON.parse(line.slice(6));
+                          if (data.type === 'complete') {
+                            finalResult = {
+                              result: data.result,
+                              measurementsCreated: data.measurementsCreated
+                            };
+                          } else if (data.type === 'error') {
+                            reject(new Error(data.error || 'Auto-count failed'));
+                            return;
+                          }
+                        } catch (parseError) {
+                          console.warn('Failed to parse final SSE data:', line, parseError);
+                        }
+                      }
+                    }
+                  }
+                  
                   if (finalResult) {
                     resolve(finalResult);
                   } else {
-                    reject(new Error('Search completed but no result received'));
+                    console.error('SSE stream ended without complete message. Buffer:', buffer);
+                    reject(new Error('Search completed but no result received. The server may have closed the connection prematurely.'));
                   }
                   return;
                 }
@@ -188,9 +212,10 @@ export class AutoCountService {
                 buffer = lines.pop() || ''; // Keep incomplete line in buffer
 
                 for (const line of lines) {
-                  if (line.startsWith('data: ')) {
+                  if (line.trim() && line.startsWith('data: ')) {
                     try {
                       const data = JSON.parse(line.slice(6));
+                      console.log('[AutoCount SSE] Received:', data.type, data);
                       
                       if (data.type === 'connected') {
                         // Connection established
@@ -207,11 +232,14 @@ export class AutoCountService {
                         }
                       } else if (data.type === 'complete') {
                         // Search complete
+                        console.log('[AutoCount SSE] Complete message received:', data);
                         finalResult = {
                           result: data.result,
                           measurementsCreated: data.measurementsCreated
                         };
+                        // Don't break here - let the stream finish naturally
                       } else if (data.type === 'error') {
+                        console.error('[AutoCount SSE] Error received:', data.error);
                         reject(new Error(data.error || 'Auto-count failed'));
                         return;
                       }
@@ -259,6 +287,27 @@ export class AutoCountService {
     }
 
     return await response.json();
+  }
+
+  /**
+   * Get match thumbnails for a visual search condition
+   */
+  async getMatchThumbnails(
+    conditionId: string,
+    projectId: string,
+    maxThumbnails: number = 6
+  ): Promise<Array<{ measurementId: string; thumbnail: string }>> {
+    const response = await fetch(
+      `${API_BASE_URL}/visual-search/thumbnails/${conditionId}?projectId=${projectId}&maxThumbnails=${maxThumbnails}`
+    );
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to get match thumbnails');
+    }
+
+    const result = await response.json();
+    return result.thumbnails || [];
   }
 }
 

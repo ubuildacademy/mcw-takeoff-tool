@@ -59,6 +59,8 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
   const [expandedConditions, setExpandedConditions] = useState<Set<string>>(new Set());
   const [showExportDropdown, setShowExportDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const [matchThumbnails, setMatchThumbnails] = useState<Record<string, Array<{ measurementId: string; thumbnail: string }>>>({});
+  const [loadingThumbnails, setLoadingThumbnails] = useState<Set<string>>(new Set());
 
   const { addCondition, conditions, setSelectedCondition, selectedConditionId, getConditionTakeoffMeasurements, loadProjectConditions, getProjectTakeoffMeasurements, takeoffMeasurements, loadingConditions, refreshProjectConditions, ensureConditionsLoaded, getProjectCostBreakdown, getConditionCostBreakdown } = useTakeoffStore();
 
@@ -91,6 +93,56 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       condition.description.toLowerCase().includes(searchQuery.toLowerCase())
     )
   );
+
+  // Load match thumbnails for auto-count (visual-search) conditions
+  useEffect(() => {
+    if (!projectId) return;
+
+    const loadThumbnails = async () => {
+      // Compute filtered conditions inside the effect to ensure we have the latest values
+      const currentFilteredConditions = conditions.filter(condition =>
+        condition.projectId === projectId && (
+          condition.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          condition.description.toLowerCase().includes(searchQuery.toLowerCase())
+        )
+      );
+
+      const visualSearchConditions = currentFilteredConditions.filter(
+        c => c.type === 'visual-search' && 
+        !loadingThumbnails.has(c.id) &&
+        !matchThumbnails[c.id]
+      );
+
+      // Load thumbnails for each condition
+      for (const condition of visualSearchConditions) {
+        const measurements = getConditionTakeoffMeasurements(projectId, condition.id);
+        if (measurements.length > 0) {
+          console.log(`[TakeoffSidebar] Loading thumbnails for condition ${condition.id} with ${measurements.length} measurements`);
+          setLoadingThumbnails(prev => new Set(prev).add(condition.id));
+          try {
+            const { visualSearchService } = await import('../services/visualSearchService');
+            const thumbnails = await visualSearchService.getMatchThumbnails(condition.id, projectId, 6);
+            console.log(`[TakeoffSidebar] Loaded ${thumbnails.length} thumbnails for condition ${condition.id}`, thumbnails);
+            setMatchThumbnails(prev => ({
+              ...prev,
+              [condition.id]: thumbnails
+            }));
+          } catch (error) {
+            console.error(`[TakeoffSidebar] Failed to load thumbnails for condition ${condition.id}:`, error);
+          } finally {
+            setLoadingThumbnails(prev => {
+              const next = new Set(prev);
+              next.delete(condition.id);
+              return next;
+            });
+          }
+        }
+      }
+    };
+
+    loadThumbnails();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, conditions, searchQuery, takeoffMeasurements]);
 
 
   // Helper function to get sheet name for a page
@@ -1927,7 +1979,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                   {condition.description}
                 </p>
                 
-                {/* Visual Search Image Preview */}
+                {/* Auto Count Image Preview */}
                 {condition.type === 'visual-search' && (
                   <>
                     {condition.searchImage ? (
@@ -1953,6 +2005,51 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                         No search image set
                       </div>
                     )}
+                    
+                    {/* Match Preview Thumbnails */}
+                    {(() => {
+                      const measurements = getConditionTakeoffMeasurements(projectId, condition.id);
+                      const hasMatches = measurements.length > 0;
+                      const thumbnails = matchThumbnails[condition.id] || [];
+                      const isLoading = loadingThumbnails.has(condition.id);
+
+                      if (!hasMatches) {
+                        return null;
+                      }
+
+                      return (
+                        <div className="mb-3">
+                          <div className="text-xs text-gray-500 mb-1">
+                            Found Items ({measurements.length}):
+                          </div>
+                          {isLoading ? (
+                            <div className="text-xs text-gray-400 italic">Loading previews...</div>
+                          ) : thumbnails.length > 0 ? (
+                            <div className="grid grid-cols-3 gap-1">
+                              {thumbnails.map((thumb, idx) => (
+                                <div
+                                  key={thumb.measurementId || idx}
+                                  className="border border-gray-200 rounded p-1 bg-gray-50 aspect-square flex items-center justify-center overflow-hidden"
+                                >
+                                  <img
+                                    src={thumb.thumbnail}
+                                    alt={`Match ${idx + 1}`}
+                                    className="w-full h-full object-contain rounded"
+                                    onError={(e) => {
+                                      (e.target as HTMLImageElement).style.display = 'none';
+                                    }}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="text-xs text-gray-400 italic">
+                              {measurements.length} match{measurements.length !== 1 ? 'es' : ''} found
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </>
                 )}
                 

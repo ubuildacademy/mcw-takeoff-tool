@@ -37,40 +37,55 @@ Professional construction takeoff software built with React, TypeScript, and mod
 
 ### Prerequisites
 - Node.js 18+ 
+- Python 3.8+ (for backend Python scripts)
 - npm or yarn
+- Supabase account and project
 
-### Installation
+### Quick Setup
 
-1. Clone the repository:
+For detailed local development setup instructions, see **[DEVELOPMENT_SETUP.md](./DEVELOPMENT_SETUP.md)**
+
+**Quick start:**
+
+1. Run the setup script (optional, helps with initial setup):
 ```bash
-git clone https://github.com/ubuildacademy/mcw-takeoff-tool.git
-cd mcw-takeoff-tool
+./scripts/dev-setup.sh
 ```
 
-2. Install frontend dependencies:
+2. Set up environment variables:
+   - Copy `.env.example` to `.env` (root directory)
+   - Copy `.env.example` to `server/.env`
+   - Add your Supabase credentials to both files
+
+3. Install dependencies:
 ```bash
+# Frontend
 npm install
-```
 
-3. Install backend dependencies:
-```bash
+# Backend
 cd server
 npm install
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
 cd ..
 ```
 
-4. Start the backend server:
+4. Start development servers (in two separate terminals):
+
+**Terminal 1 - Backend:**
 ```bash
 cd server
+source venv/bin/activate  # If using venv
 npm run dev
 ```
 
-5. Start the frontend development server (in a new terminal):
+**Terminal 2 - Frontend:**
 ```bash
 npm run dev
 ```
 
-6. Open your browser and navigate to `http://localhost:3001`
+5. Open your browser to `http://localhost:3001`
 
 ### Available Scripts
 

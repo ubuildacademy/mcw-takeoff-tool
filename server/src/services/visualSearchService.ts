@@ -684,6 +684,7 @@ except Exception as e:
         const centerY = match.boundingBox.y + (match.boundingBox.height / 2);
         
         // Store bounding box info in description as JSON for thumbnail extraction
+        // Format: {bbox: {x, y, width, height}} where coordinates are normalized (0-1)
         const bboxInfo = match.pdfCoordinates ? {
           bbox: {
             x: match.pdfCoordinates.x,
@@ -728,6 +729,166 @@ except Exception as e:
     } catch (error) {
       console.error('❌ Failed to create count measurements:', error);
       throw new Error('Failed to create count measurements');
+    }
+  }
+
+  /**
+   * Extract thumbnail images for visual search matches
+   */
+  async extractMatchThumbnails(
+    conditionId: string,
+    projectId: string,
+    maxThumbnails: number = 6
+  ): Promise<Array<{ measurementId: string; thumbnail: string }>> {
+    try {
+      console.log(`[VisualSearchService] Extracting thumbnails for condition ${conditionId}, project ${projectId}`);
+      // Get all measurements for this condition
+      const measurements = await storage.getTakeoffMeasurements();
+      const conditionMeasurements = measurements.filter(m => m.conditionId === conditionId);
+      
+      console.log(`[VisualSearchService] Found ${conditionMeasurements.length} measurements for condition ${conditionId}`);
+      
+      if (conditionMeasurements.length === 0) {
+        console.log(`[VisualSearchService] No measurements found, returning empty array`);
+        return [];
+      }
+
+      // Group measurements by sheet and page
+      const measurementsByPage = new Map<string, typeof conditionMeasurements>();
+      for (const measurement of conditionMeasurements) {
+        const key = `${measurement.sheetId}-${measurement.pdfPage}`;
+        if (!measurementsByPage.has(key)) {
+          measurementsByPage.set(key, []);
+        }
+        measurementsByPage.get(key)!.push(measurement);
+      }
+
+      const thumbnails: Array<{ measurementId: string; thumbnail: string }> = [];
+      let thumbnailCount = 0;
+
+      // Process each page
+      for (const [key, pageMeasurements] of measurementsByPage) {
+        if (thumbnailCount >= maxThumbnails) break;
+
+        const [sheetId, pageNumberStr] = key.split('-');
+        const pageNumber = parseInt(pageNumberStr, 10);
+
+        // Get PDF file
+        const files = await storage.getFilesByProject(projectId);
+        const file = files.find(f => f.id === sheetId);
+        if (!file || file.mimetype !== 'application/pdf') continue;
+
+        // Get PDF path
+        const pdfPath = await this.getPDFFilePath(sheetId, projectId);
+
+        // Convert PDF page to image
+        const imageBuffer = await pythonPdfConverter.convertPageToBuffer(pdfPath, pageNumber, {
+          format: 'png',
+          scale: 2.0,
+          quality: 90
+        });
+
+        if (!imageBuffer) continue;
+
+        // Save page image temporarily
+        await fs.ensureDir(this.tempDir);
+        const pageImagePath = path.join(this.tempDir, `page_${uuidv4()}.png`);
+        await fs.writeFile(pageImagePath, imageBuffer);
+
+        // Extract thumbnails for measurements on this page
+        for (const measurement of pageMeasurements.slice(0, maxThumbnails - thumbnailCount)) {
+          if (thumbnailCount >= maxThumbnails) break;
+
+          // Try to get bounding box from description (stored as JSON)
+          let selectionBox: { x: number; y: number; width: number; height: number } | null = null;
+          
+          if (measurement.description) {
+            try {
+              const descData = JSON.parse(measurement.description);
+              if (descData.normalizedBbox) {
+                // Use the normalized bounding box (0-1 scale)
+                selectionBox = {
+                  x: descData.normalizedBbox.x,
+                  y: descData.normalizedBbox.y,
+                  width: descData.normalizedBbox.width,
+                  height: descData.normalizedBbox.height
+                };
+              }
+            } catch (e) {
+              // Description is not JSON, fall back to center point method
+            }
+          }
+          
+          // Fallback: use center point with estimated size
+          if (!selectionBox) {
+            const center = measurement.pdfCoordinates?.[0];
+            if (!center) continue;
+
+            // Use a thumbnail size that's reasonable for symbols (typically 2-5% of page)
+            // We'll use 4% which should capture most symbols nicely
+            const thumbnailSize = 0.04; // 4% of page size
+            const halfSize = thumbnailSize / 2;
+            
+            // Calculate bounding box ensuring it stays within page bounds
+            let x = center.x - halfSize;
+            let y = center.y - halfSize;
+            let width = thumbnailSize;
+            let height = thumbnailSize;
+            
+            // Clamp to page bounds
+            if (x < 0) {
+              width += x;
+              x = 0;
+            }
+            if (y < 0) {
+              height += y;
+              y = 0;
+            }
+            if (x + width > 1) {
+              width = 1 - x;
+            }
+            if (y + height > 1) {
+              height = 1 - y;
+            }
+            
+            // Skip if the bounding box is too small
+            if (width < 0.01 || height < 0.01) continue;
+            
+            selectionBox = { x, y, width, height };
+          }
+          
+          // Ensure bounding box is valid
+          if (!selectionBox || selectionBox.width < 0.01 || selectionBox.height < 0.01) continue;
+
+          try {
+            const thumbnailPath = await this.cropImageRegion(pageImagePath, selectionBox, pageNumber);
+            const thumbnailBuffer = await fs.readFile(thumbnailPath);
+            const thumbnailBase64 = thumbnailBuffer.toString('base64');
+            
+            thumbnails.push({
+              measurementId: measurement.id,
+              thumbnail: `data:image/png;base64,${thumbnailBase64}`
+            });
+            
+            thumbnailCount++;
+            console.log(`[VisualSearchService] Extracted thumbnail ${thumbnailCount}/${maxThumbnails} for measurement ${measurement.id}`);
+            
+            // Clean up thumbnail file
+            await fs.remove(thumbnailPath).catch(() => {});
+          } catch (error) {
+            console.error(`[VisualSearchService] Failed to extract thumbnail for measurement ${measurement.id}:`, error);
+          }
+        }
+
+        // Clean up page image
+        await fs.remove(pageImagePath).catch(() => {});
+      }
+
+      console.log(`[VisualSearchService] Returning ${thumbnails.length} thumbnails for condition ${conditionId}`);
+      return thumbnails;
+    } catch (error) {
+      console.error('❌ Failed to extract match thumbnails:', error);
+      return [];
     }
   }
 }

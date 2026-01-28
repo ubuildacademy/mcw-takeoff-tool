@@ -1074,16 +1074,20 @@ export function TakeoffWorkspace() {
     
     try {
       setDocumentsLoading(true);
+      console.log('[LoadDocuments] Starting to load project documents...');
       // Use projectFiles state instead of calling API again to avoid duplicate requests
       const files = projectFiles.length > 0 ? projectFiles : (await fileService.getProjectFiles(projectId)).files || [];
+      console.log(`[LoadDocuments] Found ${files.length} total files`);
       
       const pdfFiles = files.filter((file: any) => file.mimetype === 'application/pdf');
+      console.log(`[LoadDocuments] Processing ${pdfFiles.length} PDF files`);
       
       // CRITICAL FIX: Use Promise.allSettled instead of Promise.all to prevent one failure from breaking everything
       // This ensures that even if one document fails to load, others can still load successfully
       const documentResults = await Promise.allSettled(
         pdfFiles.map(async (file: any) => {
           try {
+            console.log(`[LoadDocuments] Loading PDF: ${file.originalName}`);
             // Load PDF to get actual page count - use correct API base URL
             const { getApiBaseUrl } = await import('../lib/apiConfig');
             const API_BASE_URL = getApiBaseUrl();
@@ -1099,15 +1103,18 @@ export function TakeoffWorkspace() {
               httpHeaders['Authorization'] = `Bearer ${session.access_token}`;
             }
             
+            console.log(`[LoadDocuments] Fetching PDF document: ${file.originalName}`);
             const pdf = await pdfjsLib.getDocument({
               url: pdfUrl,
               httpHeaders
             }).promise;
             const totalPages = pdf.numPages;
+            console.log(`[LoadDocuments] PDF loaded: ${file.originalName} has ${totalPages} pages`);
             
             // CRITICAL FIX: Create pages array and load existing sheet data from database
             // This ensures documents have proper page data from the start, preventing null page errors
             // Use Promise.allSettled to handle individual page loading failures gracefully
+            console.log(`[LoadDocuments] Loading sheet data for ${totalPages} pages of ${file.originalName}...`);
             const pageResults = await Promise.allSettled(
               Array.from({ length: totalPages }, async (_, index) => {
                 const pageNumber = index + 1;
@@ -1115,6 +1122,8 @@ export function TakeoffWorkspace() {
                 
                 try {
                   // Try to load existing sheet data from database
+                  // NOTE: This makes one API call per page - can be slow for documents with many pages
+                  // Consider optimizing by batching requests or loading all sheets for a document at once
                   const { sheetService } = await import('../services/apiService');
                   const sheetData = await sheetService.getSheet(sheetId);
                   if (sheetData && sheetData.sheet) {
@@ -1175,12 +1184,14 @@ export function TakeoffWorkspace() {
               })
               .filter((page): page is PDFPage => page != null && page.pageNumber != null);
             
+            console.log(`[LoadDocuments] Finished loading pages for ${file.originalName}, checking OCR data...`);
             // Check if document has OCR data
             const { serverOcrService } = await import('../services/serverOcrService');
             const ocrData = await serverOcrService.getDocumentData(file.id, projectId);
             // CRITICAL FIX: Ensure results array exists and is valid before checking length
             const hasOCRData = ocrData && Array.isArray(ocrData.results) && ocrData.results.length > 0;
             
+            console.log(`[LoadDocuments] ✅ Completed loading: ${file.originalName} (${totalPages} pages, OCR: ${hasOCRData ? 'yes' : 'no'})`);
             return {
               id: file.id,
               name: file.originalName.replace('.pdf', ''),
@@ -1971,11 +1982,11 @@ export function TakeoffWorkspace() {
               <div className="flex items-center space-x-2">
                 <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></div>
                 <span className="text-sm font-medium text-indigo-900">
-                  Visual Search Mode: {visualSearchCondition.name}
+                  Auto Count Mode: {visualSearchCondition.name}
                 </span>
               </div>
               <div className="text-xs text-indigo-700">
-                Draw a box around a symbol to find and count similar items
+                Draw a box around a symbol to automatically find and count similar items
               </div>
             </div>
           )}

@@ -474,7 +474,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
                   <div className="flex-1">
                     <h4 className="text-sm font-medium text-indigo-900 mb-1">Auto-Count Condition</h4>
                     <p className="text-sm text-indigo-700 mb-2">
-                      After creating this condition, you'll be able to draw a selection box around a symbol on the drawing to define what to search for.
+                      After creating this condition, you'll be able to draw a selection box around a symbol on the drawing to define what to count.
                     </p>
                     <p className="text-xs text-indigo-600">
                       The system will use AI to automatically find and count all similar symbols based on your selected scope.
