@@ -2,44 +2,22 @@ import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { storage, StoredTakeoffMeasurement } from '../storage';
 import { supabase, TABLES } from '../supabase';
+import { 
+  requireAuth, 
+  validateUUIDParam,
+  hasProjectAccess
+} from '../middleware';
 
 const router = express.Router();
 
-// Helper function to get authenticated user from request
-async function getAuthenticatedUser(req: express.Request) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null;
-  }
-  
-  const token = authHeader.substring(7);
-  const { data: { user }, error } = await supabase.auth.getUser(token);
-  
-  if (error || !user) {
-    return null;
-  }
-  
-  return user;
-}
-
-// Helper function to check if user is admin
-async function isAdmin(userId: string): Promise<boolean> {
-  const { data, error } = await supabase
-    .from('user_metadata')
-    .select('role')
-    .eq('id', userId)
-    .single();
-  
-  if (error || !data) {
-    return false;
-  }
-  
-  return data.role === 'admin';
-}
-
-// Get all takeoff measurements
-router.get('/', async (req, res) => {
+// Get all takeoff measurements - admin only (returns all data)
+router.get('/', requireAuth, async (req, res) => {
   try {
+    // Only admins can see all measurements across all projects
+    if (req.user?.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required to view all measurements' });
+    }
+    
     const measurements = await storage.getTakeoffMeasurements();
     return res.json({ measurements });
   } catch (error) {
@@ -48,33 +26,16 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Get takeoff measurements for a project
-router.get('/project/:projectId', async (req, res) => {
+// Get takeoff measurements for a project - requires auth and project access
+router.get('/project/:projectId', requireAuth, validateUUIDParam('projectId'), async (req, res) => {
   try {
-    // Get authenticated user
-    const user = await getAuthenticatedUser(req);
-    if (!user) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-    
     const { projectId } = req.params;
+    const userId = req.user?.id;
+    const userIsAdmin = req.user?.role === 'admin';
     
-    // Check if user is admin
-    const userIsAdmin = await isAdmin(user.id);
-    
-    // First, verify the user has access to this project
-    let projectQuery = supabase
-      .from(TABLES.PROJECTS)
-      .select('id, user_id')
-      .eq('id', projectId);
-    
-    if (!userIsAdmin) {
-      projectQuery = projectQuery.eq('user_id', user.id);
-    }
-    
-    const { data: project, error: projectError } = await projectQuery.single();
-    
-    if (projectError || !project) {
+    // Verify access to project
+    const hasAccess = await hasProjectAccess(userId!, projectId, userIsAdmin);
+    if (!hasAccess) {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
     
@@ -88,10 +49,31 @@ router.get('/project/:projectId', async (req, res) => {
   }
 });
 
-// Get takeoff measurements for a specific sheet
-router.get('/sheet/:sheetId', async (req, res) => {
+// Get takeoff measurements for a specific sheet - requires auth
+router.get('/sheet/:sheetId', requireAuth, validateUUIDParam('sheetId'), async (req, res) => {
   try {
     const { sheetId } = req.params;
+    const userId = req.user?.id;
+    const userIsAdmin = req.user?.role === 'admin';
+    
+    // Get the sheet to find its project for access control
+    const sheet = await storage.getSheet(sheetId);
+    if (!sheet) {
+      return res.status(404).json({ error: 'Sheet not found' });
+    }
+    
+    // Get document to find project
+    const file = await storage.getFile(sheet.documentId);
+    if (!file) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    
+    // Verify access to project
+    const hasAccess = await hasProjectAccess(userId!, file.projectId, userIsAdmin);
+    if (!hasAccess) {
+      return res.status(404).json({ error: 'Sheet not found or access denied' });
+    }
+    
     const measurements = await storage.getTakeoffMeasurementsBySheet(sheetId);
     return res.json({ measurements });
   } catch (error) {
@@ -100,14 +82,34 @@ router.get('/sheet/:sheetId', async (req, res) => {
   }
 });
 
-// Get takeoff measurements for a specific page
-router.get('/sheet/:sheetId/page/:pageNumber', async (req, res) => {
+// Get takeoff measurements for a specific page - requires auth
+router.get('/sheet/:sheetId/page/:pageNumber', requireAuth, validateUUIDParam('sheetId'), async (req, res) => {
   try {
     const { sheetId, pageNumber } = req.params;
+    const userId = req.user?.id;
+    const userIsAdmin = req.user?.role === 'admin';
     const pageNum = parseInt(pageNumber, 10);
     
     if (isNaN(pageNum) || pageNum < 1) {
       return res.status(400).json({ error: 'Invalid page number' });
+    }
+    
+    // Get the sheet to find its project for access control
+    const sheet = await storage.getSheet(sheetId);
+    if (!sheet) {
+      return res.status(404).json({ error: 'Sheet not found' });
+    }
+    
+    // Get document to find project
+    const file = await storage.getFile(sheet.documentId);
+    if (!file) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    
+    // Verify access to project
+    const hasAccess = await hasProjectAccess(userId!, file.projectId, userIsAdmin);
+    if (!hasAccess) {
+      return res.status(404).json({ error: 'Sheet not found or access denied' });
     }
     
     const measurements = await storage.getTakeoffMeasurementsByPage(sheetId, pageNum);
@@ -118,9 +120,12 @@ router.get('/sheet/:sheetId/page/:pageNumber', async (req, res) => {
   }
 });
 
-// Create a new takeoff measurement
-router.post('/', async (req, res) => {
+// Create a new takeoff measurement - requires auth and project access
+router.post('/', requireAuth, async (req, res) => {
   try {
+    const userId = req.user?.id;
+    const userIsAdmin = req.user?.role === 'admin';
+    
     const {
       projectId,
       sheetId,
@@ -148,6 +153,12 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ 
         error: 'Invalid type. Must be one of: area, volume, linear, count' 
       });
+    }
+    
+    // Verify access to project
+    const hasAccess = await hasProjectAccess(userId!, projectId, userIsAdmin);
+    if (!hasAccess) {
+      return res.status(404).json({ error: 'Project not found or access denied' });
     }
 
     const id = uuidv4();
@@ -191,10 +202,12 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Update an existing takeoff measurement
-router.put('/:id', async (req, res) => {
+// Update an existing takeoff measurement - requires auth and project access
+router.put('/:id', requireAuth, validateUUIDParam('id'), async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = req.user?.id;
+    const userIsAdmin = req.user?.role === 'admin';
     const updates = req.body;
     
     const measurements = await storage.getTakeoffMeasurements();
@@ -203,6 +216,15 @@ router.put('/:id', async (req, res) => {
     if (!existingMeasurement) {
       return res.status(404).json({ error: 'Takeoff measurement not found' });
     }
+    
+    // Verify access to project
+    const hasAccess = await hasProjectAccess(userId!, existingMeasurement.projectId, userIsAdmin);
+    if (!hasAccess) {
+      return res.status(404).json({ error: 'Measurement not found or access denied' });
+    }
+    
+    // Don't allow changing project ownership
+    delete updates.projectId;
     
     const updatedMeasurement = { ...existingMeasurement, ...updates };
     const savedMeasurement = await storage.saveTakeoffMeasurement(updatedMeasurement);
@@ -217,10 +239,27 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// Delete a takeoff measurement
-router.delete('/:id', async (req, res) => {
+// Delete a takeoff measurement - requires auth and project access
+router.delete('/:id', requireAuth, validateUUIDParam('id'), async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = req.user?.id;
+    const userIsAdmin = req.user?.role === 'admin';
+    
+    // Get measurement to check project access
+    const measurements = await storage.getTakeoffMeasurements();
+    const measurement = measurements.find(m => m.id === id);
+    
+    if (!measurement) {
+      return res.status(404).json({ error: 'Takeoff measurement not found' });
+    }
+    
+    // Verify access to project
+    const hasAccess = await hasProjectAccess(userId!, measurement.projectId, userIsAdmin);
+    if (!hasAccess) {
+      return res.status(404).json({ error: 'Measurement not found or access denied' });
+    }
+    
     await storage.deleteTakeoffMeasurement(id);
     return res.json({ success: true });
   } catch (error) {

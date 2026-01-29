@@ -4,6 +4,13 @@ import multer from 'multer';
 import path from 'path';
 import { storage, StoredProject } from '../storage';
 import { supabase, TABLES } from '../supabase';
+import { 
+  requireAuth, 
+  requireProjectAccess,
+  validateUUIDParam,
+  sanitizeBody,
+  uploadRateLimit
+} from '../middleware';
 
 // Configure multer for file uploads
 const upload = multer({ 
@@ -13,76 +20,10 @@ const upload = multer({
 
 const router = express.Router();
 
-// Helper function to get authenticated user from request
-async function getAuthenticatedUser(req: express.Request) {
-  const authHeader = req.headers.authorization;
-  console.log('🔐 Auth header:', authHeader ? 'Present' : 'Missing');
-  
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    console.log('❌ No valid Bearer token');
-    return null;
-  }
-  
-  const token = authHeader.substring(7);
-  console.log('🎫 Token length:', token.length);
-  
-  const { data: { user }, error } = await supabase.auth.getUser(token);
-  
-  if (error) {
-    console.log('❌ Token verification error:', error.message);
-    return null;
-  }
-  
-  if (!user) {
-    console.log('❌ No user from token');
-    return null;
-  }
-  
-  console.log('✅ User authenticated:', user.id, user.email);
-  return user;
-}
-
-// Helper function to check if user is admin
-async function isAdmin(userId: string): Promise<boolean> {
-  console.log('🔍 Checking admin status for user:', userId);
-  
-  const { data, error } = await supabase
-    .from('user_metadata')
-    .select('role')
-    .eq('id', userId)
-    .single();
-  
-  if (error) {
-    console.log('❌ Error checking admin status:', error.message);
-    return false;
-  }
-  
-  if (!data) {
-    console.log('❌ No user metadata found');
-    return false;
-  }
-  
-  const isAdminUser = data.role === 'admin';
-  console.log('🔑 User role:', data.role, 'Is admin:', isAdminUser);
-  return isAdminUser;
-}
-
-router.get('/', async (req, res) => {
+router.get('/', requireAuth, async (req, res) => {
   try {
-    console.log('🔍 GET /projects - Headers:', req.headers.authorization ? 'Auth header present' : 'No auth header');
-    
-    // Get authenticated user
-    const user = await getAuthenticatedUser(req);
-    console.log('👤 Authenticated user:', user ? `${user.id} (${user.email})` : 'None');
-    
-    if (!user) {
-      console.log('❌ No authenticated user, returning 401');
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-    
-    // Check if user is admin
-    const userIsAdmin = await isAdmin(user.id);
-    console.log('🔑 User is admin:', userIsAdmin);
+    const userId = req.user?.id;
+    const userIsAdmin = req.user?.role === 'admin';
     
     // Build query based on user role
     let query = supabase
@@ -92,14 +33,10 @@ router.get('/', async (req, res) => {
     
     // If not admin, only show user's own projects
     if (!userIsAdmin) {
-      query = query.eq('user_id', user.id);
-      console.log('🔒 Filtering projects for user:', user.id);
-    } else {
-      console.log('👑 Admin user - showing all projects');
+      query = query.eq('user_id', userId);
     }
     
     const { data: projects, error } = await query;
-    console.log('📋 Query result:', { projectsCount: projects?.length || 0, error: error?.message });
     
     if (error) {
       console.error('Error fetching projects:', error);
@@ -140,11 +77,19 @@ router.get('/', async (req, res) => {
   }
 });
 
-router.post('/', async (req, res) => {
+// Create a new project - requires authentication
+router.post('/', requireAuth, sanitizeBody('name', 'client', 'location', 'description', 'contactPerson'), async (req, res) => {
   try {
     const id = uuidv4();
     const now = new Date().toISOString();
     const incoming = req.body as Partial<StoredProject>;
+    
+    // Get user ID from authenticated request
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'User not authenticated' });
+    }
+    
     const project: StoredProject = {
       id,
       name: incoming.name || 'Untitled',
@@ -159,7 +104,8 @@ router.post('/', async (req, res) => {
       contactEmail: incoming.contactEmail,
       contactPhone: incoming.contactPhone,
       createdAt: now,
-      lastModified: now
+      lastModified: now,
+      userId // Associate project with the authenticated user
     };
     const savedProject = await storage.saveProject(project);
     return res.status(201).json({ success: true, project: savedProject });
@@ -169,26 +115,39 @@ router.post('/', async (req, res) => {
   }
 });
 
-router.get('/:id', async (req, res) => {
+// Get a single project - requires auth and project access
+router.get('/:id', requireAuth, validateUUIDParam('id'), async (req, res) => {
   try {
     const { id } = req.params;
-    const projects = await storage.getProjects();
-    const project = projects.find(p => p.id === id);
-    if (!project) return res.status(404).json({ error: 'Project not found' });
+    const userId = req.user?.id;
+    const userIsAdmin = req.user?.role === 'admin';
+    
+    // Get project with access control
+    let query = supabase
+      .from(TABLES.PROJECTS)
+      .select('*')
+      .eq('id', id);
+    
+    // Non-admins can only see their own projects
+    if (!userIsAdmin) {
+      query = query.eq('user_id', userId);
+    }
+    
+    const { data: project, error } = await query.single();
+    
+    if (error || !project) {
+      return res.status(404).json({ error: 'Project not found or access denied' });
+    }
     
     // Calculate takeoff count for this project
     try {
       const measurements = await storage.getTakeoffMeasurementsByProject(project.id);
       const takeoffCount = measurements.length;
       
-      // Note: We don't calculate totalValue here since calculatedValue represents
-      // measurement quantities (SF, LF, etc.) not monetary values
-      // Total value would need to be calculated using condition pricing if available
-      
       const projectWithCounts = {
         ...project,
         takeoffCount,
-        totalValue: 0 // Set to 0 since we don't have pricing information
+        totalValue: 0
       };
       
       return res.json({ project: projectWithCounts });
@@ -215,14 +174,33 @@ router.get('/:id/conditions', (req, res) => {
   return res.json({ conditions: [] });
 });
 
-router.put('/:id', async (req, res) => {
+// Update a project - requires auth and project access
+router.put('/:id', requireAuth, validateUUIDParam('id'), sanitizeBody('name', 'client', 'location', 'description', 'contactPerson'), async (req, res) => {
   try {
     const { id } = req.params;
-    const projects = await storage.getProjects();
-    const existingProject = projects.find(p => p.id === id);
-    if (!existingProject) return res.status(404).json({ error: 'Not found' });
+    const userId = req.user?.id;
+    const userIsAdmin = req.user?.role === 'admin';
+    
+    // Verify access to project
+    let query = supabase
+      .from(TABLES.PROJECTS)
+      .select('*')
+      .eq('id', id);
+    
+    if (!userIsAdmin) {
+      query = query.eq('user_id', userId);
+    }
+    
+    const { data: existingProject, error } = await query.single();
+    
+    if (error || !existingProject) {
+      return res.status(404).json({ error: 'Project not found or access denied' });
+    }
     
     const updates = req.body as Partial<StoredProject>;
+    // Don't allow changing user_id
+    delete updates.userId;
+    
     const updated: StoredProject = { ...existingProject, ...updates, lastModified: new Date().toISOString() };
     const savedProject = await storage.saveProject(updated);
     return res.json({ success: true, project: savedProject });
@@ -232,9 +210,29 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-router.delete('/:id', async (req, res) => {
+// Delete a project - requires auth and project access
+router.delete('/:id', requireAuth, validateUUIDParam('id'), async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = req.user?.id;
+    const userIsAdmin = req.user?.role === 'admin';
+    
+    // Verify access to project
+    let query = supabase
+      .from(TABLES.PROJECTS)
+      .select('id, user_id')
+      .eq('id', id);
+    
+    if (!userIsAdmin) {
+      query = query.eq('user_id', userId);
+    }
+    
+    const { data: project, error } = await query.single();
+    
+    if (error || !project) {
+      return res.status(404).json({ error: 'Project not found or access denied' });
+    }
+    
     await storage.deleteProject(id);
     return res.json({ success: true });
   } catch (error) {
@@ -243,10 +241,27 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
-// Export project endpoint
-router.get('/:id/export', async (req, res) => {
+// Export project endpoint - requires auth and project access
+router.get('/:id/export', requireAuth, validateUUIDParam('id'), async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = req.user?.id;
+    const userIsAdmin = req.user?.role === 'admin';
+    
+    // Verify access
+    let accessQuery = supabase
+      .from(TABLES.PROJECTS)
+      .select('id')
+      .eq('id', id);
+    
+    if (!userIsAdmin) {
+      accessQuery = accessQuery.eq('user_id', userId);
+    }
+    
+    const { data: accessCheck, error: accessError } = await accessQuery.single();
+    if (accessError || !accessCheck) {
+      return res.status(404).json({ error: 'Project not found or access denied' });
+    }
     
     console.log('🔄 Starting project export for:', id);
     
@@ -355,11 +370,16 @@ router.get('/:id/export', async (req, res) => {
   }
 });
 
-// Import project endpoint
-router.post('/import', upload.single('file'), async (req, res) => {
+// Import project endpoint - requires auth
+router.post('/import', requireAuth, uploadRateLimit, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
+    }
+    
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'User not authenticated' });
     }
 
     console.log('🔄 Starting project import...');
@@ -376,10 +396,11 @@ router.post('/import', upload.single('file'), async (req, res) => {
     console.log(`📦 Importing backup version ${backup.version} from ${backup.timestamp}`);
 
     // Create the project (without the original ID to avoid conflicts)
-    const { id: originalId, ...projectData } = backup.project;
+    const { id: originalId, userId: originalUserId, ...projectData } = backup.project;
     const newProject = await storage.saveProject({
       ...projectData,
       id: uuidv4(),
+      userId, // Associate with the authenticated user
       createdAt: new Date().toISOString(),
       lastModified: new Date().toISOString()
     });

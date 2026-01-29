@@ -16,6 +16,7 @@ export interface StoredProject {
   profitMarginPercent?: number;
   lastModified?: string;
   createdAt?: string;
+  userId?: string; // Owner of the project
 }
 
 export interface StoredFileMeta {
@@ -141,7 +142,8 @@ class SupabaseStorage {
       contactPhone: item.contact_phone,
       profitMarginPercent: item.profit_margin_percent,
       createdAt: item.created_at,
-      lastModified: item.last_modified
+      lastModified: item.last_modified,
+      userId: item.user_id
     }));
   }
 
@@ -174,13 +176,14 @@ class SupabaseStorage {
       contactEmail: data.contact_email,
       contactPhone: data.contact_phone,
       createdAt: data.created_at,
-      lastModified: data.last_modified
+      lastModified: data.last_modified,
+      userId: data.user_id
     };
   }
 
   async saveProject(project: StoredProject): Promise<StoredProject> {
     // Map camelCase to snake_case for database
-    const dbProject = {
+    const dbProject: Record<string, any> = {
       id: project.id,
       name: project.name,
       client: project.client,
@@ -196,6 +199,11 @@ class SupabaseStorage {
       created_at: project.createdAt,
       last_modified: project.lastModified
     };
+    
+    // Only include user_id if it's provided (for new projects)
+    if (project.userId) {
+      dbProject.user_id = project.userId;
+    }
     
     const { data, error } = await supabase
       .from(TABLES.PROJECTS)
@@ -223,7 +231,8 @@ class SupabaseStorage {
       contactPhone: data.contact_phone,
       profitMarginPercent: data.profit_margin_percent,
       createdAt: data.created_at,
-      lastModified: data.last_modified
+      lastModified: data.last_modified,
+      userId: data.user_id
     };
   }
 
@@ -287,6 +296,33 @@ class SupabaseStorage {
       mimetype: item.mimetype,
       uploadedAt: item.uploaded_at
     }));
+  }
+
+  async getFile(id: string): Promise<StoredFileMeta | null> {
+    const { data, error } = await supabase
+      .from(TABLES.FILES)
+      .select('*')
+      .eq('id', id)
+      .single();
+    
+    if (error) {
+      console.error('Error fetching file:', error);
+      return null;
+    }
+    
+    if (!data) return null;
+    
+    // Map snake_case to camelCase
+    return {
+      id: data.id,
+      projectId: data.project_id,
+      originalName: data.original_name,
+      filename: data.filename,
+      path: data.path,
+      size: data.size,
+      mimetype: data.mimetype,
+      uploadedAt: data.uploaded_at
+    };
   }
 
   async saveFile(file: StoredFileMeta): Promise<StoredFileMeta> {

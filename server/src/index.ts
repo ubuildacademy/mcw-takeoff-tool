@@ -26,6 +26,7 @@ import { livePreviewService } from './services/livePreviewService';
 // Initialize queue service (starts worker)
 import './services/queueService';
 import { supabase } from './supabase';
+import { standardRateLimit, strictRateLimit, generousRateLimit } from './middleware';
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '4000', 10);
@@ -200,6 +201,25 @@ app.all('/api/debug', (req, res) => {
     headers: req.headers,
     timestamp: new Date().toISOString()
   });
+});
+
+// Apply rate limiting only to sensitive endpoints
+// Read operations are already protected by authentication, so we don't rate limit them aggressively
+// This prevents 429 errors when loading documents with many pages/sheets
+
+// Strict rate limiting for auth endpoints (brute force protection)
+app.use('/api/users/login', strictRateLimit);
+app.use('/api/users/signup', strictRateLimit);
+app.use('/api/users/invite', strictRateLimit);
+
+// Standard rate limiting for write operations (POST/PUT/DELETE) on non-auth routes
+app.use('/api', (req, res, next) => {
+  // Skip rate limiting for GET requests (read operations)
+  if (req.method === 'GET') {
+    return next();
+  }
+  // Apply standard rate limit to write operations
+  return standardRateLimit(req, res, next);
 });
 
 // API routes

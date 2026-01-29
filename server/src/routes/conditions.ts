@@ -2,44 +2,25 @@ import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { storage } from '../storage';
 import { supabase, TABLES } from '../supabase';
+import { 
+  requireAuth, 
+  requireProjectAccess,
+  validateUUIDParam,
+  sanitizeBody,
+  isAdmin as checkIsAdmin,
+  hasProjectAccess
+} from '../middleware';
 
 const router = express.Router();
 
-// Helper function to get authenticated user from request
-async function getAuthenticatedUser(req: express.Request) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null;
-  }
-  
-  const token = authHeader.substring(7);
-  const { data: { user }, error } = await supabase.auth.getUser(token);
-  
-  if (error || !user) {
-    return null;
-  }
-  
-  return user;
-}
-
-// Helper function to check if user is admin
-async function isAdmin(userId: string): Promise<boolean> {
-  const { data, error } = await supabase
-    .from('user_metadata')
-    .select('role')
-    .eq('id', userId)
-    .single();
-  
-  if (error || !data) {
-    return false;
-  }
-  
-  return data.role === 'admin';
-}
-
-// Get all conditions
-router.get('/', async (req, res) => {
+// Get all conditions - requires admin (dangerous endpoint that returns all data)
+router.get('/', requireAuth, async (req, res) => {
   try {
+    // Only admins can see all conditions across all projects
+    if (req.user?.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required to view all conditions' });
+    }
+    
     const conditions = await storage.getConditions();
     return res.json({ conditions });
   } catch (error) {
@@ -48,33 +29,16 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Get all conditions for a project
-router.get('/project/:projectId', async (req, res) => {
+// Get all conditions for a project - uses middleware for auth
+router.get('/project/:projectId', requireAuth, validateUUIDParam('projectId'), async (req, res) => {
   try {
-    // Get authenticated user
-    const user = await getAuthenticatedUser(req);
-    if (!user) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-    
     const { projectId } = req.params;
+    const userId = req.user?.id;
+    const userIsAdmin = req.user?.role === 'admin';
     
-    // Check if user is admin
-    const userIsAdmin = await isAdmin(user.id);
-    
-    // First, verify the user has access to this project
-    let projectQuery = supabase
-      .from(TABLES.PROJECTS)
-      .select('id, user_id')
-      .eq('id', projectId);
-    
-    if (!userIsAdmin) {
-      projectQuery = projectQuery.eq('user_id', user.id);
-    }
-    
-    const { data: project, error: projectError } = await projectQuery.single();
-    
-    if (projectError || !project) {
+    // Verify access to project
+    const hasAccess = await hasProjectAccess(userId!, projectId, userIsAdmin);
+    if (!hasAccess) {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
     
@@ -88,15 +52,24 @@ router.get('/project/:projectId', async (req, res) => {
   }
 });
 
-// Get a specific condition by ID
-router.get('/:id', async (req, res) => {
+// Get a specific condition by ID - requires auth and project access
+router.get('/:id', requireAuth, validateUUIDParam('id'), async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = req.user?.id;
+    const userIsAdmin = req.user?.role === 'admin';
+    
     const conditions = await storage.getConditions();
     const condition = conditions.find(c => c.id === id);
     
     if (!condition) {
       return res.status(404).json({ error: 'Condition not found' });
+    }
+    
+    // Verify user has access to the project this condition belongs to
+    const hasAccess = await hasProjectAccess(userId!, condition.projectId, userIsAdmin);
+    if (!hasAccess) {
+      return res.status(404).json({ error: 'Condition not found or access denied' });
     }
     
     return res.json({ condition });
@@ -106,14 +79,11 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// Create a new condition
-router.post('/', async (req, res) => {
+// Create a new condition - requires auth and project access
+router.post('/', requireAuth, sanitizeBody('name', 'description'), async (req, res) => {
   try {
-    // Get authenticated user
-    const user = await getAuthenticatedUser(req);
-    if (!user) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
+    const userId = req.user?.id;
+    const userIsAdmin = req.user?.role === 'admin';
 
     const {
       projectId,
@@ -145,22 +115,9 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // Check if user is admin
-    const userIsAdmin = await isAdmin(user.id);
-    
     // Verify the user has access to this project
-    let projectQuery = supabase
-      .from(TABLES.PROJECTS)
-      .select('id, user_id')
-      .eq('id', projectId);
-    
-    if (!userIsAdmin) {
-      projectQuery = projectQuery.eq('user_id', user.id);
-    }
-    
-    const { data: project, error: projectError } = await projectQuery.single();
-    
-    if (projectError || !project) {
+    const hasAccess = await hasProjectAccess(userId!, projectId, userIsAdmin);
+    if (!hasAccess) {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
 
@@ -332,10 +289,12 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Update an existing condition
-router.put('/:id', async (req, res) => {
+// Update an existing condition - requires auth and project access
+router.put('/:id', requireAuth, validateUUIDParam('id'), sanitizeBody('name', 'description'), async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = req.user?.id;
+    const userIsAdmin = req.user?.role === 'admin';
     const {
       name,
       type,
@@ -370,6 +329,12 @@ router.put('/:id', async (req, res) => {
     
     if (!existingCondition) {
       return res.status(404).json({ error: 'Condition not found' });
+    }
+    
+    // Verify user has access to the project this condition belongs to
+    const hasAccess = await hasProjectAccess(userId!, existingCondition.projectId, userIsAdmin);
+    if (!hasAccess) {
+      return res.status(404).json({ error: 'Condition not found or access denied' });
     }
     
     // Count and auto-count conditions should not have waste factors
@@ -472,10 +437,27 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// Delete a condition
-router.delete('/:id', async (req, res) => {
+// Delete a condition - requires auth and project access
+router.delete('/:id', requireAuth, validateUUIDParam('id'), async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = req.user?.id;
+    const userIsAdmin = req.user?.role === 'admin';
+    
+    // Get condition to check project access
+    const conditions = await storage.getConditions();
+    const condition = conditions.find(c => c.id === id);
+    
+    if (!condition) {
+      return res.status(404).json({ error: 'Condition not found' });
+    }
+    
+    // Verify user has access to the project
+    const hasAccess = await hasProjectAccess(userId!, condition.projectId, userIsAdmin);
+    if (!hasAccess) {
+      return res.status(404).json({ error: 'Condition not found or access denied' });
+    }
+    
     await storage.deleteCondition(id);
     return res.json({ success: true });
   } catch (error) {
@@ -484,15 +466,24 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
-// Duplicate a condition (copy to same project)
-router.post('/:id/duplicate', async (req, res) => {
+// Duplicate a condition (copy to same project) - requires auth and project access
+router.post('/:id/duplicate', requireAuth, validateUUIDParam('id'), async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = req.user?.id;
+    const userIsAdmin = req.user?.role === 'admin';
+    
     const conditions = await storage.getConditions();
     const originalCondition = conditions.find(c => c.id === id);
     
     if (!originalCondition) {
       return res.status(404).json({ error: 'Condition not found' });
+    }
+    
+    // Verify user has access to the project
+    const hasAccess = await hasProjectAccess(userId!, originalCondition.projectId, userIsAdmin);
+    if (!hasAccess) {
+      return res.status(404).json({ error: 'Condition not found or access denied' });
     }
     
     const newId = uuidv4();

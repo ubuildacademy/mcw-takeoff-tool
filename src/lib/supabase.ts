@@ -1,12 +1,16 @@
 import { createClient, User, Session } from '@supabase/supabase-js'
 
-// Supabase project credentials - use environment variables in production
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://mxjyytwfhmoonkduvybr.supabase.co'
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im14anl5dHdmaG1vb25rZHV2eWJyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTgxMzE4NTksImV4cCI6MjA3MzcwNzg1OX0.nG28P04Gdg9hbwasEeYKL2ekoSkWoInoT6RwUwA0BJ8'
+// Supabase project credentials - MUST be set via environment variables
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
-// Validate that we have the required values
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing Supabase configuration. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY environment variables.')
+// Validate that we have the required values - no fallbacks for security
+if (!supabaseUrl) {
+  throw new Error('Missing VITE_SUPABASE_URL environment variable. Please set it in your .env file.')
+}
+
+if (!supabaseAnonKey) {
+  throw new Error('Missing VITE_SUPABASE_ANON_KEY environment variable. Please set it in your .env file.')
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)

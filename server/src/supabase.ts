@@ -1,7 +1,24 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.SUPABASE_URL || 'https://mxjyytwfhmoonkduvybr.supabase.co';
+const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+// Validate ALL required environment variables - no hardcoded fallbacks for security
+if (!supabaseUrl) {
+  const errorMessage = `
+❌ Missing SUPABASE_URL environment variable
+
+To fix this:
+1. Create a .env file in the server directory
+2. Add your Supabase URL:
+   SUPABASE_URL=https://your-project.supabase.co
+   SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
+
+Or copy .env.example to .env and fill in the values:
+   cp .env.example .env
+`;
+  throw new Error(errorMessage.trim());
+}
 
 if (!supabaseKey) {
   const errorMessage = `
@@ -10,11 +27,11 @@ if (!supabaseKey) {
 To fix this:
 1. Create a .env file in the server directory
 2. Add your Supabase service role key:
-   SUPABASE_URL=https://mxjyytwfhmoonkduvybr.supabase.co
+   SUPABASE_URL=https://your-project.supabase.co
    SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
 
-Get your service role key from:
-   https://supabase.com/dashboard/project/mxjyytwfhmoonkduvybr/settings/api
+Get your service role key from your Supabase dashboard:
+   Settings > API > service_role (secret)
 
 Or copy .env.example to .env and fill in the values:
    cp .env.example .env
