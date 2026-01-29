@@ -1,4 +1,5 @@
 import { supabase, TABLES } from './supabase';
+import { DatabaseError, isNotFoundError } from './errors';
 
 export interface StoredProject {
   id: string;
@@ -123,8 +124,7 @@ class SupabaseStorage {
       .order('created_at', { ascending: false });
     
     if (error) {
-      console.error('Error fetching projects:', error);
-      return [];
+      throw new DatabaseError('Failed to fetch projects', error);
     }
     
     // Map snake_case to camelCase
@@ -256,8 +256,7 @@ class SupabaseStorage {
       .order('uploaded_at', { ascending: false });
     
     if (error) {
-      console.error('Error fetching files:', error);
-      return [];
+      throw new DatabaseError('Failed to fetch files', error);
     }
     
     // Map snake_case to camelCase
@@ -281,8 +280,7 @@ class SupabaseStorage {
       .order('uploaded_at', { ascending: false });
     
     if (error) {
-      console.error('Error fetching files by project:', error);
-      return [];
+      throw new DatabaseError('Failed to fetch files by project', error, { projectId });
     }
     
     // Map snake_case to camelCase
@@ -306,8 +304,11 @@ class SupabaseStorage {
       .single();
     
     if (error) {
-      console.error('Error fetching file:', error);
-      return null;
+      // Return null for "not found" errors, throw for other errors
+      if (isNotFoundError(error)) {
+        return null;
+      }
+      throw new DatabaseError('Failed to fetch file', error, { fileId: id });
     }
     
     if (!data) return null;
@@ -382,8 +383,7 @@ class SupabaseStorage {
       .order('created_at', { ascending: false });
     
     if (error) {
-      console.error('Error fetching conditions:', error);
-      return [];
+      throw new DatabaseError('Failed to fetch conditions', error);
     }
     
     // Map snake_case to camelCase
@@ -417,8 +417,7 @@ class SupabaseStorage {
       .order('created_at', { ascending: false });
     
     if (error) {
-      console.error('Error fetching conditions by project:', error);
-      return [];
+      throw new DatabaseError('Failed to fetch conditions by project', error, { projectId });
     }
     
     // Map snake_case to camelCase
@@ -577,8 +576,7 @@ class SupabaseStorage {
       .order('created_at', { ascending: false });
     
     if (error) {
-      console.error('Error fetching takeoff measurements:', error);
-      return [];
+      throw new DatabaseError('Failed to fetch takeoff measurements', error);
     }
     
     // Map snake_case to camelCase
@@ -611,8 +609,7 @@ class SupabaseStorage {
       .order('created_at', { ascending: false });
     
     if (error) {
-      console.error('Error fetching takeoff measurements by project:', error);
-      return [];
+      throw new DatabaseError('Failed to fetch takeoff measurements by project', error, { projectId });
     }
     
     // Map snake_case to camelCase
@@ -645,8 +642,7 @@ class SupabaseStorage {
       .order('created_at', { ascending: false });
     
     if (error) {
-      console.error('Error fetching takeoff measurements by sheet:', error);
-      return [];
+      throw new DatabaseError('Failed to fetch takeoff measurements by sheet', error, { sheetId });
     }
     
     // Map snake_case to camelCase
@@ -680,8 +676,7 @@ class SupabaseStorage {
       .order('created_at', { ascending: false });
     
     if (error) {
-      console.error('Error fetching takeoff measurements by page:', error);
-      return [];
+      throw new DatabaseError('Failed to fetch takeoff measurements by page', error, { sheetId, pageNumber });
     }
     
     // Map snake_case to camelCase
@@ -903,8 +898,7 @@ class SupabaseStorage {
       .order('page_number', { ascending: true });
 
     if (error) {
-      console.error('Error fetching sheets by document:', error);
-      return [];
+      throw new DatabaseError('Failed to fetch sheets by document', error, { documentId });
     }
 
     return (data || []).map((item: any) => ({

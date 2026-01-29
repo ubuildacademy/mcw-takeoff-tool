@@ -43,32 +43,33 @@ router.get('/', requireAuth, async (req, res) => {
       return res.status(500).json({ error: 'Failed to fetch projects' });
     }
     
-    // Calculate takeoff counts for each project
-    const projectsWithCounts = await Promise.all(
-      (projects || []).map(async (project) => {
-        try {
-          const { data: measurements } = await supabase
-            .from(TABLES.TAKEOFF_MEASUREMENTS)
-            .select('id')
-            .eq('project_id', project.id);
-          
-          const takeoffCount = measurements?.length || 0;
-          
-          return {
-            ...project,
-            takeoffCount,
-            totalValue: 0 // Set to 0 since we don't have pricing information
-          };
-        } catch (error) {
-          console.error(`Error calculating takeoff count for project ${project.id}:`, error);
-          return {
-            ...project,
-            takeoffCount: 0,
-            totalValue: 0
-          };
-        }
-      })
-    );
+    // Batch query: Get all measurement counts in a single query instead of N queries
+    const projectIds = (projects || []).map(p => p.id);
+    
+    let countsByProject: Record<string, number> = {};
+    if (projectIds.length > 0) {
+      const { data: measurements, error: countError } = await supabase
+        .from(TABLES.TAKEOFF_MEASUREMENTS)
+        .select('project_id')
+        .in('project_id', projectIds);
+      
+      if (countError) {
+        console.error('Error fetching measurement counts:', countError);
+      } else {
+        // Group and count by project_id
+        countsByProject = (measurements || []).reduce((acc, m) => {
+          acc[m.project_id] = (acc[m.project_id] || 0) + 1;
+          return acc;
+        }, {} as Record<string, number>);
+      }
+    }
+    
+    // Map projects with their counts (no additional queries needed)
+    const projectsWithCounts = (projects || []).map(project => ({
+      ...project,
+      takeoffCount: countsByProject[project.id] || 0,
+      totalValue: 0
+    }));
     
     return res.json({ projects: projectsWithCounts });
   } catch (error) {
@@ -280,19 +281,38 @@ router.get('/:id/export', requireAuth, validateUUIDParam('id'), async (req, res)
 
     console.log(`📦 Found ${files.length} files, ${conditions.length} conditions, ${measurements.length} measurements, ${calibrations.length} calibrations`);
 
-    // Get sheets data for each file
-    const sheetsPromises = files.map(async (file) => {
-      try {
-        const sheets = await storage.getSheetsByDocument(file.id);
-        return sheets;
-      } catch (error) {
-        console.warn('Failed to get sheets for file:', file.id, error);
-        return [];
+    // Batch query: Get all sheets for all files in a single query instead of N queries
+    const fileIds = files.map(f => f.id);
+    let sheets: any[] = [];
+    
+    if (fileIds.length > 0) {
+      const { data: allSheets, error: sheetsError } = await supabase
+        .from(TABLES.SHEETS)
+        .select('*')
+        .in('document_id', fileIds)
+        .order('page_number', { ascending: true });
+      
+      if (sheetsError) {
+        console.warn('Failed to get sheets:', sheetsError);
+      } else {
+        // Transform to camelCase format
+        sheets = (allSheets || []).map(sheet => ({
+          id: sheet.id,
+          documentId: sheet.document_id,
+          pageNumber: sheet.page_number,
+          sheetNumber: sheet.sheet_number,
+          sheetName: sheet.sheet_name,
+          extractedText: sheet.extracted_text,
+          hasTakeoffs: sheet.has_takeoffs,
+          takeoffCount: sheet.takeoff_count,
+          isVisible: sheet.is_visible,
+          ocrProcessed: sheet.ocr_processed,
+          titleblockConfig: sheet.titleblock_config,
+          createdAt: sheet.created_at,
+          updatedAt: sheet.updated_at
+        }));
       }
-    });
-
-    const sheetsArrays = await Promise.all(sheetsPromises);
-    const sheets = sheetsArrays.flat();
+    }
 
     // Download and encode PDF files as base64
     console.log('📄 Downloading PDF files...');
