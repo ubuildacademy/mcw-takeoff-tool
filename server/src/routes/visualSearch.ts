@@ -9,11 +9,12 @@ import { autoCountService } from '../services/visualSearchService';
 import { storage } from '../storage';
 import fs from 'fs-extra';
 import path from 'path';
+import { requireAuth, hasProjectAccess, isAdmin, validateUUIDParam } from '../middleware';
 
 const router = Router();
 
 // Extract symbol template from selection box
-router.post('/extract-template', async (req, res) => {
+router.post('/extract-template', requireAuth, async (req, res) => {
   try {
     const { pdfFileId, pageNumber, selectionBox } = req.body;
 
@@ -40,7 +41,7 @@ router.post('/extract-template', async (req, res) => {
 });
 
 // Search for symbols matching a template
-router.post('/search-symbols', async (req, res) => {
+router.post('/search-symbols', requireAuth, async (req, res) => {
   try {
     const { conditionId, pdfFileId, template, options, pageNumber } = req.body;
 
@@ -69,7 +70,7 @@ router.post('/search-symbols', async (req, res) => {
 });
 
 // Complete auto-count workflow with Server-Sent Events for real-time progress
-router.post('/complete-search', async (req, res) => {
+router.post('/complete-search', requireAuth, async (req, res) => {
   // Check if client wants SSE (via Accept header or query param)
   const wantsSSE = req.headers.accept?.includes('text/event-stream') || req.query.sse === 'true';
   
@@ -357,7 +358,7 @@ router.post('/complete-search', async (req, res) => {
 });
 
 // Get auto-count results for a condition
-router.get('/results/:conditionId', async (req, res) => {
+router.get('/results/:conditionId', requireAuth, validateUUIDParam('conditionId'), async (req, res) => {
   try {
     const { conditionId } = req.params;
 
@@ -377,7 +378,7 @@ router.get('/results/:conditionId', async (req, res) => {
 });
 
 // Get match thumbnails for a visual search condition
-router.get('/thumbnails/:conditionId', async (req, res) => {
+router.get('/thumbnails/:conditionId', requireAuth, validateUUIDParam('conditionId'), async (req, res) => {
   try {
     const { conditionId } = req.params;
     const { projectId } = req.query;

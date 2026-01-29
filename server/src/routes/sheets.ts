@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs-extra';
 import { v4 as uuidv4 } from 'uuid';
 import { storage } from '../storage';
+import { requireAuth, hasProjectAccess, isAdmin, validateUUIDParam } from '../middleware';
 
 const router = express.Router();
 
@@ -41,9 +42,15 @@ interface DocumentMetadata {
 }
 
 // Get all sheets for a project
-router.get('/project/:projectId', async (req, res) => {
+router.get('/project/:projectId', requireAuth, validateUUIDParam('projectId'), async (req, res) => {
   try {
     const { projectId } = req.params;
+    
+    // Verify user has access to this project
+    const userIsAdmin = await isAdmin(req.user!.id);
+    if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+      return res.status(404).json({ error: 'Project not found or access denied' });
+    }
     
     // Get all files for the project
     const files = await storage.getFilesByProject(projectId);
@@ -72,7 +79,7 @@ router.get('/project/:projectId', async (req, res) => {
 });
 
 // Get specific sheet metadata
-router.get('/:sheetId', async (req, res) => {
+router.get('/:sheetId', requireAuth, async (req, res) => {
   try {
     const { sheetId } = req.params;
     
@@ -108,7 +115,7 @@ router.get('/:sheetId', async (req, res) => {
 });
 
 // Update sheet metadata
-router.put('/:sheetId', async (req, res) => {
+router.put('/:sheetId', requireAuth, async (req, res) => {
   try {
     const { sheetId } = req.params;
     const updates = req.body;
@@ -156,7 +163,7 @@ router.put('/:sheetId', async (req, res) => {
 });
 
 // Process OCR for a sheet
-router.post('/:sheetId/ocr', async (req, res) => {
+router.post('/:sheetId/ocr', requireAuth, async (req, res) => {
   try {
     const { sheetId } = req.params;
     const { pageNumbers } = req.body;

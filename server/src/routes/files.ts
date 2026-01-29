@@ -5,40 +5,9 @@ import fs from 'fs-extra';
 import { v4 as uuidv4 } from 'uuid';
 import { storage, StoredFileMeta } from '../storage';
 import { supabase, TABLES } from '../supabase';
+import { requireAuth, isAdmin, hasProjectAccess, validateUUIDParam } from '../middleware';
 
 const router = express.Router();
-
-// Helper function to get authenticated user from request
-async function getAuthenticatedUser(req: express.Request) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null;
-  }
-  
-  const token = authHeader.substring(7);
-  const { data: { user }, error } = await supabase.auth.getUser(token);
-  
-  if (error || !user) {
-    return null;
-  }
-  
-  return user;
-}
-
-// Helper function to check if user is admin
-async function isAdmin(userId: string): Promise<boolean> {
-  const { data, error } = await supabase
-    .from('user_metadata')
-    .select('role')
-    .eq('id', userId)
-    .single();
-  
-  if (error || !data) {
-    return false;
-  }
-  
-  return data.role === 'admin';
-}
 
 const uploadRoot = path.join(__dirname, '../../uploads');
 fs.ensureDirSync(uploadRoot);
@@ -104,7 +73,7 @@ const handleUpload = async (req: express.Request, res: express.Response, next: e
   });
 };
 
-router.post('/upload', handleUpload, async (req, res) => {
+router.post('/upload', requireAuth, handleUpload, async (req, res) => {
   try {
     console.log('=== FILE UPLOAD REQUEST ===');
     console.log('Request body:', req.body);
@@ -235,9 +204,14 @@ router.post('/upload', handleUpload, async (req, res) => {
   }
 });
 
-// Get all files
-router.get('/', async (req, res) => {
+// Get all files (admin only)
+router.get('/', requireAuth, async (req, res) => {
   try {
+    // Only admins can see all files
+    const userIsAdmin = await isAdmin(req.user!.id);
+    if (!userIsAdmin) {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
     const files = await storage.getFiles();
     return res.json({ files });
   } catch (error) {
@@ -246,7 +220,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-router.get('/:fileId', async (req, res) => {
+router.get('/:fileId', requireAuth, validateUUIDParam('fileId'), async (req, res) => {
   const startTime = Date.now();
   const { fileId } = req.params;
   
@@ -254,24 +228,12 @@ router.get('/:fileId', async (req, res) => {
     fileId,
     method: req.method,
     path: req.path,
-    hasAuthHeader: !!req.headers.authorization,
-    userAgent: req.headers['user-agent']?.substring(0, 50),
+    userId: req.user!.id,
     timestamp: new Date().toISOString()
   });
   
   try {
-    // Get authenticated user
-    const user = await getAuthenticatedUser(req);
-    if (!user) {
-      console.error('❌ [FILE REQUEST] Authentication failed:', {
-        fileId,
-        hasAuthHeader: !!req.headers.authorization,
-        authHeaderLength: req.headers.authorization?.length || 0
-      });
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-    
-    console.log('✅ [FILE REQUEST] User authenticated:', { fileId, userId: user.id, email: user.email });
+    const user = req.user!;
     
     // Query file directly by ID instead of getting all files
     const { data: fileData, error: fileError } = await supabase
@@ -429,18 +391,12 @@ router.get('/:fileId', async (req, res) => {
   }
 });
 
-router.get('/project/:projectId', async (req, res) => {
+router.get('/project/:projectId', requireAuth, validateUUIDParam('projectId'), async (req, res) => {
   try {
-    // Get authenticated user
-    const user = await getAuthenticatedUser(req);
-    if (!user) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-    
     const { projectId } = req.params;
     
     // Check if user is admin
-    const userIsAdmin = await isAdmin(user.id);
+    const userIsAdmin = await isAdmin(req.user!.id);
     
     // First, verify the user has access to this project
     let projectQuery = supabase
@@ -449,7 +405,7 @@ router.get('/project/:projectId', async (req, res) => {
       .eq('id', projectId);
     
     if (!userIsAdmin) {
-      projectQuery = projectQuery.eq('user_id', user.id);
+      projectQuery = projectQuery.eq('user_id', req.user!.id);
     }
     
     const { data: project, error: projectError } = await projectQuery.single();
@@ -480,16 +436,10 @@ router.get('/project/:projectId', async (req, res) => {
   }
 });
 
-router.delete('/:fileId', async (req, res) => {
+router.delete('/:fileId', requireAuth, validateUUIDParam('fileId'), async (req, res) => {
   try {
-    // Get authenticated user
-    const user = await getAuthenticatedUser(req);
-    if (!user) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-    
     const { fileId } = req.params;
-    console.log('🗑️ DELETE FILE REQUEST:', { fileId, userId: user.id });
+    console.log('🗑️ DELETE FILE REQUEST:', { fileId, userId: req.user!.id });
     
     // Query file directly by ID
     const { data: fileData, error: fileError } = await supabase
@@ -504,14 +454,14 @@ router.delete('/:fileId', async (req, res) => {
     }
     
     // Check if user has access to this file's project
-    const userIsAdmin = await isAdmin(user.id);
+    const userIsAdmin = await isAdmin(req.user!.id);
     let projectQuery = supabase
       .from(TABLES.PROJECTS)
       .select('id, user_id')
       .eq('id', fileData.project_id);
     
     if (!userIsAdmin) {
-      projectQuery = projectQuery.eq('user_id', user.id);
+      projectQuery = projectQuery.eq('user_id', req.user!.id);
     }
     
     const { data: project, error: projectError } = await projectQuery.single();

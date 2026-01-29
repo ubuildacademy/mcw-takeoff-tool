@@ -4,13 +4,14 @@ import fs from 'fs-extra';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../supabase';
 import { simpleOcrService } from '../services/simpleOcrService';
+import { requireAuth, hasProjectAccess, isAdmin, validateUUIDParam } from '../middleware';
 
 const router = express.Router();
 
 
 
 // Process entire document with OCR
-router.post('/process-document/:documentId', async (req, res) => {
+router.post('/process-document/:documentId', requireAuth, validateUUIDParam('documentId'), async (req, res) => {
   const { documentId } = req.params;
   const { projectId } = req.body;
 
@@ -18,6 +19,12 @@ router.post('/process-document/:documentId', async (req, res) => {
 
   if (!projectId) {
     return res.status(400).json({ error: 'Project ID is required' });
+  }
+
+  // Verify user has access to this project
+  const userIsAdmin = await isAdmin(req.user!.id);
+  if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+    return res.status(404).json({ error: 'Project not found or access denied' });
   }
 
   try {
@@ -115,7 +122,7 @@ router.post('/process-document/:documentId', async (req, res) => {
 });
 
 // Get OCR job status
-router.get('/status/:jobId', async (req, res) => {
+router.get('/status/:jobId', requireAuth, validateUUIDParam('jobId'), async (req, res) => {
   const { jobId } = req.params;
 
   try {
@@ -146,7 +153,7 @@ router.get('/status/:jobId', async (req, res) => {
 });
 
 // Search OCR results
-router.get('/search/:documentId', async (req, res) => {
+router.get('/search/:documentId', requireAuth, validateUUIDParam('documentId'), async (req, res) => {
   const { documentId } = req.params;
   const { query, projectId } = req.query;
 
@@ -210,12 +217,18 @@ router.get('/search/:documentId', async (req, res) => {
 });
 
 // Get OCR results for a document
-router.get('/results/:documentId', async (req, res) => {
+router.get('/results/:documentId', requireAuth, validateUUIDParam('documentId'), async (req, res) => {
   const { documentId } = req.params;
   const { projectId } = req.query;
 
   if (!projectId || typeof projectId !== 'string') {
     return res.status(400).json({ error: 'Project ID is required' });
+  }
+
+  // Verify user has access to this project
+  const userIsAdmin = await isAdmin(req.user!.id);
+  if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+    return res.status(404).json({ error: 'Project not found or access denied' });
   }
 
   try {
@@ -263,12 +276,18 @@ router.get('/results/:documentId', async (req, res) => {
 });
 
 // Clear OCR results for a document (allows re-processing)
-router.delete('/results/:documentId', async (req, res) => {
+router.delete('/results/:documentId', requireAuth, validateUUIDParam('documentId'), async (req, res) => {
   const { documentId } = req.params;
   const { projectId } = req.body;
 
   if (!projectId) {
     return res.status(400).json({ error: 'Project ID is required' });
+  }
+
+  // Verify user has access to this project
+  const userIsAdmin = await isAdmin(req.user!.id);
+  if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+    return res.status(404).json({ error: 'Project not found or access denied' });
   }
 
   try {
@@ -286,7 +305,7 @@ router.delete('/results/:documentId', async (req, res) => {
 });
 
 // Receive client-side OCR results (for image-based OCR fallback)
-router.post('/client-results/:documentId', async (req, res) => {
+router.post('/client-results/:documentId', requireAuth, validateUUIDParam('documentId'), async (req, res) => {
   const { documentId } = req.params;
   const { projectId, results, jobId } = req.body;
 
@@ -296,6 +315,12 @@ router.post('/client-results/:documentId', async (req, res) => {
 
   if (!results || !Array.isArray(results)) {
     return res.status(400).json({ error: 'Results array is required' });
+  }
+
+  // Verify user has access to this project
+  const userIsAdmin = await isAdmin(req.user!.id);
+  if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+    return res.status(404).json({ error: 'Project not found or access denied' });
   }
 
   try {

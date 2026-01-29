@@ -6,6 +6,7 @@
 
 import { Router } from 'express';
 import { enhancedOcrService } from '../services/enhancedOcrService';
+import { requireAuth } from '../middleware';
 
 const router = Router();
 
@@ -13,7 +14,7 @@ const router = Router();
  * POST /api/enhanced-ocr/analyze
  * Perform enhanced OCR analysis on an image
  */
-router.post('/analyze', async (req, res) => {
+router.post('/analyze', requireAuth, async (req, res) => {
   try {
     const { imageData } = req.body;
 
@@ -42,7 +43,7 @@ router.post('/analyze', async (req, res) => {
  * GET /api/enhanced-ocr/status
  * Get enhanced OCR service status
  */
-router.get('/status', async (req, res) => {
+router.get('/status', requireAuth, async (req, res) => {
   try {
     const isAvailable = await enhancedOcrService.isAvailable();
     

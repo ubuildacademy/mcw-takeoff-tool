@@ -6,6 +6,7 @@ import { supabase, TABLES } from '../supabase';
 import { storage, StoredSheet } from '../storage';
 import { titleblockExtractionService } from '../services/titleblockExtractionService';
 import pdfParse from 'pdf-parse';
+import { requireAuth, hasProjectAccess, isAdmin } from '../middleware';
 
 const router = express.Router();
 
@@ -39,7 +40,7 @@ interface TitleblockConfig {
  * - Saves sheetNumber and sheetName for each page via storage.saveSheet
  * - Persists titleblockConfig on each sheet for future use
  */
-router.post('/extract', async (req, res) => {
+router.post('/extract', requireAuth, async (req, res) => {
   try {
     const { projectId, documentIds, titleblockConfig } = req.body as {
       projectId?: string;
@@ -57,6 +58,12 @@ router.post('/extract', async (req, res) => {
       !titleblockConfig.sheetNameField
     ) {
       return res.status(400).json({ error: 'titleblockConfig with sheetNumberField and sheetNameField is required' });
+    }
+
+    // Verify user has access to this project
+    const userIsAdmin = await isAdmin(req.user!.id);
+    if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+      return res.status(404).json({ error: 'Project not found or access denied' });
     }
 
     // Keep both regions separate for individual extraction

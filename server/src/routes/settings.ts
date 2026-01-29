@@ -1,55 +1,12 @@
 import express from 'express';
 import { supabase, TABLES } from '../supabase';
+import { requireAuth, requireAdmin } from '../middleware';
 
 const router = express.Router();
 
-// Helper function to get authenticated user from request
-async function getAuthenticatedUser(req: express.Request) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null;
-  }
-  
-  const token = authHeader.substring(7);
-  const { data: { user }, error } = await supabase.auth.getUser(token);
-  
-  if (error || !user) {
-    return null;
-  }
-  
-  return user;
-}
-
-// Helper function to check if user is admin
-async function isAdmin(userId: string): Promise<boolean> {
-  const { data, error } = await supabase
-    .from('user_metadata')
-    .select('role')
-    .eq('id', userId)
-    .single();
-  
-  if (error || !data) {
-    return false;
-  }
-  
-  return data.role === 'admin';
-}
-
 // Get all app settings
-router.get('/', async (req, res) => {
+router.get('/', requireAuth, requireAdmin, async (req, res) => {
   try {
-    // Get authenticated user
-    const user = await getAuthenticatedUser(req);
-    if (!user) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-    
-    // Check if user is admin
-    const userIsAdmin = await isAdmin(user.id);
-    if (!userIsAdmin) {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
-    
     // Get all settings
     const { data, error } = await supabase
       .from(TABLES.APP_SETTINGS)
@@ -79,20 +36,8 @@ router.get('/', async (req, res) => {
 });
 
 // Get a specific setting
-router.get('/:key', async (req, res) => {
+router.get('/:key', requireAuth, requireAdmin, async (req, res) => {
   try {
-    // Get authenticated user
-    const user = await getAuthenticatedUser(req);
-    if (!user) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-    
-    // Check if user is admin
-    const userIsAdmin = await isAdmin(user.id);
-    if (!userIsAdmin) {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
-    
     const { key } = req.params;
     
     const { data, error } = await supabase
@@ -122,20 +67,8 @@ router.get('/:key', async (req, res) => {
 });
 
 // Create or update a setting
-router.put('/:key', async (req, res) => {
+router.put('/:key', requireAuth, requireAdmin, async (req, res) => {
   try {
-    // Get authenticated user
-    const user = await getAuthenticatedUser(req);
-    if (!user) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-    
-    // Check if user is admin
-    const userIsAdmin = await isAdmin(user.id);
-    if (!userIsAdmin) {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
-    
     const { key } = req.params;
     const { value } = req.body;
     
@@ -176,20 +109,8 @@ router.put('/:key', async (req, res) => {
 });
 
 // Update multiple settings at once
-router.put('/', async (req, res) => {
+router.put('/', requireAuth, requireAdmin, async (req, res) => {
   try {
-    // Get authenticated user
-    const user = await getAuthenticatedUser(req);
-    if (!user) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-    
-    // Check if user is admin
-    const userIsAdmin = await isAdmin(user.id);
-    if (!userIsAdmin) {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
-    
     const { settings } = req.body;
     
     if (!settings || typeof settings !== 'object') {

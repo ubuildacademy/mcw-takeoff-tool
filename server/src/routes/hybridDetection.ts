@@ -7,6 +7,7 @@
 import { Router } from 'express';
 import { hybridDetectionService } from '../services/hybridDetectionService';
 import { yoloDetectionService } from '../services/yoloDetectionService';
+import { requireAuth } from '../middleware';
 
 const router = Router();
 
@@ -14,7 +15,7 @@ const router = Router();
  * POST /api/hybrid-detection/detect
  * Perform hybrid detection on an image
  */
-router.post('/detect', async (req, res) => {
+router.post('/detect', requireAuth, async (req, res) => {
   try {
     const { imageData, scope, options } = req.body;
 
@@ -47,7 +48,7 @@ router.post('/detect', async (req, res) => {
  * GET /api/hybrid-detection/status
  * Get service availability status
  */
-router.get('/status', async (req, res) => {
+router.get('/status', requireAuth, async (req, res) => {
   try {
     const status = await hybridDetectionService.getServiceStatus();
     
@@ -68,7 +69,7 @@ router.get('/status', async (req, res) => {
  * POST /api/hybrid-detection/yolo-only
  * Perform YOLOv8 detection only (for testing)
  */
-router.post('/yolo-only', async (req, res) => {
+router.post('/yolo-only', requireAuth, async (req, res) => {
   try {
     const { imageData } = req.body;
 
@@ -104,7 +105,7 @@ router.post('/yolo-only', async (req, res) => {
  * GET /api/hybrid-detection/yolo-stats
  * Get YOLOv8 detection statistics
  */
-router.get('/yolo-stats', async (req, res) => {
+router.get('/yolo-stats', requireAuth, async (req, res) => {
   try {
     const isAvailable = await yoloDetectionService.isAvailable();
     

@@ -9,28 +9,12 @@ import { cvTakeoffService } from '../services/cvTakeoffService';
 import { storage } from '../storage';
 import { supabase, TABLES } from '../supabase';
 import { cvTakeoffQueue } from '../services/queueService';
+import { requireAuth, hasProjectAccess, isAdmin, validateUUIDParam } from '../middleware';
 
 const router = express.Router();
 
-// Helper function to get authenticated user
-async function getAuthenticatedUser(req: express.Request) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null;
-  }
-  
-  const token = authHeader.substring(7);
-  const { data: { user }, error } = await supabase.auth.getUser(token);
-  
-  if (error || !user) {
-    return null;
-  }
-  
-  return user;
-}
-
 // Check CV takeoff service availability
-router.get('/status', async (req, res) => {
+router.get('/status', requireAuth, async (req, res) => {
   try {
     const available = await cvTakeoffService.isAvailable();
     const details = await cvTakeoffService.getStatusDetails();
@@ -88,12 +72,8 @@ router.get('/status', async (req, res) => {
 });
 
 // Test CV detection with a sample (for verification)
-router.post('/test', async (req, res) => {
+router.post('/test', requireAuth, async (req, res) => {
   try {
-    const user = await getAuthenticatedUser(req);
-    if (!user) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
 
     // Create a simple test image (white square with black border)
     const testImageBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
@@ -135,13 +115,8 @@ router.post('/test', async (req, res) => {
 });
 
 // Process a single page (async - returns job ID immediately)
-router.post('/process-page', async (req, res) => {
+router.post('/process-page', requireAuth, async (req, res) => {
   try {
-    const user = await getAuthenticatedUser(req);
-    if (!user) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
     const { documentId, pageNumber, projectId, scaleFactor, options } = req.body;
 
     // Validate required fields
@@ -152,14 +127,8 @@ router.post('/process-page', async (req, res) => {
     }
 
     // Check if user has access to this project
-    const { data: project, error: projectError } = await supabase
-      .from(TABLES.PROJECTS)
-      .select('id, user_id')
-      .eq('id', projectId)
-      .eq('user_id', user.id)
-      .single();
-
-    if (projectError || !project) {
+    const userIsAdmin = await isAdmin(req.user!.id);
+    if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
 
@@ -208,7 +177,7 @@ router.post('/process-page', async (req, res) => {
 });
 
 // Get job status
-router.get('/job/:jobId', async (req, res) => {
+router.get('/job/:jobId', requireAuth, async (req, res) => {
   try {
     const { jobId } = req.params;
     console.log(`🔍 [Job Status] Looking up job ${jobId}`);
@@ -266,13 +235,8 @@ router.get('/job/:jobId', async (req, res) => {
 });
 
 // Process multiple pages
-router.post('/process-pages', async (req, res) => {
+router.post('/process-pages', requireAuth, async (req, res) => {
   try {
-    const user = await getAuthenticatedUser(req);
-    if (!user) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
     const { documentId, pageNumbers, projectId, scaleFactor, options } = req.body;
 
     // Validate required fields
@@ -289,14 +253,8 @@ router.post('/process-pages', async (req, res) => {
     }
 
     // Check if user has access to this project
-    const { data: project, error: projectError } = await supabase
-      .from(TABLES.PROJECTS)
-      .select('id, user_id')
-      .eq('id', projectId)
-      .eq('user_id', user.id)
-      .single();
-
-    if (projectError || !project) {
+    const userIsAdmin = await isAdmin(req.user!.id);
+    if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
 

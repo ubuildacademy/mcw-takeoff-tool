@@ -1,47 +1,19 @@
 import express from 'express';
 import { storage } from '../storage';
 import { supabase } from '../supabase';
+import { requireAuth, hasProjectAccess, validateUUIDParam, isAdmin } from '../middleware';
 
 const router = express.Router();
 
-// Helper function to get authenticated user from request
-async function getAuthenticatedUser(req: express.Request) {
-  const authHeader = req.headers.authorization;
-  
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null;
-  }
-  
-  const token = authHeader.substring(7);
-  const { data: { user }, error } = await supabase.auth.getUser(token);
-  
-  if (error || !user) {
-    return null;
-  }
-  
-  return user;
-}
-
 // Get calibration for a specific project and sheet (optionally for a specific page)
-router.get('/project/:projectId/sheet/:sheetId', async (req, res) => {
+router.get('/project/:projectId/sheet/:sheetId', requireAuth, validateUUIDParam('projectId'), validateUUIDParam('sheetId'), async (req, res) => {
   try {
-    const user = await getAuthenticatedUser(req);
-    if (!user) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
     const { projectId, sheetId } = req.params;
     const pageNumber = req.query.pageNumber ? parseInt(req.query.pageNumber as string) : undefined;
     
     // Verify user has access to this project
-    const { data: project } = await supabase
-      .from('takeoff_projects')
-      .select('id, user_id')
-      .eq('id', projectId)
-      .eq('user_id', user.id)
-      .single();
-
-    if (!project) {
+    const userIsAdmin = await isAdmin(req.user!.id);
+    if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
 
@@ -60,24 +32,13 @@ router.get('/project/:projectId/sheet/:sheetId', async (req, res) => {
 });
 
 // Get all calibrations for a project
-router.get('/project/:projectId', async (req, res) => {
+router.get('/project/:projectId', requireAuth, validateUUIDParam('projectId'), async (req, res) => {
   try {
-    const user = await getAuthenticatedUser(req);
-    if (!user) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
     const { projectId } = req.params;
     
     // Verify user has access to this project
-    const { data: project } = await supabase
-      .from('takeoff_projects')
-      .select('id, user_id')
-      .eq('id', projectId)
-      .eq('user_id', user.id)
-      .single();
-
-    if (!project) {
+    const userIsAdmin = await isAdmin(req.user!.id);
+    if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
 
@@ -90,13 +51,8 @@ router.get('/project/:projectId', async (req, res) => {
 });
 
 // Save calibration
-router.post('/', async (req, res) => {
+router.post('/', requireAuth, async (req, res) => {
   try {
-    const user = await getAuthenticatedUser(req);
-    if (!user) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
     const { projectId, sheetId, scaleFactor, unit, pageNumber, scope, viewportWidth, viewportHeight, rotation } = req.body;
 
     if (!projectId || !sheetId || scaleFactor === undefined || !unit) {
@@ -104,14 +60,8 @@ router.post('/', async (req, res) => {
     }
 
     // Verify user has access to this project
-    const { data: project } = await supabase
-      .from('takeoff_projects')
-      .select('id, user_id')
-      .eq('id', projectId)
-      .eq('user_id', user.id)
-      .single();
-
-    if (!project) {
+    const userIsAdmin = await isAdmin(req.user!.id);
+    if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
 

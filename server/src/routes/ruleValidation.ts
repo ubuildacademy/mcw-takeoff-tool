@@ -6,6 +6,7 @@
 
 import { Router } from 'express';
 import { ruleBasedValidationService } from '../services/ruleBasedValidationService';
+import { requireAuth } from '../middleware';
 
 const router = Router();
 
@@ -13,7 +14,7 @@ const router = Router();
  * POST /api/rule-validation/validate
  * Validate takeoff results using construction industry rules
  */
-router.post('/validate', async (req, res) => {
+router.post('/validate', requireAuth, async (req, res) => {
   try {
     const { elements, scaleInfo, ocrData } = req.body;
 
@@ -47,7 +48,7 @@ router.post('/validate', async (req, res) => {
  * GET /api/rule-validation/rules
  * Get all available validation rules
  */
-router.get('/rules', async (req, res) => {
+router.get('/rules', requireAuth, async (req, res) => {
   try {
     const rules = ruleBasedValidationService.getRules();
     
@@ -68,7 +69,7 @@ router.get('/rules', async (req, res) => {
  * GET /api/rule-validation/rules/:category
  * Get validation rules by category
  */
-router.get('/rules/:category', async (req, res) => {
+router.get('/rules/:category', requireAuth, async (req, res) => {
   try {
     const { category } = req.params;
     const rules = ruleBasedValidationService.getRulesByCategory(category);
@@ -91,7 +92,7 @@ router.get('/rules/:category', async (req, res) => {
  * GET /api/rule-validation/status
  * Get rule validation service status
  */
-router.get('/status', async (req, res) => {
+router.get('/status', requireAuth, async (req, res) => {
   try {
     const isAvailable = await ruleBasedValidationService.isAvailable();
     

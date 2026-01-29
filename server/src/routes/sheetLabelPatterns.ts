@@ -1,55 +1,12 @@
 import express from 'express';
 import { supabase } from '../supabase';
+import { requireAuth, requireAdmin, validateUUIDParam } from '../middleware';
 
 const router = express.Router();
 
-// Helper function to get authenticated user from request
-async function getAuthenticatedUser(req: express.Request) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null;
-  }
-  
-  const token = authHeader.substring(7);
-  const { data: { user }, error } = await supabase.auth.getUser(token);
-  
-  if (error || !user) {
-    return null;
-  }
-  
-  return user;
-}
-
-// Helper function to check if user is admin
-async function isAdmin(userId: string): Promise<boolean> {
-  const { data, error } = await supabase
-    .from('user_metadata')
-    .select('role')
-    .eq('id', userId)
-    .single();
-  
-  if (error || !data) {
-    return false;
-  }
-  
-  return data.role === 'admin';
-}
-
 // Get all sheet label patterns
-router.get('/', async (req, res) => {
+router.get('/', requireAuth, requireAdmin, async (req, res) => {
   try {
-    // Get authenticated user
-    const user = await getAuthenticatedUser(req);
-    if (!user) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-    
-    // Check if user is admin
-    const userIsAdmin = await isAdmin(user.id);
-    if (!userIsAdmin) {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
-    
     const { pattern_type } = req.query;
     
     let query = supabase
@@ -107,20 +64,8 @@ router.get('/active', async (req, res) => {
 });
 
 // Create a new pattern
-router.post('/', async (req, res) => {
+router.post('/', requireAuth, requireAdmin, async (req, res) => {
   try {
-    // Get authenticated user
-    const user = await getAuthenticatedUser(req);
-    if (!user) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-    
-    // Check if user is admin
-    const userIsAdmin = await isAdmin(user.id);
-    if (!userIsAdmin) {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
-    
     const { pattern_type, pattern_label, pattern_regex, priority, description, is_active } = req.body;
     
     if (!pattern_type || !pattern_label || !pattern_regex) {
@@ -147,7 +92,7 @@ router.post('/', async (req, res) => {
         priority: priority ?? 0,
         description: description || null,
         is_active: is_active !== undefined ? is_active : true,
-        created_by: user.id
+        created_by: req.user!.id
       })
       .select()
       .single();
@@ -165,20 +110,8 @@ router.post('/', async (req, res) => {
 });
 
 // Update a pattern
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireAuth, requireAdmin, validateUUIDParam('id'), async (req, res) => {
   try {
-    // Get authenticated user
-    const user = await getAuthenticatedUser(req);
-    if (!user) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-    
-    // Check if user is admin
-    const userIsAdmin = await isAdmin(user.id);
-    if (!userIsAdmin) {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
-    
     const { id } = req.params;
     const { pattern_label, pattern_regex, priority, description, is_active } = req.body;
     
@@ -224,20 +157,8 @@ router.put('/:id', async (req, res) => {
 });
 
 // Delete a pattern
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireAuth, requireAdmin, validateUUIDParam('id'), async (req, res) => {
   try {
-    // Get authenticated user
-    const user = await getAuthenticatedUser(req);
-    if (!user) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-    
-    // Check if user is admin
-    const userIsAdmin = await isAdmin(user.id);
-    if (!userIsAdmin) {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
-    
     const { id } = req.params;
     
     const { error } = await supabase

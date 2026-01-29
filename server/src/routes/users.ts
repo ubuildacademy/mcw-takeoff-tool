@@ -1,45 +1,12 @@
 import { Router } from 'express';
 import { supabase } from '../supabase';
 import { emailService } from '../services/emailService';
+import { requireAuth, requireAdmin, validateUUIDParam } from '../middleware';
 
 const router = Router();
 
-// Middleware to verify admin access
-const verifyAdmin = async (req: any, res: any, next: any) => {
-  try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ error: 'No authorization token provided' });
-    }
-
-    const token = authHeader.substring(7);
-    const { data: { user }, error } = await supabase.auth.getUser(token);
-    
-    if (error || !user) {
-      return res.status(401).json({ error: 'Invalid token' });
-    }
-
-    // Check if user is admin
-    const { data: userMetadata, error: metadataError } = await supabase
-      .from('user_metadata')
-      .select('role')
-      .eq('id', user.id)
-      .single();
-
-    if (metadataError || !userMetadata || userMetadata.role !== 'admin') {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
-
-    req.user = user;
-    next();
-  } catch (error) {
-    console.error('Admin verification error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-};
-
 // Get all users (admin only)
-router.get('/', verifyAdmin, async (req, res) => {
+router.get('/', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('user_metadata')
@@ -62,7 +29,7 @@ router.get('/', verifyAdmin, async (req, res) => {
 });
 
 // Create user invitation (admin only)
-router.post('/invitations', verifyAdmin, async (req, res) => {
+router.post('/invitations', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { email, role } = req.body;
 
@@ -103,7 +70,7 @@ router.post('/invitations', verifyAdmin, async (req, res) => {
         email,
         role,
         invite_token: inviteToken,
-        invited_by: (req as any).user.id,
+        invited_by: req.user!.id,
         expires_at: expiresAt.toISOString()
       })
       .select()
@@ -121,7 +88,7 @@ router.post('/invitations', verifyAdmin, async (req, res) => {
       email,
       role,
       inviteUrl,
-      invitedBy: (req as any).user.email || 'Admin',
+      invitedBy: req.user!.email || 'Admin',
       expiresAt: expiresAt.toISOString()
     });
 
@@ -141,7 +108,7 @@ router.post('/invitations', verifyAdmin, async (req, res) => {
 });
 
 // Get all invitations (admin only)
-router.get('/invitations', verifyAdmin, async (req, res) => {
+router.get('/invitations', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('user_invitations')
@@ -161,7 +128,7 @@ router.get('/invitations', verifyAdmin, async (req, res) => {
 });
 
 // Delete invitation (admin only)
-router.delete('/invitations/:id', verifyAdmin, async (req, res) => {
+router.delete('/invitations/:id', requireAuth, requireAdmin, validateUUIDParam('id'), async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -183,7 +150,7 @@ router.delete('/invitations/:id', verifyAdmin, async (req, res) => {
 });
 
 // Update user role (admin only)
-router.patch('/:id/role', verifyAdmin, async (req, res) => {
+router.patch('/:id/role', requireAuth, requireAdmin, validateUUIDParam('id'), async (req, res) => {
   try {
     const { id } = req.params;
     const { role } = req.body;
@@ -210,7 +177,7 @@ router.patch('/:id/role', verifyAdmin, async (req, res) => {
 });
 
 // Delete user (admin only)
-router.delete('/:id', verifyAdmin, async (req, res) => {
+router.delete('/:id', requireAuth, requireAdmin, validateUUIDParam('id'), async (req, res) => {
   try {
     const { id } = req.params;
 

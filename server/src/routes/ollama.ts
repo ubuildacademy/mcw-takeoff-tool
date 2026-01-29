@@ -3,6 +3,7 @@ import axios from 'axios';
 import { supabase } from '../supabase';
 import * as path from 'path';
 import * as fs from 'fs-extra';
+import { requireAuth } from '../middleware';
 
 const router = express.Router();
 
@@ -12,7 +13,7 @@ const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'https://ollama.com';
 const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY;
 
 // Get available models
-router.get('/models', async (req, res) => {
+router.get('/models', requireAuth, async (req, res) => {
   try {
     if (!OLLAMA_API_KEY) {
       return res.status(400).json({ error: 'Ollama API key not configured' });
@@ -42,7 +43,7 @@ router.get('/models', async (req, res) => {
 });
 
 // Chat endpoint
-router.post('/chat', async (req, res) => {
+router.post('/chat', requireAuth, async (req, res) => {
   try {
     const { model, messages, stream, options } = req.body;
 
@@ -794,7 +795,7 @@ async function extractSheetInfoFromOCRText(ocrText: string, pageNumber: number):
 }
 
 // Analyze document sheets using AI (restored from d5cdad4 with optimizations)
-router.post('/analyze-sheets', async (req, res) => {
+router.post('/analyze-sheets', requireAuth, async (req, res) => {
   try {
     const { documentId, projectId, customPrompt } = req.body;
     
