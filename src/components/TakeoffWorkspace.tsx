@@ -251,12 +251,13 @@ export function TakeoffWorkspace() {
   const calibrationRotation = currentCalibration?.rotation ?? null;
 
   // Handle measurement state changes from PDFViewer
-  const handleMeasurementStateChange = (measuring: boolean, calibrating: boolean, type: string, orthoSnapping: boolean) => {
+  // CRITICAL: Wrapped in useCallback to prevent infinite re-render loops
+  const handleMeasurementStateChange = useCallback((measuring: boolean, calibrating: boolean, type: string, orthoSnapping: boolean) => {
     setIsMeasuring(measuring);
     setIsCalibrating(calibrating);
     setMeasurementType(type);
     setIsOrthoSnapping(orthoSnapping);
-  };
+  }, []);
 
   // Poll OCR status for a document
   const pollOcrStatus = useCallback(async (documentId: string, documentName: string) => {
@@ -487,7 +488,8 @@ export function TakeoffWorkspace() {
     };
   }, []);
 
-  const handleConditionSelect = (condition: TakeoffCondition | null) => {
+  // CRITICAL: Wrapped in useCallback to prevent re-render loops
+  const handleConditionSelect = useCallback((condition: TakeoffCondition | null) => {
     if (condition === null) {
       setSelectedCondition(null);
       // Also clear in the store
@@ -519,7 +521,7 @@ export function TakeoffWorkspace() {
         setVisualSearchCondition(null);
       }
     }
-  };
+  }, []);
 
   // Global Spacebar handler to deselect current condition
   useEffect(() => {
@@ -938,8 +940,10 @@ export function TakeoffWorkspace() {
   };
 
   // Enhanced page selection handler
-  // CRITICAL: User-initiated page selection - use handlePageChange for consistency
-  const handlePageSelect = (documentId: string, pageNumber: number) => {
+  // CRITICAL: User-initiated page selection
+  // Note: Cannot use handlePageChange in deps since it's defined later
+  // Instead, we duplicate the page change logic here for proper ordering
+  const handlePageSelect = useCallback((documentId: string, pageNumber: number) => {
     setSelectedDocumentId(documentId);
     setSelectedPageNumber(pageNumber);
     
@@ -955,8 +959,10 @@ export function TakeoffWorkspace() {
       setScale(savedScale);
       setRotation(savedRotation);
       
-      // Use handlePageChange to ensure proper validation and persistence
-      handlePageChange(pageNumber);
+      // Set the page directly (duplicated from handlePageChange to avoid ordering issues)
+      setCurrentPage(pageNumber);
+      setDocumentPage(selectedFile.id, pageNumber);
+      setLastViewedDocumentId?.(selectedFile.id);
       
       // Restore scroll position after a short delay
       if (savedLocation.x !== 0 || savedLocation.y !== 0) {
@@ -967,13 +973,14 @@ export function TakeoffWorkspace() {
         }, 200);
       }
     }
-  };
+  }, [projectFiles, getDocumentScale, getDocumentRotation, getDocumentLocation, setDocumentPage, setLastViewedDocumentId]);
 
   /**
    * Start per-document titleblock extraction by prompting the user
    * to draw regions for sheet number and sheet name on the selected document.
    */
-  const handleExtractTitleblockForDocument = (documentId: string) => {
+  // CRITICAL: Wrapped in useCallback to prevent re-render loops
+  const handleExtractTitleblockForDocument = useCallback((documentId: string) => {
     const targetDocument = documents.find(doc => doc.id === documentId);
     if (!targetDocument || !projectFiles.length) {
       alert('Document not found or project files not loaded yet.');
@@ -998,13 +1005,14 @@ export function TakeoffWorkspace() {
         pageNumber: firstPage,
       });
     }
-  };
+  }, [documents, projectFiles, handlePageSelect]);
 
   /**
    * Start bulk titleblock extraction using a single reference document.
    * For now we use the first document as the reference.
    */
-  const handleBulkExtractTitleblock = () => {
+  // CRITICAL: Wrapped in useCallback to prevent re-render loops
+  const handleBulkExtractTitleblock = useCallback(() => {
     if (!documents.length) {
       alert('No documents available to extract titleblock info from.');
       return;
@@ -1029,7 +1037,7 @@ export function TakeoffWorkspace() {
         totalDocuments: documents.length,
       });
     }
-  };
+  }, [documents, handlePageSelect]);
 
 
   // OCR processing handler
@@ -1038,7 +1046,8 @@ export function TakeoffWorkspace() {
   const [ocrPageNumbers, setOcrPageNumbers] = useState<number[]>([]);
   const [ocrDocumentName, setOcrDocumentName] = useState<string>('');
 
-  const handleOCRRequest = (documentId: string, pageNumbers?: number[]) => {
+  // CRITICAL: Wrapped in useCallback to prevent re-render loops
+  const handleOCRRequest = useCallback((documentId: string, pageNumbers?: number[]) => {
     // Find the document name
     const document = projectFiles.find(file => file.id === documentId);
     const documentName = document?.originalName || 'Unknown Document';
@@ -1047,25 +1056,28 @@ export function TakeoffWorkspace() {
     setOcrPageNumbers(pageNumbers || []);
     setOcrDocumentName(documentName);
     setShowOCRDialog(true);
-  };
+  }, [projectFiles]);
 
-  const handleSearchInDocument = (query: string) => {
+  const handleSearchInDocument = useCallback((query: string) => {
     const mockResults = [
       `Found "${query}" in note at coordinates (150, 200)`,
       `Found "${query}" in dimension at coordinates (300, 350)`,
       `Found "${query}" in title block at coordinates (600, 50)`
     ];
     setSearchResults(mockResults);
-  };
+  }, []);
 
-  const handleOcrSearchResults = (results: any[], query: string) => {
+  // CRITICAL: Wrapped in useCallback to prevent re-render loops in SheetSidebar
+  const handleOcrSearchResults = useCallback((results: any[], query: string) => {
     setOcrSearchResults(results);
     setCurrentSearchQuery(query);
-  };
+  }, []);
 
-  const handleDocumentsUpdate = (updatedDocuments: PDFDocument[]) => {
+  // CRITICAL: Wrapped in useCallback to prevent re-render loops in SheetSidebar
+  // This is called from a useEffect in SheetSidebar that watches takeoffMeasurements
+  const handleDocumentsUpdate = useCallback((updatedDocuments: PDFDocument[]) => {
     setDocuments(updatedDocuments);
-  };
+  }, []);
 
 
   // Load project documents directly
@@ -1346,19 +1358,22 @@ export function TakeoffWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPdfFile?.id]);
 
-  const handleExportStatusUpdate = (type: 'excel' | 'pdf' | null, progress: number) => {
+  // CRITICAL: Wrapped in useCallback to prevent re-render loops
+  const handleExportStatusUpdate = useCallback((type: 'excel' | 'pdf' | null, progress: number) => {
     setExportStatus({type, progress});
-  };
+  }, []);
 
-  const handleCutoutMode = (conditionId: string | null) => {
+  // CRITICAL: Wrapped in useCallback to prevent infinite re-render loops
+  const handleCutoutMode = useCallback((conditionId: string | null) => {
     setCutoutMode(!!conditionId);
     setCutoutTargetConditionId(conditionId);
-  };
+  }, []);
 
   // PDF viewer control handlers
   // CRITICAL: This is the ONLY function that should change the page when called by the user
   // All other page changes should go through this handler to ensure proper persistence
-  const handlePageChange = (page: number) => {
+  // CRITICAL: Wrapped in useCallback to prevent infinite re-render loops
+  const handlePageChange = useCallback((page: number) => {
     // Validate page number
     if (page < 1 || (totalPages > 0 && page > totalPages)) {
       if (isDev) console.warn('⚠️ Invalid page number requested:', { page, totalPages, currentPage });
@@ -1381,35 +1396,39 @@ export function TakeoffWorkspace() {
       console.log('⏭️ Page change skipped - already on page', page);
     }
     // Calibration state is now managed per page, no need to reset
-  };
+  }, [totalPages, currentPage, currentPdfFile, setDocumentPage, setLastViewedDocumentId]);
 
-  const handleScaleChange = (newScale: number) => {
+  // CRITICAL: Wrapped in useCallback to prevent infinite re-render loops
+  const handleScaleChange = useCallback((newScale: number) => {
     setScale(newScale);
     // Store scale for current document in the store
     if (currentPdfFile) {
       setDocumentScale(currentPdfFile.id, newScale);
     }
-  };
+  }, [currentPdfFile, setDocumentScale]);
 
-  const handleRotationChange = (newRotation: number) => {
+  // CRITICAL: Wrapped in useCallback to prevent infinite re-render loops
+  const handleRotationChange = useCallback((newRotation: number) => {
     setRotation(newRotation);
     // Store rotation for current document in the store
     if (currentPdfFile) {
       setDocumentRotation(currentPdfFile.id, newRotation);
     }
-  };
+  }, [currentPdfFile, setDocumentRotation]);
 
-  const handleLocationChange = (x: number, y: number) => {
+  // CRITICAL: Wrapped in useCallback to prevent infinite re-render loops
+  const handleLocationChange = useCallback((x: number, y: number) => {
     // Store location for current document in the store
     if (currentPdfFile) {
       setDocumentLocation(currentPdfFile.id, { x, y });
     }
-  };
+  }, [currentPdfFile, setDocumentLocation]);
 
   // Track if this is the initial render to prevent scroll restoration during zoom
   const isInitialRenderRef = useRef(true);
   
-  const handlePDFRendered = () => {
+  // CRITICAL: Wrapped in useCallback to prevent infinite re-render loops
+  const handlePDFRendered = useCallback(() => {
     // Only restore scroll position on initial render, not during zoom/scale changes
     // During zoom, the scroll position should be maintained naturally by the browser
     if (currentPdfFile && isInitialRenderRef.current) {
@@ -1429,7 +1448,7 @@ export function TakeoffWorkspace() {
       // Log that we're skipping scroll restoration during zoom
       if (isDev) console.log('⏭️ Skipping scroll restoration - not initial render (likely zoom operation)');
     }
-  };
+  }, [currentPdfFile, getDocumentLocation]);
   
   // Reset initial render flag when file changes
   useEffect(() => {
@@ -1463,12 +1482,14 @@ export function TakeoffWorkspace() {
     }
   };
 
-  const handlePDFLoaded = (totalPages: number) => {
+  // CRITICAL: Wrapped in useCallback to prevent infinite re-render loops
+  const handlePDFLoaded = useCallback((totalPages: number) => {
     setTotalPages(totalPages);
     // Don't reset page here - let the useEffect handle it from store
-  };
+  }, []);
 
-  const handleCalibrationComplete = async (
+  // CRITICAL: Wrapped in useCallback to prevent infinite re-render loops
+  const handleCalibrationComplete = useCallback(async (
     isCalibrated: boolean, 
     scaleFactor: number, 
     unit: string,
@@ -1561,7 +1582,7 @@ export function TakeoffWorkspace() {
         setDocumentPage(currentPdfFile.id, currentPageToPreserve);
       }
     }
-  };
+  }, [currentPdfFile, projectId, currentPage, setDocumentPage, setCalibration]);
 
   const handlePdfUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;

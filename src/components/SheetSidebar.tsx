@@ -225,15 +225,29 @@ export function SheetSidebar({
   // Subscribe to takeoffMeasurements changes from store to update counts when measurements are added/deleted
   const takeoffMeasurements = useTakeoffStore((state) => state.takeoffMeasurements);
   
+  // Track the last measurements count to prevent update loops
+  // Only update documents when takeoffMeasurements actually changes, not when documents changes
+  const lastMeasurementsCountRef = useRef<number>(-1);
+  const lastMeasurementsHashRef = useRef<string>('');
+  
   useEffect(() => {
-    if (documents.length > 0) {
-      // Update documents through parent callback
-      if (onDocumentsUpdate) {
+    if (documents.length > 0 && onDocumentsUpdate) {
+      // Create a simple hash of measurements to detect actual changes
+      const measurementsHash = takeoffMeasurements.map(m => `${m.id}-${m.sheetId}-${m.pdfPage}`).join(',');
+      
+      // Only update if measurements actually changed (not just documents)
+      if (measurementsHash !== lastMeasurementsHashRef.current) {
+        lastMeasurementsHashRef.current = measurementsHash;
+        lastMeasurementsCountRef.current = takeoffMeasurements.length;
+        
         const updatedDocuments = updateHasTakeoffs(documents);
         onDocumentsUpdate(updatedDocuments);
       }
     }
-  }, [projectId, takeoffMeasurements, documents, onDocumentsUpdate, updateHasTakeoffs]); // Watch measurements changes
+  // CRITICAL: Remove 'documents' from deps to prevent update loop
+  // We only want to run when takeoffMeasurements changes, not when documents changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, takeoffMeasurements, onDocumentsUpdate, updateHasTakeoffs]);
 
 
 
