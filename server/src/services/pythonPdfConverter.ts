@@ -40,7 +40,11 @@ class PythonPdfConverter {
       ? path.join(__dirname, '..', '..') // dist/services -> dist -> server root
       : path.join(__dirname, '..'); // src/services -> src -> server root
 
-    this.pythonScriptPath = path.join(baseDir, 'src', 'scripts', 'pdf_to_image.py');
+    // When compiled: baseDir is server root, need to add 'src' to get to scripts
+    // When not compiled: baseDir is already 'src', so just add 'scripts'
+    this.pythonScriptPath = isCompiled
+      ? path.join(baseDir, 'src', 'scripts', 'pdf_to_image.py')
+      : path.join(baseDir, 'scripts', 'pdf_to_image.py');
   }
 
   /**

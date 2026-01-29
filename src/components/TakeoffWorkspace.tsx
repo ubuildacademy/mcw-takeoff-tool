@@ -101,6 +101,12 @@ export function TakeoffWorkspace() {
   } | null>(null);
   const [showAutoCountProgress, setShowAutoCountProgress] = useState(false);
   const [isCancellingAutoCount, setIsCancellingAutoCount] = useState(false);
+  const [autoCountCompletionResult, setAutoCountCompletionResult] = useState<{
+    success: boolean;
+    matchesFound: number;
+    measurementsCreated: number;
+    message?: string;
+  } | null>(null);
   const autoCountAbortControllerRef = useRef<AbortController | null>(null);
 
   // Titleblock selection state (user-taught regions for sheet number/name)
@@ -552,6 +558,8 @@ export function TakeoffWorkspace() {
       console.error('❌ No auto-count condition set');
       alert('Auto-count condition is missing. Please select an auto-count condition.');
       setVisualSearchLoading(false);
+      setVisualSearchMode(false);
+      setVisualSearchCondition(null);
       return;
     }
     
@@ -570,6 +578,8 @@ export function TakeoffWorkspace() {
       console.error('❌ No PDF file selected');
       alert('No PDF file is open. Please open a PDF file first.');
       setVisualSearchLoading(false);
+      setVisualSearchMode(false);
+      setVisualSearchCondition(null);
       return;
     }
     
@@ -577,6 +587,8 @@ export function TakeoffWorkspace() {
       console.error('❌ No project ID');
       alert('Project ID is missing. Please refresh the page.');
       setVisualSearchLoading(false);
+      setVisualSearchMode(false);
+      setVisualSearchCondition(null);
       return;
     }
     
@@ -617,6 +629,7 @@ export function TakeoffWorkspace() {
         setShowAutoCountProgress(true);
         setAutoCountProgress({ current: 0, total: 1 });
         setIsCancellingAutoCount(false);
+        setAutoCountCompletionResult(null); // Reset any previous completion result
         
         // Progress callback - update progress when received from SSE
         const onProgress = (progress: { current: number; total: number; currentPage?: number; currentDocument?: string }) => {
@@ -661,21 +674,23 @@ export function TakeoffWorkspace() {
           m => m.conditionId === visualSearchCondition.id
         );
         
-        // Hide progress dialog
-        setShowAutoCountProgress(false);
-        setAutoCountProgress(null);
-        
-        // Show success message
+        // Show completion result in dialog (don't hide it)
         if (result.measurementsCreated > 0) {
-          alert(`Auto-count complete! Found ${result.measurementsCreated} matching items and created ${conditionMeasurements.length} count measurements.`);
+          setAutoCountCompletionResult({
+            success: true,
+            matchesFound: result.measurementsCreated,
+            measurementsCreated: conditionMeasurements.length
+          });
         } else {
-          alert(`Auto-count complete, but no matching items were found (confidence threshold: ${searchOptions.confidenceThreshold}). Try:\n- Lowering the confidence threshold (currently ${searchOptions.confidenceThreshold})\n- Selecting a more distinctive symbol\n- Ensuring the symbol appears multiple times`);
+          setAutoCountCompletionResult({
+            success: false,
+            matchesFound: 0,
+            measurementsCreated: 0,
+            message: `Try:\n• Lowering the confidence threshold (currently ${searchOptions.confidenceThreshold})\n• Selecting a more distinctive symbol\n• Ensuring the symbol appears multiple times`
+          });
         }
         
-        // Exit auto-count mode
-        setVisualSearchMode(false);
-        setVisualSearchCondition(null);
-        setSelectionBox(null);
+        // Note: Auto-count mode exit is handled when user closes the dialog
         
       } catch (error: any) {
         // Clear abort controller
@@ -705,6 +720,11 @@ export function TakeoffWorkspace() {
         } else {
           alert(`Auto-count failed: ${errorMessage}`);
         }
+        
+        // Reset visual search mode so user can try again by re-selecting the condition
+        setVisualSearchMode(false);
+        setVisualSearchCondition(null);
+        setSelectionBox(null);
       } finally {
         setVisualSearchLoading(false);
       }
@@ -2427,8 +2447,19 @@ export function TakeoffWorkspace() {
         <AutoCountProgressDialog
           isOpen={showAutoCountProgress}
           onClose={() => {
+            // Check if we're completing (before resetting) to know if we should exit visual search mode
+            const wasComplete = autoCountCompletionResult !== null;
+            
             setShowAutoCountProgress(false);
             setAutoCountProgress(null);
+            setAutoCountCompletionResult(null);
+            
+            // Exit auto-count mode when closing after completion
+            if (wasComplete) {
+              setVisualSearchMode(false);
+              setVisualSearchCondition(null);
+              setSelectionBox(null);
+            }
           }}
           onCancel={() => {
             if (autoCountAbortControllerRef.current) {
@@ -2440,6 +2471,7 @@ export function TakeoffWorkspace() {
           conditionName={visualSearchCondition.name}
           searchScope={visualSearchCondition.searchScope || 'current-page'}
           isCancelling={isCancellingAutoCount}
+          completionResult={autoCountCompletionResult}
         />
       )}
 

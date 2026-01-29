@@ -102,7 +102,11 @@ class AutoCountService {
       ? path.join(__dirname, '..', '..') // dist/services -> dist -> server root
       : path.join(__dirname, '..'); // src/services -> src -> server root
 
-    this.pythonScriptPath = path.join(baseDir, 'src', 'scripts', 'visual_search.py');
+    // When compiled: baseDir is server root, need to add 'src' to get to scripts
+    // When not compiled: baseDir is already 'src', so just add 'scripts'
+    this.pythonScriptPath = isCompiled
+      ? path.join(baseDir, 'src', 'scripts', 'visual_search.py')
+      : path.join(baseDir, 'scripts', 'visual_search.py');
     
     // Temp directory for images
     const isProduction = process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === 'production';
@@ -701,7 +705,7 @@ except Exception as e:
         } : null;
         
         const measurement = {
-          id: `measurement_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          id: uuidv4(),
           projectId,
           sheetId,
           conditionId,
@@ -728,7 +732,9 @@ except Exception as e:
       console.log(`✅ Created ${matches.length} count measurements`);
     } catch (error) {
       console.error('❌ Failed to create count measurements:', error);
-      throw new Error('Failed to create count measurements');
+      // Preserve the actual error message for debugging
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`Failed to create count measurements: ${errorMessage}`);
     }
   }
 

@@ -406,12 +406,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     currentProjectId, 
     selectedConditionId,
     getSelectedCondition,
+    conditions,
     annotations: storeAnnotations,
     addAnnotation,
     getPageAnnotations,
     loadPageTakeoffMeasurements,
     getPageTakeoffMeasurements
   } = useTakeoffStore();
+  
+  // Helper to get current condition color by ID (uses live condition data, not stored measurement color)
+  const getConditionColor = useCallback((conditionId: string, fallbackColor?: string): string => {
+    const condition = conditions.find(c => c.id === conditionId);
+    return condition?.color || fallbackColor || '#000000';
+  }, [conditions]);
   
   // Load existing takeoff measurements for the current sheet - reactive to store changes
   const [localTakeoffMeasurements, setLocalTakeoffMeasurements] = useState<any[]>([]);
@@ -1063,7 +1070,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       renderRunningLengthDisplay(svgOverlay, viewport);
     }
     
-  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, cutoutMode, currentCutout, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionBox, currentProjectId, file?.id, getPageTakeoffMeasurements, measurementsLoading]);
+  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, cutoutMode, currentCutout, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionBox, currentProjectId, file?.id, getPageTakeoffMeasurements, measurementsLoading, getConditionColor]);
 
   // OPTIMIZED: Update only visual styling of markups when selection changes (no full re-render)
   const updateMarkupSelection = useCallback((newSelectedId: string | null, previousSelectedId: string | null) => {
@@ -1099,7 +1106,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         
         const measurement = localTakeoffMeasurements.find(m => m.id === previousSelectedId);
         if (measurement) {
-          const defaultColor = measurement.color || measurement.conditionColor || '#000000';
+          const defaultColor = getConditionColor(measurement.conditionId, measurement.conditionColor);
           const defaultStrokeWidth = '2';
           
           // Update stroke color and width for shape elements
@@ -1117,7 +1124,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Find and update text elements for measurements (search by traversing siblings)
       const prevMeasurement = localTakeoffMeasurements.find(m => m.id === previousSelectedId);
       if (prevMeasurement) {
-        const defaultColor = prevMeasurement.color || prevMeasurement.conditionColor || '#000000';
+        const defaultColor = getConditionColor(prevMeasurement.conditionId, prevMeasurement.conditionColor);
         // Find text elements that follow measurement shapes
         const allTextElements = svg.querySelectorAll('text');
         allTextElements.forEach((textEl) => {
@@ -1206,7 +1213,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
       });
     }
-  }, [localTakeoffMeasurements, localAnnotations]);
+  }, [localTakeoffMeasurements, localAnnotations, getConditionColor]);
 
   // Re-render annotations when measurements or interaction state changes
   // NOTE: selectedMarkupId is removed from dependencies to prevent full re-renders on selection changes
@@ -1248,7 +1255,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
       }
     }
-  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, renderMarkupsWithPointerEvents, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, currentAnnotation, isContinuousDrawing, activePoints, pdfDocument, measurementsLoading, currentProjectId, file?.id, getPageTakeoffMeasurements, isSelectionMode, totalPages]);
+  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, renderMarkupsWithPointerEvents, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionBox, currentAnnotation, isContinuousDrawing, activePoints, pdfDocument, measurementsLoading, currentProjectId, file?.id, getPageTakeoffMeasurements, isSelectionMode, totalPages, conditions]);
 
   // Track previous measurements for comparison (used by other logic)
   const prevLocalTakeoffMeasurementsRef = useRef<any[]>([]);
@@ -1669,7 +1676,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     });
     
     const isSelected = selectedMarkupId === measurement.id;
-    const strokeColor = isSelected ? '#ff0000' : (measurement.color || measurement.conditionColor || '#000000');
+    // Use live condition color instead of stored color so updates reflect immediately
+    const liveColor = getConditionColor(measurement.conditionId, measurement.conditionColor);
+    const strokeColor = isSelected ? '#ff0000' : liveColor;
     const strokeWidth = isSelected ? '4' : '2';
     
     switch (measurement.type) {
@@ -1762,7 +1771,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             
             compoundPath.setAttribute('d', pathData);
             compoundPath.setAttribute('fill-rule', 'evenodd');
-            compoundPath.setAttribute('fill', (measurement.color || measurement.conditionColor || '#000000') + '40');
+            compoundPath.setAttribute('fill', liveColor + '40');
             compoundPath.setAttribute('stroke', strokeColor);
             compoundPath.setAttribute('stroke-width', strokeWidth);
             compoundPath.setAttribute('data-measurement-id', measurement.id);
@@ -1776,7 +1785,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             // Create polygon for area measurement without cutouts
             const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
             polygon.setAttribute('points', pointString);
-            polygon.setAttribute('fill', (measurement.color || measurement.conditionColor || '#000000') + '40');
+            polygon.setAttribute('fill', liveColor + '40');
             polygon.setAttribute('stroke', strokeColor);
             polygon.setAttribute('stroke-width', strokeWidth);
             polygon.setAttribute('data-measurement-id', measurement.id);
@@ -1858,7 +1867,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             
             compoundPath.setAttribute('d', pathData);
             compoundPath.setAttribute('fill-rule', 'evenodd');
-            compoundPath.setAttribute('fill', (measurement.color || measurement.conditionColor || '#000000') + '40');
+            compoundPath.setAttribute('fill', liveColor + '40');
             compoundPath.setAttribute('stroke', strokeColor);
             compoundPath.setAttribute('stroke-width', strokeWidth);
             compoundPath.setAttribute('data-measurement-id', measurement.id);
@@ -1872,7 +1881,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             // Create polygon for volume measurement without cutouts
             const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
             polygon.setAttribute('points', pointString);
-            polygon.setAttribute('fill', (measurement.color || measurement.conditionColor || '#000000') + '40');
+            polygon.setAttribute('fill', liveColor + '40');
             polygon.setAttribute('stroke', strokeColor);
             polygon.setAttribute('stroke-width', strokeWidth);
             polygon.setAttribute('data-measurement-id', measurement.id);
@@ -1932,7 +1941,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         circle.setAttribute('cx', point.x.toString());
         circle.setAttribute('cy', point.y.toString());
         circle.setAttribute('r', '8');
-        circle.setAttribute('fill', measurement.color || measurement.conditionColor || '#74b9ff');
+        circle.setAttribute('fill', liveColor);
         // Only show red stroke when selected, no stroke when not selected
         if (isSelected) {
           circle.setAttribute('stroke', '#ff0000');

@@ -1902,7 +1902,9 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                         <div className="mt-2 p-2 bg-indigo-50 border border-indigo-200 rounded-lg">
                           <div className="text-xs font-medium text-indigo-900 mb-1">Searched Symbol:</div>
                           <img 
-                            src={condition.searchImage} 
+                            src={condition.searchImage.startsWith('data:') || condition.searchImage.startsWith('http')
+                              ? condition.searchImage 
+                              : `data:image/png;base64,${condition.searchImage}`} 
                             alt="Searched symbol" 
                             className="max-w-full h-auto max-h-24 rounded border border-indigo-300"
                             style={{ imageRendering: 'crisp-edges' }}

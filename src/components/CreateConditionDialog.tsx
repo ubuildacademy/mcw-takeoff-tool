@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Textarea } from './ui/textarea';
 import { X } from 'lucide-react';
 import { useTakeoffStore } from '../store/useTakeoffStore';
-import { generateRandomColor, getDefaultUnit, parseDepthInput, formatDepthOutput } from '../utils/commonUtils';
+import { generateDistinctColor, getDefaultUnit, parseDepthInput, formatDepthOutput } from '../utils/commonUtils';
 
 interface CreateConditionDialogProps {
   projectId: string;
@@ -17,14 +17,22 @@ interface CreateConditionDialogProps {
 }
 
 export function CreateConditionDialog({ projectId, onClose, onConditionCreated, onConditionSelect, editingCondition }: CreateConditionDialogProps) {
-  const { addCondition, updateCondition } = useTakeoffStore();
+  const { addCondition, updateCondition, conditions } = useTakeoffStore();
+  
+  // Get existing colors from project conditions to generate a distinct color
+  const existingColors = useMemo(() => {
+    return conditions
+      .filter(c => c.projectId === projectId)
+      .map(c => c.color)
+      .filter(Boolean);
+  }, [conditions, projectId]);
 
   const [formData, setFormData] = useState({
     name: editingCondition?.name || '',
     type: (editingCondition?.type || 'area') as 'area' | 'volume' | 'linear' | 'count' | 'auto-count',
     unit: editingCondition?.unit || 'SF', // Initialize with default unit for 'area' type
     wasteFactor: editingCondition?.wasteFactor?.toString() || '',
-    color: editingCondition?.color || generateRandomColor(),
+    color: editingCondition?.color || generateDistinctColor(conditions.filter(c => c.projectId === projectId).map(c => c.color).filter(Boolean)),
     description: editingCondition?.description || '',
     materialCost: editingCondition?.materialCost != null ? editingCondition.materialCost.toString() : '',
     equipmentCost: editingCondition?.equipmentCost != null ? editingCondition.equipmentCost.toString() : '',

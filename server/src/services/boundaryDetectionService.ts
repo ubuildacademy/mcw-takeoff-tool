@@ -105,9 +105,11 @@ class BoundaryDetectionService {
         ? path.join(__dirname, '..', '..') // dist/services -> dist -> server root
         : path.join(__dirname, '..'); // src/services -> src -> server root
 
-      // Scripts are always in src/scripts (not dist)
-      // Use absolute path to avoid any relative path issues
-      this.pythonScriptPath = path.resolve(path.join(baseDir, 'src', 'scripts', 'cv_boundary_detection.py'));
+      // When compiled: baseDir is server root, need to add 'src' to get to scripts
+      // When not compiled: baseDir is already 'src', so just add 'scripts'
+      this.pythonScriptPath = path.resolve(isCompiled
+        ? path.join(baseDir, 'src', 'scripts', 'cv_boundary_detection.py')
+        : path.join(baseDir, 'scripts', 'cv_boundary_detection.py'));
       
       // In dev, check if cwd is server/ or repo root
       const cwd = process.cwd();

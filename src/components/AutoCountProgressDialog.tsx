@@ -1,8 +1,14 @@
-import { useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Button } from './ui/button';
 import { Progress } from './ui/progress';
-import { Search, X, Clock } from 'lucide-react';
+import { Search, X, Clock, CheckCircle2, AlertCircle } from 'lucide-react';
+
+interface CompletionResult {
+  success: boolean;
+  matchesFound: number;
+  measurementsCreated: number;
+  message?: string; // Custom message for special cases
+}
 
 interface AutoCountProgressDialogProps {
   isOpen: boolean;
@@ -17,6 +23,7 @@ interface AutoCountProgressDialogProps {
   conditionName: string;
   searchScope: 'current-page' | 'entire-document' | 'entire-project';
   isCancelling?: boolean;
+  completionResult?: CompletionResult | null;
 }
 
 export function AutoCountProgressDialog({
@@ -26,7 +33,8 @@ export function AutoCountProgressDialog({
   progress,
   conditionName,
   searchScope,
-  isCancelling = false
+  isCancelling = false,
+  completionResult = null
 }: AutoCountProgressDialogProps) {
   const progressPercent = progress 
     ? Math.round((progress.current / progress.total) * 100)
@@ -38,18 +46,29 @@ export function AutoCountProgressDialog({
     'entire-project': 'Entire Project'
   };
 
+  const isComplete = completionResult !== null;
+  const isSearching = progress && progress.current < progress.total && !isComplete;
+
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && !isCancelling && onClose()}>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && !isCancelling && !isSearching && onClose()}>
       <DialogContent className="max-w-2xl" onInteractOutside={(e) => {
         // Prevent closing during processing
-        if (progress && progress.current < progress.total) {
+        if (isSearching) {
           e.preventDefault();
         }
       }}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Search className="w-5 h-5 text-indigo-600" />
-            Auto-Count in Progress
+            {isComplete ? (
+              completionResult.success ? (
+                <CheckCircle2 className="w-5 h-5 text-green-600" />
+              ) : (
+                <AlertCircle className="w-5 h-5 text-yellow-600" />
+              )
+            ) : (
+              <Search className="w-5 h-5 text-indigo-600" />
+            )}
+            {isComplete ? 'Auto-Count Complete' : 'Auto-Count in Progress'}
           </DialogTitle>
         </DialogHeader>
         
@@ -105,9 +124,42 @@ export function AutoCountProgressDialog({
             </div>
           )}
 
+          {/* Completion Result */}
+          {isComplete && (
+            <div className={`p-4 rounded-lg border ${
+              completionResult.success 
+                ? 'bg-green-50 border-green-200' 
+                : 'bg-yellow-50 border-yellow-200'
+            }`}>
+              {completionResult.success ? (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-green-800">
+                    <CheckCircle2 className="w-5 h-5" />
+                    <span className="font-medium">Search completed successfully!</span>
+                  </div>
+                  <p className="text-green-700 text-sm">
+                    Found <span className="font-semibold">{completionResult.matchesFound}</span> matching items and created <span className="font-semibold">{completionResult.measurementsCreated}</span> count measurements.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-yellow-800">
+                    <AlertCircle className="w-5 h-5" />
+                    <span className="font-medium">No matches found</span>
+                  </div>
+                  {completionResult.message && (
+                    <p className="text-yellow-700 text-sm whitespace-pre-line">
+                      {completionResult.message}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Actions */}
           <div className="flex justify-end gap-2">
-            {progress && progress.current < progress.total && !isCancelling && (
+            {isSearching && !isCancelling && (
               <Button
                 variant="outline"
                 onClick={onCancel}
@@ -117,12 +169,12 @@ export function AutoCountProgressDialog({
                 Cancel Search
               </Button>
             )}
-            {(!progress || progress.current >= progress.total || isCancelling) && (
+            {(isComplete || isCancelling || !isSearching) && (
               <Button
                 onClick={onClose}
                 disabled={isCancelling}
               >
-                {isCancelling ? 'Cancelling...' : 'Close'}
+                {isCancelling ? 'Cancelling...' : 'OK'}
               </Button>
             )}
           </div>
