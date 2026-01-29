@@ -201,7 +201,7 @@ export function SheetSidebar({
         };
       })
     }));
-  }, [projectId]); // Remove getProjectTakeoffMeasurements from dependencies to prevent unnecessary recreations
+  }, [projectId, getProjectTakeoffMeasurements]); // Include getProjectTakeoffMeasurements to ensure fresh data
 
   // CRITICAL FIX: Removed independent document loading to prevent race conditions
   // TakeoffWorkspace is now the single source of truth for document loading

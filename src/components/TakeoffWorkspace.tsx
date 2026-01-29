@@ -139,6 +139,7 @@ export function TakeoffWorkspace() {
     getSelectedCondition,
     getCurrentProject,
     getProjectTakeoffSummary,
+    getProjectTakeoffMeasurements,
     loadProjectConditions,
     loadProjectTakeoffMeasurements,
     setCalibration,
@@ -1310,13 +1311,31 @@ export function TakeoffWorkspace() {
       const totalPages = documents.reduce((sum, doc) => sum + (doc.pages?.length || 0), 0);
       console.log(`[LoadDocuments] Loaded ${documents.length} documents, ${totalPagesWithLabels}/${totalPages} pages have labels`);
       
-      setDocuments(documents);
+      // CRITICAL FIX: Update takeoff counts from store measurements BEFORE setting documents
+      // This ensures documents have correct hasTakeoffs/takeoffCount values even if measurements
+      // loaded before documents finished loading
+      const takeoffMeasurements = getProjectTakeoffMeasurements(projectId);
+      const documentsWithTakeoffCounts = documents.map(doc => ({
+        ...doc,
+        pages: doc.pages.map(page => {
+          const measurementCount = takeoffMeasurements.filter(
+            m => m.sheetId === doc.id && m.pdfPage === page.pageNumber
+          ).length;
+          return {
+            ...page,
+            hasTakeoffs: measurementCount > 0,
+            takeoffCount: measurementCount
+          };
+        })
+      }));
+      
+      setDocuments(documentsWithTakeoffCounts);
       setDocumentsLoading(false);
     } catch (error) {
       console.error('Error loading project documents:', error);
       setDocumentsLoading(false);
     }
-  }, [projectId, projectFiles]);
+  }, [projectId, projectFiles, getProjectTakeoffMeasurements]);
 
   // Load documents when project changes
   useEffect(() => {
