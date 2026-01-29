@@ -23,7 +23,7 @@ import {
   Building2 
 } from 'lucide-react';
 import { projectService, fileService } from '../services/apiService';
-import { useTakeoffStore } from '../store/useTakeoffStore';
+import { useProjectStore } from '../store/slices/projectSlice';
 
 interface ProjectCreationDialogProps {
   open: boolean;
@@ -45,7 +45,7 @@ interface JobFormData {
 }
 
 export function ProjectCreationDialog({ open, onOpenChange, onCreated }: ProjectCreationDialogProps) {
-  const { addProject } = useTakeoffStore();
+  const addProject = useProjectStore((s) => s.addProject);
   
   const [formData, setFormData] = useState<JobFormData>({
     name: '',

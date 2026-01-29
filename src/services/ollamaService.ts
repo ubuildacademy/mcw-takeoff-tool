@@ -71,6 +71,8 @@ class OllamaService {
   private connectionRetries: number = 0;
   private maxRetries: number = 3;
   private retryDelay: number = 1000; // 1 second
+  /** Last error message from server (e.g. "Ollama API key not configured") for UI display */
+  private lastErrorMessage: string | null = null;
 
   constructor() {
     // Use consistent API base URL logic - backend proxy avoids CORS issues
@@ -138,15 +140,25 @@ class OllamaService {
 
   // Check if Ollama cloud API is accessible with retry logic
   async isAvailable(): Promise<boolean> {
+    this.lastErrorMessage = null;
     try {
-      // Note: API key is handled by the backend, so we don't need to check it here
       const response = await this.makeRequest('/models', {
         method: 'GET',
         signal: AbortSignal.timeout(5000) // 5 second timeout
       });
       
       this.isConnected = response.ok;
-      this.connectionRetries = 0; // Reset retry counter on success
+      this.connectionRetries = 0;
+      if (!response.ok) {
+        try {
+          const body = await response.json();
+          if (body && typeof body.error === 'string') {
+            this.lastErrorMessage = body.error;
+          }
+        } catch {
+          // ignore parse errors
+        }
+      }
       return response.ok;
     } catch (error) {
       console.warn('Ollama cloud API not available:', error);
@@ -155,21 +167,49 @@ class OllamaService {
     }
   }
 
+  /** Server error message when unavailable (e.g. "Ollama API key not configured") for UI */
+  getLastErrorMessage(): string | null {
+    return this.lastErrorMessage;
+  }
+
   // Robust request method with retry logic
+  // Includes Supabase auth token so server requireAuth middleware accepts the request
   private async makeRequest(endpoint: string, options: RequestInit = {}, retryCount: number = 0): Promise<Response> {
     try {
+      const { supabase } = await import('../lib/supabase');
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...(options.headers as Record<string, string>),
+      };
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`;
+      }
+
       const baseUrl = await this.getBaseUrl();
       const response = await fetch(`${baseUrl}${endpoint}`, {
         ...options,
-        headers: {
-          'Content-Type': 'application/json',
-          ...options.headers,
-        },
+        headers,
       });
 
-      if (!response.ok && retryCount < this.maxRetries) {
+      // Don't retry on 4xx (e.g. 400 = API key not configured) — fix config first
+      const is4xx = response.status >= 400 && response.status < 500;
+      if (!response.ok && is4xx) {
+        try {
+          const body = await response.clone().json();
+          if (body && typeof body.error === 'string') {
+            this.lastErrorMessage = body.error;
+          }
+        } catch {
+          // ignore
+        }
+      }
+      if (response.ok) {
+        this.lastErrorMessage = null;
+      }
+      if (!response.ok && !is4xx && retryCount < this.maxRetries) {
         console.warn(`Request failed (${response.status}), retrying... (${retryCount + 1}/${this.maxRetries})`);
-        await this.delay(this.retryDelay * (retryCount + 1)); // Exponential backoff
+        await this.delay(this.retryDelay * (retryCount + 1));
         return this.makeRequest(endpoint, options, retryCount + 1);
       }
 

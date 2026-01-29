@@ -14,7 +14,9 @@ import {
   SquareStack
 } from 'lucide-react';
 import { cvTakeoffService } from '../services/cvTakeoffService';
-import { useTakeoffStore } from '../store/useTakeoffStore';
+import { useCalibrationStore } from '../store/slices/calibrationSlice';
+import { useConditionStore } from '../store/slices/conditionSlice';
+import { useMeasurementStore } from '../store/slices/measurementSlice';
 
 interface CVTakeoffAgentProps {
   isOpen: boolean;
@@ -62,8 +64,9 @@ export function CVTakeoffAgent({
     detectWindows: false
   });
 
-  // Store integration
-  const { getCalibration, loadProjectConditions, loadProjectTakeoffMeasurements } = useTakeoffStore();
+  const getCalibration = useCalibrationStore((s) => s.getCalibration);
+  const loadProjectConditions = useConditionStore((s) => s.loadProjectConditions);
+  const loadProjectTakeoffMeasurements = useMeasurementStore((s) => s.loadProjectTakeoffMeasurements);
 
   // Check service availability on mount
   useEffect(() => {

@@ -20,7 +20,8 @@ import { ProjectSettingsDialog } from './ProjectSettingsDialog';
 import { BackupDialog } from './BackupDialog';
 import { AdminPanel } from './AdminPanel';
 import UserProfile from './UserProfile';
-import { useTakeoffStore } from '../store/useTakeoffStore';
+import { useProjectStore } from '../store/slices/projectSlice';
+import { useMeasurementStore } from '../store/slices/measurementSlice';
 import { authHelpers } from '../lib/supabase';
 
 interface ApiProject {
@@ -52,8 +53,9 @@ export function ProjectList() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [conditionCounts, setConditionCounts] = useState<Record<string, number>>({});
   
-  // Use the store
-  const { projects, loadInitialData, getProjectTotalCost } = useTakeoffStore();
+  const projects = useProjectStore((s) => s.projects);
+  const loadInitialData = useProjectStore((s) => s.loadInitialData);
+  const getProjectTotalCost = useMeasurementStore((s) => s.getProjectTotalCost);
 
   useEffect(() => {
     let mounted = true;

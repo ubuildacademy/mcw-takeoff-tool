@@ -1,87 +1,24 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
-import { useTakeoffStore } from '../store/useTakeoffStore';
-import type { SearchResult, Annotation } from '../types';
+import { useProjectStore } from '../store/slices/projectSlice';
+import { useConditionStore } from '../store/slices/conditionSlice';
+import { useMeasurementStore } from '../store/slices/measurementSlice';
+import { useAnnotationStore } from '../store/slices/annotationSlice';
+import type { Annotation } from '../types';
+import type { PDFViewerProps, Measurement } from './PDFViewer.types';
+import { usePDFLoad } from './pdf-viewer/usePDFLoad';
+import {
+  renderSVGSelectionBox,
+  renderSVGCurrentCutout,
+  renderSVGCrosshair,
+} from './pdf-viewer/pdfViewerRenderers';
 import CalibrationDialog from './CalibrationDialog';
 import ScaleApplicationDialog from './ScaleApplicationDialog';
 import { formatFeetAndInches } from '../lib/utils';
 import { calculateDistance } from '../utils/commonUtils';
 
-// Configure PDF.js worker with performance optimizations
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
-
-// Configure PDF.js for better performance
-pdfjsLib.GlobalWorkerOptions.workerPort = null; // Use default port
-
-interface PDFViewerProps {
-  file: File | string | any;
-  className?: string;
-  currentPage?: number;
-  totalPages?: number;
-  onPageChange?: (page: number) => void;
-  scale?: number;
-  onScaleChange?: (scale: number) => void;
-  rotation?: number;
-  onCalibrateScale?: () => void;
-  onClearAll?: () => void;
-  isPageCalibrated?: boolean;
-  scaleFactor?: number;
-  unit?: string;
-  calibrationViewportWidth?: number | null;
-  calibrationViewportHeight?: number | null;
-  calibrationRotation?: number | null;
-  onPDFLoaded?: (totalPages: number) => void;
-  onCalibrationRequest?: () => void;
-  onCalibrationComplete?: (isCalibrated: boolean, scaleFactor: number, unit: string, scope?: 'page' | 'document', pageNumber?: number | null, viewportWidth?: number | null, viewportHeight?: number | null, rotation?: number | null) => void;
-  searchResults?: SearchResult[];
-  currentSearchQuery?: string;
-  cutoutMode?: boolean;
-  cutoutTargetConditionId?: string | null;
-  onCutoutModeChange?: (conditionId: string | null) => void;
-  onMeasurementStateChange?: (isMeasuring: boolean, isCalibrating: boolean, measurementType: string, isOrthoSnapping: boolean) => void;
-  annotationTool?: 'text' | 'arrow' | 'rectangle' | 'circle' | null;
-  annotationColor?: string;
-  onAnnotationToolChange?: (tool: 'text' | 'arrow' | 'rectangle' | 'circle' | null) => void;
-  onLocationChange?: (x: number, y: number) => void;
-  onPDFRendered?: () => void;
-  // Visual search props
-  visualSearchMode?: boolean;
-  visualSearchCondition?: any;
-  onVisualSearchComplete?: (selectionBox: {x: number, y: number, width: number, height: number}) => void;
-  // Titleblock selection (reuses visual selection interaction)
-  titleblockSelectionMode?: 'sheetNumber' | 'sheetName' | null;
-  onTitleblockSelectionComplete?: (
-    field: 'sheetNumber' | 'sheetName',
-    selectionBox: {x: number, y: number, width: number, height: number}
-  ) => void;
-}
-
-interface Measurement {
-  id: string;
-  projectId: string;
-  sheetId: string;
-  conditionId: string;
-  type: 'linear' | 'area' | 'volume' | 'count';
-  points: { x: number; y: number }[];
-  calculatedValue: number;
-  unit: string;
-  timestamp: string;
-  pdfPage: number;
-  pdfCoordinates: Array<{ x: number; y: number }>;
-  conditionColor: string;
-  conditionName: string;
-  perimeterValue?: number;
-  areaValue?: number;
-  cutouts?: Array<{
-    id: string;
-    points: Array<{ x: number; y: number }>;
-    pdfCoordinates: Array<{ x: number; y: number }>;
-    calculatedValue: number;
-  }>;
-  netCalculatedValue?: number;
-  // Legacy support
-  color?: string;
-}
+pdfjsLib.GlobalWorkerOptions.workerPort = null;
 
 const PDFViewer: React.FC<PDFViewerProps> = ({ 
   file, 
@@ -122,13 +59,20 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   titleblockSelectionMode = null,
   onTitleblockSelectionComplete
 }) => {
-  // Core PDF state
-  const [pdfDocument, setPdfDocument] = useState<any>(null);
-  const [internalCurrentPage, setInternalCurrentPage] = useState(1);
-  const [internalTotalPages, setInternalTotalPages] = useState(0);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  
+  const {
+    pdfDocument,
+    isLoading,
+    error,
+    internalTotalPages,
+    setInternalTotalPages,
+    internalCurrentPage,
+    setInternalCurrentPage,
+  } = usePDFLoad(file, {
+    externalTotalPages,
+    externalCurrentPage,
+    onPDFLoaded,
+  });
+
   // View state
   const [internalViewState, setInternalViewState] = useState({ 
     scale: 1.0, 
@@ -401,18 +345,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
   }, [isOrthoSnapping]);
 
-  // Store integration
-  const { 
-    currentProjectId, 
-    selectedConditionId,
-    getSelectedCondition,
-    conditions,
-    annotations: storeAnnotations,
-    addAnnotation,
-    getPageAnnotations,
-    loadPageTakeoffMeasurements,
-    getPageTakeoffMeasurements
-  } = useTakeoffStore();
+  const currentProjectId = useProjectStore((s) => s.currentProjectId);
+  const selectedConditionId = useConditionStore((s) => s.selectedConditionId);
+  const getSelectedCondition = useConditionStore((s) => s.getSelectedCondition);
+  const conditions = useConditionStore((s) => s.conditions);
+  const storeAnnotations = useAnnotationStore((s) => s.annotations);
+  const addAnnotation = useAnnotationStore((s) => s.addAnnotation);
+  const getPageAnnotations = useAnnotationStore((s) => s.getPageAnnotations);
+  const loadPageTakeoffMeasurements = useMeasurementStore((s) => s.loadPageTakeoffMeasurements);
+  const getPageTakeoffMeasurements = useMeasurementStore((s) => s.getPageTakeoffMeasurements);
   
   // Helper to get current condition color by ID (uses live condition data, not stored measurement color)
   const getConditionColor = useCallback((conditionId: string, fallbackColor?: string): string => {
@@ -438,7 +379,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   }, [currentProjectId, file?.id, storeAnnotations]);
 
   // Subscribe to store changes for takeoffMeasurements to reactively update when measurements are added/updated
-  const allTakeoffMeasurements = useTakeoffStore(state => state.takeoffMeasurements);
+  const allTakeoffMeasurements = useMeasurementStore((state) => state.takeoffMeasurements);
   
   // PER-PAGE LOADING: Load measurements for current page when page changes
   useEffect(() => {
@@ -596,87 +537,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       setSelectionStart(null);
     }
   }, [visualSearchMode, titleblockSelectionMode]);
-
-  // Load PDF document
-  useEffect(() => {
-    const loadPDF = async () => {
-      if (!file) {
-        return;
-      }
-      
-      setIsLoading(true);
-      setError(null);
-      
-      let pdfUrl: string | undefined;
-      try {
-        if (typeof file === 'string') {
-          pdfUrl = file;
-        } else if (file instanceof File) {
-          pdfUrl = URL.createObjectURL(file);
-        } else if (file && file.id) {
-          // Use the correct API base URL instead of hardcoded localhost
-          const { getApiBaseUrl } = await import('../lib/apiConfig');
-          const API_BASE_URL = getApiBaseUrl();
-          pdfUrl = `${API_BASE_URL}/files/${file.id}`;
-        } else {
-          throw new Error('Invalid file object provided');
-        }
-        
-        // Get authentication token for PDF requests
-        let httpHeaders: Record<string, string> | undefined;
-        if (file && file.id) {
-          // Only add auth headers for API requests (not File objects or direct URLs)
-          const { supabase } = await import('../lib/supabase');
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session?.access_token) {
-            httpHeaders = {
-              'Authorization': `Bearer ${session.access_token}`,
-              'Accept': 'application/pdf'
-            };
-          }
-        }
-        
-        const pdf = await pdfjsLib.getDocument({
-          url: pdfUrl,
-          httpHeaders, // Include auth headers for authenticated requests
-          // Performance optimizations
-          disableAutoFetch: false,
-          disableStream: false,
-          disableRange: false,
-          // Enable caching for better performance
-          cMapUrl: 'https://unpkg.com/pdfjs-dist@3.11.174/cmaps/',
-          cMapPacked: true,
-          // Optimize for faster loading
-          maxImageSize: 1024 * 1024, // 1MB max image size
-          isEvalSupported: false, // Disable eval for security and performance
-        }).promise;
-        setPdfDocument(pdf);
-        
-        if (externalTotalPages === undefined) {
-          setInternalTotalPages(pdf.numPages);
-        }
-        // CRITICAL: Only reset to page 1 if externalCurrentPage is undefined AND we don't have a saved page
-        // This prevents resetting the page when the PDF reloads if we have a saved state
-        if (externalCurrentPage === undefined) {
-          // Only set to 1 if we don't already have a page set (preserve existing state)
-          setInternalCurrentPage(prev => prev || 1);
-        }
-        
-        if (onPDFLoaded) {
-          onPDFLoaded(pdf.numPages);
-        }
-        
-      } catch (error: any) {
-        console.error('Error loading PDF:', error);
-        setError('Failed to load PDF file');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    loadPDF();
-  }, [file]);
-
 
   // Sync external cut-out state with internal state
   useEffect(() => {
@@ -1033,7 +893,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Draw current cut-out being created (only if on the page being rendered)
     if (cutoutMode && currentCutout.length > 0 && pageNum === currentPage) {
-      renderSVGCurrentCutout(svgOverlay, viewport);
+      renderSVGCurrentCutout(svgOverlay, viewport, currentCutout, mousePosition);
     }
     
     // Draw visual search or titleblock selection box (only if on the page being rendered)
@@ -1438,7 +1298,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Always re-render all annotations for this page, regardless of current state
     // This ensures takeoffs are visible immediately when the page loads
     // Use current state values, not captured values
-    const currentMeasurements = useTakeoffStore.getState().takeoffMeasurements.filter(
+    const currentMeasurements = useMeasurementStore.getState().takeoffMeasurements.filter(
       (m) => m.projectId === currentProjectId && m.sheetId === file?.id && m.pdfPage === pageNum
     );
     
@@ -1559,7 +1419,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // This handles the case where measurements load after the PDF renders
       try {
         // Get current measurements for this page from store (may have loaded after PDF render started)
-        const currentMeasurements = useTakeoffStore.getState().takeoffMeasurements.filter(
+        const currentMeasurements = useMeasurementStore.getState().takeoffMeasurements.filter(
           (m) => m.projectId === currentProjectId && m.sheetId === file?.id && m.pdfPage === pageNum
         );
         
@@ -2230,85 +2090,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
   };
 
-  // Helper function to check if a point is inside a polygon
-  const isPointInPolygon = (point: { x: number; y: number }, polygon: { x: number; y: number }[]): boolean => {
-    if (polygon.length < 3) return false;
-    
-    
-    let inside = false;
-    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-      const xi = polygon[i].x;
-      const yi = polygon[i].y;
-      const xj = polygon[j].x;
-      const yj = polygon[j].y;
-      
-      const condition1 = (yi > point.y) !== (yj > point.y);
-      const condition2 = point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi;
-      
-      if (condition1 && condition2) {
-        inside = !inside;
-      }
-    }
-    
-    return inside;
-  };
-
-  // Render current cut-out being created
-  const renderSVGCurrentCutout = (svg: SVGSVGElement, viewport: any) => {
-    if (!viewport || currentCutout.length === 0) return;
-
-    // Create a polyline for the preview (including mouse position)
-    const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-    let pointString = currentCutout.map(p => {
-      // Points are stored in normalized coordinates (0-1), convert to viewport pixels
-      return `${p.x * viewport.width},${p.y * viewport.height}`;
-    }).join(' ');
-    
-    if (mousePosition) {
-      const mousePoint = { x: mousePosition.x * viewport.width, y: mousePosition.y * viewport.height };
-      pointString += ` ${mousePoint.x},${mousePoint.y}`;
-    }
-    
-    polyline.setAttribute('points', pointString);
-    polyline.setAttribute('stroke', '#ff0000'); // Red outline
-    polyline.setAttribute('stroke-width', '2');
-    polyline.setAttribute('fill', 'none');
-    polyline.setAttribute('vector-effect', 'non-scaling-stroke');
-    svg.appendChild(polyline);
-    
-    // If we have 3+ points, also show the filled polygon preview (but blank)
-    if (currentCutout.length >= 3) {
-      const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-      const polygonPointString = currentCutout.map(p => {
-        return `${p.x * viewport.width},${p.y * viewport.height}`;
-      }).join(' ');
-      
-      polygon.setAttribute('points', polygonPointString);
-      polygon.setAttribute('fill', 'none'); // No fill - blank
-      polygon.setAttribute('stroke', '#ff0000'); // Red outline
-      polygon.setAttribute('stroke-width', '2');
-      svg.appendChild(polygon);
-    }
-  };
-
-  // Render visual search selection box
-  const renderSVGSelectionBox = (svg: SVGSVGElement, selectionBox: {x: number, y: number, width: number, height: number}, viewport: any) => {
-    if (!viewport || !selectionBox) return;
-
-    // Create rectangle for the selection box
-    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    rect.setAttribute('x', selectionBox.x.toString());
-    rect.setAttribute('y', selectionBox.y.toString());
-    rect.setAttribute('width', selectionBox.width.toString());
-    rect.setAttribute('height', selectionBox.height.toString());
-    rect.setAttribute('fill', 'rgba(59, 130, 246, 0.1)'); // Light blue fill
-    rect.setAttribute('stroke', '#3B82F6'); // Blue border
-    rect.setAttribute('stroke-width', '2');
-    rect.setAttribute('stroke-dasharray', '5,5'); // Dashed border
-    rect.setAttribute('vector-effect', 'non-scaling-stroke');
-    svg.appendChild(rect);
-  };
-
   // Render completed annotation
   const renderSVGAnnotation = (svg: SVGSVGElement, annotation: Annotation, viewport: any) => {
     if (!viewport || annotation.points.length === 0) return;
@@ -2608,7 +2389,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
   };
 
-  // Render calibration points as SVG
+  // Render calibration points as SVG (uses currentViewport, calibrationPoints, etc. from closure)
   const renderSVGCalibrationPoints = (svg: SVGSVGElement) => {
     if (!currentViewport) return;
     
@@ -2729,61 +2510,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       distanceText.textContent = `${distance.toFixed(1)} px`;
       svg.appendChild(distanceText);
     }
-  };
-
-  // Render crosshair as SVG
-  const renderSVGCrosshair = (svg: SVGSVGElement, position: { x: number; y: number }, viewport: any, isCalibrating: boolean = false) => {
-    if (!position || !viewport) {
-      console.warn('renderSVGCrosshair: Missing position or viewport');
-      return;
-    }
-    
-    // Position is in PDF coordinates (0-1), convert to viewport pixels
-    const viewportPoint = { x: position.x * viewport.width, y: position.y * viewport.height };
-    
-    if (typeof viewportPoint.x !== 'number' || typeof viewportPoint.y !== 'number') {
-      console.warn('renderSVGCrosshair: Invalid viewport point', viewportPoint);
-      return;
-    }
-    
-    // Create crosshair lines with different styling for calibration
-    const crosshairSize = isCalibrating ? 30 : 35;
-    const strokeColor = isCalibrating ? 'rgba(255, 0, 0, 0.9)' : 'rgba(0, 0, 0, 0.8)';
-    const strokeWidth = isCalibrating ? '2' : '1';
-    const dotColor = isCalibrating ? 'rgba(255, 0, 0, 1)' : 'rgba(0, 0, 0, 0.9)';
-    const dotRadius = isCalibrating ? '3' : '2';
-    
-    // Horizontal line
-    const hLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    hLine.setAttribute('x1', (viewportPoint.x - crosshairSize).toString());
-    hLine.setAttribute('y1', viewportPoint.y.toString());
-    hLine.setAttribute('x2', (viewportPoint.x + crosshairSize).toString());
-    hLine.setAttribute('y2', viewportPoint.y.toString());
-    hLine.setAttribute('stroke', strokeColor);
-    hLine.setAttribute('stroke-width', strokeWidth);
-    hLine.setAttribute('stroke-linecap', 'round');
-    svg.appendChild(hLine);
-    
-    // Vertical line
-    const vLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    vLine.setAttribute('x1', viewportPoint.x.toString());
-    vLine.setAttribute('y1', (viewportPoint.y - crosshairSize).toString());
-    vLine.setAttribute('x2', viewportPoint.x.toString());
-    vLine.setAttribute('y2', (viewportPoint.y + crosshairSize).toString());
-    vLine.setAttribute('stroke', strokeColor);
-    vLine.setAttribute('stroke-width', strokeWidth);
-    vLine.setAttribute('stroke-linecap', 'round');
-    svg.appendChild(vLine);
-    
-    // Center dot
-    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-    dot.setAttribute('cx', viewportPoint.x.toString());
-    dot.setAttribute('cy', viewportPoint.y.toString());
-    dot.setAttribute('r', dotRadius);
-    dot.setAttribute('fill', dotColor);
-    dot.setAttribute('stroke', isCalibrating ? 'rgba(255, 255, 255, 0.8)' : 'none');
-    dot.setAttribute('stroke-width', '1');
-    svg.appendChild(dot);
   };
 
   // Render running length display for continuous linear drawing
@@ -3162,9 +2888,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       setIsDeselecting(false);
     }
     
-    const currentStoreState = useTakeoffStore.getState();
-    const currentSelectedConditionId = currentStoreState.selectedConditionId;
-    // Removed verbose logging - was causing console spam
+    const currentSelectedConditionId = useConditionStore.getState().selectedConditionId;
     
     // Get CSS pixel coordinates relative to the canvas/SVG
     const rect = pdfCanvasRef.current.getBoundingClientRect();
@@ -3515,9 +3239,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       return;
     }
     
-    const currentStoreState = useTakeoffStore.getState();
-    const currentSelectedConditionId = currentStoreState.selectedConditionId;
-    
+    const currentSelectedConditionId = useConditionStore.getState().selectedConditionId;
+
     if (!currentSelectedConditionId || points.length === 0) {
       return;
     }
@@ -3660,10 +3383,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       perimeterValue = perimeter / scaleFactor;
     }
 
-    // Save to API
     if (currentProjectId && file?.id) {
-      const { addTakeoffMeasurement, getPageTakeoffMeasurements } = useTakeoffStore.getState();
-      
+      const addTakeoffMeasurement = useMeasurementStore.getState().addTakeoffMeasurement;
       addTakeoffMeasurement({
         projectId: currentProjectId,
         sheetId: file.id,
@@ -3710,9 +3431,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       return;
     }
 
-    const currentStoreState = useTakeoffStore.getState();
-    const { getPageTakeoffMeasurements, updateTakeoffMeasurement } = currentStoreState;
-    
+    const getPageTakeoffMeasurements = useMeasurementStore.getState().getPageTakeoffMeasurements;
+    const updateTakeoffMeasurement = useMeasurementStore.getState().updateTakeoffMeasurement;
+
     // Get existing measurements for the target condition
     if (!file?.id || !currentProjectId) return;
     const existingMeasurements = getPageTakeoffMeasurements(currentProjectId, file.id, currentPage);
@@ -4478,12 +4199,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         const deletedId = selectedMarkupId;
         setSelectedMarkupId(null);
         
-        // Delete annotation from store
-        const { deleteAnnotation } = useTakeoffStore.getState();
+        const deleteAnnotation = useAnnotationStore.getState().deleteAnnotation;
         deleteAnnotation(deletedId);
-        
-        // Get updated annotations from store after deletion
-        const { annotations: updatedAnnotations } = useTakeoffStore.getState();
+        const updatedAnnotations = useAnnotationStore.getState().annotations;
         
         // Immediately update local annotations to reflect the deletion
         const filteredAnnotations = updatedAnnotations.filter(
@@ -4497,9 +4215,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current, true);
         }
       } else if (currentProjectId && file?.id) {
-        // Delete measurement
-        const { deleteTakeoffMeasurement } = useTakeoffStore.getState();
-        
+        const deleteTakeoffMeasurement = useMeasurementStore.getState().deleteTakeoffMeasurement;
         try {
           // Clear selection immediately
           const deletedId = selectedMarkupId;
@@ -4692,7 +4408,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         // Clear measurement mode to prevent stale state and silent click failures
         console.warn('Condition not found: selectedConditionId exists but condition object missing', {
           selectedConditionId,
-          conditionsCount: useTakeoffStore.getState().conditions.length
+          conditionsCount: useConditionStore.getState().conditions.length
         });
         
         // Clear measurement state to prevent clicks from failing silently

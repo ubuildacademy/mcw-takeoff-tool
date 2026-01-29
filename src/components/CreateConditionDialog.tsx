@@ -5,7 +5,7 @@ import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Textarea } from './ui/textarea';
 import { X } from 'lucide-react';
-import { useTakeoffStore } from '../store/useTakeoffStore';
+import { useConditionStore } from '../store/slices/conditionSlice';
 import { generateDistinctColor, getDefaultUnit, parseDepthInput, formatDepthOutput } from '../utils/commonUtils';
 
 interface CreateConditionDialogProps {
@@ -17,13 +17,14 @@ interface CreateConditionDialogProps {
 }
 
 export function CreateConditionDialog({ projectId, onClose, onConditionCreated, onConditionSelect, editingCondition }: CreateConditionDialogProps) {
-  const { addCondition, updateCondition, conditions } = useTakeoffStore();
-  
-  // Get existing colors from project conditions to generate a distinct color
+  const addCondition = useConditionStore((s) => s.addCondition);
+  const updateCondition = useConditionStore((s) => s.updateCondition);
+  const conditions = useConditionStore((s) => s.conditions);
+
   const existingColors = useMemo(() => {
     return conditions
-      .filter(c => c.projectId === projectId)
-      .map(c => c.color)
+      .filter((c: { projectId: string; color?: string }) => c.projectId === projectId)
+      .map((c: { color?: string }) => c.color)
       .filter(Boolean);
   }, [conditions, projectId]);
 
@@ -32,7 +33,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
     type: (editingCondition?.type || 'area') as 'area' | 'volume' | 'linear' | 'count' | 'auto-count',
     unit: editingCondition?.unit || 'SF', // Initialize with default unit for 'area' type
     wasteFactor: editingCondition?.wasteFactor?.toString() || '',
-    color: editingCondition?.color || generateDistinctColor(conditions.filter(c => c.projectId === projectId).map(c => c.color).filter(Boolean)),
+    color: editingCondition?.color || generateDistinctColor(conditions.filter((c: { projectId: string; color?: string }) => c.projectId === projectId).map((c: { color?: string }) => c.color).filter(Boolean)),
     description: editingCondition?.description || '',
     materialCost: editingCondition?.materialCost != null ? editingCondition.materialCost.toString() : '',
     equipmentCost: editingCondition?.equipmentCost != null ? editingCondition.equipmentCost.toString() : '',
@@ -181,9 +182,8 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
         // Create new condition - get the condition ID
         const conditionId = await addCondition(conditionData);
         
-        // Get the full condition object from the store (it was added by addCondition)
-        const store = useTakeoffStore.getState();
-        createdCondition = store.conditions.find(c => c.id === conditionId);
+        const store = useConditionStore.getState();
+        createdCondition = store.conditions.find((c: { id: string }) => c.id === conditionId);
         result = createdCondition || { id: conditionId, ...conditionData };
       }
       

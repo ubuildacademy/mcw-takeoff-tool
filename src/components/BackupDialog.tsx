@@ -16,7 +16,7 @@ import {
   FileImage
 } from 'lucide-react';
 import { BackupService, ProjectBackup } from '../services/backupService';
-import { useTakeoffStore } from '../store/useTakeoffStore';
+import { useProjectStore } from '../store/slices/projectSlice';
 
 interface BackupDialogProps {
   open: boolean;
@@ -39,7 +39,7 @@ export function BackupDialog({
   const [success, setSuccess] = useState(false);
   const [fileInfo, setFileInfo] = useState<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { loadInitialData } = useTakeoffStore();
+  const loadInitialData = useProjectStore((s) => s.loadInitialData);
 
   const handleBackup = async () => {
     if (!projectId) return;

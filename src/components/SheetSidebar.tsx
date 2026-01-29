@@ -18,7 +18,7 @@ import {
   Brain
 } from 'lucide-react';
 import { fileService, sheetService, aiAnalysisService } from '../services/apiService';
-import { useTakeoffStore } from '../store/useTakeoffStore';
+import { useMeasurementStore } from '../store/slices/measurementSlice';
 import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFPage, PDFDocument } from '../types';
 
@@ -158,8 +158,7 @@ export function SheetSidebar({
     }
   }, [openDocumentMenu, openPageMenu, openBulkActionsMenu]);
 
-  // Store integration
-  const { getProjectTakeoffMeasurements } = useTakeoffStore();
+  const getProjectTakeoffMeasurements = useMeasurementStore((s) => s.getProjectTakeoffMeasurements);
 
   // Check if document has OCR data
   const checkDocumentOCRStatus = async (documentId: string): Promise<boolean> => {
@@ -223,7 +222,7 @@ export function SheetSidebar({
 
   // Update hasTakeoffs when takeoff measurements change (but preserve expansion state)
   // Subscribe to takeoffMeasurements changes from store to update counts when measurements are added/deleted
-  const takeoffMeasurements = useTakeoffStore((state) => state.takeoffMeasurements);
+  const takeoffMeasurements = useMeasurementStore((state) => state.takeoffMeasurements);
   
   // Track the last measurements count to prevent update loops
   // Only update documents when takeoffMeasurements actually changes, not when documents changes

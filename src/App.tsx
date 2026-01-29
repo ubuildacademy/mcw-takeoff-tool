@@ -8,7 +8,8 @@ import PricingPage from './components/PricingPage';
 import LoginPage from './components/LoginPage';
 import SignupPage from './components/SignupPage';
 import AuthGuard from './components/AuthGuard';
-import { useTakeoffStore } from './store/useTakeoffStore';
+import { useProjectStore } from './store/slices/projectSlice';
+import { runStoreMigration } from './store/migrateStores';
 
 // Component to handle redirect from old /job/ routes to new /project/ routes
 function JobRedirect() {
@@ -17,21 +18,23 @@ function JobRedirect() {
 }
 
 function App() {
-  const { loadInitialData } = useTakeoffStore();
+  const loadInitialData = useProjectStore((s) => s.loadInitialData);
   const isDev = import.meta.env.DEV;
-  
+
+  useEffect(() => {
+    runStoreMigration();
+  }, []);
+
   useEffect(() => {
     if (isDev) {
-      console.log('🚀 APP: App component mounted', { 
+      console.log('🚀 APP: App component mounted', {
         currentUrl: window.location.href,
         pathname: window.location.pathname,
         search: window.location.search
       });
     }
-    
-    // Load initial data when app starts
     loadInitialData();
-  }, [loadInitialData]);
+  }, [loadInitialData, isDev]);
 
   return (
     <Router

@@ -25,7 +25,11 @@ import {
   Bot,
   Search,
 } from 'lucide-react';
-import { useTakeoffStore } from '../store/useTakeoffStore';
+import { useProjectStore } from '../store/slices/projectSlice';
+import { useConditionStore } from '../store/slices/conditionSlice';
+import { useMeasurementStore } from '../store/slices/measurementSlice';
+import { useAnnotationStore } from '../store/slices/annotationSlice';
+import { useDocumentViewStore } from '../store/slices/documentViewSlice';
 import { sheetService } from '../services/apiService';
 import type { TakeoffCondition, PDFDocument, Sheet } from '../types';
 import { CreateConditionDialog } from './CreateConditionDialog';
@@ -62,7 +66,19 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
   const [matchThumbnails, setMatchThumbnails] = useState<Record<string, Array<{ measurementId: string; thumbnail: string }>>>({});
   const [loadingThumbnails, setLoadingThumbnails] = useState<Set<string>>(new Set());
 
-  const { addCondition, conditions, setSelectedCondition, selectedConditionId, getConditionTakeoffMeasurements, loadProjectConditions, getProjectTakeoffMeasurements, takeoffMeasurements, loadingConditions, refreshProjectConditions, ensureConditionsLoaded, getProjectCostBreakdown, getConditionCostBreakdown } = useTakeoffStore();
+  const addCondition = useConditionStore((s) => s.addCondition);
+  const conditions = useConditionStore((s) => s.conditions);
+  const setSelectedCondition = useConditionStore((s) => s.setSelectedCondition);
+  const selectedConditionId = useConditionStore((s) => s.selectedConditionId);
+  const getConditionTakeoffMeasurements = useMeasurementStore((s) => s.getConditionTakeoffMeasurements);
+  const loadProjectConditions = useConditionStore((s) => s.loadProjectConditions);
+  const getProjectTakeoffMeasurements = useMeasurementStore((s) => s.getProjectTakeoffMeasurements);
+  const takeoffMeasurements = useMeasurementStore((s) => s.takeoffMeasurements);
+  const loadingConditions = useConditionStore((s) => s.loadingConditions);
+  const refreshProjectConditions = useConditionStore((s) => s.refreshProjectConditions);
+  const ensureConditionsLoaded = useConditionStore((s) => s.ensureConditionsLoaded);
+  const getProjectCostBreakdown = useMeasurementStore((s) => s.getProjectCostBreakdown);
+  const getConditionCostBreakdown = useMeasurementStore((s) => s.getConditionCostBreakdown);
 
   useEffect(() => {
     // Ensure conditions are loaded when component mounts or projectId changes
@@ -442,7 +458,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       const workbook = new ExcelJS.Workbook();
       
       // Get current project info and calculate cost breakdown once (optimize)
-      const currentProject = useTakeoffStore.getState().getCurrentProject();
+      const currentProject = useProjectStore.getState().getCurrentProject();
       const costBreakdown = getProjectCostBreakdown(projectId);
       
       // Helper function to format date safely
@@ -1323,7 +1339,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       });
 
       // Also get all unique pages that have annotations (only if file exists)
-      const annotations = useTakeoffStore.getState().annotations;
+      const annotations = useAnnotationStore.getState().annotations;
       const projectAnnotations = annotations.filter(a => a.projectId === projectId);
       
       projectAnnotations.forEach(annotation => {
@@ -1354,7 +1370,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
 
       // Create a new PDF document
       const pdf = new jsPDF('p', 'mm', 'a4');
-      const currentProject = useTakeoffStore.getState().getCurrentProject();
+      const currentProject = useProjectStore.getState().getCurrentProject();
       
                   // Add summary page with formatted table
                   pdf.setFontSize(20);
@@ -1512,13 +1528,14 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       const summaryPdfBytes = new Uint8Array(pdf.output('arraybuffer'));
       
       // Prepare pages with measurements for PDF export
-      const { getConditionTakeoffMeasurements, annotations: storeAnnotations } = useTakeoffStore.getState();
+      const getConditionTakeoffMeasurementsFromStore = useMeasurementStore.getState().getConditionTakeoffMeasurements;
+      const storeAnnotations = useAnnotationStore.getState().annotations;
       const pagesForExport = Array.from(pagesWithMeasurements.values())
         .map(pageInfo => {
           // Get all measurements for this page
           const pageMeasurements: any[] = [];
           conditionIds.forEach(conditionId => {
-            const conditionMeasurements = getConditionTakeoffMeasurements(projectId, conditionId);
+            const conditionMeasurements = getConditionTakeoffMeasurementsFromStore(projectId, conditionId);
             const pageSpecificMeasurements = conditionMeasurements.filter(
               m => m.sheetId === pageInfo.sheetId && m.pdfPage === pageInfo.pageNumber
             );
@@ -1554,7 +1571,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
       onExportStatusUpdate?.('pdf', 30);
       
       // Get document rotations for coordinate transformation
-      const { getDocumentRotation } = useTakeoffStore.getState();
+      const getDocumentRotation = useDocumentViewStore.getState().getDocumentRotation;
       const documentRotations = new Map<string, number>();
       pagesForExport.forEach(page => {
         if (!documentRotations.has(page.sheetId)) {
@@ -1643,7 +1660,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
   const handleDeleteCondition = async (conditionId: string) => {
     try {
       // Delete condition via API and update store
-      await useTakeoffStore.getState().deleteCondition(conditionId);
+      await useConditionStore.getState().deleteCondition(conditionId);
       setShowDeleteConfirm(null);
     } catch (error) {
       console.error('Failed to delete condition:', error);

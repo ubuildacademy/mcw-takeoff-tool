@@ -11,7 +11,12 @@ import { ProfitMarginDialog } from './ProfitMarginDialog';
 import { CVTakeoffAgent } from './CVTakeoffAgent';
 import { AutoCountProgressDialog } from './AutoCountProgressDialog';
 
-import { useTakeoffStore } from '../store/useTakeoffStore';
+import { useProjectStore } from '../store/slices/projectSlice';
+import { useConditionStore } from '../store/slices/conditionSlice';
+import { useMeasurementStore } from '../store/slices/measurementSlice';
+import { useCalibrationStore } from '../store/slices/calibrationSlice';
+import { useAnnotationStore } from '../store/slices/annotationSlice';
+import { useDocumentViewStore } from '../store/slices/documentViewSlice';
 import type { TakeoffCondition, Sheet, ProjectFile, PDFDocument, Calibration, PDFPage } from '../types';
 import * as pdfjsLib from 'pdfjs-dist';
 
@@ -20,37 +25,11 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Separator } from "./ui/separator";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "./ui/dropdown-menu";
-import { 
-  ArrowLeft, 
-  PanelLeftClose,
-  PanelLeftOpen,
-  PanelRightClose,
-  PanelRightOpen,
-  Upload,
-  FileText,
-  Search,
-  MessageSquare,
-  BarChart3,
-  Pencil,
-  Type,
-  Square,
-  Circle,
-  ArrowRight,
-  Palette,
-  Trash2,
-  ChevronDown,
-  Highlighter,
-  Scan
-} from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { fileService, sheetService, ocrService, titleblockService } from '../services/apiService';
+import { TakeoffWorkspaceHeader } from './takeoff-workspace/TakeoffWorkspaceHeader';
+import { TakeoffWorkspaceStatusBar } from './takeoff-workspace/TakeoffWorkspaceStatusBar';
+import { TakeoffWorkspaceRightSidebar } from './takeoff-workspace/TakeoffWorkspaceRightSidebar';
 
 // All interfaces now imported from shared types
 
@@ -132,34 +111,29 @@ export function TakeoffWorkspace() {
     error?: string;
   } | null>(null);
   
-  // Store integration
-  const { 
-    setCurrentProject, 
-    setSelectedCondition, 
-    getSelectedCondition,
-    getCurrentProject,
-    getProjectTakeoffSummary,
-    getProjectTakeoffMeasurements,
-    loadProjectConditions,
-    loadProjectTakeoffMeasurements,
-    setCalibration,
-    getCalibration,
-    clearProjectCalibrations,
-    clearPageAnnotations,
-    setDocumentRotation,
-    getDocumentRotation,
-    setDocumentPage,
-    getDocumentPage,
-    setDocumentScale,
-    getDocumentScale,
-    setDocumentLocation,
-    getDocumentLocation,
-    getLastViewedDocumentId,
-    setLastViewedDocumentId
-  } = useTakeoffStore();
-  
-  // Subscribe to calibrations array to make calibration retrieval reactive
-  const calibrations = useTakeoffStore((state) => state.calibrations);
+  const setCurrentProject = useProjectStore((s) => s.setCurrentProject);
+  const setSelectedCondition = useConditionStore((s) => s.setSelectedCondition);
+  const getSelectedCondition = useConditionStore((s) => s.getSelectedCondition);
+  const getCurrentProject = useProjectStore((s) => s.getCurrentProject);
+  const getProjectTakeoffSummary = useMeasurementStore((s) => s.getProjectTakeoffSummary);
+  const getProjectTakeoffMeasurements = useMeasurementStore((s) => s.getProjectTakeoffMeasurements);
+  const loadProjectConditions = useConditionStore((s) => s.loadProjectConditions);
+  const loadProjectTakeoffMeasurements = useMeasurementStore((s) => s.loadProjectTakeoffMeasurements);
+  const setCalibration = useCalibrationStore((s) => s.setCalibration);
+  const getCalibration = useCalibrationStore((s) => s.getCalibration);
+  const clearProjectCalibrations = useCalibrationStore((s) => s.clearProjectCalibrations);
+  const clearPageAnnotations = useAnnotationStore((s) => s.clearPageAnnotations);
+  const setDocumentRotation = useDocumentViewStore((s) => s.setDocumentRotation);
+  const getDocumentRotation = useDocumentViewStore((s) => s.getDocumentRotation);
+  const setDocumentPage = useDocumentViewStore((s) => s.setDocumentPage);
+  const getDocumentPage = useDocumentViewStore((s) => s.getDocumentPage);
+  const setDocumentScale = useDocumentViewStore((s) => s.setDocumentScale);
+  const getDocumentScale = useDocumentViewStore((s) => s.getDocumentScale);
+  const setDocumentLocation = useDocumentViewStore((s) => s.setDocumentLocation);
+  const getDocumentLocation = useDocumentViewStore((s) => s.getDocumentLocation);
+  const getLastViewedDocumentId = useDocumentViewStore((s) => s.getLastViewedDocumentId);
+  const setLastViewedDocumentId = useDocumentViewStore((s) => s.setLastViewedDocumentId);
+  const calibrations = useCalibrationStore((s) => s.calibrations);
   
   const selectedCondition = getSelectedCondition();
 
@@ -426,7 +400,7 @@ export function TakeoffWorkspace() {
   // Set current project in store and load its data
   useEffect(() => {
     if (projectId) {
-      // Set current project first (this clears old measurements)
+      useMeasurementStore.getState().clearForProjectSwitch(projectId);
       setCurrentProject(projectId);
       
       // Load calibrations from database and sync to store
@@ -499,20 +473,14 @@ export function TakeoffWorkspace() {
   const handleConditionSelect = useCallback((condition: TakeoffCondition | null) => {
     if (condition === null) {
       setSelectedCondition(null);
-      // Also clear in the store
-      useTakeoffStore.getState().setSelectedCondition(null);
       setVisualSearchMode(false);
       setVisualSearchCondition(null);
     } else {
       setSelectedCondition(condition.id);
-      // Also set in the store
-      useTakeoffStore.getState().setSelectedCondition(condition.id);
       
-      // Check if this is an auto-count condition
       if (condition.type === 'auto-count') {
-        // Check if condition already has measurements - if so, don't allow box drawing
-        const store = useTakeoffStore.getState();
-        const existingMeasurements = store.takeoffMeasurements.filter(m => m.conditionId === condition.id);
+        const takeoffMeasurements = useMeasurementStore.getState().takeoffMeasurements;
+        const existingMeasurements = takeoffMeasurements.filter(m => m.conditionId === condition.id);
         
         if (existingMeasurements.length > 0) {
           // Condition already has measurements - show message and don't enable selection mode
@@ -564,9 +532,8 @@ export function TakeoffWorkspace() {
       return;
     }
     
-    // Double-check that condition doesn't already have measurements
-    const store = useTakeoffStore.getState();
-    const existingMeasurements = store.takeoffMeasurements.filter(m => m.conditionId === visualSearchCondition.id);
+    const takeoffMeasurements = useMeasurementStore.getState().takeoffMeasurements;
+    const existingMeasurements = takeoffMeasurements.filter(m => m.conditionId === visualSearchCondition.id);
     if (existingMeasurements.length > 0) {
       alert(`This auto-count condition already has ${existingMeasurements.length} measurements. Please delete the condition and recreate it to run a new search.`);
       setVisualSearchLoading(false);
@@ -669,9 +636,8 @@ export function TakeoffWorkspace() {
           await loadProjectConditions(projectId);
         }
         
-        // Get updated count to verify
-        const updatedStore = useTakeoffStore.getState();
-        const conditionMeasurements = updatedStore.takeoffMeasurements.filter(
+        const updatedTakeoffMeasurements = useMeasurementStore.getState().takeoffMeasurements;
+        const conditionMeasurements = updatedTakeoffMeasurements.filter(
           m => m.conditionId === visualSearchCondition.id
         );
         
@@ -1766,242 +1732,34 @@ export function TakeoffWorkspace() {
 
   return (
     <div className="app-shell h-screen flex flex-col bg-background">
-      {/* Top Navigation Bar */}
-      <div className="flex items-center justify-between p-4 border-b bg-muted/30">
-        {/* Left side - Navigation and Project Info */}
-        <div className="flex items-center gap-6">
-          <Button variant="ghost" onClick={handleBackToProjects} className="flex items-center gap-2">
-            <ArrowLeft className="w-4 h-4" />
-            Back to Projects
-          </Button>
-          
-          <Separator orientation="vertical" className="h-8" />
-          
-        </div>
-
-        {/* Center - PDF Controls */}
-        <div className="flex items-center gap-4">
-          {/* Navigation Controls - always visible */}
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => handlePageChange(Math.max(1, currentPage - 1))}
-              disabled={currentPage <= 1 || !currentPdfFile}
-            >
-              Previous
-            </Button>
-            <span className="px-3 py-1 bg-gray-100 rounded text-sm">
-              {currentPdfFile ? `${currentPage} / ${totalPages}` : 'No PDF'}
-            </span>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => handlePageChange(Math.min(totalPages, currentPage + 1))}
-              disabled={currentPage >= totalPages || !currentPdfFile}
-            >
-              Next
-            </Button>
-          </div>
-
-          <Separator orientation="vertical" className="h-8" />
-
-          {/* Scale Controls - only show when PDF is loaded */}
-          {currentPdfFile && (
-            <>
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleScaleChange(Math.max(0.5, scale - 0.1))}
-                >
-                  -
-                </Button>
-                <span className="px-3 py-1 bg-gray-100 rounded text-sm min-w-[60px] text-center">
-                  {Math.round(scale * 100)}%
-                </span>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleScaleChange(Math.min(5, scale + 0.1))}
-                >
-                  +
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleResetView}
-                >
-                  Reset View
-                </Button>
-              </div>
-
-              <Separator orientation="vertical" className="h-8" />
-
-              {/* Rotation Controls */}
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => rotatePage('counterclockwise')}
-                  title="Rotate counterclockwise"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-                    <path d="M3 3v5h5"/>
-                  </svg>
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => rotatePage('clockwise')}
-                  title="Rotate clockwise"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/>
-                    <path d="M21 3v5h-5"/>
-                  </svg>
-                </Button>
-              </div>
-
-              <Separator orientation="vertical" className="h-8" />
-            </>
-          )}
-
-          {/* Calibration Controls - always visible */}
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              variant={isPageCalibrated ? "default" : "secondary"}
-              onClick={handleCalibrateScale}
-              className={isPageCalibrated ? "bg-green-600 hover:bg-green-700 text-white" : "bg-orange-600 hover:bg-orange-700 text-white"}
-            >
-              {isPageCalibrated ? 'Recalibrate' : 'Calibrate Scale'}
-            </Button>
-          </div>
-
-          <Separator orientation="vertical" className="h-8" />
-
-          {/* CV Takeoff Button */}
-          <Button
-            size="sm"
-            variant="outline"
-            className="flex items-center gap-2"
-            onClick={() => setShowCVTakeoffAgent(true)}
-          >
-            <Scan className="w-4 h-4" />
-            CV Takeoff
-          </Button>
-
-          <Separator orientation="vertical" className="h-8" />
-
-          {/* Annotations Dropdown - always visible */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                size="sm"
-                variant={annotationTool ? "default" : "outline"}
-                className={annotationTool ? "bg-blue-600 hover:bg-blue-700 text-white" : ""}
-              >
-                <Pencil className="w-4 h-4 mr-1" />
-                Annotations
-                <ChevronDown className="w-3 h-3 ml-1" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              <DropdownMenuLabel>Annotation Tools</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              
-              <DropdownMenuItem
-                onClick={() => setAnnotationTool(annotationTool === 'text' ? null : 'text')}
-                className={annotationTool === 'text' ? 'bg-accent' : ''}
-              >
-                <Type className="w-4 h-4 mr-2" />
-                Text Annotation
-              </DropdownMenuItem>
-              
-              
-              <DropdownMenuSeparator />
-              <DropdownMenuLabel className="text-xs">Shapes</DropdownMenuLabel>
-              
-              <DropdownMenuItem
-                onClick={() => setAnnotationTool(annotationTool === 'arrow' ? null : 'arrow')}
-                className={annotationTool === 'arrow' ? 'bg-accent' : ''}
-              >
-                <ArrowRight className="w-4 h-4 mr-2" />
-                Arrow
-              </DropdownMenuItem>
-              
-              <DropdownMenuItem
-                onClick={() => setAnnotationTool(annotationTool === 'rectangle' ? null : 'rectangle')}
-                className={annotationTool === 'rectangle' ? 'bg-accent' : ''}
-              >
-                <Square className="w-4 h-4 mr-2" />
-                Rectangle
-              </DropdownMenuItem>
-              
-              <DropdownMenuItem
-                onClick={() => setAnnotationTool(annotationTool === 'circle' ? null : 'circle')}
-                className={annotationTool === 'circle' ? 'bg-accent' : ''}
-              >
-                <Circle className="w-4 h-4 mr-2" />
-                Circle
-              </DropdownMenuItem>
-              
-              <DropdownMenuSeparator />
-              
-              <DropdownMenuItem className="flex items-center justify-between">
-                <div className="flex items-center">
-                  <Palette className="w-4 h-4 mr-2" />
-                  Color
-                </div>
-                <input
-                  type="color"
-                  value={annotationColor}
-                  onChange={(e) => setAnnotationColor(e.target.value)}
-                  className="w-8 h-6 rounded cursor-pointer"
-                  onClick={(e) => e.stopPropagation()}
-                />
-              </DropdownMenuItem>
-              
-              <DropdownMenuSeparator />
-              
-              <DropdownMenuItem 
-                onClick={() => {
-                  setAnnotationTool(null);
-                  // Clear all annotations for current page
-                  if (projectId && currentPdfFile?.id && selectedPageNumber) {
-                    clearPageAnnotations(projectId, currentPdfFile.id, selectedPageNumber);
-                  }
-                }}
-                className="text-red-600 focus:text-red-600"
-              >
-                <Trash2 className="w-4 h-4 mr-2" />
-                Clear Annotations
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-
-        {/* Ortho Snapping Indicator */}
-        {((isOrthoSnapping && isMeasuring) || (isCalibrating && isOrthoSnapping)) && (
-          <div className="flex items-center gap-1 bg-green-600 text-white px-2 py-1 rounded text-xs">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 12h18"/>
-              <path d="M12 3v18"/>
-            </svg>
-            <span>Ortho</span>
-          </div>
-        )}
-
-        {/* Right side - Actions */}
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 text-sm text-gray-600">
-            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-            <span>All changes saved</span>
-          </div>
-        </div>
-      </div>
+      <TakeoffWorkspaceHeader
+        onBackToProjects={handleBackToProjects}
+        currentPage={currentPage}
+        totalPages={totalPages}
+        currentPdfFile={currentPdfFile}
+        onPageChange={handlePageChange}
+        scale={scale}
+        onScaleChange={handleScaleChange}
+        onResetView={handleResetView}
+        onRotatePage={rotatePage}
+        isPageCalibrated={isPageCalibrated}
+        onCalibrateScale={handleCalibrateScale}
+        onOpenCVTakeoffAgent={() => setShowCVTakeoffAgent(true)}
+        annotationTool={annotationTool}
+        annotationColor={annotationColor}
+        onAnnotationToolChange={setAnnotationTool}
+        onAnnotationColorChange={setAnnotationColor}
+        onClearAnnotations={() => {
+          setAnnotationTool(null);
+          if (projectId && currentPdfFile?.id && selectedPageNumber) {
+            clearPageAnnotations(projectId, currentPdfFile.id, selectedPageNumber);
+          }
+        }}
+        isOrthoSnapping={isOrthoSnapping}
+        isMeasuring={isMeasuring}
+        isCalibrating={isCalibrating}
+        measurementType={measurementType}
+      />
 
       {/* Main Content Area - Fixed height container */}
       <div className="flex-1 flex min-h-0">
@@ -2122,283 +1880,42 @@ export function TakeoffWorkspace() {
           )}
         </div>
 
-        {/* Right Sidebar Toggle */}
-        <div className="flex">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-full w-8 rounded-none border-l"
-            onClick={() => setRightSidebarOpen(!rightSidebarOpen)}
-          >
-            {rightSidebarOpen ? 
-              <PanelRightClose className="w-4 h-4" /> : 
-              <PanelRightOpen className="w-4 h-4" />
-            }
-          </Button>
-          {rightSidebarOpen && (
-            <div className="w-96 bg-white border-l flex flex-col h-full">
-              {/* Right Sidebar Tabs */}
-              <div className="flex border-b">
-                <button
-                  className={`flex-1 px-3 py-3 text-sm font-medium border-b-2 transition-colors ${
-                    rightSidebarTab === 'documents'
-                      ? 'border-blue-500 text-blue-600'
-                      : 'border-transparent text-gray-500 hover:text-gray-700'
-                  }`}
-                  onClick={() => setRightSidebarTab('documents')}
-                >
-                  <div className="flex items-center justify-center gap-2">
-                    <FileText className="w-4 h-4" />
-                    Documents
-                  </div>
-                </button>
-                <button
-                  className={`flex-1 px-3 py-3 text-sm font-medium border-b-2 transition-colors ${
-                    rightSidebarTab === 'search'
-                      ? 'border-blue-500 text-blue-600'
-                      : 'border-transparent text-gray-500 hover:text-gray-700'
-                  }`}
-                  onClick={() => setRightSidebarTab('search')}
-                >
-                  <div className="flex items-center justify-center gap-2">
-                    <Search className="w-4 h-4" />
-                    Search
-                  </div>
-                </button>
-                <button
-                  className={`flex-1 px-3 py-3 text-sm font-medium border-b-2 transition-colors ${
-                    rightSidebarTab === 'ai-chat'
-                      ? 'border-blue-500 text-blue-600'
-                      : 'border-transparent text-gray-500 hover:text-gray-700'
-                  }`}
-                  onClick={() => setRightSidebarTab('ai-chat')}
-                >
-                  <div className="flex items-center justify-center gap-2">
-                    <MessageSquare className="w-4 h-4" />
-                    AI Chat
-                  </div>
-                </button>
-              </div>
-
-              {/* Tab Content */}
-              {rightSidebarTab === 'documents' && (
-                <SheetSidebar 
-                  projectId={storeCurrentProject?.id || projectId!}
-                  documents={documents}
-                  documentsLoading={documentsLoading}
-                  onPageSelect={handlePageSelect}
-                  selectedDocumentId={selectedDocumentId || undefined}
-                  selectedPageNumber={selectedPageNumber || undefined}
-                  onOCRRequest={handleOCRRequest}
-                  onOcrSearchResults={handleOcrSearchResults}
-                  onDocumentsUpdate={handleDocumentsUpdate}
-                  onReloadDocuments={loadProjectDocuments}
-                  onPdfUpload={handlePdfUpload}
-                  uploading={uploading}
-                  onLabelingJobUpdate={setLabelingJob}
-                  onExtractTitleblockForDocument={handleExtractTitleblockForDocument}
-                  onBulkExtractTitleblock={handleBulkExtractTitleblock}
-                />
-              )}
-              
-              {rightSidebarTab === 'search' && (
-                <SearchTab
-                  projectId={storeCurrentProject?.id || projectId!}
-                  documents={documents}
-                  onPageSelect={handlePageSelect}
-                  selectedDocumentId={selectedDocumentId || undefined}
-                  selectedPageNumber={selectedPageNumber || undefined}
-                />
-              )}
-              
-              {rightSidebarTab === 'ai-chat' && (
-                <ChatTab
-                  projectId={storeCurrentProject?.id || projectId!}
-                  documents={documents}
-                  onPageSelect={handlePageSelect}
-                  onOCRRequest={handleOCRRequest}
-                />
-              )}
-            </div>
-          )}
-        </div>
+        <TakeoffWorkspaceRightSidebar
+          rightSidebarOpen={rightSidebarOpen}
+          onRightSidebarOpenChange={setRightSidebarOpen}
+          rightSidebarTab={rightSidebarTab}
+          onRightSidebarTabChange={setRightSidebarTab}
+          projectId={storeCurrentProject?.id || projectId!}
+          documents={documents}
+          documentsLoading={documentsLoading}
+          onPageSelect={handlePageSelect}
+          selectedDocumentId={selectedDocumentId || undefined}
+          selectedPageNumber={selectedPageNumber || undefined}
+          onOCRRequest={handleOCRRequest}
+          onOcrSearchResults={handleOcrSearchResults}
+          onDocumentsUpdate={handleDocumentsUpdate}
+          onReloadDocuments={loadProjectDocuments}
+          onPdfUpload={handlePdfUpload}
+          uploading={uploading}
+          onLabelingJobUpdate={setLabelingJob}
+          onExtractTitleblockForDocument={handleExtractTitleblockForDocument}
+          onBulkExtractTitleblock={handleBulkExtractTitleblock}
+        />
       </div>
 
-      {/* Bottom Status Bar */}
-      <div className="flex items-center justify-between px-4 py-2 border-t bg-muted/30 text-sm">
-        <div className="flex items-center gap-4">
-          {selectedSheet && (
-            <>
-              <div className="flex items-center gap-2">
-                <FileText className="w-4 h-4" />
-                <span>{selectedSheet.name}</span>
-                <Badge variant="outline" className="text-xs">
-                  Page {selectedSheet.pageNumber}
-                </Badge>
-              </div>
-              <Separator orientation="vertical" className="h-4" />
-            </>
-          )}
-          <span>Project: {currentProject.name}</span>
-        </div>
-        
-        {/* Center - Minimal Status */}
-        <div className="flex-1 flex justify-center">
-          {selectedCondition ? (
-            <div className="text-center text-sm text-gray-600">
-              {selectedCondition.name} - {selectedCondition.type} takeoff
-            </div>
-          ) : (
-            <div className="text-center text-sm text-gray-600">
-              Select a condition to start drawing
-            </div>
-          )}
-        </div>
-        
-        <div className="flex items-center gap-4">
-          {exportStatus.type ? (
-            <div className="flex items-center gap-3 bg-blue-50 px-3 py-2 rounded-lg border border-blue-200">
-              <div className="animate-spin w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full"></div>
-              <div className="flex flex-col">
-                <span className="text-sm font-medium text-blue-700">
-                  Exporting {exportStatus.type.toUpperCase()} report...
-                </span>
-                <div className="flex items-center gap-2 mt-1">
-                  <div className="w-32 h-2 bg-blue-200 rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-blue-500 transition-all duration-300 ease-out rounded-full"
-                      style={{ width: `${exportStatus.progress}%` }}
-                    ></div>
-                  </div>
-                  <span className="text-xs text-blue-600 font-medium">
-                    {exportStatus.progress}%
-                  </span>
-                </div>
-              </div>
-            </div>
-          ) : titleblockExtractionStatus && titleblockExtractionStatus.status === 'processing' ? (
-            <div className="flex items-center gap-3 bg-blue-50 px-3 py-2 rounded-lg border border-blue-200">
-              <div className="animate-spin w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full"></div>
-              <div className="flex flex-col">
-                <span className="text-sm font-medium text-blue-700">
-                  Extracting Titleblocks
-                  {titleblockExtractionStatus.currentDocument && `: ${titleblockExtractionStatus.currentDocument}`}
-                  {titleblockExtractionStatus.processedPages !== undefined && titleblockExtractionStatus.totalPages !== undefined 
-                    ? ` (${titleblockExtractionStatus.processedPages}/${titleblockExtractionStatus.totalPages} pages)`
-                    : titleblockExtractionStatus.totalPages !== undefined 
-                      ? ` (0/${titleblockExtractionStatus.totalPages} pages)`
-                      : ''}
-                </span>
-                <div className="flex items-center gap-2 mt-1">
-                  <div className="w-32 h-2 bg-blue-200 rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-blue-500 transition-all duration-300 ease-out rounded-full"
-                      style={{ width: `${titleblockExtractionStatus.progress || 0}%` }}
-                    ></div>
-                  </div>
-                  <span className="text-xs text-blue-600 font-medium">
-                    {titleblockExtractionStatus.progress || 0}%
-                  </span>
-                </div>
-              </div>
-            </div>
-          ) : titleblockExtractionStatus && titleblockExtractionStatus.status === 'completed' ? (
-            <div className="flex items-center gap-3 bg-green-50 px-3 py-2 rounded-lg border border-green-200">
-              <div className="w-5 h-5 border-2 border-green-500 rounded-full flex items-center justify-center">
-                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-              </div>
-              <div className="flex flex-col">
-                <span className="text-sm font-medium text-green-700">
-                  Titleblock Extraction Complete
-                  {titleblockExtractionStatus.processedPages !== undefined && titleblockExtractionStatus.totalPages !== undefined 
-                    ? ` (${titleblockExtractionStatus.processedPages}/${titleblockExtractionStatus.totalPages} pages)`
-                    : ''}
-                </span>
-              </div>
-            </div>
-          ) : titleblockExtractionStatus && titleblockExtractionStatus.status === 'failed' ? (
-            <div className="flex items-center gap-3 bg-red-50 px-3 py-2 rounded-lg border border-red-200">
-              <div className="w-5 h-5 border-2 border-red-500 rounded-full flex items-center justify-center">
-                <span className="text-red-500 text-xs font-bold">×</span>
-              </div>
-              <div className="flex flex-col">
-                <span className="text-sm font-medium text-red-700">
-                  Titleblock Extraction Failed
-                </span>
-                {titleblockExtractionStatus.error && (
-                  <span className="text-xs text-red-600 mt-1">
-                    {titleblockExtractionStatus.error}
-                  </span>
-                )}
-              </div>
-            </div>
-          ) : labelingJob && labelingJob.status === 'processing' ? (
-            <div className="flex items-center gap-3 bg-green-50 px-3 py-2 rounded-lg border border-green-200">
-              <div className="animate-spin w-5 h-5 border-2 border-green-500 border-t-transparent rounded-full"></div>
-              <div className="flex flex-col">
-                <span className="text-sm font-medium text-green-700">
-                  Labeling Pages
-                  {labelingJob.currentDocument && `: ${labelingJob.currentDocument}`}
-                  {labelingJob.processedPages !== undefined && labelingJob.totalPages !== undefined 
-                    ? ` (${labelingJob.processedPages}/${labelingJob.totalPages} pages)`
-                    : labelingJob.totalPages !== undefined 
-                      ? ` (0/${labelingJob.totalPages} pages)`
-                      : ''}
-                </span>
-                <div className="flex items-center gap-2 mt-1">
-                  <div className="w-32 h-2 bg-green-200 rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-green-500 transition-all duration-300 ease-out rounded-full"
-                      style={{ width: `${labelingJob.progress}%` }}
-                    ></div>
-                  </div>
-                  <span className="text-xs text-green-600 font-medium">
-                    {labelingJob.progress}%
-                  </span>
-                </div>
-              </div>
-            </div>
-          ) : ocrJobs.size > 0 ? (
-            <div className="flex items-center gap-3 bg-purple-50 px-3 py-2 rounded-lg border border-purple-200">
-              <div className="animate-spin w-5 h-5 border-2 border-purple-500 border-t-transparent rounded-full"></div>
-              <div className="flex flex-col">
-                <span className="text-sm font-medium text-purple-700">
-                  {ocrJobs.size === 1 
-                    ? `OCR Processing: ${Array.from(ocrJobs.values())[0].documentName}`
-                    : `OCR Processing ${ocrJobs.size} documents...`}
-                </span>
-                {ocrJobs.size === 1 && (() => {
-                  const job = Array.from(ocrJobs.values())[0];
-                  return (
-                    <div className="flex items-center gap-2 mt-1">
-                      <div className="w-32 h-2 bg-purple-200 rounded-full overflow-hidden">
-                        <div 
-                          className="h-full bg-purple-500 transition-all duration-300 ease-out rounded-full"
-                          style={{ width: `${job.progress}%` }}
-                        ></div>
-                      </div>
-                      <span className="text-xs text-purple-600 font-medium">
-                        {job.progress}%
-                        {job.processedPages && job.totalPages ? ` (${job.processedPages}/${job.totalPages})` : ''}
-                      </span>
-                    </div>
-                  );
-                })()}
-              </div>
-            </div>
-          ) : (
-            <span className="text-sm text-gray-600">
-              {uploading ? 'Uploading…' : 
-               (isMeasuring || isCalibrating) ? (
-                 <span className="bg-blue-600 text-white px-3 py-1 rounded-lg text-sm">
-                   {isCalibrating ? 'Calibrating: Click two points to set scale' : `Measuring: ${measurementType} - Click to add points`}
-                 </span>
-               ) : 'Ready'
-              }
-            </span>
-          )}
-        </div>
-      </div>
+      <TakeoffWorkspaceStatusBar
+        selectedSheet={selectedSheet}
+        currentProject={currentProject}
+        selectedCondition={selectedCondition}
+        exportStatus={exportStatus}
+        titleblockExtractionStatus={titleblockExtractionStatus}
+        labelingJob={labelingJob}
+        ocrJobs={ocrJobs}
+        uploading={uploading}
+        isMeasuring={isMeasuring}
+        isCalibrating={isCalibrating}
+        measurementType={measurementType}
+      />
 
       {/* Export Progress Overlay */}
       {exportStatus.type && (

@@ -3,7 +3,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { BaseDialog } from './ui/base-dialog';
-import { useTakeoffStore } from '../store/useTakeoffStore';
+import { useProjectStore } from '../store/slices/projectSlice';
 
 interface ProfitMarginDialogProps {
   open: boolean;
@@ -12,7 +12,8 @@ interface ProfitMarginDialogProps {
 }
 
 export function ProfitMarginDialog({ open, onOpenChange, projectId }: ProfitMarginDialogProps) {
-  const { getCurrentProject, updateProject } = useTakeoffStore();
+  const getCurrentProject = useProjectStore((s) => s.getCurrentProject);
+  const updateProject = useProjectStore((s) => s.updateProject);
   const currentProject = getCurrentProject();
   
   const [profitMargin, setProfitMargin] = useState(

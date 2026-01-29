@@ -5,7 +5,7 @@ import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Textarea } from './ui/textarea';
 import { BaseDialog } from './ui/base-dialog';
-import { useTakeoffStore } from '../store/useTakeoffStore';
+import { useProjectStore } from '../store/slices/projectSlice';
 
 interface ProjectSettingsDialogProps {
   open: boolean;
@@ -30,7 +30,7 @@ interface ProjectFormData {
 }
 
 export function ProjectSettingsDialog({ open, onOpenChange, project, onUpdated }: ProjectSettingsDialogProps) {
-  const { updateProject } = useTakeoffStore();
+  const updateProject = useProjectStore((s) => s.updateProject);
   
   const [formData, setFormData] = useState<ProjectFormData>({
     name: project?.name || '',

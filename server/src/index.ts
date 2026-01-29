@@ -1,9 +1,13 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+import path from 'path';
+
+// Load .env from server directory so the key is always found (not dependent on process.cwd())
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
+
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
-import path from 'path';
 import fs from 'fs-extra';
 import { projectRoutes } from './routes/projects';
 import { fileRoutes } from './routes/files';
