@@ -6,7 +6,8 @@ import { requireAuth, hasProjectAccess, validateUUIDParam, isAdmin } from '../mi
 const router = express.Router();
 
 // Get calibration for a specific project and sheet (optionally for a specific page)
-router.get('/project/:projectId/sheet/:sheetId', requireAuth, validateUUIDParam('projectId'), validateUUIDParam('sheetId'), async (req, res) => {
+// Note: sheetId is a compound format (documentId-pageNumber), not a UUID
+router.get('/project/:projectId/sheet/:sheetId', requireAuth, validateUUIDParam('projectId'), async (req, res) => {
   try {
     const { projectId, sheetId } = req.params;
     const pageNumber = req.query.pageNumber ? parseInt(req.query.pageNumber as string) : undefined;

@@ -50,7 +50,8 @@ router.get('/project/:projectId', requireAuth, validateUUIDParam('projectId'), a
 });
 
 // Get takeoff measurements for a specific sheet - requires auth
-router.get('/sheet/:sheetId', requireAuth, validateUUIDParam('sheetId'), async (req, res) => {
+// Note: sheetId is a compound format (documentId-pageNumber), not a UUID
+router.get('/sheet/:sheetId', requireAuth, async (req, res) => {
   try {
     const { sheetId } = req.params;
     const userId = req.user?.id;
@@ -83,7 +84,8 @@ router.get('/sheet/:sheetId', requireAuth, validateUUIDParam('sheetId'), async (
 });
 
 // Get takeoff measurements for a specific page - requires auth
-router.get('/sheet/:sheetId/page/:pageNumber', requireAuth, validateUUIDParam('sheetId'), async (req, res) => {
+// Note: sheetId is a compound format (documentId-pageNumber), not a UUID
+router.get('/sheet/:sheetId/page/:pageNumber', requireAuth, async (req, res) => {
   try {
     const { sheetId, pageNumber } = req.params;
     const userId = req.user?.id;
