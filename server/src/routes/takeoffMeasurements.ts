@@ -49,22 +49,16 @@ router.get('/project/:projectId', requireAuth, validateUUIDParam('projectId'), a
   }
 });
 
-// Get takeoff measurements for a specific sheet - requires auth
-// Note: sheetId is a compound format (documentId-pageNumber), not a UUID
+// Get takeoff measurements for a specific sheet/document - requires auth
+// Note: sheetId here is actually the documentId (file.id from frontend)
 router.get('/sheet/:sheetId', requireAuth, async (req, res) => {
   try {
     const { sheetId } = req.params;
     const userId = req.user?.id;
     const userIsAdmin = req.user?.role === 'admin';
     
-    // Get the sheet to find its project for access control
-    const sheet = await storage.getSheet(sheetId);
-    if (!sheet) {
-      return res.status(404).json({ error: 'Sheet not found' });
-    }
-    
-    // Get document to find project
-    const file = await storage.getFile(sheet.documentId);
+    // sheetId is actually documentId - look up the file directly for access control
+    const file = await storage.getFile(sheetId);
     if (!file) {
       return res.status(404).json({ error: 'Document not found' });
     }
@@ -72,7 +66,7 @@ router.get('/sheet/:sheetId', requireAuth, async (req, res) => {
     // Verify access to project
     const hasAccess = await hasProjectAccess(userId!, file.projectId, userIsAdmin);
     if (!hasAccess) {
-      return res.status(404).json({ error: 'Sheet not found or access denied' });
+      return res.status(404).json({ error: 'Document not found or access denied' });
     }
     
     const measurements = await storage.getTakeoffMeasurementsBySheet(sheetId);
@@ -84,7 +78,7 @@ router.get('/sheet/:sheetId', requireAuth, async (req, res) => {
 });
 
 // Get takeoff measurements for a specific page - requires auth
-// Note: sheetId is a compound format (documentId-pageNumber), not a UUID
+// Note: sheetId here is actually the documentId (file.id from frontend)
 router.get('/sheet/:sheetId/page/:pageNumber', requireAuth, async (req, res) => {
   try {
     const { sheetId, pageNumber } = req.params;
@@ -96,14 +90,8 @@ router.get('/sheet/:sheetId/page/:pageNumber', requireAuth, async (req, res) => 
       return res.status(400).json({ error: 'Invalid page number' });
     }
     
-    // Get the sheet to find its project for access control
-    const sheet = await storage.getSheet(sheetId);
-    if (!sheet) {
-      return res.status(404).json({ error: 'Sheet not found' });
-    }
-    
-    // Get document to find project
-    const file = await storage.getFile(sheet.documentId);
+    // sheetId is actually documentId - look up the file directly for access control
+    const file = await storage.getFile(sheetId);
     if (!file) {
       return res.status(404).json({ error: 'Document not found' });
     }
@@ -111,7 +99,7 @@ router.get('/sheet/:sheetId/page/:pageNumber', requireAuth, async (req, res) => 
     // Verify access to project
     const hasAccess = await hasProjectAccess(userId!, file.projectId, userIsAdmin);
     if (!hasAccess) {
-      return res.status(404).json({ error: 'Sheet not found or access denied' });
+      return res.status(404).json({ error: 'Document not found or access denied' });
     }
     
     const measurements = await storage.getTakeoffMeasurementsByPage(sheetId, pageNum);
