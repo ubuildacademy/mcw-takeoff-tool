@@ -13,6 +13,7 @@ import { useMeasurementStore } from '../store/slices/measurementSlice';
 import { useCalibrationStore } from '../store/slices/calibrationSlice';
 import { useAnnotationStore } from '../store/slices/annotationSlice';
 import { useDocumentViewStore } from '../store/slices/documentViewSlice';
+import { useUndoStore } from '../store/slices/undoSlice';
 import type { TakeoffCondition, Sheet, ProjectFile, PDFDocument, SearchResult } from '../types';
 import { triggerCalibration, triggerFitToWindow } from '../lib/windowBridge';
 import * as pdfjsLib from 'pdfjs-dist';
@@ -71,6 +72,11 @@ export function TakeoffWorkspace() {
       return;
     }
   }, [projectId, navigate]);
+
+  // Clear undo history when switching projects
+  useEffect(() => {
+    if (projectId) useUndoStore.getState().clear();
+  }, [projectId]);
   
   const [selectedSheet, setSelectedSheet] = useState<Sheet | null>(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
@@ -259,22 +265,43 @@ export function TakeoffWorkspace() {
     }
   }, [visualSearch]);
 
-  // Global Spacebar handler to deselect current condition
+  // Undo/redo for header buttons and shortcuts
+  const undo = useUndoStore((s) => s.undo);
+  const redo = useUndoStore((s) => s.redo);
+  const canUndo = useUndoStore((s) => s.past.length > 0);
+  const canRedo = useUndoStore((s) => s.future.length > 0);
+
+  // Global keydown: Space (deselect condition), Cmd/Ctrl+Z (undo), Cmd/Ctrl+Shift+Z or Cmd/Ctrl+Y (redo)
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const isSpace = event.code === 'Space' || event.key === ' ';
-      if (!isSpace) return;
-
-      const currentlySelected = getSelectedCondition();
-      if (currentlySelected) {
-        event.preventDefault();
-        handleConditionSelect(null);
+      if (isSpace) {
+        const currentlySelected = getSelectedCondition();
+        if (currentlySelected) {
+          event.preventDefault();
+          handleConditionSelect(null);
+        }
+        return;
+      }
+      const isUndo = (event.metaKey || event.ctrlKey) && event.key === 'z' && !event.shiftKey;
+      const isRedo = (event.metaKey || event.ctrlKey) && (event.key === 'y' || (event.key === 'z' && event.shiftKey));
+      if (isUndo) {
+        const { past } = useUndoStore.getState();
+        if (past.length > 0) {
+          event.preventDefault();
+          undo();
+        }
+      } else if (isRedo) {
+        const { future } = useUndoStore.getState();
+        if (future.length > 0) {
+          event.preventDefault();
+          redo();
+        }
       }
     };
-
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [getSelectedCondition]);
+  }, [getSelectedCondition, handleConditionSelect, undo, redo]);
 
   const handleToolSelect = (tool: string) => {
     // Tool selection handled by PDF viewer
@@ -577,6 +604,10 @@ export function TakeoffWorkspace() {
         isMeasuring={isMeasuring}
         isCalibrating={isCalibrating}
         measurementType={measurementType}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onUndo={() => undo()}
+        onRedo={() => redo()}
       />
 
       {/* Main Content Area - Fixed height container */}

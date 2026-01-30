@@ -5,3 +5,5 @@ export { useMeasurementStore } from './measurementSlice';
 export { useCalibrationStore } from './calibrationSlice';
 export { useAnnotationStore } from './annotationSlice';
 export { useDocumentViewStore } from './documentViewSlice';
+export { useUndoStore } from './undoSlice';
+export type { UndoEntry } from './undoSlice';

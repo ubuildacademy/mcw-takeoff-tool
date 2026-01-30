@@ -94,16 +94,6 @@ export function useTakeoffWorkspaceProjectInit({
             const savedRotation = getDocumentRotation(target.id);
             const savedLocation = getDocumentLocation(target.id);
 
-            if (isDev) {
-              console.log('🔄 Restoring document state immediately:', {
-                documentId: target.id,
-                savedPage,
-                savedScale,
-                savedRotation,
-                savedLocation,
-              });
-            }
-
             setCurrentPdfFile(target);
             setSelectedDocumentId(target.id);
             setScale(savedScale);

@@ -60,9 +60,41 @@ export interface UsePDFViewerMeasurementsResult {
   setSelectionBox: React.Dispatch<React.SetStateAction<{ x: number; y: number; width: number; height: number } | null>>;
   selectionStart: { x: number; y: number } | null;
   setSelectionStart: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
-  // Selection state (markups)
-  selectedMarkupId: string | null;
-  setSelectedMarkupId: React.Dispatch<React.SetStateAction<string | null>>;
+  // Annotation drag-to-draw state (rectangle/circle/arrow)
+  annotationDragStart: { x: number; y: number } | null;
+  setAnnotationDragStart: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
+  annotationDragBox: { x: number; y: number; width: number; height: number } | null;
+  setAnnotationDragBox: React.Dispatch<React.SetStateAction<{ x: number; y: number; width: number; height: number } | null>>;
+  // Annotation move state (drag selected annotation in selection mode; move all selected on drag)
+  annotationMoveId: string | null;
+  setAnnotationMoveId: React.Dispatch<React.SetStateAction<string | null>>;
+  annotationMoveIds: string[];
+  setAnnotationMoveIds: React.Dispatch<React.SetStateAction<string[]>>;
+  annotationMoveStart: { x: number; y: number } | null;
+  setAnnotationMoveStart: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
+  annotationMoveOriginalPoints: { x: number; y: number }[] | null;
+  setAnnotationMoveOriginalPoints: React.Dispatch<React.SetStateAction<{ x: number; y: number }[] | null>>;
+  annotationMoveDelta: { x: number; y: number } | null;
+  setAnnotationMoveDelta: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
+  // Measurement drag-to-draw state (area/volume)
+  measurementDragStart: { x: number; y: number } | null;
+  setMeasurementDragStart: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
+  measurementDragBox: { x: number; y: number; width: number; height: number } | null;
+  setMeasurementDragBox: React.Dispatch<React.SetStateAction<{ x: number; y: number; width: number; height: number } | null>>;
+  // Measurement move state (drag selected measurement in selection mode; move all selected on drag)
+  measurementMoveId: string | null;
+  setMeasurementMoveId: React.Dispatch<React.SetStateAction<string | null>>;
+  measurementMoveIds: string[];
+  setMeasurementMoveIds: React.Dispatch<React.SetStateAction<string[]>>;
+  measurementMoveStart: { x: number; y: number } | null;
+  setMeasurementMoveStart: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
+  measurementMoveOriginalPoints: { x: number; y: number }[] | null;
+  setMeasurementMoveOriginalPoints: React.Dispatch<React.SetStateAction<{ x: number; y: number }[] | null>>;
+  measurementMoveDelta: { x: number; y: number } | null;
+  setMeasurementMoveDelta: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
+  // Selection state (markups) — multi-select via Cmd+click
+  selectedMarkupIds: string[];
+  setSelectedMarkupIds: React.Dispatch<React.SetStateAction<string[]>>;
   isSelectionMode: boolean;
   setIsSelectionMode: React.Dispatch<React.SetStateAction<boolean>>;
   // Continuous linear drawing state
@@ -117,8 +149,30 @@ export function usePDFViewerMeasurements({
   const [selectionBox, setSelectionBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const [selectionStart, setSelectionStart] = useState<{ x: number; y: number } | null>(null);
 
-  // Selection state for deleting markups
-  const [selectedMarkupId, setSelectedMarkupId] = useState<string | null>(null);
+  // Annotation drag-to-draw state (rectangle/circle/arrow)
+  const [annotationDragStart, setAnnotationDragStart] = useState<{ x: number; y: number } | null>(null);
+  const [annotationDragBox, setAnnotationDragBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+
+  // Annotation move state (drag selected annotation in selection mode; move all selected on drag)
+  const [annotationMoveId, setAnnotationMoveId] = useState<string | null>(null);
+  const [annotationMoveIds, setAnnotationMoveIds] = useState<string[]>([]);
+  const [annotationMoveStart, setAnnotationMoveStart] = useState<{ x: number; y: number } | null>(null);
+  const [annotationMoveOriginalPoints, setAnnotationMoveOriginalPoints] = useState<{ x: number; y: number }[] | null>(null);
+  const [annotationMoveDelta, setAnnotationMoveDelta] = useState<{ x: number; y: number } | null>(null);
+
+  // Measurement drag-to-draw state (area/volume)
+  const [measurementDragStart, setMeasurementDragStart] = useState<{ x: number; y: number } | null>(null);
+  const [measurementDragBox, setMeasurementDragBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+
+  // Measurement move state (drag selected measurement in selection mode; move all selected on drag)
+  const [measurementMoveId, setMeasurementMoveId] = useState<string | null>(null);
+  const [measurementMoveIds, setMeasurementMoveIds] = useState<string[]>([]);
+  const [measurementMoveStart, setMeasurementMoveStart] = useState<{ x: number; y: number } | null>(null);
+  const [measurementMoveOriginalPoints, setMeasurementMoveOriginalPoints] = useState<{ x: number; y: number }[] | null>(null);
+  const [measurementMoveDelta, setMeasurementMoveDelta] = useState<{ x: number; y: number } | null>(null);
+
+  // Selection state for markups (multi-select with Cmd+click)
+  const [selectedMarkupIds, setSelectedMarkupIds] = useState<string[]>([]);
   const [isSelectionMode, setIsSelectionMode] = useState(true);
 
   // Continuous linear drawing state
@@ -204,8 +258,36 @@ export function usePDFViewerMeasurements({
     setSelectionBox,
     selectionStart,
     setSelectionStart,
-    selectedMarkupId,
-    setSelectedMarkupId,
+    annotationDragStart,
+    setAnnotationDragStart,
+    annotationDragBox,
+    setAnnotationDragBox,
+    annotationMoveId,
+    setAnnotationMoveId,
+    annotationMoveIds,
+    setAnnotationMoveIds,
+    annotationMoveStart,
+    setAnnotationMoveStart,
+    annotationMoveOriginalPoints,
+    setAnnotationMoveOriginalPoints,
+    annotationMoveDelta,
+    setAnnotationMoveDelta,
+    measurementDragStart,
+    setMeasurementDragStart,
+    measurementDragBox,
+    setMeasurementDragBox,
+    measurementMoveId,
+    setMeasurementMoveId,
+    measurementMoveIds,
+    setMeasurementMoveIds,
+    measurementMoveStart,
+    setMeasurementMoveStart,
+    measurementMoveOriginalPoints,
+    setMeasurementMoveOriginalPoints,
+    measurementMoveDelta,
+    setMeasurementMoveDelta,
+    selectedMarkupIds,
+    setSelectedMarkupIds,
     isSelectionMode,
     setIsSelectionMode,
     isContinuousDrawing,

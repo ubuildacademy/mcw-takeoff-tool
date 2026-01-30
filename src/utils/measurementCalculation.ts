@@ -404,16 +404,17 @@ export class MeasurementCalculator {
   }
   
   /**
-   * Check if polygon has self-intersections
+   * Check if polygon has self-intersections (excluding adjacent edges which only meet at a vertex).
    */
   private static hasSelfIntersection(points: MeasurementPoint[]): boolean {
-    // Simple check for obvious self-intersections
-    // This is a basic implementation - could be enhanced with more sophisticated algorithms
-    for (let i = 0; i < points.length; i++) {
-      for (let j = i + 2; j < points.length; j++) {
+    const n = points.length;
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 2; j < n; j++) {
+        // Skip adjacent edges: edge i is (i, i+1), edge j is (j, j+1). They share a vertex when (i+1)%n === j or i === (j+1)%n.
+        if ((i + 1) % n === j || i === (j + 1) % n) continue;
         if (this.linesIntersect(
-          points[i], points[(i + 1) % points.length],
-          points[j], points[(j + 1) % points.length]
+          points[i], points[(i + 1) % n],
+          points[j], points[(j + 1) % n]
         )) {
           return true;
         }

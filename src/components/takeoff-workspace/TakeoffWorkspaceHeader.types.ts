@@ -54,6 +54,10 @@ export interface TakeoffWorkspaceHeaderProps {
   isMeasuring: boolean;
   isCalibrating: boolean;
   measurementType: string;
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
 }
 
 export interface TakeoffWorkspaceStatusBarProps {

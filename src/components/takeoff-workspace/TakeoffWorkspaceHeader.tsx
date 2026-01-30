@@ -20,6 +20,8 @@ import {
   Trash2,
   ChevronDown,
   Scan,
+  Undo2,
+  Redo2,
 } from 'lucide-react';
 import type { TakeoffWorkspaceHeaderProps } from './TakeoffWorkspaceHeader.types';
 
@@ -45,6 +47,10 @@ export function TakeoffWorkspaceHeader({
   isMeasuring,
   isCalibrating,
   measurementType,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
 }: TakeoffWorkspaceHeaderProps) {
   return (
     <div className="flex items-center justify-between p-4 border-b bg-muted/30">
@@ -55,6 +61,26 @@ export function TakeoffWorkspaceHeader({
           Back to Projects
         </Button>
         <Separator orientation="vertical" className="h-8" />
+        <div className="flex items-center gap-1">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onUndo}
+            disabled={!canUndo}
+            title="Undo (⌘Z)"
+          >
+            <Undo2 className="w-4 h-4" />
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onRedo}
+            disabled={!canRedo}
+            title="Redo (⌘⇧Z)"
+          >
+            <Redo2 className="w-4 h-4" />
+          </Button>
+        </div>
       </div>
 
       {/* Center - PDF Controls */}
@@ -68,7 +94,7 @@ export function TakeoffWorkspaceHeader({
           >
             Previous
           </Button>
-          <span className="px-3 py-1 bg-gray-100 rounded text-sm">
+          <span className="shrink-0 whitespace-nowrap px-3 py-1 bg-gray-100 rounded text-sm">
             {currentPdfFile ? `${currentPage} / ${totalPages}` : 'No PDF'}
           </span>
           <Button

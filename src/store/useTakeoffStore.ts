@@ -18,5 +18,7 @@ export { useMeasurementStore } from './slices/measurementSlice';
 export { useCalibrationStore } from './slices/calibrationSlice';
 export { useAnnotationStore } from './slices/annotationSlice';
 export { useDocumentViewStore } from './slices/documentViewSlice';
+export { useUndoStore } from './slices/undoSlice';
 
 export type { TakeoffCondition, TakeoffMeasurement, Calibration, Project, Annotation } from '../types';
+export type { UndoEntry } from './slices/undoSlice';

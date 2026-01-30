@@ -76,19 +76,6 @@ export function useTakeoffWorkspaceDocumentView({
     const savedScale = getDocumentScale(currentPdfFile.id);
     const savedLocation = getDocumentLocation(currentPdfFile.id);
 
-    if (isDev) {
-      console.log('🔄 Restoring document state (backup):', {
-        documentId: currentPdfFile.id,
-        savedRotation,
-        savedPage,
-        savedScale,
-        savedLocation,
-        currentPage,
-        currentRotation: rotation,
-        currentScale: scale,
-      });
-    }
-
     if (savedPage !== currentPage) {
       setCurrentPage(savedPage);
       setSelectedPageNumber(savedPage);
@@ -240,14 +227,11 @@ export function useTakeoffWorkspaceDocumentView({
     if (currentPdfFile && isInitialRenderRef.current) {
       const savedLocation = getDocumentLocation(currentPdfFile.id);
       if (savedLocation.x !== 0 || savedLocation.y !== 0) {
-        if (isDev) console.log('🔄 Restoring scroll position after initial PDF render:', savedLocation);
         setTimeout(() => restoreScrollPosition(savedLocation.x, savedLocation.y), 25);
       }
       isInitialRenderRef.current = false;
-    } else if (isDev && !isInitialRenderRef.current) {
-      if (isDev) console.log('⏭️ Skipping scroll restoration - not initial render (likely zoom operation)');
     }
-  }, [currentPdfFile, getDocumentLocation, isDev]);
+  }, [currentPdfFile, getDocumentLocation]);
 
   return {
     handlePageChange,

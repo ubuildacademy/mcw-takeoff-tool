@@ -479,10 +479,6 @@ export const takeoffMeasurementService = {
   async getPageTakeoffMeasurements(sheetId: string, pageNumber: number) {
     const response = await apiClient.get(`/takeoff-measurements/sheet/${sheetId}/page/${pageNumber}`);
     
-    if (import.meta.env.DEV) {
-      console.log('📥 API_GET_PAGE_TAKEOFF_MEASUREMENTS: Raw response:', response.data);
-    }
-    
     // Backend now returns camelCase fields, but support both formats for backward compatibility
     const transformedMeasurements = (response.data.measurements || []).map((measurement: ApiMeasurementRow): TakeoffMeasurement => {
       const transformed = {
@@ -515,9 +511,6 @@ export const takeoffMeasurementService = {
       }
       return transformed;
     });
-    if (import.meta.env.DEV) {
-      console.log('📤 API_GET_PAGE_TAKEOFF_MEASUREMENTS: Transformed measurements:', transformedMeasurements);
-    }
     
     return { measurements: transformedMeasurements };
   },

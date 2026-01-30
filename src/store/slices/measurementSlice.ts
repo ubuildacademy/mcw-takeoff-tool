@@ -11,7 +11,9 @@ interface MeasurementState {
   loadingMeasurementsProjectId: string | null;
   loadedPages: Set<string>;
   loadingPages: Set<string>;
-  
+  /** Clipboard for copy-paste: condition markups (takeoff measurements) copied by id */
+  copiedMarkups: TakeoffMeasurement[];
+
   // Actions
   addTakeoffMeasurement: (measurement: Omit<TakeoffMeasurement, 'id' | 'timestamp'>) => Promise<string>;
   updateTakeoffMeasurement: (id: string, updates: Partial<TakeoffMeasurement>) => Promise<void>;
@@ -19,6 +21,8 @@ interface MeasurementState {
   clearProjectMeasurements: (projectId: string) => void;
   /** Clear measurements when switching project (so new project load is clean). */
   clearForProjectSwitch: (newProjectId: string) => void;
+  /** Copy condition markups by ids into clipboard (for paste). */
+  copyMarkupsByIds: (ids: string[]) => void;
 
   // Page-based markup management
   getPageKey: (projectId: string, sheetId: string, pageNumber: number) => string;
@@ -55,8 +59,24 @@ export const useMeasurementStore = create<MeasurementState>()(
     loadingMeasurementsProjectId: null,
     loadedPages: new Set<string>(),
     loadingPages: new Set<string>(),
-    
+    copiedMarkups: [],
+
     // Actions
+    copyMarkupsByIds: (ids) => {
+      if (ids.length === 0) {
+        set({ copiedMarkups: [] });
+        return;
+      }
+      const { takeoffMeasurements } = get();
+      const conditions = useConditionStore.getState().conditions;
+      const copied = takeoffMeasurements.filter((m) => {
+        if (!ids.includes(m.id)) return false;
+        const cond = conditions.find((c) => c.id === m.conditionId);
+        return cond?.type !== 'auto-count';
+      });
+      set({ copiedMarkups: copied });
+    },
+
     addTakeoffMeasurement: async (measurementData) => {
       try {
         const { takeoffMeasurementService } = await import('../../services/apiService');
@@ -69,12 +89,12 @@ export const useMeasurementStore = create<MeasurementState>()(
         };
         
         const response = await takeoffMeasurementService.createTakeoffMeasurement(measurementPayload);
-        console.log('✅ ADD_TAKEOFF_MEASUREMENT: API response received:', response);
+        if (import.meta.env.DEV) console.log('✅ ADD_TAKEOFF_MEASUREMENT: API response received:', response);
         const measurement = response.measurement || response;
-        
+
         set(state => {
-          console.log('💾 ADD_TAKEOFF_MEASUREMENT: Adding measurement to store from backend:', measurement);
-          
+          if (import.meta.env.DEV) console.log('💾 ADD_TAKEOFF_MEASUREMENT: Adding measurement to store from backend:', measurement);
+
           const pageKey = `${measurement.projectId}-${measurement.sheetId}-${measurement.pdfPage}`;
           const updatedLoadedPages = new Set(state.loadedPages);
           updatedLoadedPages.add(pageKey);
@@ -86,8 +106,8 @@ export const useMeasurementStore = create<MeasurementState>()(
         });
         
         get().updateMarkupsByPage();
-        
-        console.log('✅ ADD_TAKEOFF_MEASUREMENT: Measurement created successfully with ID:', measurement.id);
+
+        if (import.meta.env.DEV) console.log('✅ ADD_TAKEOFF_MEASUREMENT: Measurement created successfully with ID:', measurement.id);
         return measurement.id;
       } catch (error: unknown) {
         console.error('❌ ADD_TAKEOFF_MEASUREMENT: Failed to create measurement via API:', error);
@@ -191,7 +211,6 @@ export const useMeasurementStore = create<MeasurementState>()(
       });
       
       set({ markupsByPage });
-      console.log('🔄 Updated markupsByPage:', Object.keys(markupsByPage).length, 'pages');
     },
     
     // Getters
@@ -429,21 +448,11 @@ export const useMeasurementStore = create<MeasurementState>()(
       const state = get();
       
       if (state.loadedPages.has(pageKey)) {
-        if (process.env.NODE_ENV === 'development') {
-          console.log(`⏭️ LOAD_PAGE_TAKEOFF_MEASUREMENTS: Page ${pageNumber} already loaded for sheet ${sheetId}, skipping`);
-        }
         return;
       }
       
       if (state.loadingPages.has(pageKey)) {
-        if (process.env.NODE_ENV === 'development') {
-          console.log(`⏳ LOAD_PAGE_TAKEOFF_MEASUREMENTS: Page ${pageNumber} already loading for sheet ${sheetId}, skipping duplicate request`);
-        }
         return;
-      }
-      
-      if (process.env.NODE_ENV === 'development') {
-        console.log(`🔄 LOAD_PAGE_TAKEOFF_MEASUREMENTS: Loading measurements for page ${pageNumber} of sheet ${sheetId}`);
       }
       
       set(state => {
@@ -457,10 +466,6 @@ export const useMeasurementStore = create<MeasurementState>()(
         
         const response = await takeoffMeasurementService.getPageTakeoffMeasurements(sheetId, pageNumber);
         const pageMeasurements = response.measurements || [];
-        
-        if (process.env.NODE_ENV === 'development') {
-          console.log(`✅ LOAD_PAGE_TAKEOFF_MEASUREMENTS: Loaded ${pageMeasurements.length} measurements for page ${pageNumber}`);
-        }
         
         set(state => {
           const existingIds = new Set(state.takeoffMeasurements.map((m: TakeoffMeasurement) => m.id));
