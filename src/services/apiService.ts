@@ -1,8 +1,83 @@
 import axios from 'axios';
 import { supabase } from '../lib/supabase';
 import { getApiBaseUrl } from '../lib/apiConfig';
+import type { Project, TakeoffCondition, ProjectFile, TakeoffMeasurement } from '../types';
 
 const API_BASE_URL = getApiBaseUrl();
+
+// --- API request/response types (support both camelCase and snake_case from server) ---
+
+/** Raw file from API (snake_case or camelCase) */
+interface ApiFileRow {
+  id?: string;
+  project_id?: string;
+  projectId?: string;
+  original_name?: string;
+  originalName?: string;
+  uploaded_at?: string;
+  uploadedAt?: string;
+  [key: string]: unknown;
+}
+
+/** Raw condition from API */
+interface ApiConditionRow {
+  project_id?: string;
+  projectId?: string;
+  waste_factor?: number;
+  wasteFactor?: number;
+  labor_cost?: number;
+  laborCost?: number;
+  material_cost?: number;
+  materialCost?: number;
+  equipment_cost?: number;
+  equipmentCost?: number;
+  include_perimeter?: boolean;
+  includePerimeter?: boolean;
+  search_image?: string;
+  searchImage?: string;
+  search_image_id?: string;
+  searchImageId?: string;
+  search_threshold?: number;
+  searchThreshold?: number;
+  ai_generated?: boolean;
+  aiGenerated?: boolean;
+  created_at?: string;
+  createdAt?: string;
+  [key: string]: unknown;
+}
+
+/** Raw measurement from API */
+interface ApiMeasurementRow {
+  id?: string;
+  project_id?: string;
+  projectId?: string;
+  sheet_id?: string;
+  sheetId?: string;
+  condition_id?: string;
+  conditionId?: string;
+  type?: string;
+  points?: Array<{ x: number; y: number }>;
+  calculated_value?: number;
+  calculatedValue?: number;
+  pdf_page?: number;
+  pdfPage?: number;
+  pdf_coordinates?: Array<{ x: number; y: number }>;
+  pdfCoordinates?: Array<{ x: number; y: number }>;
+  condition_color?: string;
+  conditionColor?: string;
+  condition_name?: string;
+  conditionName?: string;
+  perimeter_value?: number;
+  perimeterValue?: number;
+  area_value?: number;
+  areaValue?: number;
+  net_calculated_value?: number;
+  netCalculatedValue?: number;
+  timestamp?: string;
+  unit?: string;
+  cutouts?: Array<{ id: string; points: Array<{ x: number; y: number }>; pdfCoordinates?: Array<{ x: number; y: number }>; calculatedValue?: number }>;
+  [key: string]: unknown;
+}
 
 // Note: In production, we prefer VITE_API_BASE_URL to be set directly in Vercel
 // If not set, it falls back to '/api' which relies on vercel.json rewrites
@@ -120,7 +195,7 @@ export const fileService = {
     const response = await apiClient.get(`/files/project/${projectId}`);
     
     // Transform field names from snake_case to camelCase
-    const transformedFiles = response.data.files?.map((file: any) => ({
+    const transformedFiles = response.data.files?.map((file: ApiFileRow) => ({
       ...file,
       projectId: file.project_id || file.projectId,
       originalName: file.original_name || file.originalName,
@@ -138,7 +213,7 @@ export const fileService = {
 
 // Project service
 export const projectService = {
-  async createProject(projectData: any) {
+  async createProject(projectData: Partial<Project> & Pick<Project, 'name' | 'client' | 'location' | 'status'>) {
     const response = await apiClient.post('/projects', projectData);
     return response.data;
   },
@@ -158,7 +233,7 @@ export const projectService = {
     return response.data;
   },
 
-  async updateProject(id: string, updates: any) {
+  async updateProject(id: string, updates: Partial<Project>) {
     const response = await apiClient.put(`/projects/${id}`, updates);
     return response.data;
   },
@@ -184,7 +259,7 @@ export const conditionService = {
       
       // Backend now returns camelCase fields, so just return as-is
       // Transform field names from snake_case to camelCase (backward compatibility)
-      const transformedConditions = response.data.conditions?.map((condition: any) => ({
+      const transformedConditions = response.data.conditions?.map((condition: ApiConditionRow) => ({
         ...condition,
         // Map snake_case fields if they exist (for backward compatibility)
         projectId: condition.project_id || condition.projectId,
@@ -213,7 +288,7 @@ export const conditionService = {
     return response.data;
   },
 
-  async createCondition(conditionData: any) {
+  async createCondition(conditionData: Omit<TakeoffCondition, 'id'> | Partial<TakeoffCondition>) {
     if (import.meta.env.DEV) console.log('🌐 API_CREATE_CONDITION: Making API call with data:', conditionData);
     try {
       const response = await apiClient.post('/conditions', conditionData);
@@ -225,7 +300,7 @@ export const conditionService = {
     }
   },
 
-  async updateCondition(id: string, updates: any) {
+  async updateCondition(id: string, updates: Partial<TakeoffCondition>) {
     const response = await apiClient.put(`/conditions/${id}`, updates);
     return response.data;
   },
@@ -248,7 +323,7 @@ export const authService = {
     return response.data;
   },
 
-  async register(userData: any) {
+  async register(userData: { email: string; password?: string; [key: string]: unknown }) {
     const response = await apiClient.post('/auth/register', userData);
     return response.data;
   },
@@ -328,7 +403,7 @@ export const sheetService = {
     return response.data;
   },
 
-  async updateSheet(sheetId: string, updates: any) {
+  async updateSheet(sheetId: string, updates: Record<string, unknown>) {
     const response = await apiClient.put(`/sheets/${sheetId}`, updates);
     return response.data;
   },
@@ -356,46 +431,39 @@ export const takeoffMeasurementService = {
     }
     
     // Backend now returns camelCase fields, but support both formats for backward compatibility
-    const transformedMeasurements = (response.data.measurements || []).map((measurement: any) => {
-      // Prioritize camelCase (from backend storage service) but fall back to snake_case
+    const transformedMeasurements = (response.data.measurements || []).map((measurement: ApiMeasurementRow): TakeoffMeasurement => {
       const transformed = {
-        id: measurement.id,
-        projectId: measurement.project_id || measurement.projectId,
-        sheetId: measurement.sheet_id || measurement.sheetId,
-        conditionId: measurement.condition_id || measurement.conditionId,
-        type: measurement.type,
-        points: measurement.points || [],
-        calculatedValue: measurement.calculated_value !== undefined && measurement.calculated_value !== null 
-          ? measurement.calculated_value 
-          : (measurement.calculatedValue !== undefined && measurement.calculatedValue !== null 
-              ? measurement.calculatedValue 
-              : 0),
-        unit: measurement.unit || '',
-        timestamp: measurement.timestamp || new Date().toISOString(),
-        pdfPage: measurement.pdf_page !== undefined && measurement.pdf_page !== null 
-          ? measurement.pdf_page 
-          : (measurement.pdfPage !== undefined && measurement.pdfPage !== null ? measurement.pdfPage : 1),
-        pdfCoordinates: measurement.pdf_coordinates || measurement.pdfCoordinates || [],
-        conditionColor: measurement.condition_color || measurement.conditionColor || '#000000',
-        conditionName: measurement.condition_name || measurement.conditionName || 'Unknown',
+        id: measurement.id ?? '',
+        projectId: measurement.project_id ?? measurement.projectId ?? '',
+        sheetId: measurement.sheet_id ?? measurement.sheetId ?? '',
+        conditionId: measurement.condition_id ?? measurement.conditionId ?? '',
+        type: (measurement.type as TakeoffMeasurement['type']) ?? 'linear',
+        points: measurement.points ?? [],
+        calculatedValue: measurement.calculated_value !== undefined && measurement.calculated_value !== null
+          ? measurement.calculated_value
+          : (measurement.calculatedValue ?? 0),
+        unit: measurement.unit ?? '',
+        timestamp: measurement.timestamp ?? new Date().toISOString(),
+        pdfPage: measurement.pdf_page ?? measurement.pdfPage ?? 1,
+        pdfCoordinates: measurement.pdf_coordinates ?? measurement.pdfCoordinates ?? [],
+        conditionColor: measurement.condition_color ?? measurement.conditionColor ?? '#000000',
+        conditionName: measurement.condition_name ?? measurement.conditionName ?? 'Unknown',
         ...(measurement.perimeter_value !== undefined || measurement.perimeterValue !== undefined) && {
-          perimeterValue: measurement.perimeter_value !== undefined ? measurement.perimeter_value : measurement.perimeterValue
+          perimeterValue: measurement.perimeter_value ?? measurement.perimeterValue
+        },
+        ...(measurement.area_value !== undefined || measurement.areaValue !== undefined) && {
+          areaValue: measurement.area_value ?? measurement.areaValue
         },
         ...(measurement.cutouts && { cutouts: measurement.cutouts }),
         ...(measurement.net_calculated_value !== undefined || measurement.netCalculatedValue !== undefined) && {
-          netCalculatedValue: measurement.net_calculated_value !== undefined 
-            ? measurement.net_calculated_value 
-            : measurement.netCalculatedValue
+          netCalculatedValue: measurement.net_calculated_value ?? measurement.netCalculatedValue
         }
-      };
-      
+      } as TakeoffMeasurement;
       if (import.meta.env.DEV && !transformed.conditionId) {
         console.warn('⚠️ Measurement missing conditionId:', transformed);
       }
-      
       return transformed;
     });
-    
     if (import.meta.env.DEV) {
       console.log('📤 API_GET_PROJECT_TAKEOFF_MEASUREMENTS: Transformed measurements:', transformedMeasurements);
     }
@@ -416,46 +484,37 @@ export const takeoffMeasurementService = {
     }
     
     // Backend now returns camelCase fields, but support both formats for backward compatibility
-    const transformedMeasurements = (response.data.measurements || []).map((measurement: any) => {
-      // Prioritize camelCase (from backend storage service) but fall back to snake_case
+    const transformedMeasurements = (response.data.measurements || []).map((measurement: ApiMeasurementRow): TakeoffMeasurement => {
       const transformed = {
-        id: measurement.id,
-        projectId: measurement.project_id || measurement.projectId,
-        sheetId: measurement.sheet_id || measurement.sheetId,
-        conditionId: measurement.condition_id || measurement.conditionId,
-        type: measurement.type,
-        points: measurement.points || [],
-        calculatedValue: measurement.calculated_value !== undefined && measurement.calculated_value !== null 
-          ? measurement.calculated_value 
-          : (measurement.calculatedValue !== undefined && measurement.calculatedValue !== null 
-              ? measurement.calculatedValue 
-              : 0),
-        unit: measurement.unit || '',
-        timestamp: measurement.timestamp || new Date().toISOString(),
-        pdfPage: measurement.pdf_page !== undefined && measurement.pdf_page !== null 
-          ? measurement.pdf_page 
-          : (measurement.pdfPage !== undefined && measurement.pdfPage !== null ? measurement.pdfPage : 1),
-        pdfCoordinates: measurement.pdf_coordinates || measurement.pdfCoordinates || [],
-        conditionColor: measurement.condition_color || measurement.conditionColor || '#000000',
-        conditionName: measurement.condition_name || measurement.conditionName || 'Unknown',
+        id: measurement.id ?? '',
+        projectId: measurement.project_id ?? measurement.projectId ?? '',
+        sheetId: measurement.sheet_id ?? measurement.sheetId ?? '',
+        conditionId: measurement.condition_id ?? measurement.conditionId ?? '',
+        type: (measurement.type as TakeoffMeasurement['type']) ?? 'linear',
+        points: measurement.points ?? [],
+        calculatedValue: measurement.calculated_value ?? measurement.calculatedValue ?? 0,
+        unit: measurement.unit ?? '',
+        timestamp: measurement.timestamp ?? new Date().toISOString(),
+        pdfPage: measurement.pdf_page ?? measurement.pdfPage ?? 1,
+        pdfCoordinates: measurement.pdf_coordinates ?? measurement.pdfCoordinates ?? [],
+        conditionColor: measurement.condition_color ?? measurement.conditionColor ?? '#000000',
+        conditionName: measurement.condition_name ?? measurement.conditionName ?? 'Unknown',
         ...(measurement.perimeter_value !== undefined || measurement.perimeterValue !== undefined) && {
-          perimeterValue: measurement.perimeter_value !== undefined ? measurement.perimeter_value : measurement.perimeterValue
+          perimeterValue: measurement.perimeter_value ?? measurement.perimeterValue
+        },
+        ...(measurement.area_value !== undefined || measurement.areaValue !== undefined) && {
+          areaValue: measurement.area_value ?? measurement.areaValue
         },
         ...(measurement.cutouts && { cutouts: measurement.cutouts }),
         ...(measurement.net_calculated_value !== undefined || measurement.netCalculatedValue !== undefined) && {
-          netCalculatedValue: measurement.net_calculated_value !== undefined 
-            ? measurement.net_calculated_value 
-            : measurement.netCalculatedValue
+          netCalculatedValue: measurement.net_calculated_value ?? measurement.netCalculatedValue
         }
-      };
-      
+      } as TakeoffMeasurement;
       if (import.meta.env.DEV && !transformed.conditionId) {
         console.warn('⚠️ Measurement missing conditionId:', transformed);
       }
-      
       return transformed;
     });
-    
     if (import.meta.env.DEV) {
       console.log('📤 API_GET_PAGE_TAKEOFF_MEASUREMENTS: Transformed measurements:', transformedMeasurements);
     }
@@ -463,7 +522,7 @@ export const takeoffMeasurementService = {
     return { measurements: transformedMeasurements };
   },
 
-  async createTakeoffMeasurement(measurementData: any) {
+  async createTakeoffMeasurement(measurementData: Omit<TakeoffMeasurement, 'id'> | Partial<TakeoffMeasurement>) {
     if (import.meta.env.DEV) console.log('🌐 API_CREATE_TAKEOFF_MEASUREMENT: Making API call with data:', measurementData);
     try {
       const response = await apiClient.post('/takeoff-measurements', measurementData);
@@ -475,7 +534,7 @@ export const takeoffMeasurementService = {
     }
   },
 
-  async updateTakeoffMeasurement(id: string, updates: any) {
+  async updateTakeoffMeasurement(id: string, updates: Partial<TakeoffMeasurement>) {
     const response = await apiClient.put(`/takeoff-measurements/${id}`, updates);
     return response.data;
   },
@@ -498,12 +557,12 @@ export const settingsService = {
     return response.data;
   },
 
-  async updateSetting(key: string, value: any) {
+  async updateSetting(key: string, value: unknown) {
     const response = await apiClient.put(`/settings/${key}`, { value });
     return response.data;
   },
 
-  async updateSettings(settings: Record<string, any>) {
+  async updateSettings(settings: Record<string, unknown>) {
     const response = await apiClient.put('/settings', { settings });
     return response.data;
   }
@@ -534,7 +593,7 @@ export const ocrService = {
     return response.data;
   },
 
-  async submitClientResults(documentId: string, projectId: string, results: any[], jobId?: string) {
+  async submitClientResults(documentId: string, projectId: string, results: unknown[], jobId?: string) {
     const response = await apiClient.post(`/ocr/client-results/${documentId}`, {
       projectId,
       results,

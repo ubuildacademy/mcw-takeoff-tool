@@ -8,6 +8,7 @@ import PricingPage from './components/PricingPage';
 import LoginPage from './components/LoginPage';
 import SignupPage from './components/SignupPage';
 import AuthGuard from './components/AuthGuard';
+import ErrorBoundary from './components/ErrorBoundary';
 import { useProjectStore } from './store/slices/projectSlice';
 import { runStoreMigration } from './store/migrateStores';
 
@@ -61,7 +62,9 @@ function App() {
           path="/project/:projectId" 
           element={
             <AuthGuard>
-              <TakeoffWorkspace />
+              <ErrorBoundary>
+                <TakeoffWorkspace />
+              </ErrorBoundary>
             </AuthGuard>
           } 
         />

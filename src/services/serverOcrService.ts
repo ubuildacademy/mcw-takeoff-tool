@@ -233,21 +233,20 @@ class ServerOCRService {
     }
   }
 
-  private formatSearchResults(searchResponse: any, documentId: string): SearchResult[] {
+  private formatSearchResults(searchResponse: { results?: Array<{ pageNumber?: number; matches?: Array<{ snippet?: string; confidence?: number }> }> }, documentId: string): SearchResult[] {
     if (!searchResponse.results || searchResponse.results.length === 0) {
       return [];
     }
 
-    // CRITICAL FIX: Filter out null/undefined results before accessing pageNumber
     return searchResponse.results
-      .filter((result: any) => result != null && result.pageNumber != null)
-      .map((result: any) => ({
+      .filter((result): result is NonNullable<typeof result> & { pageNumber: number } => result != null && result.pageNumber != null)
+      .map((result) => ({
         documentId,
         pageNumber: result.pageNumber,
-        matches: (result.matches || []).filter((match: any) => match != null).map((match: any) => ({
-          text: match.snippet,
-          context: match.snippet, // Using snippet as context for now
-          confidence: match.confidence
+        matches: (result.matches || []).filter((m): m is NonNullable<typeof m> => m != null).map((match) => ({
+          text: match.snippet ?? '',
+          context: match.snippet ?? '',
+          confidence: typeof match.confidence === 'number' ? match.confidence : 0
         }))
       }));
   }
@@ -267,13 +266,13 @@ class ServerOCRService {
       // CRITICAL FIX: Safely handle results array - filter out null/undefined before mapping
       // This prevents "Cannot read properties of undefined (reading 'pageNumber')" errors
       // Handle case where results might be null, undefined, or not an array
-      let safeResults: any[] = [];
+      type OcrResultRow = { pageNumber?: number; text?: string };
+      let safeResults: OcrResultRow[] = [];
       try {
         if (Array.isArray(resultsResponse.results)) {
-          safeResults = resultsResponse.results.filter((r: any) => {
-            // Comprehensive check: ensure r is an object and has pageNumber
-            return r != null && typeof r === 'object' && r.pageNumber != null;
-          });
+          safeResults = resultsResponse.results.filter((r: unknown): r is OcrResultRow & { pageNumber: number } =>
+            r != null && typeof r === 'object' && (r as OcrResultRow).pageNumber != null
+          );
         } else if (resultsResponse.results != null) {
           console.warn(`⚠️ OCR results is not an array for document ${documentId}:`, typeof resultsResponse.results);
         }
@@ -281,38 +280,41 @@ class ServerOCRService {
         console.error(`❌ Error processing OCR results array for document ${documentId}:`, error);
         safeResults = [];
       }
-      
-      // Safely build sampleResults with comprehensive error handling
-      let sampleResults: any[] = [];
+
+      type SampleItem = { pageNumber: number; textLength: number; textPreview: string };
+      let sampleResults: SampleItem[] = [];
       try {
         sampleResults = safeResults
           .slice(0, 3)
-          .map((r: any) => {
-            // Double-check pageNumber exists before accessing
+          .map((r): SampleItem | null => {
             if (r && typeof r === 'object' && r.pageNumber != null) {
               return {
                 pageNumber: r.pageNumber,
-                textLength: r.text?.length || 0,
-                textPreview: r.text?.substring(0, 100) + '...'
+                textLength: r.text?.length ?? 0,
+                textPreview: (r.text?.substring(0, 100) ?? '') + '...'
               };
             }
             return null;
           })
-          .filter((item: any) => item != null);
+          .filter((item): item is SampleItem => item != null);
       } catch (error) {
         console.error(`❌ Error building sample results for document ${documentId}:`, error);
         sampleResults = [];
       }
-      
-      // OCR data retrieved
-      
-      // Ensure we return a valid structure with a safe results array
-      // Don't spread resultsResponse to avoid any potential issues with its structure
+
+      const resultsAsOCR: OCRResult[] = safeResults.map((r) => ({
+        pageNumber: r.pageNumber!,
+        text: r.text ?? '',
+        confidence: 0,
+        processingTime: 0,
+        method: 'direct_extraction' as const
+      }));
+
       return {
         documentId: resultsResponse.documentId || documentId,
         projectId: resultsResponse.projectId || projectId,
         totalPages: resultsResponse.totalPages || safeResults.length || 0,
-        results: safeResults,
+        results: resultsAsOCR,
         processedAt: resultsResponse.processedAt || new Date().toISOString()
       };
     } catch (error) {

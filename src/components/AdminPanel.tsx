@@ -383,9 +383,11 @@ When answering questions:
       } else {
         alert(`Invitation created, but email was not sent.\n\nPlease configure SMTP settings in your backend environment variables.\n\nInvitation URL: ${result?.invite_url || 'N/A'}`);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error sending invitation:', error);
-      const errorMessage = error?.response?.data?.error || error?.message || 'Failed to send invitation';
+      const err = error as Record<string, unknown>;
+      const data = (err?.response as Record<string, unknown> | undefined)?.data as Record<string, unknown> | undefined;
+      const errorMessage = typeof data?.error === 'string' ? data.error : (typeof err?.message === 'string' ? err.message : 'Failed to send invitation');
       alert(`Failed to create invitation: ${errorMessage}`);
     } finally {
       setIsInviting(false);
@@ -509,7 +511,7 @@ When answering questions:
                     return (
                       <button
                         key={tab.id}
-                        onClick={() => setActiveTab(tab.id as any)}
+                        onClick={() => setActiveTab(tab.id as typeof activeTab)}
                         className={`w-full flex items-center gap-3 px-3 py-2 text-sm rounded-lg transition-colors ${
                           activeTab === tab.id
                             ? 'bg-blue-100 text-blue-700'
@@ -1115,10 +1117,19 @@ When answering questions:
 
 // Sheet Label Patterns Tab Component
 function SheetLabelPatternsTab() {
-  const [patterns, setPatterns] = useState<any[]>([]);
+  interface SheetLabelPattern {
+    id: string;
+    pattern_type: 'sheet_name' | 'sheet_number';
+    pattern_label: string;
+    pattern_regex: string;
+    priority: number;
+    description?: string;
+    is_active?: boolean;
+  }
+  const [patterns, setPatterns] = useState<SheetLabelPattern[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterType, setFilterType] = useState<'all' | 'sheet_name' | 'sheet_number'>('all');
-  const [editingPattern, setEditingPattern] = useState<any | null>(null);
+  const [editingPattern, setEditingPattern] = useState<SheetLabelPattern | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [formData, setFormData] = useState({
     pattern_type: 'sheet_name' as 'sheet_name' | 'sheet_number',
@@ -1166,9 +1177,11 @@ function SheetLabelPatternsTab() {
         is_active: true
       });
       loadPatterns();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to save pattern:', error);
-      alert(error.response?.data?.error || 'Failed to save pattern');
+      const err = error as Record<string, unknown>;
+      const data = (err?.response as Record<string, unknown> | undefined)?.data as Record<string, unknown> | undefined;
+      alert(typeof data?.error === 'string' ? data.error : 'Failed to save pattern');
     }
   };
 
@@ -1183,7 +1196,7 @@ function SheetLabelPatternsTab() {
     }
   };
 
-  const handleEdit = (pattern: any) => {
+  const handleEdit = (pattern: SheetLabelPattern) => {
     setEditingPattern(pattern);
     setFormData({
       pattern_type: pattern.pattern_type,
@@ -1207,7 +1220,7 @@ function SheetLabelPatternsTab() {
         <div className="flex items-center gap-4">
           <select
             value={filterType}
-            onChange={(e) => setFilterType(e.target.value as any)}
+            onChange={(e) => setFilterType((e.target.value as 'all' | 'sheet_name' | 'sheet_number') || 'all')}
             className="border rounded px-3 py-1"
           >
             <option value="all">All Patterns</option>
@@ -1242,7 +1255,7 @@ function SheetLabelPatternsTab() {
               <select
                 className="w-full p-2 border rounded-md"
                 value={formData.pattern_type}
-                onChange={(e) => setFormData({ ...formData, pattern_type: e.target.value as any })}
+                onChange={(e) => setFormData({ ...formData, pattern_type: (e.target.value as 'sheet_name' | 'sheet_number') || 'sheet_name' })}
               >
                 <option value="sheet_name">Sheet Name</option>
                 <option value="sheet_number">Sheet Number</option>

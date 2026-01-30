@@ -2,9 +2,18 @@ import React, { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { Eye, EyeOff, X, CheckCircle, AlertCircle, Clock, MapPin } from 'lucide-react';
 
+interface LivePreviewData {
+  progress?: number;
+  message?: string;
+  documentId?: string;
+  pageNumber?: number;
+  analysis?: { conditions?: unknown[]; measurements?: unknown[] };
+  condition?: { type?: string; unit?: string };
+}
+
 interface LivePreviewUpdate {
   type: 'page_analysis' | 'condition_created' | 'measurement_placed' | 'progress_update' | 'error' | 'page_identified' | 'ai_processing';
-  data: any;
+  data: LivePreviewData | string;
   timestamp: string;
   projectId: string;
   documentId?: string;
@@ -74,24 +83,21 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ projectId, isVisible, 
         console.log('📡 Received live preview update:', update);
         setUpdates(prev => [...prev, update]);
         
-        if (update.type === 'progress_update') {
-          setCurrentProgress(update.data.progress);
-          setCurrentMessage(update.data.message);
+        if (update.type === 'progress_update' && typeof update.data !== 'string') {
+          setCurrentProgress(update.data.progress ?? 0);
+          setCurrentMessage(update.data.message ?? '');
+          setIsScanning((update.data.message ?? '').includes('Analyzing') || (update.data.message ?? '').includes('Processing'));
         }
         
         if (update.type === 'page_analysis' && update.imageData) {
           setCurrentPageImage(update.imageData);
-          setCurrentPageNumber(update.pageNumber || null);
+          setCurrentPageNumber(update.pageNumber ?? null);
           setIsScanning(false);
         }
         
-        if (update.type === 'ai_processing') {
-          setCurrentMessage(update.data.message);
+        if (update.type === 'ai_processing' && typeof update.data !== 'string') {
+          setCurrentMessage(update.data.message ?? '');
           setIsScanning(true);
-        }
-        
-        if (update.type === 'progress_update') {
-          setIsScanning(update.data.message.includes('Analyzing') || update.data.message.includes('Processing'));
         }
       });
 
@@ -280,14 +286,14 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ projectId, isVisible, 
                       </p>
                       
                       {/* Additional data display */}
-                      {update.type === 'page_analysis' && update.data.analysis && (
+                      {update.type === 'page_analysis' && typeof update.data !== 'string' && update.data.analysis && (
                         <div className="mt-2 text-xs text-gray-600">
-                          <p>Conditions: {update.data.analysis.conditions?.length || 0}</p>
-                          <p>Measurements: {update.data.analysis.measurements?.length || 0}</p>
+                          <p>Conditions: {update.data.analysis.conditions?.length ?? 0}</p>
+                          <p>Measurements: {update.data.analysis.measurements?.length ?? 0}</p>
                         </div>
                       )}
                       
-                      {update.type === 'condition_created' && update.data.condition && (
+                      {update.type === 'condition_created' && typeof update.data !== 'string' && update.data.condition && (
                         <div className="mt-2 text-xs text-gray-600">
                           <p>Type: {update.data.condition.type}</p>
                           <p>Unit: {update.data.condition.unit}</p>

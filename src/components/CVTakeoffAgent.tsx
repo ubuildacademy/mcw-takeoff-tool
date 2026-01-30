@@ -38,7 +38,7 @@ export function CVTakeoffAgent({
   const [currentStage, setCurrentStage] = useState<Stage>('selection');
   const [serviceAvailable, setServiceAvailable] = useState<boolean>(false);
   const [isCheckingStatus, setIsCheckingStatus] = useState(true);
-  const [statusDetails, setStatusDetails] = useState<any>(null);
+  const [statusDetails, setStatusDetails] = useState<Record<string, unknown> | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   
   // Processing state
@@ -53,7 +53,7 @@ export function CVTakeoffAgent({
     doorsDetected: number;
     windowsDetected: number;
     errors: string[];
-    errorDetails?: any;
+    errorDetails?: Record<string, unknown>;
   } | null>(null);
 
   // Detection options - what to detect
@@ -94,7 +94,7 @@ export function CVTakeoffAgent({
     try {
       const status = await cvTakeoffService.checkStatus();
       setServiceAvailable(status.available);
-      setStatusDetails(status.details || status.diagnostics);
+      setStatusDetails((status.details ?? status.diagnostics ?? null) as Record<string, unknown> | null);
        // Preserve the backend-computed message, which already reflects
        // whether a custom model or ImageNet fallback is in use.
        setStatusMessage(status.message || null);
@@ -187,40 +187,36 @@ export function CVTakeoffAgent({
       
       // Extract error message properly
       let errorMessage = 'Unknown error';
-      let errorDetails: any = null;
-      
+      let errorDetails: Record<string, unknown> | null = null;
+
+      const getErrObj = (e: unknown): Record<string, unknown> => (e as unknown as Record<string, unknown>);
+
       if (error instanceof Error) {
         errorMessage = error.message || String(error);
-        // If message is "[object Object]", try to extract more details
         if (errorMessage === '[object Object]' || errorMessage.includes('[object Object]')) {
           try {
-            const errorObj = error as any;
-            errorMessage = errorObj.message || errorObj.error || JSON.stringify(errorObj) || 'Unknown error';
+            const err = getErrObj(error);
+            errorMessage = (typeof err.message === 'string' ? err.message : null) ?? (typeof err.error === 'string' ? err.error : null) ?? JSON.stringify(error) ?? 'Unknown error';
           } catch {
             errorMessage = 'Failed to process page - unknown error';
           }
         }
-        
-        // Try to extract error details from the message
         try {
           const detailsMatch = errorMessage.match(/Details: ({.*})/s);
           if (detailsMatch) {
-            errorDetails = JSON.parse(detailsMatch[1]);
+            errorDetails = JSON.parse(detailsMatch[1]) as Record<string, unknown>;
           } else {
-            // Also check if error object has details property
-            const errorObj = error as any;
-            if (errorObj.details) {
-              errorDetails = errorObj.details;
-            }
+            const err = getErrObj(error);
+            if (err.details != null) errorDetails = err.details as Record<string, unknown>;
           }
-        } catch (e) {
+        } catch {
           // Ignore parsing errors
         }
       } else if (error && typeof error === 'object') {
         try {
-          const errorObj = error as any;
-          errorMessage = errorObj.message || errorObj.error || JSON.stringify(errorObj) || 'Unknown error';
-          errorDetails = errorObj.details || null;
+          const err = getErrObj(error);
+          errorMessage = (typeof err.message === 'string' ? err.message : null) ?? (typeof err.error === 'string' ? err.error : null) ?? JSON.stringify(error) ?? 'Unknown error';
+          if (err.details != null) errorDetails = err.details as Record<string, unknown>;
         } catch {
           errorMessage = 'Failed to process page - unknown error';
         }
@@ -236,7 +232,7 @@ export function CVTakeoffAgent({
         doorsDetected: 0,
         windowsDetected: 0,
         errors: [errorMessage],
-        errorDetails
+        errorDetails: errorDetails ?? undefined
       });
       setCurrentStage('complete');
     } finally {
@@ -288,9 +284,9 @@ export function CVTakeoffAgent({
                     {/* Hard-coded banner to clearly indicate custom model usage */}
                     Custom CV model (CubiCasa5k ResNet-50) is active
                   </span>
-                  {statusDetails?.modelInfo?.exists && statusDetails?.modelInfo?.size && (
+                  {(statusDetails?.modelInfo as { exists?: boolean; size?: number } | undefined)?.exists && (statusDetails?.modelInfo as { size?: number } | undefined)?.size != null && (
                     <span className="text-xs text-green-700 mt-1 block">
-                      Model size: {(statusDetails.modelInfo.size / 1024 / 1024).toFixed(2)} MB
+                      Model size: {(((statusDetails?.modelInfo as { size?: number })?.size ?? 0) / 1024 / 1024).toFixed(2)} MB
                     </span>
                   )}
                 </div>

@@ -427,7 +427,7 @@ class OllamaService {
   }
 
   // Build context from project data for AI queries
-  buildProjectContext(projectData: any, documents: any[], measurements: any[]): string {
+  buildProjectContext(projectData: { name: string; client?: string; location?: string; projectType?: string; description?: string }, documents: Array<{ originalName?: string; filename?: string }>, measurements: Array<{ conditionName: string; calculatedValue: number; unit: string }>): string {
     let context = `Project: ${projectData.name}\n`;
     context += `Client: ${projectData.client || 'Not specified'}\n`;
     context += `Location: ${projectData.location || 'Not specified'}\n`;
@@ -454,17 +454,16 @@ class OllamaService {
   }
 
   // Build document context from OCR data
-  buildDocumentContext(documentId: string, ocrData: any): string {
+  buildDocumentContext(documentId: string, ocrData: { pages?: Array<{ pageNumber?: number; text?: string }>; totalPages?: number }): string {
     if (!ocrData || !ocrData.pages) {
       return `Document ${documentId}: No OCR data available`;
     }
 
     let context = `Document: ${documentId}\n`;
-    context += `Total Pages: ${ocrData.totalPages}\n`;
+    context += `Total Pages: ${ocrData.totalPages ?? 0}\n`;
     context += `Processed Pages: ${ocrData.pages.length}\n\n`;
 
-    // Include text from all pages
-    ocrData.pages.forEach((page: any, index: number) => {
+    ocrData.pages.forEach((page, index: number) => {
       if (page.text && page.text.trim().length > 0) {
         context += `Page ${page.pageNumber}:\n${page.text}\n\n`;
       }

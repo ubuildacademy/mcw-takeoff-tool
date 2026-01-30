@@ -1,8 +1,39 @@
 import Tesseract from 'tesseract.js';
 import * as pdfjsLib from 'pdfjs-dist';
+import type { PDFDocumentProxy, PDFPageProxy, PageViewport } from 'pdfjs-dist';
 
 // Configure PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+
+/** Tesseract logger message (progress updates) */
+interface TesseractLoggerMessage {
+  status?: string;
+  progress?: number;
+  [key: string]: unknown;
+}
+
+/** Tesseract recognize result word shape (compatible with Tesseract Page.words) */
+interface TesseractWord {
+  text?: string;
+  bbox?: { x0?: number; y0?: number; x1?: number; y1?: number };
+  confidence?: number;
+}
+
+/** Tesseract recognize result data shape (compatible with Tesseract Page) */
+interface TesseractRecognizeData {
+  text?: string;
+  confidence?: number;
+  words?: TesseractWord[];
+}
+
+/** Worker config with optional path overrides (omit for CDN) */
+interface TesseractWorkerConfigWithPaths {
+  logger?: (m: TesseractLoggerMessage) => void;
+  workerPath?: string;
+  langPath?: string;
+  corePath?: string;
+  [key: string]: unknown;
+}
 
 export interface OCRResult {
   pageNumber: number;
@@ -36,11 +67,11 @@ class OCRService {
 
     try {
       // Try to create worker with local files first, fallback to CDN
-      let workerConfig = {
-        logger: (m: any) => {
+      const workerConfig: TesseractWorkerConfigWithPaths = {
+        logger: (m: TesseractLoggerMessage) => {
           // Reduce OCR logging to prevent console spam - only log major milestones
           if (m.status === 'recognizing text' && (m.progress === 0.25 || m.progress === 0.5 || m.progress === 0.75 || m.progress === 1.0)) {
-            console.log(`OCR Progress: ${Math.round(m.progress * 100)}%`);
+            console.log(`OCR Progress: ${Math.round((m.progress ?? 0) * 100)}%`);
           }
         },
         // Try local files first
@@ -63,12 +94,9 @@ class OCRService {
         console.log('✅ Tesseract OCR worker initialized with local files');
       } catch (localError) {
         console.warn('⚠️ Local Tesseract files not found, trying CDN fallback:', localError);
-        // Fallback to CDN
-        const cdnConfig = { ...workerConfig };
-        delete (cdnConfig as any).workerPath;
-        delete (cdnConfig as any).langPath;
-        delete (cdnConfig as any).corePath;
-        this.worker = await Tesseract.createWorker('eng', 1, cdnConfig);
+        // Fallback to CDN: omit path overrides so Tesseract uses CDN
+        const { workerPath: _w, langPath: _l, corePath: _c, ...cdnConfig } = workerConfig;
+        this.worker = await Tesseract.createWorker('eng', 1, cdnConfig as Parameters<typeof Tesseract.createWorker>[2]);
         console.log('✅ Tesseract OCR worker initialized with CDN fallback');
       }
 
@@ -288,7 +316,7 @@ class OCRService {
   }
 
   // Process a specific page number with retry mechanism
-  private async processPageNumberWithRetry(pdf: any, pageNumber: number, maxRetries: number = 2): Promise<OCRResult> {
+  private async processPageNumberWithRetry(pdf: PDFDocumentProxy, pageNumber: number, maxRetries: number = 2): Promise<OCRResult> {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         return await this.processPageNumber(pdf, pageNumber);
@@ -324,7 +352,7 @@ class OCRService {
   }
 
   // Process a specific page number using quadrant-based approach
-  private async processPageNumber(pdf: any, pageNumber: number): Promise<OCRResult> {
+  private async processPageNumber(pdf: PDFDocumentProxy, pageNumber: number): Promise<OCRResult> {
     try {
       const page = await pdf.getPage(pageNumber);
       
@@ -348,7 +376,7 @@ class OCRService {
   }
 
   // Process full page with high resolution
-  private async processFullPage(page: any, pageNumber: number): Promise<OCRResult> {
+  private async processFullPage(page: PDFPageProxy, pageNumber: number): Promise<OCRResult> {
     const viewport = page.getViewport({ scale: 4.0 }); // Very high resolution
     
     const canvas = document.createElement('canvas');
@@ -362,6 +390,7 @@ class OCRService {
         context.imageSmoothingQuality = 'high';
         
         await page.render({
+          canvas,
           canvasContext: context,
           viewport: viewport
         }).promise;
@@ -381,7 +410,7 @@ class OCRService {
   }
 
   // Process page in quadrants for better text detection
-  private async processPageQuadrants(page: any, pageNumber: number): Promise<OCRResult> {
+  private async processPageQuadrants(page: PDFPageProxy, pageNumber: number): Promise<OCRResult> {
     const baseViewport = page.getViewport({ scale: 6.0 }); // Even higher resolution for quadrants
     const quadrantWidth = baseViewport.width / 2;
     const quadrantHeight = baseViewport.height / 2;
@@ -424,10 +453,10 @@ class OCRService {
 
   // Process a single quadrant
   private async processQuadrant(
-    page: any, 
-    pageNumber: number, 
+    page: PDFPageProxy,
+    pageNumber: number,
     quadrantNumber: number,
-    baseViewport: any,
+    baseViewport: PageViewport,
     offsetX: number,
     offsetY: number,
     width: number,
@@ -455,6 +484,7 @@ class OCRService {
       
       // Render the quadrant
       await page.render({
+        canvas,
         canvasContext: context,
         viewport: quadrantViewport
       }).promise;
@@ -835,17 +865,17 @@ class OCRService {
   }
 
   // Create OCR result from data
-  private createOCRResult(data: any, pageNumber: number, processingTime: number): OCRResult {
-    const words = (data.words || []).map((word: any) => ({
-      text: word.text || '',
-      bbox: word.bbox || { x0: 0, y0: 0, x1: 0, y1: 0 },
-      confidence: word.confidence || 0
+  private createOCRResult(data: TesseractRecognizeData, pageNumber: number, processingTime: number): OCRResult {
+    const words = (data.words || []).map((word: TesseractWord) => ({
+      text: word.text ?? '',
+      bbox: word.bbox ? { x0: word.bbox.x0 ?? 0, y0: word.bbox.y0 ?? 0, x1: word.bbox.x1 ?? 0, y1: word.bbox.y1 ?? 0 } : { x0: 0, y0: 0, x1: 0, y1: 0 },
+      confidence: word.confidence ?? 0
     }));
 
     return {
       pageNumber,
-      text: data.text || '',
-      confidence: data.confidence || 0,
+      text: data.text ?? '',
+      confidence: data.confidence ?? 0,
       processingTime,
       words
     };

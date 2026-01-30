@@ -89,9 +89,10 @@ export const useMeasurementStore = create<MeasurementState>()(
         
         console.log('✅ ADD_TAKEOFF_MEASUREMENT: Measurement created successfully with ID:', measurement.id);
         return measurement.id;
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error('❌ ADD_TAKEOFF_MEASUREMENT: Failed to create measurement via API:', error);
-        throw new Error(`Failed to create takeoff measurement: ${error.message}`);
+        const msg = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to create takeoff measurement: ${msg}`);
       }
     },
     
@@ -111,7 +112,7 @@ export const useMeasurementStore = create<MeasurementState>()(
         }));
         
         get().updateMarkupsByPage();
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error('❌ UPDATE_TAKEOFF_MEASUREMENT: Failed to update measurement via API:', error);
         // Fallback to local update if API fails
         set(state => ({
@@ -136,9 +137,10 @@ export const useMeasurementStore = create<MeasurementState>()(
         }));
         
         get().updateMarkupsByPage();
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error('❌ DELETE_TAKEOFF_MEASUREMENT: Failed to delete measurement via API:', error);
-        throw new Error(`Failed to delete takeoff measurement: ${error.message}`);
+        const msg = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to delete takeoff measurement: ${msg}`);
       }
     },
     

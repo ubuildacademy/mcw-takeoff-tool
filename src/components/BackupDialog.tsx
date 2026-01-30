@@ -37,7 +37,21 @@ export function BackupDialog({
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  const [fileInfo, setFileInfo] = useState<any>(null);
+  interface BackupFileMetadata {
+    projectName?: string;
+    totalFiles?: number;
+    totalConditions?: number;
+    totalMeasurements?: number;
+    totalSheets?: number;
+    totalCalibrations?: number;
+    filesWithData?: number;
+    filesMissing?: number;
+    hasPDFs?: boolean;
+    hasCalibrations?: boolean;
+    version?: string;
+    timestamp?: string;
+  }
+  const [fileInfo, setFileInfo] = useState<BackupFileMetadata | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const loadInitialData = useProjectStore((s) => s.loadInitialData);
 
@@ -73,8 +87,8 @@ export function BackupDialog({
         setProgress(0);
       }, 2000);
 
-    } catch (error: any) {
-      setError(error.message || 'Failed to backup project');
+    } catch (error: unknown) {
+      setError(error instanceof Error ? error.message : 'Failed to backup project');
     } finally {
       setLoading(false);
     }
@@ -94,7 +108,7 @@ export function BackupDialog({
       return;
     }
 
-    setFileInfo(validation.metadata);
+    setFileInfo((validation.metadata ?? null) as BackupFileMetadata | null);
   };
 
   const handleRestore = async () => {
@@ -137,8 +151,8 @@ export function BackupDialog({
         }
       }, 2000);
 
-    } catch (error: any) {
-      setError(error.message || 'Failed to restore project');
+    } catch (error: unknown) {
+      setError(error instanceof Error ? error.message : 'Failed to restore project');
     } finally {
       setLoading(false);
     }
@@ -255,12 +269,12 @@ export function BackupDialog({
                 <div className="p-3 bg-gray-50 rounded-lg space-y-2">
                   <div className="flex items-center gap-2">
                     <FileText className="w-4 h-4 text-gray-600" />
-                    <span className="font-medium">{fileInfo.projectName}</span>
+                    <span className="font-medium">{fileInfo.projectName ?? 'Unknown'}</span>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-sm">
                     <div className="flex items-center gap-1">
                       <FolderOpen className="w-3 h-3" />
-                      <span>{fileInfo.totalFiles} files</span>
+                      <span>{fileInfo.totalFiles ?? 0} files</span>
                     </div>
                     <div className="flex items-center gap-1">
                       <Database className="w-3 h-3" />
@@ -268,16 +282,16 @@ export function BackupDialog({
                     </div>
                     <div className="flex items-center gap-1">
                       <Ruler className="w-3 h-3" />
-                      <span>{fileInfo.totalMeasurements} measurements</span>
+                      <span>{fileInfo.totalMeasurements ?? 0} measurements</span>
                     </div>
                     <div className="flex items-center gap-1">
                       <FileImage className="w-3 h-3" />
-                      <span>{fileInfo.totalSheets} sheets</span>
+                      <span>{fileInfo.totalSheets ?? 0} sheets</span>
                     </div>
                     {fileInfo.totalCalibrations !== undefined && (
                       <div className="flex items-center gap-1">
                         <Ruler className="w-3 h-3" />
-                        <span>{fileInfo.totalCalibrations} calibrations</span>
+                        <span>{fileInfo.totalCalibrations ?? 0} calibrations</span>
                       </div>
                     )}
                   </div>
@@ -285,8 +299,8 @@ export function BackupDialog({
                     <div className="flex items-center gap-2 p-2 bg-blue-50 rounded text-xs">
                       <CheckCircle className="w-3 h-3 text-blue-600" />
                       <span className="text-blue-800">
-                        {fileInfo.filesWithData || 0} PDF file(s) included in backup
-                        {fileInfo.filesMissing > 0 && ` (${fileInfo.filesMissing} missing)`}
+                        {(fileInfo.filesWithData ?? 0)} PDF file(s) included in backup
+                        {(fileInfo.filesMissing ?? 0) > 0 && ` (${fileInfo.filesMissing} missing)`}
                       </span>
                     </div>
                   )}
@@ -300,12 +314,12 @@ export function BackupDialog({
                   )}
                   {fileInfo.version && (
                     <div className="text-xs text-gray-500">
-                      Version: {fileInfo.version} • Created: {new Date(fileInfo.timestamp).toLocaleString()}
+                      Version: {fileInfo.version} • Created: {fileInfo.timestamp ? new Date(fileInfo.timestamp).toLocaleString() : '—'}
                     </div>
                   )}
                   {!fileInfo.version && (
                     <div className="text-xs text-gray-500">
-                      Created: {new Date(fileInfo.timestamp).toLocaleString()}
+                      Created: {fileInfo.timestamp ? new Date(fileInfo.timestamp).toLocaleString() : '—'}
                     </div>
                   )}
                 </div>

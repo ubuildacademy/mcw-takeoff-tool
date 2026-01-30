@@ -20,7 +20,7 @@ import {
 import { fileService, sheetService, aiAnalysisService } from '../services/apiService';
 import { useMeasurementStore } from '../store/slices/measurementSlice';
 import * as pdfjsLib from 'pdfjs-dist';
-import type { PDFPage, PDFDocument } from '../types';
+import type { PDFPage, PDFDocument, SearchResult } from '../types';
 
 // Configure PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
@@ -35,9 +35,9 @@ interface SheetSidebarProps {
   selectedDocumentId?: string;
   selectedPageNumber?: number;
   onOCRRequest?: (documentId: string, pageNumbers: number[]) => void;
-  onOcrSearchResults?: (results: any[], query: string) => void;
+  onOcrSearchResults?: (results: SearchResult[], query: string) => void;
   onDocumentsUpdate?: (documents: PDFDocument[]) => void;
-  onReloadDocuments?: () => Promise<void>;
+  onReloadDocuments?: () => void | Promise<void>;
   onPdfUpload?: (event: React.ChangeEvent<HTMLInputElement>) => void;
   uploading?: boolean;
   onLabelingJobUpdate?: (job: {
@@ -453,17 +453,15 @@ export function SheetSidebar({
       const originalPage = originalDocument?.pages.find(page => page.pageNumber === editingSheetNumberPageNumber);
       const originalSheetNumber = originalPage?.sheetNumber || '';
       
-      // Prepare the update data - use null if empty string to clear the field
-      const updateData: any = {
-        documentId: documentId,
-        pageNumber: editingSheetNumberPageNumber
+      const updateData: {
+        documentId: string;
+        pageNumber: number;
+        sheetNumber: string | null;
+      } = {
+        documentId,
+        pageNumber: editingSheetNumberPageNumber,
+        sheetNumber: editingSheetNumber.trim() ? editingSheetNumber.trim() : null
       };
-      
-      if (editingSheetNumber.trim()) {
-        updateData.sheetNumber = editingSheetNumber.trim();
-      } else {
-        updateData.sheetNumber = null; // Clear the sheet number
-      }
       
       // Update the sheet number in the backend
       await sheetService.updateSheet(editingSheetNumberId, updateData);
@@ -541,7 +539,8 @@ export function SheetSidebar({
       // Handle Server-Sent Events for real-time progress
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
-      let result: any = null;
+      type AnalyzeDocResult = { success?: boolean; progress?: number; message?: string; error?: string; totalPages?: number; sheets?: Array<{ pageNumber: number; sheetNumber: string; sheetName: string }> };
+      let result: AnalyzeDocResult | null = null;
 
       if (reader) {
         while (true) {
@@ -678,9 +677,9 @@ export function SheetSidebar({
                 sheetName: finalSheetName
               });
               return { success: true, pageNumber: sheet.pageNumber };
-            } catch (error: any) {
-              // Handle expected 404s gracefully (they're normal for new sheets)
-              if (error.isExpected404) {
+            } catch (error: unknown) {
+              const err = error as { isExpected404?: boolean };
+              if (err.isExpected404) {
                 // Sheet not found, creating new entry
                 // Try again - the PUT endpoint should create it
                 try {
@@ -880,7 +879,8 @@ export function SheetSidebar({
         // Handle Server-Sent Events for real-time progress
         const reader = response.body?.getReader();
         const decoder = new TextDecoder();
-        let result: any = null;
+        type SSEResult = { success?: boolean; progress?: number; message?: string; error?: string; totalPages?: number; sheets?: Array<{ pageNumber: number; sheetNumber: string; sheetName: string }> };
+        let result: SSEResult | null = null;
         let lastProgress = 0;
 
         if (reader) {
@@ -894,12 +894,10 @@ export function SheetSidebar({
             for (const line of lines) {
               if (line.startsWith('data: ')) {
                 try {
-                  const data = JSON.parse(line.slice(6));
-                  
+                  const data = JSON.parse(line.slice(6)) as SSEResult & { error?: string };
                   if (data.error) {
                     throw new Error(data.error);
                   }
-                  
                   // Update progress from SSE
                   if (data.progress !== undefined && data.message) {
                     lastProgress = data.progress;
@@ -984,7 +982,7 @@ export function SheetSidebar({
             })));
           } else {
             console.warn(`[Labeling] No valid sheets to save for ${document.name}. Sample of received sheets:`, 
-              result.sheets?.slice(0, 3).map((s: any) => ({
+              result.sheets?.slice(0, 3).map((s: SheetAnalysisResult) => ({
                 page: s.pageNumber,
                 number: s.sheetNumber,
                 name: s.sheetName
@@ -1161,7 +1159,8 @@ export function SheetSidebar({
           // Handle Server-Sent Events
           const reader = response.body?.getReader();
           const decoder = new TextDecoder();
-          let result: any = null;
+          type AnalyzeResult = { success?: boolean; error?: string; totalPages?: number; sheets?: Array<{ pageNumber: number; sheetNumber: string; sheetName: string }> };
+          let result: AnalyzeResult | null = null;
           
           if (reader) {
             while (true) {
@@ -1174,7 +1173,7 @@ export function SheetSidebar({
               for (const line of lines) {
                 if (line.startsWith('data: ')) {
                   try {
-                    const data = JSON.parse(line.slice(6));
+                    const data = JSON.parse(line.slice(6)) as AnalyzeResult;
                     if (data.error) {
                       throw new Error(data.error);
                     }
@@ -1557,7 +1556,7 @@ export function SheetSidebar({
             </label>
             <select
               value={filterBy}
-              onChange={(e) => setFilterBy(e.target.value as any)}
+              onChange={(e) => setFilterBy((e.target.value as 'all' | 'withTakeoffs' | 'withoutTakeoffs') || 'all')}
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md bg-white hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
             >
               <option value="all">All Pages</option>

@@ -1,0 +1,69 @@
+# Refactoring & Improvement Recommendations
+
+Quick reference for future improvements. The workspace refactor is done; these are optional next steps.
+
+---
+
+## Done (this session)
+
+- **TakeoffWorkspace** reduced from ~2,500 to ~780 lines via hooks + UI extractions.
+- Unused imports/selectors in TakeoffWorkspace removed: `Badge`, `Separator`, `sheetService`, `getProjectTakeoffSummary`, `getProjectTakeoffMeasurements`, `loadProjectConditions`, `Calibration`, `PDFPage`.
+- **TakeoffSidebar** – export/report logic extracted into **`useTakeoffExport`** (`src/components/takeoff-sidebar/useTakeoffExport.ts`). Hook provides `getQuantityReportData`, `getQuantityReportDataAsync`, `getCostAnalysisData`, `exportToExcel`, `exportToPDF`. TakeoffSidebar reduced by ~1,200 lines (Excel/PDF build and report aggregation moved into hook).
+- **TakeoffSidebar** – Conditions tab list extracted into **`TakeoffSidebarConditionList`** (`src/components/takeoff-sidebar/TakeoffSidebarConditionList.tsx`). Renders search input + condition cards (select, cutout, duplicate, edit, delete, thumbnails, value display). TakeoffSidebar reduced by ~270 lines; `getTypeIcon` / `getTypeColor` removed from sidebar (now in component).
+- **PDFViewer** – Calibration flow extracted into **`usePDFViewerCalibration`** (`src/components/pdf-viewer/usePDFViewerCalibration.ts`). Hook owns calibration state (isCalibrating, calibrationPoints, dialogs, pendingScaleData, calibrationData, setCalibrationData, calibrationValidation, internal scale/unit), calibrationViewportRef, restore effect, and handlers (completeCalibration, startCalibration, applyScale). PDFViewer reduced by ~260 lines; CalibrationDialog and ScaleApplicationDialog still rendered in PDFViewer using hook return values.
+- **PDFViewer** – Measurement/annotation/selection state and pure helpers extracted into **`usePDFViewerMeasurements`** (`src/components/pdf-viewer/usePDFViewerMeasurements.ts`). Hook owns measurement state (isMeasuring, measurementType, currentMeasurement, measurements, isCompletingMeasurement, lastClickTime/Position, refs), annotation state (localAnnotations, currentAnnotation, showTextInput, textInputPosition/Value, mousePosition), cutout/visual-search/selection state (currentCutout, isSelectingSymbol, selectionBox, selectionStart, selectedMarkupId, isSelectionMode), continuous linear state (isContinuousDrawing, activePoints, rubberBandElement, runningLength, pageRubberBandRefs, pageCommittedPolylineRefs), ortho snapping (isOrthoSnapping), and helpers (calculateRunningLength, applyOrthoSnapping). PDFViewer reduced by ~120 lines; event handlers remain in PDFViewer and use hook state/setters.
+- **PDFViewer** – Canvas/overlay UI split into subcomponents: **`PDFViewerCanvasOverlay`** (`src/components/pdf-viewer/PDFViewerCanvasOverlay.tsx`) wraps the PDF canvas, SVG overlay, loading indicator, and optional text annotation input; **`PDFViewerLoadingIndicator`** and **`PDFViewerTextAnnotationInput`** are used inside the overlay. PDFViewer passes refs, cursor/pointer state, and event handlers (handleClick, handleSvgClick, handleCanvasDoubleClick, handleSvgDoubleClick, etc.) into the overlay. PDFViewer reduced by ~230 lines in the return block.
+- **PDFViewer** – Dialogs and status UI extracted: **`PDFViewerDialogs`** (`src/components/pdf-viewer/PDFViewerDialogs.tsx`) renders CalibrationDialog + ScaleApplicationDialog with props from calibration hook; **`PDFViewerStatusView`** (`src/components/pdf-viewer/PDFViewerStatusView.tsx`) renders loading / error / no-document early returns; **`usePDFViewerData`** (`src/components/pdf-viewer/usePDFViewerData.ts`) owns annotations-loading and per-page measurements-loading effects, returns `localTakeoffMeasurements`, `setLocalTakeoffMeasurements`, `measurementsLoading`. PDFViewer reduced by ~180 lines (dialogs block + status returns + three data-loading effects).
+- **Window bridge** – **`src/lib/windowBridge.ts`** provides typed getters/setters for PDF viewer globals (`restoreScrollPosition`, `triggerCalibration`, `triggerFitToWindow`). TakeoffWorkspace, PDFViewer, useTakeoffWorkspaceProjectInit, and useTakeoffWorkspaceDocumentView use the bridge instead of `(window as any)`.
+- **Error boundary** – TakeoffWorkspace route in `App.tsx` is wrapped with **`ErrorBoundary`** so a single component failure in the workspace doesn’t blank the whole UI.
+- **Search results** – **`SearchResultsList`** (`src/components/takeoff-workspace/SearchResultsList.tsx`) extracts the “Search Results” list below the PDF viewer; TakeoffWorkspace uses `<SearchResultsList results={searchResults} />`. **`ocrSearchResults`** is now typed as **`SearchResult[]`** (from `../types`); `handleOcrSearchResults`, SheetSidebar, and TakeoffWorkspaceHeader.types use `SearchResult[]` for the callback.
+
+---
+
+## 1. Further component refactors (by impact)
+
+| Target | Lines | Suggestion |
+|--------|-------|------------|
+| **PDFViewer.tsx** | ~4,170 | Has `usePDFLoad`, **`usePDFViewerCalibration`**, **`usePDFViewerData`**, **`usePDFViewerMeasurements`**, **`PDFViewerCanvasOverlay`**, **`PDFViewerDialogs`**, **`PDFViewerStatusView`**. Further reductions: extract more event-handler logic into hooks or split remaining controls into subcomponents. |
+| **TakeoffSidebar.tsx** | ~2,470 | Export/report logic and Excel building are good candidates for a hook (e.g. `useTakeoffExport`) and/or a separate util module. Condition list and tool UI could be subcomponents. |
+
+---
+
+## 2. Type safety
+
+- **Reduced `any` usage:** PDFViewer (viewport → PageViewport, error → unknown), TakeoffWorkspace (file/upload types, getErrorMessage), SheetSidebar (result/updateData types, filterBy), stores (condition/project/measurement error → unknown, project map typed), CreateConditionDialog (TakeoffCondition), BackupDialog/ProjectSettingsDialog/ProjectCreationDialog (Project, BackupFileMetadata), ProjectList (Project), serverOcrService (formatSearchResults, getDocumentData OcrResultRow/OCRResult[]), cvTakeoffService (PageDetectionResult, checkStatus, error handling). **Done:** commonUtils, ocrService (PDFDocumentProxy/PDFPageProxy/PageViewport, TesseractLoggerMessage/TesseractRecognizeData/TesseractWord, CDN config omit), supabaseService (ProjectWithCounts, TakeoffFileRow, ProjectFile import), hybridDetectionService (ValidationMessage, HybridDetectionValidation, ocrData types, detectWithYOLOOnly/getYOLOStats return types), AdminPanel/ChatTab/SearchTab, pdfExportUtils. No remaining type `any` in code (only in comments).
+- **Done:** PDFViewer `file` prop is now `ProjectFile` (from `../types`); all `file?.id` / `file?.originalName` and casts removed. `usePDFLoad` accepts `ProjectFile | string | File | null | undefined` and uses `PDFDocumentProxy | null` for document state. PDFViewer uses `PDFPageProxy`, `PageViewport` from pdfjs-dist for refs and callbacks; `localTakeoffMeasurements` is `Measurement[]` with full Measurement shape from store maps; `error: any` → `error: unknown` in catch; redundant `condition.type === 'auto-count'` check removed.
+- **apiService:** Replaced all `any` with proper types: `ApiFileRow`, `ApiConditionRow`, `ApiMeasurementRow` for raw API responses; `Partial<Project>`, `Partial<TakeoffCondition>`, `Partial<TakeoffMeasurement>` for updates; `Omit<TakeoffCondition, 'id'> | Partial<TakeoffCondition>` for createCondition; `Omit<TakeoffMeasurement, 'id'> | Partial<TakeoffMeasurement>` for createTakeoffMeasurement; `Record<string, unknown>` for updateSheet/updateSettings; `unknown` for updateSetting value and submitClientResults results. Takeoff-workspace hooks have no `any`.
+
+---
+
+## 3. Performance
+
+- **Zustand:** Selectors are already narrow. If a component only needs one field, use `(s) => s.field` to avoid re-renders when unrelated state changes.
+- **Heavy children:** Consider `React.memo` on `PDFViewer` and `TakeoffSidebar` only if profiling shows them as hot. Prefer “fewer state updates” (already improved by hooks) over memo everywhere.
+- **Code splitting:** **Done.** `vite.config` chunks `pdfjs`. **CVTakeoffAgent** is lazy-loaded in `TakeoffWorkspaceDialogs` via `React.lazy()` (loads when user opens the dialog). **CalibrationDialog** and **ScaleApplicationDialog** are lazy-loaded in `PDFViewerDialogs` (load when user opens calibration flow). **Excel/PDF export:** `useTakeoffExport` dynamically imports `exceljs` inside `exportToExcel` and `jspdf`, `pdf-lib`, `pdfExportUtils` inside `exportToPDF`, so those libraries load only when the user triggers an export. Initial bundle is smaller; heavy UI and export libs load on demand.
+
+---
+
+## 4. Consistency & hygiene
+
+- **Window globals:** ~~TakeoffWorkspace (and possibly PDFViewer) use `(window as any)`~~ → **Done:** `src/lib/windowBridge.ts` with typed getters/setters; all call sites updated.
+- **Error boundaries:** ~~Add a React error boundary around the main workspace~~ → **Done:** TakeoffWorkspace route wrapped with ErrorBoundary in App.tsx.
+- **Tests:** **Done.** Vitest + @testing-library/react + jsdom added. See `docs/TESTING.md`. First tests: `src/utils/commonUtils.test.ts` (calculateDistance, safeJsonParse, safeJsonStringify, isEmpty, getDefaultUnit) and `src/components/takeoff-workspace/useTakeoffWorkspaceTitleblock.test.ts` (initial state, setTitleblockSelectionMode). Run: `npm run test` or `npm run test:watch`. New hooks remain good candidates for more tests (e.g. useTakeoffWorkspaceOCR, usePDFViewerData).
+
+---
+
+## 5. Optional small wins
+
+- **Search results block:** Done – `SearchResultsList` component; TakeoffWorkspace uses `<SearchResultsList results={searchResults} />`.
+- **ocrSearchResults:** Done – typed as `SearchResult[]`; callback and SheetSidebar/Header types updated.
+
+---
+
+## Priority order (suggested)
+
+1. **PDFViewer** – extract measurement/annotation logic into a hook + 1–2 UI components (biggest maintainability win).
+2. **Types** – reduce `any` in new code and in `apiService`/PDFViewer.
+3. **TakeoffSidebar** – export/Excel logic into hook or util.
+4. **Performance** – only after measuring (profiler); memo/code-split where needed.
+5. **Window bridge + error boundary** – low effort, improves robustness.

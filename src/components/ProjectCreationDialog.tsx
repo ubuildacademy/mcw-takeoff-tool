@@ -24,11 +24,12 @@ import {
 } from 'lucide-react';
 import { projectService, fileService } from '../services/apiService';
 import { useProjectStore } from '../store/slices/projectSlice';
+import type { Project } from '../types';
 
 interface ProjectCreationDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreated?: (project: any) => void;
+  onCreated?: (project: Project) => void;
 }
 
 interface JobFormData {
@@ -97,11 +98,13 @@ export function ProjectCreationDialog({ open, onOpenChange, onCreated }: Project
     setIsSubmitting(true);
 
     try {
-      const payload: any = {
+      const now = new Date().toISOString();
+      const payload: Omit<Project, 'id' | 'lastModified' | 'takeoffCount'> = {
         name: formData.name,
         client: formData.client,
         location: formData.location,
         status: 'active',
+        createdAt: now,
         description: formData.description,
         projectType: formData.projectType,
         startDate: formData.startDate,
@@ -113,8 +116,12 @@ export function ProjectCreationDialog({ open, onOpenChange, onCreated }: Project
 
       const projectId = await addProject(payload);
       
-      // Get the created project from the store
-      const project = { id: projectId, ...payload };
+      const project: Project = {
+        ...payload,
+        id: projectId,
+        lastModified: now,
+        takeoffCount: 0
+      };
 
       // Upload files sequentially to show progress in network panel
       for (const f of uploadedFiles) {

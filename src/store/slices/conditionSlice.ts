@@ -54,9 +54,10 @@ export const useConditionStore = create<ConditionState>()(
           
           console.log('✅ ADD_CONDITION: Condition created successfully with ID:', condition.id);
           return condition.id;
-        } catch (error: any) {
+        } catch (error: unknown) {
           console.error('❌ ADD_CONDITION: Failed to create condition via API:', error);
-          throw new Error(`Failed to create condition: ${error.message}`);
+          const msg = error instanceof Error ? error.message : String(error);
+          throw new Error(`Failed to create condition: ${msg}`);
         }
       },
       
@@ -142,6 +143,14 @@ export const useConditionStore = create<ConditionState>()(
         
         if (state.loadingConditions) {
           console.log('🔄 LOAD_PROJECT_CONDITIONS: Already loading conditions, skipping duplicate request');
+          return;
+        }
+        
+        // Avoid 401: only call API when we have a session (token). Conditions route uses requireAuth.
+        const { supabase } = await import('../../lib/supabase');
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) {
+          console.warn('🔄 LOAD_PROJECT_CONDITIONS: No session yet, skipping API call (will retry when auth is ready)');
           return;
         }
         

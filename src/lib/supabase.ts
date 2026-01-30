@@ -338,16 +338,16 @@ export interface Database {
           file_id: string
           pdf_page: number
           type: 'area' | 'volume' | 'linear' | 'count'
-          points: any // JSON array of points
+          points: unknown // JSON array of points
           calculated_value: number
           unit: string
           condition_id: string
           color: string
           condition_name: string
           timestamp: number
-          pdf_coordinates: any // JSON array of PDF-relative coordinates
+          pdf_coordinates: unknown // JSON array of PDF-relative coordinates
           perimeter_value: number | null
-          cutouts: any | null // JSON array of cut-out objects
+          cutouts: unknown | null // JSON array of cut-out objects
           net_calculated_value: number | null
           created_at: string
         }
@@ -357,16 +357,16 @@ export interface Database {
           file_id: string
           pdf_page: number
           type: 'area' | 'volume' | 'linear' | 'count'
-          points: any
+          points: unknown
           calculated_value: number
           unit: string
           condition_id: string
           color: string
           condition_name: string
           timestamp?: number
-          pdf_coordinates: any
+          pdf_coordinates: unknown
           perimeter_value?: number | null
-          cutouts?: any | null
+          cutouts?: unknown | null
           net_calculated_value?: number | null
           created_at?: string
         }
@@ -376,16 +376,16 @@ export interface Database {
           file_id?: string
           pdf_page?: number
           type?: 'area' | 'volume' | 'linear' | 'count'
-          points?: any
+          points?: unknown
           calculated_value?: number
           unit?: string
           condition_id?: string
           color?: string
           condition_name?: string
           timestamp?: number
-          pdf_coordinates?: any
+          pdf_coordinates?: unknown
           perimeter_value?: number | null
-          cutouts?: any | null
+          cutouts?: unknown | null
           net_calculated_value?: number | null
           created_at?: string
         }

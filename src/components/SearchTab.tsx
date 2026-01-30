@@ -113,8 +113,9 @@ export function SearchTab({
             if (response.results && response.results.length > 0) {
               // Debug: Log page numbers from backend
               // CRITICAL FIX: Filter out null/undefined results before accessing pageNumber
-              const validResults = response.results.filter((r: any) => r != null && r.pageNumber != null);
-              console.log(`🔍 Page numbers from backend:`, validResults.map((r: any) => r.pageNumber));
+              type SearchResultItem = { pageNumber: number };
+              const validResults = response.results.filter((r: unknown): r is SearchResultItem => r != null && typeof r === 'object' && (r as SearchResultItem).pageNumber != null);
+              console.log(`🔍 Page numbers from backend:`, validResults.map((r: SearchResultItem) => r.pageNumber));
               results[doc.id] = validResults;
               console.log(`✅ Found ${response.results.length} results in document ${doc.id}`);
             } else {

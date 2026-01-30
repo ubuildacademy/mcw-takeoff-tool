@@ -4,7 +4,7 @@
  * Handles auto-count operations from the frontend
  */
 
-import type { AutoCountMatch, AutoCountResult } from '../types';
+import type { AutoCountMatch, AutoCountResult, TakeoffMeasurement } from '../types';
 
 import { getApiBaseUrl } from '../lib/apiConfig';
 
@@ -278,7 +278,7 @@ export class AutoCountService {
   /**
    * Get auto-count results for a condition
    */
-  async getResults(conditionId: string): Promise<{ measurements: any[]; count: number }> {
+  async getResults(conditionId: string): Promise<{ measurements: TakeoffMeasurement[]; count: number }> {
     const response = await fetch(`${API_BASE_URL}/visual-search/results/${conditionId}`);
 
     if (!response.ok) {

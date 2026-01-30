@@ -18,6 +18,21 @@ export interface ConstructionElement {
   description: string;
 }
 
+export interface ValidationMessage {
+  message?: string;
+  type?: string;
+  [key: string]: unknown;
+}
+
+export interface HybridDetectionValidation {
+  overallValid: boolean;
+  errors: ValidationMessage[];
+  warnings: ValidationMessage[];
+  info: ValidationMessage[];
+  suggestions: string[];
+  confidence: number;
+}
+
 export interface HybridDetectionResult {
   elements: ConstructionElement[];
   measurements: Array<{
@@ -33,21 +48,14 @@ export interface HybridDetectionResult {
     confidence: number;
   };
   ocrData: {
-    textElements: any[];
-    scaleInfo: any;
-    dimensions: any[];
+    textElements: Array<{ text?: string; bbox?: unknown; [key: string]: unknown }>;
+    scaleInfo: { scaleFactor?: number; unit?: string; scaleText?: string; confidence?: number };
+    dimensions: unknown[];
     roomNames: string[];
     symbols: string[];
     context: string;
   };
-  validation: {
-    overallValid: boolean;
-    errors: any[];
-    warnings: any[];
-    info: any[];
-    suggestions: string[];
-    confidence: number;
-  };
+  validation: HybridDetectionValidation;
   processingTime: {
     yolo: number;
     qwen: number;
@@ -172,7 +180,7 @@ class HybridDetectionService {
   /**
    * Perform YOLOv8 detection only (for testing)
    */
-  async detectWithYOLOOnly(imageData: string): Promise<any> {
+  async detectWithYOLOOnly(imageData: string): Promise<{ elements: ConstructionElement[] }> {
     try {
       console.log('🔍 Starting YOLOv8-only detection...');
       
@@ -210,7 +218,7 @@ class HybridDetectionService {
   /**
    * Get YOLOv8 service statistics
    */
-  async getYOLOStats(): Promise<any> {
+  async getYOLOStats(): Promise<{ available: boolean; service: string; success?: boolean; [key: string]: unknown }> {
     try {
       const baseUrl = await this.getBaseUrl();
       const response = await fetch(`${baseUrl}/hybrid-detection/yolo-stats`);
@@ -277,7 +285,7 @@ class HybridDetectionService {
   /**
    * Format validation results for display
    */
-  formatValidationResults(validation: { overallValid: boolean; errors: any[]; warnings: any[]; info: any[]; suggestions: string[]; confidence: number }): string {
+  formatValidationResults(validation: HybridDetectionValidation): string {
     const { overallValid, errors, warnings, info, suggestions, confidence } = validation;
     
     if (overallValid) {
@@ -291,7 +299,7 @@ class HybridDetectionService {
   /**
    * Get validation summary
    */
-  getValidationSummary(validation: { overallValid: boolean; errors: any[]; warnings: any[]; info: any[]; suggestions: string[]; confidence: number }): {
+  getValidationSummary(validation: HybridDetectionValidation): {
     status: 'valid' | 'warning' | 'error';
     message: string;
     count: number;

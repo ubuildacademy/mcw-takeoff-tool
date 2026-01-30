@@ -33,10 +33,10 @@ export interface CVTakeoffResult {
 
 export interface PageDetectionResult {
   pageNumber: number;
-  rooms: any[];
-  walls: any[];
-  doors: any[];
-  windows: any[];
+  rooms: unknown[];
+  walls: unknown[];
+  doors: unknown[];
+  windows: unknown[];
   conditionsCreated: number;
   measurementsCreated: number;
 }
@@ -48,8 +48,8 @@ export const cvTakeoffService = {
   async checkStatus(): Promise<{ 
     available: boolean; 
     message: string;
-    details?: any;
-    diagnostics?: any;
+    details?: Record<string, unknown>;
+    diagnostics?: unknown;
   }> {
     try {
       const response = await fetch('/api/cv-takeoff/status', {
@@ -150,14 +150,14 @@ export const cvTakeoffService = {
       });
 
       if (!startResponse.ok) {
-        let errorData: any = {};
+        let errorData: Record<string, unknown> = {};
         try {
-          errorData = await startResponse.json();
+          errorData = (await startResponse.json()) as Record<string, unknown>;
         } catch {
           errorData = { error: `HTTP error! status: ${startResponse.status}` };
         }
         
-        const errorMessage = errorData.error || `HTTP error! status: ${startResponse.status}`;
+        const errorMessage = (typeof errorData.error === 'string' ? errorData.error : null) ?? `HTTP error! status: ${startResponse.status}`;
         const errorMessageStr = typeof errorMessage === 'string' 
           ? errorMessage 
           : JSON.stringify(errorMessage);
@@ -206,15 +206,16 @@ export const cvTakeoffService = {
         errorMessage = error.message || String(error);
         if (errorMessage === '[object Object]' || errorMessage.includes('[object Object]')) {
           try {
-            const errorObj = error as any;
-            errorMessage = errorObj.message || errorObj.error || JSON.stringify(errorObj) || 'Unknown error';
+            const err = error as unknown as Record<string, unknown>;
+            errorMessage = (typeof err.message === 'string' ? err.message : null) ?? (typeof err.error === 'string' ? err.error : null) ?? JSON.stringify(error) ?? 'Unknown error';
           } catch {
             errorMessage = 'Failed to process page - unknown error';
           }
         }
       } else if (error && typeof error === 'object') {
         try {
-          errorMessage = (error as any).message || (error as any).error || JSON.stringify(error) || 'Unknown error';
+          const err = error as unknown as Record<string, unknown>;
+          errorMessage = (typeof err.message === 'string' ? err.message : null) ?? (typeof err.error === 'string' ? err.error : null) ?? JSON.stringify(error) ?? 'Unknown error';
         } catch {
           errorMessage = 'Failed to process page - unknown error';
         }

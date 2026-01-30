@@ -1,4 +1,5 @@
 import { supabase, Database, authHelpers } from '../lib/supabase'
+import type { ProjectFile } from '../types'
 
 type Project = Database['public']['Tables']['projects']['Row']
 type ProjectInsert = Database['public']['Tables']['projects']['Insert']
@@ -18,12 +19,31 @@ export interface ProjectWithUser extends Project {
   user_name?: string;
 }
 
+// Project with takeoff/condition counts (from getProjects)
+export interface ProjectWithCounts extends ProjectWithUser {
+  takeoffCount: number;
+  conditionCount: number;
+  totalValue: number;
+}
+
+// Row shape from takeoff_files table (snake_case)
+export interface TakeoffFileRow {
+  id: string;
+  project_id: string;
+  original_name: string;
+  filename: string;
+  path: string;
+  size: number;
+  mimetype: string;
+  created_at: string;
+  [key: string]: unknown;
+}
+
 // Helper function to convert camelCase project fields to snake_case for database
-function projectToDbFormat(project: any): any {
-  const dbProject: any = {};
+function projectToDbFormat(project: Record<string, unknown>): Record<string, unknown> {
+  const dbProject: Record<string, unknown> = {};
   
-  // Helper to convert empty strings to null for optional fields
-  const toNullIfEmpty = (value: any): any => {
+  const toNullIfEmpty = (value: unknown): unknown => {
     if (value === null || value === undefined) {
       return null;
     }
@@ -35,14 +55,12 @@ function projectToDbFormat(project: any): any {
     return value;
   };
   
-  // Map camelCase to snake_case for project fields
   if (project.name !== undefined) dbProject.name = project.name;
   if (project.client !== undefined) dbProject.client = project.client;
   if (project.location !== undefined) dbProject.location = project.location;
   if (project.status !== undefined) dbProject.status = project.status;
   if (project.description !== undefined) dbProject.description = toNullIfEmpty(project.description);
   if (project.projectType !== undefined) dbProject.project_type = toNullIfEmpty(project.projectType);
-  // Date fields: convert empty strings to null
   if (project.startDate !== undefined) dbProject.start_date = toNullIfEmpty(project.startDate);
   if (project.estimatedValue !== undefined) dbProject.estimated_value = project.estimatedValue ?? null;
   if (project.contactPerson !== undefined) dbProject.contact_person = toNullIfEmpty(project.contactPerson);
@@ -51,12 +69,10 @@ function projectToDbFormat(project: any): any {
   if (project.profitMarginPercent !== undefined) dbProject.profit_margin_percent = project.profitMarginPercent ?? null;
   if (project.createdAt !== undefined) dbProject.created_at = project.createdAt;
   if (project.lastModified !== undefined) dbProject.last_modified = project.lastModified;
-  
-  // Also handle fields that might already be in snake_case (for backwards compatibility)
+
   Object.keys(project).forEach(key => {
-    if (!dbProject.hasOwnProperty(key) && !['id', 'user_id'].includes(key)) {
-      // If it's already in snake_case, include it as-is (but convert empty strings to null for date fields)
-      if (key.includes('_') || !isNaN(Number(key))) {
+    if (!Object.prototype.hasOwnProperty.call(dbProject, key) && key !== 'id' && key !== 'user_id') {
+      if (key.includes('_') || !Number.isNaN(Number(key))) {
         const value = project[key];
         // Convert empty strings to null for date fields
         if ((key === 'start_date' || key.endsWith('_date')) && value === '') {
@@ -73,7 +89,7 @@ function projectToDbFormat(project: any): any {
 
 export const supabaseService = {
   // Projects
-  async getProjects(): Promise<ProjectWithUser[]> {
+  async getProjects(): Promise<ProjectWithCounts[]> {
     // Simple query that works with RLS
     const { data, error } = await supabase
       .from('takeoff_projects')
@@ -113,7 +129,7 @@ export const supabaseService = {
             takeoffCount: takeoffCount || 0,
             conditionCount: conditionCount || 0,
             totalValue: project.totalValue ?? 0
-          } as any;
+          } as ProjectWithCounts;
         } catch (e) {
           console.warn('Failed to load takeoff count for project', project.id, e);
           return {
@@ -121,7 +137,7 @@ export const supabaseService = {
             takeoffCount: 0,
             conditionCount: 0,
             totalValue: project.totalValue ?? 0
-          } as any;
+          } as ProjectWithCounts;
         }
       })
     );
@@ -129,7 +145,7 @@ export const supabaseService = {
     return projectsWithCounts;
   },
 
-  async createProject(project: Omit<ProjectInsert, 'user_id'> | any): Promise<Project> {
+  async createProject(project: Omit<ProjectInsert, 'user_id'> | Record<string, unknown>): Promise<Project> {
     const user = await authHelpers.getCurrentUser();
     if (!user) throw new Error('No authenticated user');
 
@@ -153,7 +169,7 @@ export const supabaseService = {
     return data
   },
 
-  async updateProject(id: string, updates: ProjectUpdate | any): Promise<Project> {
+  async updateProject(id: string, updates: ProjectUpdate | Record<string, unknown>): Promise<Project> {
     // Convert camelCase to snake_case for database
     const dbUpdates = projectToDbFormat(updates);
 
@@ -322,7 +338,7 @@ export const supabaseService = {
   },
 
   // Files
-  async getProjectFiles(projectId: string): Promise<any[]> {
+  async getProjectFiles(projectId: string): Promise<TakeoffFileRow[]> {
     const { data, error } = await supabase
       .from('takeoff_files')
       .select('*')
@@ -337,7 +353,7 @@ export const supabaseService = {
     return data || []
   },
 
-  async uploadPDF(file: File, projectId: string): Promise<any> {
+  async uploadPDF(file: File, projectId: string): Promise<{ file: ProjectFile }> {
     // For now, we'll use the existing backend API for file uploads
     // This is because file uploads are complex and the backend handles storage
     const { getApiBaseUrl } = await import('../lib/apiConfig');

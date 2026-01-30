@@ -23,17 +23,7 @@ import UserProfile from './UserProfile';
 import { useProjectStore } from '../store/slices/projectSlice';
 import { useMeasurementStore } from '../store/slices/measurementSlice';
 import { authHelpers } from '../lib/supabase';
-
-interface ApiProject {
-  id: string;
-  name: string;
-  client?: string;
-  location?: string;
-  status?: string;
-  lastModified?: string | Date;
-  takeoffCount?: number;
-  totalValue?: number;
-}
+import type { Project } from '../types';
 
 export function ProjectList() {
   const navigate = useNavigate();
@@ -45,9 +35,9 @@ export function ProjectList() {
   const [showCreate, setShowCreate] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showBackup, setShowBackup] = useState(false);
-  const [editingProject, setEditingProject] = useState<ApiProject | null>(null);
+  const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [backupMode, setBackupMode] = useState<'backup' | 'restore'>('restore');
-  const [selectedProjectForBackup, setSelectedProjectForBackup] = useState<ApiProject | null>(null);
+  const [selectedProjectForBackup, setSelectedProjectForBackup] = useState<Project | null>(null);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [showUserProfile, setShowUserProfile] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -72,10 +62,10 @@ export function ProjectList() {
         
         await loadInitialData();
         if (!mounted) return;
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (!mounted) return;
         console.error('Error loading projects:', e);
-        setError('Could not load projects: ' + e.message);
+        setError(e instanceof Error ? e.message : 'Could not load projects');
       } finally {
         if (mounted) setLoading(false);
       }
@@ -144,14 +134,14 @@ export function ProjectList() {
     setShowBackup(true);
   };
 
-  const handleProjectBackup = (project: ApiProject, e: React.MouseEvent) => {
+  const handleProjectBackup = (project: Project, e: React.MouseEvent) => {
     e.stopPropagation(); // Prevent opening the project
     setBackupMode('backup');
     setSelectedProjectForBackup(project);
     setShowBackup(true);
   };
 
-  const handleEditProject = (project: ApiProject, e: React.MouseEvent) => {
+  const handleEditProject = (project: Project, e: React.MouseEvent) => {
     e.stopPropagation(); // Prevent opening the project
     setEditingProject(project);
     setShowSettings(true);

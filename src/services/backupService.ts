@@ -10,7 +10,7 @@ export interface ProjectBackup {
     fileDataMimeType?: string;
     fileDataError?: string; // Error message if file couldn't be downloaded
   })[];
-  sheets: any[]; // Sheet data from the API
+  sheets: unknown[]; // Sheet data from the API
   measurements: TakeoffMeasurement[];
   calibrations?: Calibration[]; // Scale calibrations
   metadata: {
@@ -110,7 +110,7 @@ export class BackupService {
   /**
    * Validate a backup file without importing
    */
-  static async validateBackupFile(file: File): Promise<{ valid: boolean; metadata?: any; error?: string }> {
+  static async validateBackupFile(file: File): Promise<{ valid: boolean; metadata?: Record<string, unknown>; error?: string }> {
     try {
       const text = await file.text();
       const backup: ProjectBackup = JSON.parse(text);

@@ -149,9 +149,9 @@ export function ChatTab({
     if (savedMessages) {
       try {
         const parsed = JSON.parse(savedMessages);
-        setMessages(parsed.map((msg: any) => ({
+        setMessages(parsed.map((msg: { role: string; content: string; timestamp?: string }) => ({
           ...msg,
-          timestamp: new Date(msg.timestamp)
+          timestamp: new Date(msg.timestamp ?? 0)
         })));
       } catch (error) {
         console.error('Failed to load chat history:', error);
@@ -362,8 +362,8 @@ When answering questions:
             // Include full text content from all pages for comprehensive AI analysis
             // CRITICAL FIX: Filter out null/undefined results before accessing pageNumber
             const fullText = ocrData.results
-              .filter((result: any) => result != null && result.pageNumber != null)
-              .map((result: any) => `    Page ${result.pageNumber}:\n${result.text}`)
+              .filter((r) => r != null && r.pageNumber != null)
+              .map((result) => `    Page ${result.pageNumber}:\n${result.text ?? ''}`)
               .join('\n\n');
             if (fullText) {
               context += `  Full OCR content:\n${fullText}\n`;

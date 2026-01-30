@@ -1,4 +1,4 @@
-import { PDFDocument, rgb, degrees, StandardFonts } from 'pdf-lib';
+import { PDFDocument, rgb, degrees, StandardFonts, type PDFPage } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import type { TakeoffMeasurement, Annotation } from '../types';
 import { formatFeetAndInches } from '../lib/utils';
@@ -55,7 +55,7 @@ async function fetchPDFBytes(fileId: string): Promise<Uint8Array> {
  * Matches the visual styling from the PDF viewer exactly
  */
 async function drawMeasurement(
-  page: any,
+  page: PDFPage,
   measurement: TakeoffMeasurement,
   pageHeight: number,
   viewportWidth: number,
@@ -310,7 +310,7 @@ async function drawMeasurement(
  * Draw an annotation on a PDF page
  */
 async function drawAnnotation(
-  page: any,
+  page: PDFPage,
   annotation: Annotation,
   pageHeight: number,
   viewportWidth: number,
@@ -1092,7 +1092,7 @@ async function renderPageWithMarkupsToCanvas(
     viewport: viewport
   };
   
-  await pdfJsPage.render(renderContext).promise;
+  await pdfJsPage.render(renderContext as unknown as Parameters<typeof pdfJsPage.render>[0]).promise;
   
   // Use the SAME viewport for coordinate transformation
   // The transformCoordinates function will convert normalized (0-1) coordinates
@@ -1208,10 +1208,10 @@ export async function exportPagesWithMeasurementsToPDF(
           processedPages++;
           onProgress?.(10 + (processedPages / totalPages) * 70);
         }
-      } catch (error: any) {
-        // If file not found, log and skip this sheet but continue with others
+      } catch (error: unknown) {
         console.error(`⚠️ Failed to process sheet ${sheetId}:`, error);
-        if (error.message?.includes('404') || error.message?.includes('File not found')) {
+        const msg = error instanceof Error ? error.message : '';
+        if (msg.includes('404') || msg.includes('File not found')) {
           const reason = 'File not found - may have been deleted';
           console.warn(`⏭️ Skipping sheet ${sheetId} - ${reason}`);
           skippedSheets.push({ sheetId, reason });

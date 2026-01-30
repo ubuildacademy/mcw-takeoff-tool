@@ -6,11 +6,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Textarea } from './ui/textarea';
 import { BaseDialog } from './ui/base-dialog';
 import { useProjectStore } from '../store/slices/projectSlice';
+import type { Project } from '../types';
 
 interface ProjectSettingsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  project: any; // The project to edit
+  project: Project;
   onUpdated?: () => void;
 }
 

@@ -2,14 +2,15 @@
  * Types for PDFViewer and related components.
  */
 
-import type { SearchResult } from '../types';
+import type { SearchResult, ProjectFile } from '../types';
 
 /** Annotation type is imported from shared types where defined */
 export type { Annotation } from '../types';
 
 /** Props for the main PDFViewer component */
 export interface PDFViewerProps {
-  file: File | string | Record<string, unknown>;
+  /** Project file (id, originalName, etc.). Passed from TakeoffWorkspace. */
+  file: ProjectFile;
   className?: string;
   currentPage?: number;
   totalPages?: number;

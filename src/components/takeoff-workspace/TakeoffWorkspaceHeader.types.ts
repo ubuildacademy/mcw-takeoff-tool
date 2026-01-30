@@ -2,7 +2,7 @@
  * Types for TakeoffWorkspace subcomponents.
  */
 
-import type { ProjectFile, Sheet, TakeoffCondition, PDFDocument } from '../../types';
+import type { ProjectFile, Sheet, TakeoffCondition, PDFDocument, SearchResult } from '../../types';
 
 export interface TitleblockExtractionStatus {
   status: 'idle' | 'processing' | 'completed' | 'failed';
@@ -84,7 +84,7 @@ export interface TakeoffWorkspaceRightSidebarProps {
   selectedDocumentId: string | undefined;
   selectedPageNumber: number | undefined;
   onOCRRequest: (documentId: string, pageNumbers?: number[]) => void;
-  onOcrSearchResults: (results: unknown[], query: string) => void;
+  onOcrSearchResults: (results: SearchResult[], query: string) => void;
   onDocumentsUpdate: (documents: PDFDocument[]) => void;
   onReloadDocuments: () => void;
   onPdfUpload: (event: React.ChangeEvent<HTMLInputElement>) => void;

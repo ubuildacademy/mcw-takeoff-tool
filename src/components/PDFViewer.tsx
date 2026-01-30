@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
+import type { PDFPageProxy, PageViewport } from 'pdfjs-dist';
 import { useProjectStore } from '../store/slices/projectSlice';
 import { useConditionStore } from '../store/slices/conditionSlice';
 import { useMeasurementStore } from '../store/slices/measurementSlice';
@@ -7,18 +8,30 @@ import { useAnnotationStore } from '../store/slices/annotationSlice';
 import type { Annotation } from '../types';
 import type { PDFViewerProps, Measurement } from './PDFViewer.types';
 import { usePDFLoad } from './pdf-viewer/usePDFLoad';
+import { usePDFViewerCalibration } from './pdf-viewer/usePDFViewerCalibration';
+import { usePDFViewerData } from './pdf-viewer/usePDFViewerData';
+import { usePDFViewerMeasurements } from './pdf-viewer/usePDFViewerMeasurements';
 import {
   renderSVGSelectionBox,
   renderSVGCurrentCutout,
   renderSVGCrosshair,
 } from './pdf-viewer/pdfViewerRenderers';
-import CalibrationDialog from './CalibrationDialog';
-import ScaleApplicationDialog from './ScaleApplicationDialog';
+import { PDFViewerCanvasOverlay } from './pdf-viewer/PDFViewerCanvasOverlay';
+import { PDFViewerDialogs } from './pdf-viewer/PDFViewerDialogs';
+import { PDFViewerStatusView } from './pdf-viewer/PDFViewerStatusView';
 import { formatFeetAndInches } from '../lib/utils';
+import { setRestoreScrollPosition, setTriggerCalibration, setTriggerFitToWindow } from '../lib/windowBridge';
 import { calculateDistance } from '../utils/commonUtils';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 pdfjsLib.GlobalWorkerOptions.workerPort = null;
+
+/** Safely convert API timestamp to ISO string; avoids RangeError for invalid dates */
+function safeTimestampToISO(ts: string | number | undefined | null): string {
+  if (ts == null || ts === '') return new Date().toISOString();
+  const d = new Date(ts);
+  return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+}
 
 const PDFViewer: React.FC<PDFViewerProps> = ({ 
   file, 
@@ -88,53 +101,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     rotation: externalRotation ?? internalViewState.rotation
   }), [externalScale, internalViewState.scale, externalRotation, internalViewState.rotation]);
 
-  // Measurement state
-  const [isMeasuring, setIsMeasuring] = useState(false);
-  const [isAnnotating, setIsAnnotating] = useState(false);
-  const [measurementType, setMeasurementType] = useState<'linear' | 'area' | 'volume' | 'count'>('linear');
-  const [currentMeasurement, setCurrentMeasurement] = useState<{ x: number; y: number }[]>([]);
-  const [measurements, setMeasurements] = useState<Measurement[]>([]);
-  
-  // Annotation state
-  const [localAnnotations, setLocalAnnotations] = useState<Annotation[]>([]);
-  const [currentAnnotation, setCurrentAnnotation] = useState<{ x: number; y: number }[]>([]);
-  const [showTextInput, setShowTextInput] = useState(false);
-  const [textInputPosition, setTextInputPosition] = useState<{ x: number; y: number } | null>(null);
-  const [textInputValue, setTextInputValue] = useState('');
-  const [mousePosition, setMousePosition] = useState<{ x: number; y: number } | null>(null);
-  const [isCompletingMeasurement, setIsCompletingMeasurement] = useState(false);
-  
-  // Double-click detection for measurements
-  const [lastClickTime, setLastClickTime] = useState<number>(0);
-  const [lastClickPosition, setLastClickPosition] = useState<{ x: number; y: number } | null>(null);
-  const isCompletingMeasurementRef = useRef(false);
-  const lastCompletionTimeRef = useRef<number>(0);
-  
   // PDF loading state
   const [isPDFLoading, setIsPDFLoading] = useState(false);
-  
-  // Cut-out state (using external props)
-  const [currentCutout, setCurrentCutout] = useState<{ x: number; y: number }[]>([]);
-  
-  // Visual search state
-  const [isSelectingSymbol, setIsSelectingSymbol] = useState(false);
-  const [selectionBox, setSelectionBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
-  const [selectionStart, setSelectionStart] = useState<{ x: number; y: number } | null>(null);
-  
-  // Selection state for deleting markups
-  const [selectedMarkupId, setSelectedMarkupId] = useState<string | null>(null);
-  // CRITICAL FIX: Initialize to true since that's the default state when no condition is selected
-  // This ensures markups are selectable immediately when document loads
-  const [isSelectionMode, setIsSelectionMode] = useState(true);
-  
-  // Continuous linear drawing state
-  const [isContinuousDrawing, setIsContinuousDrawing] = useState(false);
-  const [activePoints, setActivePoints] = useState<{ x: number; y: number }[]>([]);
-  const [rubberBandElement, setRubberBandElement] = useState<SVGLineElement | null>(null);
-  const [runningLength, setRunningLength] = useState<number>(0);
-  
-  // Ortho snapping state
-  const [isOrthoSnapping, setIsOrthoSnapping] = useState(false);
   
   // Track last fully rendered PDF scale to support interactive CSS zoom while blocking renders
   const lastRenderedScaleRef = useRef(1.0);
@@ -164,32 +132,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     svg.style.transform = `scale(${targetScale})`;
   }, [viewState.scale]);
   
-  // Page-scoped refs to prevent cross-page DOM issues
-  const pageRubberBandRefs = useRef<Record<number, SVGLineElement | null>>({});
-  const pageCommittedPolylineRefs = useRef<Record<number, SVGPolylineElement | null>>({});
-  
-  // Scale calibration
-  const [internalScaleFactor, setInternalScaleFactor] = useState(1);
-  const [internalIsPageCalibrated, setInternalIsPageCalibrated] = useState(false);
-  const [internalUnit, setInternalUnit] = useState('ft');
-  
-  const scaleFactor = externalScaleFactor ?? internalScaleFactor;
-  const isPageCalibrated = externalIsPageCalibrated ?? internalIsPageCalibrated;
-  const unit = externalUnit ?? internalUnit;
-  
-  const [isCalibrating, setIsCalibrating] = useState(false);
+  // Refs - must be declared before calibration hook (hook needs pdfPageRef)
+  const containerRef = useRef<HTMLDivElement>(null);
+  const pdfCanvasRef = useRef<HTMLCanvasElement>(null);
+  const svgOverlayRef = useRef<SVGSVGElement>(null);
+  const pdfPageRef = useRef<PDFPageProxy | null>(null);
+
   const [isDeselecting, setIsDeselecting] = useState(false);
-  const [calibrationPoints, setCalibrationPoints] = useState<{ x: number; y: number }[]>([]);
-  const [showCalibrationDialog, setShowCalibrationDialog] = useState(false);
-  const [showScaleApplicationDialog, setShowScaleApplicationDialog] = useState(false);
-  const [pendingScaleData, setPendingScaleData] = useState<{scaleFactor: number, unit: string} | null>(null);
-  const [calibrationData, setCalibrationData] = useState<{knownDistance: number, unit: string} | null>(null);
-  // Temporary calibration validation overlay state
-  const [calibrationValidation, setCalibrationValidation] = useState<{
-    points: { x: number; y: number }[];
-    display: string;
-    page: number;
-  } | null>(null);
   // Temporary measurement debug overlay (compare calc paths)
   const [measurementDebug, setMeasurementDebug] = useState<{
     page: number;
@@ -203,83 +152,22 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     distanceMeasureFt: number;
   } | null>(null);
   
-  // Refs - Single Canvas + SVG Overlay System
-  const containerRef = useRef<HTMLDivElement>(null);
-  const pdfCanvasRef = useRef<HTMLCanvasElement>(null);
-  const svgOverlayRef = useRef<SVGSVGElement>(null);
-  const pdfPageRef = useRef<any>(null);
-  const calibrationViewportRef = useRef<{
-    scaleFactor: number;
-    unit: string;
-    viewportWidth: number;
-    viewportHeight: number;
-    scale: number;
-    rotation: number;
-  } | null>(null);
-  const renderTaskRef = useRef<any>(null);
+  // Refs - Single Canvas + SVG Overlay System (containerRef, pdfCanvasRef, svgOverlayRef, pdfPageRef declared above for calibration hook)
+  const renderTaskRef = useRef<{ cancel: () => void } | null>(null);
   const isRenderingRef = useRef<boolean>(false);
   const isMarkupRenderingRef = useRef<boolean>(false);
-  const pendingMarkupRenderRef = useRef<{ pageNum: number; viewport: any; page?: any } | null>(null);
-  const renderTakeoffAnnotationsRef = useRef<((pageNum: number, viewport: any, page?: any) => void) | null>(null);
+  const pendingMarkupRenderRef = useRef<{ pageNum: number; viewport: PageViewport; page?: PDFPageProxy } | null>(null);
+  const renderTakeoffAnnotationsRef = useRef<((pageNum: number, viewport: PageViewport, page?: PDFPageProxy) => void) | null>(null);
   const renderPDFPageRef = useRef<((pageNum: number) => Promise<void>) | null>(null);
   const [isComponentMounted, setIsComponentMounted] = useState(false);
   const prevIsSelectionModeRef = useRef<boolean>(false);
   // CRITICAL FIX: Ref to always hold current isSelectionMode value for click handlers
   // This ensures the click handler always uses the latest state, even if React hasn't re-rendered
   const isSelectionModeRef = useRef<boolean>(true);
-  // Keep ref in sync with state (runs synchronously during render)
-  isSelectionModeRef.current = isSelectionMode;
   const prevCalibratingRef = useRef(false);
-  
-  // Notify parent component of measurement state changes
-  useEffect(() => {
-    if (onMeasurementStateChange) {
-      onMeasurementStateChange(isMeasuring, isCalibrating, measurementType, isOrthoSnapping);
-    }
-  }, [isMeasuring, isCalibrating, measurementType, isOrthoSnapping, onMeasurementStateChange]);
-
-  // Enable ortho snapping by default when calibration mode starts
-  useEffect(() => {
-    // Only enable ortho snapping when entering calibration mode (transition from false to true)
-    if (isCalibrating && !prevCalibratingRef.current && !isOrthoSnapping) {
-      setIsOrthoSnapping(true);
-    }
-    prevCalibratingRef.current = isCalibrating;
-  }, [isCalibrating, isOrthoSnapping]);
-
-  // Restore calibration viewport ref when calibration is loaded from database
-  // This is critical for accurate measurements after re-entering a project
-  useEffect(() => {
-    if (externalIsPageCalibrated && externalScaleFactor && externalCalibrationViewportWidth && externalCalibrationViewportHeight) {
-      // Restore the calibration viewport ref with the stored dimensions and rotation
-      // CRITICAL: Use the stored rotation, not the current rotation, because viewport dimensions
-      // are specific to the rotation that was used during calibration
-      const storedRotation = externalCalibrationRotation ?? 0;
-      calibrationViewportRef.current = {
-        scaleFactor: externalScaleFactor,
-        unit: externalUnit || 'ft',
-        viewportWidth: externalCalibrationViewportWidth,
-        viewportHeight: externalCalibrationViewportHeight,
-        scale: 1, // Calibration viewport is always at scale=1
-        rotation: storedRotation // Use stored rotation, not current rotation
-      };
-      
-      // Warn if rotation doesn't match (user rotated page after calibrating)
-      if (storedRotation !== viewState.rotation) {
-        console.warn('⚠️ Calibration rotation mismatch:', {
-          calibrationRotation: storedRotation,
-          currentRotation: viewState.rotation,
-          message: 'Page was rotated after calibration. Measurements may be inaccurate. Consider recalibrating.'
-        });
-      }
-    } else if (!externalIsPageCalibrated) {
-      // Clear the ref if calibration is removed
-      calibrationViewportRef.current = null;
-    }
-  }, [externalIsPageCalibrated, externalScaleFactor, externalUnit, externalCalibrationViewportWidth, externalCalibrationViewportHeight, externalCalibrationRotation, viewState.rotation]);
 
   // Page-specific viewport and transform state for proper isolation
-  const [pageViewports, setPageViewports] = useState<Record<number, any>>({});
+  const [pageViewports, setPageViewports] = useState<Record<number, PageViewport>>({});
   const [pageOutputScales, setPageOutputScales] = useState<Record<number, number>>({});
   
   // Performance optimization: track if initial render is complete
@@ -294,65 +182,155 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     return pageOutputScales[currentPage] || 1;
   }, [pageOutputScales, currentPage]);
 
-
-  // Calculate running length for continuous linear drawing
-  const calculateRunningLength = useCallback((points: { x: number; y: number }[], currentMousePos?: { x: number; y: number }) => {
-    if (!currentViewport || points.length === 0) return 0;
-    
-    const allPoints = currentMousePos ? [...points, currentMousePos] : points;
-    if (allPoints.length < 2) return 0;
-    
-    // CRITICAL FIX: Use calibration base viewport dimensions for consistency with actual measurements
-    // The calibration viewport ref stores the base viewport (scale=1) dimensions used during calibration
-    const calibBase = calibrationViewportRef.current;
-    const viewportWidth = calibBase?.viewportWidth || currentViewport.width;
-    const viewportHeight = calibBase?.viewportHeight || currentViewport.height;
-    
-    let totalDistance = 0;
-    for (let i = 1; i < allPoints.length; i++) {
-      // Use base viewport dimensions to convert normalized coordinates to pixels
-      const dx = (allPoints[i].x - allPoints[i - 1].x) * viewportWidth;
-      const dy = (allPoints[i].y - allPoints[i - 1].y) * viewportHeight;
-      totalDistance += Math.sqrt(dx * dx + dy * dy);
-    }
-    
-    // Convert pixels to real-world units. Scale factor is units per pixel.
-    return totalDistance * scaleFactor;
-  }, [currentViewport, scaleFactor]);
-
-  // Ortho snapping function - snaps to horizontal or vertical lines
-  const applyOrthoSnapping = useCallback((currentPos: { x: number; y: number }, referencePoints: { x: number; y: number }[]) => {
-    if (!isOrthoSnapping || referencePoints.length === 0) {
-      return currentPos;
-    }
-
-    // Get the last reference point (most recent point in the measurement)
-    const lastPoint = referencePoints[referencePoints.length - 1];
-    
-    // Calculate the distance from current position to the last point
-    const dx = currentPos.x - lastPoint.x;
-    const dy = currentPos.y - lastPoint.y;
-    
-    // Determine if we should snap to horizontal or vertical
-    // If the horizontal distance is greater, snap to horizontal (keep Y, adjust X)
-    // If the vertical distance is greater, snap to vertical (keep X, adjust Y)
-    if (Math.abs(dx) > Math.abs(dy)) {
-      // Snap to horizontal line (keep Y coordinate of last point)
-      return { x: currentPos.x, y: lastPoint.y };
-    } else {
-      // Snap to vertical line (keep X coordinate of last point)
-      return { x: lastPoint.x, y: currentPos.y };
-    }
-  }, [isOrthoSnapping]);
-
+  // Required by calibration hook - must be declared before usePDFViewerCalibration
   const currentProjectId = useProjectStore((s) => s.currentProjectId);
+
+  // Scale calibration (state and handlers from hook) - after currentViewport so hook can use it
+  const calibration = usePDFViewerCalibration({
+    externalScaleFactor: externalScaleFactor ?? undefined,
+    externalIsPageCalibrated: externalIsPageCalibrated ?? undefined,
+    externalUnit: externalUnit ?? undefined,
+    externalCalibrationViewportWidth: externalCalibrationViewportWidth ?? undefined,
+    externalCalibrationViewportHeight: externalCalibrationViewportHeight ?? undefined,
+    externalCalibrationRotation: externalCalibrationRotation ?? undefined,
+    onCalibrationComplete,
+    currentPage,
+    currentViewport,
+    viewStateRotation: viewState.rotation,
+    fileId: file.id,
+    currentProjectId: currentProjectId ?? undefined,
+    pdfPageRef,
+  });
+  const {
+    isCalibrating,
+    calibrationPoints,
+    setCalibrationPoints,
+    setIsCalibrating,
+    showCalibrationDialog,
+    setShowCalibrationDialog,
+    showScaleApplicationDialog,
+    setShowScaleApplicationDialog,
+    pendingScaleData,
+    calibrationData,
+    setCalibrationData,
+    calibrationValidation,
+    setCalibrationValidation,
+    scaleFactor,
+    isPageCalibrated,
+    unit,
+    calibrationViewportRef,
+    completeCalibration,
+    startCalibration,
+    applyScale,
+  } = calibration;
+
+  // Measurement/annotation/selection state and helpers (after calibration so we have scaleFactor + calibrationViewportRef)
+  const measurementsState = usePDFViewerMeasurements({
+    currentViewport,
+    scaleFactor,
+    calibrationViewportRef,
+  });
+  const {
+    isMeasuring,
+    setIsMeasuring,
+    measurementType,
+    setMeasurementType,
+    currentMeasurement,
+    setCurrentMeasurement,
+    measurements,
+    setMeasurements,
+    isCompletingMeasurement,
+    setIsCompletingMeasurement,
+    lastClickTime,
+    setLastClickTime,
+    lastClickPosition,
+    setLastClickPosition,
+    isCompletingMeasurementRef,
+    lastCompletionTimeRef,
+    isAnnotating,
+    setIsAnnotating,
+    localAnnotations,
+    setLocalAnnotations,
+    currentAnnotation,
+    setCurrentAnnotation,
+    showTextInput,
+    setShowTextInput,
+    textInputPosition,
+    setTextInputPosition,
+    textInputValue,
+    setTextInputValue,
+    mousePosition,
+    setMousePosition,
+    currentCutout,
+    setCurrentCutout,
+    isSelectingSymbol,
+    setIsSelectingSymbol,
+    selectionBox,
+    setSelectionBox,
+    selectionStart,
+    setSelectionStart,
+    selectedMarkupId,
+    setSelectedMarkupId,
+    isSelectionMode,
+    setIsSelectionMode,
+    isContinuousDrawing,
+    setIsContinuousDrawing,
+    activePoints,
+    setActivePoints,
+    rubberBandElement,
+    setRubberBandElement,
+    runningLength,
+    setRunningLength,
+    pageRubberBandRefs,
+    pageCommittedPolylineRefs,
+    isOrthoSnapping,
+    setIsOrthoSnapping,
+    calculateRunningLength,
+    applyOrthoSnapping,
+  } = measurementsState;
+
+  // Annotations + per-page measurements loading (effects live in hook)
+  const { localTakeoffMeasurements, setLocalTakeoffMeasurements, measurementsLoading } = usePDFViewerData({
+    currentProjectId,
+    fileId: file.id,
+    currentPage,
+    setLocalAnnotations,
+  });
+
+  // Keep ref in sync with state (runs synchronously during render)
+  isSelectionModeRef.current = isSelectionMode;
+
+  // Notify parent component of measurement state changes (must be after calibration hook so isCalibrating is defined)
+  useEffect(() => {
+    if (onMeasurementStateChange) {
+      onMeasurementStateChange(isMeasuring, isCalibrating, measurementType, isOrthoSnapping);
+    }
+  }, [isMeasuring, isCalibrating, measurementType, isOrthoSnapping, onMeasurementStateChange]);
+
+  // Enable ortho snapping by default when calibration mode starts
+  useEffect(() => {
+    if (isCalibrating && !prevCalibratingRef.current && !isOrthoSnapping) {
+      setIsOrthoSnapping(true);
+    }
+    prevCalibratingRef.current = isCalibrating;
+  }, [isCalibrating, isOrthoSnapping]);
+
+  // Calibration viewport ref is restored inside usePDFViewerCalibration. Warn if rotation mismatch.
+  useEffect(() => {
+    if (externalIsPageCalibrated && externalCalibrationRotation != null && viewState.rotation !== externalCalibrationRotation) {
+      console.warn('⚠️ Calibration rotation mismatch:', {
+        calibrationRotation: externalCalibrationRotation,
+        currentRotation: viewState.rotation,
+        message: 'Page was rotated after calibration. Measurements may be inaccurate. Consider recalibrating.'
+      });
+    }
+  }, [externalIsPageCalibrated, externalCalibrationRotation, viewState.rotation]);
+
   const selectedConditionId = useConditionStore((s) => s.selectedConditionId);
   const getSelectedCondition = useConditionStore((s) => s.getSelectedCondition);
   const conditions = useConditionStore((s) => s.conditions);
-  const storeAnnotations = useAnnotationStore((s) => s.annotations);
   const addAnnotation = useAnnotationStore((s) => s.addAnnotation);
   const getPageAnnotations = useAnnotationStore((s) => s.getPageAnnotations);
-  const loadPageTakeoffMeasurements = useMeasurementStore((s) => s.loadPageTakeoffMeasurements);
   const getPageTakeoffMeasurements = useMeasurementStore((s) => s.getPageTakeoffMeasurements);
   
   // Helper to get current condition color by ID (uses live condition data, not stored measurement color)
@@ -360,156 +338,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     const condition = conditions.find(c => c.id === conditionId);
     return condition?.color || fallbackColor || '#000000';
   }, [conditions]);
-  
-  // Load existing takeoff measurements for the current sheet - reactive to store changes
-  const [localTakeoffMeasurements, setLocalTakeoffMeasurements] = useState<any[]>([]);
-  const [measurementsLoading, setMeasurementsLoading] = useState(false);
-  
-  // Load annotations for the entire sheet - reactive to store changes
-  useEffect(() => {
-    if (currentProjectId && file?.id) {
-      // Get all annotations for this sheet, we'll filter by page during render
-      const sheetAnnotations = storeAnnotations.filter(
-        a => a.projectId === currentProjectId && a.sheetId === file.id
-      );
-      setLocalAnnotations(sheetAnnotations);
-    } else {
-      setLocalAnnotations([]);
-    }
-  }, [currentProjectId, file?.id, storeAnnotations]);
-
-  // Subscribe to store changes for takeoffMeasurements to reactively update when measurements are added/updated
-  const allTakeoffMeasurements = useMeasurementStore((state) => state.takeoffMeasurements);
-  
-  // PER-PAGE LOADING: Load measurements for current page when page changes
-  useEffect(() => {
-    // CRITICAL: Clear measurements immediately when page changes to prevent cross-page contamination
-    setLocalTakeoffMeasurements([]);
-    setMeasurementsLoading(true);
-    
-    if (!currentProjectId || !file?.id || !currentPage) {
-      setMeasurementsLoading(false);
-      return;
-    }
-    
-    let isCancelled = false; // Flag to prevent state updates if page changes during async load
-    
-    // Load measurements for this specific page from API
-    const loadPageMeasurements = async () => {
-      try {
-        // Load from API if not already loaded (method handles caching)
-        await loadPageTakeoffMeasurements(currentProjectId, file.id, currentPage);
-        
-        // Check if page changed during async load
-        if (isCancelled) return;
-        
-        // Get from store (now guaranteed to be loaded)
-        const pageMeasurements = getPageTakeoffMeasurements(currentProjectId, file.id, currentPage);
-        
-        // Double-check page hasn't changed
-        if (isCancelled) return;
-        
-        // Convert API measurements to display format
-        const displayMeasurements = pageMeasurements.map(apiMeasurement => {
-          try {
-            return {
-              id: apiMeasurement.id,
-              type: apiMeasurement.type,
-              points: apiMeasurement.points,
-              calculatedValue: apiMeasurement.calculatedValue,
-              unit: apiMeasurement.unit,
-              conditionId: apiMeasurement.conditionId,
-              conditionName: apiMeasurement.conditionName,
-              color: apiMeasurement.conditionColor,
-              timestamp: new Date(apiMeasurement.timestamp).getTime(),
-              pdfPage: apiMeasurement.pdfPage,
-              pdfCoordinates: apiMeasurement.pdfCoordinates,
-              perimeterValue: apiMeasurement.perimeterValue || null,
-              cutouts: apiMeasurement.cutouts || null,
-              netCalculatedValue: apiMeasurement.netCalculatedValue || null
-            };
-          } catch (error) {
-            console.error('Error processing measurement:', error, apiMeasurement);
-            return null;
-          }
-        }).filter(Boolean);
-        
-        // Final check before setting state
-        if (!isCancelled) {
-          setLocalTakeoffMeasurements(displayMeasurements);
-          setMeasurementsLoading(false);
-        }
-      } catch (error) {
-        if (!isCancelled) {
-          console.error('Error loading page measurements:', error);
-          setLocalTakeoffMeasurements([]);
-          setMeasurementsLoading(false);
-        }
-      }
-    };
-    
-    loadPageMeasurements();
-    
-    // Cleanup: mark as cancelled if page changes
-    return () => {
-      isCancelled = true;
-      setMeasurementsLoading(false);
-    };
-  }, [currentProjectId, file?.id, currentPage, loadPageTakeoffMeasurements, getPageTakeoffMeasurements]);
-  
-  // REACTIVE UPDATE: Update localTakeoffMeasurements when store changes (e.g., new measurement created)
-  // This ensures newly created measurements appear immediately without page reload
-  // OPTIMIZATION: Only update if measurements actually changed to prevent unnecessary re-renders
-  useEffect(() => {
-    if (!currentProjectId || !file?.id || !currentPage) {
-      setLocalTakeoffMeasurements([]);
-      return;
-    }
-    
-    // Get current page measurements from store (reactively updates when store changes)
-    // getPageTakeoffMeasurements already filters by projectId, sheetId, and pageNumber
-    const pageMeasurements = getPageTakeoffMeasurements(currentProjectId, file.id, currentPage);
-    
-    // Convert to display format
-    const displayMeasurements = pageMeasurements.map(apiMeasurement => {
-      try {
-        return {
-          id: apiMeasurement.id,
-          type: apiMeasurement.type,
-          points: apiMeasurement.points,
-          calculatedValue: apiMeasurement.calculatedValue,
-          unit: apiMeasurement.unit,
-          conditionId: apiMeasurement.conditionId,
-          conditionName: apiMeasurement.conditionName,
-          color: apiMeasurement.conditionColor,
-          timestamp: new Date(apiMeasurement.timestamp).getTime(),
-          pdfPage: apiMeasurement.pdfPage,
-          pdfCoordinates: apiMeasurement.pdfCoordinates,
-          perimeterValue: apiMeasurement.perimeterValue || null,
-          areaValue: apiMeasurement.areaValue || null,
-          cutouts: apiMeasurement.cutouts || null,
-          netCalculatedValue: apiMeasurement.netCalculatedValue || null
-        };
-      } catch (error) {
-        console.error('Error processing measurement:', error, apiMeasurement);
-        return null;
-      }
-    }).filter(Boolean);
-    
-    // OPTIMIZATION: Only update if measurements actually changed (by ID count and content)
-    setLocalTakeoffMeasurements(prev => {
-      const prevIds = new Set(prev.map((m: any) => m.id));
-      const newIds = new Set(displayMeasurements.map((m: any) => m.id));
-      
-      // Check if measurements changed
-      if (prev.length !== displayMeasurements.length || 
-          ![...prevIds].every(id => newIds.has(id)) ||
-          ![...newIds].every(id => prevIds.has(id))) {
-        return displayMeasurements;
-      }
-      return prev; // No change, return previous to prevent re-render
-    });
-  }, [allTakeoffMeasurements, currentProjectId, file?.id, currentPage, getPageTakeoffMeasurements]);
 
   // Ensure component is mounted before rendering
   useEffect(() => {
@@ -551,7 +379,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   
   // Clear measurements and cleanup when file changes
   useEffect(() => {
-    const currentFileId = file?.id;
+    const currentFileId = file.id;
     const prevFileId = prevFileIdRef.current;
     
     // Only clear if the file ID actually changed
@@ -582,10 +410,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Reset rendering flags
     isRenderingRef.current = false;
-  }, [file?.id]);
+  }, [file.id]);
 
   // Page-specific canvas sizing with outputScale for crisp rendering
-  const updateCanvasDimensions = useCallback((pageNum: number, viewport: any, outputScale: number, page?: any) => {
+  const updateCanvasDimensions = useCallback((pageNum: number, viewport: PageViewport, outputScale: number, page?: PDFPageProxy) => {
     if (!pdfCanvasRef.current || !svgOverlayRef.current) {
       return;
     }
@@ -613,7 +441,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setPageOutputScales(prev => ({ ...prev, [pageNum]: outputScale }));
     
     
-  }, [file?.id]);
+  }, [file.id]);
 
   // Helper function to update pointer-events on all markup elements
   // This is called synchronously after rendering to ensure markups are selectable
@@ -657,8 +485,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // also capture isSelectionMode directly to ensure it's always current
   const renderMarkupsWithPointerEvents = useCallback(async (
     pageNum: number, 
-    viewport: any, 
-    page?: any,
+    viewport: PageViewport, 
+    page?: PDFPageProxy,
     forceImmediate: boolean = false
   ): Promise<void> => {
     // CRITICAL FIX: Allow bypassing debouncing for critical state transitions
@@ -706,7 +534,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   }, [updateMarkupPointerEvents, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, isSelectingSymbol, titleblockSelectionMode]);
 
   // SVG-based takeoff annotation renderer - Page-specific with viewport isolation
-  const renderTakeoffAnnotations = useCallback((pageNum: number, viewport: any, page?: any) => {
+  const renderTakeoffAnnotations = useCallback((pageNum: number, viewport: PageViewport, page?: PDFPageProxy) => {
     if (!viewport || !svgOverlayRef.current) return;
     
     const svgOverlay = svgOverlayRef.current;
@@ -724,7 +552,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // CRITICAL: Check store directly for measurements that might not be in localTakeoffMeasurements yet
     // This prevents clearing markups during initial load race conditions
-    const storeMeasurements = getPageTakeoffMeasurements(currentProjectId || '', file?.id || '', pageNum);
+    const storeMeasurements = getPageTakeoffMeasurements(currentProjectId || '', file.id || '', pageNum);
     
     // CRITICAL: Only render measurements for the specific page being rendered
     // Filter by page BEFORE iterating to prevent any cross-page contamination
@@ -737,28 +565,31 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (pageMeasurements.length === 0 && storeMeasurements.length > 0) {
       pageMeasurements = storeMeasurements.map(apiMeasurement => {
         try {
-          return {
+          const m: Measurement = {
             id: apiMeasurement.id,
+            projectId: apiMeasurement.projectId,
+            sheetId: apiMeasurement.sheetId,
+            conditionId: apiMeasurement.conditionId,
             type: apiMeasurement.type,
             points: apiMeasurement.points,
             calculatedValue: apiMeasurement.calculatedValue,
             unit: apiMeasurement.unit,
-            conditionId: apiMeasurement.conditionId,
-            conditionName: apiMeasurement.conditionName,
-            color: apiMeasurement.conditionColor,
-            timestamp: new Date(apiMeasurement.timestamp).getTime(),
+            timestamp: safeTimestampToISO(apiMeasurement.timestamp),
             pdfPage: apiMeasurement.pdfPage,
             pdfCoordinates: apiMeasurement.pdfCoordinates,
-            perimeterValue: apiMeasurement.perimeterValue || null,
-            areaValue: apiMeasurement.areaValue || null,
-            cutouts: apiMeasurement.cutouts || null,
-            netCalculatedValue: apiMeasurement.netCalculatedValue || null
+            conditionColor: apiMeasurement.conditionColor,
+            conditionName: apiMeasurement.conditionName,
+            perimeterValue: apiMeasurement.perimeterValue,
+            areaValue: apiMeasurement.areaValue,
+            cutouts: apiMeasurement.cutouts,
+            netCalculatedValue: apiMeasurement.netCalculatedValue,
           };
+          return m;
         } catch (error) {
           console.error('Error processing measurement:', error, apiMeasurement);
           return null;
         }
-      }).filter(Boolean) as any[];
+      }).filter((m): m is Measurement => m != null);
     }
     
     const hasLocalMeasurements = pageMeasurements.length > 0;
@@ -930,7 +761,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       renderRunningLengthDisplay(svgOverlay, viewport);
     }
     
-  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, cutoutMode, currentCutout, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionBox, currentProjectId, file?.id, getPageTakeoffMeasurements, measurementsLoading, getConditionColor]);
+  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, cutoutMode, currentCutout, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionBox, currentProjectId, file.id, getPageTakeoffMeasurements, measurementsLoading, getConditionColor]);
 
   // OPTIMIZED: Update only visual styling of markups when selection changes (no full re-render)
   const updateMarkupSelection = useCallback((newSelectedId: string | null, previousSelectedId: string | null) => {
@@ -1088,7 +919,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const isInteractiveMode = isMeasuring || isCalibrating || currentMeasurement.length > 0 || hasActivePoints || isAnnotating || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
       
       // CRITICAL: Check both local measurements AND store to handle race conditions
-      const storeMeasurements = getPageTakeoffMeasurements(currentProjectId || '', file?.id || '', currentPage);
+      const storeMeasurements = getPageTakeoffMeasurements(currentProjectId || '', file.id || '', currentPage);
       const hasLocalMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0;
       const hasStoreMarkups = storeMeasurements.length > 0;
       const hasMarkups = hasLocalMarkups || hasStoreMarkups;
@@ -1099,7 +930,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         // This ensures markups are visible on initial load and persist correctly
         // Force immediate render in selection mode to ensure pointer-events are updated
         const forceImmediate = isSelectionMode && hasMarkups;
-        renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current, forceImmediate);
+        renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current ?? undefined, forceImmediate);
       } else {
         // LAYER THRASH PREVENTION: Clear overlay when measurements are empty to prevent stale renderings
         // CRITICAL: Don't clear if measurements are still loading - this prevents race conditions
@@ -1115,10 +946,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
       }
     }
-  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, renderMarkupsWithPointerEvents, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionBox, currentAnnotation, isContinuousDrawing, activePoints, pdfDocument, measurementsLoading, currentProjectId, file?.id, getPageTakeoffMeasurements, isSelectionMode, totalPages, conditions]);
+  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, renderMarkupsWithPointerEvents, currentPage, currentViewport, isAnnotating, localAnnotations, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionBox, currentAnnotation, isContinuousDrawing, activePoints, pdfDocument, measurementsLoading, currentProjectId, file.id, getPageTakeoffMeasurements, isSelectionMode, totalPages, conditions]);
 
   // Track previous measurements for comparison (used by other logic)
-  const prevLocalTakeoffMeasurementsRef = useRef<any[]>([]);
+  const prevLocalTakeoffMeasurementsRef = useRef<Measurement[]>([]);
   useEffect(() => {
     prevLocalTakeoffMeasurementsRef.current = localTakeoffMeasurements;
   }, [localTakeoffMeasurements]);
@@ -1181,7 +1012,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // This ensures annotations stay aligned during zoom
       const hasMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0;
       if (hasMarkups) {
-        renderMarkupsWithPointerEvents(currentPage, freshViewport, pdfPageRef.current);
+        renderMarkupsWithPointerEvents(currentPage, freshViewport, pdfPageRef.current ?? undefined);
       }
     }
   }, [pdfDocument, viewState.scale, viewState.rotation, currentPage, localTakeoffMeasurements, localAnnotations, renderMarkupsWithPointerEvents]);
@@ -1203,7 +1034,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       }));
       
       // Immediately re-render all markups
-      renderMarkupsWithPointerEvents(currentPage, freshViewport, pdfPageRef.current);
+      renderMarkupsWithPointerEvents(currentPage, freshViewport, pdfPageRef.current ?? undefined);
     }
   }, [pdfDocument, viewState.scale, viewState.rotation, localTakeoffMeasurements, localAnnotations, currentPage, renderTakeoffAnnotations]);
 
@@ -1218,7 +1049,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     const hasMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0;
     if (pdfDocument && currentViewport && hasMarkups) {
       // Render markups with updated viewport state
-      renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current);
+      renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current ?? undefined);
     }
   }, [viewState.scale, viewState.rotation, pdfDocument, currentViewport, localTakeoffMeasurements, localAnnotations, currentPage, renderMarkupsWithPointerEvents]);
 
@@ -1252,7 +1083,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   }, [isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, updateMarkupPointerEvents]);
 
   // Page visibility handler - ensures overlay is properly initialized when page becomes visible
-  const onPageShown = useCallback((pageNum: number, viewport: any) => {
+  const onPageShown = useCallback((pageNum: number, viewport: PageViewport) => {
     if (!viewport || !svgOverlayRef.current) {
       return;
     }
@@ -1299,17 +1130,17 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // This ensures takeoffs are visible immediately when the page loads
     // Use current state values, not captured values
     const currentMeasurements = useMeasurementStore.getState().takeoffMeasurements.filter(
-      (m) => m.projectId === currentProjectId && m.sheetId === file?.id && m.pdfPage === pageNum
+      (m) => m.projectId === currentProjectId && m.sheetId === file.id && m.pdfPage === pageNum
     );
     
     // Render immediately if we have measurements
     // CRITICAL FIX: Force immediate render if in selection mode to ensure pointer-events are updated
     if (currentMeasurements.length > 0 || localTakeoffMeasurements.length > 0) {
-      renderMarkupsWithPointerEvents(pageNum, viewport, pdfPageRef.current, isSelectionMode);
+      renderMarkupsWithPointerEvents(pageNum, viewport, pdfPageRef.current ?? undefined, isSelectionMode);
     }
     // Note: If no measurements, the reactive useEffect will handle rendering when they load
     // The reactive useEffect watches allTakeoffMeasurements and will trigger render when measurements arrive
-  }, [renderMarkupsWithPointerEvents, localTakeoffMeasurements, currentProjectId, file?.id, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol]);
+  }, [renderMarkupsWithPointerEvents, localTakeoffMeasurements, currentProjectId, file.id, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol]);
 
 
   // PDF render function with page-specific viewport isolation
@@ -1395,7 +1226,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         renderInteractiveForms: false, // Disable interactive forms for better performance
       };
       
-      const renderTask = page.render(renderContext);
+      const renderTask = page.render(renderContext as unknown as Parameters<PDFPageProxy['render']>[0]);
       renderTaskRef.current = renderTask;
       await renderTask.promise;
       
@@ -1420,7 +1251,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       try {
         // Get current measurements for this page from store (may have loaded after PDF render started)
         const currentMeasurements = useMeasurementStore.getState().takeoffMeasurements.filter(
-          (m) => m.projectId === currentProjectId && m.sheetId === file?.id && m.pdfPage === pageNum
+          (m) => m.projectId === currentProjectId && m.sheetId === file.id && m.pdfPage === pageNum
         );
         
         // CRITICAL FIX: Get current selection mode state (may have changed since callback was created)
@@ -1442,14 +1273,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
       }
       
-    } catch (error: any) {
-      if (error.name !== 'RenderingCancelledException') {
+    } catch (error: unknown) {
+      if (!(error && typeof error === 'object' && 'name' in error && (error as { name: string }).name === 'RenderingCancelledException')) {
         console.error('Error rendering PDF page:', error);
       }
     } finally {
       isRenderingRef.current = false;
     }
-  }, [pdfDocument, viewState, updateCanvasDimensions, onPageShown, isComponentMounted, isMeasuring, isCalibrating, currentMeasurement, isDeselecting, isAnnotating, isSelectionMode, localTakeoffMeasurements, currentProjectId, file?.id, currentPage, renderMarkupsWithPointerEvents]);
+  }, [pdfDocument, viewState, updateCanvasDimensions, onPageShown, isComponentMounted, isMeasuring, isCalibrating, currentMeasurement, isDeselecting, isAnnotating, isSelectionMode, localTakeoffMeasurements, currentProjectId, file.id, currentPage, renderMarkupsWithPointerEvents]);
 
   // Keep renderPDFPage ref in sync (runs synchronously during render)
   renderPDFPageRef.current = renderPDFPage;
@@ -1459,7 +1290,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Render individual measurement as SVG
   // CRITICAL: Accept isSelectionMode as parameter to avoid stale closure values
-  const renderSVGMeasurement = (svg: SVGSVGElement, measurement: Measurement, viewport: any, page: any, selectionMode: boolean) => {
+  const renderSVGMeasurement = (svg: SVGSVGElement, measurement: Measurement, viewport: PageViewport, page: PDFPageProxy | undefined, selectionMode: boolean) => {
     if (!measurement || !measurement.points || !viewport) {
       return;
     }
@@ -1834,7 +1665,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   };
 
   // Render current measurement being drawn as SVG
-  const renderSVGCurrentMeasurement = (svg: SVGSVGElement, viewport: any) => {
+  const renderSVGCurrentMeasurement = (svg: SVGSVGElement, viewport: PageViewport) => {
     if (!viewport) return;
 
     const selectedCondition = getSelectedCondition();
@@ -2091,7 +1922,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   };
 
   // Render completed annotation
-  const renderSVGAnnotation = (svg: SVGSVGElement, annotation: Annotation, viewport: any) => {
+  const renderSVGAnnotation = (svg: SVGSVGElement, annotation: Annotation, viewport: PageViewport) => {
     if (!viewport || annotation.points.length === 0) return;
     
     // Use the passed viewport directly - caller already calculated the correct one
@@ -2309,7 +2140,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   };
 
   // Render current annotation being created with rubber banding preview
-  const renderSVGCurrentAnnotation = (svg: SVGSVGElement, viewport: any) => {
+  const renderSVGCurrentAnnotation = (svg: SVGSVGElement, viewport: PageViewport) => {
     if (!viewport || !annotationTool) return;
     
     const points = currentAnnotation.map(p => ({
@@ -2513,7 +2344,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   };
 
   // Render running length display for continuous linear drawing
-  const renderRunningLengthDisplay = (svg: SVGSVGElement, viewport: any) => {
+  const renderRunningLengthDisplay = (svg: SVGSVGElement, viewport: PageViewport) => {
     if (!viewport || !isContinuousDrawing || activePoints.length === 0) return;
     
     const selectedCondition = getSelectedCondition();
@@ -3065,7 +2896,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         // For shapes, we need 2 points (start and end)
         setCurrentAnnotation(prev => {
           const newPoints = [...prev, pdfCoords];
-          if (newPoints.length === 2 && currentProjectId && file?.id) {
+          if (newPoints.length === 2 && currentProjectId && file.id) {
             // Complete the annotation
             addAnnotation({
               projectId: currentProjectId,
@@ -3383,7 +3214,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       perimeterValue = perimeter / scaleFactor;
     }
 
-    if (currentProjectId && file?.id) {
+    if (currentProjectId && file.id) {
       const addTakeoffMeasurement = useMeasurementStore.getState().addTakeoffMeasurement;
       addTakeoffMeasurement({
         projectId: currentProjectId,
@@ -3435,7 +3266,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     const updateTakeoffMeasurement = useMeasurementStore.getState().updateTakeoffMeasurement;
 
     // Get existing measurements for the target condition
-    if (!file?.id || !currentProjectId) return;
+    if (!file.id || !currentProjectId) return;
     const existingMeasurements = getPageTakeoffMeasurements(currentProjectId, file.id, currentPage);
     const targetMeasurement = existingMeasurements.find(m => m.conditionId === cutoutTargetConditionId);
     
@@ -3678,202 +3509,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     });
   }, [currentPage]);
 
-  // Complete calibration
-  const completeCalibration = useCallback((points: { x: number; y: number }[]) => {
-    if (points.length !== 2 || !calibrationData || !currentViewport) return;
-    
-    const knownDistance = calibrationData.knownDistance;
-    const unit = calibrationData.unit;
-    
-    // Get the PDF page dimensions for accurate scale calculations
-    const pdfPage = pdfPageRef.current;
-    if (!pdfPage) {
-      console.error('PDF page is not available for calibration');
-      return;
-    }
-    
-    // Use a base viewport for calibration (rotation applied, scale = 1)
-    // This ensures scale factor is calculated at PDF's native scale, independent of zoom level
-    const baseViewport = pdfPage.getViewport({ scale: 1, rotation: viewState.rotation });
-    
-    // Calculate distance in base viewport pixels
-    // Points are in normalized coordinates (0-1), representing PDF-relative position
-    // Normalized coordinates are independent of zoom level - they represent the same PDF position
-    // regardless of which viewport was used to normalize them
-    // Multiply normalized delta by baseViewport dimensions to get pixel distance
-    const dx = (points[1].x - points[0].x) * baseViewport.width;
-    const dy = (points[1].y - points[0].y) * baseViewport.height;
-    const pixelDistance = Math.sqrt(dx * dx + dy * dy);
-    
-    // Calculate scale: real-world distance / pixel distance
-    // This gives us the scale factor in units per pixel
-    const newScaleFactor = knownDistance / pixelDistance;
-    
-    // Store the calibration base viewport info for consistent measurements
-    const calibrationInfo = {
-      viewportWidth: baseViewport.width,
-      viewportHeight: baseViewport.height,
-      scale: 1,
-      rotation: baseViewport.rotation
-    };
-    
-    // Validate the scale factor calculation
-    const testDistance = pixelDistance * newScaleFactor;
-    const accuracy = 1 - Math.abs(testDistance - knownDistance) / knownDistance;
-    
-    // Validate scale factor reasonableness with more comprehensive checks
-    const warnings: string[] = [];
-    const errors: string[] = [];
-    
-    // Check for extremely small scale factors (likely measurement error)
-    if (newScaleFactor < 0.0001) {
-      errors.push('Scale factor is extremely small - check if calibration points are too close together');
-    } else if (newScaleFactor < 0.001) {
-      warnings.push('Scale factor is very small - verify calibration points are far enough apart');
-    }
-    
-    // Check for extremely large scale factors (likely measurement error)
-    if (newScaleFactor > 10000) {
-      errors.push('Scale factor is extremely large - check if calibration points are too far apart');
-    } else if (newScaleFactor > 1000) {
-      warnings.push('Scale factor is very large - verify calibration points are close enough together');
-    }
-    
-    // Check calibration accuracy
-    if (accuracy < 0.90) {
-      errors.push('Calibration accuracy is very low - please re-calibrate with more precise points');
-    } else if (accuracy < 0.95) {
-      warnings.push('Calibration accuracy is low - consider re-calibrating for better precision');
-    }
-    
-    // Check if the known distance seems reasonable for the pixel distance
-    const pixelsPerFoot = 1 / newScaleFactor;
-    if (pixelsPerFoot < 1) {
-      warnings.push('Very high resolution detected - verify the known distance is correct');
-    } else if (pixelsPerFoot > 1000) {
-      warnings.push('Very low resolution detected - verify the known distance is correct');
-    }
-    
-    // Check for reasonable scale ranges based on typical architectural drawings
-    // Typical scales: 1/8" = 1', 1/4" = 1', 1/2" = 1', 1" = 1', etc.
-    // This translates to scale factors roughly between 0.01 and 0.1 feet per pixel
-    if (newScaleFactor < 0.005 || newScaleFactor > 0.2) {
-      warnings.push('Scale factor outside typical architectural drawing range - verify known distance');
-    }
-    
-    if (errors.length > 0) {
-      console.error('❌ CALIBRATION ERRORS:', errors);
-      // Don't proceed with calibration if there are errors
-      setCalibrationPoints([]);
-      setCalibrationData(null);
-      setIsCalibrating(false);
-      alert(`Calibration failed: ${errors.join(', ')}`);
-      return;
-    }
-    
-    if (warnings.length > 0) {
-      console.warn('⚠️ CALIBRATION WARNINGS:', warnings);
-      // Show warnings but allow calibration to proceed
-      const warningMessage = warnings.join('\n');
-      if (confirm(`Calibration warnings:\n\n${warningMessage}\n\nDo you want to proceed with this calibration?`)) {
-        // User confirmed, continue with calibration
-      } else {
-        // User cancelled, reset calibration
-        setCalibrationPoints([]);
-        setCalibrationData(null);
-        setIsCalibrating(false);
-        return;
-      }
-    }
-    
-    if (externalScaleFactor === undefined) {
-      setInternalScaleFactor(newScaleFactor);
-    }
-    if (externalUnit === undefined) {
-      setInternalUnit(unit);
-    }
-    if (externalIsPageCalibrated === undefined) {
-      setInternalIsPageCalibrated(true);
-    }
-    setPendingScaleData({ scaleFactor: newScaleFactor, unit });
-    setShowScaleApplicationDialog(true);
-    // Show a brief on-canvas validator with the computed distance
-    try {
-      const measured = pixelDistance * newScaleFactor; // in unit
-      const display = unit === 'ft' 
-        ? `${formatFeetAndInches(measured)}` 
-        : `${measured.toFixed(2)} ${unit}`;
-      setCalibrationValidation({ points, display, page: currentPage });
-      // Auto-clear after 3 seconds
-      setTimeout(() => setCalibrationValidation(null), 3000);
-    } catch {}
-    
-    // Store calibration viewport info for consistent measurements
-    // CRITICAL FIX: Store baseViewport dimensions, not currentViewport dimensions
-    // The calibration was calculated using baseViewport (scale=1), so measurements
-    // must also use baseViewport dimensions for accurate calculations
-    calibrationViewportRef.current = {
-      scaleFactor: newScaleFactor,
-      unit: unit,
-      viewportWidth: baseViewport.width,
-      viewportHeight: baseViewport.height,
-      scale: baseViewport.scale, // This should be 1
-      rotation: baseViewport.rotation
-    };
-    
-    if (onCalibrationComplete) {
-      // Default to 'page' scope for initial calibration (user will choose scope in dialog)
-      // pageNumber will be set when user clicks Apply in the dialog
-      // Pass viewport dimensions and rotation so they can be saved to the database
-      onCalibrationComplete(true, newScaleFactor, unit, 'page', currentPage, baseViewport.width, baseViewport.height, baseViewport.rotation);
-    }
-    
-    setCalibrationPoints([]);
-    setIsCalibrating(false);
-    setCalibrationData(null);
-  }, [calibrationData, onCalibrationComplete, currentViewport, viewState.rotation]);
-
-  // Start calibration
-  const startCalibration = useCallback((knownDistance: number, unit: string) => {
-    setCalibrationData({ knownDistance, unit });
-    setIsCalibrating(true);
-    setCalibrationPoints([]);
-    setShowCalibrationDialog(false);
-  }, []);
-
-  // Apply scale
-  const applyScale = useCallback((scope: 'page' | 'document') => {
-    if (!pendingScaleData) return;
-    
-    // Ensure calibration is saved when user clicks Apply
-    // This is important because onCalibrationComplete is called before the dialog,
-    // but we want to make sure it's persisted when user explicitly clicks Apply
-    if (onCalibrationComplete && file?.id && currentProjectId) {
-      // Pass scope and pageNumber so the handler can save with correct pageNumber
-      // scope = 'document' -> pageNumber = null (applies to all pages)
-      // scope = 'page' -> pageNumber = currentPage (page-specific, overwrites document-level for this page)
-      // Use viewport dimensions and rotation from calibrationViewportRef which was set during calibration
-      const pageNumber = scope === 'page' ? currentPage : null;
-      const viewportWidth = calibrationViewportRef.current?.viewportWidth ?? null;
-      const viewportHeight = calibrationViewportRef.current?.viewportHeight ?? null;
-      const rotation = calibrationViewportRef.current?.rotation ?? null;
-      onCalibrationComplete(true, pendingScaleData.scaleFactor, pendingScaleData.unit, scope, pageNumber, viewportWidth, viewportHeight, rotation);
-    }
-    
-    if (externalScaleFactor === undefined) {
-      setInternalScaleFactor(pendingScaleData.scaleFactor);
-    }
-    if (externalUnit === undefined) {
-      setInternalUnit(pendingScaleData.unit);
-    }
-    if (externalIsPageCalibrated === undefined) {
-      setInternalIsPageCalibrated(true);
-    }
-    
-    setPendingScaleData(null);
-    setShowScaleApplicationDialog(false);
-  }, [pendingScaleData, externalScaleFactor, externalUnit, externalIsPageCalibrated, onCalibrationComplete, file?.id, currentProjectId]);
-
   // Handle wheel events for zoom
   const handleWheel = useCallback((event: WheelEvent) => {
     if (event.ctrlKey || event.metaKey) {
@@ -4025,16 +3660,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Add global function to restore scroll position
   useEffect(() => {
-    (window as any).restoreScrollPosition = (x: number, y: number) => {
+    setRestoreScrollPosition((x: number, y: number) => {
       const container = containerRef.current;
       if (container) {
         container.scrollLeft = x;
         container.scrollTop = y;
       }
-    };
+    });
 
     return () => {
-      delete (window as any).restoreScrollPosition;
+      setRestoreScrollPosition(undefined);
     };
   }, []);
 
@@ -4089,7 +3724,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           scale: viewState.scale, 
           rotation: viewState.rotation 
         });
-        renderMarkupsWithPointerEvents(currentPage, freshViewport, pdfPageRef.current);
+        renderMarkupsWithPointerEvents(currentPage, freshViewport, pdfPageRef.current ?? undefined);
       }
     }
   }, [viewState.scale, isMeasuring, isCalibrating, currentMeasurement.length, isDeselecting, isAnnotating, showTextInput, applyInteractiveZoomTransforms, pdfDocument, localTakeoffMeasurements, localAnnotations, currentPage, renderMarkupsWithPointerEvents]);
@@ -4212,9 +3847,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         // CRITICAL FIX: Force immediate re-render (bypass debouncing) to ensure pointer-events are updated
         // State is already updated synchronously above, so we can render immediately
         if (currentViewport) {
-          renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current, true);
+          renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current ?? undefined, true);
         }
-      } else if (currentProjectId && file?.id) {
+      } else if (currentProjectId && file.id) {
         const deleteTakeoffMeasurement = useMeasurementStore.getState().deleteTakeoffMeasurement;
         try {
           // Clear selection immediately
@@ -4269,8 +3904,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               }
             }, 100);
           }
-        } catch (error: any) {
-          console.error(`Failed to delete markup:`, error);
+    } catch (error: unknown) {
+        console.error(`Failed to delete markup:`, error);
         }
       }
     } else if (event.key === 'Control' && (isMeasuring || isCalibrating)) {
@@ -4278,7 +3913,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       event.preventDefault();
       setIsOrthoSnapping(prev => !prev);
     }
-  }, [annotationTool, currentAnnotation, onAnnotationToolChange, localAnnotations, isMeasuring, isCalibrating, calibrationPoints.length, currentMeasurement.length, selectedMarkupId, isSelectionMode, currentProjectId, file?.id, currentPage, measurementType, isContinuousDrawing, activePoints.length, isOrthoSnapping, renderMarkupsWithPointerEvents, currentViewport, getPageTakeoffMeasurements, localTakeoffMeasurements, updateMarkupPointerEvents, totalPages, onPageShown]);
+  }, [annotationTool, currentAnnotation, onAnnotationToolChange, localAnnotations, isMeasuring, isCalibrating, calibrationPoints.length, currentMeasurement.length, selectedMarkupId, isSelectionMode, currentProjectId, file.id, currentPage, measurementType, isContinuousDrawing, activePoints.length, isOrthoSnapping, renderMarkupsWithPointerEvents, currentViewport, getPageTakeoffMeasurements, localTakeoffMeasurements, updateMarkupPointerEvents, totalPages, onPageShown]);
 
   // Add keyboard event listener
   useEffect(() => {
@@ -4381,7 +4016,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         setIsDeselecting(false); // Clear deselection state
         
         // Always use condition.type first - linear conditions with height stay as linear
-        if (condition.type === 'count' || condition.type === 'auto-count') {
+        // (auto-count already handled above with early return)
+        if (condition.type === 'count') {
           setMeasurementType('count');
         } else if (condition.type === 'volume') {
           setMeasurementType('volume');
@@ -4465,22 +4101,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const handleCalibrationRequest = () => {
         setShowCalibrationDialog(true);
       };
-      
-      (window as any).triggerCalibration = handleCalibrationRequest;
-      
-      return () => {
-        delete (window as any).triggerCalibration;
-      };
+      setTriggerCalibration(handleCalibrationRequest);
+      return () => setTriggerCalibration(undefined);
     }
   }, [onCalibrationRequest]);
 
   // Expose fitToWindow function globally
   useEffect(() => {
-    (window as any).triggerFitToWindow = fitToWindow;
-    
-    return () => {
-      delete (window as any).triggerFitToWindow;
-    };
+    setTriggerFitToWindow(fitToWindow);
+    return () => setTriggerFitToWindow(undefined);
   }, [fitToWindow]);
 
   // Cleanup effect for memory management
@@ -4519,38 +4148,137 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     };
   }, []);
 
+  // Must be declared before any conditional return (Rules of Hooks)
+  const handleCanvasDoubleClick = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      if (!annotationTool) {
+        handleDoubleClick(e as React.MouseEvent<HTMLCanvasElement | SVGSVGElement>);
+      } else {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    },
+    [annotationTool, handleDoubleClick]
+  );
+
+  const handleSvgClick = useCallback(
+    (e: React.MouseEvent<SVGSVGElement>) => {
+      const currentIsSelectionMode = isSelectionModeRef.current;
+      if (currentIsSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol)) {
+        const target = e.target as SVGElement;
+        let annotationId: string | null = null;
+        let measurementId: string | null = null;
+        if (target.hasAttribute('data-annotation-id')) {
+          annotationId = target.getAttribute('data-annotation-id');
+        } else {
+          const annotationParent = target.closest('[data-annotation-id]');
+          if (annotationParent) {
+            annotationId = annotationParent.getAttribute('data-annotation-id');
+          } else if (target.parentElement?.hasAttribute('data-annotation-id')) {
+            annotationId = target.parentElement.getAttribute('data-annotation-id');
+          }
+        }
+        if (target.hasAttribute('data-measurement-id')) {
+          measurementId = target.getAttribute('data-measurement-id');
+        } else {
+          const measurementParent = target.closest('[data-measurement-id]');
+          if (measurementParent) {
+            measurementId = measurementParent.getAttribute('data-measurement-id');
+          } else {
+            let parent = target.parentElement;
+            while (parent && !measurementId) {
+              if (parent.hasAttribute('data-measurement-id')) {
+                measurementId = parent.getAttribute('data-measurement-id');
+                break;
+              }
+              parent = parent.parentElement;
+            }
+          }
+        }
+        if (annotationId && currentIsSelectionMode) {
+          e.stopPropagation();
+          setSelectedMarkupId(annotationId);
+          return;
+        }
+        if (measurementId && currentIsSelectionMode) {
+          e.stopPropagation();
+          setSelectedMarkupId(measurementId);
+          return;
+        }
+        e.stopPropagation();
+        handleClick(e as React.MouseEvent<HTMLCanvasElement | SVGSVGElement>);
+      }
+    },
+    [isCalibrating, annotationTool, visualSearchMode, isSelectingSymbol, titleblockSelectionMode, setSelectedMarkupId, handleClick]
+  );
+
+  const handleSvgDoubleClick = useCallback(
+    (e: React.MouseEvent<SVGSVGElement>) => {
+      if (annotationTool || isMeasuring || cutoutMode) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleDoubleClick(e as React.MouseEvent<HTMLCanvasElement | SVGSVGElement>);
+      }
+    },
+    [annotationTool, isMeasuring, cutoutMode, handleDoubleClick]
+  );
+
   if (isLoading) {
-    return (
-      <div className={`flex items-center justify-center h-full ${className}`}>
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading PDF...</p>
-        </div>
-      </div>
-    );
+    return <PDFViewerStatusView status="loading" className={className} />;
   }
 
   if (error) {
-    return (
-      <div className={`flex items-center justify-center h-full ${className}`}>
-        <div className="text-center text-red-600">
-          <p className="text-lg font-semibold mb-2">Error Loading PDF</p>
-          <p className="text-sm">{error}</p>
-        </div>
-      </div>
-    );
+    return <PDFViewerStatusView status="error" className={className} message={error} />;
   }
 
   if (!pdfDocument) {
     return (
-      <div className={`flex items-center justify-center h-full ${className}`}>
-        <div className="text-center">
-          <p className="text-gray-600 mb-2">No PDF loaded</p>
-          <p className="text-sm text-gray-500">File: {file?.originalName || file?.id || 'Unknown'}</p>
-        </div>
-      </div>
+      <PDFViewerStatusView
+        status="no-document"
+        className={className}
+        fileLabel={file.originalName || file.id || 'Unknown'}
+      />
     );
   }
+
+  const overlayCursor = cutoutMode
+    ? 'crosshair'
+    : (isCalibrating ? 'crosshair' : (isMeasuring ? 'crosshair' : (isSelectionMode ? 'pointer' : 'default')));
+  const svgPointerEvents = (isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol)) ? 'auto' : 'none';
+  const overlayKey = `overlay-${currentPage}-${file.id}`;
+  const textAnnotationProps = showTextInput && textInputPosition
+    ? {
+        show: true,
+        position: textInputPosition,
+        value: textInputValue,
+        onChange: setTextInputValue,
+        onSave: () => {
+          if (textInputValue.trim() && currentProjectId) {
+            addAnnotation({
+              projectId: currentProjectId,
+              sheetId: file.id,
+              type: 'text',
+              points: currentAnnotation,
+              color: annotationColor,
+              text: textInputValue,
+              pageNumber: currentPage,
+            });
+            setCurrentAnnotation([]);
+            setTextInputValue('');
+            setShowTextInput(false);
+            setTextInputPosition(null);
+            onAnnotationToolChange?.(null);
+          }
+        },
+        onCancel: () => {
+          setCurrentAnnotation([]);
+          setTextInputValue('');
+          setShowTextInput(false);
+          setTextInputPosition(null);
+          onAnnotationToolChange?.(null);
+        },
+      }
+    : null;
 
   return (
     <div className={`pdf-viewer-container h-full flex flex-col relative ${className}`}>
@@ -4573,275 +4301,46 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }}
       >
         <div className="flex justify-start p-6 relative">
-          {/* Canvas Container - Ensures perfect alignment */}
-          <div 
-            className="relative inline-block"
-            style={{
-              // Ensure container has no extra spacing or borders
-              margin: 0,
-              padding: 0,
-              border: 'none',
-              outline: 'none'
-            }}
-          >
-            {/* PDF Canvas (Background Layer) */}
-            <canvas
-              ref={pdfCanvasRef}
-              className="shadow-lg"
-              style={{
-                cursor: cutoutMode 
-                  ? 'crosshair' 
-                  : (isCalibrating ? 'crosshair' : (isMeasuring ? 'crosshair' : (isSelectionMode ? 'pointer' : 'default'))),
-                display: 'block',
-                position: 'relative',
-                zIndex: 1,
-                // Ensure no extra spacing
-                margin: 0,
-                padding: 0,
-                border: 'none',
-                outline: 'none'
-              }}
-              onClick={handleClick}
-              onMouseDown={handleMouseDown}
-              onMouseUp={handleMouseUp}
-              onDoubleClick={(e) => {
-                // Only handle double-click for non-annotation cases
-                if (!annotationTool) {
-                  handleDoubleClick(e);
-                } else {
-                  // For annotations, prevent the canvas from handling the event
-                  e.preventDefault();
-                  e.stopPropagation();
-                }
-              }}
-              onMouseMove={handleMouseMove}
-              onMouseLeave={() => setMousePosition(null)}
-            />
-            
-            {/* SVG Overlay (Foreground Layer) - Page-specific with stable key */}
-            <svg
-              key={`overlay-${currentPage}-${file?.id || 'default'}`}
-              ref={svgOverlayRef}
-              id={`overlay-page-${currentPage}`}
-              className="shadow-lg"
-              style={{
-                cursor: cutoutMode 
-                  ? 'crosshair' 
-                  : ((visualSearchMode || !!titleblockSelectionMode) && isSelectingSymbol)
-                  ? 'crosshair'
-                  : (annotationTool ? 'crosshair' : (isCalibrating ? 'crosshair' : (isMeasuring ? 'crosshair' : (isSelectionMode ? 'pointer' : 'default')))),
-                display: 'block',
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                zIndex: 2,
-                // Ensure perfect overlay alignment
-                margin: 0,
-                padding: 0,
-                border: 'none',
-                outline: 'none',
-                pointerEvents: (isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol)) ? 'auto' : 'none' // Allow clicks in selection, calibration, annotation, visual search, or titleblock selection mode (measurements handled by canvas)
-              }}
-              onMouseMove={handleMouseMove}
-              onMouseDown={handleMouseDown}
-              onMouseUp={handleMouseUp}
-              onMouseLeave={() => setMousePosition(null)}
-              onClick={(e) => {
-                // Handle clicks in selection mode, calibration mode, annotation mode, or visual search mode
-                // CRITICAL: Use ref to get the CURRENT isSelectionMode value (not stale closure value)
-                // This ensures clicks are processed correctly even if React hasn't re-rendered
-                const currentIsSelectionMode = isSelectionModeRef.current;
-                
-                // CRITICAL: In selection mode, hit-area has pointer-events: 'none' so clicks pass through to markup elements
-                // When measuring, hit-area also has pointer-events: 'none' so clicks pass through to canvas for double-click detection
-                if (currentIsSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol)) {
-                  const target = e.target as SVGElement;
-                  
-                  // Check if target or any parent has markup data attributes
-                  // Also check if target is part of a markup (hit areas, text, etc.)
-                  let annotationId: string | null = null;
-                  let measurementId: string | null = null;
-                  
-                  // Try to get annotation ID from target or closest parent
-                  if (target.hasAttribute('data-annotation-id')) {
-                    annotationId = target.getAttribute('data-annotation-id');
-                  } else {
-                    const annotationParent = target.closest('[data-annotation-id]');
-                    if (annotationParent) {
-                      annotationId = annotationParent.getAttribute('data-annotation-id');
-                    } else if (target.parentElement?.hasAttribute('data-annotation-id')) {
-                      annotationId = target.parentElement.getAttribute('data-annotation-id');
-                    }
-                  }
-                  
-                  // Try to get measurement ID from target or closest parent
-                  // CRITICAL FIX: Also check parentElement recursively for nested SVG elements
-                  if (target.hasAttribute('data-measurement-id')) {
-                    measurementId = target.getAttribute('data-measurement-id');
-                  } else {
-                    const measurementParent = target.closest('[data-measurement-id]');
-                    if (measurementParent) {
-                      measurementId = measurementParent.getAttribute('data-measurement-id');
-                    } else {
-                      // Try parent element directly
-                      let parent = target.parentElement;
-                      while (parent && !measurementId) {
-                        if (parent.hasAttribute('data-measurement-id')) {
-                          measurementId = parent.getAttribute('data-measurement-id');
-                          break;
-                        }
-                        parent = parent.parentElement;
-                      }
-                    }
-                  }
-                  
-                  // Handle annotation selection
-                  if (annotationId && currentIsSelectionMode) {
-                    e.stopPropagation();
-                    setSelectedMarkupId(annotationId);
-                    return;
-                  }
-                  
-                  // Handle measurement selection (event delegation handles all clicks)
-                  if (measurementId && currentIsSelectionMode) {
-                    e.stopPropagation();
-                    setSelectedMarkupId(measurementId);
-                    return;
-                  }
-                  
-                  // For non-markup clicks, stop propagation and process normally
-                  e.stopPropagation();
-                  
-                  // Note: Double-click detection removed - using native onDoubleClick handler instead
-                  // This prevents duplicate calls to handleDoubleClick
-                  
-                  handleClick(e);
-                }
-              }}
-              onContextMenu={(e) => {
-                // Right-click context menu (currently unused)
-              }}
-              onDoubleClick={(e) => {
-                // Handle double-click in annotation mode, measurement mode, or cutout mode
-                if (annotationTool || isMeasuring || cutoutMode) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  handleDoubleClick(e);
-                }
-              }}
-            />
-
-            {/* PDF Loading Indicator */}
-            {isPDFLoading && (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: '50%',
-                  left: '50%',
-                  transform: 'translate(-50%, -50%)',
-                  zIndex: 1000,
-                  background: 'rgba(255, 255, 255, 0.9)',
-                  padding: '20px',
-                  borderRadius: '8px',
-                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  gap: '12px',
-                }}
-              >
-                <div
-                  style={{
-                    width: '32px',
-                    height: '32px',
-                    border: '3px solid #f3f3f3',
-                    borderTop: '3px solid #3498db',
-                    borderRadius: '50%',
-                    animation: 'spin 1s linear infinite',
-                  }}
-                />
-                <div style={{ fontSize: '14px', color: '#666', fontWeight: '500' }}>
-                  Loading PDF...
-                </div>
-              </div>
-            )}
-
-            {/* Text Annotation Input - Positioned relative to canvas */}
-            {showTextInput && textInputPosition && (
-              <div
-                style={{
-                  position: 'absolute',
-                  left: textInputPosition.x + 'px',
-                  top: textInputPosition.y + 'px',
-                  zIndex: 1000,
-                  pointerEvents: 'auto',
-                }}
-              >
-                <input
-                  type="text"
-                  autoFocus
-                  value={textInputValue}
-                  onChange={(e) => setTextInputValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && textInputValue.trim() && currentProjectId && file?.id) {
-                      // Save text annotation
-                      addAnnotation({
-                        projectId: currentProjectId,
-                        sheetId: file.id,
-                        type: 'text',
-                        points: currentAnnotation,
-                        color: annotationColor,
-                        text: textInputValue,
-                        pageNumber: currentPage
-                      });
-                      setCurrentAnnotation([]);
-                      setTextInputValue('');
-                      setShowTextInput(false);
-                      setTextInputPosition(null);
-                      onAnnotationToolChange?.(null);
-                    } else if (e.key === 'Escape') {
-                      // Cancel text annotation
-                      setCurrentAnnotation([]);
-                      setTextInputValue('');
-                      setShowTextInput(false);
-                      setTextInputPosition(null);
-                      onAnnotationToolChange?.(null);
-                    }
-                  }}
-                  className="border-2 border-blue-500 rounded px-2 py-1 text-sm shadow-lg bg-white"
-                  placeholder="Enter text..."
-                  style={{
-                    minWidth: '120px',
-                    fontSize: '14px',
-                    fontFamily: 'Arial, sans-serif',
-                  }}
-                />
-              </div>
-            )}
-          </div>
+          <PDFViewerCanvasOverlay
+            pdfCanvasRef={pdfCanvasRef}
+            svgOverlayRef={svgOverlayRef}
+            overlayKey={overlayKey}
+            currentPage={currentPage}
+            cursor={overlayCursor}
+            svgPointerEvents={svgPointerEvents}
+            onCanvasClick={handleClick as (e: React.MouseEvent<HTMLCanvasElement>) => void}
+            onCanvasMouseDown={handleMouseDown as (e: React.MouseEvent<HTMLCanvasElement>) => void}
+            onCanvasMouseUp={handleMouseUp as (e: React.MouseEvent<HTMLCanvasElement>) => void}
+            onCanvasDoubleClick={handleCanvasDoubleClick}
+            onCanvasMouseMove={handleMouseMove as (e: React.MouseEvent<HTMLCanvasElement>) => void}
+            onCanvasMouseLeave={() => setMousePosition(null)}
+            onSvgMouseMove={handleMouseMove as (e: React.MouseEvent<SVGSVGElement>) => void}
+            onSvgMouseDown={handleMouseDown as (e: React.MouseEvent<SVGSVGElement>) => void}
+            onSvgMouseUp={handleMouseUp as (e: React.MouseEvent<SVGSVGElement>) => void}
+            onSvgMouseLeave={() => setMousePosition(null)}
+            onSvgClick={handleSvgClick}
+            onSvgDoubleClick={handleSvgDoubleClick}
+            isPDFLoading={isPDFLoading}
+            textAnnotation={textAnnotationProps}
+          />
         </div>
       </div>
 
-      {/* Calibration Dialog */}
-      <CalibrationDialog
-        isOpen={showCalibrationDialog}
-        onClose={() => setShowCalibrationDialog(false)}
-        onStartCalibration={startCalibration}
-        currentScale={isPageCalibrated ? { scaleFactor, unit } : null}
+      <PDFViewerDialogs
+        showCalibrationDialog={showCalibrationDialog}
+        setShowCalibrationDialog={setShowCalibrationDialog}
+        showScaleApplicationDialog={showScaleApplicationDialog}
+        setShowScaleApplicationDialog={setShowScaleApplicationDialog}
+        startCalibration={startCalibration}
+        applyScale={applyScale}
+        isPageCalibrated={isPageCalibrated}
+        scaleFactor={scaleFactor}
+        unit={unit}
+        pendingScaleData={pendingScaleData}
         isCalibrating={isCalibrating}
-      />
-
-      {/* Scale Application Dialog */}
-      <ScaleApplicationDialog
-        isOpen={showScaleApplicationDialog}
-        onClose={() => setShowScaleApplicationDialog(false)}
-        onApply={applyScale}
-        scaleFactor={pendingScaleData?.scaleFactor || 0}
-        unit={pendingScaleData?.unit || 'ft'}
         currentPage={currentPage}
         totalPages={totalPages}
       />
-
     </div>
   );
 };

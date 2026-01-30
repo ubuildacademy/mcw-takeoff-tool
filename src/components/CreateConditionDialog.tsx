@@ -6,14 +6,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Textarea } from './ui/textarea';
 import { X } from 'lucide-react';
 import { useConditionStore } from '../store/slices/conditionSlice';
+import type { TakeoffCondition } from '../types';
 import { generateDistinctColor, getDefaultUnit, parseDepthInput, formatDepthOutput } from '../utils/commonUtils';
 
 interface CreateConditionDialogProps {
   projectId: string;
   onClose: () => void;
-  onConditionCreated: (condition: any) => void;
-  onConditionSelect?: (condition: any) => void; // Optional callback to select condition after creation
-  editingCondition?: any; // Condition to edit, if provided
+  onConditionCreated: (condition: TakeoffCondition) => void;
+  onConditionSelect?: (condition: TakeoffCondition) => void;
+  editingCondition?: TakeoffCondition | null;
 }
 
 export function CreateConditionDialog({ projectId, onClose, onConditionCreated, onConditionSelect, editingCondition }: CreateConditionDialogProps) {
@@ -33,7 +34,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
     type: (editingCondition?.type || 'area') as 'area' | 'volume' | 'linear' | 'count' | 'auto-count',
     unit: editingCondition?.unit || 'SF', // Initialize with default unit for 'area' type
     wasteFactor: editingCondition?.wasteFactor?.toString() || '',
-    color: editingCondition?.color || generateDistinctColor(conditions.filter((c: { projectId: string; color?: string }) => c.projectId === projectId).map((c: { color?: string }) => c.color).filter(Boolean)),
+    color: editingCondition?.color || generateDistinctColor(conditions.filter((c: { projectId: string; color?: string }) => c.projectId === projectId).map((c: { color?: string }) => c.color).filter((color): color is string => typeof color === 'string')),
     description: editingCondition?.description || '',
     materialCost: editingCondition?.materialCost != null ? editingCondition.materialCost.toString() : '',
     equipmentCost: editingCondition?.equipmentCost != null ? editingCondition.equipmentCost.toString() : '',
@@ -171,20 +172,17 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
         })
       };
       
-      let result;
-      let createdCondition: any = null;
+      let result: TakeoffCondition;
+      let createdCondition: TakeoffCondition | null = null;
       
       if (editingCondition) {
-        // Update existing condition
         await updateCondition(editingCondition.id, conditionData);
-        result = editingCondition; // Use existing condition for callback
+        result = editingCondition;
       } else {
-        // Create new condition - get the condition ID
         const conditionId = await addCondition(conditionData);
-        
         const store = useConditionStore.getState();
-        createdCondition = store.conditions.find((c: { id: string }) => c.id === conditionId);
-        result = createdCondition || { id: conditionId, ...conditionData };
+        createdCondition = store.conditions.find((c): c is TakeoffCondition => c.id === conditionId) ?? null;
+        result = createdCondition ?? { id: conditionId, ...conditionData } as TakeoffCondition;
       }
       
       // Call the callback with the result
@@ -242,7 +240,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
         type: value as 'area' | 'volume' | 'linear' | 'count',
         unit: defaultUnit,
         // Set waste factor to 0 for count conditions since they don't have waste
-        wasteFactor: value === 'count' ? 0 : prev.wasteFactor,
+        wasteFactor: value === 'count' ? '0' : prev.wasteFactor,
         // Reset height-related fields when type changes
         includeHeight: false,
         height: ''

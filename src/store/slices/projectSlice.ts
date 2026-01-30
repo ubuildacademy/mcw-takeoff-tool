@@ -46,8 +46,8 @@ export const useProjectStore = create<ProjectState>()(
           }));
           
           return project.id;
-        } catch (error: any) {
-          console.warn('Failed to create project via API, creating locally:', error.message);
+        } catch (error: unknown) {
+          console.warn('Failed to create project via API, creating locally:', error instanceof Error ? error.message : String(error));
           
           const id = Date.now().toString();
           const project = {
@@ -88,8 +88,8 @@ export const useProjectStore = create<ProjectState>()(
               project.id === id ? localProject : project
             )
           }));
-        } catch (error: any) {
-          console.warn('Failed to update project via API, updating locally:', error.message);
+        } catch (error: unknown) {
+          console.warn('Failed to update project via API, updating locally:', error instanceof Error ? error.message : String(error));
           
           set(state => ({
             projects: state.projects.map(project =>
@@ -128,29 +128,29 @@ export const useProjectStore = create<ProjectState>()(
           const { supabaseService } = await import('../../services/supabaseService');
           const projectsWithUser = await supabaseService.getProjects();
           
-          const projects: Project[] = projectsWithUser.map((p: any) => ({
-            id: p.id,
-            name: p.name,
-            client: p.client || '',
-            location: p.location || '',
-            status: p.status || 'active',
-            description: p.description || undefined,
-            projectType: p.project_type || undefined,
-            startDate: p.start_date || undefined,
-            estimatedValue: p.estimated_value || undefined,
-            contactPerson: p.contact_person || undefined,
-            contactEmail: p.contact_email || undefined,
-            contactPhone: p.contact_phone || undefined,
-            createdAt: p.created_at || new Date().toISOString(),
-            lastModified: p.last_modified || new Date().toISOString(),
-            takeoffCount: p.takeoffCount || 0,
-            totalValue: p.totalValue || undefined,
-            profitMarginPercent: p.profitMarginPercent || undefined,
+          const projects: Project[] = (projectsWithUser as unknown as Array<Record<string, unknown>>).map((p) => ({
+            id: p.id as string,
+            name: p.name as string,
+            client: (p.client as string) || '',
+            location: (p.location as string) || '',
+            status: (p.status as string) || 'active',
+            description: (p.description as string | undefined),
+            projectType: (p.project_type as string | undefined),
+            startDate: (p.start_date as string | undefined),
+            estimatedValue: (p.estimated_value as number | undefined),
+            contactPerson: (p.contact_person as string | undefined),
+            contactEmail: (p.contact_email as string | undefined),
+            contactPhone: (p.contact_phone as string | undefined),
+            createdAt: (p.created_at as string) || new Date().toISOString(),
+            lastModified: (p.last_modified as string) || new Date().toISOString(),
+            takeoffCount: (p.takeoffCount as number) ?? 0,
+            totalValue: (p.totalValue as number | undefined),
+            profitMarginPercent: (p.profitMarginPercent as number | undefined),
           }));
           
           set({ projects });
           console.log('Projects loaded:', projects.length);
-        } catch (error: any) {
+        } catch (error: unknown) {
           console.error('Failed to load projects from Supabase:', error);
           set({ projects: [] });
         }

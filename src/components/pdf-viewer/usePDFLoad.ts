@@ -1,7 +1,18 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
+import type { PDFDocumentProxy } from 'pdfjs-dist';
+import type { ProjectFile } from '../../types';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+
+/** Stable identity for file so we only reload when the logical file changes, not on object reference churn */
+function getFileKey(file: PDFLoadFile): string | null {
+  if (file == null) return null;
+  if (typeof file === 'string') return file;
+  if (file instanceof File) return `${file.name}-${file.size}-${file.lastModified}`;
+  if (file && typeof file === 'object' && 'id' in file && file.id) return (file as ProjectFile).id;
+  return null;
+}
 
 export interface UsePDFLoadOptions {
   externalTotalPages?: number;
@@ -10,7 +21,7 @@ export interface UsePDFLoadOptions {
 }
 
 export interface UsePDFLoadResult {
-  pdfDocument: Awaited<ReturnType<typeof pdfjsLib.getDocument>> | null;
+  pdfDocument: PDFDocumentProxy | null;
   isLoading: boolean;
   error: string | null;
   internalTotalPages: number;
@@ -19,23 +30,28 @@ export interface UsePDFLoadResult {
   setInternalCurrentPage: React.Dispatch<React.SetStateAction<number>>;
 }
 
+/** File shape accepted by usePDFLoad: project file, URL string, or browser File */
+export type PDFLoadFile = ProjectFile | string | File | null | undefined;
+
 /**
- * Loads a PDF from file (URL string, File, or API file object) and exposes document + page state.
+ * Loads a PDF from file (project file with id, URL string, or browser File) and exposes document + page state.
  */
 export function usePDFLoad(
-  file: File | string | Record<string, unknown> | null | undefined,
+  file: PDFLoadFile,
   options: UsePDFLoadOptions = {}
 ): UsePDFLoadResult {
   const { externalTotalPages, externalCurrentPage, onPDFLoaded } = options;
 
-  const [pdfDocument, setPdfDocument] = useState<Awaited<ReturnType<typeof pdfjsLib.getDocument>> | null>(null);
+  const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
   const [internalTotalPages, setInternalTotalPages] = useState(0);
   const [internalCurrentPage, setInternalCurrentPage] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const fileKey = useMemo(() => getFileKey(file), [file]);
+
   useEffect(() => {
-    if (!file) {
+    if (!fileKey || !file) {
       setPdfDocument(null);
       setInternalTotalPages(0);
       setError(null);
@@ -103,9 +119,10 @@ export function usePDFLoad(
     };
 
     loadPDF();
-    // Intentionally only depend on file - match original PDFViewer behavior
+    // Depend on stable file identity (fileKey) so we don't reload when parent passes
+    // a new object reference for the same document (e.g. after project init re-renders).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file]);
+  }, [fileKey]);
 
   return {
     pdfDocument,
