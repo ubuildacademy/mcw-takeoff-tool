@@ -4,19 +4,16 @@ import { Badge } from './ui/badge';
 import { Input } from './ui/input';
 import { 
   FileText, 
-  Upload, 
   Trash2,
   Settings,
   ChevronDown,
   ChevronRight,
-  Filter,
   Edit2,
   Check,
   X,
-  Tag,
-  Search,
-  Brain
+  Tag
 } from 'lucide-react';
+import { useSheetSidebarFilter, useSheetSidebarSheetEditing, SheetSidebarHeader, SheetSidebarDialogs } from './sheet-sidebar';
 import { fileService, sheetService, aiAnalysisService } from '../services/apiService';
 import { useMeasurementStore } from '../store/slices/measurementSlice';
 import * as pdfjsLib from 'pdfjs-dist';
@@ -73,8 +70,36 @@ export function SheetSidebar({
   onExtractTitleblockForDocument,
   onBulkExtractTitleblock,
 }: SheetSidebarProps) {
-  const [filterBy, setFilterBy] = useState<'all' | 'withTakeoffs' | 'withoutTakeoffs'>('all');
-  const [searchQuery, setSearchQuery] = useState<string>('');
+  const {
+    filterBy,
+    setFilterBy,
+    searchQuery,
+    setSearchQuery,
+    currentDocuments,
+    getFilteredAndSortedDocuments,
+    toggleDocumentExpansion,
+  } = useSheetSidebarFilter({ documents });
+
+  const {
+    editingSheetId,
+    editingSheetName,
+    setEditingSheetName,
+    startEditingSheetName,
+    cancelEditingSheetName,
+    saveSheetName,
+    handleSheetNameKeyDown,
+    editingSheetNumberId,
+    editingSheetNumber,
+    setEditingSheetNumber,
+    startEditingSheetNumber,
+    cancelEditingSheetNumber,
+    saveSheetNumber,
+    handleSheetNumberKeyDown,
+  } = useSheetSidebarSheetEditing({
+    documents,
+    onDocumentsUpdate,
+  });
+
   // Use documentsLoading from parent if provided, otherwise use local loading state
   const [localLoading, setLocalLoading] = useState(true);
   const loading = documentsLoading !== undefined ? documentsLoading : localLoading;
@@ -102,9 +127,6 @@ export function SheetSidebar({
     completedDocuments: []
   });
   
-  // Local expansion state to prevent parent from resetting it
-  const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set());
-  
   // Page menu state (for gear icon on pages)
   const [openPageMenu, setOpenPageMenu] = useState<string | null>(null);
   
@@ -115,22 +137,6 @@ export function SheetSidebar({
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [renamingPage, setRenamingPage] = useState<{documentId: string, pageNumber: number, currentName: string} | null>(null);
   const [renameInput, setRenameInput] = useState('');
-  
-  // Use documents from parent component but with local expansion state
-  const currentDocuments = documents.map(doc => ({
-    ...doc,
-    isExpanded: expandedDocuments.has(doc.id)
-  }));
-  
-  // Sheet name editing state
-  const [editingSheetId, setEditingSheetId] = useState<string | null>(null);
-  const [editingSheetName, setEditingSheetName] = useState<string>('');
-  const [editingPageNumber, setEditingPageNumber] = useState<number | null>(null);
-  
-  // Sheet number editing state
-  const [editingSheetNumberId, setEditingSheetNumberId] = useState<string | null>(null);
-  const [editingSheetNumber, setEditingSheetNumber] = useState<string>('');
-  const [editingSheetNumberPageNumber, setEditingSheetNumberPageNumber] = useState<number | null>(null);
   
   // Document menu dropdown state
   const [openDocumentMenu, setOpenDocumentMenu] = useState<string | null>(null);
@@ -294,20 +300,6 @@ export function SheetSidebar({
     onPageSelect(documentId, pageNumber);
   };
 
-  // Toggle document expansion
-  const toggleDocumentExpansion = (documentId: string) => {
-    setExpandedDocuments(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(documentId)) {
-        newSet.delete(documentId);
-      } else {
-        newSet.add(documentId);
-      }
-      return newSet;
-    });
-  };
-
-
   // Delete document
   const handleDeleteDocument = async (documentId: string) => {
     try {
@@ -349,159 +341,6 @@ export function SheetSidebar({
     } catch (error) {
       console.error('Error deleting all documents:', error);
       alert('Failed to delete some documents. Please try again.');
-    }
-  };
-
-  // Start editing sheet name
-  const startEditingSheetName = (documentId: string, pageNumber: number, currentName: string) => {
-    const sheetId = `${documentId}-${pageNumber}`;
-    setEditingSheetId(sheetId);
-    setEditingPageNumber(pageNumber);
-    setEditingSheetName(currentName || `Page ${pageNumber}`);
-  };
-
-  // Cancel editing sheet name
-  const cancelEditingSheetName = () => {
-    setEditingSheetId(null);
-    setEditingPageNumber(null);
-    setEditingSheetName('');
-  };
-
-  // Save sheet name
-  const saveSheetName = async () => {
-    if (!editingSheetId || !editingPageNumber || !editingSheetName.trim()) {
-      cancelEditingSheetName();
-      return;
-    }
-
-    try {
-      // Extract document ID from the sheet ID (format: documentId-pageNumber)
-      const documentId = editingSheetId.split('-').slice(0, -1).join('-');
-      
-      // Update the sheet name in the backend
-      await sheetService.updateSheet(editingSheetId, {
-        documentId: documentId,
-        pageNumber: editingPageNumber,
-        sheetName: editingSheetName.trim()
-      });
-
-      // Update the local state immediately for better UX
-      const updatedDocuments = documents.map(doc => 
-        doc.id === documentId 
-          ? {
-              ...doc,
-              pages: (Array.isArray(doc.pages) ? doc.pages : [])
-                .filter(page => page != null)
-                .map(page => 
-                  page.pageNumber === editingPageNumber 
-                    ? { ...page, sheetName: editingSheetName.trim() }
-                    : page
-                )
-            }
-          : doc
-      );
-      if (onDocumentsUpdate) {
-        onDocumentsUpdate(updatedDocuments);
-      }
-      
-      // Sheet name saved successfully
-      
-      cancelEditingSheetName();
-    } catch (error) {
-      console.error('Error updating sheet name:', error);
-      alert('Failed to update sheet name. Please try again.');
-    }
-  };
-
-  // Handle Enter key to save
-  const handleSheetNameKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      saveSheetName();
-    } else if (e.key === 'Escape') {
-      cancelEditingSheetName();
-    }
-  };
-
-  // Start editing sheet number
-  const startEditingSheetNumber = (documentId: string, pageNumber: number, currentSheetNumber: string) => {
-    const sheetId = `${documentId}-${pageNumber}`;
-    setEditingSheetNumberId(sheetId);
-    setEditingSheetNumber(currentSheetNumber || '');
-    setEditingSheetNumberPageNumber(pageNumber);
-  };
-
-  // Cancel editing sheet number
-  const cancelEditingSheetNumber = () => {
-    setEditingSheetNumberId(null);
-    setEditingSheetNumber('');
-    setEditingSheetNumberPageNumber(null);
-  };
-
-  // Save sheet number with OCR training data
-  const saveSheetNumber = async () => {
-    if (!editingSheetNumberId || !editingSheetNumberPageNumber) {
-      cancelEditingSheetNumber();
-      return;
-    }
-
-    try {
-      // Extract document ID from the sheet ID (format: documentId-pageNumber)
-      const documentId = editingSheetNumberId.split('-').slice(0, -1).join('-');
-      
-      // Get the original sheet number for training data
-      const originalDocument = currentDocuments.find(doc => doc.id === documentId);
-      const originalPage = originalDocument?.pages.find(page => page.pageNumber === editingSheetNumberPageNumber);
-      const originalSheetNumber = originalPage?.sheetNumber || '';
-      
-      const updateData: {
-        documentId: string;
-        pageNumber: number;
-        sheetNumber: string | null;
-      } = {
-        documentId,
-        pageNumber: editingSheetNumberPageNumber,
-        sheetNumber: editingSheetNumber.trim() ? editingSheetNumber.trim() : null
-      };
-      
-      // Update the sheet number in the backend
-      await sheetService.updateSheet(editingSheetNumberId, updateData);
-
-
-      // Update the local state immediately for better UX
-      const updatedDocuments = documents.map(doc => 
-        doc.id === documentId 
-          ? {
-              ...doc,
-              pages: (Array.isArray(doc.pages) ? doc.pages : [])
-                .filter(page => page != null)
-                .map(page => 
-                  page.pageNumber === editingSheetNumberPageNumber 
-                    ? { ...page, sheetNumber: editingSheetNumber.trim() || undefined }
-                    : page
-                )
-            }
-          : doc
-      );
-      if (onDocumentsUpdate) {
-        onDocumentsUpdate(updatedDocuments);
-      }
-      
-      // Show success feedback
-      // Sheet number saved successfully
-      
-      cancelEditingSheetNumber();
-    } catch (error) {
-      console.error('Error updating sheet number:', error);
-      alert('Failed to update sheet number. Please try again.');
-    }
-  };
-
-  // Handle Enter key to save sheet number
-  const handleSheetNumberKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      saveSheetNumber();
-    } else if (e.key === 'Escape') {
-      cancelEditingSheetNumber();
     }
   };
 
@@ -1378,52 +1217,6 @@ export function SheetSidebar({
     }
   };
 
-  // Filter and sort documents
-  const getFilteredAndSortedDocuments = () => {
-    let filteredDocuments = [...currentDocuments];
-    
-    // Apply search filter first
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase().trim();
-      filteredDocuments = filteredDocuments.map(doc => ({
-        ...doc,
-        pages: doc.pages.filter(page => {
-          // Search in page number
-          if (page.pageNumber.toString().includes(query)) return true;
-          
-          // Search in sheet name
-          if (page.sheetName && page.sheetName.toLowerCase().includes(query)) return true;
-          
-          // Search in sheet number
-          if (page.sheetNumber && page.sheetNumber.toLowerCase().includes(query)) return true;
-          
-          // Search in extracted text
-          // OCR text search removed - keeping it simple and clean
-          
-          return false;
-        })
-      })).filter(doc => doc.pages.length > 0); // Only show documents that have matching pages
-    }
-    
-    // Apply takeoff filter - filter documents but also filter pages within documents
-    if (filterBy === 'withTakeoffs') {
-      filteredDocuments = filteredDocuments.map(doc => ({
-        ...doc,
-        pages: doc.pages.filter(page => page.hasTakeoffs)
-      })).filter(doc => doc.pages.length > 0); // Only show documents that have pages with takeoffs
-    } else if (filterBy === 'withoutTakeoffs') {
-      filteredDocuments = filteredDocuments.map(doc => ({
-        ...doc,
-        pages: doc.pages.filter(page => !page.hasTakeoffs)
-      })).filter(doc => doc.pages.length > 0); // Only show documents that have pages without takeoffs
-    }
-    
-    // Sort by document name (simple alphabetical sorting)
-    filteredDocuments.sort((a, b) => a.name.localeCompare(b.name));
-    
-    return filteredDocuments;
-  };
-
   if (loading) {
     return (
       <div className="w-96 bg-white border-l flex flex-col">
@@ -1441,132 +1234,20 @@ export function SheetSidebar({
 
   return (
     <div className="w-96 bg-white border-l flex flex-col h-full">
-      {/* Header */}
-      <div className="p-4 border-b relative">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">Project Documents</h2>
-          <div className="flex gap-2 relative">
-            {onPdfUpload && (
-              <label htmlFor="pdf-upload" className="cursor-pointer">
-                <Button 
-                  size="sm" 
-                  variant="outline" 
-                  asChild
-                  title="Upload new PDF document(s)"
-                >
-                  <span className="flex items-center gap-2">
-                    <Upload className="w-4 h-4" />
-                    {uploading ? 'Uploading…' : 'Upload PDF'}
-                  </span>
-                </Button>
-              </label>
-            )}
-            <div className="relative">
-              <Button 
-                size="sm" 
-                variant="outline" 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setOpenBulkActionsMenu(!openBulkActionsMenu);
-                }}
-                title="Document Actions"
-              >
-                <Settings className="w-4 h-4" />
-              </Button>
-              
-              {openBulkActionsMenu && (
-                <div className="absolute right-0 top-full mt-1 w-56 bg-white border rounded-lg shadow-lg z-50 py-1">
-                  <button
-                    className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 text-blue-600 flex items-center gap-2"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setOpenBulkActionsMenu(false);
-                      
-                      const confirmed = window.confirm(
-                        `Extract titleblock information for all ${documents.length} document(s)? This will process all pages.`
-                      );
-                      
-                      if (!confirmed) {
-                        return;
-                      }
-                      
-                      if (onBulkExtractTitleblock) {
-                        onBulkExtractTitleblock();
-                      } else {
-                        handleLabelAllUnlabeledPages();
-                      }
-                    }}
-                  >
-                    <Tag className="w-4 h-4" />
-                    Extract Titleblock Info (All)
-                  </button>
-                  <button
-                    className="w-full px-3 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center gap-2"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      handleDeleteAllDocuments();
-                    }}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                    Delete All Documents
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-        
-        {/* Hidden file input for PDF upload */}
-        {onPdfUpload && (
-          <input
-            type="file"
-            accept=".pdf,application/pdf"
-            onChange={onPdfUpload}
-            className="hidden"
-            id="pdf-upload"
-            multiple
-          />
-        )}
-        
-
-        {/* Controls */}
-        <div className="space-y-3">
-          {/* Search */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700 flex items-center gap-2">
-              <Search className="w-4 h-4" />
-              Search Pages
-            </label>
-            <Input
-              type="text"
-              placeholder="Search by page number, sheet name, or sheet number..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full"
-            />
-          </div>
-          
-          {/* Filter */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700 flex items-center gap-2">
-              <Filter className="w-4 h-4" />
-              Filter Pages
-            </label>
-            <select
-              value={filterBy}
-              onChange={(e) => setFilterBy((e.target.value as 'all' | 'withTakeoffs' | 'withoutTakeoffs') || 'all')}
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md bg-white hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
-            >
-              <option value="all">All Pages</option>
-              <option value="withTakeoffs">With Takeoffs</option>
-              <option value="withoutTakeoffs">Without Takeoffs</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
+      <SheetSidebarHeader
+        filterBy={filterBy}
+        onFilterByChange={setFilterBy}
+        searchQuery={searchQuery}
+        onSearchQueryChange={setSearchQuery}
+        openBulkActionsMenu={openBulkActionsMenu}
+        onBulkActionsMenuToggle={setOpenBulkActionsMenu}
+        documentsCount={documents.length}
+        onBulkExtractTitleblock={onBulkExtractTitleblock}
+        onLabelAllUnlabeledPages={handleLabelAllUnlabeledPages}
+        onDeleteAllDocuments={handleDeleteAllDocuments}
+        onPdfUpload={onPdfUpload}
+        uploading={uploading}
+      />
 
       {/* Documents and Pages List */}
       <div className="flex-1 overflow-y-auto min-h-0">
@@ -2110,214 +1791,33 @@ export function SheetSidebar({
       </div>
 
       {/* Loading Dialog for AI Document Analysis */}
-      {showLabelingDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-            <div className="flex flex-col items-center space-y-4">
-              <div className="relative">
-                <Brain className="w-12 h-12 text-blue-600 animate-pulse" />
-                <div className="absolute inset-0">
-                  <Brain className="w-12 h-12 text-blue-300 animate-spin" style={{animationDuration: '2s'}} />
-                </div>
-              </div>
-              <h3 className="text-lg font-semibold text-center">AI Analyzing Document</h3>
-              <p className="text-gray-600 text-center text-sm">{labelingProgress}</p>
-              <div className="flex items-center space-x-2 text-blue-600">
-                <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce"></div>
-                <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
-                <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
-              </div>
-            </div>
-            <p className="text-sm text-gray-500 mt-4 text-center">Extracting text and analyzing sheets with AI...</p>
-          </div>
-        </div>
-      )}
-
-      {/* Bulk Analysis Confirmation Dialog */}
-      {showBulkAnalysisConfirmation && pendingBulkAnalysis && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-            <div className="flex flex-col space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold">Confirm Document Analysis</h3>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setShowBulkAnalysisConfirmation(false);
-                    setPendingBulkAnalysis(null);
-                  }}
-                >
-                  <X className="w-4 h-4" />
-                </Button>
-              </div>
-              
-              <div className="space-y-3">
-                <p className="text-sm text-gray-700">
-                  {pendingBulkAnalysis.onlyUnlabeled 
-                    ? 'This will analyze all unlabeled documents to extract sheet names and numbers using AI.'
-                    : 'This will analyze all documents to extract sheet names and numbers using AI.'}
-                </p>
-                
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                  <p className="text-sm font-medium text-blue-900 mb-2">What will happen:</p>
-                  <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
-                    <li>OCR processing will extract text from each document</li>
-                    <li>AI will analyze title blocks to identify sheet numbers and names</li>
-                    <li>Sheet information will be automatically saved</li>
-                    <li>This process may take several minutes for large documents</li>
-                  </ul>
-                </div>
-                
-                <div className="text-sm text-gray-600">
-                  <p className="font-medium mb-1">Documents to analyze:</p>
-                  <p>
-                    {pendingBulkAnalysis.onlyUnlabeled
-                      ? `${documents.filter(doc => isDocumentUnlabeled(doc)).length} unlabeled document(s)`
-                      : `${documents.length} document(s)`}
-                  </p>
-                </div>
-              </div>
-              
-              <div className="flex gap-2 justify-end pt-2">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setShowBulkAnalysisConfirmation(false);
-                    setPendingBulkAnalysis(null);
-                  }}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  onClick={() => {
-                    if (pendingBulkAnalysis) {
-                      handleBulkAnalyzeDocuments(pendingBulkAnalysis.onlyUnlabeled);
-                    }
-                  }}
-                >
-                  <Brain className="w-4 h-4 mr-2" />
-                  Start Analysis
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Bulk Analysis Progress Modal */}
-      {showBulkAnalysisDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
-            <div className="flex flex-col space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold">Bulk Document Analysis</h3>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowBulkAnalysisDialog(false)}
-                >
-                  <X className="w-4 h-4" />
-                </Button>
-              </div>
-              
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-sm">
-                  <span>Progress:</span>
-                  <span className="font-medium">
-                    {bulkAnalysisProgress.completed + bulkAnalysisProgress.failed} / {bulkAnalysisProgress.total}
-                  </span>
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div
-                    className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                    style={{
-                      width: `${((bulkAnalysisProgress.completed + bulkAnalysisProgress.failed) / bulkAnalysisProgress.total) * 100}%`
-                    }}
-                  />
-                </div>
-              </div>
-              
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-gray-700">{bulkAnalysisProgress.status}</p>
-                {bulkAnalysisProgress.current && (
-                  <p className="text-sm text-gray-600">Currently processing: {bulkAnalysisProgress.current}</p>
-                )}
-              </div>
-              
-              <div className="space-y-2">
-                <p className="text-sm font-medium">Completed Documents:</p>
-                <div className="max-h-48 overflow-y-auto space-y-1">
-                  {bulkAnalysisProgress.completedDocuments.map((doc, idx) => (
-                    <div
-                      key={idx}
-                      className={`flex items-center gap-2 text-sm p-2 rounded ${
-                        doc.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
-                      }`}
-                    >
-                      {doc.success ? (
-                        <Check className="w-4 h-4" />
-                      ) : (
-                        <X className="w-4 h-4" />
-                      )}
-                      <span>{doc.name}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Rename Dialog */}
-      {showRenameDialog && renamingPage && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-            <h3 className="text-lg font-semibold mb-4">Rename Page</h3>
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm font-medium text-gray-700 mb-2 block">
-                  Page Name
-                </label>
-                <Input
-                  value={renameInput}
-                  onChange={(e) => setRenameInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      handleRenamePage();
-                    } else if (e.key === 'Escape') {
-                      setShowRenameDialog(false);
-                      setRenamingPage(null);
-                      setRenameInput('');
-                    }
-                  }}
-                  autoFocus
-                  placeholder="Enter page name"
-                />
-              </div>
-              <div className="flex gap-2 justify-end">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setShowRenameDialog(false);
-                    setRenamingPage(null);
-                    setRenameInput('');
-                  }}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  onClick={handleRenamePage}
-                  disabled={!renameInput.trim()}
-                >
-                  Save
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <SheetSidebarDialogs
+        showLabelingDialog={showLabelingDialog}
+        labelingProgress={labelingProgress}
+        showBulkAnalysisConfirmation={showBulkAnalysisConfirmation}
+        pendingBulkAnalysis={pendingBulkAnalysis}
+        bulkAnalysisUnlabeledCount={documents.filter((doc) => isDocumentUnlabeled(doc)).length}
+        bulkAnalysisTotalCount={documents.length}
+        onBulkAnalysisConfirmationCancel={() => {
+          setShowBulkAnalysisConfirmation(false);
+          setPendingBulkAnalysis(null);
+        }}
+        onBulkAnalysisConfirm={(onlyUnlabeled) => handleBulkAnalyzeDocuments(onlyUnlabeled)}
+        showBulkAnalysisDialog={showBulkAnalysisDialog}
+        bulkAnalysisProgress={bulkAnalysisProgress}
+        onBulkAnalysisProgressClose={() => setShowBulkAnalysisDialog(false)}
+        showRenameDialog={showRenameDialog}
+        renamingPage={renamingPage}
+        renameInput={renameInput}
+        onRenameInputChange={setRenameInput}
+        onRenameCancel={() => {
+          setShowRenameDialog(false);
+          setRenamingPage(null);
+          setRenameInput('');
+        }}
+        onRenameSave={handleRenamePage}
+        isRenameSaveDisabled={!renameInput.trim()}
+      />
     </div>
   );
 }

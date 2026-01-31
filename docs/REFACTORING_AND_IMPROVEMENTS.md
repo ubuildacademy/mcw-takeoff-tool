@@ -1,6 +1,8 @@
-# Refactoring & Improvement Recommendations
+# Refactoring and Improvements
 
-Quick reference for future improvements. The workspace refactor is done; these are optional next steps.
+Tracking doc for refactoring (structure, hooks, components) and broader improvements (UX, types, performance, DevOps, accessibility). Use this to record progress and decide what to do next.
+
+**Goals:** Make Meridian Takeoff a **professional-grade construction takeoff app** that is **robust** (reliable, good error handling, tests), **well-written** (clear types, maintainable structure), and **fast/efficient** (responsive UI, sensible loading, optional scale improvements).
 
 ---
 
@@ -16,14 +18,15 @@ Quick reference for future improvements. The workspace refactor is done; these a
 - **PDFViewer** – Canvas/overlay UI split into subcomponents: **`PDFViewerCanvasOverlay`** (`src/components/pdf-viewer/PDFViewerCanvasOverlay.tsx`) wraps the PDF canvas, SVG overlay, loading indicator, and optional text annotation input; **`PDFViewerLoadingIndicator`** and **`PDFViewerTextAnnotationInput`** are used inside the overlay. PDFViewer passes refs, cursor/pointer state, and event handlers (handleClick, handleSvgClick, handleCanvasDoubleClick, handleSvgDoubleClick, etc.) into the overlay. PDFViewer reduced by ~230 lines in the return block.
 - **PDFViewer** – Dialogs and status UI extracted: **`PDFViewerDialogs`** (`src/components/pdf-viewer/PDFViewerDialogs.tsx`) renders CalibrationDialog + ScaleApplicationDialog with props from calibration hook; **`PDFViewerStatusView`** (`src/components/pdf-viewer/PDFViewerStatusView.tsx`) renders loading / error / no-document early returns; **`usePDFViewerData`** (`src/components/pdf-viewer/usePDFViewerData.ts`) owns annotations-loading and per-page measurements-loading effects, returns `localTakeoffMeasurements`, `setLocalTakeoffMeasurements`, `measurementsLoading`. PDFViewer reduced by ~180 lines (dialogs block + status returns + three data-loading effects).
 - **Window bridge** – **`src/lib/windowBridge.ts`** provides typed getters/setters for PDF viewer globals (`restoreScrollPosition`, `triggerCalibration`, `triggerFitToWindow`). TakeoffWorkspace, PDFViewer, useTakeoffWorkspaceProjectInit, and useTakeoffWorkspaceDocumentView use the bridge instead of `(window as any)`.
-- **Error boundary** – TakeoffWorkspace route in `App.tsx` is wrapped with **`ErrorBoundary`** so a single component failure in the workspace doesn’t blank the whole UI.
-- **Search results** – **`SearchResultsList`** (`src/components/takeoff-workspace/SearchResultsList.tsx`) extracts the “Search Results” list below the PDF viewer; TakeoffWorkspace uses `<SearchResultsList results={searchResults} />`. **`ocrSearchResults`** is now typed as **`SearchResult[]`** (from `../types`); `handleOcrSearchResults`, SheetSidebar, and TakeoffWorkspaceHeader.types use `SearchResult[]` for the callback.
+- **Error boundary** – TakeoffWorkspace route in `App.tsx` is wrapped with **`ErrorBoundary`** so a single component failure in the workspace doesn't blank the whole UI.
+- **SheetSidebar** – Filter/search/expansion in **`useSheetSidebarFilter`** (`sheet-sidebar/useSheetSidebarFilter.ts`); **`SheetSidebarHeader`** (upload, bulk actions, search, filter); **`useSheetSidebarSheetEditing`** (sheet name/number inline edit); **`SheetSidebarDialogs`** (Labeling, Bulk Analysis Confirmation/Progress, Rename Page). SheetSidebar reduced from ~2,323 to ~1,823 lines.
+- **Search results** – **`SearchResultsList`** (`src/components/takeoff-workspace/SearchResultsList.tsx`) extracts the "Search Results" list below the PDF viewer; TakeoffWorkspace uses `<SearchResultsList results={searchResults} />`. **`ocrSearchResults`** is now typed as **`SearchResult[]`** (from `../types`); `handleOcrSearchResults`, SheetSidebar, and TakeoffWorkspaceHeader.types use `SearchResult[]` for the callback.
 
 ---
 
 ## Done (from old audit – architecture & security)
 
-- **Massive components:** **TakeoffWorkspace** reduced from ~2,500 to ~775 lines; **TakeoffSidebar** from ~2,456 to ~743 (export in `useTakeoffExport`, condition list in `TakeoffSidebarConditionList`). **Store** split into slices – `useTakeoffStore.ts` is now a thin re-export (~24 lines); domain state lives in `projectSlice`, `conditionSlice`, `measurementSlice`, `calibrationSlice`, `annotationSlice`, `documentViewSlice`, `undoSlice`. **PDFViewer** reduced from ~4,735 to ~2,498 (SVG renderers in `pdfViewerRenderers.ts`, interactions in `usePDFViewerInteractions`). **SheetSidebar** (~2,323) remains the next large target.
+- **Massive components:** **TakeoffWorkspace** reduced from ~2,500 to ~775 lines; **TakeoffSidebar** from ~2,456 to ~743 (export in `useTakeoffExport`, condition list in `TakeoffSidebarConditionList`). **Store** split into slices – `useTakeoffStore.ts` is now a thin re-export (~24 lines); domain state lives in `projectSlice`, `conditionSlice`, `measurementSlice`, `calibrationSlice`, `annotationSlice`, `documentViewSlice`, `undoSlice`. **PDFViewer** reduced from ~4,735 to ~2,498 (SVG renderers in `pdfViewerRenderers.ts`, interactions in `usePDFViewerInteractions`). **SheetSidebar** reduced from ~2,323 to ~1,823 (filter hook, header, sheet-editing hook, dialogs in `sheet-sidebar/`).
 - **Auth:** Centralized **`requireAuth`** (and `requireAdmin`, `hasProjectAccess`) in `server/src/middleware/auth.ts`; all relevant API routes use it. No copy-pasted `getAuthenticatedUser()` across route files.
 - **N+1 queries:** **`projects.ts`** uses a single batch query for measurement counts (`.in('project_id', projectIds)`) instead of per-project queries.
 - **Error swallowing:** Storage layer uses env-based Supabase; route handlers return proper HTTP status and error payloads. (If `storage.ts` still returns empty arrays in `catch` blocks anywhere, that could be audited separately.)
@@ -34,12 +37,32 @@ Quick reference for future improvements. The workspace refactor is done; these a
 
 ---
 
+## Proposed next steps (by impact)
+
+Use this section to pick the next improvement. All items below are already detailed elsewhere in this doc; this list orders them by **impact for a professional-grade app** (robust, well-written, fast/efficient).
+
+| Priority | Area | What | Why (impact) |
+|----------|------|------|---------------|
+| **1** | **UX / robustness** | **Toast/error handling** – Replace `alert()` with a unified toast system (e.g. sonner). | Non-blocking, consistent feedback; feels professional; fewer missed errors. See §6 Frontend quality. |
+| **2** | **Reliability** | **CI/CD** – GitHub Actions: run unit tests + lint on PRs; optional E2E + security checks. | Catches regressions before merge; enforces quality; required for team/scale. See §7 Testing & DevOps. |
+| **3** | **Code quality** | **Types** – Finish reducing `any` where still noted (error handling, filter/result types). | Fewer runtime bugs; better IDE support; easier refactors. See §2 Type safety. |
+| **4** | **Optional refactor** | **SheetSidebar list** – Extract **SheetSidebarDocumentList** / **SheetSidebarPageRow** to shrink SheetSidebar.tsx further. | Maintainability only; logic already in hooks/dialogs. See §1 table. |
+| **5** | **Performance** | **Measure first** – Use React DevTools profiler; then memo/code-split only where hot. | Avoid premature optimization; app is already code-split. See §3 Performance. |
+| **6** | **Inclusion / polish** | **Accessibility** – `alt` text, ARIA, modal focus trap, keyboard navigation in critical flows. | Required for pro/enterprise; better for everyone. See §6 Frontend quality. |
+| **7** | **Scale** | **API pagination** – `limit`/`offset` or cursor for `GET /api/projects` and conditions. | Matters when projects/conditions grow. See §7 Testing & DevOps. |
+| **8** | **Backend quality** | **Server TS strictness** – Enable `noImplicitAny`, `strictNullChecks`, `strictFunctionTypes` incrementally. | Fewer server bugs; safer deploys. See §7. |
+| **9** | **E2E** | **Playwright** – Configure and add at least one smoke E2E (e.g. login → open project → view PDF). | Catches integration issues; confidence for releases. See §7. |
+
+**Recommendation:** Do **toast/error handling** next (high impact, moderate effort), then **CI/CD** (foundation for everything else). After that, types and accessibility give the best “professional polish” for the effort.
+
+---
+
 ## 1. Further component refactors (by impact)
 
 | Target | Lines | Suggestion |
 |--------|-------|------------|
 | **PDFViewer.tsx** | ~2,498 | **Done:** All SVG markup renderers in **`pdfViewerRenderers.ts`**; **`usePDFViewerInteractions`** provides **`getCssCoordsFromEvent`**, **`handleWheel`**, **`handleKeyDown`**, and all mouse handlers (**`handleMouseDown`**, **`handleMouseUp`**, **`handleMouseMove`**, **`handleClick`**, **`handleDoubleClick`**, **`handleCanvasDoubleClick`**, **`handleSvgClick`**, **`handleSvgDoubleClick`**). PDFViewer reduced from ~4,735 to ~2,498 lines; interactions hook ~1,608 lines. |
-| **SheetSidebar.tsx** | ~2,323 | Second-largest. Complex logic; good candidate for hooks (sheet labeling, bulk actions, report) and subcomponents. |
+| **SheetSidebar.tsx** | ~1,823 | **Done:** Filter in **`useSheetSidebarFilter`**; **`SheetSidebarHeader`** (upload, bulk actions, search, filter); **`useSheetSidebarSheetEditing`** (sheet name/number inline edit); **`SheetSidebarDialogs`** (Labeling, Bulk Analysis, Rename). Optional: extract **SheetSidebarDocumentList** / **SheetSidebarPageRow** to shrink further. |
 | **TakeoffSidebar.tsx** | ~743 | Already refactored (useTakeoffExport, TakeoffSidebarConditionList). Optional: extract more tool UI if needed. |
 
 ---
@@ -55,7 +78,7 @@ Quick reference for future improvements. The workspace refactor is done; these a
 ## 3. Performance
 
 - **Zustand:** Selectors are already narrow. If a component only needs one field, use `(s) => s.field` to avoid re-renders when unrelated state changes.
-- **Heavy children:** Consider `React.memo` on `PDFViewer` and `TakeoffSidebar` only if profiling shows them as hot. Prefer “fewer state updates” (already improved by hooks) over memo everywhere.
+- **Heavy children:** Consider `React.memo` on `PDFViewer` and `TakeoffSidebar` only if profiling shows them as hot. Prefer "fewer state updates" (already improved by hooks) over memo everywhere.
 - **Code splitting:** **Done.** `vite.config` chunks `pdfjs`. **CVTakeoffAgent** is lazy-loaded in `TakeoffWorkspaceDialogs` via `React.lazy()` (loads when user opens the dialog). **CalibrationDialog** and **ScaleApplicationDialog** are lazy-loaded in `PDFViewerDialogs` (load when user opens calibration flow). **Excel/PDF export:** `useTakeoffExport` dynamically imports `exceljs` inside `exportToExcel` and `jspdf`, `pdf-lib`, `pdfExportUtils` inside `exportToPDF`, so those libraries load only when the user triggers an export. Initial bundle is smaller; heavy UI and export libs load on demand.
 
 ---
@@ -95,12 +118,12 @@ Quick reference for future improvements. The workspace refactor is done; these a
 
 ## Priority order (suggested)
 
-1. **PDFViewer** – extract measurement/annotation logic into a hook + 1–2 UI components (biggest maintainability win).
-2. **Types** – reduce `any` in new code and in `apiService`/PDFViewer.
-3. **TakeoffSidebar** – export/Excel logic into hook or util.
+1. ~~**PDFViewer**~~ – Done (hooks, overlay, dialogs, data, measurements). ~~**SheetSidebar**~~ – Done (filter, header, sheet-editing hook, dialogs).
+2. **Types** – reduce `any` in new code and in `apiService`/PDFViewer where still noted.
+3. ~~**TakeoffSidebar**~~ – Done (useTakeoffExport, TakeoffSidebarConditionList).
 4. **Performance** – only after measuring (profiler); memo/code-split where needed.
-5. **Window bridge + error boundary** – low effort, improves robustness.
-6. **Toast/error handling** – replace `alert()` with a unified toast system; improves UX and consistency.
+5. ~~**Window bridge + error boundary**~~ – Done.
+6. **Toast/error handling** – replace `alert()` with a unified toast system (e.g. sonner); improves UX and consistency.
 7. **CI/CD** – GitHub Actions for test + lint on PRs; optional E2E and security scanning.
 8. **Accessibility** – alt text, ARIA, modal focus, keyboard navigation in critical paths.
 9. **API pagination** – add pagination to `GET /api/projects` and conditions endpoints for scale.
