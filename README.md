@@ -4,186 +4,80 @@ Professional construction takeoff software built with React, TypeScript, and mod
 
 ## Features
 
-### ✅ Core Functionality
-- **Project Management**: Create, edit, delete, and organize construction projects
-- **PDF Upload & Processing**: Upload and process construction drawings with OCR
-- **Takeoff Tools**: Area, linear, volume, and count measurement tools
-- **Condition Management**: Create and manage takeoff conditions with custom properties
-- **Measurement System**: Precise takeoff measurements with cutout support
-- **Scale Calibration**: Accurate scale calibration for real-world measurements
-- **Professional Reporting**: Excel and PDF export with industry-standard formatting
-- **Project Backup/Restore**: Complete project data backup and restore system
-- **Grid/List Views**: Flexible project dashboard with view mode switching
+- **Project management** – Create, edit, delete, and organize construction projects
+- **PDF upload & processing** – Upload drawings with OCR
+- **Takeoff tools** – Area, linear, volume, and count measurements with cutout support
+- **Conditions** – Custom takeoff conditions, cost rates, waste factors
+- **Scale calibration** – Real-world scale calibration on drawings
+- **Reporting** – Excel and PDF export
+- **Backup / restore** – Project backup and restore
+- **Views** – Grid/list project dashboard
 
-### Key Components
-- **PDFViewer**: Core component with canvas overlay for markup and measurements
-- **TakeoffSidebar**: Left sidebar with conditions, tools, and measurement settings
-- **SheetSidebar**: Right sidebar for sheet navigation and management
-- **ProjectList**: Home page with project overview and management
-- **BackupDialog**: Project backup and restore functionality
+## Tech stack
 
-## Technology Stack
+- **Frontend:** React 18, TypeScript, Vite, Tailwind CSS, Radix UI, Zustand
+- **PDF:** PDF.js (pdfjs-dist)
+- **Backend:** Express.js, TypeScript
+- **Database:** Supabase (PostgreSQL)
 
-- **Frontend**: React 18 + TypeScript
-- **Styling**: Tailwind CSS + Radix UI components
-- **PDF Processing**: react-pdf with PDF.js
-- **Icons**: Lucide React
-- **Build Tool**: Vite
-- **State Management**: Zustand
-- **Backend**: Express.js + TypeScript
-- **Database**: Supabase (PostgreSQL)
-
-## Getting Started
+## Getting started
 
 ### Prerequisites
-- Node.js 18+ 
-- Python 3.8+ (for backend Python scripts)
-- npm or yarn
-- Supabase account and project
 
-### Quick Setup
+Node.js 18+, Python 3.8+ (for backend scripts), npm, and a Supabase project.
 
-For detailed local development setup instructions, see **[DEVELOPMENT_SETUP.md](./DEVELOPMENT_SETUP.md)**
+### Quick start
 
-**Quick start:**
+1. **Environment** – Copy `.env.example` to `.env` (root) and `server/.env`. Add your Supabase URL and keys to both.
 
-1. Run the setup script (optional, helps with initial setup):
-```bash
-./scripts/dev-setup.sh
-```
+2. **Install**
+   ```bash
+   npm install
+   cd server && npm install && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt && cd ..
+   ```
 
-2. Set up environment variables:
-   - Copy `.env.example` to `.env` (root directory)
-   - Copy `.env.example` to `server/.env`
-   - Add your Supabase credentials to both files
+3. **Run** (two terminals)
+   - **Backend:** `cd server && source venv/bin/activate && npm run dev`
+   - **Frontend:** `npm run dev`
 
-3. Install dependencies:
-```bash
-# Frontend
-npm install
+4. **Open** – [http://localhost:3001](http://localhost:3001)
 
-# Backend
-cd server
-npm install
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
-cd ..
-```
+**Full setup, troubleshooting, and daily workflow:** [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
 
-4. Start development servers (in two separate terminals):
+### Scripts
 
-**Terminal 1 - Backend:**
-```bash
-cd server
-source venv/bin/activate  # If using venv
-npm run dev
-```
+| Command | Description |
+|--------|-------------|
+| `npm run dev` | Start frontend dev server |
+| `npm run build` | Production build |
+| `npm run preview` | Preview production build |
+| `npm run test` | Run tests |
 
-**Terminal 2 - Frontend:**
-```bash
-npm run dev
-```
-
-5. Open your browser to `http://localhost:3001`
-
-### Available Scripts
-
-- `npm run dev` - Start frontend development server
-- `npm run build` - Build frontend for production
-- `npm run preview` - Preview production build
-- `npm run lint` - Run ESLint
-
-## Project Structure
+## Project structure
 
 ```
 ├── src/
-│   ├── components/
-│   │   ├── ui/                 # Reusable UI components
-│   │   ├── PDFViewer.tsx       # Core PDF viewing and markup
-│   │   ├── TakeoffSidebar.tsx  # Left sidebar with conditions
-│   │   ├── SheetSidebar.tsx    # Right sidebar with sheets
-│   │   ├── TakeoffWorkspace.tsx # Main workspace layout
-│   │   ├── ProjectList.tsx     # Home page
-│   │   └── BackupDialog.tsx    # Backup/restore functionality
-│   ├── services/
-│   │   ├── apiService.ts       # API communication
-│   │   └── backupService.ts    # Backup/restore service
-│   ├── store/
-│   │   └── useTakeoffStore.ts  # State management
-│   ├── types/
-│   │   └── index.ts            # TypeScript definitions
-│   └── utils/
-│       └── commonUtils.ts      # Utility functions
-├── server/
-│   ├── src/
-│   │   ├── routes/             # API routes
-│   │   ├── storage.ts          # Database operations
-│   │   └── index.ts            # Server entry point
-│   └── uploads/                # File storage
-└── DEVELOPMENT_ROADMAP.md      # Current development priorities
+│   ├── components/     # UI (PDFViewer, TakeoffWorkspace, SheetSidebar, etc.)
+│   ├── services/       # API, backup, OCR, etc.
+│   ├── store/         # Zustand slices
+│   ├── types/         # TypeScript types
+│   └── utils/         # Helpers
+├── server/            # Express API, Python scripts (PDF/OCR)
+├── docs/              # DEVELOPMENT.md, TESTING.md, REFACTORING_AND_IMPROVEMENTS.md
+└── scripts/           # dev-setup.sh, start-dev.sh
 ```
-
-## Key Features Explained
-
-### PDF Viewer & Markup
-The PDFViewer component features:
-- PDF.js integration for fast rendering
-- Custom HTML5 canvas for drawing tools
-- Support for linear, area, volume, and count measurements
-- PDF-relative coordinate system for persistent positioning
-- Zoom, pan, and rotation controls
-- Search functionality within documents
-
-### Takeoff Conditions
-The TakeoffSidebar provides:
-- Pre-defined takeoff conditions (concrete, drywall, electrical, etc.)
-- Custom condition creation
-- Cost calculations with labor and material rates
-- Waste factor management
-- Unit conversion support
-
-### Project Backup/Restore
-- Individual project backup with download icons
-- Comprehensive JSON backup files
-- File upload restore functionality
-- Complete project data portability
-
-## Current Development Priorities
-
-See [DEVELOPMENT_ROADMAP.md](./DEVELOPMENT_ROADMAP.md) for current issues and development priorities.
 
 ## Deployment
 
-### Frontend (Vercel)
-This project is configured for Vercel deployment:
+- **Frontend:** Vercel (`vercel` or connect repo)
+- **Backend:** Deploy the Express app separately (e.g. Railway, Vercel serverless, DigitalOcean)
 
-1. **Deploy to Vercel**:
-```bash
-vercel
-```
+## Docs
 
-2. **Or connect your GitHub repository** to Vercel through the web interface
-
-### Backend
-The backend server is a separate Express.js application that needs to be deployed independently. Consider:
-- Vercel Functions
-- Railway
-- Heroku
-- DigitalOcean App Platform
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) – Local setup and troubleshooting
+- [docs/TESTING.md](docs/TESTING.md) – Tests
+- [docs/REFACTORING_AND_IMPROVEMENTS.md](docs/REFACTORING_AND_IMPROVEMENTS.md) – Refactoring log and next steps
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Support
-
-For support and questions, please open an issue in the GitHub repository or contact the development team.
+MIT. See the LICENSE file for details.
