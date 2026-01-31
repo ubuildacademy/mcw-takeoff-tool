@@ -21,6 +21,7 @@ Tracking doc for refactoring (structure, hooks, components) and broader improvem
 - **Error boundary** – TakeoffWorkspace route in `App.tsx` is wrapped with **`ErrorBoundary`** so a single component failure in the workspace doesn't blank the whole UI.
 - **SheetSidebar** – Filter/search/expansion in **`useSheetSidebarFilter`** (`sheet-sidebar/useSheetSidebarFilter.ts`); **`SheetSidebarHeader`** (upload, bulk actions, search, filter); **`useSheetSidebarSheetEditing`** (sheet name/number inline edit); **`SheetSidebarDialogs`** (Labeling, Bulk Analysis Confirmation/Progress, Rename Page). SheetSidebar reduced from ~2,323 to ~1,823 lines.
 - **Search results** – **`SearchResultsList`** (`src/components/takeoff-workspace/SearchResultsList.tsx`) extracts the "Search Results" list below the PDF viewer; TakeoffWorkspace uses `<SearchResultsList results={searchResults} />`. **`ocrSearchResults`** is now typed as **`SearchResult[]`** (from `../types`); `handleOcrSearchResults`, SheetSidebar, and TakeoffWorkspaceHeader.types use `SearchResult[]` for the callback.
+- **Supabase Security Advisor** – Migration **`server/migrations/supabase_security_advisor_fixes.sql`** fixes: (1) function `search_path` for `public.is_admin` and any `update_ocr_training_data*` function; (2) RLS on `public.ocr_training_data` (drops permissive policies, adds authenticated-only). **`docs/SUPABASE_SECURITY_CHECKLIST.md`** covers running the migration plus Dashboard-only steps: enable **Leaked password protection** and **MFA options** in Auth.
 
 ---
 
