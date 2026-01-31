@@ -1,6 +1,5 @@
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import axios from 'axios';
 import 'dotenv/config';
 
 async function runMigration(migrationFile: string) {
@@ -9,14 +8,7 @@ async function runMigration(migrationFile: string) {
     const migrationPath = path.join(__dirname, '..', 'migrations', migrationFile);
     const sql = await fs.readFile(migrationPath, 'utf-8');
     
-    const supabaseUrl = process.env.SUPABASE_URL || 'https://mxjyytwfhmoonkduvybr.supabase.co';
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    
-    if (!supabaseKey) {
-      throw new Error('SUPABASE_SERVICE_ROLE_KEY environment variable is required');
-    }
-    
-    console.log('🔧 Executing migration via Supabase REST API...');
+    console.log('🔧 Migration SQL (run this in Supabase SQL Editor):');
     
     // Supabase doesn't have a direct SQL execution endpoint via REST API
     // We need to use the PostgREST API or Management API
