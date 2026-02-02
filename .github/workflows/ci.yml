@@ -1,4 +1,4 @@
-# Minimal CI: test on push and PRs (add lint when ESLint is configured)
+# CI: install, typecheck, build, lint, test (same install/build as Vercel)
 name: CI
 on:
   push:
@@ -6,7 +6,7 @@ on:
   pull_request:
     branches: [main]
 jobs:
-  test:
+  ci:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,4 +15,11 @@ jobs:
           node-version: "20"
           cache: "npm"
       - run: npm ci
-      - run: npm run test
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
+      - name: Lint
+        run: npm run lint
+      - name: Test
+        run: npm run test
