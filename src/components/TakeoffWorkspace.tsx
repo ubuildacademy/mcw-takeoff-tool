@@ -15,7 +15,8 @@ import { useAnnotationStore } from '../store/slices/annotationSlice';
 import { useDocumentViewStore } from '../store/slices/documentViewSlice';
 import { useUndoStore } from '../store/slices/undoSlice';
 import type { TakeoffCondition, Sheet, ProjectFile, PDFDocument, SearchResult } from '../types';
-import { triggerCalibration, triggerFitToWindow } from '../lib/windowBridge';
+import { toast } from 'sonner';
+import { triggerCalibration, triggerFitToWindow, getCurrentScrollPosition } from '../lib/windowBridge';
 import * as pdfjsLib from 'pdfjs-dist';
 
 // Configure PDF.js worker
@@ -113,8 +114,15 @@ export function TakeoffWorkspace() {
   const getDocumentLocation = useDocumentViewStore((s) => s.getDocumentLocation);
   const getLastViewedDocumentId = useDocumentViewStore((s) => s.getLastViewedDocumentId);
   const setLastViewedDocumentId = useDocumentViewStore((s) => s.setLastViewedDocumentId);
-  const calibrations = useCalibrationStore((s) => s.calibrations);
-  
+
+  // Track when document view store has rehydrated from localStorage so we apply saved view state
+  const [documentViewRehydrated, setDocumentViewRehydrated] = useState(false);
+  useEffect(() => {
+    const unsub = useDocumentViewStore.persist?.onFinishHydration?.(() => setDocumentViewRehydrated(true));
+    if (useDocumentViewStore.persist?.hasHydrated?.()) setDocumentViewRehydrated(true);
+    return () => { unsub?.(); };
+  }, []);
+
   const selectedCondition = getSelectedCondition();
 
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
@@ -158,6 +166,11 @@ export function TakeoffWorkspace() {
   const [scale, setScale] = useState(1);
   const [rotation, setRotation] = useState(0);
 
+  // Narrow selector: only current page calibration (avoids re-render when other pages' calibrations change)
+  const currentCalibration = useCalibrationStore((s) =>
+    s.getCalibration(projectId ?? '', currentPdfFile?.id ?? '', currentPage ?? 1)
+  );
+
   const visualSearch = useTakeoffWorkspaceVisualSearch({
     projectId: projectId ?? undefined,
     currentPdfFile,
@@ -168,14 +181,9 @@ export function TakeoffWorkspace() {
   
   // Scale is now managed by the store
   
-  // Current calibration state for the active document/page - reactive to calibrations array changes
-  // CRITICAL: Page-specific calibrations take precedence over document-level calibrations
-  // This allows users to override document-level calibration for specific pages
+  // Current calibration for the active document/page (narrow selector in parent)
   const calibration = useTakeoffWorkspaceCalibration({
-    projectId: projectId ?? undefined,
-    currentPdfFile,
-    currentPage,
-    calibrations,
+    currentCalibration,
     isDev,
   });
 
@@ -209,6 +217,8 @@ export function TakeoffWorkspace() {
   useTakeoffWorkspaceProjectInit({
     projectId: projectId ?? undefined,
     isDev,
+    documentViewRehydrated,
+    currentPdfFile,
     setProjectFiles,
     setCurrentPdfFile,
     setSelectedDocumentId,
@@ -216,17 +226,27 @@ export function TakeoffWorkspace() {
     setRotation,
     setCurrentPage,
     setSelectedPageNumber,
-    getLastViewedDocumentId: () => getLastViewedDocumentId() ?? undefined,
+    getLastViewedDocumentId: (pid: string) => getLastViewedDocumentId(pid) ?? undefined,
     getDocumentPage,
     getDocumentScale,
     getDocumentRotation,
-    getDocumentLocation,
     setCurrentProject,
     clearProjectCalibrations,
     setCalibration,
     loadProjectTakeoffMeasurements,
     setShowProfitMarginDialog,
   });
+
+  // Persist scroll position on unload/refresh so viewport restores to same spot
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (!currentPdfFile) return;
+      const pos = getCurrentScrollPosition();
+      if (pos) setDocumentLocation(currentPdfFile.id, pos);
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [currentPdfFile?.id, setDocumentLocation]);
 
   // Handle measurement state changes from PDFViewer
   // CRITICAL: Wrapped in useCallback to prevent infinite re-render loops
@@ -251,7 +271,7 @@ export function TakeoffWorkspace() {
         const existingMeasurements = takeoffMeasurements.filter(m => m.conditionId === condition.id);
         
         if (existingMeasurements.length > 0) {
-          alert(`This auto-count condition already has ${existingMeasurements.length} measurements. Please delete the condition and recreate it to run a new search.`);
+          toast.warning(`This auto-count condition already has ${existingMeasurements.length} measurements. Please delete the condition and recreate it to run a new search.`);
           visualSearch.setVisualSearchMode(false);
           visualSearch.setVisualSearchCondition(null);
         } else {
@@ -479,6 +499,21 @@ export function TakeoffWorkspace() {
         setSelectedPageNumber(currentPageToPreserve);
         setDocumentPage(currentPdfFile.id, currentPageToPreserve);
       }
+
+      // Recalculate existing measurements for the calibrated scope so values use the new scale
+      const recalculateMeasurementsForCalibration = useMeasurementStore.getState().recalculateMeasurementsForCalibration;
+      const vw = viewportWidth ?? null;
+      const vh = viewportHeight ?? null;
+      if (scope === 'document') {
+        const filesRes = await fileService.getProjectFiles(projectId);
+        const pdfFiles = (filesRes.files || []).filter((file: ProjectFile) => file.mimetype === 'application/pdf');
+        for (const file of pdfFiles) {
+          await recalculateMeasurementsForCalibration(projectId, file.id, null, scaleFactor, unit, vw, vh);
+        }
+      } else {
+        const calibrationPageNumber = pageNumber ?? currentPage;
+        await recalculateMeasurementsForCalibration(projectId, currentPdfFile.id, calibrationPageNumber, scaleFactor, unit, vw, vh);
+      }
     }
   }, [currentPdfFile, projectId, currentPage, setDocumentPage, setCalibration]);
 
@@ -501,7 +536,7 @@ export function TakeoffWorkspace() {
     });
     
     if (invalidFiles.length > 0) {
-      alert(`Some files are too large! Maximum size is ${maxSizeMB}MB (1GB).\n\nLarge files:\n${invalidFiles.join('\n')}\n\nPlease contact your admin to increase the Supabase Storage file size limit.`);
+      toast.error(`Some files are too large! Maximum size is ${maxSizeMB}MB (1GB). Large files: ${invalidFiles.join(', ')}. Please contact your admin to increase the Supabase Storage file size limit.`);
       return;
     }
     
@@ -547,17 +582,17 @@ export function TakeoffWorkspace() {
       if (failedFiles.length > 0) {
         const successCount = uploadedFiles.length;
         const failCount = failedFiles.length;
-        const failMessages = failedFiles.map(f => `  • ${f.name}: ${f.error}`).join('\n');
-        alert(`Upload Summary:\n\n✅ Successfully uploaded: ${successCount} file(s)\n❌ Failed: ${failCount} file(s)\n\nFailed files:\n${failMessages}`);
+        const failMessages = failedFiles.map(f => `${f.name}: ${f.error}`).join('; ');
+        toast.warning(`Upload: ${successCount} succeeded, ${failCount} failed. ${failMessages}`);
       } else if (uploadedFiles.length > 1) {
-        alert(`Successfully uploaded ${uploadedFiles.length} files! OCR processing has started automatically in the background.`);
+        toast.success(`Successfully uploaded ${uploadedFiles.length} files! OCR processing has started automatically in the background.`);
       }
       
     } catch (error: unknown) {
       console.error('Upload failed:', error);
       const errorMessage = getErrorMessage(error);
       
-      alert(`Upload Error: ${errorMessage}`);
+      toast.error(`Upload Error: ${errorMessage}`);
     } finally {
       setUploading(false);
     }
