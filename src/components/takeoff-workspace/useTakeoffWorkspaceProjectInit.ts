@@ -1,5 +1,4 @@
 import { useEffect, useRef } from 'react';
-import { restoreScrollPosition } from '../../lib/windowBridge';
 import { fileService } from '../../services/apiService';
 import { useMeasurementStore } from '../../store/slices/measurementSlice';
 import type { ProjectFile, Calibration } from '../../types';
@@ -7,6 +6,9 @@ import type { ProjectFile, Calibration } from '../../types';
 export interface UseTakeoffWorkspaceProjectInitOptions {
   projectId: string | undefined;
   isDev?: boolean;
+  /** When true, document view store has rehydrated from localStorage so saved view state is available */
+  documentViewRehydrated?: boolean;
+  currentPdfFile: ProjectFile | null;
   setProjectFiles: (files: ProjectFile[]) => void;
   setCurrentPdfFile: (file: ProjectFile | null) => void;
   setSelectedDocumentId: (id: string | null) => void;
@@ -14,11 +16,10 @@ export interface UseTakeoffWorkspaceProjectInitOptions {
   setRotation: (rotation: number) => void;
   setCurrentPage: (page: number) => void;
   setSelectedPageNumber: (page: number | null) => void;
-  getLastViewedDocumentId: (() => string | undefined) | undefined;
+  getLastViewedDocumentId: ((projectId: string) => string | undefined) | undefined;
   getDocumentPage: (documentId: string) => number;
   getDocumentScale: (documentId: string) => number;
   getDocumentRotation: (documentId: string) => number;
-  getDocumentLocation: (documentId: string) => { x: number; y: number };
   setCurrentProject: (projectId: string) => void;
   clearProjectCalibrations: (projectId: string) => void;
   setCalibration: (
@@ -42,6 +43,8 @@ export interface UseTakeoffWorkspaceProjectInitOptions {
 export function useTakeoffWorkspaceProjectInit({
   projectId,
   isDev = false,
+  documentViewRehydrated = false,
+  currentPdfFile,
   setProjectFiles,
   setCurrentPdfFile,
   setSelectedDocumentId,
@@ -53,7 +56,6 @@ export function useTakeoffWorkspaceProjectInit({
   getDocumentPage,
   getDocumentScale,
   getDocumentRotation,
-  getDocumentLocation,
   setCurrentProject,
   clearProjectCalibrations,
   setCalibration,
@@ -61,51 +63,57 @@ export function useTakeoffWorkspaceProjectInit({
   setShowProfitMarginDialog,
 }: UseTakeoffWorkspaceProjectInitOptions): void {
   const loadedProjectIdRef = useRef<string | null>(null);
+  const appliedRehydratedRef = useRef(false);
+
+  // After document view store rehydrates, re-apply saved page/scale/rotation once (scroll restored by handlePDFRendered)
+  useEffect(() => {
+    if (!documentViewRehydrated || !projectId || !currentPdfFile || appliedRehydratedRef.current) return;
+    appliedRehydratedRef.current = true;
+    setScale(getDocumentScale(currentPdfFile.id));
+    setRotation(getDocumentRotation(currentPdfFile.id));
+    const savedPage = getDocumentPage(currentPdfFile.id);
+    setCurrentPage(savedPage);
+    setSelectedPageNumber(savedPage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documentViewRehydrated, projectId, currentPdfFile?.id]);
 
   // Load project files and restore last viewed document (once per projectId)
   useEffect(() => {
     if (!projectId) {
       loadedProjectIdRef.current = null;
+      appliedRehydratedRef.current = false;
       return;
     }
     if (loadedProjectIdRef.current === projectId) {
       return;
     }
+    const currentProjectId: string = projectId;
     loadedProjectIdRef.current = projectId;
-    const pid = projectId;
+    appliedRehydratedRef.current = false;
 
     async function loadFiles() {
       try {
-        const res = await fileService.getProjectFiles(pid);
+        const res = await fileService.getProjectFiles(currentProjectId);
         const files = (res.files || []) as ProjectFile[];
         setProjectFiles(files);
 
         if (files.length > 0) {
           const pdfFiles = files.filter((f: ProjectFile) => f.mimetype === 'application/pdf');
           let target = pdfFiles[0];
-          const lastViewedId = getLastViewedDocumentId?.();
+          const lastViewedId = getLastViewedDocumentId?.(currentProjectId);
           if (lastViewedId) {
             const match = pdfFiles.find((f: ProjectFile) => f.id === lastViewedId);
             if (match) target = match;
           }
           if (target) {
-            const savedPage = getDocumentPage(target.id);
-            const savedScale = getDocumentScale(target.id);
-            const savedRotation = getDocumentRotation(target.id);
-            const savedLocation = getDocumentLocation(target.id);
-
             setCurrentPdfFile(target);
             setSelectedDocumentId(target.id);
-            setScale(savedScale);
-            setRotation(savedRotation);
+            setScale(getDocumentScale(target.id));
+            setRotation(getDocumentRotation(target.id));
+            const savedPage = getDocumentPage(target.id);
             setCurrentPage(savedPage);
             setSelectedPageNumber(savedPage);
-
-            if (savedLocation.x !== 0 || savedLocation.y !== 0) {
-              setTimeout(() => {
-                restoreScrollPosition(savedLocation.x, savedLocation.y);
-              }, 200);
-            }
+            // Scroll position restored in handlePDFRendered when the PDF has rendered
           }
         }
       } catch (e: unknown) {
