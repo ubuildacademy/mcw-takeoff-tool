@@ -2,6 +2,11 @@ import { useCallback, useEffect, useRef } from 'react';
 import { restoreScrollPosition } from '../../lib/windowBridge';
 import type { ProjectFile, Sheet } from '../../types';
 
+/** Delays (ms) to retry scroll restore after PDF render so we catch when layout is final */
+const SCROLL_RESTORE_DELAYS_MS = [50, 150, 300, 500, 700, 1000];
+/** Delay (ms) before restoring scroll when user switches sheet/page (gives viewer time to mount) */
+const SCROLL_RESTORE_AFTER_SWITCH_MS = 200;
+
 export interface UseTakeoffWorkspaceDocumentViewOptions {
   projectId: string | undefined;
   projectFiles: ProjectFile[];
@@ -23,7 +28,7 @@ export interface UseTakeoffWorkspaceDocumentViewOptions {
   getDocumentRotation: (documentId: string) => number;
   getDocumentLocation: (documentId: string) => { x: number; y: number };
   setDocumentPage: (documentId: string, page: number) => void;
-  setLastViewedDocumentId: ((documentId: string) => void) | undefined;
+  setLastViewedDocumentId: ((projectId: string, documentId: string) => void) | undefined;
   setDocumentScale: (documentId: string, scale: number) => void;
   setDocumentRotation: (documentId: string, rotation: number) => void;
   setDocumentLocation: (documentId: string, location: { x: number; y: number }) => void;
@@ -40,6 +45,7 @@ export interface UseTakeoffWorkspaceDocumentViewResult {
 }
 
 export function useTakeoffWorkspaceDocumentView({
+  projectId,
   projectFiles,
   currentPdfFile,
   currentPage,
@@ -67,14 +73,13 @@ export function useTakeoffWorkspaceDocumentView({
   const lastRestoredFileIdRef = useRef<string | null>(null);
   const isInitialRenderRef = useRef(true);
 
-  // Restore page/scale/rotation/location from store when currentPdfFile changes
+  // Restore page/scale/rotation from store when switching documents (scroll restored in handlePDFRendered)
   useEffect(() => {
     if (!currentPdfFile || currentPdfFile.id === lastRestoredFileIdRef.current) return;
 
     const savedRotation = getDocumentRotation(currentPdfFile.id);
     const savedPage = getDocumentPage(currentPdfFile.id);
     const savedScale = getDocumentScale(currentPdfFile.id);
-    const savedLocation = getDocumentLocation(currentPdfFile.id);
 
     if (savedPage !== currentPage) {
       setCurrentPage(savedPage);
@@ -108,16 +113,16 @@ export function useTakeoffWorkspaceDocumentView({
         if (isDev) console.log('📄 Page change:', { from: currentPage, to: page, documentId: currentPdfFile?.id });
         setCurrentPage(page);
         setSelectedPageNumber(page);
-        if (currentPdfFile) {
+        if (currentPdfFile && projectId) {
           setDocumentPage(currentPdfFile.id, page);
-          setLastViewedDocumentId?.(currentPdfFile.id);
+          setLastViewedDocumentId?.(projectId, currentPdfFile.id);
           if (isDev) console.log('💾 Saved page to store:', { documentId: currentPdfFile.id, page });
         }
       } else if (isDev) {
         console.log('⏭️ Page change skipped - already on page', page);
       }
     },
-    [totalPages, currentPage, currentPdfFile, setCurrentPage, setSelectedPageNumber, setDocumentPage, setLastViewedDocumentId, isDev]
+    [totalPages, currentPage, currentPdfFile, projectId, setCurrentPage, setSelectedPageNumber, setDocumentPage, setLastViewedDocumentId, isDev]
   );
 
   const handleScaleChange = useCallback(
@@ -149,30 +154,22 @@ export function useTakeoffWorkspaceDocumentView({
     [currentPdfFile, setDocumentLocation]
   );
 
-  const handleSheetSelect = useCallback(
-    (sheet: Sheet) => {
-      setSelectedSheet(sheet);
-      const selectedFile = projectFiles.find((file) => file.id === sheet.id);
-      if (selectedFile) {
-        setCurrentPdfFile(selectedFile);
-        const savedScale = getDocumentScale(selectedFile.id);
-        const savedRotation = getDocumentRotation(selectedFile.id);
-        const savedPage = getDocumentPage(selectedFile.id);
-        const savedLocation = getDocumentLocation(selectedFile.id);
-        setScale(savedScale);
-        setRotation(savedRotation);
-        setCurrentPage(savedPage);
-        setSelectedPageNumber(savedPage);
-        setDocumentPage(selectedFile.id, savedPage);
-        setLastViewedDocumentId?.(selectedFile.id);
-        if (savedLocation.x !== 0 || savedLocation.y !== 0) {
-          setTimeout(() => restoreScrollPosition(savedLocation.x, savedLocation.y), 200);
-        }
+  const applySavedViewStateForFile = useCallback(
+    (selectedFile: ProjectFile, pageNumber: number) => {
+      setCurrentPdfFile(selectedFile);
+      setScale(getDocumentScale(selectedFile.id));
+      setRotation(getDocumentRotation(selectedFile.id));
+      setCurrentPage(pageNumber);
+      setSelectedPageNumber(pageNumber);
+      setDocumentPage(selectedFile.id, pageNumber);
+      if (projectId) setLastViewedDocumentId?.(projectId, selectedFile.id);
+      const savedLocation = getDocumentLocation(selectedFile.id);
+      if (savedLocation.x !== 0 || savedLocation.y !== 0) {
+        setTimeout(() => restoreScrollPosition(savedLocation.x, savedLocation.y), SCROLL_RESTORE_AFTER_SWITCH_MS);
       }
     },
     [
-      projectFiles,
-      setSelectedSheet,
+      projectId,
       setCurrentPdfFile,
       setScale,
       setRotation,
@@ -182,9 +179,19 @@ export function useTakeoffWorkspaceDocumentView({
       setLastViewedDocumentId,
       getDocumentScale,
       getDocumentRotation,
-      getDocumentPage,
       getDocumentLocation,
     ]
+  );
+
+  const handleSheetSelect = useCallback(
+    (sheet: Sheet) => {
+      setSelectedSheet(sheet);
+      const selectedFile = projectFiles.find((file) => file.id === sheet.id);
+      if (selectedFile) {
+        applySavedViewStateForFile(selectedFile, getDocumentPage(selectedFile.id));
+      }
+    },
+    [projectFiles, setSelectedSheet, applySavedViewStateForFile, getDocumentPage]
   );
 
   const handlePageSelect = useCallback(
@@ -193,41 +200,19 @@ export function useTakeoffWorkspaceDocumentView({
       setSelectedPageNumber(pageNumber);
       const selectedFile = projectFiles.find((file) => file.id === documentId);
       if (selectedFile) {
-        setCurrentPdfFile(selectedFile);
-        const savedScale = getDocumentScale(selectedFile.id);
-        const savedRotation = getDocumentRotation(selectedFile.id);
-        const savedLocation = getDocumentLocation(selectedFile.id);
-        setScale(savedScale);
-        setRotation(savedRotation);
-        setCurrentPage(pageNumber);
-        setDocumentPage(selectedFile.id, pageNumber);
-        setLastViewedDocumentId?.(selectedFile.id);
-        if (savedLocation.x !== 0 || savedLocation.y !== 0) {
-          setTimeout(() => restoreScrollPosition(savedLocation.x, savedLocation.y), 200);
-        }
+        applySavedViewStateForFile(selectedFile, pageNumber);
       }
     },
-    [
-      projectFiles,
-      setSelectedDocumentId,
-      setSelectedPageNumber,
-      setCurrentPdfFile,
-      setScale,
-      setRotation,
-      setCurrentPage,
-      setDocumentPage,
-      setLastViewedDocumentId,
-      getDocumentScale,
-      getDocumentRotation,
-      getDocumentLocation,
-    ]
+    [projectFiles, setSelectedDocumentId, setSelectedPageNumber, applySavedViewStateForFile]
   );
 
   const handlePDFRendered = useCallback(() => {
     if (currentPdfFile && isInitialRenderRef.current) {
       const savedLocation = getDocumentLocation(currentPdfFile.id);
       if (savedLocation.x !== 0 || savedLocation.y !== 0) {
-        setTimeout(() => restoreScrollPosition(savedLocation.x, savedLocation.y), 25);
+        const { x, y } = savedLocation;
+        requestAnimationFrame(() => restoreScrollPosition(x, y));
+        SCROLL_RESTORE_DELAYS_MS.forEach((delay) => setTimeout(() => restoreScrollPosition(x, y), delay));
       }
       isInitialRenderRef.current = false;
     }
