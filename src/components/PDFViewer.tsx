@@ -12,7 +12,7 @@ import { usePDFLoad } from './pdf-viewer/usePDFLoad';
 import { usePDFViewerCalibration } from './pdf-viewer/usePDFViewerCalibration';
 import { usePDFViewerData } from './pdf-viewer/usePDFViewerData';
 import { usePDFViewerMeasurements } from './pdf-viewer/usePDFViewerMeasurements';
-import { usePDFViewerInteractions } from './pdf-viewer/usePDFViewerInteractions';
+import { usePDFViewerInteractions, PDF_VIEWER_MAX_SCALE } from './pdf-viewer/usePDFViewerInteractions';
 import {
   renderSVGSelectionBox,
   renderSVGAnnotationDragBox,
@@ -29,7 +29,7 @@ import { PDFViewerCanvasOverlay } from './pdf-viewer/PDFViewerCanvasOverlay';
 import { PDFViewerDialogs } from './pdf-viewer/PDFViewerDialogs';
 import { PDFViewerStatusView } from './pdf-viewer/PDFViewerStatusView';
 import { formatFeetAndInches } from '../lib/utils';
-import { setRestoreScrollPosition, setTriggerCalibration, setTriggerFitToWindow } from '../lib/windowBridge';
+import { setRestoreScrollPosition, setGetCurrentScrollPosition, setTriggerCalibration, setTriggerFitToWindow } from '../lib/windowBridge';
 import { calculateDistance } from '../utils/commonUtils';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
@@ -44,6 +44,9 @@ function safeTimestampToISO(ts: string | number | undefined | null): string {
 
 /** Normalized offset for pasted markups (~2% of page) so pasted markup is visible next to original */
 const PASTE_OFFSET = 0.02;
+
+/** Debounce (ms) for saving scroll position so we persist final position on reload */
+const SCROLL_SAVE_DEBOUNCE_MS = 150;
 
 const PDFViewer: React.FC<PDFViewerProps> = ({ 
   file, 
@@ -109,7 +112,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const totalPages = externalTotalPages ?? internalTotalPages;
   
   const viewState = useMemo(() => ({ 
-    scale: externalScale ?? internalViewState.scale, 
+    scale: Math.min(PDF_VIEWER_MAX_SCALE, externalScale ?? internalViewState.scale), 
     rotation: externalRotation ?? internalViewState.rotation
   }), [externalScale, internalViewState.scale, externalRotation, internalViewState.rotation]);
 
@@ -119,14 +122,17 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Track last fully rendered PDF scale to support interactive CSS zoom while blocking renders
   const lastRenderedScaleRef = useRef(1.0);
   
-  // Helper to apply/remove interactive CSS zoom transforms when renders are blocked
-  const applyInteractiveZoomTransforms = useCallback(() => {
+  // Helper to apply/remove interactive CSS zoom transforms when renders are blocked.
+  // When called from wheel handler while renders are blocked, pass overrideScale so the
+  // transform uses the new scale immediately (viewState hasn't updated yet).
+  const applyInteractiveZoomTransforms = useCallback((overrideScale?: number) => {
     const canvas = pdfCanvasRef.current as HTMLCanvasElement | null;
     const svg = svgOverlayRef.current as SVGSVGElement | null;
     if (!canvas || !svg || !pdfPageRef.current) return;
     
     const renderedScale = lastRenderedScaleRef.current || 1.0;
-    const targetScale = (viewState.scale || 1.0) / renderedScale;
+    const effectiveScale = overrideScale ?? viewState.scale ?? 1.0;
+    const targetScale = effectiveScale / renderedScale;
     
     // If targetScale is ~1, clear transforms
     if (Math.abs(targetScale - 1) < 0.0001) {
@@ -164,6 +170,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     distanceMeasureFt: number;
   } | null>(null);
   
+  // Ref for Cmd+scroll zoom: always call latest handleWheel so we can register document listener once
+  const handleWheelRef = useRef<((e: WheelEvent) => void) | null>(null);
+
   // Refs - Single Canvas + SVG Overlay System (containerRef, pdfCanvasRef, svgOverlayRef, pdfPageRef declared above for calibration hook)
   const renderTaskRef = useRef<{ cancel: () => void } | null>(null);
   const isRenderingRef = useRef<boolean>(false);
@@ -190,6 +199,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   >(null);
   const onPageShownRef = useRef<((pageNum: number, viewport: PageViewport) => void) | null>(null);
   const updateMarkupPointerEventsRef = useRef<((selectionMode: boolean) => void) | null>(null);
+  /** Page number last fully rendered; used to allow re-render when user changes page in measuring mode */
+  const lastRenderedPageRef = useRef<number | null>(null);
+  /** Current page (ref) so we can re-trigger render in finally when user navigated during render */
+  const currentPageRef = useRef<number>(1);
 
   // Page-specific viewport and transform state for proper isolation
   const [pageViewports, setPageViewports] = useState<Record<number, PageViewport>>({});
@@ -530,6 +543,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     pdfDocument,
   });
 
+  const isBoxSelectionMode = visualSearchMode || !!titleblockSelectionMode;
+  const isDrawingBoxSelection = isBoxSelectionMode && isSelectingSymbol;
+
   // Helper to get current condition color by ID (uses live condition data, not stored measurement color)
   const getConditionColor = useCallback((conditionId: string, fallbackColor?: string): string => {
     const condition = conditions.find(c => c.id === conditionId);
@@ -552,7 +568,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Handle visual search mode
   useEffect(() => {
-    if (visualSearchMode || !!titleblockSelectionMode) {
+    if (isBoxSelectionMode) {
       setIsSelectingSymbol(true);
       setSelectionBox(null);
       setSelectionStart(null);
@@ -561,7 +577,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       setSelectionBox(null);
       setSelectionStart(null);
     }
-  }, [visualSearchMode, titleblockSelectionMode]);
+  }, [isBoxSelectionMode]);
 
   // Sync external cut-out state with internal state
   useEffect(() => {
@@ -583,6 +599,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (currentFileId !== prevFileId) {
       setLocalTakeoffMeasurements([]);
       prevFileIdRef.current = currentFileId;
+      // CRITICAL: Reset viewport state so we never use the previous document's viewports.
+      // Otherwise currentViewport can be from the other doc (wrong dimensions) and the
+      // overlay (preview, crosshair, markups) won't draw correctly on this document.
+      setPageViewports({});
+      setPageOutputScales({});
+      lastRenderedPageRef.current = null;
+      lastRenderedScaleRef.current = 1;
+      setIsInitialRenderComplete(false);
     }
     
     // Cancel any pending operations
@@ -713,7 +737,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // CRITICAL FIX: Also ensure SVG element has correct pointer-events
       // This must be done after rendering in case rendering reset it
       if (svgOverlayRef.current) {
-        const shouldReceiveClicks = isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
+        const shouldReceiveClicks = isSelectionMode || isCalibrating || annotationTool || isDrawingBoxSelection;
         svgOverlayRef.current.style.pointerEvents = shouldReceiveClicks ? 'auto' : 'none';
       }
     } finally {
@@ -732,7 +756,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         ), 0);
       }
     }
-  }, [updateMarkupPointerEvents, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, isSelectingSymbol, titleblockSelectionMode]);
+  }, [updateMarkupPointerEvents, isSelectionMode, isCalibrating, annotationTool, isDrawingBoxSelection]);
 
   useEffect(() => {
     renderMarkupsWithPointerEventsRef.current = renderMarkupsWithPointerEvents;
@@ -801,10 +825,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     const hasAnnotations = localAnnotations.filter(a => a.pageNumber === pageNum).length > 0;
     const hasAnyMarkups = hasLocalMeasurements || hasAnnotations;
     
-    // CRITICAL: Only clear overlay if we're sure there are no markups AND measurements have finished loading
-    // This prevents race conditions where measurements are loading but overlay gets cleared
-    if (!hasAnyMarkups && !measurementsLoading) {
-      // Only clear if we're certain there are no markups
+    // Check if we're in any interactive mode that requires rendering crosshairs/previews
+    const hasActivePoints = isContinuousDrawing && activePoints.length > 0;
+    const isInteractiveMode = isMeasuring || isCalibrating || currentMeasurement.length > 0 || hasActivePoints || isAnnotating || annotationTool || isDrawingBoxSelection;
+    
+    // CRITICAL: Only clear overlay and return early if:
+    // 1. We're sure there are no markups AND measurements have finished loading
+    // 2. AND we're NOT in an interactive mode (need to render crosshairs/previews)
+    if (!hasAnyMarkups && !measurementsLoading && !isInteractiveMode) {
       svgOverlay.innerHTML = '';
       return; // Early return - nothing to render
     }
@@ -824,7 +852,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (isSelectionMode) {
       hitArea.setAttribute('pointer-events', 'none');
     } else {
-      const shouldCaptureClicks = isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
+      const shouldCaptureClicks = isCalibrating || annotationTool || isDrawingBoxSelection;
       hitArea.setAttribute('pointer-events', shouldCaptureClicks ? 'all' : 'none');
     }
     svgOverlay.appendChild(hitArea);
@@ -964,7 +992,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     
     // Draw visual search or titleblock selection box (only if on the page being rendered)
-    if ((visualSearchMode || !!titleblockSelectionMode) && isSelectingSymbol && selectionBox && pageNum === currentPage) {
+    if (isDrawingBoxSelection && selectionBox && pageNum === currentPage) {
       renderSVGSelectionBox(svgOverlay, selectionBox, viewport);
     }
     
@@ -1020,8 +1048,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       });
     }
     
-    // Draw crosshair if measuring, calibrating, or annotating (only if on the page being rendered)
-    if (mousePosition && (isMeasuring || isCalibrating || annotationTool) && pageNum === currentPage) {
+    // Draw crosshair if measuring, calibrating, annotating, or drawing search/titleblock selection box (only if on the page being rendered)
+    if (mousePosition && (isMeasuring || isCalibrating || annotationTool || isBoxSelectionMode) && pageNum === currentPage) {
       renderSVGCrosshair(svgOverlay, mousePosition, viewport, isCalibrating);
     }
     
@@ -1035,7 +1063,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       });
     }
     
-  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, annotationDragBox, annotationMoveId, annotationMoveIds, annotationMoveDelta, annotationColor, measurementDragBox, measurementMoveId, measurementMoveIds, measurementMoveDelta, cutoutMode, currentCutout, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionBox, currentProjectId, file.id, getPageTakeoffMeasurements, getSelectedCondition, measurementsLoading, getConditionColor]);
+  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, annotationDragBox, annotationMoveId, annotationMoveIds, annotationMoveDelta, annotationColor, measurementDragBox, measurementMoveId, measurementMoveIds, measurementMoveDelta, cutoutMode, currentCutout, isBoxSelectionMode, isDrawingBoxSelection, selectionBox, currentProjectId, file.id, getPageTakeoffMeasurements, getSelectedCondition, measurementsLoading, getConditionColor]);
 
   // OPTIMIZED: Update only visual styling of markups when selection changes (no full re-render)
   const updateMarkupSelection = useCallback((newSelectedIds: string[], previousSelectedIds: string[]) => {
@@ -1150,7 +1178,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // CRITICAL FIX: Include activePoints.length check to ensure continuous linear preview renders
       // CRITICAL: Always render if we have markups OR are in an interactive mode
       const hasActivePoints = isContinuousDrawing && activePoints.length > 0;
-      const isInteractiveMode = isMeasuring || isCalibrating || currentMeasurement.length > 0 || hasActivePoints || isAnnotating || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
+      const isInteractiveMode = isMeasuring || isCalibrating || currentMeasurement.length > 0 || hasActivePoints || isAnnotating || isDrawingBoxSelection;
       
       // CRITICAL: Check both local measurements AND store to handle race conditions
       const storeMeasurements = getPageTakeoffMeasurements(currentProjectId || '', file.id || '', currentPage);
@@ -1180,7 +1208,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
       }
     }
-  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, renderMarkupsWithPointerEvents, currentPage, currentViewport, isAnnotating, localAnnotations, annotationDragBox, annotationMoveId, annotationMoveIds, annotationMoveDelta, measurementDragBox, measurementMoveId, measurementMoveIds, measurementMoveDelta, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, selectionBox, currentAnnotation, isContinuousDrawing, activePoints, pdfDocument, measurementsLoading, currentProjectId, file.id, getPageTakeoffMeasurements, isSelectionMode, totalPages, conditions]);
+  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, renderMarkupsWithPointerEvents, currentPage, currentViewport, isAnnotating, localAnnotations, annotationDragBox, annotationMoveId, annotationMoveIds, annotationMoveDelta, measurementDragBox, measurementMoveId, measurementMoveIds, measurementMoveDelta, isDrawingBoxSelection, selectionBox, currentAnnotation, isContinuousDrawing, activePoints, pdfDocument, measurementsLoading, currentProjectId, file.id, getPageTakeoffMeasurements, isSelectionMode, totalPages, conditions]);
 
   // Track previous measurements for comparison (used by other logic)
   const prevLocalTakeoffMeasurementsRef = useRef<Measurement[]>([]);
@@ -1292,7 +1320,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // CRITICAL FIX: Update SVG element's pointer-events directly
     // This ensures the SVG receives clicks even if React hasn't re-rendered
-    const shouldSVGReceiveClicks = isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
+    const shouldSVGReceiveClicks = isSelectionMode || isCalibrating || annotationTool || isDrawingBoxSelection;
     svgOverlayRef.current.style.pointerEvents = shouldSVGReceiveClicks ? 'auto' : 'none';
     
     // Update hit-area pointer-events
@@ -1301,7 +1329,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       if (isSelectionMode) {
         hitArea.setAttribute('pointer-events', 'none');
       } else {
-        const shouldCaptureClicks = isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
+        const shouldCaptureClicks = isCalibrating || annotationTool || isDrawingBoxSelection;
         hitArea.setAttribute('pointer-events', shouldCaptureClicks ? 'all' : 'none');
       }
     }
@@ -1312,7 +1340,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Track mode changes
     prevIsSelectionModeRef.current = isSelectionMode;
-  }, [isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol, updateMarkupPointerEvents]);
+  }, [isSelectionMode, isCalibrating, annotationTool, isDrawingBoxSelection, updateMarkupPointerEvents]);
 
   // Page visibility handler - ensures overlay is properly initialized when page becomes visible
   const onPageShown = useCallback((pageNum: number, viewport: PageViewport) => {
@@ -1353,26 +1381,22 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       if (isSelectionMode) {
         hitArea.setAttribute('pointer-events', 'none');
       } else {
-        const shouldCaptureClicks = isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol);
+        const shouldCaptureClicks = isCalibrating || annotationTool || isDrawingBoxSelection;
         hitArea.setAttribute('pointer-events', shouldCaptureClicks ? 'all' : 'none');
       }
     }
     
-    // Always re-render all annotations for this page, regardless of current state
-    // This ensures takeoffs are visible immediately when the page loads
-    // Use current state values, not captured values
+    // Always re-render overlay when we have markups OR we're in interactive mode (measuring, calibrating, etc.)
+    // so crosshairs and preview appear on every page after a full render
     const currentMeasurements = useMeasurementStore.getState().takeoffMeasurements.filter(
       (m) => m.projectId === currentProjectId && m.sheetId === file.id && m.pdfPage === pageNum
     );
-    
-    // Render immediately if we have measurements
-    // CRITICAL FIX: Force immediate render if in selection mode to ensure pointer-events are updated
-    if (currentMeasurements.length > 0 || localTakeoffMeasurements.length > 0) {
+    const hasMarkups = currentMeasurements.length > 0 || localTakeoffMeasurements.length > 0;
+    const isInteractiveMode = isMeasuring || isCalibrating || isAnnotating || isDrawingBoxSelection;
+    if (hasMarkups || isInteractiveMode) {
       renderMarkupsWithPointerEvents(pageNum, viewport, pdfPageRef.current ?? undefined, isSelectionMode);
     }
-    // Note: If no measurements, the reactive useEffect will handle rendering when they load
-    // The reactive useEffect watches allTakeoffMeasurements and will trigger render when measurements arrive
-  }, [renderMarkupsWithPointerEvents, localTakeoffMeasurements, currentProjectId, file.id, isSelectionMode, isCalibrating, annotationTool, visualSearchMode, titleblockSelectionMode, isSelectingSymbol]);
+  }, [renderMarkupsWithPointerEvents, localTakeoffMeasurements, currentProjectId, file.id, isSelectionMode, isCalibrating, isMeasuring, isAnnotating, isDrawingBoxSelection, annotationTool]);
 
   useEffect(() => {
     onPageShownRef.current = onPageShown;
@@ -1380,14 +1404,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // PDF render function with page-specific viewport isolation
   const renderPDFPage = useCallback(async (pageNum: number) => {
-    // ANTI-FLICKER: Block PDF renders during interactive operations or deselection cooldown
-    // Allow PDF renders during text annotation input (showTextInput = true)
-    // Allow initial renders even if in deselection mode (for page loads)
-    // CRITICAL FIX: Allow initial render even if isMeasuring is true - this ensures the viewport
-    // is set so clicks can work. Only block re-renders during measurement to prevent flicker.
-    // Block renders during interactive operations to prevent flicker
+    // ANTI-FLICKER: Block PDF re-renders during interactive operations on the SAME page.
+    // Allow PDF render when user changes page so overlay (preview, crosshair) has correct viewport on every page.
     const isInitialRender = !isInitialRenderComplete;
-    if (!isInitialRender && (isMeasuring || isCalibrating || currentMeasurement.length > 0 || (isDeselecting && isInitialRenderComplete) || (isAnnotating && !showTextInput))) {
+    const samePageAsLastRender = lastRenderedPageRef.current === pageNum;
+    const blockRenders =
+      !isInitialRender &&
+      samePageAsLastRender &&
+      (isMeasuring || isCalibrating || currentMeasurement.length > 0 || (isDeselecting && isInitialRenderComplete) || (isAnnotating && !showTextInput));
+    
+    if (blockRenders) {
       return;
     }
     
@@ -1400,10 +1426,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     await new Promise(resolve => setTimeout(resolve, 5));
     
     if (!isComponentMounted || !pdfDocument || !pdfCanvasRef.current || !containerRef.current) {
-      // Silently skip - this is normal during initial mount
       return;
     }
     
+    // If we're already rendering a different page, let that finish; finally will re-trigger for pageNum.
+    // If we're already rendering this page, skip.
     if (isRenderingRef.current) {
       return;
     }
@@ -1468,7 +1495,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // After PDF is rendered, ensure overlay is properly initialized and render takeoff annotations
       onPageShown(pageNum, viewport);
       
-      // Record the scale at which the PDF canvas was actually rendered
+      // Record the page and scale at which the PDF canvas was actually rendered
+      lastRenderedPageRef.current = pageNum;
       lastRenderedScaleRef.current = viewState.scale;
       
       // Clear any interactive CSS transforms (no longer needed after full render)
@@ -1481,18 +1509,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         svgOverlayRef.current.style.transformOrigin = '';
       }
       // Post-zoom settle: ensure overlay is refreshed immediately after canvas render
-      // CRITICAL: Also check if measurements are loaded and render them
-      // This handles the case where measurements load after the PDF renders
+      // CRITICAL: Always redraw overlay after clearing SVG so crosshairs/preview show on every page
+      // (when in measuring/calibrating/annotating mode there are no measurements yet, but we need the overlay)
       try {
-        // Get current measurements for this page from store (may have loaded after PDF render started)
         const currentMeasurements = useMeasurementStore.getState().takeoffMeasurements.filter(
           (m) => m.projectId === currentProjectId && m.sheetId === file.id && m.pdfPage === pageNum
         );
-        
-        // CRITICAL FIX: Get current selection mode state (may have changed since callback was created)
-        // Force immediate render if in selection mode to ensure pointer-events are updated
-        const currentSelectionMode = isSelectionMode; // Capture from closure - will be current value
-        if (currentMeasurements.length > 0 || localTakeoffMeasurements.length > 0) {
+        const hasMarkups = currentMeasurements.length > 0 || localTakeoffMeasurements.length > 0;
+        const isInteractiveMode = isMeasuring || isCalibrating || isAnnotating || isDrawingBoxSelection;
+        const currentSelectionMode = isSelectionMode;
+        if (hasMarkups || isInteractiveMode) {
           renderMarkupsWithPointerEvents(pageNum, viewport, page, currentSelectionMode);
         }
       } catch {}
@@ -1514,6 +1540,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       }
     } finally {
       isRenderingRef.current = false;
+      // If user navigated to a different page while we were rendering, render that page now.
+      const requestedPage = currentPageRef.current;
+      if (requestedPage !== pageNum && renderPDFPageRef.current) {
+        requestAnimationFrame(() => {
+          if (currentPageRef.current === requestedPage && renderPDFPageRef.current) {
+            renderPDFPageRef.current(requestedPage);
+          }
+        });
+      }
     }
   }, [pdfDocument, viewState, updateCanvasDimensions, onPageShown, isComponentMounted, isMeasuring, isCalibrating, currentMeasurement, isDeselecting, isAnnotating, isSelectionMode, localTakeoffMeasurements, currentProjectId, file.id, currentPage, renderMarkupsWithPointerEvents]);
 
@@ -1657,18 +1692,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         // Calculate area if height is provided
         if (selectedCondition.includeHeight && selectedCondition.height) {
           areaValue = calculatedValue * selectedCondition.height;
-          console.log('📐 Linear with height calculation:', {
-            linearValue: calculatedValue,
-            height: selectedCondition.height,
-            areaValue: areaValue,
-            conditionName: selectedCondition.name
-          });
-        } else {
-          console.log('⚠️ Linear condition without height:', {
-            includeHeight: selectedCondition.includeHeight,
-            height: selectedCondition.height,
-            conditionName: selectedCondition.name
-          });
         }
         break;
       case 'area':
@@ -2019,7 +2042,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Calculate scale to fit both width and height
       const scaleX = availableWidth / viewport.width;
       const scaleY = availableHeight / viewport.height;
-      const optimalScale = Math.min(scaleX, scaleY, 5); // Cap at 5x zoom
+      const optimalScale = Math.min(scaleX, scaleY, PDF_VIEWER_MAX_SCALE); // Cap for performance (see PDF_VIEWER_MAX_SCALE)
       
 
       // FIX: Update viewport IMMEDIATELY before state changes to prevent drift
@@ -2055,24 +2078,29 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
   }, [pdfDocument, viewState.rotation, onScaleChange, localTakeoffMeasurements, forceMarkupReRender]);
 
-  // Handle rotation
-
-  // Add scroll position tracking
+  // Add scroll position tracking (debounced so we persist final position on reload)
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) return;
+    if (!container || !onLocationChange) return;
+
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     const handleScroll = () => {
-      if (onLocationChange) {
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        timeoutId = null;
         onLocationChange(container.scrollLeft, container.scrollTop);
-      }
+      }, SCROLL_SAVE_DEBOUNCE_MS);
     };
 
     container.addEventListener('scroll', handleScroll);
-    return () => container.removeEventListener('scroll', handleScroll);
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      container.removeEventListener('scroll', handleScroll);
+    };
   }, [onLocationChange]);
 
-  // Add global function to restore scroll position
+  // Add global functions to restore scroll position and read current scroll (for beforeunload save)
   useEffect(() => {
     setRestoreScrollPosition((x: number, y: number) => {
       const container = containerRef.current;
@@ -2081,38 +2109,33 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         container.scrollTop = y;
       }
     });
+    setGetCurrentScrollPosition(() => {
+      const container = containerRef.current;
+      if (!container) return null;
+      return { x: container.scrollLeft, y: container.scrollTop };
+    });
 
     return () => {
       setRestoreScrollPosition(undefined);
+      setGetCurrentScrollPosition(undefined);
     };
   }, []);
 
-  // Add wheel event listener to container, canvas, and SVG to ensure zoom works during markup placement
-  useEffect(() => {
-    const container = containerRef.current;
-    const canvas = pdfCanvasRef.current;
-    const svg = svgOverlayRef.current;
-    
-    if (!container) return;
+  // Keep ref updated so document listener always calls latest handler
+  handleWheelRef.current = handleWheel;
 
-    container.addEventListener('wheel', handleWheel, { passive: false });
-    if (canvas) {
-      canvas.addEventListener('wheel', handleWheel, { passive: false });
-    }
-    if (svg) {
-      svg.addEventListener('wheel', handleWheel, { passive: false });
-    }
-    
-    return () => {
-      container.removeEventListener('wheel', handleWheel);
-      if (canvas) {
-        canvas.removeEventListener('wheel', handleWheel);
-      }
-      if (svg) {
-        svg.removeEventListener('wheel', handleWheel);
-      }
+  // Cmd+scroll zoom: document-level capture listener so we receive the event regardless of
+  // which child is the target. Registered once; handler uses ref to avoid effect churn.
+  useEffect(() => {
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const container = containerRef.current;
+      if (!container || !container.contains(e.target as Node)) return;
+      handleWheelRef.current?.(e);
     };
-  }, [handleWheel]);
+    document.addEventListener('wheel', onWheel, { passive: false, capture: true });
+    return () => document.removeEventListener('wheel', onWheel, { capture: true });
+  }, []);
 
   // Apply or clear interactive CSS zoom when external scale changes while renders are blocked
   useEffect(() => {
@@ -2143,29 +2166,115 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
   }, [viewState.scale, isMeasuring, isCalibrating, currentMeasurement.length, isDeselecting, isAnnotating, showTextInput, applyInteractiveZoomTransforms, pdfDocument, localTakeoffMeasurements, localAnnotations, currentPage, renderMarkupsWithPointerEvents]);
 
+  // Keep currentPageRef in sync so renderPDFPage's finally block can re-trigger for the right page
+  currentPageRef.current = currentPage;
+
   // Re-render when page changes
+  // CRITICAL: Set viewport FIRST (before render) so overlay can draw immediately.
+  // This ensures crosshairs and markup preview work on every page, even when canvas render is blocked.
   useEffect(() => {
-    if (pdfDocument && isComponentMounted) {
-      setMeasurements([]);
-      
-      // Optimized retry mechanism if canvas is not ready
-      // CRITICAL: Use ref to avoid dependency on renderPDFPage which changes frequently
-      const attemptRender = async (retries = 3) => {
-        if (pdfCanvasRef.current && containerRef.current && renderPDFPageRef.current) {
-          await renderPDFPageRef.current(currentPage);
-        } else if (retries > 0) {
-          setTimeout(() => attemptRender(retries - 1), 50); // Reduced retry delay
-        } else {
-          if (process.env.NODE_ENV === 'development') {
-            console.warn('Canvas not ready after retries, skipping render');
+    if (!pdfDocument || !isComponentMounted) return;
+
+    let cancelled = false;
+    
+    (async () => {
+      try {
+        // STEP 1: Always get page and set viewport FIRST - this is never blocked
+        const page = await pdfDocument.getPage(currentPage);
+        if (cancelled) return;
+        // Don't apply if user navigated to a different page while we were fetching
+        if (currentPageRef.current !== currentPage) return;
+
+        const viewport = page.getViewport({
+          scale: viewState.scale,
+          rotation: viewState.rotation,
+        });
+        
+        // Set viewport and page ref immediately so overlay can draw
+        pdfPageRef.current = page;
+        const outputScale = window.devicePixelRatio || 1;
+        
+        // Update canvas/SVG dimensions and viewport state
+        if (pdfCanvasRef.current && svgOverlayRef.current) {
+          svgOverlayRef.current.setAttribute('width', viewport.width.toString());
+          svgOverlayRef.current.setAttribute('height', viewport.height.toString());
+          svgOverlayRef.current.setAttribute('viewBox', `0 0 ${viewport.width} ${viewport.height}`);
+          
+          setPageViewports(prev => ({ ...prev, [currentPage]: viewport }));
+          setPageOutputScales(prev => ({ ...prev, [currentPage]: outputScale }));
+          
+          // Immediately render overlay so crosshairs/preview appear without waiting for effect cycle
+          if (renderMarkupsWithPointerEventsRef.current) {
+            renderMarkupsWithPointerEventsRef.current(currentPage, viewport, page, false);
           }
         }
-      };
-      
-      attemptRender();
-    }
-  // NOTE: Using renderPDFPageRef instead of renderPDFPage to prevent cascading re-renders
-  }, [pdfDocument, currentPage, isComponentMounted]);
+        
+        if (cancelled) return;
+        
+        // STEP 2: Now try to render PDF canvas (this may be blocked by measuring mode, that's OK)
+        setMeasurements([]);
+        
+        const attemptRender = async (retries = 3) => {
+          if (cancelled) return;
+          if (pdfCanvasRef.current && containerRef.current && renderPDFPageRef.current) {
+            await renderPDFPageRef.current(currentPage);
+          } else if (retries > 0) {
+            setTimeout(() => attemptRender(retries - 1), 50);
+          }
+        };
+        
+        await attemptRender();
+      } catch (err) {
+        if (process.env.NODE_ENV === 'development') {
+          console.error('Error in page change effect:', err);
+        }
+      }
+    })();
+    
+    return () => {
+      cancelled = true;
+    };
+  }, [pdfDocument, currentPage, isComponentMounted, viewState.scale, viewState.rotation]);
+
+  // VIEWPORT FALLBACK: Safety net in case page-change effect didn't set viewport (e.g., due to race condition).
+  useEffect(() => {
+    if (!pdfDocument || !currentPage || currentViewport != null) return;
+    if (!pdfCanvasRef.current || !svgOverlayRef.current) return;
+
+    const pageToFetch = currentPage;
+    let cancelled = false;
+    
+    (async () => {
+      try {
+        const page = await pdfDocument.getPage(pageToFetch);
+        if (cancelled || currentPageRef.current !== pageToFetch) return;
+        
+        const viewport = page.getViewport({
+          scale: viewState.scale,
+          rotation: viewState.rotation,
+        });
+        if (cancelled || currentPageRef.current !== pageToFetch) return;
+        
+        pdfPageRef.current = page;
+        const outputScale = window.devicePixelRatio || 1;
+        
+        if (svgOverlayRef.current) {
+          svgOverlayRef.current.setAttribute('width', viewport.width.toString());
+          svgOverlayRef.current.setAttribute('height', viewport.height.toString());
+          svgOverlayRef.current.setAttribute('viewBox', `0 0 ${viewport.width} ${viewport.height}`);
+        }
+        
+        setPageViewports(prev => ({ ...prev, [pageToFetch]: viewport }));
+        setPageOutputScales(prev => ({ ...prev, [pageToFetch]: outputScale }));
+      } catch {
+        // Silently ignore - page-change effect will handle this
+      }
+    })();
+    
+    return () => {
+      cancelled = true;
+    };
+  }, [pdfDocument, currentPage, currentViewport, viewState.scale, viewState.rotation]);
 
   // Page visibility handler - ensures overlays are rendered when returning to a page
   // SIMPLIFIED: Single render call, no cascading timeouts
@@ -2390,8 +2499,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   const overlayCursor = cutoutMode
     ? 'crosshair'
-    : (isCalibrating ? 'crosshair' : (isMeasuring ? 'crosshair' : (isSelectionMode ? 'pointer' : 'default')));
-  const svgPointerEvents = (isSelectionMode || isCalibrating || annotationTool || (visualSearchMode && isSelectingSymbol) || (!!titleblockSelectionMode && isSelectingSymbol)) ? 'auto' : 'none';
+    : (isCalibrating ? 'crosshair' : (isMeasuring ? 'crosshair' : (isBoxSelectionMode ? 'crosshair' : (isSelectionMode ? 'pointer' : 'default'))));
+  const svgPointerEvents = (isSelectionMode || isCalibrating || annotationTool || isDrawingBoxSelection) ? 'auto' : 'none';
   const overlayKey = `overlay-${currentPage}-${file.id}`;
   const textAnnotationProps = showTextInput && textInputPosition
     ? {
@@ -2445,7 +2554,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         style={{ 
           cursor: cutoutMode 
             ? 'crosshair' 
-            : (isCalibrating ? 'crosshair' : (isMeasuring ? 'crosshair' : (isSelectionMode ? 'pointer' : 'default')))
+            : (isCalibrating ? 'crosshair' : (isMeasuring ? 'crosshair' : (isBoxSelectionMode ? 'crosshair' : (isSelectionMode ? 'pointer' : 'default'))))
         }}
       >
         <div className="flex justify-start p-6 relative">

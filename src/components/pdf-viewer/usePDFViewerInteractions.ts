@@ -12,12 +12,15 @@ import { useUndoStore } from '../../store/slices/undoSlice';
 
 const PASTE_OFFSET = 0.02;
 
+/** Max zoom scale to avoid slow/frozen PDF (canvas size = viewport × devicePixelRatio; ~265%+ becomes very heavy). */
+export const PDF_VIEWER_MAX_SCALE = 2.5;
+
 export interface UsePDFViewerInteractionsOptions {
   pdfCanvasRef: RefObject<HTMLCanvasElement | null>;
   pdfPageRef: RefObject<PDFPageProxy | null>;
   svgOverlayRef: RefObject<SVGSVGElement | null>;
   containerRef: RefObject<HTMLDivElement | null>;
-  lastRenderedScaleRef: RefObject<number>;
+  lastRenderedScaleRef: MutableRefObject<number>;
   viewState: { scale: number; rotation: number };
   currentPage: number;
   totalPages: number;
@@ -31,7 +34,7 @@ export interface UsePDFViewerInteractionsOptions {
   setIsDeselecting: React.Dispatch<React.SetStateAction<boolean>>;
   isAnnotating: boolean;
   showTextInput: boolean;
-  applyInteractiveZoomTransforms: () => void;
+  applyInteractiveZoomTransforms: (overrideScale?: number) => void;
   // Keyboard handler options
   annotationTool: 'text' | 'arrow' | 'rectangle' | 'circle' | null;
   currentAnnotation: { x: number; y: number }[];
@@ -46,7 +49,7 @@ export interface UsePDFViewerInteractionsOptions {
   isContinuousDrawing: boolean;
   setIsContinuousDrawing: React.Dispatch<React.SetStateAction<boolean>>;
   activePoints: { x: number; y: number }[];
-  pageRubberBandRefs: RefObject<Record<number, SVGLineElement | null>>;
+  pageRubberBandRefs: MutableRefObject<Record<number, SVGLineElement | null>>;
   setActivePoints: React.Dispatch<React.SetStateAction<{ x: number; y: number }[]>>;
   setIsMeasuring: React.Dispatch<React.SetStateAction<boolean>>;
   setRunningLength: React.Dispatch<React.SetStateAction<number>>;
@@ -137,6 +140,7 @@ export interface UsePDFViewerInteractionsOptions {
   setLocalTakeoffMeasurements: React.Dispatch<React.SetStateAction<import('../../types').TakeoffMeasurement[]>>;
   updateTakeoffMeasurement: (id: string, update: Partial<import('../../types').TakeoffMeasurement>) => Promise<void>;
   updateAnnotation: (id: string, update: Partial<import('../../types').Annotation>) => void;
+  addAnnotation: (annotation: Omit<import('../../types').Annotation, 'id' | 'timestamp'>) => import('../../types').Annotation;
   applyOrthoSnapping: (pos: { x: number; y: number }, refPoints: { x: number; y: number }[]) => { x: number; y: number };
   calculateRunningLength: (points: { x: number; y: number }[], currentMousePos?: { x: number; y: number }) => number;
   mousePosition: { x: number; y: number } | null;
@@ -311,15 +315,24 @@ export function usePDFViewerInteractions(
 
         const ZOOM_STEP = 1.2;
         const MIN_SCALE = 0.5;
-        const MAX_SCALE = 3;
 
         const zoomFactor = event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
         const newScale = Math.min(
-          MAX_SCALE,
+          PDF_VIEWER_MAX_SCALE,
           Math.max(MIN_SCALE, viewState.scale * zoomFactor)
         );
 
-        if (pdfPageRef.current) {
+        const rendersBlocked =
+          isMeasuring ||
+          isCalibrating ||
+          currentMeasurement.length > 0 ||
+          isDeselecting ||
+          (isAnnotating && !showTextInput);
+
+        // When renders are blocked we only apply CSS zoom; canvas/SVG keep last-rendered dimensions.
+        // Do NOT update pageViewports or lastRenderedScale so overlay drawing (preview, crosshair)
+        // keeps using the correct viewport and doesn't get wrong coordinates or huge crosshair.
+        if (pdfPageRef.current && !rendersBlocked) {
           const freshViewport = pdfPageRef.current.getViewport({
             scale: newScale,
             rotation: viewState.rotation,
@@ -334,15 +347,10 @@ export function usePDFViewerInteractions(
         setInternalViewState((prev) => ({ ...prev, scale: newScale }));
         if (onScaleChange) onScaleChange(newScale);
 
-        const rendersBlocked =
-          isMeasuring ||
-          isCalibrating ||
-          currentMeasurement.length > 0 ||
-          isDeselecting ||
-          (isAnnotating && !showTextInput);
         if (rendersBlocked) {
+          // Pass newScale so transform uses it immediately (viewState not updated yet)
           requestAnimationFrame(() => {
-            applyInteractiveZoomTransforms();
+            applyInteractiveZoomTransforms(newScale);
           });
           const container = containerRef.current;
           if (container) {
@@ -485,15 +493,18 @@ export function usePDFViewerInteractions(
               setMousePosition(null);
               setIsContinuousDrawing(false);
               setRunningLength(0);
-              const currentRubberBand = pageRubberBandRefs.current[currentPage];
-              if (
-                currentRubberBand &&
-                svgOverlayRef.current &&
-                currentRubberBand.parentNode === svgOverlayRef.current
-              ) {
-                svgOverlayRef.current.removeChild(currentRubberBand);
+              const refs = pageRubberBandRefs.current;
+              if (refs) {
+                const currentRubberBand = refs[currentPage];
+                if (
+                  currentRubberBand &&
+                  svgOverlayRef.current &&
+                  currentRubberBand.parentNode === svgOverlayRef.current
+                ) {
+                  svgOverlayRef.current.removeChild(currentRubberBand);
+                }
+                refs[currentPage] = null;
               }
-              pageRubberBandRefs.current[currentPage] = null;
               setRubberBandElement(null);
             }
             return newPoints;
@@ -1012,11 +1023,12 @@ export function usePDFViewerInteractions(
       if (!pdfCanvasRef.current) return;
       let viewport = currentViewport;
       if (!viewport && pdfPageRef.current) {
-        viewport = pdfPageRef.current.getViewport({
+        const newViewport = pdfPageRef.current.getViewport({
           scale: viewState.scale,
           rotation: viewState.rotation,
         });
-        setPageViewports((prev) => ({ ...prev, [currentPage]: viewport }));
+        viewport = newViewport;
+        setPageViewports((prev) => ({ ...prev, [currentPage]: newViewport }));
       }
       if (!viewport) return;
       if (isDeselecting) setIsDeselecting(false);
@@ -1136,8 +1148,9 @@ export function usePDFViewerInteractions(
       if (isContinuousDrawing && activePoints.length > 0) {
         const newLength = calculateRunningLength(activePoints, pdfCoords);
         setRunningLength(newLength);
-        if (svgOverlayRef.current) {
-          const currentRubberBand = pageRubberBandRefs.current[currentPage];
+        const refs = pageRubberBandRefs.current;
+        if (svgOverlayRef.current && refs) {
+          const currentRubberBand = refs[currentPage];
           if (
             currentRubberBand &&
             currentRubberBand.parentNode === svgOverlayRef.current &&
@@ -1209,20 +1222,22 @@ export function usePDFViewerInteractions(
       if (!pdfCanvasRef.current) return;
       let viewport = currentViewport;
       if (!viewport && pdfPageRef.current) {
-        viewport = pdfPageRef.current.getViewport({
+        const newViewport = pdfPageRef.current.getViewport({
           scale: viewState.scale,
           rotation: viewState.rotation,
         });
-        setPageViewports((prev) => ({ ...prev, [currentPage]: viewport }));
+        viewport = newViewport;
+        setPageViewports((prev) => ({ ...prev, [currentPage]: newViewport }));
       } else if (!viewport && pdfDocument) {
         try {
           const page = await (pdfDocument as { getPage: (n: number) => Promise<PDFPageProxy> }).getPage(currentPage);
           (pdfPageRef as MutableRefObject<PDFPageProxy | null>).current = page;
-          viewport = page.getViewport({
+          const newViewport = page.getViewport({
             scale: viewState.scale,
             rotation: viewState.rotation,
           });
-          setPageViewports((prev) => ({ ...prev, [currentPage]: viewport }));
+          viewport = newViewport;
+          setPageViewports((prev) => ({ ...prev, [currentPage]: newViewport }));
         } catch (err) {
           console.error('Failed to load PDF page for click handler:', err);
           return;
