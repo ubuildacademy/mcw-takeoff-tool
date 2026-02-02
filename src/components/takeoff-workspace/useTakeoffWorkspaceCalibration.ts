@@ -1,11 +1,8 @@
-import { useMemo } from 'react';
-import type { Calibration, ProjectFile } from '../../types';
+import type { Calibration } from '../../types';
 
 export interface UseTakeoffWorkspaceCalibrationOptions {
-  projectId: string | undefined;
-  currentPdfFile: ProjectFile | null;
-  currentPage: number;
-  calibrations: Calibration[];
+  /** Current calibration for the active document/page (from store getCalibration). */
+  currentCalibration: Calibration | null;
   isDev?: boolean;
 }
 
@@ -20,61 +17,13 @@ export interface UseTakeoffWorkspaceCalibrationResult {
 }
 
 /**
- * Derives the active calibration for the current document/page.
- * Page-specific calibrations take precedence over document-level calibrations.
+ * Maps the active calibration (from store) to view props.
+ * Caller subscribes to getCalibration(projectId, sheetId, pageNumber) so only current page changes trigger re-renders.
  */
 export function useTakeoffWorkspaceCalibration({
-  projectId,
-  currentPdfFile,
-  currentPage,
-  calibrations,
+  currentCalibration,
   isDev = false,
 }: UseTakeoffWorkspaceCalibrationOptions): UseTakeoffWorkspaceCalibrationResult {
-  const currentCalibration = useMemo(() => {
-    if (!currentPdfFile || !projectId) {
-      return null;
-    }
-    const pageCalibration = calibrations.find(
-      (c) =>
-        c.projectId === projectId &&
-        c.sheetId === currentPdfFile.id &&
-        c.pageNumber === currentPage &&
-        c.pageNumber != null
-    );
-    if (pageCalibration) {
-      if (isDev) {
-        console.log('📏 Using page-specific calibration:', {
-          pageNumber: currentPage,
-          scaleFactor: pageCalibration.scaleFactor,
-          unit: pageCalibration.unit,
-        });
-      }
-      return pageCalibration;
-    }
-
-    const docCalibration = calibrations.find(
-      (c) =>
-        c.projectId === projectId &&
-        c.sheetId === currentPdfFile.id &&
-        (c.pageNumber == null || c.pageNumber === undefined)
-    );
-    if (docCalibration && isDev) {
-      console.log('📏 Using document-level calibration:', {
-        scaleFactor: docCalibration.scaleFactor,
-        unit: docCalibration.unit,
-      });
-    }
-    if (!docCalibration && isDev) {
-      console.log('⚠️ No calibration found for:', {
-        projectId,
-        sheetId: currentPdfFile.id,
-        pageNumber: currentPage,
-        totalCalibrations: calibrations.length,
-      });
-    }
-    return docCalibration ?? null;
-  }, [calibrations, projectId, currentPdfFile?.id, currentPage, isDev]);
-
   return {
     currentCalibration,
     isPageCalibrated: !!currentCalibration,

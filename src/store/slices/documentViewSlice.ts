@@ -1,3 +1,7 @@
+/**
+ * Document view state (page, scale, rotation, scroll) per document.
+ * Persisted to localStorage so viewport restores on reload.
+ */
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
@@ -7,27 +11,30 @@ interface DocumentViewState {
   documentPages: Record<string, number>;
   documentScales: Record<string, number>;
   documentLocations: Record<string, { x: number; y: number }>;
+  /** Per-project last viewed document (projectId -> documentId) so reload restores the right doc per project */
+  lastViewedDocumentIds: Record<string, string>;
+  /** @deprecated Legacy single last viewed; used as fallback when no per-project entry */
   lastViewedDocumentId: string | null;
-  
+
   // Rotation actions
   setDocumentRotation: (documentId: string, rotation: number) => void;
   getDocumentRotation: (documentId: string) => number;
-  
+
   // Page actions
   setDocumentPage: (documentId: string, page: number) => void;
   getDocumentPage: (documentId: string) => number;
-  
+
   // Scale actions
   setDocumentScale: (documentId: string, scale: number) => void;
   getDocumentScale: (documentId: string) => number;
-  
+
   // Location actions
   setDocumentLocation: (documentId: string, location: { x: number; y: number }) => void;
   getDocumentLocation: (documentId: string) => { x: number; y: number };
-  
-  // Last viewed
-  setLastViewedDocumentId: (documentId: string) => void;
-  getLastViewedDocumentId: () => string | null;
+
+  // Last viewed (per project)
+  setLastViewedDocumentId: (projectId: string, documentId: string) => void;
+  getLastViewedDocumentId: (projectId: string) => string | null;
 }
 
 export const useDocumentViewStore = create<DocumentViewState>()(
@@ -38,8 +45,9 @@ export const useDocumentViewStore = create<DocumentViewState>()(
       documentPages: {},
       documentScales: {},
       documentLocations: {},
+      lastViewedDocumentIds: {},
       lastViewedDocumentId: null,
-      
+
       // Rotation actions
       setDocumentRotation: (documentId, rotation) => {
         set(state => ({
@@ -100,14 +108,20 @@ export const useDocumentViewStore = create<DocumentViewState>()(
         return state.documentLocations[documentId] || { x: 0, y: 0 };
       },
       
-      // Last viewed
-      setLastViewedDocumentId: (documentId: string) => {
-        set({ lastViewedDocumentId: documentId });
+      // Last viewed (per project)
+      setLastViewedDocumentId: (projectId: string, documentId: string) => {
+        set((state) => ({
+          lastViewedDocumentIds: {
+            ...state.lastViewedDocumentIds,
+            [projectId]: documentId,
+          },
+        }));
       },
-      
-      getLastViewedDocumentId: () => {
-        return get().lastViewedDocumentId;
-      }
+
+      getLastViewedDocumentId: (projectId: string) => {
+        const state = get();
+        return state.lastViewedDocumentIds[projectId] ?? state.lastViewedDocumentId ?? null;
+      },
     }),
     {
       name: 'document-view-store',
@@ -116,8 +130,9 @@ export const useDocumentViewStore = create<DocumentViewState>()(
         documentPages: state.documentPages,
         documentScales: state.documentScales,
         documentLocations: state.documentLocations,
-        lastViewedDocumentId: state.lastViewedDocumentId
-      })
+        lastViewedDocumentIds: state.lastViewedDocumentIds,
+        lastViewedDocumentId: state.lastViewedDocumentId,
+      }),
     }
   )
 );

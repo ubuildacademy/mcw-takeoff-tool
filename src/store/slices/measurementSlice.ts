@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { TakeoffMeasurement, ConditionCostBreakdown, ProjectCostBreakdown } from '../../types';
+import { MeasurementCalculator } from '../../utils/measurementCalculation';
 import { useConditionStore } from './conditionSlice';
 import { useProjectStore } from './projectSlice';
 
@@ -23,6 +24,16 @@ interface MeasurementState {
   clearForProjectSwitch: (newProjectId: string) => void;
   /** Copy condition markups by ids into clipboard (for paste). */
   copyMarkupsByIds: (ids: string[]) => void;
+  /** Recalculate existing measurements after calibration change (same project/sheet/page scope). */
+  recalculateMeasurementsForCalibration: (
+    projectId: string,
+    sheetId: string,
+    pageNumber: number | null,
+    scaleFactor: number,
+    unit: string,
+    viewportWidth: number | null,
+    viewportHeight: number | null
+  ) => Promise<void>;
 
   // Page-based markup management
   getPageKey: (projectId: string, sheetId: string, pageNumber: number) => string;
@@ -212,7 +223,155 @@ export const useMeasurementStore = create<MeasurementState>()(
       
       set({ markupsByPage });
     },
-    
+
+    recalculateMeasurementsForCalibration: async (
+      projectId,
+      sheetId,
+      pageNumber,
+      scaleFactor,
+      unit,
+      viewportWidth,
+      viewportHeight
+    ) => {
+      if (viewportWidth == null || viewportHeight == null || viewportWidth <= 0 || viewportHeight <= 0) {
+        if (import.meta.env.DEV) {
+          console.warn('📐 RECALC_AFTER_CALIBRATION: Skipping recalculation - viewport dimensions required', {
+            viewportWidth,
+            viewportHeight
+          });
+        }
+        return;
+      }
+
+      const measurements =
+        pageNumber != null
+          ? get().getPageTakeoffMeasurements(projectId, sheetId, pageNumber)
+          : get().getSheetTakeoffMeasurements(projectId, sheetId);
+
+      if (measurements.length === 0) {
+        if (import.meta.env.DEV) {
+          console.log('📐 RECALC_AFTER_CALIBRATION: No measurements to recalculate', {
+            projectId,
+            sheetId,
+            pageNumber
+          });
+        }
+        return;
+      }
+
+      const scaleInfo = {
+        scaleFactor,
+        unit,
+        scaleText: 'calibrated',
+        confidence: 0.95,
+        viewportWidth,
+        viewportHeight
+      };
+
+      const conditionStore = useConditionStore.getState();
+      const updateTakeoffMeasurement = get().updateTakeoffMeasurement;
+
+      const updatePromises: Promise<void>[] = [];
+
+      for (const measurement of measurements) {
+        const points = measurement.pdfCoordinates?.length
+          ? measurement.pdfCoordinates
+          : measurement.points;
+
+        if (!points || points.length === 0) {
+          continue;
+        }
+
+        const condition = conditionStore.getConditionById(measurement.conditionId);
+        if (!condition) {
+          continue;
+        }
+
+        let calculatedValue = measurement.calculatedValue;
+        let perimeterValue: number | undefined = measurement.perimeterValue;
+        let areaValue: number | undefined = measurement.areaValue;
+        let unitOut = measurement.unit;
+
+        if (measurement.type === 'count') {
+          // Count is always 1, no recalculation
+          continue;
+        }
+
+        if (measurement.type === 'linear') {
+          const result = MeasurementCalculator.calculateLinear(points, scaleInfo, 1.0);
+          calculatedValue = result.calculatedValue;
+          unitOut = result.unit;
+          if (condition.includeHeight && condition.height) {
+            areaValue = calculatedValue * condition.height;
+          }
+        } else if (measurement.type === 'area') {
+          const result = MeasurementCalculator.calculateArea(points, scaleInfo, 1.0);
+          calculatedValue = result.calculatedValue;
+          unitOut = result.unit;
+          if (condition.includePerimeter) {
+            perimeterValue = result.perimeterValue;
+          }
+        } else if (measurement.type === 'volume') {
+          const depth = condition.depth ?? 1;
+          const result = MeasurementCalculator.calculateVolume(points, scaleInfo, depth, 1.0);
+          calculatedValue = result.calculatedValue;
+          unitOut = result.unit;
+          if (condition.includePerimeter && result.perimeterValue != null) {
+            perimeterValue = result.perimeterValue;
+          }
+        }
+
+        // Recalculate cutouts with new scale if present
+        let cutouts = measurement.cutouts;
+        let netCalculatedValue: number | undefined;
+
+        if (cutouts?.length) {
+          const depth = condition.depth ?? 1;
+          cutouts = cutouts.map(cutout => {
+            const cutoutPoints = cutout.pdfCoordinates?.length ? cutout.pdfCoordinates : cutout.points;
+            if (!cutoutPoints || cutoutPoints.length < 3) {
+              return cutout;
+            }
+            const areaResult = MeasurementCalculator.calculateArea(cutoutPoints, scaleInfo, 1.0);
+            const cutoutVal =
+              measurement.type === 'volume'
+                ? areaResult.calculatedValue * depth
+                : areaResult.calculatedValue;
+            return { ...cutout, calculatedValue: cutoutVal };
+          });
+          const totalCutoutValue = cutouts.reduce((sum, c) => sum + c.calculatedValue, 0);
+          netCalculatedValue = Math.round((calculatedValue - totalCutoutValue) * 100) / 100;
+        }
+
+        const updates: Partial<TakeoffMeasurement> = {
+          calculatedValue: Math.round(calculatedValue * 100) / 100,
+          unit: unitOut,
+          ...(perimeterValue !== undefined && { perimeterValue }),
+          ...(areaValue !== undefined && { areaValue }),
+          ...(cutouts && { cutouts }),
+          ...(netCalculatedValue !== undefined && { netCalculatedValue })
+        };
+
+        updatePromises.push(
+          updateTakeoffMeasurement(measurement.id, updates).catch(err => {
+            console.error(`📐 RECALC_AFTER_CALIBRATION: Failed to update measurement ${measurement.id}`, err);
+          })
+        );
+      }
+
+      await Promise.all(updatePromises);
+      get().updateMarkupsByPage();
+
+      if (import.meta.env.DEV) {
+        console.log('📐 RECALC_AFTER_CALIBRATION: Recalculated measurements', {
+          projectId,
+          sheetId,
+          pageNumber,
+          count: measurements.length
+        });
+      }
+    },
+
     // Getters
     getSheetTakeoffMeasurements: (projectId, sheetId) => {
       const { takeoffMeasurements } = get();
