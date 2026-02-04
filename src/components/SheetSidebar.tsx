@@ -62,7 +62,7 @@ export function SheetSidebar({
   selectedDocumentId,
   selectedPageNumber,
   onOCRRequest: _onOCRRequest,
-  onOcrSearchResults,
+  onOcrSearchResults: _onOcrSearchResults,
   onDocumentsUpdate,
   onReloadDocuments,
   onPdfUpload,
@@ -104,10 +104,10 @@ export function SheetSidebar({
   // Use documentsLoading from parent if provided, otherwise use local loading state
   const [localLoading, setLocalLoading] = useState(true);
   const loading = documentsLoading !== undefined ? documentsLoading : localLoading;
-  const [processingOCR, setProcessingOCR] = useState<string[]>([]);
+  const [_processingOCR, setProcessingOCR] = useState<string[]>([]);
   const [showLabelingDialog, setShowLabelingDialog] = useState(false);
   const [labelingProgress, setLabelingProgress] = useState('');
-  const [labelingProgressPercent, setLabelingProgressPercent] = useState(0);
+  const [_labelingProgressPercent, setLabelingProgressPercent] = useState(0);
   
   // Bulk analysis state
   const [showBulkAnalysisDialog, setShowBulkAnalysisDialog] = useState(false);
@@ -143,11 +143,11 @@ export function SheetSidebar({
   const [openDocumentMenu, setOpenDocumentMenu] = useState<string | null>(null);
   
   // Ref to track if we're currently updating documents to prevent infinite loops
-  const isUpdatingDocuments = useRef(false);
+  const _isUpdatingDocuments = useRef(false);
 
   // Close dropdowns when clicking outside
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
+    const handleClickOutside = (_event: MouseEvent) => {
       if (openDocumentMenu) {
         setOpenDocumentMenu(null);
       }
@@ -168,13 +168,13 @@ export function SheetSidebar({
   const getProjectTakeoffMeasurements = useMeasurementStore((s) => s.getProjectTakeoffMeasurements);
 
   // Check if document has OCR data
-  const checkDocumentOCRStatus = async (documentId: string): Promise<boolean> => {
+  const _checkDocumentOCRStatus = async (documentId: string): Promise<boolean> => {
     try {
       const { serverOcrService } = await import('../services/serverOcrService');
       const ocrData = await serverOcrService.getDocumentData(documentId, projectId);
       // CRITICAL FIX: Ensure results is an array before accessing length
       return !!(ocrData && Array.isArray(ocrData.results) && ocrData.results.length > 0);
-    } catch (error) {
+    } catch {
       return false;
     }
   };
@@ -192,7 +192,7 @@ export function SheetSidebar({
       pages: (Array.isArray(doc.pages) ? doc.pages : [])
         .filter(page => page != null && page.pageNumber != null)
         .map(page => {
-          const pageKey = `${projectId}-${doc.id}-${page.pageNumber}`;
+          const _pageKey = `${projectId}-${doc.id}-${page.pageNumber}`;
           const hasMeasurements = takeoffMeasurements.some(measurement => 
             measurement.sheetId === doc.id && measurement.pdfPage === page.pageNumber
           );
@@ -237,13 +237,12 @@ export function SheetSidebar({
       onDocumentsUpdate(updatedDocuments);
     }
     // Only run when measurement count for this project changes (not when documents reference changes, to avoid loops)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, projectMeasurementsCount, onDocumentsUpdate, updateHasTakeoffs]);
 
 
 
   // Process OCR for a specific page
-  const processOCR = useCallback(async (documentId: string, pageNumber: number) => {
+  const _processOCR = useCallback(async (documentId: string, pageNumber: number) => {
     try {
       setProcessingOCR(prev => [...prev, `${documentId}-${pageNumber}`]);
       
@@ -331,7 +330,7 @@ export function SheetSidebar({
   };
 
   // Handle extracted sheet names from titleblock configuration
-  const handleExtractedSheetNames = async (extractedData: Array<{ pageNumber: number; sheetNumber: string; sheetName: string }>) => {
+  const _handleExtractedSheetNames = async (_extractedData: Array<{ pageNumber: number; sheetNumber: string; sheetName: string }>) => {
     if (!selectedDocumentId) {
       console.error('No document selected for sheet name extraction');
       return;
@@ -340,7 +339,7 @@ export function SheetSidebar({
   };
 
   // Handle unified document analysis using AI
-  const handleAnalyzeDocument = async (documentId: string) => {
+  const _handleAnalyzeDocument = async (documentId: string) => {
     try {
       // Starting unified document analysis
       
@@ -368,6 +367,7 @@ export function SheetSidebar({
       let result: AnalyzeDocResult | null = null;
 
       if (reader) {
+        // eslint-disable-next-line no-constant-condition -- SSE stream: read until done
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -488,7 +488,7 @@ export function SheetSidebar({
                 if (existingSheet?.sheet?.sheetName) {
                   existingSheetName = existingSheet.sheet.sheetName;
                 }
-              } catch (error) {
+              } catch {
                 // Sheet doesn't exist yet, which is fine
               }
               
@@ -517,7 +517,7 @@ export function SheetSidebar({
                     if (existingSheet?.sheet?.sheetName) {
                       existingSheetName = existingSheet.sheet.sheetName;
                     }
-                  } catch (error) {
+                  } catch {
                     // Sheet doesn't exist yet, which is fine
                   }
                   
@@ -623,7 +623,7 @@ export function SheetSidebar({
   };
 
   // Check if a document has any unlabeled pages
-  const hasUnlabeledPages = (document: PDFDocument): boolean => {
+  const _hasUnlabeledPages = (document: PDFDocument): boolean => {
     return document.pages.some(page => !hasMeaningfulLabel(page));
   };
 
@@ -709,6 +709,7 @@ export function SheetSidebar({
         let lastProgress = 0;
 
         if (reader) {
+          // eslint-disable-next-line no-constant-condition -- SSE stream: read until done
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
@@ -895,11 +896,7 @@ export function SheetSidebar({
     const successCount = documentsToProcess.length - failedDocumentsList.length;
     const failCount = failedDocumentsList.length;
     
-    let reportMessage = `Page labeling complete!\n\n✅ Successfully labeled: ${successCount} document(s)`;
-    if (failCount > 0) {
-      reportMessage += `\n❌ Failed: ${failCount} document(s)`;
-      reportMessage += `\n\nFailed documents:\n${failedDocumentsList.map(d => `- ${d.name}`).join('\n')}`;
-    }
+    const _reportMessage = `Page labeling complete!\n\n✅ Successfully labeled: ${successCount} document(s)` + (failCount > 0 ? `\n❌ Failed: ${failCount} document(s)\n\nFailed documents:\n${failedDocumentsList.map(d => `- ${d.name}`).join('\n')}` : '');
     if (failCount === 0) toast.success(`Successfully labeled ${successCount} document(s).`);
     else toast.warning(`Labeling complete: ${successCount} succeeded, ${failCount} failed.`);
 
@@ -912,7 +909,7 @@ export function SheetSidebar({
   };
 
   // Bulk analyze documents - show confirmation first
-  const handleBulkAnalyzeDocumentsClick = (onlyUnlabeled: boolean = false) => {
+  const _handleBulkAnalyzeDocumentsClick = (onlyUnlabeled: boolean = false) => {
     // Filter documents based on option
     let documentsToAnalyze = documents;
     if (onlyUnlabeled) {
@@ -989,6 +986,7 @@ export function SheetSidebar({
           let result: AnalyzeResult | null = null;
           
           if (reader) {
+            // eslint-disable-next-line no-constant-condition -- SSE stream: read until done
             while (true) {
               const { done, value } = await reader.read();
               if (done) break;
@@ -1006,7 +1004,7 @@ export function SheetSidebar({
                     if (data.success) {
                       result = data;
                     }
-                  } catch (parseError) {
+                  } catch {
                     // Ignore parse errors
                   }
                 }
@@ -1077,7 +1075,7 @@ export function SheetSidebar({
                   if (existingSheet?.sheet?.sheetName) {
                     existingSheetName = existingSheet.sheet.sheetName;
                   }
-                } catch (error) {
+                } catch {
                   // Sheet doesn't exist yet
                 }
                 
@@ -1136,7 +1134,8 @@ export function SheetSidebar({
     setTimeout(() => {
       setShowBulkAnalysisDialog(false);
       if (successCount > 0) {
-          failCount > 0 ? toast.warning(`Bulk analysis: ${successCount} succeeded, ${failCount} failed.`) : toast.success(`Bulk analysis complete! Successfully analyzed ${successCount} document(s).`);
+          if (failCount > 0) toast.warning(`Bulk analysis: ${successCount} succeeded, ${failCount} failed.`);
+          else toast.success(`Bulk analysis complete! Successfully analyzed ${successCount} document(s).`);
         }
     }, 3000);
   };

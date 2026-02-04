@@ -25,7 +25,7 @@ const LoginPage: React.FC = () => {
       } else {
         navigate('/app');
       }
-    } catch (_err) {
+    } catch {
       setError('An unexpected error occurred');
     } finally {
       setIsLoading(false);

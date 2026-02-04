@@ -861,16 +861,17 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       : [];
     pageMeasurements.forEach((measurement) => {
       const isMoving = measurementMoveDelta && measurementIdsMoving.includes(measurement.id);
+      const delta = measurementMoveDelta ?? { x: 0, y: 0 };
       const measurementToRender = isMoving && measurement.pdfCoordinates
         ? {
             ...measurement,
             points: measurement.pdfCoordinates.map(p => ({
-              x: p.x + measurementMoveDelta!.x,
-              y: p.y + measurementMoveDelta!.y
+              x: p.x + delta.x,
+              y: p.y + delta.y
             })),
             pdfCoordinates: measurement.pdfCoordinates.map(p => ({
-              x: p.x + measurementMoveDelta!.x,
-              y: p.y + measurementMoveDelta!.y
+              x: p.x + delta.x,
+              y: p.y + delta.y
             }))
           }
         : measurement;
@@ -1013,8 +1014,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         ? (annotationMoveIds.length > 0 ? annotationMoveIds : (annotationMoveId ? [annotationMoveId] : []))
         : [];
       const isMoving = annotationMoveDelta && annotationIdsMoving.includes(annotation.id);
+      const annDelta = annotationMoveDelta ?? { x: 0, y: 0 };
       const pointsToRender = isMoving
-        ? annotation.points.map(p => ({ x: p.x + annotationMoveDelta!.x, y: p.y + annotationMoveDelta!.y }))
+        ? annotation.points.map(p => ({ x: p.x + annDelta.x, y: p.y + annDelta.y }))
         : annotation.points;
       const annotationToRender = isMoving ? { ...annotation, points: pointsToRender } : annotation;
       renderSVGAnnotation(svgOverlay, annotationToRender, viewport, {
@@ -1519,7 +1521,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         if (hasMarkups || isInteractiveMode) {
           renderMarkupsWithPointerEvents(pageNum, viewport, page, currentSelectionMode);
         }
-      } catch {}
+      } catch { /* render error ignored */ }
       
       // Removed verbose logging - was causing console spam
       
@@ -1658,7 +1660,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const dxNorm = points[1].x - points[0].x;
       const dyNorm = points[1].y - points[0].y;
       const pixelDistanceValidator = Math.hypot(dxNorm * calibBase.viewportWidth, dyNorm * calibBase.viewportHeight);
-      const pixelDistanceMeasure = Math.hypot(dxNorm * scaleInfo.viewportWidth!, dyNorm * scaleInfo.viewportHeight!);
+      const vw = scaleInfo.viewportWidth ?? 0;
+      const vh = scaleInfo.viewportHeight ?? 0;
+      const pixelDistanceMeasure = Math.hypot(dxNorm * vw, dyNorm * vh);
       const distanceValidatorFt = pixelDistanceValidator * scaleInfo.scaleFactor;
       const distanceMeasureFt = pixelDistanceMeasure * scaleInfo.scaleFactor;
       const mid = { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 };
@@ -1701,7 +1705,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           perimeterValue = measurementResult.perimeterValue;
         }
         break;
-      case 'volume':
+      case 'volume': {
         const depth = selectedCondition.depth || 1; // Default to 1 foot if no depth specified
         measurementResult = MeasurementCalculator.calculateVolume(viewportPoints, scaleInfo, depth, 1.0);
         calculatedValue = measurementResult.calculatedValue;
@@ -1711,6 +1715,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           perimeterValue = measurementResult.perimeterValue;
         }
         break;
+      }
       case 'count':
         measurementResult = MeasurementCalculator.calculateCount();
         calculatedValue = measurementResult.calculatedValue;

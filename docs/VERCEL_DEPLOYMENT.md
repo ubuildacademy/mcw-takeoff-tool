@@ -1,6 +1,6 @@
 # Vercel deployment
 
-This project deploys the **frontend only** to Vercel. The API is hosted elsewhere (e.g. Railway); `vercel.json` rewrites `/api/*` to that backend.
+This project deploys the **frontend only** to Vercel. For a short checklist so commits don’t break CI, Vercel, or Railway, see **[Deploy checklist](DEPLOY_CHECKLIST.md)**. The API is hosted elsewhere (e.g. Railway); `vercel.json` rewrites `/api/*` to that backend.
 
 ## Build setup (known working)
 

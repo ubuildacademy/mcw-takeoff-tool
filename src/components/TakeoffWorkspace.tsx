@@ -3,9 +3,6 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import PDFViewer from './PDFViewer';
 import { TakeoffSidebar } from './TakeoffSidebar';
-import { SheetSidebar } from './SheetSidebar';
-import { ChatTab } from './ChatTab';
-import { SearchTab } from './SearchTab';
 
 import { useProjectStore } from '../store/slices/projectSlice';
 import { useConditionStore } from '../store/slices/conditionSlice';
@@ -101,7 +98,7 @@ export function TakeoffWorkspace() {
   const getCurrentProject = useProjectStore((s) => s.getCurrentProject);
   const loadProjectTakeoffMeasurements = useMeasurementStore((s) => s.loadProjectTakeoffMeasurements);
   const setCalibration = useCalibrationStore((s) => s.setCalibration);
-  const getCalibration = useCalibrationStore((s) => s.getCalibration);
+  const _getCalibration = useCalibrationStore((s) => s.getCalibration);
   const clearProjectCalibrations = useCalibrationStore((s) => s.clearProjectCalibrations);
   const clearPageAnnotations = useAnnotationStore((s) => s.clearPageAnnotations);
   const setDocumentRotation = useDocumentViewStore((s) => s.setDocumentRotation);
@@ -140,7 +137,7 @@ export function TakeoffWorkspace() {
   const [currentPdfFile, setCurrentPdfFile] = useState<ProjectFile | null>(null);
   const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
   const [uploading, setUploading] = useState<boolean>(false);
-  const [loading, setLoading] = useState(true);
+  const [_loading, _setLoading] = useState(true);
   const { documents, documentsLoading, loadProjectDocuments, setDocuments } = useTakeoffWorkspaceDocuments({
     projectId: projectId ?? undefined,
     projectFiles,
@@ -323,7 +320,7 @@ export function TakeoffWorkspace() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [getSelectedCondition, handleConditionSelect, undo, redo]);
 
-  const handleToolSelect = (tool: string) => {
+  const handleToolSelect = (_tool: string) => {
     // Tool selection handled by PDF viewer
   };
 
@@ -348,7 +345,7 @@ export function TakeoffWorkspace() {
     loadProjectDocuments,
   });
 
-  const handleSearchInDocument = useCallback((query: string) => {
+  const _handleSearchInDocument = useCallback((query: string) => {
     const mockResults = [
       `Found "${query}" in note at coordinates (150, 200)`,
       `Found "${query}" in dimension at coordinates (300, 350)`,
@@ -651,7 +648,7 @@ export function TakeoffWorkspace() {
         <div className="flex">
           {leftSidebarOpen && (
                         <TakeoffSidebar
-              projectId={storeCurrentProject?.id || projectId!}
+              projectId={storeCurrentProject?.id ?? projectId ?? ''}
               onConditionSelect={handleConditionSelect}
               onToolSelect={handleToolSelect}
               documents={documents}
@@ -734,7 +731,7 @@ export function TakeoffWorkspace() {
           onRightSidebarOpenChange={setRightSidebarOpen}
           rightSidebarTab={rightSidebarTab}
           onRightSidebarTabChange={setRightSidebarTab}
-          projectId={storeCurrentProject?.id || projectId!}
+          projectId={storeCurrentProject?.id ?? projectId ?? ''}
           documents={documents}
           documentsLoading={documentsLoading}
           onPageSelect={documentView.handlePageSelect}

@@ -74,7 +74,6 @@ export function useTakeoffWorkspaceProjectInit({
     const savedPage = getDocumentPage(currentPdfFile.id);
     setCurrentPage(savedPage);
     setSelectedPageNumber(savedPage);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [documentViewRehydrated, projectId, currentPdfFile?.id]);
 
   // Load project files and restore last viewed document (once per projectId)
@@ -175,7 +174,6 @@ export function useTakeoffWorkspaceProjectInit({
     loadCalibrations();
     loadMeasurements();
     // Only depend on projectId so we don't re-run when store setters change reference
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   // Listen for profit margin dialog open event

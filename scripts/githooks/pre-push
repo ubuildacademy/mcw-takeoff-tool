@@ -1,0 +1,10 @@
+#!/bin/sh
+# Pre-push hook: run the same checks CI runs so we don't push broken commits.
+# Runs from repo root (Git invokes hooks with GIT_DIR set).
+set -e
+cd "$(git rev-parse --show-toplevel)" || exit 1
+echo "Running typecheck..."
+npm run typecheck
+echo "Running build..."
+npm run build
+echo "Pre-push checks passed."

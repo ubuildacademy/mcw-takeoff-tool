@@ -367,7 +367,7 @@ When answering questions:
               context += `  Full OCR content:\n${fullText}\n`;
             }
           }
-        } catch (_error) {
+        } catch {
           // Silently skip if OCR data not available
         }
       }

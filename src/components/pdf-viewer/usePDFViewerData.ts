@@ -100,6 +100,7 @@ export function usePDFViewerData({
 
   // PER-PAGE LOADING: Load measurements for current page when page changes
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: reset local state when deps change
     setLocalTakeoffMeasurements([]);
     setMeasurementsLoading(true);
 
@@ -146,6 +147,7 @@ export function usePDFViewerData({
   // REACTIVE UPDATE: Update localTakeoffMeasurements when store changes
   useEffect(() => {
     if (!currentProjectId || !fileId || !currentPage) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: clear when deps invalid
       setLocalTakeoffMeasurements([]);
       return;
     }

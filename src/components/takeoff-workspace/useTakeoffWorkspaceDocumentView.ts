@@ -93,8 +93,7 @@ export function useTakeoffWorkspaceDocumentView({
     }
 
     lastRestoredFileIdRef.current = currentPdfFile.id;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPdfFile?.id]);
+    }, [currentPdfFile?.id]);
 
   // Reset initial render flag when file changes
   useEffect(() => {

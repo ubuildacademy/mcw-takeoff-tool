@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import {
   Plus,
   Calculator,
@@ -37,7 +36,7 @@ interface TakeoffSidebarProps {
   selectedDocumentId?: string | null;
 }
 
-export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, documents = [], onPageSelect, onExportStatusUpdate, onCutoutMode, cutoutMode, cutoutTargetConditionId, selectedDocumentId }: TakeoffSidebarProps) {
+export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _onToolSelect, documents = [], onPageSelect, onExportStatusUpdate, onCutoutMode, cutoutMode, cutoutTargetConditionId, selectedDocumentId }: TakeoffSidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -55,17 +54,17 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
   const setSelectedCondition = useConditionStore((s) => s.setSelectedCondition);
   const selectedConditionId = useConditionStore((s) => s.selectedConditionId);
   const getConditionTakeoffMeasurements = useMeasurementStore((s) => s.getConditionTakeoffMeasurements);
-  const loadProjectConditions = useConditionStore((s) => s.loadProjectConditions);
-  const getProjectTakeoffMeasurements = useMeasurementStore((s) => s.getProjectTakeoffMeasurements);
+  const _loadProjectConditions = useConditionStore((s) => s.loadProjectConditions);
+  const _getProjectTakeoffMeasurements = useMeasurementStore((s) => s.getProjectTakeoffMeasurements);
   // Narrow selector: summary changes when measurements change; used to trigger thumbnail effect (avoids subscribing to full array)
   const takeoffSummary = useMeasurementStore((s) => s.getProjectTakeoffSummary(projectId));
   const loadingConditions = useConditionStore((s) => s.loadingConditions);
   const refreshProjectConditions = useConditionStore((s) => s.refreshProjectConditions);
   const ensureConditionsLoaded = useConditionStore((s) => s.ensureConditionsLoaded);
   const getProjectCostBreakdown = useMeasurementStore((s) => s.getProjectCostBreakdown);
-  const getConditionCostBreakdown = useMeasurementStore((s) => s.getConditionCostBreakdown);
+  const _getConditionCostBreakdown = useMeasurementStore((s) => s.getConditionCostBreakdown);
 
-  const { getQuantityReportData, getCostAnalysisData, exportToExcel, exportToPDF } = useTakeoffExport({
+  const { getQuantityReportData, getCostAnalysisData: _getCostAnalysisData, exportToExcel, exportToPDF } = useTakeoffExport({
     projectId,
     documents,
     onExportStatusUpdate,
@@ -205,7 +204,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
   };
 
   const handleDuplicateCondition = (condition: TakeoffCondition) => {
-    const { id, ...conditionWithoutId } = condition;
+    const { id: _id, ...conditionWithoutId } = condition;
     
     // Generate a random color from a curated palette
     const colors = [
@@ -248,7 +247,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
   };
 
   // Helper function to check if condition has measurements
-  const hasMeasurements = (condition: TakeoffCondition): boolean => {
+  const _hasMeasurements = (condition: TakeoffCondition): boolean => {
     const measurements = getConditionTakeoffMeasurements(projectId, condition.id);
     return measurements.length > 0;
   };
@@ -721,7 +720,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
         <CreateConditionDialog
           projectId={projectId}
           onClose={handleCloseDialog}
-          onConditionCreated={(condition) => {
+          onConditionCreated={(_condition) => {
             refreshProjectConditions(projectId); // Force refresh conditions from API
             handleCloseDialog();
           }}

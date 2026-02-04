@@ -40,7 +40,7 @@ export function ProjectList() {
   const [selectedProjectForBackup, setSelectedProjectForBackup] = useState<Project | null>(null);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [showUserProfile, setShowUserProfile] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [isAdmin, _setIsAdmin] = useState(false);
   const [conditionCounts, setConditionCounts] = useState<Record<string, number>>({});
   
   const projects = useProjectStore((s) => s.projects);
@@ -411,7 +411,7 @@ export function ProjectList() {
         <ProjectCreationDialog
         open={showCreate}
         onOpenChange={setShowCreate}
-        onCreated={async (proj) => {
+        onCreated={async (_proj) => {
           // The project is already added to the store by addProject
           // Just close the dialog
           setShowCreate(false);

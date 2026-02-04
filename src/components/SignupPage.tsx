@@ -34,7 +34,7 @@ const SignupPage: React.FC = () => {
         } else {
           setError('Invalid or expired invitation');
         }
-      } catch (_err) {
+      } catch {
         setError('Failed to validate invitation');
       } finally {
         setIsValidating(false);
@@ -61,10 +61,15 @@ const SignupPage: React.FC = () => {
       return;
     }
 
+    const email = invitation?.email;
+    if (!email) {
+      setError('Invalid or missing invitation.');
+      return;
+    }
     try {
       // Sign up the user
       const { error: signUpError } = await authHelpers.signUp(
-        invitation!.email,
+        email,
         formData.password,
         {
           full_name: formData.fullName,
@@ -78,13 +83,17 @@ const SignupPage: React.FC = () => {
       }
 
       // Accept the invitation
-      await authHelpers.acceptInvitation(inviteToken!, {
+      if (!inviteToken) {
+        setError('Invalid or missing invitation token.');
+        return;
+      }
+      await authHelpers.acceptInvitation(inviteToken, {
         full_name: formData.fullName,
         company: formData.company
       });
 
       navigate('/app');
-    } catch (_err) {
+    } catch {
       setError('An unexpected error occurred');
     } finally {
       setIsLoading(false);

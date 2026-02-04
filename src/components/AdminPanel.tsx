@@ -946,7 +946,7 @@ When answering questions:
                             } else {
                               toast.error('Ollama connection failed. Make sure Ollama is running.');
                             }
-                          } catch (_error) {
+                          } catch {
                             toast.error('Connection test failed. Check console for details.');
                           }
                         }}

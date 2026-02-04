@@ -236,11 +236,11 @@ export function usePDFViewerInteractions(
     setMeasurementMoveStart,
     measurementMoveOriginalPoints,
     setMeasurementMoveOriginalPoints,
-    measurementMoveDelta,
+    measurementMoveDelta: _measurementMoveDelta,
     setMeasurementMoveDelta,
     measurementDragStart,
     setMeasurementDragStart,
-    measurementDragBox,
+    measurementDragBox: _measurementDragBox,
     setMeasurementDragBox,
     annotationMoveId,
     setAnnotationMoveId,
@@ -250,17 +250,17 @@ export function usePDFViewerInteractions(
     setAnnotationMoveStart,
     annotationMoveOriginalPoints,
     setAnnotationMoveOriginalPoints,
-    annotationMoveDelta,
+    annotationMoveDelta: _annotationMoveDelta,
     setAnnotationMoveDelta,
     annotationDragStart,
     setAnnotationDragStart,
-    annotationDragBox,
+    annotationDragBox: _annotationDragBox,
     setAnnotationDragBox,
     cutoutMode,
     currentCutout,
     setCurrentCutout,
-    cutoutTargetConditionId,
-    onCutoutModeChange,
+    cutoutTargetConditionId: _cutoutTargetConditionId,
+    onCutoutModeChange: _onCutoutModeChange,
     completeCalibration,
     createRubberBandElementRef,
     completeCutoutRef,
@@ -289,7 +289,7 @@ export function usePDFViewerInteractions(
   const copyMarkupsByIds = useMeasurementStore((s) => s.copyMarkupsByIds);
   const copiedMarkups = useMeasurementStore((s) => s.copiedMarkups);
   const addTakeoffMeasurement = useMeasurementStore((s) => s.addTakeoffMeasurement);
-  const getSelectedCondition = useConditionStore((s) => s.getSelectedCondition);
+  const _getSelectedCondition = useConditionStore((s) => s.getSelectedCondition);
   const selectedConditionId = useConditionStore((s) => s.selectedConditionId);
 
   const getCssCoordsFromEvent = useCallback(

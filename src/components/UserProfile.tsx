@@ -36,7 +36,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ onClose }) => {
             confirmPassword: ''
           });
         }
-      } catch (_err) {
+      } catch {
         setError('Failed to load user data');
       } finally {
         setIsLoading(false);
@@ -64,7 +64,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ onClose }) => {
       if (metadata) {
         setUserMetadata(metadata);
       }
-    } catch (_err) {
+    } catch {
       setError('Failed to update profile');
     } finally {
       setIsSaving(false);
@@ -98,7 +98,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ onClose }) => {
         newPassword: '',
         confirmPassword: ''
       });
-    } catch (_err) {
+    } catch {
       setError('Failed to update password');
     } finally {
       setIsSaving(false);
