@@ -39,7 +39,7 @@ export function useTakeoffWorkspaceOCR({
   const [ocrDocumentName, setOcrDocumentName] = useState('');
 
   const pollOcrStatus = useCallback(
-    async (documentId: string, documentName: string) => {
+    async (documentId: string, _documentName: string) => {
       await new Promise((resolve) => setTimeout(resolve, 2000));
 
       let attempts = 0;

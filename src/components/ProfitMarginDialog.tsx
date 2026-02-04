@@ -11,7 +11,7 @@ interface ProfitMarginDialogProps {
   projectId: string;
 }
 
-export function ProfitMarginDialog({ open, onOpenChange, projectId }: ProfitMarginDialogProps) {
+export function ProfitMarginDialog({ open, onOpenChange, projectId: _projectId }: ProfitMarginDialogProps) {
   const getCurrentProject = useProjectStore((s) => s.getCurrentProject);
   const updateProject = useProjectStore((s) => s.updateProject);
   const currentProject = getCurrentProject();

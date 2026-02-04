@@ -46,7 +46,7 @@ export function TakeoffWorkspaceHeader({
   isOrthoSnapping,
   isMeasuring,
   isCalibrating,
-  measurementType,
+  measurementType: _measurementType,
   canUndo,
   canRedo,
   onUndo,

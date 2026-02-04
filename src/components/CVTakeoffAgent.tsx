@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from './ui/button';
-import { Badge } from './ui/badge';
-import { Progress } from './ui/progress';
 import { 
   X, 
   Scan, 
@@ -13,6 +11,7 @@ import {
   DoorOpen,
   SquareStack
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { cvTakeoffService } from '../services/cvTakeoffService';
 import { useCalibrationStore } from '../store/slices/calibrationSlice';
 import { useConditionStore } from '../store/slices/conditionSlice';
@@ -39,10 +38,10 @@ export function CVTakeoffAgent({
   const [serviceAvailable, setServiceAvailable] = useState<boolean>(false);
   const [isCheckingStatus, setIsCheckingStatus] = useState(true);
   const [statusDetails, setStatusDetails] = useState<Record<string, unknown> | null>(null);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [_statusMessage, setStatusMessage] = useState<string | null>(null);
   
   // Processing state
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [_isProcessing, setIsProcessing] = useState(false);
   
   // Results
   const [results, setResults] = useState<{
@@ -115,13 +114,13 @@ export function CVTakeoffAgent({
   const handleStartProcessing = async () => {
     // Validate that at least one option is selected
     if (!Object.values(detectionOptions).some(v => v)) {
-      alert('Please select at least one item to detect.');
+      toast.warning('Please select at least one item to detect.');
       return;
     }
 
     // Validate document and page
     if (!documentId || !pageNumber) {
-      alert('Please navigate to a page first.');
+      toast.warning('Please navigate to a page first.');
       return;
     }
 
@@ -252,17 +251,17 @@ export function CVTakeoffAgent({
   const hasValidPage = documentId && pageNumber;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-md flex flex-col">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" role="presentation" onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); handleClose(); } }}>
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-md flex flex-col" role="dialog" aria-modal="true" aria-labelledby="dialog-cv-takeoff-title">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-gradient-to-br from-green-500 to-blue-600 rounded-lg flex items-center justify-center">
               <Scan className="w-5 h-5 text-white" />
             </div>
-            <h2 className="text-xl font-semibold">CV Takeoff Detection</h2>
+            <h2 id="dialog-cv-takeoff-title" className="text-xl font-semibold">CV Takeoff Detection</h2>
           </div>
-          <Button variant="ghost" size="sm" onClick={handleClose}>
+          <Button variant="ghost" size="sm" onClick={handleClose} aria-label="Close">
             <X className="w-4 h-4" />
           </Button>
         </div>

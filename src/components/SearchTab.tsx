@@ -311,7 +311,7 @@ export function SearchTab({
 
                 {/* Results */}
                 <div className="divide-y">
-                  {results.map((result, index) => {
+                  {results.map((result, _index) => {
                     const resultKey = `${documentId}-${result.pageNumber}`;
                     const isExpanded = expandedResults.has(resultKey);
                     const isSelected = selectedDocumentId === documentId && selectedPageNumber === result.pageNumber;

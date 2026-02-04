@@ -3,7 +3,7 @@
  * Used for selection box, point-in-polygon checks, and markup rendering.
  */
 import type { PDFPageProxy, PageViewport } from 'pdfjs-dist';
-import type { Measurement } from '../PDFViewer.types';
+import type { Measurement, SelectionBox } from '../PDFViewer.types';
 import type { Annotation } from '../../types';
 import { formatFeetAndInches } from '../../lib/utils';
 import { calculateDistance } from '../../utils/commonUtils';
@@ -38,13 +38,6 @@ export function isPointInPolygon(
   }
 
   return inside;
-}
-
-export interface SelectionBox {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
 }
 
 /** Renders the visual search / titleblock selection box as an SVG rect */
@@ -132,7 +125,7 @@ export function renderSVGCurrentCutout(
   }
 }
 
-/** Renders crosshair at position (position in normalized 0–1 coordinates) */
+/** Renders crosshair at position (position in normalized 0–1 coordinates). */
 export function renderSVGCrosshair(
   svg: SVGSVGElement,
   position: Point,
@@ -144,11 +137,27 @@ export function renderSVGCrosshair(
   const vy = position.y * viewport.height;
   if (typeof vx !== 'number' || typeof vy !== 'number') return;
 
-  const crosshairSize = isCalibrating ? 30 : 35;
-  const strokeColor = isCalibrating ? 'rgba(255, 0, 0, 0.9)' : 'rgba(0, 0, 0, 0.8)';
-  const strokeWidth = isCalibrating ? '2' : '1';
-  const dotColor = isCalibrating ? 'rgba(255, 0, 0, 1)' : 'rgba(0, 0, 0, 0.9)';
-  const dotRadius = isCalibrating ? '3' : '2';
+  const viewportMin = Math.min(viewport.width, viewport.height);
+  const CROSSHAIR_SIZE_MIN = 22;
+  const CROSSHAIR_SIZE_FRACTION = 0.035;
+  const CROSSHAIR_SIZE_CALIBRATING_MIN = 24;
+  const CROSSHAIR_SIZE_CALIBRATING_FRACTION = 0.032;
+  const DOT_RADIUS_FRACTION = 0.0015;
+  const DOT_RADIUS_CALIBRATING_FRACTION = 0.002;
+  const DOT_RADIUS_MAX = 4;
+
+  const crosshairSize = isCalibrating
+    ? Math.max(CROSSHAIR_SIZE_CALIBRATING_MIN, viewportMin * CROSSHAIR_SIZE_CALIBRATING_FRACTION)
+    : Math.max(CROSSHAIR_SIZE_MIN, viewportMin * CROSSHAIR_SIZE_FRACTION);
+  const strokeColor = isCalibrating ? 'rgba(255, 0, 0, 0.9)' : 'rgba(0, 0, 0, 0.85)';
+  const strokeWidth = isCalibrating ? '2' : '1.5';
+  const dotRadius = Math.min(
+    DOT_RADIUS_MAX,
+    isCalibrating
+      ? Math.max(3, viewportMin * DOT_RADIUS_CALIBRATING_FRACTION)
+      : Math.max(2, viewportMin * DOT_RADIUS_FRACTION)
+  );
+  const dotColor = isCalibrating ? 'rgba(255, 0, 0, 1)' : 'rgba(0, 0, 0, 0.95)';
 
   const hLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
   hLine.setAttribute('x1', String(vx - crosshairSize));
@@ -156,8 +165,9 @@ export function renderSVGCrosshair(
   hLine.setAttribute('x2', String(vx + crosshairSize));
   hLine.setAttribute('y2', String(vy));
   hLine.setAttribute('stroke', strokeColor);
-  hLine.setAttribute('stroke-width', strokeWidth);
+  hLine.setAttribute('stroke-width', String(strokeWidth));
   hLine.setAttribute('stroke-linecap', 'round');
+  hLine.setAttribute('vector-effect', 'non-scaling-stroke');
   svg.appendChild(hLine);
 
   const vLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
@@ -166,17 +176,19 @@ export function renderSVGCrosshair(
   vLine.setAttribute('x2', String(vx));
   vLine.setAttribute('y2', String(vy + crosshairSize));
   vLine.setAttribute('stroke', strokeColor);
-  vLine.setAttribute('stroke-width', strokeWidth);
+  vLine.setAttribute('stroke-width', String(strokeWidth));
   vLine.setAttribute('stroke-linecap', 'round');
+  vLine.setAttribute('vector-effect', 'non-scaling-stroke');
   svg.appendChild(vLine);
 
   const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
   dot.setAttribute('cx', String(vx));
   dot.setAttribute('cy', String(vy));
-  dot.setAttribute('r', dotRadius);
+  dot.setAttribute('r', String(dotRadius));
   dot.setAttribute('fill', dotColor);
   dot.setAttribute('stroke', isCalibrating ? 'rgba(255, 255, 255, 0.8)' : 'none');
   dot.setAttribute('stroke-width', '1');
+  dot.setAttribute('vector-effect', 'non-scaling-stroke');
   svg.appendChild(dot);
 }
 
@@ -197,7 +209,7 @@ export function renderSVGMeasurement(
 
   const { rotation, selectedMarkupIds, getConditionColor, selectionMode } = options;
   const currentViewport = viewport;
-  const baseViewport = page.getViewport({ scale: 1, rotation: 0 });
+  const _baseViewport = page.getViewport({ scale: 1, rotation: 0 });
 
   const transformedPoints = points.map((point) => {
     const normalizedX = point.x;

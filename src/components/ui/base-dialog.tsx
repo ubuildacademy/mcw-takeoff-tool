@@ -1,7 +1,6 @@
 import React from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './dialog';
 import { Button } from './button';
-import { X } from 'lucide-react';
 
 interface BaseDialogProps {
   open: boolean;

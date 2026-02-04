@@ -36,7 +36,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ onClose }) => {
             confirmPassword: ''
           });
         }
-      } catch (err) {
+      } catch (_err) {
         setError('Failed to load user data');
       } finally {
         setIsLoading(false);
@@ -64,7 +64,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ onClose }) => {
       if (metadata) {
         setUserMetadata(metadata);
       }
-    } catch (err) {
+    } catch (_err) {
       setError('Failed to update profile');
     } finally {
       setIsSaving(false);
@@ -98,7 +98,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ onClose }) => {
         newPassword: '',
         confirmPassword: ''
       });
-    } catch (err) {
+    } catch (_err) {
       setError('Failed to update password');
     } finally {
       setIsSaving(false);
@@ -112,11 +112,11 @@ const UserProfile: React.FC<UserProfileProps> = ({ onClose }) => {
 
   if (isLoading) {
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" role="presentation">
+        <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4" role="dialog" aria-modal="true" aria-labelledby="dialog-profile-loading-title" aria-busy="true">
           <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="mt-2 text-slate-600">Loading profile...</p>
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto" aria-hidden="true"></div>
+            <p id="dialog-profile-loading-title" className="mt-2 text-slate-600">Loading profile...</p>
           </div>
         </div>
       </div>
@@ -124,12 +124,12 @@ const UserProfile: React.FC<UserProfileProps> = ({ onClose }) => {
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" role="presentation" onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); onClose(); } }}>
+      <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="dialog-user-profile-title">
         <div className="flex justify-between items-center mb-6">
-          <h2 className="text-2xl font-bold text-slate-900">User Profile</h2>
-          <Button variant="ghost" onClick={onClose}>
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <h2 id="dialog-user-profile-title" className="text-2xl font-bold text-slate-900">User Profile</h2>
+          <Button variant="ghost" onClick={onClose} aria-label="Close">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </Button>

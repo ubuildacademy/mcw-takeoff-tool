@@ -6,7 +6,6 @@ import { useConditionStore } from '../store/slices/conditionSlice';
 import { useMeasurementStore } from '../store/slices/measurementSlice';
 import { useAnnotationStore } from '../store/slices/annotationSlice';
 import { useUndoStore } from '../store/slices/undoSlice';
-import type { Annotation } from '../types';
 import type { PDFViewerProps, Measurement } from './PDFViewer.types';
 import { usePDFLoad } from './pdf-viewer/usePDFLoad';
 import { usePDFViewerCalibration } from './pdf-viewer/usePDFViewerCalibration';

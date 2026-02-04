@@ -38,6 +38,7 @@ export class MeasurementCalculator {
   static calculateLinear(
     points: MeasurementPoint[],
     scaleInfo: ScaleInfo,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- reserved for future viewport scaling
     viewportScale: number = 1.0
   ): MeasurementResult {
     const warnings: string[] = [];
@@ -57,20 +58,14 @@ export class MeasurementCalculator {
       };
     }
     
-    // Calculate total distance
-    let totalDistance = 0;
+    // Calculate total distance (normalized coords) for legacy/confidence use
+    let _totalDistance = 0;
     for (let i = 1; i < points.length; i++) {
       const dx = points[i].x - points[i - 1].x;
       const dy = points[i].y - points[i - 1].y;
-      const segmentDistance = Math.sqrt(dx * dx + dy * dy);
-      totalDistance += segmentDistance;
-      
-      // Validate segment length
-      if (segmentDistance < 1) {
-        warnings.push(`Very short segment detected (${segmentDistance.toFixed(2)}px)`);
-      }
+      _totalDistance += Math.sqrt(dx * dx + dy * dy);
     }
-    
+
     // Apply scale conversion
     // scaleInfo.scaleFactor is units per pixel, so we multiply by it to get units
     // Points are in normalized coordinates (0-1); convert each segment to pixels using width/height
@@ -88,33 +83,22 @@ export class MeasurementCalculator {
       };
     }
     
-    // Sum pixel distances per segment with proper aspect handling
+    // Sum pixel distances per segment with proper aspect handling; warn only on genuinely tiny segments (e.g. duplicate points)
+    const MIN_SEGMENT_PX = 2;
     let pixelDistance = 0;
     for (let i = 1; i < points.length; i++) {
       const dxNorm = points[i].x - points[i - 1].x;
       const dyNorm = points[i].y - points[i - 1].y;
       const dxPx = dxNorm * scaleInfo.viewportWidth;
       const dyPx = dyNorm * scaleInfo.viewportHeight;
-      pixelDistance += Math.sqrt(dxPx * dxPx + dyPx * dyPx);
+      const segmentPx = Math.sqrt(dxPx * dxPx + dyPx * dyPx);
+      pixelDistance += segmentPx;
+      if (segmentPx > 0 && segmentPx < MIN_SEGMENT_PX) {
+        warnings.push(`Very short segment detected (${segmentPx.toFixed(2)}px)`);
+      }
     }
     const calculatedValue = pixelDistance * scaleInfo.scaleFactor;
-    
-    // Debug logging
-    console.warn('🧮 LINEAR CALCULATION DEBUG:', {
-      totalDistance: totalDistance,
-      scaleInfo: scaleInfo,
-      calculatedValue: calculatedValue,
-      pixelDistance: pixelDistance,
-      viewportWidth: scaleInfo.viewportWidth,
-      viewportHeight: scaleInfo.viewportHeight,
-      // Show the calculation step by step
-      calculation: `sum(distPx) * ${scaleInfo.scaleFactor} = ${calculatedValue}`,
-      // Show what the scale factor represents
-      scaleFactorMeaning: `${scaleInfo.scaleFactor} units per pixel`,
-      // Show that we're using normalized coordinates
-      coordinateSystem: 'normalized (0-1) to pixels'
-    });
-    
+
     // Validation
     if (calculatedValue < 0.1) {
       warnings.push('Very small linear measurement detected');
@@ -159,6 +143,7 @@ export class MeasurementCalculator {
   static calculateArea(
     points: MeasurementPoint[],
     scaleInfo: ScaleInfo,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- reserved for future viewport scaling
     viewportScale: number = 1.0
   ): MeasurementResult {
     const warnings: string[] = [];
@@ -209,12 +194,12 @@ export class MeasurementCalculator {
     const calculatedValue = pixelArea * (scaleInfo.scaleFactor * scaleInfo.scaleFactor);
     
     // Calculate perimeter
-    let perimeter = 0;
+    let _perimeter = 0;
     for (let i = 0; i < points.length; i++) {
       const j = (i + 1) % points.length;
       const dx = points[j].x - points[i].x;
       const dy = points[j].y - points[i].y;
-      perimeter += Math.sqrt(dx * dx + dy * dy);
+      _perimeter += Math.sqrt(dx * dx + dy * dy);
     }
     // Convert normalized perimeter to pixels using proper aspect handling
     let pixelPerimeter = 0;
@@ -424,19 +409,30 @@ export class MeasurementCalculator {
   }
   
   /**
-   * Check if two line segments intersect
+   * Check if two line segments intersect (strict interior crossing only).
+   * Touching at a shared vertex (endpoint) does not count as self-intersection,
+   * so simple rectangles and closed polygons do not false-positive.
    */
   private static linesIntersect(
     p1: MeasurementPoint, p2: MeasurementPoint,
     p3: MeasurementPoint, p4: MeasurementPoint
   ): boolean {
-    const denom = (p4.y - p3.y) * (p2.x - p1.x) - (p4.x - p3.x) * (p2.y - p1.y);
+    const tol = 1e-10;
+    const dx1 = p2.x - p1.x;
+    const dy1 = p2.y - p1.y;
+    const dx2 = p4.x - p3.x;
+    const dy2 = p4.y - p3.y;
+    if (Math.abs(dx1) < tol && Math.abs(dy1) < tol) return false; // degenerate segment p1-p2
+    if (Math.abs(dx2) < tol && Math.abs(dy2) < tol) return false; // degenerate segment p3-p4
+
+    const denom = dy2 * dx1 - dx2 * dy1;
     if (Math.abs(denom) < 1e-10) return false; // Lines are parallel
-    
-    const ua = ((p4.x - p3.x) * (p1.y - p3.y) - (p4.y - p3.y) * (p1.x - p3.x)) / denom;
-    const ub = ((p2.x - p1.x) * (p1.y - p3.y) - (p2.y - p1.y) * (p1.x - p3.x)) / denom;
-    
-    return ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1;
+
+    const ua = (dx2 * (p1.y - p3.y) - dy2 * (p1.x - p3.x)) / denom;
+    const ub = (dx1 * (p1.y - p3.y) - dy1 * (p1.x - p3.x)) / denom;
+
+    // Only count strict interior crossing; shared vertices (ua/ub 0 or 1) are not self-intersection
+    return ua > tol && ua < 1 - tol && ub > tol && ub < 1 - tol;
   }
   
   /**

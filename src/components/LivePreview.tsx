@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { Eye, EyeOff, X, CheckCircle, AlertCircle, Clock, MapPin } from 'lucide-react';
+import { Eye, X, CheckCircle, AlertCircle, Clock, MapPin } from 'lucide-react';
 
 interface LivePreviewData {
   progress?: number;
@@ -41,7 +41,7 @@ interface LivePreviewProps {
 }
 
 export const LivePreview: React.FC<LivePreviewProps> = ({ projectId, isVisible, onClose, takeoffProgress }) => {
-  const [socket, setSocket] = useState<Socket | null>(null);
+  const [_socket, setSocket] = useState<Socket | null>(null);
   const [updates, setUpdates] = useState<LivePreviewUpdate[]>([]);
   const [currentProgress, setCurrentProgress] = useState(0);
   const [currentMessage, setCurrentMessage] = useState('');
@@ -142,18 +142,20 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ projectId, isVisible, 
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl h-5/6 flex flex-col">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" role="presentation" onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); onClose(); } }}>
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl h-5/6 flex flex-col" role="dialog" aria-modal="true" aria-labelledby="dialog-live-preview-title">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b">
           <div className="flex items-center gap-3">
             <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-            <h2 className="text-xl font-semibold">Live Preview - AI Takeoff Agent</h2>
+            <h2 id="dialog-live-preview-title" className="text-xl font-semibold">Live Preview - AI Takeoff Agent</h2>
             <span className="text-sm text-gray-500">Project: {projectId.slice(0, 8)}...</span>
           </div>
           <button
+            type="button"
             onClick={onClose}
             className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+            aria-label="Close"
           >
             <X className="w-5 h-5" />
           </button>

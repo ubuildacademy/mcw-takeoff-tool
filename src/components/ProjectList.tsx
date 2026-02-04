@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
-import { Badge } from './ui/badge';
 import { 
   Plus, 
   FolderOpen, 
@@ -13,6 +12,7 @@ import {
   Download,
   User
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { projectService } from '../services/apiService';
 import { supabase } from '../lib/supabase';
 import { ProjectCreationDialog } from './ProjectCreationDialog';
@@ -156,7 +156,7 @@ export function ProjectList() {
         await loadInitialData();
       } catch (error) {
         console.error('Failed to delete project:', error);
-        alert('Failed to delete project. Please try again.');
+        toast.error('Failed to delete project. Please try again.');
       }
     }
   };

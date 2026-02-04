@@ -7,6 +7,7 @@ import { useMeasurementStore } from '../../store/slices/measurementSlice';
 import { useProjectStore } from '../../store/slices/projectSlice';
 import { useAnnotationStore } from '../../store/slices/annotationSlice';
 import { useDocumentViewStore } from '../../store/slices/documentViewSlice';
+import { toast } from 'sonner';
 import { sheetService } from '../../services/apiService';
 import type { TakeoffCondition, TakeoffMeasurement, PDFDocument, Sheet } from '../../types';
 
@@ -236,10 +237,10 @@ export function useTakeoffExport({
 
   const exportToExcel = async () => {
     try {
-      const { reportData, sortedPages } = await getQuantityReportDataAsync();
+      const { reportData } = await getQuantityReportDataAsync();
       const conditionIds = Object.keys(reportData);
       if (conditionIds.length === 0) {
-        alert('No data to export');
+        toast.warning('No data to export');
         return;
       }
       onExportStatusUpdate?.('excel', 5);
@@ -851,10 +852,10 @@ export function useTakeoffExport({
 
   const exportToPDF = async () => {
     try {
-      const { reportData, sortedPages } = await getQuantityReportDataAsync();
+      const { reportData } = await getQuantityReportDataAsync();
       const conditionIds = Object.keys(reportData);
       if (conditionIds.length === 0) {
-        alert('No data to export');
+        toast.warning('No data to export');
         return;
       }
       onExportStatusUpdate?.('pdf', 10);
@@ -891,7 +892,7 @@ export function useTakeoffExport({
       });
 
       if (pagesWithMeasurements.size === 0) {
-        alert('No pages with measurements or annotations found');
+        toast.warning('No pages with measurements or annotations found');
         return;
       }
       onExportStatusUpdate?.('pdf', 10);
@@ -1062,7 +1063,7 @@ export function useTakeoffExport({
           `This may indicate files were deleted but measurements still reference them. ` +
           `Your export may be incomplete. Please check your project files.`;
         console.warn('⚠️ PDF Export Warning:', warningMessage, exportResult.skippedSheets);
-        alert(warningMessage);
+        toast.warning(warningMessage);
       }
 
       onExportStatusUpdate?.('pdf', 85);
@@ -1083,7 +1084,7 @@ export function useTakeoffExport({
       setTimeout(() => onExportStatusUpdate?.(null, 0), 1000);
     } catch (error) {
       console.error('PDF export error:', error);
-      alert('Error exporting PDF. Please try again.');
+      toast.error('Error exporting PDF. Please try again.');
       onExportStatusUpdate?.(null, 0);
       throw error;
     }

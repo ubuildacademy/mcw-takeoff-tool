@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from './ui/button';
-import { Progress } from './ui/progress';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
 import { Badge } from './ui/badge';
 import { 
@@ -9,8 +8,7 @@ import {
   XCircle, 
   AlertCircle,
   FileText,
-  Clock,
-  Download
+  Clock
 } from 'lucide-react';
 import type { OCRResult } from '../types';
 
@@ -94,7 +92,7 @@ export function OCRProcessingDialog({
         }
       }, 1000); // Check every second
       
-      const result = await serverOcrService.processDocument(documentId, projectId);
+      await serverOcrService.processDocument(documentId, projectId);
       
       // Clear the progress interval
       clearInterval(progressInterval);
@@ -124,8 +122,8 @@ export function OCRProcessingDialog({
     }
   };
 
-  // Mock functions for generating realistic content
-  const getMockSheetName = (pageNumber: number) => {
+  // Mock functions for generating realistic content (kept for potential future use)
+  const _getMockSheetName = (pageNumber: number) => {
     const names = [
       'Floor Plan',
       'Elevation',
@@ -141,7 +139,7 @@ export function OCRProcessingDialog({
     return names[pageNumber % names.length];
   };
 
-  const getMockDrawingTitle = (pageNumber: number) => {
+  const _getMockDrawingTitle = (pageNumber: number) => {
     const titles = [
       'First Floor Plan',
       'North Elevation',
@@ -162,6 +160,7 @@ export function OCRProcessingDialog({
     if (isOpen && pageNumbers.length > 0) {
       processOCR();
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- processOCR is intentionally run on open only
   }, [isOpen, pageNumbers.length]);
 
   const successfulPages = results.filter(r => r.success).length;

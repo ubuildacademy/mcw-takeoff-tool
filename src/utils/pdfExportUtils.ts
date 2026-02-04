@@ -18,26 +18,12 @@ interface PageMeasurements {
  * Fetch PDF bytes from the server with authentication
  */
 async function fetchPDFBytes(fileId: string): Promise<Uint8Array> {
-  // Use the correct API base URL instead of hardcoded localhost
   const { getApiBaseUrl } = await import('../lib/apiConfig');
+  const { getAuthHeaders } = await import('../lib/apiAuth');
   const API_BASE_URL = getApiBaseUrl();
-  
-  // Get authentication token from Supabase session
-  const { supabase } = await import('../lib/supabase');
-  const { data: { session } } = await supabase.auth.getSession();
-  const authToken = session?.access_token;
-  
-  // Build headers with authentication
-  const headers: HeadersInit = {};
-  if (authToken) {
-    headers['Authorization'] = `Bearer ${authToken}`;
-  } else {
-    console.warn('⚠️ No auth token available for PDF fetch');
-  }
-  
-  const url = `${API_BASE_URL}/files/${fileId}`;
-  
-  const response = await fetch(url, {
+  const headers = await getAuthHeaders();
+
+  const response = await fetch(`${API_BASE_URL}/files/${fileId}`, {
     headers,
   });
   
@@ -77,7 +63,7 @@ async function drawMeasurement(
   const colorRgb = rgb(color.r, color.g, color.b);
 
   // Get page dimensions from pdf-lib
-  const { width: pageWidth } = page.getSize();
+  const { width: _pageWidth } = page.getSize();
 
   // Convert PDF coordinates (0-1 normalized scale) to actual page coordinates
   // Coordinates are stored normalized based on viewport at rotation 0, scale 1
@@ -309,7 +295,7 @@ async function drawMeasurement(
 /**
  * Draw an annotation on a PDF page
  */
-async function drawAnnotation(
+async function _drawAnnotation(
   page: PDFPage,
   annotation: Annotation,
   pageHeight: number,
@@ -332,7 +318,7 @@ async function drawAnnotation(
   const colorRgb = rgb(color.r, color.g, color.b);
 
   // Get page dimensions from pdf-lib
-  const { width: pageWidth } = page.getSize();
+  const { width: _pageWidth } = page.getSize();
 
   // Convert PDF coordinates (0-1 normalized scale) to actual page coordinates
   // Coordinates are stored normalized based on viewport at rotation 0, scale 1
@@ -480,7 +466,7 @@ function transformCoordinates(
 /**
  * Render a measurement to SVG element
  */
-function renderMeasurementToSVG(
+function _renderMeasurementToSVG(
   svg: SVGSVGElement,
   measurement: TakeoffMeasurement,
   viewport: { width: number; height: number },
@@ -661,7 +647,7 @@ function renderMeasurementToSVG(
 /**
  * Render an annotation to SVG element
  */
-function renderAnnotationToSVG(
+function _renderAnnotationToSVG(
   svg: SVGSVGElement,
   annotation: Annotation,
   viewport: { width: number; height: number },
@@ -1167,11 +1153,11 @@ export async function exportPagesWithMeasurementsToPDF(
       try {
         // Fetch the source PDF
         const pdfBytes = await fetchPDFBytes(sheetId);
-        const sourcePdf = await PDFDocument.load(pdfBytes);
+        const _sourcePdf = await PDFDocument.load(pdfBytes);
 
         // Process each page
         for (const pageMeasurement of pages) {
-          const pageIndex = pageMeasurement.pageNumber - 1; // Convert to 0-based index
+          const _pageIndex = pageMeasurement.pageNumber - 1; // Convert to 0-based index
 
           // Get document rotation if available
           const documentRotation = documentRotations?.get(sheetId) || 0;

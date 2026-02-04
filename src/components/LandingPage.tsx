@@ -1,7 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from './ui/button';
-import { Badge } from './ui/badge';
 
 const LandingPage: React.FC = () => {
   const navigate = useNavigate();

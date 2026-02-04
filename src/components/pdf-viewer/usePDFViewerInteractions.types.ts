@@ -4,7 +4,7 @@
  */
 import type { RefObject } from 'react';
 import type { PDFPageProxy, PageViewport } from 'pdfjs-dist';
-import type { Measurement } from '../PDFViewer.types';
+import type { SelectionBox } from '../PDFViewer.types';
 import type { Annotation } from '../../types';
 import type { UsePDFViewerMeasurementsResult } from './usePDFViewerMeasurements';
 
@@ -46,11 +46,8 @@ export interface PDFViewerInteractionsCallbacks {
   onScaleChange?: (scale: number) => void;
   onPageChange?: (page: number) => void;
   onAnnotationToolChange?: (tool: 'text' | 'arrow' | 'rectangle' | 'circle' | null) => void;
-  onVisualSearchComplete?: (selectionBox: { x: number; y: number; width: number; height: number }) => void;
-  onTitleblockSelectionComplete?: (
-    field: 'sheetNumber' | 'sheetName',
-    selectionBox: { x: number; y: number; width: number; height: number }
-  ) => void;
+  onVisualSearchComplete?: (selectionBox: SelectionBox) => void;
+  onTitleblockSelectionComplete?: (field: 'sheetNumber' | 'sheetName', selectionBox: SelectionBox) => void;
   onPageShown?: (pageNum: number, viewport: PageViewport) => void;
 }
 
@@ -76,8 +73,8 @@ export interface PDFViewerInteractionsOptions
     forceImmediate?: boolean
   ) => Promise<void>;
   updateMarkupPointerEvents: (selectionMode: boolean) => void;
-  /** Apply CSS zoom when PDF render is blocked */
-  applyInteractiveZoomTransforms: () => void;
+  /** Apply CSS zoom when PDF render is blocked; pass overrideScale when called from wheel so transform uses new scale before state updates */
+  applyInteractiveZoomTransforms: (overrideScale?: number) => void;
   /** Completion handlers (defined in PDFViewer, passed in) */
   completeMeasurement: (points: { x: number; y: number }[]) => Promise<void>;
   completeCutout: (points: { x: number; y: number }[]) => Promise<void>;

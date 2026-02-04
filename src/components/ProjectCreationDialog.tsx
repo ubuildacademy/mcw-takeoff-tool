@@ -22,7 +22,7 @@ import {
 import { 
   Building2 
 } from 'lucide-react';
-import { projectService, fileService } from '../services/apiService';
+import { fileService } from '../services/apiService';
 import { useProjectStore } from '../store/slices/projectSlice';
 import type { Project } from '../types';
 
@@ -206,7 +206,7 @@ export function ProjectCreationDialog({ open, onOpenChange, onCreated }: Project
                   value={formData.projectType}
                   onValueChange={(value) => handleInputChange('projectType', value)}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger id="projectType">
                     <SelectValue placeholder="Select project type" />
                   </SelectTrigger>
                   <SelectContent>

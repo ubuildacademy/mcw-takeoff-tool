@@ -13,6 +13,7 @@ import {
   X,
   Tag
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { useSheetSidebarFilter, useSheetSidebarSheetEditing, SheetSidebarHeader, SheetSidebarDialogs } from './sheet-sidebar';
 import { fileService, sheetService, aiAnalysisService } from '../services/apiService';
 import { useMeasurementStore } from '../store/slices/measurementSlice';
@@ -60,7 +61,7 @@ export function SheetSidebar({
   onPageSelect, 
   selectedDocumentId,
   selectedPageNumber,
-  onOCRRequest,
+  onOCRRequest: _onOCRRequest,
   onOcrSearchResults,
   onDocumentsUpdate,
   onReloadDocuments,
@@ -227,32 +228,17 @@ export function SheetSidebar({
   }, [projectId, documents, documentsLoading]);
 
   // Update hasTakeoffs when takeoff measurements change (but preserve expansion state)
-  // Subscribe to takeoffMeasurements changes from store to update counts when measurements are added/deleted
-  const takeoffMeasurements = useMeasurementStore((state) => state.takeoffMeasurements);
-  
-  // Track the last measurements count to prevent update loops
-  // Only update documents when takeoffMeasurements actually changes, not when documents changes
-  const lastMeasurementsCountRef = useRef<number>(-1);
-  const lastMeasurementsHashRef = useRef<string>('');
-  
+  // Narrow selector: project measurement count only (avoids subscribing to full takeoffMeasurements array)
+  const projectMeasurementsCount = useMeasurementStore((state) => state.getProjectTakeoffMeasurements(projectId).length);
+
   useEffect(() => {
     if (documents.length > 0 && onDocumentsUpdate) {
-      // Create a simple hash of measurements to detect actual changes
-      const measurementsHash = takeoffMeasurements.map(m => `${m.id}-${m.sheetId}-${m.pdfPage}`).join(',');
-      
-      // Only update if measurements actually changed (not just documents)
-      if (measurementsHash !== lastMeasurementsHashRef.current) {
-        lastMeasurementsHashRef.current = measurementsHash;
-        lastMeasurementsCountRef.current = takeoffMeasurements.length;
-        
-        const updatedDocuments = updateHasTakeoffs(documents);
-        onDocumentsUpdate(updatedDocuments);
-      }
+      const updatedDocuments = updateHasTakeoffs(documents);
+      onDocumentsUpdate(updatedDocuments);
     }
-  // CRITICAL: Remove 'documents' from deps to prevent update loop
-  // We only want to run when takeoffMeasurements changes, not when documents changes
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, takeoffMeasurements, onDocumentsUpdate, updateHasTakeoffs]);
+    // Only run when measurement count for this project changes (not when documents reference changes, to avoid loops)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, projectMeasurementsCount, onDocumentsUpdate, updateHasTakeoffs]);
 
 
 
@@ -310,7 +296,7 @@ export function SheetSidebar({
       }
     } catch (error) {
       console.error('Error deleting document:', error);
-      alert('Failed to delete document. Please try again.');
+      toast.error('Failed to delete document. Please try again.');
     }
   };
 
@@ -340,7 +326,7 @@ export function SheetSidebar({
       setOpenBulkActionsMenu(false);
     } catch (error) {
       console.error('Error deleting all documents:', error);
-      alert('Failed to delete some documents. Please try again.');
+      toast.error('Failed to delete some documents. Please try again.');
     }
   };
 
@@ -362,7 +348,7 @@ export function SheetSidebar({
       const document = documents.find(doc => doc.id === documentId);
       if (!document) {
         console.error('Document not found:', documentId);
-        alert('Document not found. Please try again.');
+        toast.error('Document not found. Please try again.');
         return;
       }
 
@@ -583,15 +569,15 @@ export function SheetSidebar({
         }
         
         // Show success message after data is reloaded
-        alert(successMessage);
+        toast.success(successMessage);
       } else {
         console.warn('No sheet information could be extracted:', result);
-        alert('Could not automatically extract sheet information. The AI may need more context or the document structure may be unclear.');
+        toast.warning('Could not automatically extract sheet information. The AI may need more context or the document structure may be unclear.');
       }
 
     } catch (error) {
       console.error('Error in automatic sheet labeling:', error);
-      alert('Failed to perform automatic sheet labeling. Please try again or use manual labeling.');
+      toast.error('Failed to perform automatic sheet labeling. Please try again or use manual labeling.');
     } finally {
       // Remove loading state and close dialog
       setProcessingOCR(prev => prev.filter(id => id !== documentId));
@@ -648,7 +634,7 @@ export function SheetSidebar({
     const documentsToProcess = documents.filter(doc => doc.pages && doc.pages.length > 0);
     
     if (documentsToProcess.length === 0) {
-      alert('No documents found to label.');
+      toast.warning('No documents found to label.');
       return;
     }
 
@@ -914,7 +900,8 @@ export function SheetSidebar({
       reportMessage += `\n❌ Failed: ${failCount} document(s)`;
       reportMessage += `\n\nFailed documents:\n${failedDocumentsList.map(d => `- ${d.name}`).join('\n')}`;
     }
-    alert(reportMessage);
+    if (failCount === 0) toast.success(`Successfully labeled ${successCount} document(s).`);
+    else toast.warning(`Labeling complete: ${successCount} succeeded, ${failCount} failed.`);
 
     // Clear job after 3 seconds
     setTimeout(() => {
@@ -933,7 +920,7 @@ export function SheetSidebar({
     }
     
     if (documentsToAnalyze.length === 0) {
-      alert(onlyUnlabeled 
+      toast.warning(onlyUnlabeled 
         ? 'No unlabeled documents found. All documents already have sheet names or numbers.'
         : 'No documents found to analyze.');
       return;
@@ -956,7 +943,7 @@ export function SheetSidebar({
     }
     
     if (documentsToAnalyze.length === 0) {
-      alert(onlyUnlabeled 
+      toast.warning(onlyUnlabeled 
         ? 'No unlabeled documents found. All documents already have sheet names or numbers.'
         : 'No documents found to analyze.');
       return;
@@ -1149,8 +1136,8 @@ export function SheetSidebar({
     setTimeout(() => {
       setShowBulkAnalysisDialog(false);
       if (successCount > 0) {
-        alert(`Bulk analysis complete!\n\n✅ Successfully analyzed: ${successCount} document(s)\n${failCount > 0 ? `❌ Failed: ${failCount} document(s)` : ''}`);
-      }
+          failCount > 0 ? toast.warning(`Bulk analysis: ${successCount} succeeded, ${failCount} failed.`) : toast.success(`Bulk analysis complete! Successfully analyzed ${successCount} document(s).`);
+        }
     }, 3000);
   };
 
@@ -1195,7 +1182,7 @@ export function SheetSidebar({
       setRenameInput('');
     } catch (error) {
       console.error('Error renaming page:', error);
-      alert('Failed to rename page. Please try again.');
+      toast.error('Failed to rename page. Please try again.');
     }
   };
 
@@ -1213,7 +1200,7 @@ export function SheetSidebar({
       }
     } catch (error) {
       console.error('Error deleting document:', error);
-      alert('Failed to delete document. Please try again.');
+      toast.error('Failed to delete document. Please try again.');
     }
   };
 
@@ -1755,7 +1742,7 @@ export function SheetSidebar({
                                     } else {
                                       // For multi-page documents, we'd need a different delete handler
                                       // For now, just show a message
-                                      alert('To delete a page from a multi-page document, please delete the entire document.');
+                                      toast.info('To delete a page from a multi-page document, please delete the entire document.');
                                     }
                                     setOpenPageMenu(null);
                                   }}

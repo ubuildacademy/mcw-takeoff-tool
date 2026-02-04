@@ -122,7 +122,7 @@ export class BackupService {
       // Check backup version and provide helpful info
       const isV2 = backup.version === '2.0' || parseFloat(backup.version) >= 2.0;
       const filesWithData = backup.metadata?.filesWithData ?? 0;
-      const filesMissing = backup.metadata?.filesMissing ?? 0;
+      const _filesMissing = backup.metadata?.filesMissing ?? 0;
       const hasCalibrations = backup.calibrations && backup.calibrations.length > 0;
 
       return { 

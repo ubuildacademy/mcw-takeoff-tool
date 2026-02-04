@@ -286,7 +286,7 @@ class HybridDetectionService {
    * Format validation results for display
    */
   formatValidationResults(validation: HybridDetectionValidation): string {
-    const { overallValid, errors, warnings, info, suggestions, confidence } = validation;
+    const { overallValid, errors, warnings, info: _info, suggestions: _suggestions, confidence } = validation;
     
     if (overallValid) {
       return `✅ Valid (${Math.round(confidence * 100)}% confidence)`;

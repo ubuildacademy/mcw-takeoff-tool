@@ -2,7 +2,6 @@ import { useState, useRef } from 'react';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 import { Progress } from './ui/progress';
-import { Badge } from './ui/badge';
 import { 
   Download, 
   Upload, 
@@ -15,7 +14,7 @@ import {
   Ruler,
   FileImage
 } from 'lucide-react';
-import { BackupService, ProjectBackup } from '../services/backupService';
+import { BackupService } from '../services/backupService';
 import { useProjectStore } from '../store/slices/projectSlice';
 
 interface BackupDialogProps {

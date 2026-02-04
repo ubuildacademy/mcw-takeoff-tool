@@ -34,7 +34,7 @@ const SignupPage: React.FC = () => {
         } else {
           setError('Invalid or expired invitation');
         }
-      } catch (err) {
+      } catch (_err) {
         setError('Failed to validate invitation');
       } finally {
         setIsValidating(false);
@@ -84,7 +84,7 @@ const SignupPage: React.FC = () => {
       });
 
       navigate('/app');
-    } catch (err) {
+    } catch (_err) {
       setError('An unexpected error occurred');
     } finally {
       setIsLoading(false);
@@ -144,7 +144,9 @@ const SignupPage: React.FC = () => {
               <Label htmlFor="email">Email address</Label>
               <Input
                 id="email"
+                name="email"
                 type="email"
+                autoComplete="email"
                 value={invitation.email}
                 disabled
                 className="mt-1 bg-slate-50"
@@ -156,6 +158,7 @@ const SignupPage: React.FC = () => {
                 id="fullName"
                 name="fullName"
                 type="text"
+                autoComplete="name"
                 required
                 value={formData.fullName}
                 onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
@@ -169,6 +172,7 @@ const SignupPage: React.FC = () => {
                 id="company"
                 name="company"
                 type="text"
+                autoComplete="organization"
                 value={formData.company}
                 onChange={(e) => setFormData({ ...formData, company: e.target.value })}
                 className="mt-1"
@@ -181,6 +185,7 @@ const SignupPage: React.FC = () => {
                 id="password"
                 name="password"
                 type="password"
+                autoComplete="new-password"
                 required
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
@@ -194,6 +199,7 @@ const SignupPage: React.FC = () => {
                 id="confirmPassword"
                 name="confirmPassword"
                 type="password"
+                autoComplete="new-password"
                 required
                 value={formData.confirmPassword}
                 onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}

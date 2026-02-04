@@ -16,6 +16,7 @@ import {
   Trash2,
   Mail
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { ollamaService, type OllamaModel } from '../services/ollamaService';
 import { authHelpers, UserMetadata, UserInvitation } from '../lib/supabase';
 import { settingsService, sheetLabelPatternsService } from '../services/apiService';
@@ -26,7 +27,7 @@ interface AdminPanelProps {
   projectId: string;
 }
 
-export function AdminPanel({ isOpen, onClose, projectId }: AdminPanelProps) {
+export function AdminPanel({ isOpen, onClose, projectId: _projectId }: AdminPanelProps) {
   const [activeTab, setActiveTab] = useState<'overview' | 'ai-prompt' | 'ai-settings' | 'user-management' | 'sheet-label-patterns'>('overview');
   const [isLoading, setIsLoading] = useState(false);
   const [adminKey, setAdminKey] = useState('');
@@ -54,7 +55,7 @@ export function AdminPanel({ isOpen, onClose, projectId }: AdminPanelProps) {
       setIsUnlocked(true);
       setAdminKey('');
     } else {
-      alert('Invalid admin key');
+      toast.error('Invalid admin key');
     }
   };
 
@@ -140,10 +141,10 @@ When answering questions:
       localStorage.setItem('titleblock-sheet-number-prompt', sheetNumberPrompt);
       
       // Show success message
-      alert('✅ Sheet number prompt saved successfully!');
+      toast.success('Sheet number prompt saved successfully!');
     } catch (error) {
       console.error('Error saving sheet number prompt:', error);
-      alert('❌ Failed to save sheet number prompt');
+      toast.error('Failed to save sheet number prompt');
     } finally {
       setIsLoading(false);
     }
@@ -167,10 +168,10 @@ When answering questions:
       localStorage.setItem('titleblock-sheet-name-prompt', sheetNamePrompt);
       
       // Show success message
-      alert('✅ Sheet name prompt saved successfully!');
+      toast.success('Sheet name prompt saved successfully!');
     } catch (error) {
       console.error('Error saving sheet name prompt:', error);
-      alert('❌ Failed to save sheet name prompt');
+      toast.error('Failed to save sheet name prompt');
     } finally {
       setIsLoading(false);
     }
@@ -248,10 +249,10 @@ When answering questions:
       localStorage.setItem('ai-chat-assistant-prompt', chatPrompt);
       
       // Show success message
-      alert('✅ Chat assistant prompt saved successfully!');
+      toast.success('Chat assistant prompt saved successfully!');
     } catch (error) {
       console.error('Error saving chat prompt:', error);
-      alert('❌ Failed to save chat prompt');
+      toast.error('Failed to save chat prompt');
     } finally {
       setIsLoading(false);
     }
@@ -379,16 +380,16 @@ When answering questions:
       
       // Check if email was actually sent
       if (result?.email_sent) {
-        alert('Invitation created and email sent successfully!');
+        toast.success('Invitation created and email sent successfully!');
       } else {
-        alert(`Invitation created, but email was not sent.\n\nPlease configure SMTP settings in your backend environment variables.\n\nInvitation URL: ${result?.invite_url || 'N/A'}`);
+        toast.warning(`Invitation created, but email was not sent. Please configure SMTP settings in your backend. Invitation URL: ${result?.invite_url || 'N/A'}`);
       }
     } catch (error: unknown) {
       console.error('Error sending invitation:', error);
       const err = error as Record<string, unknown>;
       const data = (err?.response as Record<string, unknown> | undefined)?.data as Record<string, unknown> | undefined;
       const errorMessage = typeof data?.error === 'string' ? data.error : (typeof err?.message === 'string' ? err.message : 'Failed to send invitation');
-      alert(`Failed to create invitation: ${errorMessage}`);
+      toast.error(`Failed to create invitation: ${errorMessage}`);
     } finally {
       setIsInviting(false);
     }
@@ -402,7 +403,7 @@ When answering questions:
       await loadInvitations();
     } catch (error) {
       console.error('Error deleting invitation:', error);
-      alert('Failed to delete invitation');
+      toast.error('Failed to delete invitation');
     }
   };
 
@@ -414,7 +415,7 @@ When answering questions:
       await loadUsers();
     } catch (error) {
       console.error('Error updating user role:', error);
-      alert('Failed to update user role');
+      toast.error('Failed to update user role');
     }
   };
 
@@ -426,7 +427,7 @@ When answering questions:
       await loadUsers();
     } catch (error) {
       console.error('Error deleting user:', error);
-      alert('Failed to delete user');
+      toast.error('Failed to delete user');
     }
   };
 
@@ -466,7 +467,9 @@ When answering questions:
                   <Label htmlFor="admin-key">Admin Key</Label>
                   <Input
                     id="admin-key"
+                    name="admin-key"
                     type="password"
+                    autoComplete="current-password"
                     value={adminKey}
                     onChange={(e) => setAdminKey(e.target.value)}
                     placeholder="Enter admin key..."
@@ -585,12 +588,12 @@ When answering questions:
                           try {
                             const models = await ollamaService.getModels();
                             if (models && models.length > 0) {
-                              alert(`✅ AI models loaded successfully! Found ${models.length} available models.`);
+                              toast.success(`AI models loaded successfully! Found ${models.length} available models.`);
                             } else {
-                              alert('⚠️ No AI models found. Please check your Ollama installation.');
+                              toast.warning('No AI models found. Please check your Ollama installation.');
                             }
                           } catch (error) {
-                            alert('❌ Failed to connect to AI models. Check console for details.');
+                            toast.error('Failed to connect to AI models. Check console for details.');
                             console.error('Model connection error:', error);
                           }
                         }}
@@ -731,6 +734,7 @@ When answering questions:
                           <Label htmlFor="chat-prompt">Construction Takeoff Assistant Prompt</Label>
                           <textarea 
                             id="chat-prompt"
+                            name="chat-prompt"
                             value={chatPrompt}
                             onChange={(e) => setChatPrompt(e.target.value)}
                             className="w-full h-32 p-3 border rounded-md resize-none"
@@ -920,10 +924,10 @@ When answering questions:
                             localStorage.setItem('ai-selected-model', selectedModel);
                             localStorage.setItem('ai-fallback-model', fallbackModel);
                             
-                            alert('✅ AI settings saved successfully!');
+                            toast.success('AI settings saved successfully!');
                           } catch (error) {
                             console.error('Error saving AI settings:', error);
-                            alert('❌ Failed to save AI settings');
+                            toast.error('Failed to save AI settings');
                           } finally {
                             setIsLoading(false);
                           }
@@ -938,12 +942,12 @@ When answering questions:
                           try {
                             const isAvailable = await ollamaService.isAvailable();
                             if (isAvailable) {
-                              alert('✅ Ollama connection successful!');
+                              toast.success('Ollama connection successful!');
                             } else {
-                              alert('❌ Ollama connection failed. Make sure Ollama is running.');
+                              toast.error('Ollama connection failed. Make sure Ollama is running.');
                             }
-                          } catch (error) {
-                            alert('❌ Connection test failed. Check console for details.');
+                          } catch (_error) {
+                            toast.error('Connection test failed. Check console for details.');
                           }
                         }}
                       >
@@ -956,7 +960,7 @@ When answering questions:
                           setSelectedModel('gpt-oss:120b-cloud');
                           setFallbackModel('llama3.1:8b');
                           ollamaService.setDefaultModel('gpt-oss:120b-cloud');
-                          alert('✅ Settings reset to defaults!');
+                          toast.success('Settings reset to defaults!');
                         }}
                       >
                         <RefreshCw className="w-4 h-4 mr-2" />
@@ -983,7 +987,9 @@ When answering questions:
                           <Label htmlFor="invite-email">Email Address</Label>
                           <Input
                             id="invite-email"
+                            name="invite-email"
                             type="email"
+                            autoComplete="email"
                             value={inviteEmail}
                             onChange={(e) => setInviteEmail(e.target.value)}
                             placeholder="user@example.com"
@@ -993,6 +999,7 @@ When answering questions:
                           <Label htmlFor="invite-role">Role</Label>
                           <select
                             id="invite-role"
+                            name="invite-role"
                             className="w-full p-2 border rounded-md"
                             value={inviteRole}
                             onChange={(e) => setInviteRole(e.target.value as 'admin' | 'user')}
@@ -1142,6 +1149,8 @@ function SheetLabelPatternsTab() {
 
   useEffect(() => {
     loadPatterns();
+    // filterType is the intended dep; loadPatterns is stable and would require useCallback to add
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterType]);
 
   const loadPatterns = async () => {
@@ -1153,7 +1162,7 @@ function SheetLabelPatternsTab() {
       setPatterns(allPatterns);
     } catch (error) {
       console.error('Failed to load patterns:', error);
-      alert('Failed to load patterns');
+      toast.error('Failed to load patterns');
     } finally {
       setLoading(false);
     }
@@ -1181,7 +1190,7 @@ function SheetLabelPatternsTab() {
       console.error('Failed to save pattern:', error);
       const err = error as Record<string, unknown>;
       const data = (err?.response as Record<string, unknown> | undefined)?.data as Record<string, unknown> | undefined;
-      alert(typeof data?.error === 'string' ? data.error : 'Failed to save pattern');
+      toast.error(typeof data?.error === 'string' ? data.error : 'Failed to save pattern');
     }
   };
 
@@ -1192,7 +1201,7 @@ function SheetLabelPatternsTab() {
       loadPatterns();
     } catch (error) {
       console.error('Failed to delete pattern:', error);
-      alert('Failed to delete pattern');
+      toast.error('Failed to delete pattern');
     }
   };
 

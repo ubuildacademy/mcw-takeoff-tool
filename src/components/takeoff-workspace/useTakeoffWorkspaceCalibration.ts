@@ -22,7 +22,7 @@ export interface UseTakeoffWorkspaceCalibrationResult {
  */
 export function useTakeoffWorkspaceCalibration({
   currentCalibration,
-  isDev = false,
+  isDev: _isDev = false,
 }: UseTakeoffWorkspaceCalibrationOptions): UseTakeoffWorkspaceCalibrationResult {
   return {
     currentCalibration,

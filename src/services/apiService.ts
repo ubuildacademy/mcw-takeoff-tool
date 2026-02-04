@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { supabase } from '../lib/supabase';
 import { getApiBaseUrl } from '../lib/apiConfig';
-import type { Project, TakeoffCondition, ProjectFile, TakeoffMeasurement } from '../types';
+import type { Project, TakeoffCondition, TakeoffMeasurement } from '../types';
 
 const API_BASE_URL = getApiBaseUrl();
 

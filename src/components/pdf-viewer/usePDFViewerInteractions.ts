@@ -174,7 +174,7 @@ export function usePDFViewerInteractions(
     lastRenderedScaleRef,
     viewState,
     currentPage,
-    totalPages,
+    totalPages: _totalPages,
     setPageViewports,
     setInternalViewState,
     onScaleChange,

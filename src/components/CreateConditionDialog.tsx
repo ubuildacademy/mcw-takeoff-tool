@@ -5,9 +5,10 @@ import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Textarea } from './ui/textarea';
 import { X } from 'lucide-react';
+import { toast } from 'sonner';
 import { useConditionStore } from '../store/slices/conditionSlice';
 import type { TakeoffCondition } from '../types';
-import { generateDistinctColor, getDefaultUnit, parseDepthInput, formatDepthOutput } from '../utils/commonUtils';
+import { generateDistinctColor, parseDepthInput, formatDepthOutput } from '../utils/commonUtils';
 
 interface CreateConditionDialogProps {
   projectId: string;
@@ -22,7 +23,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
   const updateCondition = useConditionStore((s) => s.updateCondition);
   const conditions = useConditionStore((s) => s.conditions);
 
-  const existingColors = useMemo(() => {
+  const _existingColors = useMemo(() => {
     return conditions
       .filter((c: { projectId: string; color?: string }) => c.projectId === projectId)
       .map((c: { color?: string }) => c.color)
@@ -51,8 +52,8 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
   const [loading, setLoading] = useState(false);
   const [depthError, setDepthError] = useState<string>('');
   const [heightError, setHeightError] = useState<string>('');
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [_imagePreview, _setImagePreview] = useState<string | null>(null);
+  const [_imageFile, _setImageFile] = useState<File | null>(null);
 
 
   // Ensure unit is set when component mounts
@@ -61,6 +62,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
       const defaultUnit = getDefaultUnit(formData.type);
       setFormData(prev => ({ ...prev, unit: defaultUnit }));
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount to set default unit
   }, []);
 
   // Auto-switch unit when includeHeight changes for linear conditions
@@ -78,6 +80,8 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
         }
       }
     }
+  // formData.unit intentionally omitted to avoid loop when we set it
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData.includeHeight, formData.type]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -198,7 +202,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
       
     } catch (error) {
       console.error('Error saving condition:', error);
-      alert(`Failed to ${editingCondition ? 'update' : 'create'} condition. Please try again.`);
+      toast.error(`Failed to ${editingCondition ? 'update' : 'create'} condition. Please try again.`);
     } finally {
       setLoading(false);
     }
@@ -286,7 +290,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
             <div>
               <Label htmlFor="type">Type *</Label>
               <Select value={formData.type} onValueChange={handleTypeChange}>
-                <SelectTrigger>
+                <SelectTrigger id="type">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -304,7 +308,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
               <Select value={formData.unit || getDefaultUnit(formData.type)} onValueChange={(value) => {
                 handleInputChange('unit', value);
               }}>
-                <SelectTrigger>
+                <SelectTrigger id="unit">
                   <SelectValue placeholder="Select unit" />
                 </SelectTrigger>
                 <SelectContent>
@@ -495,7 +499,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
                   value={formData.searchScope} 
                   onValueChange={(value) => handleInputChange('searchScope', value)}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger id="searchScope">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>

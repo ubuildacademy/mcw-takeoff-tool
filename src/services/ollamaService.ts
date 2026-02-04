@@ -343,7 +343,7 @@ class OllamaService {
                     this.connectionRetries = 0;
                     return;
                   }
-                } catch (parseError) {
+                } catch (_parseError) {
                   console.warn('Failed to parse Ollama streaming response line:', line);
                   // Continue processing other lines instead of failing completely
                 }

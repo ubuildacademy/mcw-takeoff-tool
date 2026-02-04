@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
-import { Input } from './ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import {
   Plus,
@@ -15,6 +14,7 @@ import {
   DollarSign,
   Edit3,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { useConditionStore } from '../store/slices/conditionSlice';
 import { useMeasurementStore } from '../store/slices/measurementSlice';
 import type { TakeoffCondition, PDFDocument } from '../types';
@@ -50,13 +50,15 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
   const [loadingThumbnails, setLoadingThumbnails] = useState<Set<string>>(new Set());
 
   const addCondition = useConditionStore((s) => s.addCondition);
-  const conditions = useConditionStore((s) => s.conditions);
+  // Narrow selector: only this project's conditions (avoids re-render when other projects' conditions change)
+  const conditions = useConditionStore((s) => s.getProjectConditions(projectId));
   const setSelectedCondition = useConditionStore((s) => s.setSelectedCondition);
   const selectedConditionId = useConditionStore((s) => s.selectedConditionId);
   const getConditionTakeoffMeasurements = useMeasurementStore((s) => s.getConditionTakeoffMeasurements);
   const loadProjectConditions = useConditionStore((s) => s.loadProjectConditions);
   const getProjectTakeoffMeasurements = useMeasurementStore((s) => s.getProjectTakeoffMeasurements);
-  const takeoffMeasurements = useMeasurementStore((s) => s.takeoffMeasurements);
+  // Narrow selector: summary changes when measurements change; used to trigger thumbnail effect (avoids subscribing to full array)
+  const takeoffSummary = useMeasurementStore((s) => s.getProjectTakeoffSummary(projectId));
   const loadingConditions = useConditionStore((s) => s.loadingConditions);
   const refreshProjectConditions = useConditionStore((s) => s.refreshProjectConditions);
   const ensureConditionsLoaded = useConditionStore((s) => s.ensureConditionsLoaded);
@@ -110,11 +112,10 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
     }
   }, [showExportDropdown]);
 
-  const filteredConditions = conditions.filter(condition =>
-    condition.projectId === projectId && (
-      condition.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      condition.description.toLowerCase().includes(searchQuery.toLowerCase())
-    )
+  const filteredConditions = conditions.filter(
+    (c) =>
+      c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      c.description.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   // Load match thumbnails for auto-count (visual-search) conditions
@@ -122,15 +123,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
     if (!projectId) return;
 
     const loadThumbnails = async () => {
-      // Compute filtered conditions inside the effect to ensure we have the latest values
-      const currentFilteredConditions = conditions.filter(condition =>
-        condition.projectId === projectId && (
-          condition.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          condition.description.toLowerCase().includes(searchQuery.toLowerCase())
-        )
-      );
-
-      const visualSearchConditions = currentFilteredConditions.filter(
+      const visualSearchConditions = filteredConditions.filter(
         c => (c.type as string) === 'visual-search' && 
         !loadingThumbnails.has(c.id) &&
         !matchThumbnails[c.id]
@@ -143,8 +136,8 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
           console.log(`[TakeoffSidebar] Loading thumbnails for condition ${condition.id} with ${measurements.length} measurements`);
           setLoadingThumbnails(prev => new Set(prev).add(condition.id));
           try {
-            const { visualSearchService } = await import('../services/visualSearchService');
-            const thumbnails = await visualSearchService.getMatchThumbnails(condition.id, projectId, 6);
+            const { autoCountService } = await import('../services/visualSearchService');
+            const thumbnails = await autoCountService.getMatchThumbnails(condition.id, projectId, 6);
             console.log(`[TakeoffSidebar] Loaded ${thumbnails.length} thumbnails for condition ${condition.id}`, thumbnails);
             setMatchThumbnails(prev => ({
               ...prev,
@@ -165,7 +158,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
 
     loadThumbnails();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, conditions, searchQuery, takeoffMeasurements]);
+  }, [projectId, conditions, searchQuery, takeoffSummary]);
 
 
   const toggleConditionExpansion = (conditionId: string) => {
@@ -357,7 +350,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                         setShowExportDropdown(false);
                       } catch (error) {
                         console.error('Excel export error:', error);
-                        alert('Error exporting Excel file. Please try again.');
+                        toast.error('Error exporting Excel file. Please try again.');
                       }
                     }}
                   >
@@ -374,7 +367,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect, doc
                         setShowExportDropdown(false);
                       } catch (error) {
                         console.error('PDF export error:', error);
-                        alert('Error exporting PDF file. Please try again.');
+                        toast.error('Error exporting PDF file. Please try again.');
                       }
                     }}
                   >
