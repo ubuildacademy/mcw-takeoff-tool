@@ -3,9 +3,6 @@
   "version": "0.1.1",
   "private": true,
   "type": "module",
-  "engines": {
-    "node": ">=18"
-  },
   "dependencies": {
     "@radix-ui/react-context": "^1.1.2",
     "@radix-ui/react-dialog": "^1.0.5",

@@ -2,25 +2,22 @@
 
 This project deploys the **frontend only** to Vercel. The API is hosted elsewhere (e.g. Railway); `vercel.json` rewrites `/api/*` to that backend.
 
-## Build setup
+## Build setup (known working)
 
-- **Install:** `npm ci` (reproducible; installs devDependencies so typecheck and Vite build succeed).
+- **Install:** `NODE_ENV=development npm install` (in `vercel.json`). This ensures devDependencies are installed so typecheck and Vite build succeed. Do not switch to `npm ci` or change this without checking Vercel build logs—a previous attempt with `npm ci` caused deploy failures.
 - **Build:** `npm run build` → `copy-pdf-worker` → `typecheck` → `vite build`.
 - **Output:** `dist/`.
-- **Node:** Use Node 18+ (see `package.json` `engines` and `.nvmrc`). In Vercel, set **Node.js Version** to 18.x or 20.x if needed (Project Settings → General).
 
-## If the build fails on Vercel
+## Why a deploy might fail (without access to logs)
 
-1. **Get the exact error**  
-   Vercel dashboard → your project → **Deployments** → failed deployment → **Building** (or **Logs**). The failure is usually at the end of the build or install step.
+Inferred from which commits deployed vs failed:
 
-2. **Typical causes**
-   - **TypeScript / typecheck:** Fix the reported file and line (CI typecheck is blocking, so this should match what you see in GitHub Actions).
-   - **Missing devDependencies:** Build needs `vite`, `typescript`, etc. We use `npm ci` so the full dependency tree is installed. If you changed the install command, ensure it doesn’t skip devDependencies.
-   - **Node version:** Vercel should use Node 18+ (`.nvmrc` and `engines`). If your error is “unsupported” or “syntax,” set Node.js Version in Project Settings to **20.x**.
-   - **Out of memory / timeout:** The build is large (pdfjs, exceljs, etc.). If the job runs out of memory or times out, try enabling **Vercel’s “Include source maps”** off to reduce work, or contact Vercel about increasing build resources.
+1. **TypeScript / typecheck** – If the commit touches code and typecheck fails in CI (GitHub Actions), the same error will fail the Vercel build because `npm run build` runs typecheck. Fix the type error and push again.
+2. **Install or config change** – Changing `installCommand` (e.g. to `npm ci`), adding `engines` in package.json, or adding `.nvmrc` has been observed to break Vercel deploys even when the same build works locally. Keep the install command as `NODE_ENV=development npm install` unless you can confirm a new config works via build logs.
 
-3. **Reproduce locally**  
-   From repo root:  
-   `rm -rf node_modules dist && npm ci && npm run build`  
-   If this fails, fix the error locally first; the same fix should apply on Vercel.
+## If you get access to Vercel logs
+
+1. Open the failed deployment → **Building** (or **Logs**) and use the exact error message.
+2. **Typecheck:** Fix the reported file/line (should match GitHub Actions if it failed there too).
+3. **Install:** If the error is about package-lock.json or `npm ci`, revert to `NODE_ENV=development npm install`.
+4. **Reproduce locally:** `rm -rf node_modules dist && npm install && npm run build`. If it passes locally, the issue is likely Vercel environment (Node version, install command, or cache).

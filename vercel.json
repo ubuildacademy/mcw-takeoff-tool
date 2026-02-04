@@ -2,7 +2,7 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "devCommand": "npm run dev",
-  "installCommand": "npm ci",
+  "installCommand": "NODE_ENV=development npm install",
   "framework": "vite",
   "rewrites": [
     {
