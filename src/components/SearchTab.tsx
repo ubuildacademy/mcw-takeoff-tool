@@ -113,7 +113,8 @@ export function SearchTab({
   const selectedDocumentRef = useRef(selectedDocument);
   selectedDocumentRef.current = selectedDocument;
   const debouncedSearch = useMemo(
-    () => debounce((query: string) => {
+    () => debounce((...args: unknown[]) => {
+      const query = typeof args[0] === 'string' ? args[0] : '';
       if (query.trim().length >= 2) {
         performSearchRef.current(query, selectedDocumentRef.current ?? undefined);
       }
