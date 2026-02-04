@@ -103,12 +103,15 @@ export function SheetSidebarHeader({
 
       <div className="space-y-3">
         <div className="space-y-2">
-          <label className="text-sm font-medium text-gray-700 flex items-center gap-2">
+          <label htmlFor="sheet-search-pages" className="text-sm font-medium text-gray-700 flex items-center gap-2">
             <Search className="w-4 h-4" />
             Search Pages
           </label>
           <Input
+            id="sheet-search-pages"
+            name="sheet-search-pages"
             type="text"
+            autoComplete="off"
             placeholder="Search by page number, sheet name, or sheet number..."
             value={searchQuery}
             onChange={(e) => onSearchQueryChange(e.target.value)}
@@ -117,11 +120,13 @@ export function SheetSidebarHeader({
         </div>
 
         <div className="space-y-2">
-          <label className="text-sm font-medium text-gray-700 flex items-center gap-2">
+          <label htmlFor="sheet-filter-pages" className="text-sm font-medium text-gray-700 flex items-center gap-2">
             <Filter className="w-4 h-4" />
             Filter Pages
           </label>
           <select
+            id="sheet-filter-pages"
+            name="sheet-filter-pages"
             value={filterBy}
             onChange={(e) =>
               onFilterByChange((e.target.value as SheetSidebarFilterBy) || 'all')

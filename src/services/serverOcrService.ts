@@ -38,14 +38,12 @@ class ServerOCRService {
   // Process a document with server-side OCR
   async processDocument(documentId: string, projectId: string): Promise<DocumentOCRData> {
     // Check if already processing
-    if (this.processingJobs.has(documentId)) {
-      return this.processingJobs.get(documentId)!;
-    }
+    const queued = this.processingJobs.get(documentId);
+    if (queued != null) return queued;
 
     // Check if already completed
-    if (this.completedOCR.has(documentId)) {
-      return this.completedOCR.get(documentId)!;
-    }
+    const completed = this.completedOCR.get(documentId);
+    if (completed != null) return completed;
 
     const processingPromise = this._processDocument(documentId, projectId);
     this.processingJobs.set(documentId, processingPromise);
@@ -282,9 +280,9 @@ class ServerOCRService {
       }
 
       type SampleItem = { pageNumber: number; textLength: number; textPreview: string };
-      let sampleResults: SampleItem[] = [];
+      let _sampleResults: SampleItem[] = [];
       try {
-        sampleResults = safeResults
+        _sampleResults = safeResults
           .slice(0, 3)
           .map((r): SampleItem | null => {
             if (r && typeof r === 'object' && r.pageNumber != null) {
@@ -299,11 +297,11 @@ class ServerOCRService {
           .filter((item): item is SampleItem => item != null);
       } catch (error) {
         console.error(`❌ Error building sample results for document ${documentId}:`, error);
-        sampleResults = [];
+        _sampleResults = [];
       }
 
       const resultsAsOCR: OCRResult[] = safeResults.map((r) => ({
-        pageNumber: r.pageNumber!,
+        pageNumber: r.pageNumber ?? 0,
         text: r.text ?? '',
         confidence: 0,
         processingTime: 0,
@@ -334,7 +332,7 @@ class ServerOCRService {
   }
 
   // Get processing progress (not available for server-side processing)
-  getProgress(documentId: string): { current: number; total: number } | null {
+  getProgress(_documentId: string): { current: number; total: number } | null {
     // Server-side processing progress is not easily accessible from client
     return null;
   }

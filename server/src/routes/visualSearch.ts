@@ -5,13 +5,79 @@
  */
 
 import { Router } from 'express';
-import { autoCountService } from '../services/visualSearchService';
+import { autoCountService, type AutoCountResult } from '../services/visualSearchService';
 import { storage } from '../storage';
 import fs from 'fs-extra';
 import path from 'path';
-import { requireAuth, hasProjectAccess, isAdmin, validateUUIDParam } from '../middleware';
+import { requireAuth, validateUUIDParam } from '../middleware';
 
 const router = Router();
+
+// Client sends selection box in normalized 0–1 coordinates (fraction of page width/height)
+const MIN_SELECTION_SIZE_NORMALIZED = 0.005;
+
+function validateSelectionBox(selectionBox: { x: number; y: number; width: number; height: number } | undefined): string | null {
+  if (!selectionBox || typeof selectionBox.width !== 'number' || typeof selectionBox.height !== 'number') {
+    return 'Selection box must have width and height';
+  }
+  if (selectionBox.width < MIN_SELECTION_SIZE_NORMALIZED || selectionBox.height < MIN_SELECTION_SIZE_NORMALIZED) {
+    return 'Selection box is too small – draw a larger box around the symbol';
+  }
+  return null;
+}
+
+/** Resolve condition and ensure it can run auto-count (no existing measurements). */
+async function getConditionForCompleteSearch(conditionId: string): Promise<
+  { condition: Awaited<ReturnType<typeof storage.getConditions>>[number] } | { error: string; status?: number }
+> {
+  const measurements = await storage.getTakeoffMeasurements();
+  const existingMeasurements = measurements.filter(m => m.conditionId === conditionId);
+  if (existingMeasurements.length > 0) {
+    return {
+      error: 'This condition already has measurements. Please delete the condition and recreate it to run a new search.',
+      status: 400
+    };
+  }
+  const conditions = await storage.getConditions();
+  const condition = conditions.find(c => c.id === conditionId);
+  if (!condition) {
+    return { error: 'Condition not found', status: 404 };
+  }
+  return { condition };
+}
+
+/** Save extracted template image to condition (searchImage) for UI display. */
+async function saveTemplateImageToCondition(
+  template: { id: string; imageData: string },
+  conditionId: string
+): Promise<void> {
+  if (!template.imageData) return;
+  try {
+    let base64Image: string;
+    if (template.imageData.startsWith('data:') || template.imageData.startsWith('/') || template.imageData.includes(path.sep)) {
+      if (await fs.pathExists(template.imageData)) {
+        const imageBuffer = await fs.readFile(template.imageData);
+        base64Image = imageBuffer.toString('base64');
+      } else {
+        return;
+      }
+    } else {
+      base64Image = template.imageData;
+    }
+    if (!base64Image) return;
+    const conditions = await storage.getConditions();
+    const existingCondition = conditions.find(c => c.id === conditionId);
+    if (existingCondition) {
+      await storage.saveCondition({
+        ...existingCondition,
+        searchImage: base64Image,
+        searchImageId: template.id
+      });
+    }
+  } catch (error) {
+    console.error('⚠️ Failed to save template image to condition:', error);
+  }
+}
 
 // Extract symbol template from selection box
 router.post('/extract-template', requireAuth, async (req, res) => {
@@ -22,6 +88,11 @@ router.post('/extract-template', requireAuth, async (req, res) => {
       return res.status(400).json({
         error: 'Missing required fields: pdfFileId, pageNumber, and selectionBox are required'
       });
+    }
+
+    const selectionError = validateSelectionBox(selectionBox);
+    if (selectionError) {
+      return res.status(400).json({ error: selectionError });
     }
 
     const template = await autoCountService.extractSymbolTemplate(
@@ -114,18 +185,22 @@ router.post('/complete-search', requireAuth, async (req, res) => {
     }
   };
   
-  const sendComplete = (result: any) => {
+  const sendComplete = (result: { success: boolean; result: AutoCountResult; measurementsCreated: number }) => {
     if (wantsSSE) {
       try {
         const completeMessage = { type: 'complete', ...result };
-        console.log('📤 Sending SSE complete message:', JSON.stringify(completeMessage, null, 2));
+        if (process.env.NODE_ENV === 'development') {
+          console.log('📤 Sending SSE complete message:', JSON.stringify(completeMessage, null, 2));
+        }
         const message = `data: ${JSON.stringify(completeMessage)}\n\n`;
         res.write(message);
         // Ensure the stream is properly flushed before ending
         if (typeof res.flush === 'function') {
           res.flush();
         }
-        console.log('✅ SSE complete message sent, closing connection');
+        if (process.env.NODE_ENV === 'development') {
+          console.log('✅ SSE complete message sent, closing connection');
+        }
         res.end();
       } catch (error) {
         console.error('❌ Error sending SSE complete message:', error);
@@ -157,51 +232,35 @@ router.post('/complete-search', requireAuth, async (req, res) => {
       });
     }
 
-    console.log('🔍 Starting complete auto-count workflow...');
-    console.log('📋 Request details:', {
-      conditionId,
-      pdfFileId,
-      pageNumber,
-      selectionBox,
-      projectId,
-      sheetId,
-      options
-    });
-
-    // Check if condition already has measurements (prevent re-running)
-    const measurements = await storage.getTakeoffMeasurements();
-    const existingMeasurements = measurements.filter(m => m.conditionId === conditionId);
-    if (existingMeasurements.length > 0) {
-      console.log(`⚠️ Condition ${conditionId} already has ${existingMeasurements.length} measurements`);
-      const errorMsg = 'This condition already has measurements. Please delete the condition and recreate it to run a new search.';
+    const selectionError = validateSelectionBox(selectionBox);
+    if (selectionError) {
       if (wantsSSE) {
-        sendError(errorMsg);
+        sendError(selectionError);
         return;
       }
-      return res.status(400).json({
-        error: errorMsg,
-        existingCount: existingMeasurements.length
-      });
+      return res.status(400).json({ error: selectionError });
     }
 
-    // Get condition info for color and name
-    const conditions = await storage.getConditions();
-    const condition = conditions.find(c => c.id === conditionId);
-    if (!condition) {
-      console.error(`❌ Condition ${conditionId} not found`);
-      const errorMsg = 'Condition not found';
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🔍 Starting complete auto-count workflow...');
+    }
+
+    const conditionResult = await getConditionForCompleteSearch(conditionId);
+    if ('error' in conditionResult) {
       if (wantsSSE) {
-        sendError(errorMsg);
+        sendError(conditionResult.error);
         return;
       }
-      return res.status(404).json({ error: errorMsg });
+      return res.status(conditionResult.status ?? 400).json({ error: conditionResult.error });
     }
-
-    console.log(`✅ Found condition: ${condition.name} (type: ${condition.type})`);
+    const { condition } = conditionResult;
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`✅ Found condition: ${condition.name} (type: ${condition.type})`);
+      console.log('📦 Step 1: Extracting symbol template from selection box...');
+      console.log('📐 Selection box:', selectionBox);
+    }
 
     // Step 1: Extract symbol template (pass projectId for PDF download)
-    console.log('📦 Step 1: Extracting symbol template from selection box...');
-    console.log('📐 Selection box:', selectionBox);
     const template = await autoCountService.extractSymbolTemplate(
       pdfFileId,
       pageNumber,
@@ -209,52 +268,14 @@ router.post('/complete-search', requireAuth, async (req, res) => {
       projectId
     );
 
-    // Step 1.5: Save the template image to the condition so it can be displayed in the UI
-    // template.imageData is a file path, so we need to read it and convert to base64
-    if (template.imageData) {
-      try {
-        // Check if it's already base64 (starts with data: or is a long base64 string)
-        // or if it's a file path (starts with / or contains path separators)
-        let base64Image: string;
-        
-        if (template.imageData.startsWith('data:') || template.imageData.startsWith('/') || template.imageData.includes(path.sep)) {
-          // It's a file path, read and convert to base64
-          if (await fs.pathExists(template.imageData)) {
-            const imageBuffer = await fs.readFile(template.imageData);
-            base64Image = imageBuffer.toString('base64');
-          } else {
-            console.warn('⚠️ Template image file not found:', template.imageData);
-            // Skip saving if file doesn't exist
-            base64Image = '';
-          }
-        } else {
-          // Assume it's already base64
-          base64Image = template.imageData;
-        }
-        
-        if (base64Image) {
-          const conditions = await storage.getConditions();
-          const existingCondition = conditions.find(c => c.id === conditionId);
-          if (existingCondition) {
-            const updatedCondition = {
-              ...existingCondition,
-              searchImage: base64Image,
-              searchImageId: template.id
-            };
-            await storage.saveCondition(updatedCondition);
-            console.log('✅ Saved template image to condition (base64)');
-          }
-        }
-      } catch (error) {
-        console.error('⚠️ Failed to save template image to condition:', error);
-        // Don't fail the whole workflow if saving the image fails
-      }
-    }
+    await saveTemplateImageToCondition(template, conditionId);
 
-    // Step 3: Search for matching symbols (pass pageNumber, projectId, and searchScope)
+    // Step 2: Search for matching symbols (pass pageNumber, projectId, and searchScope)
     const searchScope = condition.searchScope || 'current-page';
-    console.log(`🔎 Step 3: Searching for matching symbols (scope: ${searchScope})...`);
-    console.log('⚙️ Search options:', options);
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`🔎 Step 2: Searching for matching symbols (scope: ${searchScope})...`);
+      console.log('⚙️ Search options:', options);
+    }
     
     // Send initial progress update
     if (wantsSSE) {
@@ -272,8 +293,10 @@ router.post('/complete-search', requireAuth, async (req, res) => {
       sendProgress // Pass the SSE progress function
     );
 
-    // Step 4: Create count measurements with condition's color and name
-    console.log(`📝 Step 4: Creating ${searchResult.matches.length} count measurements...`);
+    // Step 3: Create count measurements with condition's color and name
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`📝 Step 3: Creating ${searchResult.matches.length} count measurements...`);
+    }
     if (wantsSSE) {
       sendProgress({ 
         current: searchResult.totalMatches, 
@@ -308,17 +331,23 @@ router.post('/complete-search', requireAuth, async (req, res) => {
       }
     }
 
-    console.log(`✅ Auto-count workflow complete: ${searchResult.totalMatches} matches found and ${searchResult.totalMatches} measurements created`);
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`✅ Auto-count workflow complete: ${searchResult.totalMatches} matches found and ${searchResult.totalMatches} measurements created`);
+    }
 
     // Send completion via SSE or regular JSON
     if (wantsSSE) {
-      console.log('📤 About to send complete message via SSE...');
+      if (process.env.NODE_ENV === 'development') {
+        console.log('📤 About to send complete message via SSE...');
+      }
       sendComplete({
         success: true,
         result: searchResult,
         measurementsCreated: searchResult.totalMatches
       });
-      console.log('✅ Complete message sent');
+      if (process.env.NODE_ENV === 'development') {
+        console.log('✅ Complete message sent');
+      }
     } else {
       return res.json({
         success: true,

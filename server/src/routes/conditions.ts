@@ -264,17 +264,18 @@ router.post('/', requireAuth, sanitizeBody('name', 'description'), async (req, r
       console.error('❌ Save error details:', saveErrorDetails);
       
       // If it's a database error, provide more details
-      if (saveError && typeof saveError === 'object' && 'code' in saveError) {
-        console.error('❌ Database error code:', (saveError as any).code);
-        console.error('❌ Database error details:', (saveError as any).details);
-        console.error('❌ Database error hint:', (saveError as any).hint);
+      const dbErr = saveError && typeof saveError === 'object' && 'code' in saveError ? saveError as { code?: string; details?: unknown; hint?: string } : null;
+      if (dbErr) {
+        console.error('❌ Database error code:', dbErr.code);
+        console.error('❌ Database error details:', dbErr.details);
+        console.error('❌ Database error hint:', dbErr.hint);
       }
       
       return res.status(500).json({ 
         error: 'Failed to save condition to database',
         details: saveErrorMessage,
-        code: (saveError as any)?.code,
-        hint: (saveError as any)?.hint
+        code: dbErr?.code,
+        hint: dbErr?.hint
       });
     }
   } catch (error) {
@@ -418,21 +419,15 @@ router.put('/:id', requireAuth, validateUUIDParam('id'), sanitizeBody('name', 'd
       success: true, 
       condition: savedCondition 
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error updating condition:', error);
-    // Log more details for debugging
-    if (error.message) {
-      console.error('Error message:', error.message);
-    }
-    if (error.details) {
-      console.error('Error details:', error.details);
-    }
-    if (error.hint) {
-      console.error('Error hint:', error.hint);
-    }
+    const errMsg = error instanceof Error ? error.message : String(error);
+    const errObj = error && typeof error === 'object' && 'details' in error ? error as { details?: unknown; hint?: string } : null;
+    if (errObj?.details) console.error('Error details:', errObj.details);
+    if (errObj?.hint) console.error('Error hint:', errObj.hint);
     return res.status(500).json({ 
       error: 'Failed to update condition',
-      details: error.message || 'Unknown error'
+      details: errMsg
     });
   }
 });

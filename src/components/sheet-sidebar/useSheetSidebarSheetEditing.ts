@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { toast } from 'sonner';
 import { sheetService } from '../../services/apiService';
 import type { PDFDocument } from '../../types';
 
@@ -82,7 +83,7 @@ export function useSheetSidebarSheetEditing({
       cancelEditingSheetName();
     } catch (error) {
       console.error('Error updating sheet name:', error);
-      alert('Failed to update sheet name. Please try again.');
+      toast.error('Failed to update sheet name. Please try again.');
     }
   }, [
     editingSheetId,
@@ -147,7 +148,7 @@ export function useSheetSidebarSheetEditing({
       cancelEditingSheetNumber();
     } catch (error) {
       console.error('Error updating sheet number:', error);
-      alert('Failed to update sheet number. Please try again.');
+      toast.error('Failed to update sheet number. Please try again.');
     }
   }, [
     editingSheetNumberId,

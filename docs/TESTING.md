@@ -6,7 +6,6 @@
 
 - **Unit tests** – Test one piece of logic in isolation (e.g. a hook, a pure function). They run in Node, are fast, and don’t open a browser.
 - **Integration tests** – Test several pieces together (e.g. a component that uses a hook and a store).
-- **E2E tests** – Test the full app in a real browser (you already have **Playwright** for this).
 
 For the new hooks we extracted, **unit tests** are the right fit: we call the hook with fake (mocked) data and assert that it returns the right state and callbacks.
 

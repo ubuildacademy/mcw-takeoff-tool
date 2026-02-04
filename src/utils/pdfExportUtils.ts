@@ -1,4 +1,4 @@
-import { PDFDocument, rgb, degrees, StandardFonts, type PDFPage } from 'pdf-lib';
+import { PDFDocument, rgb, StandardFonts, type PDFPage } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import type { TakeoffMeasurement, Annotation } from '../types';
 import { formatFeetAndInches } from '../lib/utils';
@@ -40,7 +40,7 @@ async function fetchPDFBytes(fileId: string): Promise<Uint8Array> {
  * Draw a measurement on a PDF page
  * Matches the visual styling from the PDF viewer exactly
  */
-async function drawMeasurement(
+async function _drawMeasurement(
   page: PDFPage,
   measurement: TakeoffMeasurement,
   pageHeight: number,

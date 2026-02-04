@@ -74,7 +74,7 @@ export function TakeoffWorkspaceDialogs({
         documentId={ocrDocumentId}
         documentName={ocrDocumentName}
         pageNumbers={ocrPageNumbers}
-        projectId={projectId!}
+        projectId={projectId ?? ''}
         onOCRComplete={ocrOnComplete}
       />
 

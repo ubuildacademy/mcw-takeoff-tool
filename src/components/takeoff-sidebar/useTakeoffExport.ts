@@ -296,17 +296,17 @@ export function useTakeoffExport({
         alignment: { horizontal: 'center' as const, vertical: 'middle' as const, wrapText: true },
       };
 
-      const titleStyle = {
+      const _titleStyle = {
         font: { bold: true, size: 16, color: { argb: 'FF111827' } },
         alignment: { horizontal: 'left' as const, vertical: 'middle' as const, wrapText: true },
       };
 
-      const sectionHeaderStyle = {
+      const _sectionHeaderStyle = {
         font: { bold: true, size: 12, color: { argb: 'FF374151' } },
         alignment: { horizontal: 'left' as const, vertical: 'middle' as const },
       };
 
-      const totalsStyle = {
+      const _totalsStyle = {
         font: { bold: true, size: 11, color: { argb: 'FF111827' } },
         fill: { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFE5E7EB' } },
         border: {
@@ -749,7 +749,7 @@ export function useTakeoffExport({
       };
 
       let detailRowNum = 2;
-      Object.entries(conditionGroups).forEach(([conditionId, conditionGroup]) => {
+      Object.entries(conditionGroups).forEach(([_conditionId, conditionGroup]) => {
         const condition = conditionGroup.condition;
         const conditionStartRow = detailRowNum;
         let col = 1;
@@ -968,7 +968,8 @@ export function useTakeoffExport({
         const conditionData = reportData[conditionId];
         Object.entries(conditionData.pages).forEach(([pageKey, pageData]) => {
           if (!pageBreakdown.has(pageKey)) pageBreakdown.set(pageKey, []);
-          pageBreakdown.get(pageKey)!.push({ condition: conditionData.condition, total: pageData.total });
+          const arr = pageBreakdown.get(pageKey);
+          if (arr) arr.push({ condition: conditionData.condition, total: pageData.total });
         });
       });
       const sortedPageKeys = Array.from(pageBreakdown.keys()).sort((a, b) => {

@@ -1,7 +1,14 @@
 import { useState, useRef, useCallback } from 'react';
+import { toast } from 'sonner';
 import { useMeasurementStore } from '../../store/slices/measurementSlice';
 import { useConditionStore } from '../../store/slices/conditionSlice';
 import type { TakeoffCondition, Sheet, ProjectFile } from '../../types';
+import type { SelectionBox } from '../PDFViewer.types';
+
+/** Deselect the current condition in the store (used after auto-count completes). */
+function deselectCondition(): void {
+  useConditionStore.getState().setSelectedCondition(null);
+}
 
 export interface AutoCountProgress {
   current: number;
@@ -17,12 +24,7 @@ export interface AutoCountCompletionResult {
   message?: string;
 }
 
-export interface SelectionBox {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
+export type { SelectionBox };
 
 export interface UseTakeoffWorkspaceVisualSearchOptions {
   projectId: string | undefined;
@@ -72,43 +74,46 @@ export function useTakeoffWorkspaceVisualSearch({
   const loadProjectTakeoffMeasurements = useMeasurementStore((s) => s.loadProjectTakeoffMeasurements);
   const loadProjectConditions = useConditionStore((s) => s.loadProjectConditions);
 
+  const exitVisualSearchMode = useCallback(() => {
+    setVisualSearchMode(false);
+    setVisualSearchCondition(null);
+    setSelectionBox(null);
+  }, []);
+
+  const failEarly = useCallback(
+    (message: string) => {
+      toast.warning(message);
+      setVisualSearchLoading(false);
+      exitVisualSearchMode();
+    },
+    [exitVisualSearchMode]
+  );
+
   const handleVisualSearchComplete = useCallback(
     async (box: SelectionBox) => {
       setVisualSearchLoading(true);
 
       if (!visualSearchCondition) {
-        alert('Auto-count condition is missing. Please select an auto-count condition.');
-        setVisualSearchLoading(false);
-        setVisualSearchMode(false);
-        setVisualSearchCondition(null);
+        failEarly('Auto-count condition is missing. Please select an auto-count condition.');
         return;
       }
 
       const takeoffMeasurements = useMeasurementStore.getState().takeoffMeasurements;
       const existingMeasurements = takeoffMeasurements.filter((m) => m.conditionId === visualSearchCondition.id);
       if (existingMeasurements.length > 0) {
-        alert(
+        failEarly(
           `This auto-count condition already has ${existingMeasurements.length} measurements. Please delete the condition and recreate it to run a new search.`
         );
-        setVisualSearchLoading(false);
-        setVisualSearchMode(false);
-        setVisualSearchCondition(null);
         return;
       }
 
       if (!currentPdfFile) {
-        alert('No PDF file is open. Please open a PDF file first.');
-        setVisualSearchLoading(false);
-        setVisualSearchMode(false);
-        setVisualSearchCondition(null);
+        failEarly('No PDF file is open. Please open a PDF file first.');
         return;
       }
 
       if (!projectId) {
-        alert('Project ID is missing. Please refresh the page.');
-        setVisualSearchLoading(false);
-        setVisualSearchMode(false);
-        setVisualSearchCondition(null);
+        failEarly('Project ID is missing. Please refresh the page.');
         return;
       }
 
@@ -187,6 +192,9 @@ export function useTakeoffWorkspaceVisualSearch({
             message: `Try:\n• Lowering the confidence threshold (currently ${searchOptions.confidenceThreshold})\n• Selecting a more distinctive symbol\n• Ensuring the symbol appears multiple times`,
           });
         }
+
+        // Auto-count is the only condition type that deselects after completion
+        deselectCondition();
       } catch (error: unknown) {
         autoCountAbortControllerRef.current = null;
         setShowAutoCountProgress(false);
@@ -197,23 +205,19 @@ export function useTakeoffWorkspaceVisualSearch({
 
         const err = error as { name?: string; message?: string };
         if (err?.name === 'AbortError' || err?.message?.includes('cancelled') || err?.message?.includes('aborted')) {
-          setVisualSearchMode(false);
-          setVisualSearchCondition(null);
-          setSelectionBox(null);
+          exitVisualSearchMode();
           return;
         }
 
         const errorMessage = err?.message ?? 'Auto-count failed. Please try again.';
         if (errorMessage.includes('already has measurements')) {
-          alert(
+          toast.warning(
             'This condition already has measurements. Please delete the condition and recreate it to run a new search.'
           );
         } else {
-          alert(`Auto-count failed: ${errorMessage}`);
+          toast.error(`Auto-count failed: ${errorMessage}`);
         }
-        setVisualSearchMode(false);
-        setVisualSearchCondition(null);
-        setSelectionBox(null);
+        exitVisualSearchMode();
       } finally {
         setVisualSearchLoading(false);
       }
@@ -227,6 +231,8 @@ export function useTakeoffWorkspaceVisualSearch({
       loadProjectTakeoffMeasurements,
       loadProjectConditions,
       isDev,
+      exitVisualSearchMode,
+      failEarly,
     ]
   );
 

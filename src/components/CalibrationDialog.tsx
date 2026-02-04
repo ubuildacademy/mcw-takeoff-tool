@@ -52,13 +52,14 @@ const CalibrationDialog: React.FC<CalibrationDialogProps> = ({
         </DialogHeader>
         
         <div className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="known-distance">Known Distance on Drawing</Label>
+          <div className="space-y-2" role="group" aria-labelledby="known-distance-label">
+            <p id="known-distance-label" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">Known Distance on Drawing</p>
             <div className="flex gap-2 items-end">
               <div className="flex-1">
                 <Label htmlFor="feet-input" className="text-xs text-gray-600">Feet</Label>
                 <Input
                   id="feet-input"
+                  name="feet"
                   type="number"
                   value={feet}
                   onChange={(e) => setFeet(e.target.value)}
@@ -72,6 +73,7 @@ const CalibrationDialog: React.FC<CalibrationDialogProps> = ({
                 <Label htmlFor="inches-input" className="text-xs text-gray-600">Inches</Label>
                 <Input
                   id="inches-input"
+                  name="inches"
                   type="number"
                   value={inches}
                   onChange={(e) => setInches(e.target.value)}

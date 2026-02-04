@@ -477,10 +477,9 @@ export const useMeasurementStore = create<MeasurementState>()(
       const conditions = useConditionStore.getState().getProjectConditions(projectId);
       const currentProject = useProjectStore.getState().getCurrentProject();
       
-      const conditionBreakdowns: ConditionCostBreakdown[] = conditions.map(condition => {
-        const breakdown = get().getConditionCostBreakdown(condition.id);
-        return breakdown!;
-      }).filter(Boolean);
+      const conditionBreakdowns: ConditionCostBreakdown[] = conditions
+        .map(condition => get().getConditionCostBreakdown(condition.id))
+        .filter((b): b is NonNullable<typeof b> => b != null);
       
       let totalMaterialCost = 0;
       let totalEquipmentCost = 0;

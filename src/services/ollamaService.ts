@@ -343,7 +343,7 @@ class OllamaService {
                     this.connectionRetries = 0;
                     return;
                   }
-                } catch (_parseError) {
+                } catch {
                   console.warn('Failed to parse Ollama streaming response line:', line);
                   // Continue processing other lines instead of failing completely
                 }
@@ -463,7 +463,7 @@ class OllamaService {
     context += `Total Pages: ${ocrData.totalPages ?? 0}\n`;
     context += `Processed Pages: ${ocrData.pages.length}\n\n`;
 
-    ocrData.pages.forEach((page, index: number) => {
+    ocrData.pages.forEach((page, _index: number) => {
       if (page.text && page.text.trim().length > 0) {
         context += `Page ${page.pageNumber}:\n${page.text}\n\n`;
       }

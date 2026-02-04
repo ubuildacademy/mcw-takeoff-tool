@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { toast } from 'sonner';
 import { titleblockService } from '../../services/apiService';
 import type { PDFDocument, ProjectFile } from '../../types';
 import type { TitleblockExtractionStatus } from './TakeoffWorkspaceHeader.types';
@@ -60,7 +61,7 @@ export function useTakeoffWorkspaceTitleblock({
 
       if (!titleblockSelectionContext) {
         console.error('[Titleblock] No selection context available - extraction cannot proceed');
-        alert('Titleblock selection context is missing. Please try again.');
+        toast.warning('Titleblock selection context is missing. Please try again.');
         return;
       }
 
@@ -89,7 +90,7 @@ export function useTakeoffWorkspaceTitleblock({
 
       if (!finalConfig.sheetNumberField || !finalConfig.sheetNameField) {
         console.error('[Titleblock] Missing required fields:', finalConfig);
-        alert('Both sheet number and sheet name regions must be selected. Please try again.');
+        toast.warning('Both sheet number and sheet name regions must be selected. Please try again.');
         setTitleblockSelectionContext(null);
         setPendingTitleblockConfig(null);
         return;
@@ -231,7 +232,7 @@ export function useTakeoffWorkspaceTitleblock({
     (documentId: string) => {
       const targetDocument = documents.find((doc) => doc.id === documentId);
       if (!targetDocument || !projectFiles.length) {
-        alert('Document not found or project files not loaded yet.');
+        toast.warning('Document not found or project files not loaded yet.');
         return;
       }
 
@@ -255,7 +256,7 @@ export function useTakeoffWorkspaceTitleblock({
 
   const handleBulkExtractTitleblock = useCallback(() => {
     if (!documents.length) {
-      alert('No documents available to extract titleblock info from.');
+      toast.warning('No documents available to extract titleblock info from.');
       return;
     }
 

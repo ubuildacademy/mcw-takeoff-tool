@@ -4,6 +4,14 @@
 
 import type { SearchResult, ProjectFile } from '../types';
 
+/** Rectangular selection box (CSS/viewport coords). Used for visual search and titleblock selection. */
+export interface SelectionBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 /** Annotation type is imported from shared types where defined */
 export type { Annotation } from '../types';
 
@@ -56,12 +64,9 @@ export interface PDFViewerProps {
   onPDFRendered?: () => void;
   visualSearchMode?: boolean;
   visualSearchCondition?: unknown;
-  onVisualSearchComplete?: (selectionBox: { x: number; y: number; width: number; height: number }) => void;
+  onVisualSearchComplete?: (selectionBox: SelectionBox) => void;
   titleblockSelectionMode?: 'sheetNumber' | 'sheetName' | null;
-  onTitleblockSelectionComplete?: (
-    field: 'sheetNumber' | 'sheetName',
-    selectionBox: { x: number; y: number; width: number; height: number }
-  ) => void;
+  onTitleblockSelectionComplete?: (field: 'sheetNumber' | 'sheetName', selectionBox: SelectionBox) => void;
 }
 
 /** Measurement shape used by PDFViewer for rendering (aligned with TakeoffMeasurement + legacy) */

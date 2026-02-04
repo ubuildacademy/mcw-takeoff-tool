@@ -78,14 +78,9 @@ export function usePDFLoad(
 
         let httpHeaders: Record<string, string> | undefined;
         if (file && typeof file === 'object' && 'id' in file && file.id) {
-          const { supabase } = await import('../../lib/supabase');
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session?.access_token) {
-            httpHeaders = {
-              Authorization: `Bearer ${session.access_token}`,
-              Accept: 'application/pdf',
-            };
-          }
+          const { getAuthHeaders } = await import('../../lib/apiAuth');
+          const auth = await getAuthHeaders();
+          httpHeaders = { ...auth, Accept: 'application/pdf' };
         }
 
         const pdf = await pdfjsLib.getDocument({

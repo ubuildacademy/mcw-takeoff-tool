@@ -5,7 +5,7 @@
  */
 import { useState, useRef, useCallback, type RefObject } from 'react';
 import type { Annotation } from '../../types';
-import type { Measurement } from '../PDFViewer.types';
+import type { Measurement, SelectionBox } from '../PDFViewer.types';
 
 export interface UsePDFViewerMeasurementsOptions {
   currentViewport: { width: number; height: number; rotation?: number } | null;
@@ -56,8 +56,8 @@ export interface UsePDFViewerMeasurementsResult {
   // Visual search state
   isSelectingSymbol: boolean;
   setIsSelectingSymbol: React.Dispatch<React.SetStateAction<boolean>>;
-  selectionBox: { x: number; y: number; width: number; height: number } | null;
-  setSelectionBox: React.Dispatch<React.SetStateAction<{ x: number; y: number; width: number; height: number } | null>>;
+  selectionBox: SelectionBox | null;
+  setSelectionBox: React.Dispatch<React.SetStateAction<SelectionBox | null>>;
   selectionStart: { x: number; y: number } | null;
   setSelectionStart: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
   // Annotation drag-to-draw state (rectangle/circle/arrow)
@@ -146,7 +146,7 @@ export function usePDFViewerMeasurements({
 
   // Visual search state
   const [isSelectingSymbol, setIsSelectingSymbol] = useState(false);
-  const [selectionBox, setSelectionBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
   const [selectionStart, setSelectionStart] = useState<{ x: number; y: number } | null>(null);
 
   // Annotation drag-to-draw state (rectangle/circle/arrow)

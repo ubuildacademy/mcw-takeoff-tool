@@ -86,6 +86,10 @@ export function TakeoffSidebarConditionList({
   return (
     <>
       <Input
+        id="conditions-search"
+        name="conditions-search"
+        type="search"
+        autoComplete="off"
         placeholder="Search conditions..."
         value={searchQuery}
         onChange={(e) => onSearchChange(e.target.value)}
@@ -126,22 +130,23 @@ export function TakeoffSidebarConditionList({
                         </div>
                       )}
                     </div>
-                    {(condition as TakeoffCondition & { searchImage?: string }).searchImage && condition.type === 'auto-count' && (
+                    {(condition as TakeoffCondition & { searchImage?: string }).searchImage && condition.type === 'auto-count' && (() => {
+                      const img = (condition as TakeoffCondition & { searchImage?: string }).searchImage ?? '';
+                      return (
                       <div className="mt-2 p-2 bg-indigo-50 border border-indigo-200 rounded-lg">
                         <div className="text-xs font-medium text-indigo-900 mb-1">Searched Symbol:</div>
                         <img
                           src={
-                            (condition as TakeoffCondition & { searchImage?: string }).searchImage!.startsWith('data:') ||
-                            (condition as TakeoffCondition & { searchImage?: string }).searchImage!.startsWith('http')
-                              ? (condition as TakeoffCondition & { searchImage?: string }).searchImage!
-                              : `data:image/png;base64,${(condition as TakeoffCondition & { searchImage?: string }).searchImage!}`
+                            img.startsWith('data:') || img.startsWith('http')
+                              ? img
+                              : `data:image/png;base64,${img}`
                           }
                           alt="Searched symbol"
                           className="max-w-full h-auto max-h-24 rounded border border-indigo-300"
                           style={{ imageRendering: 'crisp-edges' }}
                         />
                       </div>
-                    )}
+                    ); })()}
                   </div>
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0 ml-2">
@@ -184,26 +189,30 @@ export function TakeoffSidebarConditionList({
               <p className="text-sm text-muted-foreground mb-2">{condition.description}</p>
               {(condition.type as string) === 'visual-search' && (
                 <>
-                  {(condition as TakeoffCondition & { searchImage?: string }).searchImage ? (
-                    <div className="mb-3">
-                      <div className="text-xs text-gray-500 mb-1">Search Image:</div>
-                      <div className="border border-gray-200 rounded-lg p-2 bg-gray-50 flex items-center justify-center min-h-[80px]">
-                        <img
-                          src={
-                            (condition as TakeoffCondition & { searchImage?: string }).searchImage!.startsWith('data:') ||
-                            (condition as TakeoffCondition & { searchImage?: string }).searchImage!.startsWith('http')
-                              ? (condition as TakeoffCondition & { searchImage?: string }).searchImage!
-                              : `data:image/png;base64,${(condition as TakeoffCondition & { searchImage?: string }).searchImage!}`
-                          }
-                          alt="Search template"
-                          className="max-w-full max-h-32 object-contain rounded"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).style.display = 'none';
-                          }}
-                        />
-                      </div>
-                    </div>
-                  ) : (
+                  {(condition as TakeoffCondition & { searchImage?: string }).searchImage
+                    ? (() => {
+                        const img = (condition as TakeoffCondition & { searchImage?: string }).searchImage ?? '';
+                        return (
+                          <div className="mb-3">
+                            <div className="text-xs text-gray-500 mb-1">Search Image:</div>
+                            <div className="border border-gray-200 rounded-lg p-2 bg-gray-50 flex items-center justify-center min-h-[80px]">
+                              <img
+                                src={
+                                  img.startsWith('data:') || img.startsWith('http')
+                                    ? img
+                                    : `data:image/png;base64,${img}`
+                                }
+                                alt="Search template"
+                                className="max-w-full max-h-32 object-contain rounded"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).style.display = 'none';
+                                }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })()
+                    : (
                     <div className="mb-2 text-xs text-gray-400 italic">No search image set</div>
                   )}
                   {(() => {

@@ -18,12 +18,12 @@ export function ExportProgressOverlay({ exportStatus }: ExportProgressOverlayPro
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" role="presentation">
+      <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl" role="dialog" aria-modal="true" aria-labelledby="dialog-export-progress-title" aria-busy="true">
         <div className="flex items-center gap-4 mb-4">
-          <div className="animate-spin w-8 h-8 border-3 border-blue-500 border-t-transparent rounded-full" />
+          <div className="animate-spin w-8 h-8 border-3 border-blue-500 border-t-transparent rounded-full" aria-hidden="true" />
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">
+            <h3 id="dialog-export-progress-title" className="text-lg font-semibold text-gray-900">
               Exporting {exportStatus.type.toUpperCase()} Report
             </h3>
             <p className="text-sm text-gray-600">

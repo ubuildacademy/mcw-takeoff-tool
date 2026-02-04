@@ -4,12 +4,26 @@
  * Handles auto-count operations from the frontend
  */
 
-import type { AutoCountMatch, AutoCountResult, TakeoffMeasurement } from '../types';
+import type { AutoCountResult, TakeoffMeasurement } from '../types';
 
 import { getApiBaseUrl } from '../lib/apiConfig';
+import { getAuthHeaders } from '../lib/apiAuth';
 
-// Use consistent API base URL logic across all services
 const API_BASE_URL = getApiBaseUrl();
+
+/** Parse error body from a failed response; avoids throwing when body is not JSON. */
+async function parseErrorResponse(response: Response, fallback: string): Promise<string> {
+  try {
+    const body = await response.json();
+    if (body?.details && body?.error) return `${body.error}: ${body.details}`;
+    if (body?.error && typeof body.error === 'string') return body.error;
+    return fallback;
+  } catch {
+    return response.status === 401
+      ? 'Unauthorized – please sign in again.'
+      : `${fallback} (${response.status})`;
+  }
+}
 
 export interface SymbolTemplate {
   id: string;
@@ -42,9 +56,7 @@ export class AutoCountService {
   ): Promise<SymbolTemplate> {
     const response = await fetch(`${API_BASE_URL}/visual-search/extract-template`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: await getAuthHeaders(),
       body: JSON.stringify({
         pdfFileId,
         pageNumber,
@@ -53,8 +65,7 @@ export class AutoCountService {
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to extract template');
+      throw new Error(await parseErrorResponse(response, 'Failed to extract template'));
     }
 
     const result = await response.json();
@@ -72,9 +83,7 @@ export class AutoCountService {
   ): Promise<AutoCountResult> {
     const response = await fetch(`${API_BASE_URL}/visual-search/search-symbols`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: await getAuthHeaders(),
       body: JSON.stringify({
         conditionId,
         pdfFileId,
@@ -84,8 +93,7 @@ export class AutoCountService {
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to search for symbols');
+      throw new Error(await parseErrorResponse(response, 'Failed to search for symbols'));
     }
 
     const result = await response.json();
@@ -107,6 +115,8 @@ export class AutoCountService {
     onProgress?: (progress: { current: number; total: number; currentPage?: number; currentDocument?: string }) => void,
     abortSignal?: AbortSignal
   ): Promise<{ result: AutoCountResult; measurementsCreated: number }> {
+    const headers = { ...(await getAuthHeaders()), Accept: 'text/event-stream' };
+
     return new Promise((resolve, reject) => {
       // First, send the request using fetch with POST
       // We'll use a workaround: send POST data via query params and body, then switch to SSE
@@ -121,30 +131,16 @@ export class AutoCountService {
         searchScope: searchScope || 'current-page'
       };
 
-      // Create a unique job ID for this search
-      const jobId = `autocount_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
       // Use fetch with POST to initiate the search, but request SSE response
       fetch(`${API_BASE_URL}/visual-search/complete-search?sse=true`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'text/event-stream',
-        },
+        headers,
         body: JSON.stringify(requestBody),
         signal: abortSignal
       }).then(async (response) => {
         if (!response.ok) {
-          // If not SSE, try to parse as JSON error
-          try {
-            const error = await response.json();
-            const errorMessage = error.details 
-              ? `${error.error || 'Auto-count workflow failed'}: ${error.details}`
-              : error.error || 'Auto-count workflow failed';
-            reject(new Error(errorMessage));
-          } catch {
-            reject(new Error(`Auto-count failed with status ${response.status}`));
-          }
+          const msg = await parseErrorResponse(response, 'Auto-count workflow failed');
+          reject(new Error(msg));
           return;
         }
 
@@ -165,6 +161,7 @@ export class AutoCountService {
 
           const processChunk = async () => {
             try {
+              // eslint-disable-next-line no-constant-condition -- stream read loop
               while (true) {
                 if (abortSignal?.aborted) {
                   reader.cancel();
@@ -192,7 +189,7 @@ export class AutoCountService {
                             return;
                           }
                         } catch (parseError) {
-                          console.warn('Failed to parse final SSE data:', line, parseError);
+                          if (import.meta.env.DEV) console.warn('Failed to parse final SSE data:', line, parseError);
                         }
                       }
                     }
@@ -201,7 +198,7 @@ export class AutoCountService {
                   if (finalResult) {
                     resolve(finalResult);
                   } else {
-                    console.error('SSE stream ended without complete message. Buffer:', buffer);
+                    if (import.meta.env.DEV) console.error('SSE stream ended without complete message. Buffer:', buffer);
                     reject(new Error('Search completed but no result received. The server may have closed the connection prematurely.'));
                   }
                   return;
@@ -215,8 +212,8 @@ export class AutoCountService {
                   if (line.trim() && line.startsWith('data: ')) {
                     try {
                       const data = JSON.parse(line.slice(6));
-                      console.log('[AutoCount SSE] Received:', data.type, data);
-                      
+                      if (import.meta.env.DEV) console.log('[AutoCount SSE] Received:', data.type, data);
+
                       if (data.type === 'connected') {
                         // Connection established
                         continue;
@@ -231,28 +228,29 @@ export class AutoCountService {
                           });
                         }
                       } else if (data.type === 'complete') {
-                        // Search complete
-                        console.log('[AutoCount SSE] Complete message received:', data);
+                        if (import.meta.env.DEV) console.log('[AutoCount SSE] Complete message received:', data);
                         finalResult = {
                           result: data.result,
                           measurementsCreated: data.measurementsCreated
                         };
                         // Don't break here - let the stream finish naturally
                       } else if (data.type === 'error') {
-                        console.error('[AutoCount SSE] Error received:', data.error);
+                        if (import.meta.env.DEV) console.error('[AutoCount SSE] Error received:', data.error);
                         reject(new Error(data.error || 'Auto-count failed'));
                         return;
                       }
                     } catch (parseError) {
-                      console.warn('Failed to parse SSE data:', line, parseError);
+                      if (import.meta.env.DEV) console.warn('Failed to parse SSE data:', line, parseError);
                     }
                   }
                 }
               }
             } catch (error) {
-              if (error instanceof Error && error.message !== 'Search cancelled') {
-                reject(error);
+              if (error instanceof Error && (error.name === 'AbortError' || error.message === 'Search cancelled')) {
+                reject(error.message === 'Search cancelled' ? error : new Error('Search cancelled'));
+                return;
               }
+              reject(error instanceof Error ? error : new Error(String(error ?? 'Stream read failed')));
             }
           };
 
@@ -279,14 +277,16 @@ export class AutoCountService {
    * Get auto-count results for a condition
    */
   async getResults(conditionId: string): Promise<{ measurements: TakeoffMeasurement[]; count: number }> {
-    const response = await fetch(`${API_BASE_URL}/visual-search/results/${conditionId}`);
+    const response = await fetch(`${API_BASE_URL}/visual-search/results/${conditionId}`, {
+      headers: await getAuthHeaders(),
+    });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to get auto-count results');
+      throw new Error(await parseErrorResponse(response, 'Failed to get auto-count results'));
     }
 
-    return await response.json();
+    const result = await response.json();
+    return { measurements: result.measurements ?? [], count: result.count ?? 0 };
   }
 
   /**
@@ -298,12 +298,12 @@ export class AutoCountService {
     maxThumbnails: number = 6
   ): Promise<Array<{ measurementId: string; thumbnail: string }>> {
     const response = await fetch(
-      `${API_BASE_URL}/visual-search/thumbnails/${conditionId}?projectId=${projectId}&maxThumbnails=${maxThumbnails}`
+      `${API_BASE_URL}/visual-search/thumbnails/${conditionId}?projectId=${projectId}&maxThumbnails=${maxThumbnails}`,
+      { headers: await getAuthHeaders() }
     );
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to get match thumbnails');
+      throw new Error(await parseErrorResponse(response, 'Failed to get match thumbnails'));
     }
 
     const result = await response.json();
@@ -312,5 +312,3 @@ export class AutoCountService {
 }
 
 export const autoCountService = new AutoCountService();
-// Legacy export for backward compatibility during migration
-export const visualSearchService = autoCountService;

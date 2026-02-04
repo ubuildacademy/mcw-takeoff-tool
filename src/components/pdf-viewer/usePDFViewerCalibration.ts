@@ -3,6 +3,7 @@
  * complete/start/apply scale logic. Used by PDFViewer.
  */
 import { useState, useCallback, useEffect, useRef, type RefObject } from 'react';
+import { toast } from 'sonner';
 import { formatFeetAndInches } from '../../lib/utils';
 
 export interface UsePDFViewerCalibrationOptions {
@@ -164,7 +165,8 @@ export function usePDFViewerCalibration({
       const pixelsPerFoot = 1 / newScaleFactor;
       if (pixelsPerFoot < 1) warnings.push('Very high resolution detected - verify the known distance is correct');
       else if (pixelsPerFoot > 1000) warnings.push('Very low resolution detected - verify the known distance is correct');
-      if (newScaleFactor < 0.005 || newScaleFactor > 0.2) {
+      // Allow wider range so 18' and similar calibrations on various zoom/viewport sizes don't trigger
+      if (newScaleFactor < 0.001 || newScaleFactor > 0.5) {
         warnings.push('Scale factor outside typical architectural drawing range - verify known distance');
       }
       if (errors.length > 0) {
@@ -172,7 +174,7 @@ export function usePDFViewerCalibration({
         setCalibrationPoints([]);
         setCalibrationData(null);
         setIsCalibrating(false);
-        alert(`Calibration failed: ${errors.join(', ')}`);
+        toast.error(`Calibration failed: ${errors.join(', ')}`);
         return;
       }
       if (warnings.length > 0) {

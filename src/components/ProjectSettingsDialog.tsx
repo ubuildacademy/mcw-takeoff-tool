@@ -4,6 +4,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Textarea } from './ui/textarea';
+import { toast } from 'sonner';
 import { BaseDialog } from './ui/base-dialog';
 import { useProjectStore } from '../store/slices/projectSlice';
 import type { Project } from '../types';
@@ -80,7 +81,7 @@ export function ProjectSettingsDialog({ open, onOpenChange, project, onUpdated }
     if (e) e.preventDefault();
     
     if (!formData.name.trim() || !formData.client.trim() || !formData.location.trim()) {
-      alert('Please fill in all required fields (Name, Client, Location)');
+      toast.error('Please fill in all required fields (Name, Client, Location)');
       return;
     }
 
@@ -108,7 +109,7 @@ export function ProjectSettingsDialog({ open, onOpenChange, project, onUpdated }
       onOpenChange(false);
     } catch (error) {
       console.error('Failed to update project:', error);
-      alert('Failed to update project. Please try again.');
+      toast.error('Failed to update project. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -188,7 +189,7 @@ export function ProjectSettingsDialog({ open, onOpenChange, project, onUpdated }
             <div>
               <Label htmlFor="status">Status</Label>
               <Select value={formData.status} onValueChange={(value) => handleInputChange('status', value)}>
-                <SelectTrigger>
+                <SelectTrigger id="status">
                   <SelectValue placeholder="Select status" />
                 </SelectTrigger>
                 <SelectContent>
@@ -222,7 +223,7 @@ export function ProjectSettingsDialog({ open, onOpenChange, project, onUpdated }
             <div>
               <Label htmlFor="projectType">Project Type</Label>
               <Select value={formData.projectType} onValueChange={(value) => handleInputChange('projectType', value)}>
-                <SelectTrigger>
+                <SelectTrigger id="projectType">
                   <SelectValue placeholder="Select project type" />
                 </SelectTrigger>
                 <SelectContent>

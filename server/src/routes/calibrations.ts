@@ -26,7 +26,7 @@ router.get('/project/:projectId/sheet/:sheetId', requireAuth, validateUUIDParam(
     }
 
     res.json({ calibration });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error fetching calibration:', error);
     res.status(500).json({ error: 'Failed to fetch calibration' });
   }
@@ -45,7 +45,7 @@ router.get('/project/:projectId', requireAuth, validateUUIDParam('projectId'), a
 
     const calibrations = await storage.getCalibrationsByProject(projectId);
     res.json({ calibrations });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error fetching calibrations:', error);
     res.status(500).json({ error: 'Failed to fetch calibrations' });
   }
@@ -84,7 +84,7 @@ router.post('/', requireAuth, async (req, res) => {
     });
 
     res.json({ calibration });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error saving calibration:', error);
     res.status(500).json({ error: 'Failed to save calibration' });
   }

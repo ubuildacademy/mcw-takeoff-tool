@@ -31,8 +31,8 @@ export function SheetSidebarDialogs({
   return (
     <>
       {showLabelingDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" role="presentation">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4" role="dialog" aria-modal="true" aria-labelledby="dialog-labeling-title">
             <div className="flex flex-col items-center space-y-4">
               <div className="relative">
                 <Brain className="w-12 h-12 text-blue-600 animate-pulse" />
@@ -40,7 +40,7 @@ export function SheetSidebarDialogs({
                   <Brain className="w-12 h-12 text-blue-300 animate-spin" style={{ animationDuration: '2s' }} />
                 </div>
               </div>
-              <h3 className="text-lg font-semibold text-center">AI Analyzing Document</h3>
+              <h3 id="dialog-labeling-title" className="text-lg font-semibold text-center">AI Analyzing Document</h3>
               <p className="text-gray-600 text-center text-sm">{labelingProgress}</p>
               <div className="flex items-center space-x-2 text-blue-600">
                 <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" />
@@ -54,12 +54,12 @@ export function SheetSidebarDialogs({
       )}
 
       {showBulkAnalysisConfirmation && pendingBulkAnalysis && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" role="presentation" onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); onBulkAnalysisConfirmationCancel(); } }}>
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4" role="dialog" aria-modal="true" aria-labelledby="dialog-bulk-confirm-title">
             <div className="flex flex-col space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold">Confirm Document Analysis</h3>
-                <Button variant="ghost" size="sm" onClick={onBulkAnalysisConfirmationCancel}>
+                <h3 id="dialog-bulk-confirm-title" className="text-lg font-semibold">Confirm Document Analysis</h3>
+                <Button variant="ghost" size="sm" onClick={onBulkAnalysisConfirmationCancel} aria-label="Close">
                   <X className="w-4 h-4" />
                 </Button>
               </div>
@@ -102,12 +102,12 @@ export function SheetSidebarDialogs({
       )}
 
       {showBulkAnalysisDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" role="presentation" onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); onBulkAnalysisProgressClose(); } }}>
+          <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="dialog-bulk-progress-title">
             <div className="flex flex-col space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold">Bulk Document Analysis</h3>
-                <Button variant="ghost" size="sm" onClick={onBulkAnalysisProgressClose}>
+                <h3 id="dialog-bulk-progress-title" className="text-lg font-semibold">Bulk Document Analysis</h3>
+                <Button variant="ghost" size="sm" onClick={onBulkAnalysisProgressClose} aria-label="Close">
                   <X className="w-4 h-4" />
                 </Button>
               </div>
@@ -155,13 +155,15 @@ export function SheetSidebarDialogs({
       )}
 
       {showRenameDialog && renamingPage && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-            <h3 className="text-lg font-semibold mb-4">Rename Page</h3>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" role="presentation" onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); onRenameCancel(); } }}>
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4" role="dialog" aria-modal="true" aria-labelledby="dialog-rename-page-title">
+            <h3 id="dialog-rename-page-title" className="text-lg font-semibold mb-4">Rename Page</h3>
             <div className="space-y-4">
               <div>
-                <label className="text-sm font-medium text-gray-700 mb-2 block">Page Name</label>
+                <label htmlFor="sheet-page-rename" className="text-sm font-medium text-gray-700 mb-2 block">Page Name</label>
                 <Input
+                  id="sheet-page-rename"
+                  name="sheet-page-rename"
                   value={renameInput}
                   onChange={(e) => onRenameInputChange(e.target.value)}
                   onKeyDown={(e) => {

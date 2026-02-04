@@ -29,7 +29,6 @@ import { PDFViewerDialogs } from './pdf-viewer/PDFViewerDialogs';
 import { PDFViewerStatusView } from './pdf-viewer/PDFViewerStatusView';
 import { formatFeetAndInches } from '../lib/utils';
 import { setRestoreScrollPosition, setGetCurrentScrollPosition, setTriggerCalibration, setTriggerFitToWindow } from '../lib/windowBridge';
-import { calculateDistance } from '../utils/commonUtils';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 pdfjsLib.GlobalWorkerOptions.workerPort = null;
@@ -42,7 +41,7 @@ function safeTimestampToISO(ts: string | number | undefined | null): string {
 }
 
 /** Normalized offset for pasted markups (~2% of page) so pasted markup is visible next to original */
-const PASTE_OFFSET = 0.02;
+const _PASTE_OFFSET = 0.02;
 
 /** Debounce (ms) for saving scroll position so we persist final position on reload */
 const SCROLL_SAVE_DEBOUNCE_MS = 150;
@@ -52,12 +51,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   className = '',
   currentPage: externalCurrentPage,
   totalPages: externalTotalPages,
-  onPageChange,
+  onPageChange: _onPageChange,
   scale: externalScale,
   onScaleChange,
   rotation: externalRotation,
-  onCalibrateScale,
-  onClearAll,
+  onCalibrateScale: _onCalibrateScale,
+  onClearAll: _onClearAll,
   isPageCalibrated: externalIsPageCalibrated,
   scaleFactor: externalScaleFactor,
   unit: externalUnit,
@@ -67,8 +66,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   onPDFLoaded,
   onCalibrationRequest,
   onCalibrationComplete,
-  searchResults = [],
-  currentSearchQuery = '',
+  searchResults: _searchResults = [],
+  currentSearchQuery: _currentSearchQuery = '',
   cutoutMode = false,
   cutoutTargetConditionId = null,
   onCutoutModeChange,
@@ -80,7 +79,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   onPDFRendered,
   // Visual search props
   visualSearchMode = false,
-  visualSearchCondition = null,
+  visualSearchCondition: _visualSearchCondition = null,
   onVisualSearchComplete,
   // Titleblock selection props
   titleblockSelectionMode = null,
@@ -91,9 +90,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     isLoading,
     error,
     internalTotalPages,
-    setInternalTotalPages,
+    setInternalTotalPages: _setInternalTotalPages,
     internalCurrentPage,
-    setInternalCurrentPage,
+    setInternalCurrentPage: _setInternalCurrentPage,
   } = usePDFLoad(file, {
     externalTotalPages,
     externalCurrentPage,
@@ -215,7 +214,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     return pageViewports[currentPage] || null;
   }, [pageViewports, currentPage]);
   
-  const currentOutputScale = useMemo(() => {
+  const _currentOutputScale = useMemo(() => {
     return pageOutputScales[currentPage] || 1;
   }, [pageOutputScales, currentPage]);
 
@@ -248,10 +247,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     showScaleApplicationDialog,
     setShowScaleApplicationDialog,
     pendingScaleData,
-    calibrationData,
+    calibrationData: _calibrationData,
     setCalibrationData,
     calibrationValidation,
-    setCalibrationValidation,
+    setCalibrationValidation: _setCalibrationValidation,
     scaleFactor,
     isPageCalibrated,
     unit,
@@ -274,14 +273,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setMeasurementType,
     currentMeasurement,
     setCurrentMeasurement,
-    measurements,
+    measurements: _measurements,
     setMeasurements,
-    isCompletingMeasurement,
-    setIsCompletingMeasurement,
-    lastClickTime,
-    setLastClickTime,
-    lastClickPosition,
-    setLastClickPosition,
+    isCompletingMeasurement: _isCompletingMeasurement,
+    setIsCompletingMeasurement: _setIsCompletingMeasurement,
+    lastClickTime: _lastClickTime,
+    setLastClickTime: _setLastClickTime,
+    lastClickPosition: _lastClickPosition,
+    setLastClickPosition: _setLastClickPosition,
     isCompletingMeasurementRef,
     lastCompletionTimeRef,
     isAnnotating,
@@ -342,7 +341,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setIsContinuousDrawing,
     activePoints,
     setActivePoints,
-    rubberBandElement,
+    rubberBandElement: _rubberBandElement,
     setRubberBandElement,
     runningLength,
     setRunningLength,
@@ -412,13 +411,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   }, [selectedMarkupIds, localAnnotations]);
 
   const {
-    getCssCoordsFromEvent,
+    getCssCoordsFromEvent: _getCssCoordsFromEvent,
     handleWheel,
     handleMouseDown,
     handleMouseUp,
     handleMouseMove,
     handleClick,
-    handleDoubleClick,
+    handleDoubleClick: _handleDoubleClick,
     handleCanvasDoubleClick,
     handleSvgClick,
     handleSvgDoubleClick,
@@ -633,7 +632,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   }, [file.id]);
 
   // Page-specific canvas sizing with outputScale for crisp rendering
-  const updateCanvasDimensions = useCallback((pageNum: number, viewport: PageViewport, outputScale: number, page?: PDFPageProxy) => {
+  const updateCanvasDimensions = useCallback((pageNum: number, viewport: PageViewport, outputScale: number, _page?: PDFPageProxy) => {
     if (!pdfCanvasRef.current || !svgOverlayRef.current) {
       return;
     }

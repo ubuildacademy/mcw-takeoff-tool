@@ -51,7 +51,7 @@ const ScaleApplicationDialog: React.FC<ScaleApplicationDialogProps> = ({
       <div className="space-y-2">
         <Label htmlFor="scope">Apply to:</Label>
         <Select value={selectedScope} onValueChange={(value: 'page' | 'document') => setSelectedScope(value)}>
-          <SelectTrigger>
+          <SelectTrigger id="scope">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

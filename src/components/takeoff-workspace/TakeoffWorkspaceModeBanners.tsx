@@ -33,7 +33,7 @@ export function TakeoffWorkspaceModeBanners({
           <div className="flex items-center space-x-2">
             <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse" />
             <span className="text-sm font-medium text-indigo-900">
-              Auto Count Mode: {visualSearchCondition!.name}
+              Auto Count Mode: {visualSearchCondition?.name ?? 'Condition'}
             </span>
           </div>
           <div className="text-xs text-indigo-700">

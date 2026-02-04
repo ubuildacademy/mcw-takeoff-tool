@@ -72,6 +72,100 @@ export interface StoredCondition {
   searchThreshold?: number;
   searchScope?: 'current-page' | 'entire-document' | 'entire-project';
   createdAt: string;
+  aiGenerated?: boolean;
+}
+
+/** Raw DB row shapes (snake_case) from Supabase .select('*') */
+interface ProjectRow {
+  id: string;
+  name: string;
+  client?: string;
+  location?: string;
+  status?: string;
+  description?: string;
+  project_type?: string;
+  start_date?: string;
+  contact_person?: string;
+  contact_email?: string;
+  contact_phone?: string;
+  profit_margin_percent?: number;
+  created_at?: string;
+  last_modified?: string;
+  user_id?: string;
+  estimated_value?: number;
+}
+interface FileRow {
+  id: string;
+  project_id: string;
+  original_name: string;
+  filename: string;
+  path: string;
+  size: number;
+  mimetype: string;
+  uploaded_at: string;
+}
+interface ConditionRow {
+  id: string;
+  project_id: string;
+  name: string;
+  type: string;
+  unit: string;
+  waste_factor: number;
+  color: string;
+  description?: string;
+  labor_cost?: number;
+  material_cost?: number;
+  equipment_cost?: number;
+  include_perimeter?: boolean;
+  depth?: number;
+  include_height?: boolean;
+  height?: number;
+  search_image?: string;
+  search_image_id?: string;
+  search_threshold?: number;
+  search_scope?: string;
+  created_at?: string;
+  ai_generated?: boolean;
+}
+interface TakeoffMeasurementRow {
+  id: string;
+  project_id: string;
+  sheet_id: string;
+  condition_id: string;
+  type: string;
+  points: unknown;
+  calculated_value: number;
+  unit: string;
+  timestamp: string;
+  pdf_page: number;
+  pdf_coordinates: unknown;
+  condition_color: string;
+  condition_name: string;
+  description?: string;
+  perimeter_value?: number;
+  area_value?: number;
+  cutouts?: unknown;
+  net_calculated_value?: number;
+  created_at?: string;
+}
+interface SheetRow {
+  id: string;
+  document_id: string;
+  page_number: number;
+  sheet_number?: string;
+  sheet_name?: string;
+  extracted_text?: string;
+  has_takeoffs: boolean;
+  takeoff_count: number;
+  is_visible: boolean;
+  ocr_processed: boolean;
+  titleblock_config?: unknown;
+  created_at: string;
+  updated_at: string;
+}
+
+function hasCode(e: unknown): e is { code: string } {
+  return e !== null && typeof e === 'object' && 'code' in e;
 }
 
 export interface StoredTakeoffMeasurement {
@@ -128,12 +222,12 @@ class SupabaseStorage {
     }
     
     // Map snake_case to camelCase
-    return (data || []).map((item: any) => ({
+    return (data || []).map((item: ProjectRow): StoredProject => ({
       id: item.id,
       name: item.name,
       client: item.client,
       location: item.location,
-      status: item.status,
+      status: (item.status as StoredProject['status']) ?? 'active',
       description: item.description,
       projectType: item.project_type,
       startDate: item.start_date,
@@ -143,7 +237,8 @@ class SupabaseStorage {
       profitMarginPercent: item.profit_margin_percent,
       createdAt: item.created_at,
       lastModified: item.last_modified,
-      userId: item.user_id
+      userId: item.user_id,
+      estimatedValue: item.estimated_value
     }));
   }
 
@@ -260,7 +355,7 @@ class SupabaseStorage {
     }
     
     // Map snake_case to camelCase
-    return (data || []).map((item: any) => ({
+    return (data || []).map((item: FileRow) => ({
       id: item.id,
       projectId: item.project_id,
       originalName: item.original_name,
@@ -284,7 +379,7 @@ class SupabaseStorage {
     }
     
     // Map snake_case to camelCase
-    return (data || []).map((item: any) => ({
+    return (data || []).map((item: FileRow) => ({
       id: item.id,
       projectId: item.project_id,
       originalName: item.original_name,
@@ -387,11 +482,11 @@ class SupabaseStorage {
     }
     
     // Map snake_case to camelCase
-    return (data || []).map((item: any) => ({
+    return (data || []).map((item: ConditionRow): StoredCondition => ({
       id: item.id,
       projectId: item.project_id,
       name: item.name,
-      type: item.type,
+      type: item.type as StoredCondition['type'],
       unit: item.unit,
       wasteFactor: item.waste_factor,
       color: item.color,
@@ -404,7 +499,7 @@ class SupabaseStorage {
       searchImage: item.search_image,
       searchImageId: item.search_image_id,
       searchThreshold: item.search_threshold,
-      createdAt: item.created_at,
+      createdAt: item.created_at ?? '',
       ...(item.ai_generated !== undefined && { aiGenerated: item.ai_generated })
     }));
   }
@@ -421,11 +516,11 @@ class SupabaseStorage {
     }
     
     // Map snake_case to camelCase
-    return (data || []).map((item: any) => ({
+    return (data || []).map((item: ConditionRow): StoredCondition => ({
       id: item.id,
       projectId: item.project_id,
       name: item.name,
-      type: item.type,
+      type: item.type as StoredCondition['type'],
       unit: item.unit,
       wasteFactor: item.waste_factor,
       color: item.color,
@@ -440,15 +535,15 @@ class SupabaseStorage {
       searchImage: item.search_image,
       searchImageId: item.search_image_id,
       searchThreshold: item.search_threshold,
-      searchScope: item.search_scope,
-      createdAt: item.created_at,
+      searchScope: (item.search_scope as StoredCondition['searchScope']) ?? undefined,
+      createdAt: item.created_at ?? '',
       ...(item.ai_generated !== undefined && { aiGenerated: item.ai_generated })
     }));
   }
 
   async saveCondition(condition: StoredCondition): Promise<StoredCondition> {
     // Map camelCase to snake_case for database
-    const dbCondition: any = {
+    const dbCondition: Record<string, unknown> = {
       id: condition.id,
       project_id: condition.projectId,
       name: condition.name,
@@ -471,8 +566,8 @@ class SupabaseStorage {
     };
     
     // Only include ai_generated if it exists (column might not exist in all database schemas)
-    if ((condition as any).aiGenerated !== undefined) {
-      dbCondition.ai_generated = (condition as any).aiGenerated;
+    if (condition.aiGenerated !== undefined) {
+      dbCondition.ai_generated = condition.aiGenerated;
     }
     
     // Only include auto-count fields if they exist (columns might not exist if migration hasn't run)
@@ -580,23 +675,23 @@ class SupabaseStorage {
     }
     
     // Map snake_case to camelCase
-    return (data || []).map((item: any) => ({
+    return (data || []).map((item: TakeoffMeasurementRow): StoredTakeoffMeasurement => ({
       id: item.id,
       projectId: item.project_id,
       sheetId: item.sheet_id,
       conditionId: item.condition_id,
-      type: item.type,
-      points: item.points,
+      type: item.type as StoredTakeoffMeasurement['type'],
+      points: (item.points as StoredTakeoffMeasurement['points']) ?? [],
       calculatedValue: item.calculated_value,
       unit: item.unit,
       timestamp: item.timestamp,
       pdfPage: item.pdf_page,
-      pdfCoordinates: item.pdf_coordinates,
+      pdfCoordinates: (item.pdf_coordinates as StoredTakeoffMeasurement['pdfCoordinates']) ?? [],
       conditionColor: item.condition_color,
       conditionName: item.condition_name,
       perimeterValue: item.perimeter_value,
       areaValue: item.area_value,
-      cutouts: item.cutouts,
+      cutouts: item.cutouts as StoredTakeoffMeasurement['cutouts'],
       netCalculatedValue: item.net_calculated_value
     }));
   }
@@ -613,23 +708,23 @@ class SupabaseStorage {
     }
     
     // Map snake_case to camelCase
-    return (data || []).map((item: any) => ({
+    return (data || []).map((item: TakeoffMeasurementRow): StoredTakeoffMeasurement => ({
       id: item.id,
       projectId: item.project_id,
       sheetId: item.sheet_id,
       conditionId: item.condition_id,
-      type: item.type,
-      points: item.points,
+      type: item.type as StoredTakeoffMeasurement['type'],
+      points: (item.points as StoredTakeoffMeasurement['points']) ?? [],
       calculatedValue: item.calculated_value,
       unit: item.unit,
       timestamp: item.timestamp,
       pdfPage: item.pdf_page,
-      pdfCoordinates: item.pdf_coordinates,
+      pdfCoordinates: (item.pdf_coordinates as StoredTakeoffMeasurement['pdfCoordinates']) ?? [],
       conditionColor: item.condition_color,
       conditionName: item.condition_name,
       perimeterValue: item.perimeter_value,
       areaValue: item.area_value,
-      cutouts: item.cutouts,
+      cutouts: item.cutouts as StoredTakeoffMeasurement['cutouts'],
       netCalculatedValue: item.net_calculated_value
     }));
   }
@@ -646,23 +741,23 @@ class SupabaseStorage {
     }
     
     // Map snake_case to camelCase
-    return (data || []).map((item: any) => ({
+    return (data || []).map((item: TakeoffMeasurementRow): StoredTakeoffMeasurement => ({
       id: item.id,
       projectId: item.project_id,
       sheetId: item.sheet_id,
       conditionId: item.condition_id,
-      type: item.type,
-      points: item.points,
+      type: item.type as StoredTakeoffMeasurement['type'],
+      points: (item.points as StoredTakeoffMeasurement['points']) ?? [],
       calculatedValue: item.calculated_value,
       unit: item.unit,
       timestamp: item.timestamp,
       pdfPage: item.pdf_page,
-      pdfCoordinates: item.pdf_coordinates,
+      pdfCoordinates: (item.pdf_coordinates as StoredTakeoffMeasurement['pdfCoordinates']) ?? [],
       conditionColor: item.condition_color,
       conditionName: item.condition_name,
       perimeterValue: item.perimeter_value,
       areaValue: item.area_value,
-      cutouts: item.cutouts,
+      cutouts: item.cutouts as StoredTakeoffMeasurement['cutouts'],
       netCalculatedValue: item.net_calculated_value
     }));
   }
@@ -680,23 +775,23 @@ class SupabaseStorage {
     }
     
     // Map snake_case to camelCase
-    return (data || []).map((item: any) => ({
+    return (data || []).map((item: TakeoffMeasurementRow): StoredTakeoffMeasurement => ({
       id: item.id,
       projectId: item.project_id,
       sheetId: item.sheet_id,
       conditionId: item.condition_id,
-      type: item.type,
-      points: item.points,
+      type: item.type as StoredTakeoffMeasurement['type'],
+      points: (item.points as StoredTakeoffMeasurement['points']) ?? [],
       calculatedValue: item.calculated_value,
       unit: item.unit,
       timestamp: item.timestamp,
       pdfPage: item.pdf_page,
-      pdfCoordinates: item.pdf_coordinates,
+      pdfCoordinates: (item.pdf_coordinates as StoredTakeoffMeasurement['pdfCoordinates']) ?? [],
       conditionColor: item.condition_color,
       conditionName: item.condition_name,
       perimeterValue: item.perimeter_value,
       areaValue: item.area_value,
-      cutouts: item.cutouts,
+      cutouts: item.cutouts as StoredTakeoffMeasurement['cutouts'],
       netCalculatedValue: item.net_calculated_value
     }));
   }
@@ -818,23 +913,23 @@ class SupabaseStorage {
       }
 
       // Map snake_case back to camelCase
-      const mappedResults = (data || []).map((item: any) => ({
+      const mappedResults = (data || []).map((item: TakeoffMeasurementRow): StoredTakeoffMeasurement => ({
         id: item.id,
         projectId: item.project_id,
         sheetId: item.sheet_id,
         conditionId: item.condition_id,
-        type: item.type,
-        points: item.points,
+        type: item.type as StoredTakeoffMeasurement['type'],
+        points: (item.points as StoredTakeoffMeasurement['points']) ?? [],
         calculatedValue: item.calculated_value,
         unit: item.unit,
         timestamp: item.timestamp,
         pdfPage: item.pdf_page,
-        pdfCoordinates: item.pdf_coordinates,
+        pdfCoordinates: (item.pdf_coordinates as StoredTakeoffMeasurement['pdfCoordinates']) ?? [],
         conditionColor: item.condition_color,
         conditionName: item.condition_name,
         perimeterValue: item.perimeter_value,
         areaValue: item.area_value,
-        cutouts: item.cutouts,
+        cutouts: item.cutouts as StoredTakeoffMeasurement['cutouts'],
         netCalculatedValue: item.net_calculated_value
       }));
       
@@ -873,7 +968,7 @@ class SupabaseStorage {
       throw error;
     }
     
-    return data.map((item: any) => ({
+    return data.map((item: SheetRow): StoredSheet => ({
       id: item.id,
       documentId: item.document_id,
       pageNumber: item.page_number,
@@ -884,7 +979,7 @@ class SupabaseStorage {
       takeoffCount: item.takeoff_count,
       isVisible: item.is_visible,
       ocrProcessed: item.ocr_processed,
-      titleblockConfig: item.titleblock_config,
+      titleblockConfig: item.titleblock_config as StoredSheet['titleblockConfig'],
       createdAt: item.created_at,
       updatedAt: item.updated_at
     }));
@@ -901,7 +996,7 @@ class SupabaseStorage {
       throw new DatabaseError('Failed to fetch sheets by document', error, { documentId });
     }
 
-    return (data || []).map((item: any) => ({
+    return (data || []).map((item: SheetRow): StoredSheet => ({
       id: item.id,
       documentId: item.document_id,
       pageNumber: item.page_number,
@@ -912,7 +1007,7 @@ class SupabaseStorage {
       takeoffCount: item.takeoff_count,
       isVisible: item.is_visible,
       ocrProcessed: item.ocr_processed,
-      titleblockConfig: item.titleblock_config,
+      titleblockConfig: item.titleblock_config as StoredSheet['titleblockConfig'],
       createdAt: item.created_at,
       updatedAt: item.updated_at
     }));
@@ -954,8 +1049,8 @@ class SupabaseStorage {
         createdAt: data.created_at,
         updatedAt: data.updated_at
       };
-    } catch (error: any) {
-      if (error.code === 'PGRST205') {
+    } catch (error: unknown) {
+      if (hasCode(error) && error.code === 'PGRST205') {
         // Table doesn't exist yet - return null
         console.log('Sheets table does not exist yet, returning null');
         return null;
@@ -1015,8 +1110,8 @@ class SupabaseStorage {
         createdAt: data.created_at,
         updatedAt: data.updated_at
       };
-    } catch (error: any) {
-      if (error.code === 'PGRST205') {
+    } catch (error: unknown) {
+      if (hasCode(error) && error.code === 'PGRST205') {
         // Table doesn't exist yet - return the sheet as-is (no persistence)
         console.log('Sheets table does not exist yet, returning sheet without persistence');
         return sheet;

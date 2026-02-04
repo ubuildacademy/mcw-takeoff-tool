@@ -173,14 +173,12 @@ class OCRService {
   // Process entire PDF document
   async processDocument(documentId: string, pdfUrl: string): Promise<DocumentOCRData> {
     // Check if already processing
-    if (this.processingQueue.has(documentId)) {
-      return this.processingQueue.get(documentId)!;
-    }
+    const queued = this.processingQueue.get(documentId);
+    if (queued != null) return queued;
 
     // Check if already completed
-    if (this.completedOCR.has(documentId)) {
-      return this.completedOCR.get(documentId)!;
-    }
+    const completed = this.completedOCR.get(documentId);
+    if (completed != null) return completed;
 
     // Check memory usage before starting
     const memoryInfo = this.getMemoryInfo();
@@ -588,10 +586,11 @@ class OCRService {
       .filter(word => word.length > 2); // Filter out short words
 
     words.forEach(word => {
-      if (!searchIndex.has(word)) {
-        searchIndex.set(word, []);
+      let pages = searchIndex.get(word);
+      if (!pages) {
+        pages = [];
+        searchIndex.set(word, pages);
       }
-      const pages = searchIndex.get(word)!;
       if (!pages.includes(result.pageNumber)) {
         pages.push(result.pageNumber);
       }

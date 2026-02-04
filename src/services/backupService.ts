@@ -137,7 +137,7 @@ export class BackupService {
           ...backup.metadata
         }
       };
-    } catch (error) {
+    } catch {
       return { 
         valid: false, 
         error: 'Failed to parse backup file. Please ensure it is a valid JSON file.' 

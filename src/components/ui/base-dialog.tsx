@@ -30,7 +30,7 @@ export function BaseDialog({
   children,
   footer,
   maxWidth = 'lg',
-  showCloseButton = true,
+  showCloseButton: _showCloseButton = true,
   className = ''
 }: BaseDialogProps) {
   return (

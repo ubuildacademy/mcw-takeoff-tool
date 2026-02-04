@@ -5,7 +5,6 @@
 import type { RefObject } from 'react';
 import type { PDFPageProxy, PageViewport } from 'pdfjs-dist';
 import type { SelectionBox } from '../PDFViewer.types';
-import type { Annotation } from '../../types';
 import type { UsePDFViewerMeasurementsResult } from './usePDFViewerMeasurements';
 
 export interface PDFViewerInteractionsRefs {
