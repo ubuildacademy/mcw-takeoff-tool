@@ -79,7 +79,6 @@ class OCRService {
         langPath: '/tesseract/lang-data/',
         corePath: '/tesseract/',
         // Optimize for architectural drawings and technical text
-        // @ts-ignore - tessedit_char_whitelist is a valid Tesseract option
         tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:!?()[]{}\'"-+=/\\@#$%^&*|<>~` ',
         tessedit_pageseg_mode: Tesseract.PSM.AUTO_OSD, // Better for mixed text/graphics
         preserve_interword_spaces: '1',
@@ -806,7 +805,8 @@ class OCRService {
     // Check for patterns that indicate garbled text
     const garbledPatterns = [
       /[a-z]{1,2}\s+[a-z]{1,2}\s+[a-z]{1,2}/g, // Short random letters
-      /[^a-zA-Z0-9\s.,;:!?()\[\]{}'"-+=/\\@#$%^&*|<>~`]{4,}/g, // Too many special characters
+      // Brackets [ ] and / as hex to avoid regex/template parse issues
+      /[^a-zA-Z0-9\s.,;:!?()[\x5B\x5D]{}'"-+=\x2F\\@#$%^&*|<>~\u0060]{4,}/g, // Too many special characters
       /\s{4,}/g, // Too many consecutive spaces
       /[|]{3,}/g, // Multiple pipe characters
       /[=]{4,}/g, // Multiple equals signs
