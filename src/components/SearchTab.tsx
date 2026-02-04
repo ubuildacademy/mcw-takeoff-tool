@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback, useMemo, useRef } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Badge } from './ui/badge';
@@ -10,11 +10,13 @@ import {
   ChevronRight,
   Loader2,
   AlertCircle,
-  CheckCircle,
   X
 } from 'lucide-react';
 import { ocrService } from '../services/apiService';
+import { debounce } from '../utils/commonUtils';
 import type { PDFDocument } from '../types';
+
+const DEV = import.meta.env.DEV;
 
 interface SearchResult {
   pageNumber: number;
@@ -55,97 +57,79 @@ export function SearchTab({
     doc.ocrEnabled || doc.pages.some(page => page.ocrProcessed)
   );
 
-  // Debug logging
-  useEffect(() => {
-    console.log('🔍 SearchTab Debug Info:');
-    console.log('📚 Total documents:', documents.length);
-    console.log('📋 Documents with OCR:', ocrEnabledDocuments.length);
-    console.log('📄 Document details:', documents.map(doc => ({
-      id: doc.id,
-      name: doc.name,
-      ocrEnabled: doc.ocrEnabled,
-      pagesWithOCR: doc.pages.filter(p => p.ocrProcessed).length,
-      totalPages: doc.pages.length
-    })));
-  }, [documents, ocrEnabledDocuments]);
-
-
-  // Search function
+  // Search function (called by debounced wrapper or directly when changing document filter)
   const performSearch = useCallback(async (query: string, documentId?: string) => {
     if (!query.trim() || query.length < 2) {
       setSearchResults({});
       return;
     }
 
-    console.log('🔍 Starting search for:', query);
-    console.log('📋 OCR enabled documents:', ocrEnabledDocuments.length);
-    console.log('🎯 Target document:', documentId || 'all documents');
+    if (DEV) {
+      console.log('🔍 Search:', query, documentId ? `(document: ${documentId})` : '(all documents)');
+    }
 
     setIsSearching(true);
     setSearchError(null);
 
     try {
       const results: Record<string, SearchResult[]> = {};
+      type SearchResultItem = { pageNumber: number };
 
       if (documentId) {
-        // Search specific document
-        console.log(`🔍 Searching document ${documentId} for "${query}"`);
         try {
           const response = await ocrService.searchDocument(documentId, query, projectId);
-          console.log('📊 Search response:', response);
           if (response.results && response.results.length > 0) {
             results[documentId] = response.results;
-            console.log(`✅ Found ${response.results.length} results in document ${documentId}`);
-          } else {
-            console.log(`❌ No results found in document ${documentId}`);
           }
         } catch (error) {
-          console.error(`❌ Search failed for document ${documentId}:`, error);
+          if (DEV) console.error('Search failed for document:', error);
         }
       } else {
-        // Search all OCR-enabled documents
-        console.log(`🔍 Searching ${ocrEnabledDocuments.length} documents for "${query}"`);
         for (const doc of ocrEnabledDocuments) {
-          console.log(`🔍 Searching document ${doc.id} (${doc.name})`);
           try {
             const response = await ocrService.searchDocument(doc.id, query, projectId);
-            console.log(`📊 Search response for ${doc.id}:`, response);
             if (response.results && response.results.length > 0) {
-              // Debug: Log page numbers from backend
-              // CRITICAL FIX: Filter out null/undefined results before accessing pageNumber
-              type SearchResultItem = { pageNumber: number };
               const validResults = response.results.filter((r: unknown): r is SearchResultItem => r != null && typeof r === 'object' && (r as SearchResultItem).pageNumber != null);
-              console.log(`🔍 Page numbers from backend:`, validResults.map((r: SearchResultItem) => r.pageNumber));
               results[doc.id] = validResults;
-              console.log(`✅ Found ${response.results.length} results in document ${doc.id}`);
-            } else {
-              console.log(`❌ No results found in document ${doc.id}`);
             }
           } catch (error) {
-            console.error(`❌ Search failed for document ${doc.id}:`, error);
+            if (DEV) console.error('Search failed for document:', doc.id, error);
           }
         }
       }
 
-      console.log('📊 Final search results:', results);
       setSearchResults(results);
     } catch (error) {
-      console.error('❌ Search error:', error);
+      if (DEV) console.error('Search error:', error);
       setSearchError('Search failed. Please try again.');
     } finally {
       setIsSearching(false);
     }
   }, [projectId, ocrEnabledDocuments]);
 
-  // Handle search input
+  // Debounced search for typing (400ms) so we don't hit the API on every keystroke
+  const performSearchRef = useRef(performSearch);
+  performSearchRef.current = performSearch;
+  const selectedDocumentRef = useRef(selectedDocument);
+  selectedDocumentRef.current = selectedDocument;
+  const debouncedSearch = useMemo(
+    () => debounce((query: string) => {
+      if (query.trim().length >= 2) {
+        performSearchRef.current(query, selectedDocumentRef.current ?? undefined);
+      }
+    }, 400),
+    []
+  );
+
+  // Handle search input: update UI immediately, debounce API call
   const handleSearch = useCallback((query: string) => {
     setSearchQuery(query);
-    if (query.trim().length >= 2) {
-      performSearch(query, selectedDocument || undefined);
-    } else {
+    if (query.trim().length < 2) {
       setSearchResults({});
+    } else {
+      debouncedSearch(query);
     }
-  }, [performSearch, selectedDocument]);
+  }, [debouncedSearch]);
 
   // Handle document selection
   const handleDocumentSelect = (documentId: string) => {
@@ -339,14 +323,7 @@ export function SearchTab({
                             ? 'bg-primary/10 border-l-4 border-primary shadow-sm'
                             : 'hover:bg-accent/30 hover:shadow-sm'
                         }`}
-                        onClick={() => {
-                          console.log(`🔍 Navigating to document ${documentId}, page ${result.pageNumber}`);
-                          onPageSelect(documentId, result.pageNumber);
-                          
-                          // Show a brief success message
-                          const docName = getDocumentName(documentId);
-                          console.log(`✅ Navigated to ${docName} - Page ${result.pageNumber}`);
-                        }}
+                        onClick={() => onPageSelect(documentId, result.pageNumber)}
                         title={`Click to go to page ${result.pageNumber}`}
                       >
                         <div className="flex items-start gap-3">
