@@ -93,6 +93,7 @@ export function useTakeoffWorkspaceDocumentView({
     }
 
     lastRestoredFileIdRef.current = currentPdfFile.id;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Run only when file id changes; store getters/setters stable
     }, [currentPdfFile?.id]);
 
   // Reset initial render flag when file changes
@@ -100,6 +101,7 @@ export function useTakeoffWorkspaceDocumentView({
     if (currentPdfFile) {
       isInitialRenderRef.current = true;
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Run when file id changes; currentPdfFile?.id sufficient
   }, [currentPdfFile?.id]);
 
   const handlePageChange = useCallback(

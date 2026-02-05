@@ -243,6 +243,7 @@ export function TakeoffWorkspace() {
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- Only need file id for persist; omit full currentPdfFile
   }, [currentPdfFile?.id, setDocumentLocation]);
 
   // Handle measurement state changes from PDFViewer
@@ -280,6 +281,7 @@ export function TakeoffWorkspace() {
         visualSearch.setVisualSearchCondition(null);
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Setters stable; omit
   }, [visualSearch]);
 
   // Undo/redo for header buttons and shortcuts
@@ -364,6 +366,7 @@ export function TakeoffWorkspace() {
   // This is called from a useEffect in SheetSidebar that watches takeoffMeasurements
   const handleDocumentsUpdate = useCallback((updatedDocuments: PDFDocument[]) => {
     setDocuments(updatedDocuments);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Setter stable; omit
   }, []);
 
 
@@ -512,7 +515,7 @@ export function TakeoffWorkspace() {
         await recalculateMeasurementsForCalibration(projectId, currentPdfFile.id, calibrationPageNumber, scaleFactor, unit, vw, vh);
       }
     }
-  }, [currentPdfFile, projectId, currentPage, setDocumentPage, setCalibration]);
+  }, [currentPdfFile, projectId, currentPage, setDocumentPage, setCalibration, isDev]);
 
   const handlePdfUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;

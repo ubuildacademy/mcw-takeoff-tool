@@ -69,17 +69,17 @@ Format: **File** | **Line** | **Hook** | **Rule** | **What’s missing / issue**
 
 | Line | Hook | Rule | What's missing / issue | Decision | Notes |
 |------|------|------|------------------------|----------|--------|
-| 240 | useEffect | exhaustive-deps | documents | | |
-| 281 | useCallback | exhaustive-deps | documents, onDocumentsUpdate | | |
+| 240 | useEffect | exhaustive-deps | documents | Omit + document | Run when project measurement count changes; omit documents to avoid loops |
+| 281 | useCallback | exhaustive-deps | documents, onDocumentsUpdate | Add deps | Added documents, onDocumentsUpdate; parent wraps onDocumentsUpdate in useCallback |
 
 ### TakeoffWorkspace.tsx
 
 | Line | Hook | Rule | What's missing / issue | Decision | Notes |
 |------|------|------|------------------------|----------|--------|
-| 246 | useEffect | exhaustive-deps | currentPdfFile | | |
-| 283 | useCallback | exhaustive-deps | setSelectedCondition | | |
-| 367 | useCallback | exhaustive-deps | setDocuments | | |
-| 515 | useCallback | exhaustive-deps | isDev | | |
+| 246 | useEffect | exhaustive-deps | currentPdfFile | Omit + document | Only need file id for persist; omit full currentPdfFile |
+| 283 | useCallback | exhaustive-deps | setSelectedCondition | Omit + document | Setters stable; omit |
+| 367 | useCallback | exhaustive-deps | setDocuments | Omit + document | Setter stable; omit |
+| 515 | useCallback | exhaustive-deps | isDev | Add deps | Added isDev |
 
 ### usePDFViewerInteractions.ts
 
@@ -104,16 +104,16 @@ Format: **File** | **Line** | **Hook** | **Rule** | **What’s missing / issue**
 
 | Line | Hook | Rule | What's missing / issue | Decision | Notes |
 |------|------|------|------------------------|----------|--------|
-| 96 | useEffect | exhaustive-deps | currentPage, currentPdfFile, getDocument*, rotation, scale, setCurrentPage, setRotation, setScale, setSelectedPageNumber | | |
-| 103 | useEffect | exhaustive-deps | currentPdfFile | | |
+| 96 | useEffect | exhaustive-deps | currentPage, currentPdfFile, getDocument*, rotation, scale, setCurrentPage, setRotation, setScale, setSelectedPageNumber | Omit + document | Run only when file id changes; store getters/setters stable |
+| 103 | useEffect | exhaustive-deps | currentPdfFile | Omit + document | Run when file id changes; currentPdfFile?.id sufficient |
 
 ### useTakeoffWorkspaceProjectInit.ts
 
 | Line | Hook | Rule | What's missing / issue | Decision | Notes |
 |------|------|------|------------------------|----------|--------|
-| 77 | useEffect | exhaustive-deps | currentPdfFile, getDocument*, setCurrentPage, setRotation, setScale, setSelectedPageNumber | | |
-| 125 | useEffect | exhaustive-deps | getDocument*, getLastViewedDocumentId, setCurrentPage, setCurrentPdfFile, setProjectFiles, setRotation, setScale, setSelectedDocumentId, setSelectedPageNumber | | |
-| 177 | useEffect | exhaustive-deps | clearProjectCalibrations, loadProjectTakeoffMeasurements, setCalibration, setCurrentProject | | |
+| 77 | useEffect | exhaustive-deps | currentPdfFile, getDocument*, setCurrentPage, setRotation, setScale, setSelectedPageNumber | Omit + document | Run once per file when rehydrated; ref guards; omit store setters/getters |
+| 125 | useEffect | exhaustive-deps | getDocument*, getLastViewedDocumentId, setCurrentPage, setCurrentPdfFile, setProjectFiles, setRotation, setScale, setSelectedDocumentId, setSelectedPageNumber | Omit + document | Run once per projectId; ref guards; omit store setters/getters |
+| 177 | useEffect | exhaustive-deps | clearProjectCalibrations, loadProjectTakeoffMeasurements, setCalibration, setCurrentProject | Omit + document | Run once per projectId; ref guards; omit store/load functions |
 
 ---
 

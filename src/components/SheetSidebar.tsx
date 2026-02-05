@@ -237,6 +237,7 @@ export function SheetSidebar({
       onDocumentsUpdate(updatedDocuments);
     }
     // Only run when measurement count for this project changes (not when documents reference changes, to avoid loops)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Run when project measurement count changes; omit documents to avoid loops
   }, [projectId, projectMeasurementsCount, onDocumentsUpdate, updateHasTakeoffs]);
 
 
@@ -278,7 +279,7 @@ export function SheetSidebar({
     } finally {
       setProcessingOCR(prev => prev.filter(id => id !== `${documentId}-${pageNumber}`));
     }
-  }, [projectId]);
+  }, [projectId, documents, onDocumentsUpdate]);
 
   // Handle page selection
   const handlePageClick = (documentId: string, pageNumber: number) => {
