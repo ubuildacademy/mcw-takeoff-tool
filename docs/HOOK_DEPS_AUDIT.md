@@ -1,6 +1,8 @@
 # Hook dependency audit
 
-Track and fix React hook dependency warnings (exhaustive-deps, preserve-manual-memoization) one at a time. No band-aids—either add missing deps (and fix any bad behavior) or intentionally omit and document why.
+**Audit complete.** All checklist items have been addressed; lint passes with 0 hook-dependency warnings. This doc is kept for reference—the table below records the decision and rationale for each fix (useful when reading `eslint-disable` comments in code).
+
+Original purpose: track and fix React hook dependency warnings (exhaustive-deps, preserve-manual-memoization) one at a time. No band-aids—either add missing deps (and fix any bad behavior) or intentionally omit and document why.
 
 ---
 
