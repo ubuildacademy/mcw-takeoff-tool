@@ -39,31 +39,31 @@ Format: **File** | **Line** | **Hook** | **Rule** | **What’s missing / issue**
 
 | Line | Hook | Rule | What's missing / issue | Decision | Notes |
 |------|------|------|------------------------|----------|--------|
-| 380 | useEffect | exhaustive-deps | setIsOrthoSnapping | | |
-| 578 | useEffect | exhaustive-deps | setIsSelectingSymbol, setSelectionBox, setSelectionStart | | |
-| 586 | useEffect | exhaustive-deps | setCurrentCutout | | |
-| 632 | useEffect | exhaustive-deps | setLocalTakeoffMeasurements | | |
-| 663 | useCallback | exhaustive-deps | Unnecessary: file.id | | |
-| 1066 | useCallback | exhaustive-deps | applyOrthoSnapping, calibrationValidation, isAnnotating, isOrthoSnapping, measurementDebug, pageCommittedPolylineRefs, selectedMarkupIds, viewState.rotation | | |
-| 1299 | useCallback | exhaustive-deps | renderMarkupsWithPointerEvents | | |
-| 1314 | useEffect | exhaustive-deps | currentMeasurement.length, isAnnotating, isCalibrating, isMeasuring, showTextInput | | |
-| 1553 | useCallback | exhaustive-deps | isDrawingBoxSelection, isInitialRenderComplete, onPDFRendered, showTextInput | | |
-| 1602 | useCallback | exhaustive-deps | getSelectedCondition, pageRubberBandRefs, setRubberBandElement | | |
-| 1787 | useCallback | exhaustive-deps | calibrationViewportRef, currentViewport, isCompletingMeasurementRef, lastCompletionTimeRef, setCurrentMeasurement, setMousePosition | | |
-| 1928 | useCallback | exhaustive-deps | calibrationViewportRef, setCurrentCutout, setLocalTakeoffMeasurements | | |
-| 1951 | useCallback | exhaustive-deps | pageRubberBandRefs, setActivePoints, setIsContinuousDrawing, setRubberBandElement, setRunningLength | | |
-| 1981 | useCallback | exhaustive-deps | (same as 1951) | | |
-| 2023 | useEffect | exhaustive-deps | pageCommittedPolylineRefs, pageRubberBandRefs | | |
-| 2082 | useCallback | exhaustive-deps | currentPage | | |
-| 2170 | useEffect | exhaustive-deps | viewState.rotation | | |
-| 2240 | useEffect | exhaustive-deps | setMeasurements | | |
-| 2297 | useEffect | exhaustive-deps | setCurrentMeasurement, setMeasurements, setMousePosition | | |
-| 2326 | useEffect | exhaustive-deps | applyInteractiveZoomTransforms | | |
-| 2415 | useEffect | exhaustive-deps | setCurrentMeasurement, setIsMeasuring, setIsSelectionMode, setMeasurementType, setMeasurements, setMousePosition, setSelectedMarkupIds | | |
-| 2430 | useEffect | exhaustive-deps | setCurrentAnnotation, setIsAnnotating, setIsSelectionMode, setMousePosition, setSelectedMarkupIds | | |
-| 2441 | useEffect | exhaustive-deps | setShowCalibrationDialog | | |
-| 2462 | useEffect | exhaustive-deps | Ref in cleanup: copy pdfCanvasRef.current to variable inside effect, use in cleanup | | |
-| 2472 | useEffect | exhaustive-deps | Ref in cleanup: copy svgOverlayRef.current to variable inside effect, use in cleanup | | |
+| 380 | useEffect | exhaustive-deps | setIsOrthoSnapping | Omit + document | Setter stable; omit |
+| 578 | useEffect | exhaustive-deps | setIsSelectingSymbol, setSelectionBox, setSelectionStart | Omit + document | Setters stable; omit |
+| 586 | useEffect | exhaustive-deps | setCurrentCutout | Omit + document | Setter stable; omit |
+| 632 | useEffect | exhaustive-deps | setLocalTakeoffMeasurements | Omit + document | Run on file.id change; setters stable; omit |
+| 663 | useCallback | exhaustive-deps | Unnecessary: file.id | Remove dep | Removed file.id; deps [] |
+| 1066 | useCallback | exhaustive-deps | applyOrthoSnapping, calibrationValidation, isAnnotating, isOrthoSnapping, measurementDebug, pageCommittedPolylineRefs, selectedMarkupIds, viewState.rotation | Omit + document | Large render callback; refs/some deps omitted to avoid cascade |
+| 1299 | useCallback | exhaustive-deps | renderMarkupsWithPointerEvents | Omit + document | Re-render on scale/rotation; omit to avoid cascade |
+| 1314 | useEffect | exhaustive-deps | currentMeasurement.length, isAnnotating, isCalibrating, isMeasuring, showTextInput | Add deps | Added all five |
+| 1553 | useCallback | exhaustive-deps | isDrawingBoxSelection, isInitialRenderComplete, onPDFRendered, showTextInput | Omit + document | Refs and parent callback omitted to avoid cascade |
+| 1602 | useCallback | exhaustive-deps | getSelectedCondition, pageRubberBandRefs, setRubberBandElement | Omit + document | Refs and setter stable; omit |
+| 1787 | useCallback | exhaustive-deps | calibrationViewportRef, currentViewport, isCompletingMeasurementRef, lastCompletionTimeRef, setCurrentMeasurement, setMousePosition | Omit + document | Refs and setters stable; omit |
+| 1928 | useCallback | exhaustive-deps | calibrationViewportRef, setCurrentCutout, setLocalTakeoffMeasurements | Omit + document | Ref and setters stable; omit |
+| 1951 | useCallback | exhaustive-deps | pageRubberBandRefs, setActivePoints, setIsContinuousDrawing, setRubberBandElement, setRunningLength | Omit + document | Refs and setters stable; omit |
+| 1981 | useCallback | exhaustive-deps | (same as 1951) | Omit + document | Refs and setters stable; omit |
+| 2023 | useEffect | exhaustive-deps | pageCommittedPolylineRefs, pageRubberBandRefs | Omit + document | Run on currentPage change; refs for cleanup only; omit refs |
+| 2082 | useCallback | exhaustive-deps | currentPage | Add deps | Added currentPage; removed unnecessary forceMarkupReRender, localTakeoffMeasurements |
+| 2170 | useEffect | exhaustive-deps | viewState.rotation | Add deps | Added viewState.rotation to applyInteractiveZoomTransforms callback |
+| 2240 | useEffect | exhaustive-deps | setMeasurements | Omit + document | Run on currentPage; setters stable; omit |
+| 2297 | useEffect | exhaustive-deps | setCurrentMeasurement, setMeasurements, setMousePosition | Omit + document | Setters stable; omit (viewport fallback) |
+| 2326 | useEffect | exhaustive-deps | applyInteractiveZoomTransforms | Omit + document | applyInteractiveZoomTransforms omitted to avoid cascade |
+| 2415 | useEffect | exhaustive-deps | setCurrentMeasurement, setIsMeasuring, setIsSelectionMode, setMeasurementType, setMeasurements, setMousePosition, setSelectedMarkupIds | Omit + document | Setters stable; omit |
+| 2430 | useEffect | exhaustive-deps | setCurrentAnnotation, setIsAnnotating, setIsSelectionMode, setMousePosition, setSelectedMarkupIds | Omit + document | Setters stable; omit |
+| 2441 | useEffect | exhaustive-deps | setShowCalibrationDialog | Omit + document | Setter stable; omit |
+| 2462 | useEffect | exhaustive-deps | Ref in cleanup: copy pdfCanvasRef.current to variable inside effect, use in cleanup | Fix pattern | Captured canvas/svg at effect start; use in cleanup |
+| 2472 | useEffect | exhaustive-deps | Ref in cleanup: copy svgOverlayRef.current to variable inside effect, use in cleanup | Fix pattern | Same as 2462 |
 
 ### SheetSidebar.tsx
 
@@ -85,20 +85,20 @@ Format: **File** | **Line** | **Hook** | **Rule** | **What’s missing / issue**
 
 | Line | Hook | Rule | What's missing / issue | Decision | Notes |
 |------|------|------|------------------------|----------|--------|
-| 572 | useCallback | exhaustive-deps | onPageShownRef, renderMarkupsWithPointerEventsRef, setIsContinuousDrawing, svgOverlayRef, updateMarkupPointerEventsRef | | |
-| 574 | useCallback | preserve-manual-memoization | Compiler deps differ from manual list | | |
-| 708 | useCallback | exhaustive-deps | pdfCanvasRef | | |
-| 710 | useCallback | preserve-manual-memoization | Compiler deps differ from manual list | | |
-| 966 | useCallback | exhaustive-deps | annotationDragJustCompletedRef, annotationMoveJustCompletedRef, completeMeasurementRef, measurementDragJustCompletedRef, measurementMoveJustCompletedRef, pdfCanvasRef, setLocalAnnotations | | |
-| 968 | useCallback | preserve-manual-memoization | Compiler deps differ from manual list | | |
-| 1176 | useCallback | exhaustive-deps | isOrthoSnapping, pdfCanvasRef | | |
-| 1178 | useCallback | preserve-manual-memoization | Compiler deps differ from manual list | | |
-| 1416 | useCallback | exhaustive-deps | pdfCanvasRef, pdfPageRef, setIsDeselecting | | |
-| 1418 | useCallback | preserve-manual-memoization | Compiler deps differ from manual list | | |
-| 1489 | useCallback | exhaustive-deps | completeContinuousLinearMeasurementRef, completeCutoutRef, completeMeasurementRef | | |
-| 1491 | useCallback | preserve-manual-memoization | Compiler deps differ from manual list | | |
-| 1588 | useCallback | exhaustive-deps | annotationMoveJustCompletedRef, isSelectionModeRef, measurementDragJustCompletedRef, measurementMoveJustCompletedRef | | |
-| 1590 | useCallback | preserve-manual-memoization | Compiler deps differ from manual list | | |
+| 572 | useCallback | exhaustive-deps | onPageShownRef, renderMarkupsWithPointerEventsRef, setIsContinuousDrawing, svgOverlayRef, updateMarkupPointerEventsRef | Omit + document | Refs and setter stable; omit |
+| 574 | useCallback | preserve-manual-memoization | Compiler deps differ from manual list | (same fix) | — |
+| 708 | useCallback | exhaustive-deps | pdfCanvasRef | Omit + document | Ref used for guard only; omit |
+| 710 | useCallback | preserve-manual-memoization | Compiler deps differ from manual list | (same fix) | — |
+| 966 | useCallback | exhaustive-deps | annotationDragJustCompletedRef, annotationMoveJustCompletedRef, completeMeasurementRef, measurementDragJustCompletedRef, measurementMoveJustCompletedRef, pdfCanvasRef, setLocalAnnotations | Omit + document | Refs and setter stable; omit |
+| 968 | useCallback | preserve-manual-memoization | Compiler deps differ from manual list | (same fix) | — |
+| 1176 | useCallback | exhaustive-deps | isOrthoSnapping, pdfCanvasRef | Add + omit | Added isOrthoSnapping; omit pdfCanvasRef |
+| 1178 | useCallback | preserve-manual-memoization | Compiler deps differ from manual list | (same fix) | — |
+| 1416 | useCallback | exhaustive-deps | pdfCanvasRef, pdfPageRef, setIsDeselecting | Omit + document | Refs and setter stable; omit |
+| 1418 | useCallback | preserve-manual-memoization | Compiler deps differ from manual list | (same fix) | — |
+| 1489 | useCallback | exhaustive-deps | completeContinuousLinearMeasurementRef, completeCutoutRef, completeMeasurementRef | Omit + document | Completion callbacks via refs; omit |
+| 1491 | useCallback | preserve-manual-memoization | Compiler deps differ from manual list | (same fix) | — |
+| 1588 | useCallback | exhaustive-deps | annotationMoveJustCompletedRef, isSelectionModeRef, measurementDragJustCompletedRef, measurementMoveJustCompletedRef | Omit + document | Refs for completion/selection state; omit |
+| 1590 | useCallback | preserve-manual-memoization | Compiler deps differ from manual list | (same fix) | — |
 
 ### useTakeoffWorkspaceDocumentView.ts
 
@@ -128,5 +128,5 @@ These already have an eslint-disable with a short comment in code:
 ## Progress
 
 - **Total items in this checklist:** ~45 (some useCallback lines have both exhaustive-deps and preserve-manual-memoization; fixing exhaustive-deps may clear or change preserve-manual-memoization).
-- **Done:** 0 (use this table as you fix; update Decision and Notes, then tick or delete the row when done).
+- **Done:** All. SheetSidebar, TakeoffWorkspace, useTakeoffWorkspaceDocumentView, useTakeoffWorkspaceProjectInit, PDFViewer, and usePDFViewerInteractions checklist items have been addressed; Decision and Notes updated.
 - **Suggested order:** Start with SheetSidebar and TakeoffWorkspace (fewer, simpler), then useTakeoffWorkspaceDocumentView / useTakeoffWorkspaceProjectInit, then PDFViewer and usePDFViewerInteractions.

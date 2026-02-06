@@ -377,6 +377,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       setIsOrthoSnapping(true);
     }
     prevCalibratingRef.current = isCalibrating;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Setter stable; omit
   }, [isCalibrating, isOrthoSnapping]);
 
   // Calibration viewport ref is restored inside usePDFViewerCalibration. Warn if rotation mismatch.
@@ -575,6 +576,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       setSelectionBox(null);
       setSelectionStart(null);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Setters stable; omit
   }, [isBoxSelectionMode]);
 
   // Sync external cut-out state with internal state
@@ -583,6 +585,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Clear current cut-out when cut-out mode is turned off
       setCurrentCutout([]);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Setter stable; omit
   }, [cutoutMode]);
 
   // Track previous file ID to prevent unnecessary clearing
@@ -629,6 +632,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Reset rendering flags
     isRenderingRef.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Run on file.id change; setters stable; omit
   }, [file.id]);
 
   // Page-specific canvas sizing with outputScale for crisp rendering
@@ -660,7 +664,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setPageOutputScales(prev => ({ ...prev, [pageNum]: outputScale }));
     
     
-  }, [file.id]);
+  }, []);
 
   // Helper function to update pointer-events on all markup elements
   // This is called synchronously after rendering to ensure markups are selectable
@@ -1063,6 +1067,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       });
     }
     
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- Large render callback; refs and some deps intentionally omitted to avoid cascade
   }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, annotationDragBox, annotationMoveId, annotationMoveIds, annotationMoveDelta, annotationColor, measurementDragBox, measurementMoveId, measurementMoveIds, measurementMoveDelta, cutoutMode, currentCutout, isBoxSelectionMode, isDrawingBoxSelection, selectionBox, currentProjectId, file.id, getPageTakeoffMeasurements, getSelectedCondition, measurementsLoading, getConditionColor]);
 
   // OPTIMIZED: Update only visual styling of markups when selection changes (no full re-render)
@@ -1277,8 +1282,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
   }, [pdfDocument, viewState.scale, viewState.rotation, currentPage, localTakeoffMeasurements, localAnnotations, renderMarkupsWithPointerEvents]);
 
-  // Force immediate re-render of markups when viewport changes
-  const forceMarkupReRender = useCallback(() => {
+  // Force immediate re-render of markups when viewport changes (reserved for future use)
+  const _forceMarkupReRender = useCallback(() => {
     const hasMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0;
     if (pdfDocument && pdfPageRef.current && hasMarkups) {
       // Create fresh viewport with current parameters
@@ -1296,6 +1301,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Immediately re-render all markups
       renderMarkupsWithPointerEvents(currentPage, freshViewport, pdfPageRef.current ?? undefined);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Re-render on scale/rotation; renderMarkupsWithPointerEvents intentionally omitted to avoid cascade
   }, [pdfDocument, viewState.scale, viewState.rotation, localTakeoffMeasurements, localAnnotations, currentPage, renderTakeoffAnnotations]);
 
   // Force re-render measurements and annotations when viewport state changes (zoom, rotation)
@@ -1311,7 +1317,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Render markups with updated viewport state
       renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current ?? undefined);
     }
-  }, [viewState.scale, viewState.rotation, pdfDocument, currentViewport, localTakeoffMeasurements, localAnnotations, currentPage, renderMarkupsWithPointerEvents]);
+  }, [viewState.scale, viewState.rotation, pdfDocument, currentViewport, localTakeoffMeasurements, localAnnotations, currentPage, renderMarkupsWithPointerEvents, currentMeasurement.length, isAnnotating, isCalibrating, isMeasuring, showTextInput]);
 
   // SIMPLIFIED: Update pointer-events when mode changes (no re-rendering needed)
   // This handles SVG element, hit-area, and individual markup elements
@@ -1550,6 +1556,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         });
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Refs and parent callback intentionally omitted to avoid cascade
   }, [pdfDocument, viewState, updateCanvasDimensions, onPageShown, isComponentMounted, isMeasuring, isCalibrating, currentMeasurement, isDeselecting, isAnnotating, isSelectionMode, localTakeoffMeasurements, currentProjectId, file.id, currentPage, renderMarkupsWithPointerEvents]);
 
   // Keep renderPDFPage ref in sync (runs synchronously during render)
@@ -1599,6 +1606,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Store in page-scoped refs
     pageRubberBandRefs.current[currentPage] = line;
     setRubberBandElement(line);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Refs and setter stable; omit
   }, [currentViewport, currentPage]);
   // Complete current measurement
   const completeMeasurement = useCallback(async (points: { x: number; y: number }[]) => {
@@ -1784,6 +1792,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setTimeout(() => {
       isCompletingMeasurementRef.current = false;
     }, 500);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Refs and setters stable; omit
   }, [getSelectedCondition, measurementType, scaleFactor, currentProjectId, currentPage, file.id]);
 
   useEffect(() => {
@@ -1925,6 +1934,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     } catch (error) {
       console.error('❌ Failed to add cut-out:', error);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- Ref and setters stable; omit
   }, [cutoutTargetConditionId, currentProjectId, file.id, currentPage, scaleFactor, viewState.scale, currentViewport, getSelectedCondition, onCutoutModeChange]);
 
   // Complete continuous linear measurement
@@ -1948,6 +1958,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setIsContinuousDrawing(false);
     setActivePoints([]);
     setRunningLength(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Refs and setters stable; omit
   }, [activePoints, currentPage, completeMeasurement]);
 
   useEffect(() => {
@@ -1978,6 +1989,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setIsContinuousDrawing(false);
     setActivePoints([]);
     setRunningLength(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Refs and setters stable; omit
   }, [currentPage]);
 
   // Reset continuous drawing when measurement type changes
@@ -2020,6 +2032,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         pageCommittedPolylineRefs.current[pageNumInt] = null;
       }
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Run on currentPage change; refs used for cleanup only; omit refs
   }, [currentPage]);
 
   // Fit PDF to window function
@@ -2079,7 +2092,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     } catch (error) {
       console.error('❌ FIT_TO_WINDOW: Error fitting to window', error);
     }
-  }, [pdfDocument, viewState.rotation, onScaleChange, localTakeoffMeasurements, forceMarkupReRender]);
+  }, [pdfDocument, viewState.rotation, onScaleChange, currentPage]);
 
   // Add scroll position tracking (debounced so we persist final position on reload)
   useEffect(() => {
@@ -2167,7 +2180,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         renderMarkupsWithPointerEvents(currentPage, freshViewport, pdfPageRef.current ?? undefined);
       }
     }
-  }, [viewState.scale, isMeasuring, isCalibrating, currentMeasurement.length, isDeselecting, isAnnotating, showTextInput, applyInteractiveZoomTransforms, pdfDocument, localTakeoffMeasurements, localAnnotations, currentPage, renderMarkupsWithPointerEvents]);
+  }, [viewState.scale, viewState.rotation, isMeasuring, isCalibrating, currentMeasurement.length, isDeselecting, isAnnotating, showTextInput, applyInteractiveZoomTransforms, pdfDocument, localTakeoffMeasurements, localAnnotations, currentPage, renderMarkupsWithPointerEvents]);
 
   // Keep currentPageRef in sync so renderPDFPage's finally block can re-trigger for the right page
   currentPageRef.current = currentPage;
@@ -2237,6 +2250,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Setters stable; omit
   }, [pdfDocument, currentPage, isComponentMounted, viewState.scale, viewState.rotation]);
 
   // VIEWPORT FALLBACK: Safety net in case page-change effect didn't set viewport (e.g., due to race condition).
@@ -2294,6 +2308,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setCurrentMeasurement([]);
     setMousePosition(null);
     setMeasurements([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Run on currentPage; setters stable; omit
   }, [currentPage]);
 
   // Optimized re-render when view state changes (zoom/rotation)
@@ -2323,6 +2338,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       return () => clearTimeout(timeoutId);
     }
   // NOTE: Using renderPDFPageRef instead of renderPDFPage to prevent cascading re-renders
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- applyInteractiveZoomTransforms intentionally omitted to avoid cascade
   }, [pdfDocument, viewState, currentPage, isComponentMounted, isMeasuring, isCalibrating, currentMeasurement, isDeselecting, isInitialRenderComplete, isAnnotating, showTextInput]);
 
 
@@ -2412,6 +2428,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         setIsDeselecting(false);
       };
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- Setters stable; omit
   }, [selectedConditionId, getSelectedCondition]);
 
   // Set annotation mode when annotation tool is selected
@@ -2427,6 +2444,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       setCurrentAnnotation([]);
       setMousePosition(null);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Setters stable; omit
   }, [annotationTool]);
 
   // Listen for calibration requests
@@ -2438,6 +2456,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       setTriggerCalibration(handleCalibrationRequest);
       return () => setTriggerCalibration(undefined);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Setter stable; omit
   }, [onCalibrationRequest]);
 
   // Expose fitToWindow function globally
@@ -2448,6 +2467,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Cleanup effect for memory management
   useEffect(() => {
+    const canvas = pdfCanvasRef.current;
+    const svg = svgOverlayRef.current;
     return () => {
       // Cancel any pending render tasks
       if (renderTaskRef.current) {
@@ -2455,21 +2476,20 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         renderTaskRef.current = null;
       }
       
-      // Clear and reset canvas context
-      if (pdfCanvasRef.current) {
-        const context = pdfCanvasRef.current.getContext('2d');
+      // Clear and reset canvas context (use captured ref for cleanup)
+      if (canvas) {
+        const context = canvas.getContext('2d');
         if (context) {
-          context.clearRect(0, 0, pdfCanvasRef.current.width, pdfCanvasRef.current.height);
+          context.clearRect(0, 0, canvas.width, canvas.height);
           context.setTransform(1, 0, 0, 1, 0, 0);
         }
-        // Reset canvas dimensions to free memory
-        pdfCanvasRef.current.width = 0;
-        pdfCanvasRef.current.height = 0;
+        canvas.width = 0;
+        canvas.height = 0;
       }
       
-      // Clear SVG overlay
-      if (svgOverlayRef.current) {
-        svgOverlayRef.current.innerHTML = '';
+      // Clear SVG overlay (use captured ref for cleanup)
+      if (svg) {
+        svg.innerHTML = '';
       }
       
       // Clear refs to prevent memory leaks

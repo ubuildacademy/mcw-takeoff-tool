@@ -569,6 +569,7 @@ export function usePDFViewerInteractions(
         setIsOrthoSnapping((prev) => !prev);
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Refs and setter stable; omit
     [
       annotationTool,
       currentAnnotation.length,
@@ -705,6 +706,7 @@ export function usePDFViewerInteractions(
       event.preventDefault();
       event.stopPropagation();
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Ref used for guard only; omit
     [
       annotationTool,
       visualSearchMode,
@@ -963,6 +965,7 @@ export function usePDFViewerInteractions(
       event.preventDefault();
       event.stopPropagation();
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Refs and setter stable; omit
     [
       measurementMoveId,
       measurementMoveIds,
@@ -1173,6 +1176,7 @@ export function usePDFViewerInteractions(
         }
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- pdfCanvasRef omit; added isOrthoSnapping
     [
       annotationTool,
       annotationDragStart,
@@ -1185,6 +1189,7 @@ export function usePDFViewerInteractions(
       isCalibrating,
       calibrationPoints,
       isMeasuring,
+      isOrthoSnapping,
       selectedConditionId,
       mousePosition,
       isContinuousDrawing,
@@ -1413,6 +1418,7 @@ export function usePDFViewerInteractions(
         if (measurementType === 'count') completeMeasurementRef.current?.([pdfCoords]);
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Refs and setter stable; omit
     [
       isCalibrating,
       calibrationPoints,
@@ -1486,6 +1492,7 @@ export function usePDFViewerInteractions(
         }
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Completion callbacks via refs; omit
     [
       isContinuousDrawing,
       activePoints,
@@ -1585,6 +1592,7 @@ export function usePDFViewerInteractions(
         handleClick(e as React.MouseEvent<HTMLCanvasElement | SVGSVGElement>);
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Refs for completion/selection state; omit
     [
       isCalibrating,
       annotationTool,
