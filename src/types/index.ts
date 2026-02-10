@@ -16,6 +16,7 @@ export interface Project {
   createdAt: string;
   lastModified: string;
   takeoffCount?: number;
+  conditionCount?: number;
   totalValue?: number;
   profitMarginPercent?: number; // Global profit margin percentage (default 15%)
 }

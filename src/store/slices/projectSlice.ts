@@ -144,6 +144,7 @@ export const useProjectStore = create<ProjectState>()(
             createdAt: (p.created_at as string) || new Date().toISOString(),
             lastModified: (p.last_modified as string) || new Date().toISOString(),
             takeoffCount: (p.takeoffCount as number) ?? 0,
+            conditionCount: (p.conditionCount as number) ?? 0,
             totalValue: (p.totalValue as number | undefined),
             profitMarginPercent: (p.profitMarginPercent as number | undefined),
           }));

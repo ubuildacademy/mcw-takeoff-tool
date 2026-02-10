@@ -19,11 +19,12 @@ export interface ProjectWithUser extends Project {
   user_name?: string;
 }
 
-// Project with takeoff/condition counts (from getProjects)
+// Project with takeoff/condition counts and computed total (from getProjects)
 export interface ProjectWithCounts extends ProjectWithUser {
   takeoffCount: number;
   conditionCount: number;
   totalValue: number;
+  profitMarginPercent?: number;
 }
 
 // Row shape from takeoff_files table (snake_case)
@@ -110,33 +111,61 @@ export const supabaseService = {
       user_name: undefined
     }));
 
-    // Attach takeoff counts for each project so the UI can display them
-    // We use a head-only count query per project to respect RLS and avoid large payloads
+    // Attach takeoff/condition counts and computed total value per project (from conditions + measurements)
     const projectsWithCounts = await Promise.all(
       baseProjects.map(async (project) => {
         try {
-          const { count: takeoffCount } = await supabase
-            .from('takeoff_measurements')
-            .select('id', { count: 'exact', head: true })
-            .eq('project_id', project.id);
-          const { count: conditionCount } = await supabase
-            .from('takeoff_conditions')
-            .select('id', { count: 'exact', head: true })
-            .eq('project_id', project.id);
+          const [conditionsDataRes, measurementsDataRes] = await Promise.all([
+            supabase
+              .from('takeoff_conditions')
+              .select('id, material_cost, equipment_cost, waste_factor')
+              .eq('project_id', project.id),
+            supabase
+              .from('takeoff_measurements')
+              .select('condition_id, calculated_value, net_calculated_value')
+              .eq('project_id', project.id)
+          ]);
+          const conditions = (conditionsDataRes.data ?? []) as Array<{ id: string; material_cost: number | null; equipment_cost?: number | null; waste_factor?: number }>;
+          const measurements = (measurementsDataRes.data ?? []) as Array<{ condition_id: string; calculated_value: number; net_calculated_value: number | null }>;
+          const conditionCount = conditions.length;
+          const takeoffCount = measurements.length;
+
+          // Compute project total cost (same formula as measurementSlice getProjectCostBreakdown)
+          const profitMarginPercent = (project as { profit_margin_percent?: number }).profit_margin_percent ?? 15;
+          let subtotal = 0;
+          for (const cond of conditions) {
+            const materialCostPerUnit = cond.material_cost ?? 0;
+            const equipmentCost = cond.equipment_cost ?? 0;
+            const wasteFactor = cond.waste_factor ?? 0;
+            const conditionMeasurements = measurements.filter((m) => m.condition_id === cond.id);
+            const quantity = conditionMeasurements.reduce((sum, m) => {
+              const value = m.net_calculated_value != null ? m.net_calculated_value : m.calculated_value;
+              return sum + (value ?? 0);
+            }, 0);
+            const adjustedQuantity = quantity * (1 + wasteFactor / 100);
+            const materialCost = adjustedQuantity * materialCostPerUnit;
+            const wasteCost = (adjustedQuantity - quantity) * materialCostPerUnit;
+            subtotal += materialCost + equipmentCost + wasteCost;
+          }
+          const profitMarginAmount = subtotal * (profitMarginPercent / 100);
+          const totalCost = Math.round((subtotal + profitMarginAmount) * 100) / 100;
+
           return {
             ...project,
-            takeoff_count: undefined, // normalize if coming from a view
+            takeoff_count: undefined,
             takeoffCount: takeoffCount || 0,
             conditionCount: conditionCount || 0,
-            totalValue: project.totalValue ?? 0
+            totalValue: totalCost,
+            profitMarginPercent: profitMarginPercent
           } as ProjectWithCounts;
         } catch (e) {
-          console.warn('Failed to load takeoff count for project', project.id, e);
+          console.warn('Failed to load counts/total for project', project.id, e);
           return {
             ...project,
             takeoffCount: 0,
             conditionCount: 0,
-            totalValue: project.totalValue ?? 0
+            totalValue: 0,
+            profitMarginPercent: (project as { profit_margin_percent?: number }).profit_margin_percent ?? 15
           } as ProjectWithCounts;
         }
       })
