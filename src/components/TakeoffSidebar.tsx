@@ -34,9 +34,11 @@ interface TakeoffSidebarProps {
   cutoutMode?: boolean;
   cutoutTargetConditionId?: string | null;
   selectedDocumentId?: string | null;
+  /** Opens the CV Takeoff (experimental) dialog when user chooses it from Create Condition. */
+  onOpenCVTakeoff?: () => void;
 }
 
-export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _onToolSelect, documents = [], onPageSelect, onExportStatusUpdate, onCutoutMode, cutoutMode, cutoutTargetConditionId, selectedDocumentId }: TakeoffSidebarProps) {
+export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _onToolSelect, documents = [], onPageSelect, onExportStatusUpdate, onCutoutMode, cutoutMode, cutoutTargetConditionId, selectedDocumentId, onOpenCVTakeoff }: TakeoffSidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -726,6 +728,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
           }}
           onConditionSelect={onConditionSelect} // Pass condition select handler for auto-selection
           editingCondition={editingCondition}
+          onOpenCVTakeoff={onOpenCVTakeoff}
         />
       )}
 

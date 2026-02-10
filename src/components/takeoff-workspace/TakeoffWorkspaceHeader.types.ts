@@ -44,7 +44,6 @@ export interface TakeoffWorkspaceHeaderProps {
   onRotatePage: (direction: 'clockwise' | 'counterclockwise') => void;
   isPageCalibrated: boolean;
   onCalibrateScale: () => void;
-  onOpenCVTakeoffAgent: () => void;
   annotationTool: AnnotationTool;
   annotationColor: string;
   onAnnotationToolChange: (tool: AnnotationTool) => void;

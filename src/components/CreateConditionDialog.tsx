@@ -16,9 +16,13 @@ interface CreateConditionDialogProps {
   onConditionCreated: (condition: TakeoffCondition) => void;
   onConditionSelect?: (condition: TakeoffCondition) => void;
   editingCondition?: TakeoffCondition | null;
+  /** When user chooses CV Takeoff (experimental) and clicks Start, this opens the CV Takeoff dialog. */
+  onOpenCVTakeoff?: () => void;
 }
 
-export function CreateConditionDialog({ projectId, onClose, onConditionCreated, onConditionSelect, editingCondition }: CreateConditionDialogProps) {
+type ConditionFormType = 'area' | 'volume' | 'linear' | 'count' | 'auto-count' | 'cv-takeoff';
+
+export function CreateConditionDialog({ projectId, onClose, onConditionCreated, onConditionSelect, editingCondition, onOpenCVTakeoff }: CreateConditionDialogProps) {
   const addCondition = useConditionStore((s) => s.addCondition);
   const updateCondition = useConditionStore((s) => s.updateCondition);
   const conditions = useConditionStore((s) => s.conditions);
@@ -32,7 +36,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
 
   const [formData, setFormData] = useState({
     name: editingCondition?.name || '',
-    type: (editingCondition?.type || 'area') as 'area' | 'volume' | 'linear' | 'count' | 'auto-count',
+    type: (editingCondition?.type || 'area') as ConditionFormType,
     unit: editingCondition?.unit || 'SF', // Initialize with default unit for 'area' type
     wasteFactor: editingCondition?.wasteFactor?.toString() || '',
     color: editingCondition?.color || generateDistinctColor(conditions.filter((c: { projectId: string; color?: string }) => c.projectId === projectId).map((c: { color?: string }) => c.color).filter((color): color is string => typeof color === 'string')),
@@ -86,6 +90,8 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // CV Takeoff is a launcher only — no condition is created from this form
+    if (formData.type === 'cv-takeoff') return;
     setLoading(true);
 
     try {
@@ -239,9 +245,9 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
   const handleTypeChange = (value: string) => {
     const defaultUnit = getDefaultUnit(value);
     setFormData(prev => {
-      const newData = { 
-        ...prev, 
-        type: value as 'area' | 'volume' | 'linear' | 'count',
+      const newData = {
+        ...prev,
+        type: value as ConditionFormType,
         unit: defaultUnit,
         // Set waste factor to 0 for count conditions since they don't have waste
         wasteFactor: value === 'count' ? '0' : prev.wasteFactor,
@@ -260,8 +266,14 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
       case 'linear': return 'LF';
       case 'count': return 'EA';
       case 'auto-count': return 'EA';
+      case 'cv-takeoff': return 'EA';
       default: return '';
     }
+  };
+
+  const handleStartCVTakeoff = () => {
+    onClose();
+    onOpenCVTakeoff?.();
   };
 
   return (
@@ -275,16 +287,18 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {formData.type !== 'cv-takeoff' && (
           <div>
             <Label htmlFor="name">Name *</Label>
             <Input
               id="name"
               value={formData.name}
               onChange={(e) => handleInputChange('name', e.target.value)}
-                              placeholder="e.g., Foundation Wall"
+              placeholder="e.g., Foundation Wall"
               required
             />
           </div>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -299,10 +313,12 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
                   <SelectItem value="linear">Linear</SelectItem>
                   <SelectItem value="count">Count</SelectItem>
                   <SelectItem value="auto-count">Auto-Count</SelectItem>
+                  <SelectItem value="cv-takeoff">CV Takeoff (experimental)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
+            {formData.type !== 'cv-takeoff' && (
             <div>
               <Label htmlFor="unit">Unit *</Label>
               <Select value={formData.unit || getDefaultUnit(formData.type)} onValueChange={(value) => {
@@ -360,8 +376,26 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
                 </SelectContent>
               </Select>
             </div>
+            )}
           </div>
 
+          {formData.type === 'cv-takeoff' && (
+            <div className="space-y-4 pt-2">
+              <p className="text-sm text-muted-foreground">
+                Use CV to detect and add conditions from the sheet. This feature is still in development.
+              </p>
+              <Button
+                type="button"
+                onClick={handleStartCVTakeoff}
+                className="w-full bg-green-600 hover:bg-green-700 text-white"
+              >
+                Start CV Takeoff
+              </Button>
+            </div>
+          )}
+
+          {formData.type !== 'cv-takeoff' && (
+          <>
           {(formData.type === 'area' || formData.type === 'volume') && (
             <div>
               <Label htmlFor="includePerimeter" className="flex items-center space-x-2">
@@ -577,6 +611,8 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
               {loading ? (editingCondition ? 'Updating...' : 'Creating...') : (editingCondition ? 'Update Condition' : 'Create Condition')}
             </Button>
           </div>
+          </>
+          )}
         </form>
       </div>
     </div>

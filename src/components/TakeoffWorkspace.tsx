@@ -624,7 +624,6 @@ export function TakeoffWorkspace() {
         onRotatePage={rotatePage}
         isPageCalibrated={calibration.isPageCalibrated}
         onCalibrateScale={handleCalibrateScale}
-        onOpenCVTakeoffAgent={() => setShowCVTakeoffAgent(true)}
         annotationTool={annotationTool}
         annotationColor={annotationColor}
         onAnnotationToolChange={setAnnotationTool}
@@ -661,6 +660,7 @@ export function TakeoffWorkspace() {
               cutoutMode={cutoutMode}
               cutoutTargetConditionId={cutoutTargetConditionId}
               selectedDocumentId={selectedDocumentId}
+              onOpenCVTakeoff={() => setShowCVTakeoffAgent(true)}
             />
           )}
           <Button
