@@ -20,7 +20,24 @@ import { useConditionStore } from '../store/slices/conditionSlice';
 import { useMeasurementStore } from '../store/slices/measurementSlice';
 import { authHelpers } from '../lib/supabase';
 import type { PDFDocument } from '../types';
-// Removed complex export libraries - keeping it simple
+
+/** Strip markdown to plain text (pure, no closure — safe to define outside component). */
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/_([^_]+)_/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/^[-*_]{3,}$/gm, '')
+    .replace(/^[\s]*[-*+]\s+/gm, '• ')
+    .replace(/^[\s]*\d+\.\s+/gm, '')
+    .replace(/\n\s*\n\s*\n/g, '\n\n')
+    .trim();
+}
 
 interface ChatMessage {
   id: string;
@@ -34,47 +51,15 @@ interface ChatMessage {
 interface ChatTabProps {
   projectId: string;
   documents: PDFDocument[];
-  onPageSelect?: (documentId: string, pageNumber: number) => void;
-  onOCRRequest?: (documentId: string) => void;
 }
 
-export function ChatTab({ 
-  projectId, 
-  documents,
-  onPageSelect: _onPageSelect,
-  onOCRRequest: _onOCRRequest
-}: ChatTabProps) {
+export function ChatTab({ projectId, documents }: ChatTabProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isOllamaAvailable, setIsOllamaAvailable] = useState<boolean | null>(null);
   const [userName, setUserName] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  // Function to strip markdown formatting from text
-  const stripMarkdown = (text: string): string => {
-    return text
-      // Remove code blocks
-      .replace(/```[\s\S]*?```/g, '')
-      .replace(/`([^`]+)`/g, '$1')
-      // Remove bold and italic
-      .replace(/\*\*([^*]+)\*\*/g, '$1')
-      .replace(/\*([^*]+)\*/g, '$1')
-      .replace(/__([^_]+)__/g, '$1')
-      .replace(/_([^_]+)_/g, '$1')
-      // Remove headers
-      .replace(/^#{1,6}\s+/gm, '')
-      // Remove links but keep the text
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-      // Remove horizontal rules
-      .replace(/^[-*_]{3,}$/gm, '')
-      // Remove list markers
-      .replace(/^[\s]*[-*+]\s+/gm, '• ')
-      .replace(/^[\s]*\d+\.\s+/gm, '')
-      // Clean up extra whitespace
-      .replace(/\n\s*\n\s*\n/g, '\n\n')
-      .trim();
-  };
 
   // Simple function to render message content as plain text
   const renderMessageContent = (message: ChatMessage) => {
@@ -88,9 +73,10 @@ export function ChatTab({
   const getCurrentProject = useProjectStore((s) => s.getCurrentProject);
   const getProjectTakeoffSummary = useMeasurementStore((s) => s.getProjectTakeoffSummary);
   const getProjectTakeoffMeasurements = useMeasurementStore((s) => s.getProjectTakeoffMeasurements);
-  const conditions = useConditionStore((s) => s.conditions);
-  const loadProjectConditions = useConditionStore((s) => s.loadProjectConditions);
-  const loadProjectTakeoffMeasurements = useMeasurementStore((s) => s.loadProjectTakeoffMeasurements);
+  // Narrow selector: only this project's conditions (fewer re-renders when other projects change)
+  const conditions = useConditionStore((s) => s.getProjectConditions(projectId));
+  // Do not load conditions/measurements here — the left conditions sidebar owns loading.
+  // ChatTab only reads from the store so switching to AI Chat won't refresh the sidebar.
 
   // Scroll to bottom when new messages arrive
   const scrollToBottom = useCallback(() => {
@@ -101,44 +87,28 @@ export function ChatTab({
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
-  // Load user name on mount
+  // One-time mount: user name + Ollama availability
   useEffect(() => {
-    const loadUserName = async () => {
+    let cancelled = false;
+    (async () => {
       try {
-        const metadata = await authHelpers.getUserMetadata();
-        if (metadata?.full_name) {
-          setUserName(metadata.full_name);
+        const [metadata, available] = await Promise.all([
+          authHelpers.getUserMetadata(),
+          ollamaService.isAvailable(),
+        ]);
+        if (!cancelled) {
+          if (metadata?.full_name) setUserName(metadata.full_name);
+          setIsOllamaAvailable(available);
         }
       } catch (error) {
-        console.error('Failed to load user name:', error);
+        if (!cancelled) {
+          console.error('Failed to initialize chat:', error);
+          setIsOllamaAvailable(false);
+        }
       }
-    };
-
-    loadUserName();
+    })();
+    return () => { cancelled = true; };
   }, []);
-
-  // Check Ollama availability on mount
-  useEffect(() => {
-    const initializeOllama = async () => {
-      try {
-        const available = await ollamaService.isAvailable();
-        setIsOllamaAvailable(available);
-      } catch (error) {
-        console.error('Failed to initialize Ollama:', error);
-        setIsOllamaAvailable(false);
-      }
-    };
-
-    initializeOllama();
-  }, []);
-
-  // Load project data when projectId changes
-  useEffect(() => {
-    if (projectId) {
-      loadProjectConditions(projectId);
-      loadProjectTakeoffMeasurements(projectId);
-    }
-  }, [projectId, loadProjectConditions, loadProjectTakeoffMeasurements]);
 
   // Load chat history from localStorage for persistence
   useEffect(() => {
@@ -198,10 +168,19 @@ What would you like to know about this project?`,
     setInputMessage('');
     setIsLoading(true);
 
+    const assistantMessageId = `assistant-${Date.now()}`;
+    const assistantMessage: ChatMessage = {
+      id: assistantMessageId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date(),
+      isStreaming: true
+    };
+
     try {
       // Build context from project data
       const projectContext = await buildProjectContext();
-      
+
       // Create messages for Ollama
       const ollamaMessages: OllamaMessage[] = [
         {
@@ -227,15 +206,6 @@ When answering questions:
           content: userMessage.content
         }
       ];
-
-      // Create assistant message placeholder
-      const assistantMessage: ChatMessage = {
-        id: `assistant-${Date.now()}`,
-        role: 'assistant',
-        content: '',
-        timestamp: new Date(),
-        isStreaming: true
-      };
 
       setMessages(prev => [...prev, assistantMessage]);
 
@@ -274,12 +244,10 @@ When answering questions:
 
     } catch (error) {
       console.error('Error sending message to Ollama:', error);
-      
-      // Update the assistant message with error
-      setMessages(prev => prev.map(msg => 
-        msg.id === `assistant-${Date.now()}` 
-          ? { 
-              ...msg, 
+      setMessages(prev => prev.map(msg =>
+        msg.id === assistantMessageId
+          ? {
+              ...msg,
               content: 'Sorry, I encountered an error while processing your request. Please try again.',
               isStreaming: false,
               error: error instanceof Error ? error.message : 'Unknown error'

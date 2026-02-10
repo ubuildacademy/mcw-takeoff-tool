@@ -116,12 +116,7 @@ export function TakeoffWorkspaceRightSidebar({
           )}
 
           {rightSidebarTab === 'ai-chat' && (
-            <ChatTab
-              projectId={projectId}
-              documents={documents}
-              onPageSelect={onPageSelect}
-              onOCRRequest={onOCRRequest}
-            />
+            <ChatTab projectId={projectId} documents={documents} />
           )}
         </div>
       )}
