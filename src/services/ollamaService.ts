@@ -144,7 +144,7 @@ class OllamaService {
     try {
       const response = await this.makeRequest('/models', {
         method: 'GET',
-        signal: AbortSignal.timeout(5000) // 5 second timeout
+        signal: AbortSignal.timeout(15000) // 15s — server may need to call ollama.com
       });
       
       this.isConnected = response.ok;
@@ -177,7 +177,12 @@ class OllamaService {
   private async makeRequest(endpoint: string, options: RequestInit = {}, retryCount: number = 0): Promise<Response> {
     try {
       const { supabase } = await import('../lib/supabase');
-      const { data: { session } } = await supabase.auth.getSession();
+      let { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        await supabase.auth.refreshSession();
+        const next = await supabase.auth.getSession();
+        session = next.data.session ?? null;
+      }
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         ...(options.headers as Record<string, string>),

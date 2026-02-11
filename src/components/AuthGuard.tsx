@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Navigate } from 'react-router-dom';
-import { authHelpers } from '../lib/supabase';
+import { authHelpers, supabase } from '../lib/supabase';
 
 interface AuthGuardProps {
   children: React.ReactNode;
@@ -16,13 +16,25 @@ const AuthGuard: React.FC<AuthGuardProps> = ({ children, requireAdmin = false })
     const checkAuth = async () => {
       try {
         const user = await authHelpers.getCurrentUser();
-        if (user) {
-          setIsAuthenticated(true);
-          
-          if (requireAdmin) {
-            const adminStatus = await authHelpers.isAdmin();
-            setIsAdmin(adminStatus);
+        if (!user) {
+          setIsLoading(false);
+          return;
+        }
+        // Refresh session so API requests (files, conditions, documents) get a valid token.
+        // Only consider authenticated if we have a valid session after refresh (avoids 401s).
+        const { data: { session }, error: refreshError } = await supabase.auth.refreshSession();
+        if (refreshError || !session?.access_token) {
+          if (refreshError && import.meta.env.DEV) {
+            console.warn('Auth session refresh failed:', refreshError.message);
           }
+          setIsLoading(false);
+          return;
+        }
+        setIsAuthenticated(true);
+
+        if (requireAdmin) {
+          const adminStatus = await authHelpers.isAdmin();
+          setIsAdmin(adminStatus);
         }
       } catch (error) {
         console.error('Auth check failed:', error);

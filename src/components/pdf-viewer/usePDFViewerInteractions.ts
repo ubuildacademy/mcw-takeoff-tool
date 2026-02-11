@@ -2,7 +2,7 @@
  * Hook that provides PDFViewer mouse/keyboard event handlers.
  * Accepts context from PDFViewer so handlers don't close over all state inline.
  */
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { MutableRefObject, RefObject } from 'react';
 import type { PDFPageProxy, PageViewport } from 'pdfjs-dist';
 import { useAnnotationStore } from '../../store/slices/annotationSlice';
@@ -615,9 +615,69 @@ export function usePDFViewerInteractions(
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
 
+  // Middle-click (scroll wheel) drag-to-pan - uses document listeners so drag continues
+  // even when cursor leaves the PDF area. Does not affect left-click mappings.
+  const [middleClickPanStart, setMiddleClickPanStart] = useState<{
+    clientX: number;
+    clientY: number;
+    scrollLeft: number;
+    scrollTop: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!middleClickPanStart) return;
+    const container = containerRef.current;
+    if (!container) {
+      setMiddleClickPanStart(null);
+      return;
+    }
+    const onMove = (e: MouseEvent) => {
+      e.preventDefault();
+      const dx = e.clientX - middleClickPanStart.clientX;
+      const dy = e.clientY - middleClickPanStart.clientY;
+      container.scrollLeft = middleClickPanStart.scrollLeft - dx;
+      container.scrollTop = middleClickPanStart.scrollTop - dy;
+    };
+    const onUp = (e: MouseEvent) => {
+      if (e.button === 1) {
+        e.preventDefault();
+        setMiddleClickPanStart(null);
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      }
+    };
+    document.body.style.cursor = 'grabbing';
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMove, { passive: false });
+    document.addEventListener('mouseup', onUp, { passive: false });
+    return () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [middleClickPanStart]);
+
   const handleMouseDown = useCallback(
     (event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
       if (!pdfCanvasRef.current) return;
+
+      // Middle-click (scroll wheel) drag-to-pan - check first, does not affect left-click
+      if (event.button === 1) {
+        const container = containerRef.current;
+        if (container) {
+          setMiddleClickPanStart({
+            clientX: event.clientX,
+            clientY: event.clientY,
+            scrollLeft: container.scrollLeft,
+            scrollTop: container.scrollTop,
+          });
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        return;
+      }
+
       const isShapeTool = ['arrow', 'rectangle', 'circle'].includes(annotationTool ?? '');
       const isVisualSearchOrTitleblock = (visualSearchMode || !!titleblockSelectionMode) && isSelectingSymbol;
       const currentSelectedConditionId = useConditionStore.getState().selectedConditionId;

@@ -19,23 +19,39 @@ declare global {
  */
 export async function getAuthenticatedUser(req: Request) {
   const authHeader = req.headers.authorization;
-  
+
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.warn('[Auth] No Bearer token in request to:', req.method, req.path);
+      console.warn('[Auth] Headers:', JSON.stringify(req.headers, null, 2));
+    }
     return null;
   }
-  
+
   const token = authHeader.substring(7);
-  
+
   try {
     const { data: { user }, error } = await supabase.auth.getUser(token);
-    
+
     if (error || !user) {
+      if (process.env.NODE_ENV !== 'production') {
+        const msg = error?.message ?? 'No user';
+        console.warn('[Auth] getUser failed for', req.method, req.path, ':', msg);
+        console.warn('[Auth] Token (first 20 chars):', token.substring(0, 20) + '...');
+        console.warn('[Auth] Error details:', error);
+      }
       return null;
     }
-    
+
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[Auth] ✓ Authenticated user:', user.id, 'for', req.method, req.path);
+    }
+
     return user;
-  } catch (error) {
-    console.error('Error verifying auth token:', error);
+  } catch (err) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.error('[Auth] Error verifying token for', req.method, req.path, ':', err instanceof Error ? err.message : err);
+    }
     return null;
   }
 }

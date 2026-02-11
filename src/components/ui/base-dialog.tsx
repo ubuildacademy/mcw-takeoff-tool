@@ -33,12 +33,15 @@ export function BaseDialog({
   showCloseButton: _showCloseButton = true,
   className = ''
 }: BaseDialogProps) {
+  const descriptionId = 'base-dialog-description';
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={`${maxWidthClasses[maxWidth]} max-h-[90vh] overflow-y-auto ${className}`}>
+      <DialogContent className={`${maxWidthClasses[maxWidth]} max-h-[90vh] overflow-y-auto ${className}`} aria-describedby={descriptionId}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
-          {description && <DialogDescription>{description}</DialogDescription>}
+          <DialogDescription id={descriptionId} className={description ? '' : 'sr-only'}>
+            {description ?? `Dialog: ${title}`}
+          </DialogDescription>
         </DialogHeader>
         
         <div className="space-y-4">

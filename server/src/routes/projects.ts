@@ -266,17 +266,45 @@ router.get('/:id/export', requireAuth, validateUUIDParam('id'), async (req, res)
     
     console.log('🔄 Starting project export for:', id);
     
-    // Get all project data
-    const [project, conditions, files, measurements, calibrations] = await Promise.all([
-      storage.getProject(id),
-      storage.getConditionsByProject(id),
-      storage.getFilesByProject(id),
-      storage.getTakeoffMeasurementsByProject(id),
-      storage.getCalibrationsByProject(id)
-    ]);
+    // Get all project data with individual error handling
+    let project, conditions, files, measurements, calibrations;
+    
+    try {
+      project = await storage.getProject(id);
+      if (!project) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+    } catch (error) {
+      console.error('❌ Error fetching project:', error);
+      return res.status(500).json({ error: 'Failed to fetch project data' });
+    }
 
-    if (!project) {
-      return res.status(404).json({ error: 'Project not found' });
+    try {
+      conditions = await storage.getConditionsByProject(id);
+    } catch (error) {
+      console.error('❌ Error fetching conditions:', error);
+      conditions = []; // Continue with empty conditions
+    }
+
+    try {
+      files = await storage.getFilesByProject(id);
+    } catch (error) {
+      console.error('❌ Error fetching files:', error);
+      files = []; // Continue with empty files
+    }
+
+    try {
+      measurements = await storage.getTakeoffMeasurementsByProject(id);
+    } catch (error) {
+      console.error('❌ Error fetching measurements:', error);
+      measurements = []; // Continue with empty measurements
+    }
+
+    try {
+      calibrations = await storage.getCalibrationsByProject(id);
+    } catch (error) {
+      console.error('❌ Error fetching calibrations:', error);
+      calibrations = []; // Continue with empty calibrations
     }
 
     console.log(`📦 Found ${files.length} files, ${conditions.length} conditions, ${measurements.length} measurements, ${calibrations.length} calibrations`);
@@ -286,31 +314,36 @@ router.get('/:id/export', requireAuth, validateUUIDParam('id'), async (req, res)
     let sheets: any[] = [];
     
     if (fileIds.length > 0) {
-      const { data: allSheets, error: sheetsError } = await supabase
-        .from(TABLES.SHEETS)
-        .select('*')
-        .in('document_id', fileIds)
-        .order('page_number', { ascending: true });
-      
-      if (sheetsError) {
-        console.warn('Failed to get sheets:', sheetsError);
-      } else {
-        // Transform to camelCase format
-        sheets = (allSheets || []).map(sheet => ({
-          id: sheet.id,
-          documentId: sheet.document_id,
-          pageNumber: sheet.page_number,
-          sheetNumber: sheet.sheet_number,
-          sheetName: sheet.sheet_name,
-          extractedText: sheet.extracted_text,
-          hasTakeoffs: sheet.has_takeoffs,
-          takeoffCount: sheet.takeoff_count,
-          isVisible: sheet.is_visible,
-          ocrProcessed: sheet.ocr_processed,
-          titleblockConfig: sheet.titleblock_config,
-          createdAt: sheet.created_at,
-          updatedAt: sheet.updated_at
-        }));
+      try {
+        const { data: allSheets, error: sheetsError } = await supabase
+          .from(TABLES.SHEETS)
+          .select('*')
+          .in('document_id', fileIds)
+          .order('page_number', { ascending: true });
+        
+        if (sheetsError) {
+          console.warn('⚠️ Failed to get sheets:', sheetsError);
+        } else {
+          // Transform to camelCase format
+          sheets = (allSheets || []).map(sheet => ({
+            id: sheet.id,
+            documentId: sheet.document_id,
+            pageNumber: sheet.page_number,
+            sheetNumber: sheet.sheet_number,
+            sheetName: sheet.sheet_name,
+            extractedText: sheet.extracted_text,
+            hasTakeoffs: sheet.has_takeoffs,
+            takeoffCount: sheet.takeoff_count,
+            isVisible: sheet.is_visible,
+            ocrProcessed: sheet.ocr_processed,
+            titleblockConfig: sheet.titleblock_config,
+            createdAt: sheet.created_at,
+            updatedAt: sheet.updated_at
+          }));
+        }
+      } catch (error) {
+        console.error('❌ Error fetching sheets:', error);
+        // Continue with empty sheets
       }
     }
 
@@ -319,13 +352,23 @@ router.get('/:id/export', requireAuth, validateUUIDParam('id'), async (req, res)
     const filesWithData = await Promise.all(
       files.map(async (file) => {
         try {
+          // Skip if no path
+          if (!file.path) {
+            console.warn(`⚠️ File ${file.id} has no storage path`);
+            return {
+              ...file,
+              fileData: null,
+              fileDataError: 'No storage path'
+            };
+          }
+
           // Download file from Supabase Storage
           const { data: fileData, error: downloadError } = await supabase.storage
             .from('project-files')
             .download(file.path);
 
           if (downloadError || !fileData) {
-            console.warn(`⚠️ Failed to download file ${file.id} (${file.originalName}):`, downloadError);
+            console.warn(`⚠️ Failed to download file ${file.id} (${file.originalName}):`, downloadError?.message);
             return {
               ...file,
               fileData: null, // Mark as missing
@@ -357,23 +400,24 @@ router.get('/:id/export', requireAuth, validateUUIDParam('id'), async (req, res)
     );
 
     // Create backup object with all data
+    const filesWithDataCount = filesWithData.filter((f) => f.fileData !== null).length;
     const backup = {
       version: '2.0', // Bump version to indicate new format with PDFs and calibrations
       timestamp: new Date().toISOString(),
       project,
       conditions,
-      files: filesWithData, // Now includes base64 encoded PDF data
+      files: filesWithData,
       sheets,
       measurements,
-      calibrations, // Include scale calibrations
+      calibrations,
       metadata: {
         totalFiles: files.length,
         totalConditions: conditions.length,
         totalMeasurements: measurements.length,
         totalSheets: sheets.length,
         totalCalibrations: calibrations.length,
-        filesWithData: filesWithData.filter(f => f.fileData !== null).length,
-        filesMissing: filesWithData.filter(f => f.fileData === null).length
+        filesWithData: filesWithDataCount,
+        filesMissing: filesWithData.length - filesWithDataCount
       }
     };
 
@@ -386,7 +430,12 @@ router.get('/:id/export', requireAuth, validateUUIDParam('id'), async (req, res)
     return res.json(backup);
   } catch (error) {
     console.error('❌ Error exporting project:', error);
-    return res.status(500).json({ error: 'Failed to export project' });
+    // Provide more detailed error information
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    return res.status(500).json({ 
+      error: 'Failed to export project', 
+      details: errorMessage 
+    });
   }
 });
 
@@ -525,15 +574,18 @@ router.post('/import', requireAuth, uploadRateLimit, upload.single('file'), asyn
     }
 
     // Import sheets (update file IDs to new ones)
+    const sheetIdMapping: Record<string, string> = {}; // Map old sheet IDs to new sheet IDs
     if (backup.sheets && backup.sheets.length > 0) {
       console.log(`📑 Importing ${backup.sheets.length} sheets...`);
       const sheetsPromises = backup.sheets.map(async (sheet: any) => {
-        const { id: originalId, documentId, ...sheetData } = sheet;
+        const { id: originalSheetId, documentId, ...sheetData } = sheet;
         const newDocumentId = fileIdMapping[documentId] || documentId; // Use mapped ID if available
+        const newSheetId = uuidv4();
+        sheetIdMapping[originalSheetId] = newSheetId; // Map old to new
         
         return storage.saveSheet({
           ...sheetData,
-          id: uuidv4(),
+          id: newSheetId,
           documentId: newDocumentId,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
@@ -543,12 +595,12 @@ router.post('/import', requireAuth, uploadRateLimit, upload.single('file'), asyn
       console.log('✅ Sheets imported');
     }
 
-    // Import calibrations (update file/sheet IDs to new ones)
+    // Import calibrations (update sheet IDs to new ones)
     if (backup.calibrations && backup.calibrations.length > 0) {
       console.log(`📏 Importing ${backup.calibrations.length} calibrations...`);
       const calibrationsPromises = backup.calibrations.map(async (calibration: any) => {
         const { id: originalId, sheetId, ...calibrationData } = calibration;
-        const newSheetId = fileIdMapping[sheetId] || sheetId; // Use mapped ID if available
+        const newSheetId = sheetIdMapping[sheetId] || sheetId; // Use mapped sheet ID
         
         return storage.saveCalibration({
           ...calibrationData,
@@ -561,12 +613,12 @@ router.post('/import', requireAuth, uploadRateLimit, upload.single('file'), asyn
       console.log('✅ Calibrations imported');
     }
 
-    // Import measurements (update file/sheet IDs to new ones)
+    // Import measurements (update sheet IDs to new ones)
     if (backup.measurements && backup.measurements.length > 0) {
       console.log(`📊 Importing ${backup.measurements.length} measurements...`);
       const measurementsPromises = backup.measurements.map(async (measurement: any) => {
         const { id: originalId, sheetId, ...measurementData } = measurement;
-        const newSheetId = fileIdMapping[sheetId] || sheetId; // Use mapped ID if available
+        const newSheetId = sheetIdMapping[sheetId] || sheetId; // Use mapped sheet ID
         
         return storage.saveTakeoffMeasurement({
           ...measurementData,

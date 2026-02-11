@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { supabase } from '../lib/supabase';
+import { supabase, authHelpers } from '../lib/supabase';
 import { getApiBaseUrl } from '../lib/apiConfig';
 import type { Project, TakeoffCondition, TakeoffMeasurement } from '../types';
 
@@ -91,45 +91,76 @@ const apiClient = axios.create({
   },
 });
 
-// Add request interceptor to include authentication token
+// Attach session token to all API requests; refresh if missing or expired so 401s are avoided.
+// If no session yet (e.g. Supabase still restoring from storage), wait briefly and retry once.
 apiClient.interceptors.request.use(
   async (config) => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      let session = await authHelpers.getValidSession();
+      if (!session?.access_token) {
+        await new Promise((r) => setTimeout(r, 150));
+        session = await authHelpers.getValidSession();
+      }
       if (session?.access_token) {
         config.headers.Authorization = `Bearer ${session.access_token}`;
       }
-    } catch (error) {
-      if (import.meta.env.DEV) console.error('Error getting session for API request:', error);
+    } catch (err) {
+      if (import.meta.env.DEV) console.error('Error getting session for API request:', err);
     }
     return config;
   },
-  (error) => {
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error)
 );
 
-// Add response interceptor to handle errors gracefully
+// On 401: retry once after refreshing session; then handle other errors
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => {
-    // Suppress 404 errors for individual sheet requests since they're expected for new documents
-    if (error.response?.status === 404 && 
-        error.config?.url?.includes('/sheets/') && 
-        !error.config?.url?.includes('/sheets/project/')) {
-      // Don't log these as they're normal when individual sheets don't exist yet
-      // Return a structured error that can be handled gracefully
+  async (error) => {
+    const originalRequest = error.config;
+
+    if (error.response?.status === 401 && originalRequest && !originalRequest._authRetried) {
+      originalRequest._authRetried = true;
+      try {
+        const { data: { session }, error: refreshError } = await supabase.auth.refreshSession();
+        if (!refreshError && session?.access_token) {
+          originalRequest.headers.Authorization = `Bearer ${session.access_token}`;
+          return apiClient.request(originalRequest);
+        }
+      } catch {
+        // Refresh failed; fall through to reject with original 401
+      }
+    }
+
+    // Treat 404 on individual sheet URLs as expected (new documents)
+    if (error.response?.status === 404 &&
+        originalRequest?.url?.includes('/sheets/') &&
+        !originalRequest?.url?.includes('/sheets/project/')) {
       return Promise.reject({
         ...error,
         isExpected404: true,
         message: 'Sheet not found (expected for new documents)'
       });
     }
-    
-    // Log other errors
-    if (import.meta.env.DEV) console.warn('API Error:', error.message);
-    
-    // Return a mock response structure for failed requests
+
+    // Treat 404 on settings as expected (setting not yet saved to database)
+    const isSettings404 =
+      error.response?.status === 404 &&
+      typeof originalRequest?.url === 'string' &&
+      /\/settings\/[^/]+$/.test(originalRequest.url);
+    if (isSettings404) {
+      return Promise.reject({
+        ...error,
+        isExpected404: true,
+        message: 'Setting not found (expected for unsaved settings)'
+      });
+    }
+
+    // Skip logging 401/403 to reduce console noise when settings require admin auth
+    const status = error.response?.status;
+    if (import.meta.env.DEV && status !== 401 && status !== 403) {
+      console.warn('API Error:', error.message);
+    }
+
     if (error.code === 'ERR_NETWORK' || error.code === 'ECONNREFUSED') {
       return Promise.reject({
         ...error,
@@ -389,6 +420,16 @@ export const userService = {
     const response = await apiClient.delete(`/users/invitations/${invitationId}`);
     return response.data;
   },
+
+  async updateUserRole(userId: string, role: 'admin' | 'user') {
+    const response = await apiClient.patch(`/users/${userId}/role`, { role });
+    return response.data;
+  },
+
+  async deleteUser(userId: string) {
+    const response = await apiClient.delete(`/users/${userId}`);
+    return response.data;
+  },
 };
 
 // Sheets service
@@ -592,157 +633,6 @@ export const ocrService = {
       results,
       jobId
     });
-    return response.data;
-  },
-};
-
-// AI Analysis service
-export const aiAnalysisService = {
-
-  // Analyze sheets using text-based AI (fallback method)
-  async analyzeSheetsWithText(documentId: string, projectId: string, customPrompt?: string) {
-    const response = await fetch(`${API_BASE_URL}/ollama/analyze-sheets`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        documentId,
-        projectId,
-        customPrompt
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`Text analysis failed: ${response.statusText}`);
-    }
-
-    return response;
-  },
-
-  // Analyze sheets using text-based AI
-  async analyzeSheets(documentId: string, projectId: string, customPrompt?: string) {
-    return await this.analyzeSheetsWithText(documentId, projectId, customPrompt);
-  },
-
-  // Unified document analysis - combines simple OCR + AI sheet labeling
-  async analyzeDocumentComplete(documentId: string, projectId: string) {
-    // Step 1: Run OCR processing first
-    const ocrResponse = await fetch(`${API_BASE_URL}/ocr/process-document/${documentId}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        projectId
-      })
-    });
-
-    if (!ocrResponse.ok) {
-      throw new Error(`OCR processing failed: ${ocrResponse.statusText}`);
-    }
-
-    const ocrResult = await ocrResponse.json();
-    const jobId = ocrResult.jobId;
-
-    // Step 2: Wait for OCR to complete
-    let ocrCompleted = false;
-    while (!ocrCompleted) {
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
-      
-      const statusResponse = await fetch(`${API_BASE_URL}/ocr/status/${jobId}`);
-      const status = await statusResponse.json();
-      
-      if (status.status === 'completed') {
-        ocrCompleted = true;
-      } else if (status.status === 'failed') {
-        throw new Error(`OCR processing failed: ${status.error}`);
-      }
-    }
-
-    // Step 3: Run AI sheet analysis with custom prompt from admin panel
-    const customPrompt = localStorage.getItem('ai-page-labeling-prompt');
-    const response = await fetch(`${API_BASE_URL}/ollama/analyze-sheets`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        documentId,
-        projectId,
-        customPrompt
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`AI sheet analysis failed: ${response.statusText}`);
-    }
-
-    return response;
-  },
-
-  // Analyze sheets directly using existing OCR data (skip OCR step)
-  async analyzeSheetsOnly(documentId: string, projectId: string) {
-    const customPrompt = localStorage.getItem('ai-page-labeling-prompt');
-    const response = await fetch(`${API_BASE_URL}/ollama/analyze-sheets`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        documentId,
-        projectId,
-        customPrompt
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`AI sheet analysis failed: ${response.statusText}`);
-    }
-
-    return response;
-  },
-};
-
-// Sheet Label Patterns Service
-export const sheetLabelPatternsService = {
-  async getPatterns(patternType?: 'sheet_name' | 'sheet_number') {
-    const params = patternType ? { pattern_type: patternType } : {};
-    const response = await apiClient.get('/sheet-label-patterns', { params });
-    return response.data.patterns;
-  },
-
-  async getActivePatterns(patternType?: 'sheet_name' | 'sheet_number') {
-    const params = patternType ? { pattern_type: patternType } : {};
-    const response = await apiClient.get('/sheet-label-patterns/active', { params });
-    return response.data.patterns;
-  },
-
-  async createPattern(pattern: {
-    pattern_type: 'sheet_name' | 'sheet_number';
-    pattern_label: string;
-    pattern_regex: string;
-    priority?: number;
-    description?: string;
-    is_active?: boolean;
-  }) {
-    const response = await apiClient.post('/sheet-label-patterns', pattern);
-    return response.data.pattern;
-  },
-
-  async updatePattern(id: string, updates: {
-    pattern_label?: string;
-    pattern_regex?: string;
-    priority?: number;
-    description?: string;
-    is_active?: boolean;
-  }) {
-    const response = await apiClient.put(`/sheet-label-patterns/${id}`, updates);
-    return response.data.pattern;
-  },
-
-  async deletePattern(id: string) {
-    const response = await apiClient.delete(`/sheet-label-patterns/${id}`);
     return response.data;
   },
 };

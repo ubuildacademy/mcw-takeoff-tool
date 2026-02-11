@@ -14,7 +14,6 @@ export function SheetSidebarHeader({
   onBulkActionsMenuToggle,
   documentsCount,
   onBulkExtractTitleblock,
-  onLabelAllUnlabeledPages,
   onDeleteAllDocuments,
   onPdfUpload,
   uploading,
@@ -26,8 +25,6 @@ export function SheetSidebarHeader({
     if (!confirmed) return;
     if (onBulkExtractTitleblock) {
       onBulkExtractTitleblock();
-    } else if (onLabelAllUnlabeledPages) {
-      onLabelAllUnlabeledPages();
     }
   };
 
@@ -92,11 +89,12 @@ export function SheetSidebarHeader({
 
       {onPdfUpload && (
         <input
+          id="pdf-upload"
+          name="pdf-upload"
           type="file"
           accept=".pdf,application/pdf"
           onChange={onPdfUpload}
           className="hidden"
-          id="pdf-upload"
           multiple
         />
       )}

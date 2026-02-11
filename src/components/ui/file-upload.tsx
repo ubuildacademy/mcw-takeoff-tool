@@ -11,14 +11,15 @@ interface FileUploadProps {
   multiple?: boolean;
 }
 
-export function FileUpload({ 
-  onFileSelect, 
-  acceptedTypes = ['.pdf', '.dwg', '.jpg', '.jpeg', '.png'], 
+export function FileUpload({
+  onFileSelect,
+  acceptedTypes = ['.pdf', '.dwg', '.jpg', '.jpeg', '.png'],
   maxSize = 1024,
   className,
   multiple = false
 }: FileUploadProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inputId = React.useId();
   const [dragActive, setDragActive] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
 
@@ -119,6 +120,8 @@ export function FileUpload({
         </p>
         
         <input
+          id={inputId}
+          name="file-upload"
           ref={fileInputRef}
           type="file"
           className="hidden"

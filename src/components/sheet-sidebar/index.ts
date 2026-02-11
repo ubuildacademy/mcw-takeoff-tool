@@ -5,4 +5,4 @@ export type { UseSheetSidebarSheetEditingOptions, UseSheetSidebarSheetEditingRes
 export { SheetSidebarHeader } from './SheetSidebarHeader';
 export type { SheetSidebarHeaderProps } from './SheetSidebarHeader.types';
 export { SheetSidebarDialogs } from './SheetSidebarDialogs';
-export type { SheetSidebarDialogsProps, BulkAnalysisProgress, RenamingPage } from './SheetSidebarDialogs.types';
+export type { SheetSidebarDialogsProps, RenamingPage } from './SheetSidebarDialogs.types';

@@ -3,7 +3,7 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './ui/dialog';
 import { 
   BarChart3, 
   RefreshCw,
@@ -18,8 +18,16 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ollamaService, type OllamaModel } from '../services/ollamaService';
-import { authHelpers, UserMetadata, UserInvitation } from '../lib/supabase';
-import { settingsService, sheetLabelPatternsService } from '../services/apiService';
+import { authHelpers, supabase, UserMetadata, UserInvitation } from '../lib/supabase';
+import { settingsService } from '../services/apiService';
+
+// Fallback when /api/ollama/models fails — official Ollama cloud models (https://ollama.com/blog/cloud-models)
+const FALLBACK_OLLAMA_MODELS: OllamaModel[] = [
+  { name: 'qwen3-coder:480b-cloud', size: 0, digest: '', modified_at: '' },
+  { name: 'gpt-oss:120b-cloud', size: 0, digest: '', modified_at: '' },
+  { name: 'gpt-oss:20b-cloud', size: 0, digest: '', modified_at: '' },
+  { name: 'deepseek-v3.1:671b-cloud', size: 0, digest: '', modified_at: '' },
+];
 
 interface AdminPanelProps {
   isOpen: boolean;
@@ -28,7 +36,7 @@ interface AdminPanelProps {
 }
 
 export function AdminPanel({ isOpen, onClose, projectId: _projectId }: AdminPanelProps) {
-  const [activeTab, setActiveTab] = useState<'overview' | 'ai-prompt' | 'ai-settings' | 'user-management' | 'sheet-label-patterns'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'ai-prompt' | 'ai-settings' | 'user-management'>('overview');
   const [isLoading, setIsLoading] = useState(false);
   const [adminKey, setAdminKey] = useState('');
   const [isUnlocked, setIsUnlocked] = useState(false);
@@ -127,13 +135,18 @@ When answering questions:
   const saveSheetNumberPrompt = async () => {
     try {
       setIsLoading(true);
-      
-      try {
-        // Save to API (database)
-        await settingsService.updateSetting('titleblock-sheet-number-prompt', sheetNumberPrompt);
-      } catch (apiError) {
-        console.warn('Failed to save to API, using localStorage fallback:', apiError);
-        // Fallback to localStorage for backward compatibility
+      const hasSession = await ensureSession();
+      if (hasSession) {
+        try {
+          await settingsService.updateSetting('titleblock-sheet-number-prompt', sheetNumberPrompt);
+        } catch (apiError: unknown) {
+          const status = (apiError as { response?: { status?: number } })?.response?.status;
+          if (status !== 401 && status !== 403 && import.meta.env.DEV) {
+            console.warn('Failed to save to API, using localStorage fallback:', apiError);
+          }
+          localStorage.setItem('titleblock-sheet-number-prompt', sheetNumberPrompt);
+        }
+      } else {
         localStorage.setItem('titleblock-sheet-number-prompt', sheetNumberPrompt);
       }
       
@@ -154,13 +167,18 @@ When answering questions:
   const saveSheetNamePrompt = async () => {
     try {
       setIsLoading(true);
-      
-      try {
-        // Save to API (database)
-        await settingsService.updateSetting('titleblock-sheet-name-prompt', sheetNamePrompt);
-      } catch (apiError) {
-        console.warn('Failed to save to API, using localStorage fallback:', apiError);
-        // Fallback to localStorage for backward compatibility
+      const hasSession = await ensureSession();
+      if (hasSession) {
+        try {
+          await settingsService.updateSetting('titleblock-sheet-name-prompt', sheetNamePrompt);
+        } catch (apiError: unknown) {
+          const status = (apiError as { response?: { status?: number } })?.response?.status;
+          if (status !== 401 && status !== 403 && import.meta.env.DEV) {
+            console.warn('Failed to save to API, using localStorage fallback:', apiError);
+          }
+          localStorage.setItem('titleblock-sheet-name-prompt', sheetNamePrompt);
+        }
+      } else {
         localStorage.setItem('titleblock-sheet-name-prompt', sheetNamePrompt);
       }
       
@@ -177,54 +195,64 @@ When answering questions:
     }
   };
 
-  // Load sheet number prompt from API (with localStorage fallback)
+  // Ensure we have a valid session before calling settings API (avoids 401 when session not ready)
+  const ensureSession = async (): Promise<boolean> => {
+    let { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) return true;
+    await supabase.auth.refreshSession();
+    const next = await supabase.auth.getSession();
+    return !!next.data.session?.access_token;
+  };
+
+  // Load all AI prompts from API (one request) when we have a session, else from localStorage
   const loadSheetNumberPrompt = async () => {
     try {
-      // Try to load from API first
-      try {
-        const response = await settingsService.getSetting('titleblock-sheet-number-prompt');
-        if (response?.value) {
-          setSheetNumberPrompt(response.value);
-          return;
+      const hasSession = await ensureSession();
+      if (hasSession) {
+        try {
+          const response = await settingsService.getSetting('titleblock-sheet-number-prompt');
+          if (response?.value) {
+            setSheetNumberPrompt(response.value);
+            return;
+          }
+        } catch (apiError: unknown) {
+          const err = apiError as { response?: { status?: number }; isExpected404?: boolean };
+          const status = err?.response?.status;
+          const isExpected404 = err?.isExpected404;
+          if (status !== 401 && status !== 403 && !isExpected404 && import.meta.env.DEV) {
+            console.warn('Failed to load sheet number prompt from API, using localStorage:', apiError);
+          }
         }
-      } catch (apiError) {
-        console.warn('Failed to load from API, trying localStorage:', apiError);
       }
-      
-      // Fallback to localStorage
       const saved = localStorage.getItem('titleblock-sheet-number-prompt');
-      if (saved) {
-        setSheetNumberPrompt(saved);
-      } else {
-        setSheetNumberPrompt(getDefaultSheetNumberPrompt());
-      }
+      setSheetNumberPrompt(saved || getDefaultSheetNumberPrompt());
     } catch (error) {
       console.error('Error loading prompt:', error);
       setSheetNumberPrompt(getDefaultSheetNumberPrompt());
     }
   };
 
-  // Load sheet name prompt from API (with localStorage fallback)
   const loadSheetNamePrompt = async () => {
     try {
-      // Try to load from API first
-      try {
-        const response = await settingsService.getSetting('titleblock-sheet-name-prompt');
-        if (response?.value) {
-          setSheetNamePrompt(response.value);
-          return;
+      const hasSession = await ensureSession();
+      if (hasSession) {
+        try {
+          const response = await settingsService.getSetting('titleblock-sheet-name-prompt');
+          if (response?.value) {
+            setSheetNamePrompt(response.value);
+            return;
+          }
+        } catch (apiError: unknown) {
+          const err = apiError as { response?: { status?: number }; isExpected404?: boolean };
+          const status = err?.response?.status;
+          const isExpected404 = err?.isExpected404;
+          if (status !== 401 && status !== 403 && !isExpected404 && import.meta.env.DEV) {
+            console.warn('Failed to load sheet name prompt from API, using localStorage:', apiError);
+          }
         }
-      } catch (apiError) {
-        console.warn('Failed to load from API, trying localStorage:', apiError);
       }
-      
-      // Fallback to localStorage
       const saved = localStorage.getItem('titleblock-sheet-name-prompt');
-      if (saved) {
-        setSheetNamePrompt(saved);
-      } else {
-        setSheetNamePrompt(getDefaultSheetNamePrompt());
-      }
+      setSheetNamePrompt(saved || getDefaultSheetNamePrompt());
     } catch (error) {
       console.error('Error loading prompt:', error);
       setSheetNamePrompt(getDefaultSheetNamePrompt());
@@ -235,20 +263,18 @@ When answering questions:
   const saveChatPrompt = async () => {
     try {
       setIsLoading(true);
-      
-      try {
-        // Save to API (database)
-        await settingsService.updateSetting('ai-chat-assistant-prompt', chatPrompt);
-      } catch (apiError) {
-        console.warn('Failed to save to API, using localStorage fallback:', apiError);
-        // Fallback to localStorage for backward compatibility
-        localStorage.setItem('ai-chat-assistant-prompt', chatPrompt);
+      const hasSession = await ensureSession();
+      if (hasSession) {
+        try {
+          await settingsService.updateSetting('ai-chat-assistant-prompt', chatPrompt);
+        } catch (apiError: unknown) {
+          const status = (apiError as { response?: { status?: number } })?.response?.status;
+          if (status !== 401 && status !== 403 && import.meta.env.DEV) {
+            console.warn('Failed to save to API, using localStorage fallback:', apiError);
+          }
+        }
       }
-      
-      // Also save to localStorage as backup
       localStorage.setItem('ai-chat-assistant-prompt', chatPrompt);
-      
-      // Show success message
       toast.success('Chat assistant prompt saved successfully!');
     } catch (error) {
       console.error('Error saving chat prompt:', error);
@@ -258,27 +284,27 @@ When answering questions:
     }
   };
 
-  // Load chat prompt from API (with localStorage fallback)
   const loadChatPrompt = async () => {
     try {
-      // Try to load from API first
-      try {
-        const response = await settingsService.getSetting('ai-chat-assistant-prompt');
-        if (response?.value) {
-          setChatPrompt(response.value);
-          return;
+      const hasSession = await ensureSession();
+      if (hasSession) {
+        try {
+          const response = await settingsService.getSetting('ai-chat-assistant-prompt');
+          if (response?.value) {
+            setChatPrompt(response.value);
+            return;
+          }
+        } catch (apiError: unknown) {
+          const err = apiError as { response?: { status?: number }; isExpected404?: boolean };
+          const status = err?.response?.status;
+          const isExpected404 = err?.isExpected404;
+          if (status !== 401 && status !== 403 && !isExpected404 && import.meta.env.DEV) {
+            console.warn('Failed to load chat prompt from API, using localStorage:', apiError);
+          }
         }
-      } catch (apiError) {
-        console.warn('Failed to load from API, trying localStorage:', apiError);
       }
-      
-      // Fallback to localStorage
       const saved = localStorage.getItem('ai-chat-assistant-prompt');
-      if (saved) {
-        setChatPrompt(saved);
-      } else {
-        setChatPrompt(getDefaultChatPrompt());
-      }
+      setChatPrompt(saved || getDefaultChatPrompt());
     } catch (error) {
       console.error('Error loading chat prompt:', error);
       setChatPrompt(getDefaultChatPrompt());
@@ -288,24 +314,34 @@ When answering questions:
   // Load available models and saved settings when AI settings tab is opened
   const loadAvailableModels = async () => {
     try {
-      const models = await ollamaService.getModels();
-      setAvailableModels(models);
-      
-      // Try to load saved settings from API
+      const hasSession = await ensureSession();
+
       try {
-        const settings = await settingsService.getSettings();
-        if (settings?.settings) {
-          if (settings.settings['ai-selected-model']) {
-            setSelectedModel(settings.settings['ai-selected-model']);
-            ollamaService.setDefaultModel(settings.settings['ai-selected-model']);
+        const models = await ollamaService.getModels();
+        setAvailableModels(models.length > 0 ? models : FALLBACK_OLLAMA_MODELS);
+      } catch {
+        setAvailableModels(FALLBACK_OLLAMA_MODELS);
+      }
+
+      if (hasSession) {
+        try {
+          const settings = await settingsService.getSettings();
+          if (settings?.settings) {
+            if (settings.settings['ai-selected-model']) {
+              setSelectedModel(settings.settings['ai-selected-model']);
+              ollamaService.setDefaultModel(settings.settings['ai-selected-model']);
+            }
+            if (settings.settings['ai-fallback-model']) {
+              setFallbackModel(settings.settings['ai-fallback-model']);
+            }
+            return;
           }
-          if (settings.settings['ai-fallback-model']) {
-            setFallbackModel(settings.settings['ai-fallback-model']);
+        } catch (apiError: unknown) {
+          const status = (apiError as { response?: { status?: number } })?.response?.status;
+          if (status !== 401 && status !== 403 && import.meta.env.DEV) {
+            console.warn('Failed to load settings from API, using localStorage:', apiError);
           }
-          return;
         }
-      } catch (apiError) {
-        console.warn('Failed to load settings from API, using localStorage:', apiError);
       }
       
       // Fallback to localStorage
@@ -324,7 +360,11 @@ When answering questions:
         setFallbackModel(savedFallback);
       }
     } catch (error) {
-      console.error('Failed to load models:', error);
+      const err = error as { message?: string; status?: number };
+      const is401 = err?.message?.includes('Unauthorized') ?? false;
+      if (!is401 && import.meta.env.DEV) {
+        console.error('Failed to load models:', error);
+      }
     }
   };
 
@@ -413,6 +453,7 @@ When answering questions:
     try {
       await authHelpers.updateUserRole(userId, newRole);
       await loadUsers();
+      toast.success(`User role updated to ${newRole} successfully!`);
     } catch (error) {
       console.error('Error updating user role:', error);
       toast.error('Failed to update user role');
@@ -425,6 +466,7 @@ When answering questions:
     try {
       await authHelpers.deleteUser(userId);
       await loadUsers();
+      toast.success('User deleted successfully!');
     } catch (error) {
       console.error('Error deleting user:', error);
       toast.error('Failed to delete user');
@@ -435,7 +477,6 @@ When answering questions:
     { id: 'overview', label: 'Overview', icon: BarChart3 },
     { id: 'ai-prompt', label: 'AI Prompt Editor', icon: Brain },
     { id: 'ai-settings', label: 'AI Settings', icon: Brain },
-    { id: 'sheet-label-patterns', label: 'Sheet Label Patterns', icon: Brain },
     { id: 'user-management', label: 'User Management', icon: Users }
   ];
 
@@ -443,7 +484,10 @@ When answering questions:
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="w-[95vw] h-[95vh] max-w-none max-h-none overflow-hidden flex flex-col">
+      <DialogContent className="w-[95vw] h-[95vh] max-w-none max-h-none overflow-hidden flex flex-col" aria-describedby="admin-panel-description">
+        <DialogDescription id="admin-panel-description" className="sr-only">
+          System administration: AI prompts, model settings, and user management.
+        </DialogDescription>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Lock className="w-5 h-5" />
@@ -775,7 +819,7 @@ When answering questions:
                           >
                             {availableModels.map((model) => (
                               <option key={model.name} value={model.name}>
-                                {model.name} ({(model.size / 1024 / 1024 / 1024).toFixed(1)}GB)
+                                {model.name} ({model.size ? `${(model.size / 1024 / 1024 / 1024).toFixed(1)}GB` : 'cloud'})
                               </option>
                             ))}
                           </select>
@@ -790,7 +834,7 @@ When answering questions:
                           >
                             {availableModels.map((model) => (
                               <option key={model.name} value={model.name}>
-                                {model.name} ({(model.size / 1024 / 1024 / 1024).toFixed(1)}GB)
+                                {model.name} ({model.size ? `${(model.size / 1024 / 1024 / 1024).toFixed(1)}GB` : 'cloud'})
                               </option>
                             ))}
                           </select>
@@ -907,15 +951,22 @@ When answering questions:
                             setIsLoading(true);
                             ollamaService.setDefaultModel(selectedModel);
                             
-                            // Save AI model settings to API
-                            try {
-                              await settingsService.updateSettings({
-                                'ai-selected-model': selectedModel,
-                                'ai-fallback-model': fallbackModel
-                              });
-                            } catch (apiError) {
-                              console.warn('Failed to save to API, using localStorage fallback:', apiError);
-                              // Fallback to localStorage
+                            const hasSession = await ensureSession();
+                            if (hasSession) {
+                              try {
+                                await settingsService.updateSettings({
+                                  'ai-selected-model': selectedModel,
+                                  'ai-fallback-model': fallbackModel
+                                });
+                              } catch (apiError: unknown) {
+                                const status = (apiError as { response?: { status?: number } })?.response?.status;
+                                if (status !== 401 && status !== 403 && import.meta.env.DEV) {
+                                  console.warn('Failed to save to API, using localStorage fallback:', apiError);
+                                }
+                                localStorage.setItem('ai-selected-model', selectedModel);
+                                localStorage.setItem('ai-fallback-model', fallbackModel);
+                              }
+                            } else {
                               localStorage.setItem('ai-selected-model', selectedModel);
                               localStorage.setItem('ai-fallback-model', fallbackModel);
                             }
@@ -1103,10 +1154,6 @@ When answering questions:
                 </div>
               )}
 
-              {activeTab === 'sheet-label-patterns' && (
-                <SheetLabelPatternsTab />
-              )}
-
             </div>
           </div>
         )}
@@ -1119,268 +1166,5 @@ When answering questions:
       </DialogContent>
 
     </Dialog>
-  );
-}
-
-// Sheet Label Patterns Tab Component
-function SheetLabelPatternsTab() {
-  interface SheetLabelPattern {
-    id: string;
-    pattern_type: 'sheet_name' | 'sheet_number';
-    pattern_label: string;
-    pattern_regex: string;
-    priority: number;
-    description?: string;
-    is_active?: boolean;
-  }
-  const [patterns, setPatterns] = useState<SheetLabelPattern[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [filterType, setFilterType] = useState<'all' | 'sheet_name' | 'sheet_number'>('all');
-  const [editingPattern, setEditingPattern] = useState<SheetLabelPattern | null>(null);
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [formData, setFormData] = useState({
-    pattern_type: 'sheet_name' as 'sheet_name' | 'sheet_number',
-    pattern_label: '',
-    pattern_regex: '',
-    priority: 0,
-    description: '',
-    is_active: true
-  });
-
-  useEffect(() => {
-    loadPatterns();
-    // filterType is the intended dep; loadPatterns is stable and would require useCallback to add
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterType]);
-
-  const loadPatterns = async () => {
-    try {
-      setLoading(true);
-      const allPatterns = await sheetLabelPatternsService.getPatterns(
-        filterType === 'all' ? undefined : filterType
-      );
-      setPatterns(allPatterns);
-    } catch (error) {
-      console.error('Failed to load patterns:', error);
-      toast.error('Failed to load patterns');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSave = async () => {
-    try {
-      if (editingPattern) {
-        await sheetLabelPatternsService.updatePattern(editingPattern.id, formData);
-      } else {
-        await sheetLabelPatternsService.createPattern(formData);
-      }
-      setShowAddForm(false);
-      setEditingPattern(null);
-      setFormData({
-        pattern_type: 'sheet_name',
-        pattern_label: '',
-        pattern_regex: '',
-        priority: 0,
-        description: '',
-        is_active: true
-      });
-      loadPatterns();
-    } catch (error: unknown) {
-      console.error('Failed to save pattern:', error);
-      const err = error as Record<string, unknown>;
-      const data = (err?.response as Record<string, unknown> | undefined)?.data as Record<string, unknown> | undefined;
-      toast.error(typeof data?.error === 'string' ? data.error : 'Failed to save pattern');
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this pattern?')) return;
-    try {
-      await sheetLabelPatternsService.deletePattern(id);
-      loadPatterns();
-    } catch (error) {
-      console.error('Failed to delete pattern:', error);
-      toast.error('Failed to delete pattern');
-    }
-  };
-
-  const handleEdit = (pattern: SheetLabelPattern) => {
-    setEditingPattern(pattern);
-    setFormData({
-      pattern_type: pattern.pattern_type,
-      pattern_label: pattern.pattern_label,
-      pattern_regex: pattern.pattern_regex,
-      priority: pattern.priority || 0,
-      description: pattern.description || '',
-      is_active: pattern.is_active !== false
-    });
-    setShowAddForm(true);
-  };
-
-  const filteredPatterns = filterType === 'all' 
-    ? patterns 
-    : patterns.filter(p => p.pattern_type === filterType);
-
-  return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold">Sheet Label Patterns</h2>
-        <div className="flex items-center gap-4">
-          <select
-            value={filterType}
-            onChange={(e) => setFilterType((e.target.value as 'all' | 'sheet_name' | 'sheet_number') || 'all')}
-            className="border rounded px-3 py-1"
-          >
-            <option value="all">All Patterns</option>
-            <option value="sheet_name">Sheet Names</option>
-            <option value="sheet_number">Sheet Numbers</option>
-          </select>
-          <Button onClick={() => {
-            setShowAddForm(true);
-            setEditingPattern(null);
-            setFormData({
-              pattern_type: 'sheet_name',
-              pattern_label: '',
-              pattern_regex: '',
-              priority: 0,
-              description: '',
-              is_active: true
-            });
-          }}>
-            Add Pattern
-          </Button>
-        </div>
-      </div>
-
-      {showAddForm && (
-        <div className="border rounded-lg p-6 mb-6 bg-gray-50">
-          <h3 className="text-lg font-semibold mb-4">
-            {editingPattern ? 'Edit Pattern' : 'Add New Pattern'}
-          </h3>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label>Pattern Type</Label>
-              <select
-                className="w-full p-2 border rounded-md"
-                value={formData.pattern_type}
-                onChange={(e) => setFormData({ ...formData, pattern_type: (e.target.value as 'sheet_name' | 'sheet_number') || 'sheet_name' })}
-              >
-                <option value="sheet_name">Sheet Name</option>
-                <option value="sheet_number">Sheet Number</option>
-              </select>
-            </div>
-            <div>
-              <Label>Pattern Label</Label>
-              <Input
-                value={formData.pattern_label}
-                onChange={(e) => setFormData({ ...formData, pattern_label: e.target.value })}
-                placeholder="e.g., drawing data, sheet title"
-              />
-            </div>
-            <div className="col-span-2">
-              <Label>Regex Pattern</Label>
-              <Input
-                value={formData.pattern_regex}
-                onChange={(e) => setFormData({ ...formData, pattern_regex: e.target.value })}
-                placeholder='e.g., drawing\s*data\s*:?\s*(.+?)(?:\n|$)'
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                Use regex to match the label. Capture group ( ) will extract the value.
-              </p>
-            </div>
-            <div>
-              <Label>Priority</Label>
-              <Input
-                type="number"
-                value={formData.priority}
-                onChange={(e) => setFormData({ ...formData, priority: parseInt(e.target.value) || 0 })}
-              />
-              <p className="text-xs text-gray-500 mt-1">Higher priority patterns are tried first</p>
-            </div>
-            <div>
-              <Label>Active</Label>
-              <div className="flex items-center gap-2 mt-2">
-                <input
-                  type="checkbox"
-                  checked={formData.is_active}
-                  onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
-                />
-                <span className="text-sm">Enable this pattern</span>
-              </div>
-            </div>
-            <div className="col-span-2">
-              <Label>Description (Optional)</Label>
-              <Input
-                value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                placeholder="e.g., Used by ABC Architects"
-              />
-            </div>
-            <div className="col-span-2 flex gap-2">
-              <Button onClick={handleSave}>
-                {editingPattern ? 'Update' : 'Create'} Pattern
-              </Button>
-              <Button variant="outline" onClick={() => {
-                setShowAddForm(false);
-                setEditingPattern(null);
-              }}>
-                Cancel
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {loading ? (
-        <div className="text-center py-8">Loading patterns...</div>
-      ) : filteredPatterns.length === 0 ? (
-        <div className="text-center py-8 text-gray-500">No patterns found</div>
-      ) : (
-        <div className="space-y-2">
-          {filteredPatterns.map((pattern) => (
-            <div key={pattern.id} className="border rounded-lg p-4 bg-white">
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Badge variant={pattern.pattern_type === 'sheet_name' ? 'default' : 'secondary'}>
-                      {pattern.pattern_type === 'sheet_name' ? 'Sheet Name' : 'Sheet Number'}
-                    </Badge>
-                    <span className="font-semibold">{pattern.pattern_label}</span>
-                    {!pattern.is_active && (
-                      <Badge variant="outline" className="text-gray-500">Inactive</Badge>
-                    )}
-                    <Badge variant="outline">Priority: {pattern.priority}</Badge>
-                  </div>
-                  <code className="text-xs bg-gray-100 p-2 rounded block mb-2">
-                    {pattern.pattern_regex}
-                  </code>
-                  {pattern.description && (
-                    <p className="text-sm text-gray-600">{pattern.description}</p>
-                  )}
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleEdit(pattern)}
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleDelete(pattern.id)}
-                    className="text-red-600"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
   );
 }

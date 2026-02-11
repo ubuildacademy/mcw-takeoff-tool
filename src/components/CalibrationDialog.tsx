@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -46,7 +46,10 @@ const CalibrationDialog: React.FC<CalibrationDialogProps> = ({
         onClose();
       }
     }}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" aria-describedby="calibration-dialog-description">
+        <DialogDescription id="calibration-dialog-description" className="sr-only">
+          Enter a known distance on the drawing to calibrate the scale.
+        </DialogDescription>
         <DialogHeader>
           <DialogTitle>Calibrate Scale</DialogTitle>
         </DialogHeader>

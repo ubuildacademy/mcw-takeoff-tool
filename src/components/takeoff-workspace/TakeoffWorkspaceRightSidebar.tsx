@@ -23,7 +23,6 @@ export function TakeoffWorkspaceRightSidebar({
   onReloadDocuments,
   onPdfUpload,
   uploading,
-  onLabelingJobUpdate,
   onExtractTitleblockForDocument,
   onBulkExtractTitleblock,
 }: TakeoffWorkspaceRightSidebarProps) {
@@ -99,7 +98,6 @@ export function TakeoffWorkspaceRightSidebar({
               onReloadDocuments={onReloadDocuments}
               onPdfUpload={onPdfUpload}
               uploading={uploading}
-              onLabelingJobUpdate={onLabelingJobUpdate}
               onExtractTitleblockForDocument={onExtractTitleblockForDocument}
               onBulkExtractTitleblock={onBulkExtractTitleblock}
             />

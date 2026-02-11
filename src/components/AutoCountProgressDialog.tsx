@@ -1,4 +1,4 @@
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 import { Button } from './ui/button';
 import { Progress } from './ui/progress';
 import { Search, X, Clock, CheckCircle2, AlertCircle } from 'lucide-react';
@@ -51,12 +51,15 @@ export function AutoCountProgressDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && !isCancelling && !isSearching && onClose()}>
-      <DialogContent className="max-w-2xl" onInteractOutside={(e) => {
+      <DialogContent className="max-w-2xl" aria-describedby="autocount-dialog-description" onInteractOutside={(e) => {
         // Prevent closing during processing
         if (isSearching) {
           e.preventDefault();
         }
       }}>
+        <DialogDescription id="autocount-dialog-description" className="sr-only">
+          Progress for automatic symbol search and count.
+        </DialogDescription>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {isComplete ? (

@@ -13,7 +13,6 @@ export interface SheetSidebarHeaderProps {
   onBulkActionsMenuToggle: (open: boolean) => void;
   documentsCount: number;
   onBulkExtractTitleblock?: () => void;
-  onLabelAllUnlabeledPages?: () => void;
   onDeleteAllDocuments: () => void;
   onPdfUpload?: (event: React.ChangeEvent<HTMLInputElement>) => void;
   uploading?: boolean;

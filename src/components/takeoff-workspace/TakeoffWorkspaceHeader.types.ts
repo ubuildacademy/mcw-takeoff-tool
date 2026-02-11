@@ -13,14 +13,6 @@ export interface TitleblockExtractionStatus {
   error?: string;
 }
 
-export interface LabelingJobStatus {
-  status: string;
-  currentDocument?: string;
-  processedPages?: number;
-  totalPages?: number;
-  progress: number;
-}
-
 export interface OcrJobEntry {
   documentId: string;
   documentName: string;
@@ -65,7 +57,6 @@ export interface TakeoffWorkspaceStatusBarProps {
   selectedCondition: TakeoffCondition | null;
   exportStatus: { type: 'excel' | 'pdf' | null; progress: number };
   titleblockExtractionStatus: TitleblockExtractionStatus | null;
-  labelingJob: LabelingJobStatus | null;
   ocrJobs: Map<string, OcrJobEntry>;
   uploading: boolean;
   isMeasuring: boolean;
@@ -92,7 +83,6 @@ export interface TakeoffWorkspaceRightSidebarProps {
   onReloadDocuments: () => void;
   onPdfUpload: (event: React.ChangeEvent<HTMLInputElement>) => void;
   uploading: boolean;
-  onLabelingJobUpdate: (job: LabelingJobStatus | null) => void;
   onExtractTitleblockForDocument: (documentId: string) => void;
   onBulkExtractTitleblock: () => void;
 }

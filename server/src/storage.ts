@@ -1202,7 +1202,7 @@ class SupabaseStorage {
 
   async saveCalibration(calibration: StoredCalibration): Promise<StoredCalibration> {
     // Map camelCase to snake_case for database
-    const dbCalibration = {
+    const dbCalibration: Record<string, unknown> = {
       project_id: calibration.projectId,
       sheet_id: calibration.sheetId,
       page_number: calibration.pageNumber ?? null, // null for document-level
@@ -1215,10 +1215,15 @@ class SupabaseStorage {
       updated_at: new Date().toISOString()
     };
 
+    // Include ID if provided (for imports with specific IDs)
+    if (calibration.id) {
+      dbCalibration.id = calibration.id;
+    }
+
     const { data, error } = await supabase
       .from(TABLES.CALIBRATIONS)
       .upsert(dbCalibration, {
-        onConflict: 'project_id,sheet_id,page_number',
+        onConflict: calibration.id ? 'id' : 'project_id,sheet_id,page_number',
         ignoreDuplicates: false
       })
       .select()

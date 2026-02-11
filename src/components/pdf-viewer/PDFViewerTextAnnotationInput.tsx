@@ -47,6 +47,8 @@ export const PDFViewerTextAnnotationInput: React.FC<PDFViewerTextAnnotationInput
       }}
     >
       <input
+        id="pdf-annotation-text"
+        name="pdf-annotation-text"
         type="text"
         autoFocus
         value={value}

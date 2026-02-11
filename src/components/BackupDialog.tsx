@@ -172,7 +172,7 @@ export function BackupDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" aria-describedby="backup-dialog-description">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {mode === 'backup' ? (
@@ -187,7 +187,7 @@ export function BackupDialog({
               </>
             )}
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription id="backup-dialog-description">
             {mode === 'backup' 
               ? `Create a backup file for "${projectName}" including all data and measurements.`
               : 'Select a backup file to restore a project with all its data.'

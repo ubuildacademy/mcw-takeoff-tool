@@ -144,19 +144,6 @@ export function TakeoffWorkspace() {
   });
   const [exportStatus, setExportStatus] = useState<{type: 'excel' | 'pdf' | null, progress: number}>({type: null, progress: 0});
 
-  // Labeling job state - track active page labeling jobs
-  const [labelingJob, setLabelingJob] = useState<{
-    totalDocuments: number;
-    completedDocuments: number;
-    failedDocuments: number;
-    progress: number;
-    status: 'idle' | 'processing' | 'completed' | 'failed';
-    currentDocument?: string;
-    processedPages?: number;
-    totalPages?: number;
-    failedDocumentsList?: Array<{id: string, name: string}>;
-  } | null>(null);
-  
   // PDF viewer controls state
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
@@ -746,7 +733,6 @@ export function TakeoffWorkspace() {
           onReloadDocuments={loadProjectDocuments}
           onPdfUpload={handlePdfUpload}
           uploading={uploading}
-          onLabelingJobUpdate={(job) => setLabelingJob(job === null ? null : { totalDocuments: 0, completedDocuments: 0, failedDocuments: 0, progress: job.progress ?? 0, status: (job.status as 'idle' | 'processing' | 'completed' | 'failed') || 'idle', currentDocument: job.currentDocument, processedPages: job.processedPages, totalPages: job.totalPages })}
           onExtractTitleblockForDocument={titleblock.handleExtractTitleblockForDocument}
           onBulkExtractTitleblock={titleblock.handleBulkExtractTitleblock}
         />
@@ -758,7 +744,6 @@ export function TakeoffWorkspace() {
         selectedCondition={selectedCondition}
         exportStatus={exportStatus}
         titleblockExtractionStatus={titleblock.titleblockExtractionStatus}
-        labelingJob={labelingJob}
         ocrJobs={ocr.ocrJobs}
         uploading={uploading}
         isMeasuring={isMeasuring}

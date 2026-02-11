@@ -15,6 +15,9 @@ if (!supabaseAnonKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
+/** One in-flight getValidSession so concurrent API requests share a single refresh. */
+let validSessionPromise: Promise<Session | null> | null = null
+
 // Auth types
 export interface UserMetadata {
   id: string
@@ -49,6 +52,29 @@ export const authHelpers = {
   async getCurrentSession(): Promise<Session | null> {
     const { data: { session } } = await supabase.auth.getSession()
     return session
+  },
+
+  /** Get a session that is valid for API calls (refresh if missing or expired). Use for attaching to requests. */
+  /** Concurrent calls share one in-flight refresh to avoid races. */
+  async getValidSession(): Promise<Session | null> {
+    if (!validSessionPromise) {
+      validSessionPromise = (async (): Promise<Session | null> => {
+        try {
+          let { data: { session } } = await supabase.auth.getSession()
+          const expiresAt = session?.expires_at
+          const isExpired = typeof expiresAt === 'number' && expiresAt <= Math.floor(Date.now() / 1000) + 60
+          if (!session?.access_token || isExpired) {
+            await supabase.auth.refreshSession()
+            const next = await supabase.auth.getSession()
+            session = next.data.session ?? null
+          }
+          return session
+        } finally {
+          validSessionPromise = null
+        }
+      })()
+    }
+    return validSessionPromise
   },
 
   // Sign in with email and password
@@ -221,18 +247,16 @@ export const authHelpers = {
     return await userService.deleteInvitation(invitationId)
   },
 
-  // Update user role (admin only)
+  // Update user role (admin only) - uses backend API
   async updateUserRole(userId: string, role: 'admin' | 'user') {
-    return await supabase
-      .from('user_metadata')
-      .update({ role })
-      .eq('id', userId)
+    const { userService } = await import('../services/apiService')
+    return await userService.updateUserRole(userId, role)
   },
 
-  // Delete user (admin only)
+  // Delete user (admin only) - uses backend API
   async deleteUser(userId: string) {
-    // This will cascade delete all user's projects and related data
-    return await supabase.auth.admin.deleteUser(userId)
+    const { userService } = await import('../services/apiService')
+    return await userService.deleteUser(userId)
   }
 }
 

@@ -257,6 +257,8 @@ export function TakeoffWorkspaceHeader({
                 Color
               </div>
               <input
+                id="annotation-color"
+                name="annotation-color"
                 type="color"
                 value={annotationColor}
                 onChange={(e) => onAnnotationColorChange(e.target.value)}

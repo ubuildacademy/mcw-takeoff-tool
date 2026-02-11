@@ -1,4 +1,14 @@
 import { Project, TakeoffCondition, ProjectFile, TakeoffMeasurement, Calibration } from '../types';
+import { authHelpers } from '../lib/supabase';
+import { getApiBaseUrl } from '../lib/apiConfig';
+
+async function getAuthHeaders(): Promise<HeadersInit> {
+  const session = await authHelpers.getValidSession();
+  if (session?.access_token) {
+    return { Authorization: `Bearer ${session.access_token}` };
+  }
+  return {};
+}
 
 export interface ProjectBackup {
   version: string;
@@ -31,13 +41,10 @@ export class BackupService {
   static async exportProject(projectId: string): Promise<void> {
     try {
       console.log('🔄 BACKUP: Starting project export for:', projectId);
-      
-      // Use consistent API base URL logic
-      const { getApiBaseUrl } = await import('../lib/apiConfig');
-      const API_BASE_URL = getApiBaseUrl();
-      
-      // Use the backend's export endpoint
-      const response = await fetch(`${API_BASE_URL}/projects/${projectId}/export`);
+
+      const response = await fetch(`${getApiBaseUrl()}/projects/${projectId}/export`, {
+        headers: await getAuthHeaders()
+      });
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -78,23 +85,25 @@ export class BackupService {
   static async importProject(file: File): Promise<Project> {
     try {
       console.log('🔄 BACKUP: Starting project import for file:', file.name);
-      
-      // Use consistent API base URL logic
-      const { getApiBaseUrl } = await import('../lib/apiConfig');
-      const API_BASE_URL = getApiBaseUrl();
-      
-      // Use the backend's import endpoint
+
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await fetch(`${API_BASE_URL}/projects/import`, {
+      const response = await fetch(`${getApiBaseUrl()}/projects/import`, {
         method: 'POST',
+        headers: await getAuthHeaders(),
         body: formData
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        let message = `HTTP error! status: ${response.status}`;
+        try {
+          const errorData = await response.json();
+          if (errorData?.error) message = errorData.error;
+        } catch {
+          // Server may have returned non-JSON (e.g. HTML error page)
+        }
+        throw new Error(message);
       }
 
       const result = await response.json();
@@ -122,7 +131,6 @@ export class BackupService {
       // Check backup version and provide helpful info
       const isV2 = backup.version === '2.0' || parseFloat(backup.version) >= 2.0;
       const filesWithData = backup.metadata?.filesWithData ?? 0;
-      const _filesMissing = backup.metadata?.filesMissing ?? 0;
       const hasCalibrations = backup.calibrations && backup.calibrations.length > 0;
 
       return { 

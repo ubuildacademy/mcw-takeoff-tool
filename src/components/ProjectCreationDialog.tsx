@@ -148,13 +148,13 @@ export function ProjectCreationDialog({ open, onOpenChange, onCreated }: Project
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto" aria-describedby="project-creation-description">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Building2 className="w-5 h-5" />
             Create New Project
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription id="project-creation-description">
             Set up a new construction project with all the essential details.
           </DialogDescription>
         </DialogHeader>

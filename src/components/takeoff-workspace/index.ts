@@ -17,7 +17,6 @@ export type {
   TakeoffWorkspaceRightSidebarProps,
   AnnotationTool,
   TitleblockExtractionStatus,
-  LabelingJobStatus,
   OcrJobEntry,
   RightSidebarTab,
 } from './TakeoffWorkspaceHeader.types';

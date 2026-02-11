@@ -93,6 +93,7 @@ export function usePDFLoad(
           cMapPacked: true,
           maxImageSize: 1024 * 1024,
           isEvalSupported: false,
+          verbosity: 0, // Suppress font recovery warnings (e.g. "TT: undefined function")
         }).promise;
 
         setPdfDocument(pdf);

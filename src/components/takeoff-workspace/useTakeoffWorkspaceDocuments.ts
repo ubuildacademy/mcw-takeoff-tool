@@ -43,8 +43,8 @@ export function useTakeoffWorkspaceDocuments({
             const { getApiBaseUrl } = await import('../../lib/apiConfig');
             const API_BASE_URL = getApiBaseUrl();
             const pdfUrl = `${API_BASE_URL}/files/${file.id}`;
-            const { supabase } = await import('../../lib/supabase');
-            const { data: { session } } = await supabase.auth.getSession();
+            const { authHelpers } = await import('../../lib/supabase');
+            const session = await authHelpers.getValidSession();
             const httpHeaders: Record<string, string> = { Accept: 'application/pdf' };
             if (session?.access_token) {
               httpHeaders['Authorization'] = `Bearer ${session.access_token}`;
