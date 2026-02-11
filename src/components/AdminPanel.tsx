@@ -197,7 +197,7 @@ When answering questions:
 
   // Ensure we have a valid session before calling settings API (avoids 401 when session not ready)
   const ensureSession = async (): Promise<boolean> => {
-    let { data: { session } } = await supabase.auth.getSession();
+    const { data: { session } } = await supabase.auth.getSession();
     if (session?.access_token) return true;
     await supabase.auth.refreshSession();
     const next = await supabase.auth.getSession();

@@ -656,7 +656,7 @@ export function usePDFViewerInteractions(
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };
-  }, [middleClickPanStart]);
+  }, [middleClickPanStart, containerRef]);
 
   const handleMouseDown = useCallback(
     (event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {

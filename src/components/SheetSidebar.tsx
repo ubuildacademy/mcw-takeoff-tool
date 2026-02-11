@@ -18,7 +18,7 @@ import { useSheetSidebarFilter, useSheetSidebarSheetEditing, SheetSidebarHeader,
 import { fileService, sheetService } from '../services/apiService';
 import { useMeasurementStore } from '../store/slices/measurementSlice';
 import * as pdfjsLib from 'pdfjs-dist';
-import type { PDFPage, PDFDocument, SearchResult } from '../types';
+import type { PDFDocument, SearchResult } from '../types';
 
 // Configure PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
