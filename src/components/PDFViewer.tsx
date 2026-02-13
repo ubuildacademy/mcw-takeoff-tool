@@ -704,10 +704,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     });
     
     // Update ALL annotation elements including hit areas
+    // Rect/ellipse use 'stroke' so interior passes through to measurements below; line/text use 'auto'
     const annotationElements = svgOverlayRef.current.querySelectorAll('[data-annotation-id]');
     annotationElements.forEach((el) => {
       const element = el as SVGElement;
-      element.style.pointerEvents = selectionMode ? 'auto' : 'none';
+      const tag = element.tagName?.toLowerCase();
+      const strokeOnly = tag === 'rect' || tag === 'ellipse';
+      element.style.pointerEvents = selectionMode ? (strokeOnly ? 'stroke' : 'auto') : 'none';
       element.style.cursor = selectionMode ? 'pointer' : 'default';
     });
     
@@ -1405,12 +1408,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     const currentMeasurements = useMeasurementStore.getState().takeoffMeasurements.filter(
       (m) => m.projectId === currentProjectId && m.sheetId === file.id && m.pdfPage === pageNum
     );
-    const hasMarkups = currentMeasurements.length > 0 || localTakeoffMeasurements.length > 0;
+    const hasAnnotationsOnPage = localAnnotations.filter((a) => a.pageNumber === pageNum).length > 0;
+    const hasMarkups =
+      currentMeasurements.length > 0 ||
+      localTakeoffMeasurements.length > 0 ||
+      hasAnnotationsOnPage;
     const isInteractiveMode = isMeasuring || isCalibrating || isAnnotating || isDrawingBoxSelection;
     if (hasMarkups || isInteractiveMode) {
       renderMarkupsWithPointerEvents(pageNum, viewport, pdfPageRef.current ?? undefined, isSelectionMode);
     }
-  }, [renderMarkupsWithPointerEvents, localTakeoffMeasurements, currentProjectId, file.id, isSelectionMode, isCalibrating, isMeasuring, isAnnotating, isDrawingBoxSelection, annotationTool]);
+  }, [renderMarkupsWithPointerEvents, localTakeoffMeasurements, localAnnotations, currentProjectId, file.id, isSelectionMode, isCalibrating, isMeasuring, isAnnotating, isDrawingBoxSelection, annotationTool]);
 
   useEffect(() => {
     onPageShownRef.current = onPageShown;
@@ -1529,7 +1536,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         const currentMeasurements = useMeasurementStore.getState().takeoffMeasurements.filter(
           (m) => m.projectId === currentProjectId && m.sheetId === file.id && m.pdfPage === pageNum
         );
-        const hasMarkups = currentMeasurements.length > 0 || localTakeoffMeasurements.length > 0;
+        const hasAnnotationsOnPage = localAnnotations.filter((a) => a.pageNumber === pageNum).length > 0;
+        const hasMarkups =
+          currentMeasurements.length > 0 ||
+          localTakeoffMeasurements.length > 0 ||
+          hasAnnotationsOnPage;
         const isInteractiveMode = isMeasuring || isCalibrating || isAnnotating || isDrawingBoxSelection;
         const currentSelectionMode = isSelectionMode;
         if (hasMarkups || isInteractiveMode) {
@@ -1565,7 +1576,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Refs and parent callback intentionally omitted to avoid cascade
-  }, [pdfDocument, viewState, updateCanvasDimensions, onPageShown, isComponentMounted, isMeasuring, isCalibrating, currentMeasurement, isDeselecting, isAnnotating, isSelectionMode, localTakeoffMeasurements, currentProjectId, file.id, currentPage, renderMarkupsWithPointerEvents]);
+  }, [pdfDocument, viewState, updateCanvasDimensions, onPageShown, isComponentMounted, isMeasuring, isCalibrating, currentMeasurement, isDeselecting, isAnnotating, isSelectionMode, localTakeoffMeasurements, localAnnotations, currentProjectId, file.id, currentPage, renderMarkupsWithPointerEvents]);
 
   // Keep renderPDFPage ref in sync (runs synchronously during render)
   renderPDFPageRef.current = renderPDFPage;
@@ -2438,6 +2449,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // eslint-disable-next-line react-hooks/exhaustive-deps -- Setters stable; omit
   }, [selectedConditionId, getSelectedCondition]);
 
+  const prevAnnotationToolRef = useRef<'text' | 'arrow' | 'rectangle' | 'circle' | null>(null);
+
   // Set annotation mode when annotation tool is selected
   useEffect(() => {
     if (annotationTool) {
@@ -2453,6 +2466,18 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Setters stable; omit
   }, [annotationTool]);
+
+  // When exiting annotation mode, force immediate markup re-render so annotations stay visible
+  useEffect(() => {
+    const prevTool = prevAnnotationToolRef.current;
+    const wasInAnnotationMode = prevTool != null;
+    const justExitedToSelection = wasInAnnotationMode && annotationTool == null;
+    prevAnnotationToolRef.current = annotationTool;
+
+    if (justExitedToSelection && localAnnotations.length > 0 && currentViewport && pdfDocument) {
+      renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current ?? undefined, true);
+    }
+  }, [annotationTool, localAnnotations.length, currentPage, currentViewport, pdfDocument, renderMarkupsWithPointerEvents]);
 
   // Listen for calibration requests
   useEffect(() => {
@@ -2530,7 +2555,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const overlayCursor = cutoutMode
     ? 'crosshair'
     : (isCalibrating ? 'crosshair' : (isMeasuring ? 'crosshair' : (isBoxSelectionMode ? 'crosshair' : (isSelectionMode ? 'pointer' : 'default'))));
-  const svgPointerEvents = (isSelectionMode || isCalibrating || annotationTool || isDrawingBoxSelection) ? 'auto' : 'none';
+  const hasMarkupsForOverlay = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0;
+  const svgPointerEvents =
+    hasMarkupsForOverlay ||
+    isSelectionMode ||
+    isCalibrating ||
+    annotationTool ||
+    isDrawingBoxSelection
+      ? 'auto'
+      : 'none';
   const overlayKey = `overlay-${currentPage}-${file.id}`;
   const textAnnotationProps = showTextInput && textInputPosition
     ? {
@@ -2550,6 +2583,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
               pageNumber: currentPage,
             });
             useUndoStore.getState().push({ type: 'annotation_add', id: created.id, annotation: created });
+            setLocalAnnotations((prev) => [...prev, created]);
             setCurrentAnnotation([]);
             setTextInputValue('');
             setShowTextInput(false);

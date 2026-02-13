@@ -12,6 +12,33 @@ import { useUndoStore } from '../../store/slices/undoSlice';
 
 const PASTE_OFFSET = 0.02;
 
+const ANNOTATION_SHORTCUTS: Record<string, 'rectangle' | 'text' | 'circle' | 'arrow'> = {
+  r: 'rectangle',
+  t: 'text',
+  c: 'circle',
+  a: 'arrow',
+};
+
+/** Returns markup IDs at point in z-order (top to bottom), for click-to-cycle selection. */
+function getStackedMarkupIdsAtPoint(svg: SVGSVGElement, clientX: number, clientY: number): string[] {
+  const elements = document.elementsFromPoint(clientX, clientY);
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const el of elements) {
+    if (!svg.contains(el)) continue;
+    const elem = el as Element;
+    const id =
+      elem.closest?.('[data-annotation-id]')?.getAttribute?.('data-annotation-id') ??
+      elem.closest?.('[data-measurement-id]')?.getAttribute?.('data-measurement-id') ??
+      null;
+    if (id && !seen.has(id)) {
+      seen.add(id);
+      ids.push(id);
+    }
+  }
+  return ids;
+}
+
 /** Max zoom scale to avoid slow/frozen PDF (canvas size = viewport × devicePixelRatio; ~265%+ becomes very heavy). */
 export const PDF_VIEWER_MAX_SCALE = 2.5;
 
@@ -470,6 +497,28 @@ export function usePDFViewerInteractions(
 
       if (handled) return;
 
+      // Annotation shortcuts R/T/C/A: only when no condition selected and not typing in input
+      const target = event.target as HTMLElement;
+      const isTyping =
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.getAttribute?.('contenteditable') === 'true';
+      const key = event.key.toLowerCase();
+      if (
+        !isTyping &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !selectedConditionId &&
+        onAnnotationToolChange &&
+        key in ANNOTATION_SHORTCUTS
+      ) {
+        const tool = ANNOTATION_SHORTCUTS[key as keyof typeof ANNOTATION_SHORTCUTS];
+        event.preventDefault();
+        onAnnotationToolChange(annotationTool === tool ? null : tool);
+        return;
+      }
+
       if (event.key === 'Escape' && annotationTool) {
         event.preventDefault();
         if (currentAnnotation.length > 0) {
@@ -598,6 +647,7 @@ export function usePDFViewerInteractions(
       annotationTool,
       currentAnnotation.length,
       onAnnotationToolChange,
+      selectedConditionId,
       isMeasuring,
       isCalibrating,
       calibrationPoints.length,
@@ -992,6 +1042,7 @@ export function usePDFViewerInteractions(
                 pageNumber: currentPage,
               });
               useUndoStore.getState().push({ type: 'annotation_add', id: created.id, annotation: created });
+              setLocalAnnotations((prev) => [...prev, created]);
             }
             setCurrentAnnotation([]);
             onAnnotationToolChange?.(null);
@@ -1481,6 +1532,7 @@ export function usePDFViewerInteractions(
               pageNumber: currentPage,
             });
             useUndoStore.getState().push({ type: 'annotation_add', id: created.id, annotation: created });
+            setLocalAnnotations((prev) => [...prev, created]);
             setCurrentAnnotation([]);
             onAnnotationToolChange?.(null);
           }
@@ -1683,23 +1735,35 @@ export function usePDFViewerInteractions(
             }
           }
         }
-        if (annotationId && currentIsSelectionMode) {
+        if ((annotationId || measurementId) && currentIsSelectionMode) {
           e.stopPropagation();
           const meta = e.metaKey || e.ctrlKey;
+          const clickedId = annotationId ?? measurementId!;
+
+          // Cycle through overlapping markups when re-clicking the sole selection
+          if (
+            !meta &&
+            selectedMarkupIds.length === 1 &&
+            selectedMarkupIds[0] === clickedId &&
+            svgOverlayRef.current
+          ) {
+            const stackedIds = getStackedMarkupIdsAtPoint(
+              svgOverlayRef.current,
+              e.clientX,
+              e.clientY
+            );
+            if (stackedIds.length > 1) {
+              const nextIdx = (stackedIds.indexOf(clickedId) + 1) % stackedIds.length;
+              setSelectedMarkupIds([stackedIds[nextIdx]]);
+              return;
+            }
+          }
+
+          const id = annotationId ?? measurementId!;
           setSelectedMarkupIds((prev) =>
             meta
-              ? prev.includes(annotationId) ? prev.filter((id) => id !== annotationId) : [...prev, annotationId]
-              : prev.includes(annotationId) && prev.length === 1 ? [] : [annotationId]
-          );
-          return;
-        }
-        if (measurementId && currentIsSelectionMode) {
-          e.stopPropagation();
-          const meta = e.metaKey || e.ctrlKey;
-          setSelectedMarkupIds((prev) =>
-            meta
-              ? prev.includes(measurementId) ? prev.filter((id) => id !== measurementId) : [...prev, measurementId]
-              : prev.includes(measurementId) && prev.length === 1 ? [] : [measurementId]
+              ? prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+              : prev.includes(id) && prev.length === 1 ? [] : [id]
           );
           return;
         }
@@ -1714,6 +1778,7 @@ export function usePDFViewerInteractions(
       visualSearchMode,
       isSelectingSymbol,
       titleblockSelectionMode,
+      selectedMarkupIds,
       setSelectedMarkupIds,
       handleClick,
     ]

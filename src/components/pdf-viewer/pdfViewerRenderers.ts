@@ -3,6 +3,9 @@
  * Used for selection box, point-in-polygon checks, and markup rendering.
  */
 import type { PDFPageProxy, PageViewport } from 'pdfjs-dist';
+
+/** Stroke width for annotation hit areas (rect/circle); stroke-only so interior passes through. */
+const ANNOTATION_HIT_STROKE_WIDTH = 12;
 import type { Measurement, SelectionBox } from '../PDFViewer.types';
 import type { Annotation } from '../../types';
 import { formatFeetAndInches } from '../../lib/utils';
@@ -567,18 +570,20 @@ export function renderSVGAnnotation(
     rect.setAttribute('stroke-width', strokeWidth);
     rect.setAttribute('fill', 'none');
     rect.setAttribute('data-annotation-id', annotation.id);
-    rect.style.pointerEvents = selectionMode ? 'auto' : 'none';
+    rect.style.pointerEvents = selectionMode ? 'stroke' : 'none';
     rect.style.cursor = selectionMode ? 'pointer' : 'default';
     svg.appendChild(rect);
+    // Hit area: stroke-only so interior passes through to markups below (e.g. measurements)
     const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    hitArea.setAttribute('x', (x - 5).toString());
-    hitArea.setAttribute('y', (y - 5).toString());
-    hitArea.setAttribute('width', (width + 10).toString());
-    hitArea.setAttribute('height', (height + 10).toString());
-    hitArea.setAttribute('fill', 'transparent');
+    hitArea.setAttribute('x', x.toString());
+    hitArea.setAttribute('y', y.toString());
+    hitArea.setAttribute('width', width.toString());
+    hitArea.setAttribute('height', height.toString());
+    hitArea.setAttribute('fill', 'none');
     hitArea.setAttribute('stroke', 'transparent');
+    hitArea.setAttribute('stroke-width', ANNOTATION_HIT_STROKE_WIDTH.toString());
     hitArea.setAttribute('data-annotation-id', annotation.id);
-    hitArea.style.pointerEvents = selectionMode ? 'auto' : 'none';
+    hitArea.style.pointerEvents = selectionMode ? 'stroke' : 'none';
     hitArea.style.cursor = selectionMode ? 'pointer' : 'default';
     svg.appendChild(hitArea);
   } else if (annotation.type === 'circle' && points.length === 2) {
@@ -595,18 +600,20 @@ export function renderSVGAnnotation(
     ellipse.setAttribute('stroke-width', strokeWidth);
     ellipse.setAttribute('fill', 'none');
     ellipse.setAttribute('data-annotation-id', annotation.id);
-    ellipse.style.pointerEvents = selectionMode ? 'auto' : 'none';
+    ellipse.style.pointerEvents = selectionMode ? 'stroke' : 'none';
     ellipse.style.cursor = selectionMode ? 'pointer' : 'default';
     svg.appendChild(ellipse);
+    // Hit area: stroke-only so interior passes through to markups below
     const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
     hitArea.setAttribute('cx', cx.toString());
     hitArea.setAttribute('cy', cy.toString());
-    hitArea.setAttribute('rx', (rx + 10).toString());
-    hitArea.setAttribute('ry', (ry + 10).toString());
-    hitArea.setAttribute('fill', 'transparent');
+    hitArea.setAttribute('rx', rx.toString());
+    hitArea.setAttribute('ry', ry.toString());
+    hitArea.setAttribute('fill', 'none');
     hitArea.setAttribute('stroke', 'transparent');
+    hitArea.setAttribute('stroke-width', ANNOTATION_HIT_STROKE_WIDTH.toString());
     hitArea.setAttribute('data-annotation-id', annotation.id);
-    hitArea.style.pointerEvents = selectionMode ? 'auto' : 'none';
+    hitArea.style.pointerEvents = selectionMode ? 'stroke' : 'none';
     hitArea.style.cursor = selectionMode ? 'pointer' : 'default';
     svg.appendChild(hitArea);
   } else if (annotation.type === 'highlight' && points.length >= 2) {

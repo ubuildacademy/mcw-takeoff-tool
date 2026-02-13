@@ -223,12 +223,25 @@ export function usePDFViewerMeasurements({
       const lastPoint = referencePoints[referencePoints.length - 1];
       const dx = currentPos.x - lastPoint.x;
       const dy = currentPos.y - lastPoint.y;
-      if (Math.abs(dx) > Math.abs(dy)) {
-        return { x: currentPos.x, y: lastPoint.y };
-      }
-      return { x: lastPoint.x, y: currentPos.y };
+      const calibBase = calibrationViewportRef.current;
+      const vw = calibBase?.viewportWidth ?? currentViewport?.width ?? 1;
+      const vh = calibBase?.viewportHeight ?? currentViewport?.height ?? 1;
+      const dxPx = dx * vw;
+      const dyPx = dy * vh;
+      const distPx = Math.sqrt(dxPx * dxPx + dyPx * dyPx);
+      if (distPx < 1e-6) return currentPos;
+      let angleDeg = (Math.atan2(dyPx, dxPx) * 180) / Math.PI;
+      if (angleDeg < 0) angleDeg += 360;
+      const snapAngleDeg = Math.round(angleDeg / 45) * 45;
+      const snapRad = ((snapAngleDeg % 360) * Math.PI) / 180;
+      const dxPxSnap = distPx * Math.cos(snapRad);
+      const dyPxSnap = distPx * Math.sin(snapRad);
+      return {
+        x: lastPoint.x + dxPxSnap / vw,
+        y: lastPoint.y + dyPxSnap / vh,
+      };
     },
-    [isOrthoSnapping]
+    [isOrthoSnapping, currentViewport, calibrationViewportRef]
   );
 
   return {
