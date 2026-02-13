@@ -27,10 +27,10 @@ function getStackedMarkupIdsAtPoint(svg: SVGSVGElement, clientX: number, clientY
   for (const el of elements) {
     if (!svg.contains(el)) continue;
     const elem = el as Element;
+    const marked = elem.closest?.('[data-annotation-id], [data-measurement-id]');
+    if (!marked) continue;
     const id =
-      elem.closest?.('[data-annotation-id]')?.getAttribute?.('data-annotation-id') ??
-      elem.closest?.('[data-measurement-id]')?.getAttribute?.('data-measurement-id') ??
-      null;
+      marked.getAttribute?.('data-annotation-id') ?? marked.getAttribute?.('data-measurement-id');
     if (id && !seen.has(id)) {
       seen.add(id);
       ids.push(id);

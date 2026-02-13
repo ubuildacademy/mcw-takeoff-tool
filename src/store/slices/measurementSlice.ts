@@ -96,7 +96,10 @@ export const useMeasurementStore = create<MeasurementState>()(
         const measurementPayload = {
           ...measurementData,
           conditionColor: condition?.color || '#000000',
-          conditionName: condition?.name || 'Unknown'
+          conditionName: condition?.name || 'Unknown',
+          ...(measurementData.type === 'linear' && condition?.lineThickness != null && {
+            conditionLineThickness: condition.lineThickness,
+          }),
         };
         
         const response = await takeoffMeasurementService.createTakeoffMeasurement(measurementPayload);

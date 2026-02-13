@@ -564,10 +564,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const isBoxSelectionMode = visualSearchMode || !!titleblockSelectionMode;
   const isDrawingBoxSelection = isBoxSelectionMode && isSelectingSymbol;
 
-  // Helper to get current condition color by ID (uses live condition data, not stored measurement color)
   const getConditionColor = useCallback((conditionId: string, fallbackColor?: string): string => {
     const condition = conditions.find(c => c.id === conditionId);
     return condition?.color || fallbackColor || '#000000';
+  }, [conditions]);
+
+  const getConditionLineThickness = useCallback((conditionId: string): number => {
+    const condition = conditions.find(c => c.id === conditionId);
+    const t = condition?.lineThickness;
+    return typeof t === 'number' && t >= 1 && t <= 8 ? t : 2;
   }, [conditions]);
 
   // Ensure component is mounted before rendering
@@ -695,7 +700,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     const selectionMode = currentSelectionMode !== undefined ? currentSelectionMode : isSelectionMode;
     
     // Update ALL measurement elements including hit areas
-    // Hit areas need pointer-events: auto too so they can capture clicks for selection
     const measurementElements = svgOverlayRef.current.querySelectorAll('[data-measurement-id]');
     measurementElements.forEach((el) => {
       const element = el as SVGElement;
@@ -905,6 +909,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         rotation: viewState.rotation || 0,
         selectedMarkupIds,
         getConditionColor,
+        getConditionLineThickness,
         selectionMode: isSelectionMode,
         showLabel: showMeasurementLabels,
       });
@@ -1007,6 +1012,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             currentMeasurement,
             cutoutMode,
             conditionColor: getSelectedCondition()?.color || '#000000',
+            conditionLineThickness: getSelectedCondition()?.lineThickness,
           });
         }
       }
@@ -1095,7 +1101,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     
   // eslint-disable-next-line react-hooks/exhaustive-deps -- Large render callback; refs and some deps intentionally omitted to avoid cascade
-  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, annotationDragBox, annotationMoveId, annotationMoveIds, annotationMoveDelta, annotationColor, measurementDragBox, measurementMoveId, measurementMoveIds, measurementMoveDelta, cutoutMode, currentCutout, isBoxSelectionMode, isDrawingBoxSelection, selectionBox, currentProjectId, file.id, getPageTakeoffMeasurements, getSelectedCondition, measurementsLoading, getConditionColor, crosshairFullScreen, crosshairColor, crosshairStrokeWidth, showMeasurementLabels, showRunningLength]);
+  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, annotationDragBox, annotationMoveId, annotationMoveIds, annotationMoveDelta, annotationColor, measurementDragBox, measurementMoveId, measurementMoveIds, measurementMoveDelta, cutoutMode, currentCutout, isBoxSelectionMode, isDrawingBoxSelection, selectionBox, currentProjectId, file.id, getPageTakeoffMeasurements, getSelectedCondition, measurementsLoading, getConditionColor, getConditionLineThickness, crosshairFullScreen, crosshairColor, crosshairStrokeWidth, showMeasurementLabels, showRunningLength]);
 
   // OPTIMIZED: Update only visual styling of markups when selection changes (no full re-render)
   const updateMarkupSelection = useCallback((newSelectedIds: string[], previousSelectedIds: string[]) => {
@@ -1119,7 +1125,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         const measurement = localTakeoffMeasurements.find((m) => m.id === previousSelectedId);
         if (measurement) {
           const defaultColor = getConditionColor(measurement.conditionId, measurement.conditionColor);
-          const defaultStrokeWidth = '2';
+          const defaultStrokeWidth =
+            measurement.type === 'linear' && getConditionLineThickness
+              ? String(getConditionLineThickness(measurement.conditionId))
+              : '2';
           if (element.tagName === 'polyline' || element.tagName === 'polygon' || element.tagName === 'path') {
             element.setAttribute('stroke', defaultColor);
             element.setAttribute('stroke-width', defaultStrokeWidth);
@@ -1198,7 +1207,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
     idsToDeselect.forEach(deselectId);
     idsToSelect.forEach(selectId);
-  }, [localTakeoffMeasurements, localAnnotations, getConditionColor]);
+  }, [localTakeoffMeasurements, localAnnotations, getConditionColor, getConditionLineThickness]);
 
   // Re-render annotations when measurements or interaction state changes
   // NOTE: selectedMarkupIds is used in the effect below to update only visual styling on selection change
@@ -1595,7 +1604,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     const selectedCondition = getSelectedCondition();
     const conditionColor = selectedCondition?.color || '#000000';
-    
+    const conditionLineThickness = (selectedCondition?.lineThickness != null ? selectedCondition.lineThickness : 2);
+
     // Remove existing rubber band for this page if it exists
     const existingRubberBand = pageRubberBandRefs.current[currentPage];
     if (existingRubberBand && existingRubberBand.parentNode === svgOverlay) {
@@ -1604,7 +1614,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
     line.setAttribute('stroke', conditionColor);
-    line.setAttribute('stroke-width', '2');
+    line.setAttribute('stroke-width', String(conditionLineThickness));
     line.setAttribute('stroke-dasharray', '5,5');
     line.setAttribute('stroke-linecap', 'round');
     line.setAttribute('stroke-linejoin', 'round');
@@ -1785,6 +1795,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         pdfCoordinates: points,
         conditionColor: selectedCondition.color,
         conditionName: selectedCondition.name,
+        ...(measurementType === 'linear' && selectedCondition.lineThickness != null && {
+          conditionLineThickness: selectedCondition.lineThickness,
+        }),
         // Only include perimeterValue if the condition requires it
         ...(selectedCondition.includePerimeter && { perimeterValue }),
         // Only include areaValue if the condition requires it (linear with height)

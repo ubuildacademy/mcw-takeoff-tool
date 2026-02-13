@@ -73,6 +73,25 @@ export const useConditionStore = create<ConditionState>()(
               condition.id === id ? { ...condition, ...updatedCondition } : condition
             )
           }));
+
+          // Sync denormalized condition styling to existing measurements so viewer/export reflect updates
+          const { useMeasurementStore } = await import('./measurementSlice');
+          useMeasurementStore.setState((state) => ({
+            takeoffMeasurements: state.takeoffMeasurements.map((m) =>
+              m.conditionId === id
+                ? {
+                    ...m,
+                    conditionColor: updatedCondition.color ?? m.conditionColor,
+                    conditionName: updatedCondition.name ?? m.conditionName,
+                    ...(m.type === 'linear' &&
+                      updatedCondition.lineThickness != null && {
+                        conditionLineThickness: updatedCondition.lineThickness,
+                      }),
+                  }
+                : m
+            ),
+          }));
+          useMeasurementStore.getState().updateMarkupsByPage();
         } catch (error) {
           console.error('Failed to update condition:', error);
           throw error;

@@ -71,6 +71,7 @@ export interface StoredCondition {
   searchImageId?: string;
   searchThreshold?: number;
   searchScope?: 'current-page' | 'entire-document' | 'entire-project';
+  lineThickness?: number; // For linear measurements, stroke width in px (1-8, default 2)
   createdAt: string;
   aiGenerated?: boolean;
 }
@@ -124,6 +125,7 @@ interface ConditionRow {
   search_image_id?: string;
   search_threshold?: number;
   search_scope?: string;
+  line_thickness?: number;
   created_at?: string;
   ai_generated?: boolean;
 }
@@ -166,6 +168,15 @@ interface SheetRow {
 
 function hasCode(e: unknown): e is { code: string } {
   return e !== null && typeof e === 'object' && 'code' in e;
+}
+
+function hasColumnNotFoundError(e: unknown): boolean {
+  if (!e || typeof e !== 'object') return false;
+  const err = e as { code?: string; message?: string };
+  // PostgreSQL 42703 = undefined_column
+  if (err.code === '42703') return true;
+  const msg = String(err.message ?? '');
+  return msg.includes('line_thickness') && (msg.includes('does not exist') || msg.includes('undefined column'));
 }
 
 export interface StoredTakeoffMeasurement {
@@ -499,6 +510,7 @@ class SupabaseStorage {
       searchImage: item.search_image,
       searchImageId: item.search_image_id,
       searchThreshold: item.search_threshold,
+      ...(item.line_thickness != null && { lineThickness: item.line_thickness }),
       createdAt: item.created_at ?? '',
       ...(item.ai_generated !== undefined && { aiGenerated: item.ai_generated })
     }));
@@ -536,6 +548,7 @@ class SupabaseStorage {
       searchImageId: item.search_image_id,
       searchThreshold: item.search_threshold,
       searchScope: (item.search_scope as StoredCondition['searchScope']) ?? undefined,
+      ...(item.line_thickness != null && { lineThickness: item.line_thickness }),
       createdAt: item.created_at ?? '',
       ...(item.ai_generated !== undefined && { aiGenerated: item.ai_generated })
     }));
@@ -583,17 +596,35 @@ class SupabaseStorage {
     if (condition.searchScope !== undefined) {
       dbCondition.search_scope = condition.searchScope;
     }
+    if (condition.lineThickness !== undefined) {
+      dbCondition.line_thickness = condition.lineThickness;
+    }
     
-    const { data, error } = await supabase
+    let result = await supabase
       .from(TABLES.CONDITIONS)
       .upsert(dbCondition)
       .select()
       .single();
     
-    if (error) {
-      console.error('Error saving condition:', error);
-      throw error;
+    // If column doesn't exist (migration not run), retry without line_thickness
+    if (result.error && hasColumnNotFoundError(result.error) && condition.lineThickness !== undefined) {
+      console.warn(
+        '⚠️ line_thickness column not found. Run migration: server/migrations/add_line_thickness_to_conditions.sql'
+      );
+      delete dbCondition.line_thickness;
+      result = await supabase
+        .from(TABLES.CONDITIONS)
+        .upsert(dbCondition)
+        .select()
+        .single();
     }
+    
+    if (result.error) {
+      console.error('Error saving condition:', result.error);
+      throw result.error;
+    }
+    
+    const data = result.data;
     
     // Map snake_case back to camelCase
     return {
@@ -616,6 +647,7 @@ class SupabaseStorage {
       searchImageId: data.search_image_id,
       searchThreshold: data.search_threshold,
       searchScope: data.search_scope,
+      ...(data.line_thickness != null && { lineThickness: data.line_thickness }),
       createdAt: data.created_at,
       ...(data.ai_generated !== undefined && { aiGenerated: data.ai_generated })
     };

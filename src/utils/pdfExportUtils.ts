@@ -82,7 +82,8 @@ async function _drawMeasurement(
   const helveticaBoldFont = await page.doc.embedFont(StandardFonts.HelveticaBold);
 
   if (measurement.type === 'linear') {
-    // Draw line segments - match viewer: stroke width 2, opacity 1.0
+    const lineThickness = measurement.conditionLineThickness ?? 2;
+    // Draw line segments - match viewer stroke width, opacity 1.0
     for (let i = 0; i < points.length - 1; i++) {
       const start = points[i];
       const end = points[i + 1];
@@ -90,7 +91,7 @@ async function _drawMeasurement(
       page.drawLine({
         start: { x: start.x, y: start.y },
         end: { x: end.x, y: end.y },
-        thickness: 2,
+        thickness: lineThickness,
         color: colorRgb,
         opacity: 1.0, // Match viewer (no opacity specified = 1.0)
       });
@@ -479,8 +480,10 @@ function _renderMeasurementToSVG(
   );
   
   const strokeColor = measurement.conditionColor || '#000000';
-  const strokeWidth = '2';
-  
+  const strokeWidth = measurement.type === 'linear' && measurement.conditionLineThickness != null
+    ? String(measurement.conditionLineThickness)
+    : '2';
+
   switch (measurement.type) {
     case 'linear':
       if (transformedPoints.length >= 2) {
@@ -786,8 +789,10 @@ function drawMeasurementToCanvas(
   const rgb = hexToRgb(strokeColor);
   ctx.strokeStyle = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
   ctx.fillStyle = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
-  ctx.lineWidth = 2;
-  
+  ctx.lineWidth = measurement.type === 'linear' && measurement.conditionLineThickness != null
+    ? measurement.conditionLineThickness
+    : 2;
+
   switch (measurement.type) {
     case 'linear':
       if (transformedPoints.length >= 2) {

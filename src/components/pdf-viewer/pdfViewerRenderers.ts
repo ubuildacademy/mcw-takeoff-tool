@@ -15,6 +15,7 @@ export interface RenderSVGMeasurementOptions {
   rotation: number;
   selectedMarkupIds: string[];
   getConditionColor: (id: string, fallback?: string) => string;
+  getConditionLineThickness?: (id: string) => number;
   selectionMode: boolean;
   /** When false, value labels (LF, SF, CY, etc.) on completed measurements are hidden. Defaults to true. */
   showLabel?: boolean;
@@ -220,7 +221,7 @@ export function renderSVGMeasurement(
   if (measurement.type !== 'count' && points.length < 2) return;
   if (!page) return;
 
-  const { rotation, selectedMarkupIds, getConditionColor, selectionMode, showLabel = true } = options;
+  const { rotation, selectedMarkupIds, getConditionColor, getConditionLineThickness, selectionMode, showLabel = true } = options;
   const currentViewport = viewport;
   const _baseViewport = page.getViewport({ scale: 1, rotation: 0 });
 
@@ -250,7 +251,10 @@ export function renderSVGMeasurement(
   const isSelected = selectedMarkupIds.includes(measurement.id);
   const liveColor = getConditionColor(measurement.conditionId, measurement.conditionColor);
   const strokeColor = isSelected ? '#ff0000' : liveColor;
-  const strokeWidth = isSelected ? '4' : '2';
+  const baseStrokeWidth = measurement.type === 'linear' && getConditionLineThickness
+    ? getConditionLineThickness(measurement.conditionId)
+    : 2;
+  const strokeWidth = isSelected ? '4' : String(baseStrokeWidth);
 
   switch (measurement.type) {
     case 'linear': {
@@ -867,6 +871,8 @@ export interface RenderSVGCurrentMeasurementOptions {
   currentMeasurement: { x: number; y: number }[];
   cutoutMode: boolean;
   conditionColor: string;
+  /** For linear measurements, stroke width in px. Defaults to 2. */
+  conditionLineThickness?: number;
 }
 
 /** Renders current measurement being drawn (preview polylines, polygons, count circle). */
@@ -885,6 +891,7 @@ export function renderSVGCurrentMeasurement(
     currentMeasurement,
     cutoutMode,
     conditionColor,
+    conditionLineThickness = 2,
   } = options;
   if (!viewport) return;
 
@@ -909,7 +916,7 @@ export function renderSVGCurrentMeasurement(
           const pointString = activePoints.map((p) => `${p.x * viewport.width},${p.y * viewport.height}`).join(' ');
           polyline.setAttribute('points', pointString);
           polyline.setAttribute('stroke', strokeColor);
-          polyline.setAttribute('stroke-width', '2');
+          polyline.setAttribute('stroke-width', String(conditionLineThickness));
           polyline.setAttribute('stroke-linecap', 'round');
           polyline.setAttribute('stroke-linejoin', 'round');
           polyline.setAttribute('fill', 'none');
@@ -926,7 +933,7 @@ export function renderSVGCurrentMeasurement(
           }
           previewPolyline.setAttribute('points', pointString);
           previewPolyline.setAttribute('stroke', conditionColor);
-          previewPolyline.setAttribute('stroke-width', '2');
+          previewPolyline.setAttribute('stroke-width', String(conditionLineThickness));
           previewPolyline.setAttribute('stroke-linecap', 'round');
           previewPolyline.setAttribute('stroke-linejoin', 'round');
           previewPolyline.setAttribute('fill', 'none');
@@ -947,7 +954,7 @@ export function renderSVGCurrentMeasurement(
         }
         polyline.setAttribute('points', pointString);
         polyline.setAttribute('stroke', strokeColor);
-        polyline.setAttribute('stroke-width', '2');
+        polyline.setAttribute('stroke-width', String(conditionLineThickness));
         polyline.setAttribute('stroke-linecap', 'round');
         polyline.setAttribute('stroke-linejoin', 'round');
         polyline.setAttribute('fill', 'none');

@@ -105,7 +105,8 @@ router.post('/', requireAuth, sanitizeBody('name', 'description'), async (req, r
       searchImage,
       searchImageId,
       searchThreshold,
-      searchScope
+      searchScope,
+      lineThickness
     } = req.body;
 
     // Validation
@@ -243,6 +244,9 @@ router.post('/', requireAuth, sanitizeBody('name', 'description'), async (req, r
         searchThreshold: searchThreshold || 0.7,
         searchScope: searchScope || 'current-page'
       }),
+      ...(type === 'linear' && lineThickness != null && {
+        lineThickness: Math.max(1, Math.min(8, typeof lineThickness === 'string' ? parseInt(lineThickness, 10) || 2 : lineThickness))
+      }),
       createdAt: now
     };
     
@@ -315,7 +319,8 @@ router.put('/:id', requireAuth, validateUUIDParam('id'), sanitizeBody('name', 'd
       searchImage,
       searchImageId,
       searchThreshold,
-      searchScope
+      searchScope,
+      lineThickness
     } = req.body;
 
     // Validation
@@ -410,7 +415,10 @@ router.put('/:id', requireAuth, validateUUIDParam('id'), sanitizeBody('name', 'd
       ...(searchImage !== undefined && { searchImage }),
       ...(searchImageId !== undefined && { searchImageId }),
       ...(searchThreshold !== undefined && { searchThreshold }),
-      ...(searchScope !== undefined && { searchScope })
+      ...(searchScope !== undefined && { searchScope }),
+      ...(lineThickness !== undefined && {
+        lineThickness: Math.max(1, Math.min(8, typeof lineThickness === 'string' ? parseInt(lineThickness, 10) || 2 : lineThickness))
+      })
     };
     
     const savedCondition = await storage.saveCondition(updatedCondition);

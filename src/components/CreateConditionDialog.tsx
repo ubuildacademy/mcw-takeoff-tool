@@ -47,6 +47,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
     depth: editingCondition?.depth ? formatDepthOutput(editingCondition.depth) : '',
     includeHeight: editingCondition?.includeHeight || false,
     height: editingCondition?.height ? formatDepthOutput(editingCondition.height) : '',
+    lineThickness: editingCondition?.lineThickness?.toString() || '2',
     // Auto-count specific fields
     searchImage: editingCondition?.searchImage || '',
     searchImageId: editingCondition?.searchImageId || '',
@@ -68,6 +69,31 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount to set default unit
   }, []);
+
+  // Sync form when editingCondition changes (e.g. opening to edit a different condition)
+  useEffect(() => {
+    if (!editingCondition) return;
+    setFormData({
+      name: editingCondition.name || '',
+      type: (editingCondition.type || 'area') as ConditionFormType,
+      unit: editingCondition.unit || 'SF',
+      wasteFactor: editingCondition.wasteFactor?.toString() || '',
+      color: editingCondition.color || generateDistinctColor(conditions.filter((c: { projectId: string; color?: string }) => c.projectId === projectId).map((c: { color?: string }) => c.color).filter((color): color is string => typeof color === 'string')),
+      description: editingCondition.description || '',
+      materialCost: editingCondition.materialCost != null ? editingCondition.materialCost.toString() : '',
+      equipmentCost: editingCondition.equipmentCost != null ? editingCondition.equipmentCost.toString() : '',
+      includePerimeter: editingCondition.includePerimeter || false,
+      depth: editingCondition.depth ? formatDepthOutput(editingCondition.depth) : '',
+      includeHeight: editingCondition.includeHeight || false,
+      height: editingCondition.height ? formatDepthOutput(editingCondition.height) : '',
+      lineThickness: editingCondition.lineThickness?.toString() || '2',
+      searchImage: editingCondition.searchImage || '',
+      searchImageId: editingCondition.searchImageId || '',
+      searchThreshold: editingCondition.searchThreshold?.toString() || '0.7',
+      searchScope: (editingCondition.searchScope || 'current-page') as 'current-page' | 'entire-document' | 'entire-project'
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- Sync only when switching to edit a condition
+  }, [editingCondition?.id]);
 
   // Auto-switch unit when includeHeight changes for linear conditions
   useEffect(() => {
@@ -173,6 +199,9 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
         depth: parsedDepth === null || parsedDepth === undefined ? undefined : parsedDepth,
         includeHeight: formData.includeHeight,
         height: parsedHeight === null || parsedHeight === undefined ? undefined : parsedHeight,
+        lineThickness: formData.type === 'linear' && formData.lineThickness
+          ? Math.max(1, Math.min(8, parseInt(formData.lineThickness, 10) || 2))
+          : undefined,
         // Auto-count specific fields
         ...(formData.type === 'auto-count' && {
           searchImage: formData.searchImage,
@@ -253,7 +282,8 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
         wasteFactor: value === 'count' ? '0' : prev.wasteFactor,
         // Reset height-related fields when type changes
         includeHeight: false,
-        height: ''
+        height: '',
+        lineThickness: value === 'linear' ? prev.lineThickness || '2' : ''
       };
       return newData;
     });
@@ -412,18 +442,33 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
           )}
 
           {formData.type === 'linear' && (
-            <div>
-              <Label htmlFor="includeHeight" className="flex items-center space-x-2">
-                <input
-                  id="includeHeight"
-                  type="checkbox"
-                  checked={formData.includeHeight}
-                  onChange={(e) => handleInputChange('includeHeight', e.target.checked)}
-                  className="rounded"
+            <>
+              <div>
+                <Label htmlFor="includeHeight" className="flex items-center space-x-2">
+                  <input
+                    id="includeHeight"
+                    type="checkbox"
+                    checked={formData.includeHeight}
+                    onChange={(e) => handleInputChange('includeHeight', e.target.checked)}
+                    className="rounded"
+                  />
+                  <span>Include height for area calculation (SF)</span>
+                </Label>
+              </div>
+              <div>
+                <Label htmlFor="lineThickness">Line thickness (px)</Label>
+                <Input
+                  id="lineThickness"
+                  type="number"
+                  min={1}
+                  max={8}
+                  value={formData.lineThickness}
+                  onChange={(e) => handleInputChange('lineThickness', e.target.value)}
+                  className="mt-1 w-20"
+                  placeholder="2"
                 />
-                <span>Include height for area calculation (SF)</span>
-              </Label>
-            </div>
+              </div>
+            </>
           )}
 
           {formData.type === 'volume' && (
