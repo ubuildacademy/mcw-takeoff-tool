@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Button } from '../ui/button';
 import { Separator } from '../ui/separator';
 import {
@@ -29,8 +29,10 @@ import {
   ZoomIn,
   ZoomOut,
   Maximize2,
+  Settings,
 } from 'lucide-react';
 import type { TakeoffWorkspaceHeaderProps } from './TakeoffWorkspaceHeader.types';
+import { UserSettingsDialog } from '../UserSettingsDialog';
 
 export function TakeoffWorkspaceHeader({
   onBackToProjects,
@@ -58,6 +60,8 @@ export function TakeoffWorkspaceHeader({
   onUndo,
   onRedo,
 }: TakeoffWorkspaceHeaderProps) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
   return (
     <div className="flex items-center justify-between gap-2 p-2 sm:p-4 border-b bg-muted/30 flex-wrap lg:flex-nowrap min-w-0">
       {/* Left - Back, Undo/Redo */}
@@ -105,12 +109,12 @@ export function TakeoffWorkspaceHeader({
           </Button>
         </div>
 
-        <Separator orientation="vertical" className="h-8 hidden lg:block" />
+        <Separator orientation="vertical" className="h-8 hidden xl:block" />
 
         {/* View dropdown: scale, reset, rotate, calibrate - visible below lg to avoid mid-size overflow */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button size="sm" variant="outline" className="lg:hidden flex items-center gap-1" title="View options">
+            <Button size="sm" variant="outline" className="xl:hidden flex items-center gap-1" title="View options">
               <Layout className="w-4 h-4" />
               <span>{currentPdfFile ? `${Math.round(scale * 100)}%` : 'View'}</span>
               <ChevronDown className="w-3 h-3" />
@@ -171,14 +175,14 @@ export function TakeoffWorkspaceHeader({
         {/* Inline view tools - visible from lg up (keeps mid-size bar from overflowing) */}
         {currentPdfFile && (
           <>
-            <div className="hidden lg:flex items-center gap-2">
+            <div className="hidden xl:flex items-center gap-2">
               <Button size="sm" variant="outline" onClick={() => onScaleChange(Math.max(0.5, scale - 0.1))} title="Zoom out">-</Button>
               <span className="px-3 py-1 bg-gray-100 rounded text-sm min-w-[60px] text-center">{Math.round(scale * 100)}%</span>
               <Button size="sm" variant="outline" onClick={() => onScaleChange(Math.min(5, scale + 0.1))} title="Zoom in">+</Button>
               <Button size="sm" variant="outline" onClick={onResetView}>Reset View</Button>
             </div>
-            <Separator orientation="vertical" className="h-8 hidden lg:block" />
-            <div className="hidden lg:flex items-center gap-2">
+            <Separator orientation="vertical" className="h-8 hidden xl:block" />
+            <div className="hidden xl:flex items-center gap-2">
               <Button size="sm" variant="outline" onClick={() => onRotatePage('counterclockwise')} title="Rotate counterclockwise">
                 <RotateCcw className="w-4 h-4" />
               </Button>
@@ -186,11 +190,11 @@ export function TakeoffWorkspaceHeader({
                 <RotateCw className="w-4 h-4" />
               </Button>
             </div>
-            <Separator orientation="vertical" className="h-8 hidden lg:block" />
+            <Separator orientation="vertical" className="h-8 hidden xl:block" />
           </>
         )}
 
-        <div className="hidden lg:block">
+        <div className="hidden xl:block">
           <Button
             size="sm"
             variant={isPageCalibrated ? 'default' : 'secondary'}
@@ -202,7 +206,7 @@ export function TakeoffWorkspaceHeader({
           </Button>
         </div>
 
-        <Separator orientation="vertical" className="h-8 hidden lg:block" />
+        <Separator orientation="vertical" className="h-8 hidden xl:block" />
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -212,8 +216,8 @@ export function TakeoffWorkspaceHeader({
               className={annotationTool ? 'bg-blue-600 hover:bg-blue-700 text-white' : ''}
               title="Annotate"
             >
-              <Pencil className="w-4 h-4 shrink-0 lg:mr-1" />
-              <span className="hidden lg:inline">Annotate</span>
+              <Pencil className="w-4 h-4 shrink-0 xl:mr-1" />
+              <span className="hidden xl:inline">Annotate</span>
               <ChevronDown className="w-3 h-3 ml-1 shrink-0" />
             </Button>
           </DropdownMenuTrigger>
@@ -275,8 +279,17 @@ export function TakeoffWorkspaceHeader({
         </DropdownMenu>
       </div>
 
-      {/* Right - Ortho badge, Saved status */}
+      {/* Right - Settings, Ortho badge, Saved status */}
       <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setSettingsOpen(true)}
+          title="User Settings"
+          className="shrink-0"
+        >
+          <Settings className="w-4 h-4" />
+        </Button>
         {((isOrthoSnapping && isMeasuring) || (isCalibrating && isOrthoSnapping)) && (
           <div className="flex items-center gap-1 bg-green-600 text-white px-2 py-1 rounded text-xs">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -288,9 +301,11 @@ export function TakeoffWorkspaceHeader({
         )}
         <div className="flex items-center gap-2 text-sm text-gray-600" title="All changes saved">
           <div className="w-2 h-2 bg-green-500 rounded-full shrink-0" />
-          <span className="hidden xl:inline">All changes saved</span>
+          <span className="hidden 2xl:inline">All changes saved</span>
         </div>
       </div>
+
+      <UserSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
   );
 }
