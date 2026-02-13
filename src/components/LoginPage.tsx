@@ -18,10 +18,10 @@ const LoginPage: React.FC = () => {
     setError('');
 
     try {
-      const { error } = await authHelpers.signIn(email, password);
-      
+      const { error } = await authHelpers.signInViaProxy(email, password);
+
       if (error) {
-        setError(error.message);
+        setError((error as { message?: string })?.message ?? 'An error occurred');
       } else {
         navigate('/app');
       }

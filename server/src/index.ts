@@ -25,6 +25,7 @@ import visualSearchRoutes from './routes/visualSearch';
 import settingsRoutes from './routes/settings';
 import titleblockRoutes from './routes/titleblock';
 import calibrationRoutes from './routes/calibrations';
+import authRoutes from './routes/auth';
 import { livePreviewService } from './services/livePreviewService';
 // Initialize queue service (starts worker)
 import './services/queueService';
@@ -211,6 +212,7 @@ app.all('/api/debug', (req, res) => {
 // This prevents 429 errors when loading documents with many pages/sheets
 
 // Strict rate limiting for auth endpoints (brute force protection)
+app.use('/api/auth/login', strictRateLimit);
 app.use('/api/users/login', strictRateLimit);
 app.use('/api/users/signup', strictRateLimit);
 app.use('/api/users/invite', strictRateLimit);
@@ -226,6 +228,7 @@ app.use('/api', (req, res, next) => {
 });
 
 // API routes
+app.use('/api/auth', authRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/conditions', conditionRoutes);

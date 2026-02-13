@@ -5,7 +5,8 @@ export {
   useMeasurementStore,
   useCalibrationStore,
   useAnnotationStore,
-  useDocumentViewStore
+  useDocumentViewStore,
+  useUserPreferencesStore,
 } from './useTakeoffStore';
 
 export type {

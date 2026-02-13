@@ -3,9 +3,10 @@
  * plus pure helpers (calculateRunningLength, applyOrthoSnapping). Event handlers
  * remain in PDFViewer and use this state. Used by PDFViewer.
  */
-import { useState, useRef, useCallback, type RefObject } from 'react';
+import { useState, useRef, useCallback, useEffect, type RefObject } from 'react';
 import type { Annotation } from '../../types';
 import type { Measurement, SelectionBox } from '../PDFViewer.types';
+import { useUserPreferencesStore } from '../../store/slices/userPreferencesSlice';
 
 export interface UsePDFViewerMeasurementsOptions {
   currentViewport: { width: number; height: number; rotation?: number } | null;
@@ -183,8 +184,19 @@ export function usePDFViewerMeasurements({
   const pageRubberBandRefs = useRef<Record<number, SVGLineElement | null>>({});
   const pageCommittedPolylineRefs = useRef<Record<number, SVGPolylineElement | null>>({});
 
-  // Ortho snapping state
-  const [isOrthoSnapping, setIsOrthoSnapping] = useState(false);
+  // Ortho snapping state – initialise from persisted user preference
+  const defaultOrthoSnapping = useUserPreferencesStore((s) => s.defaultOrthoSnapping);
+  const [isOrthoSnapping, setIsOrthoSnapping] = useState(defaultOrthoSnapping);
+
+  // Reset ortho snapping to user preference each time a new measurement session starts.
+  // useState only uses its initial value on first mount; this effect handles subsequent sessions.
+  const prevIsMeasuringRef = useRef(false);
+  useEffect(() => {
+    if (isMeasuring && !prevIsMeasuringRef.current) {
+      setIsOrthoSnapping(defaultOrthoSnapping);
+    }
+    prevIsMeasuringRef.current = isMeasuring;
+  }, [isMeasuring, defaultOrthoSnapping]);
 
   const calculateRunningLength = useCallback(
     (points: { x: number; y: number }[], currentMousePos?: { x: number; y: number }) => {

@@ -13,6 +13,8 @@ export interface RenderSVGMeasurementOptions {
   selectedMarkupIds: string[];
   getConditionColor: (id: string, fallback?: string) => string;
   selectionMode: boolean;
+  /** When false, value labels (LF, SF, CY, etc.) on completed measurements are hidden. Defaults to true. */
+  showLabel?: boolean;
 }
 
 /** Ray-casting point-in-polygon test */
@@ -89,7 +91,10 @@ export interface Point {
   y: number;
 }
 
-/** Renders the current cut-out preview (polyline + optional polygon) */
+/** Renders the current cut-out preview (polyline + optional fill polygon).
+ *  Matches regular area/volume measurement preview behaviour: dashed stroke
+ *  polyline following the cursor, with a semi-transparent fill polygon once
+ *  three or more points exist (no diagonal closing stroke). */
 export function renderSVGCurrentCutout(
   svg: SVGSVGElement,
   viewport: { width: number; height: number },
@@ -98,6 +103,7 @@ export function renderSVGCurrentCutout(
 ): void {
   if (!viewport || currentCutout.length === 0) return;
 
+  // Dashed polyline showing committed points + mouse position (matches area/volume preview)
   const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
   let pointString = currentCutout
     .map((p) => `${p.x * viewport.width},${p.y * viewport.height}`)
@@ -109,20 +115,38 @@ export function renderSVGCurrentCutout(
   polyline.setAttribute('stroke', '#ff0000');
   polyline.setAttribute('stroke-width', '2');
   polyline.setAttribute('fill', 'none');
+  polyline.setAttribute('stroke-dasharray', '5,5');
   polyline.setAttribute('vector-effect', 'non-scaling-stroke');
+  polyline.setAttribute('pointer-events', 'none');
   svg.appendChild(polyline);
 
+  // Semi-transparent fill polygon (no stroke) — same pattern as area/volume preview
   if (currentCutout.length >= 3) {
     const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
     const polygonPointString = currentCutout
       .map((p) => `${p.x * viewport.width},${p.y * viewport.height}`)
       .join(' ');
     polygon.setAttribute('points', polygonPointString);
-    polygon.setAttribute('fill', 'none');
-    polygon.setAttribute('stroke', '#ff0000');
-    polygon.setAttribute('stroke-width', '2');
+    polygon.setAttribute('fill', 'rgba(255, 0, 0, 0.15)');
+    polygon.setAttribute('stroke', 'none');
+    polygon.setAttribute('pointer-events', 'none');
     svg.appendChild(polygon);
   }
+}
+
+/** Converts hex color to rgba string. */
+function hexToRgba(hex: string, alpha: number): string {
+  const m = hex.replace(/^#/, '').match(/^([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i);
+  if (!m) return `rgba(0, 0, 0, ${alpha})`;
+  return `rgba(${parseInt(m[1], 16)}, ${parseInt(m[2], 16)}, ${parseInt(m[3], 16)}, ${alpha})`;
+}
+
+export interface CrosshairOptions {
+  fullScreen?: boolean;
+  /** Hex color for non-calibrating mode. Ignored when isCalibrating. */
+  strokeColor?: string;
+  /** Stroke thickness in CSS pixels. Defaults to 1.5 (or 2 when calibrating). */
+  strokeWidth?: number;
 }
 
 /** Renders crosshair at position (position in normalized 0–1 coordinates). */
@@ -130,66 +154,52 @@ export function renderSVGCrosshair(
   svg: SVGSVGElement,
   position: Point,
   viewport: { width: number; height: number },
-  isCalibrating: boolean = false
+  isCalibrating: boolean = false,
+  options?: CrosshairOptions
 ): void {
   if (!position || !viewport) return;
   const vx = position.x * viewport.width;
   const vy = position.y * viewport.height;
   if (typeof vx !== 'number' || typeof vy !== 'number') return;
 
+  const { fullScreen = false, strokeColor: strokeColorHex, strokeWidth: customStrokeWidth } = options ?? {};
   const viewportMin = Math.min(viewport.width, viewport.height);
   const CROSSHAIR_SIZE_MIN = 22;
   const CROSSHAIR_SIZE_FRACTION = 0.035;
   const CROSSHAIR_SIZE_CALIBRATING_MIN = 24;
   const CROSSHAIR_SIZE_CALIBRATING_FRACTION = 0.032;
-  const DOT_RADIUS_FRACTION = 0.0015;
-  const DOT_RADIUS_CALIBRATING_FRACTION = 0.002;
-  const DOT_RADIUS_MAX = 4;
-
   const crosshairSize = isCalibrating
     ? Math.max(CROSSHAIR_SIZE_CALIBRATING_MIN, viewportMin * CROSSHAIR_SIZE_CALIBRATING_FRACTION)
     : Math.max(CROSSHAIR_SIZE_MIN, viewportMin * CROSSHAIR_SIZE_FRACTION);
-  const strokeColor = isCalibrating ? 'rgba(255, 0, 0, 0.9)' : 'rgba(0, 0, 0, 0.85)';
-  const strokeWidth = isCalibrating ? '2' : '1.5';
-  const dotRadius = Math.min(
-    DOT_RADIUS_MAX,
-    isCalibrating
-      ? Math.max(3, viewportMin * DOT_RADIUS_CALIBRATING_FRACTION)
-      : Math.max(2, viewportMin * DOT_RADIUS_FRACTION)
-  );
-  const dotColor = isCalibrating ? 'rgba(255, 0, 0, 1)' : 'rgba(0, 0, 0, 0.95)';
 
-  const hLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-  hLine.setAttribute('x1', String(vx - crosshairSize));
-  hLine.setAttribute('y1', String(vy));
-  hLine.setAttribute('x2', String(vx + crosshairSize));
-  hLine.setAttribute('y2', String(vy));
-  hLine.setAttribute('stroke', strokeColor);
-  hLine.setAttribute('stroke-width', String(strokeWidth));
-  hLine.setAttribute('stroke-linecap', 'round');
-  hLine.setAttribute('vector-effect', 'non-scaling-stroke');
-  svg.appendChild(hLine);
+  const strokeColor = isCalibrating
+    ? 'rgba(255, 0, 0, 0.9)'
+    : strokeColorHex
+      ? hexToRgba(strokeColorHex, 0.85)
+      : 'rgba(0, 0, 0, 0.85)';
+  const strokeWidth = isCalibrating ? '2' : String(customStrokeWidth ?? 1.5);
 
-  const vLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-  vLine.setAttribute('x1', String(vx));
-  vLine.setAttribute('y1', String(vy - crosshairSize));
-  vLine.setAttribute('x2', String(vx));
-  vLine.setAttribute('y2', String(vy + crosshairSize));
-  vLine.setAttribute('stroke', strokeColor);
-  vLine.setAttribute('stroke-width', String(strokeWidth));
-  vLine.setAttribute('stroke-linecap', 'round');
-  vLine.setAttribute('vector-effect', 'non-scaling-stroke');
-  svg.appendChild(vLine);
+  const hx1 = fullScreen && !isCalibrating ? 0 : vx - crosshairSize;
+  const hx2 = fullScreen && !isCalibrating ? viewport.width : vx + crosshairSize;
+  const vy1 = fullScreen && !isCalibrating ? 0 : vy - crosshairSize;
+  const vy2 = fullScreen && !isCalibrating ? viewport.height : vy + crosshairSize;
 
-  const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-  dot.setAttribute('cx', String(vx));
-  dot.setAttribute('cy', String(vy));
-  dot.setAttribute('r', String(dotRadius));
-  dot.setAttribute('fill', dotColor);
-  dot.setAttribute('stroke', isCalibrating ? 'rgba(255, 255, 255, 0.8)' : 'none');
-  dot.setAttribute('stroke-width', '1');
-  dot.setAttribute('vector-effect', 'non-scaling-stroke');
-  svg.appendChild(dot);
+  const makeLine = (x1: number, y1: number, x2: number, y2: number) => {
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', String(x1));
+    line.setAttribute('y1', String(y1));
+    line.setAttribute('x2', String(x2));
+    line.setAttribute('y2', String(y2));
+    line.setAttribute('stroke', strokeColor);
+    line.setAttribute('stroke-width', String(strokeWidth));
+    line.setAttribute('stroke-dasharray', '6 4');
+    line.setAttribute('stroke-linecap', 'round');
+    line.setAttribute('vector-effect', 'non-scaling-stroke');
+    return line;
+  };
+
+  svg.appendChild(makeLine(hx1, vy, hx2, vy));   // horizontal
+  svg.appendChild(makeLine(vx, vy1, vx, vy2));    // vertical
 }
 
 /** Renders a single takeoff measurement as SVG (polyline/polygon/circle + label). */
@@ -207,7 +217,7 @@ export function renderSVGMeasurement(
   if (measurement.type !== 'count' && points.length < 2) return;
   if (!page) return;
 
-  const { rotation, selectedMarkupIds, getConditionColor, selectionMode } = options;
+  const { rotation, selectedMarkupIds, getConditionColor, selectionMode, showLabel = true } = options;
   const currentViewport = viewport;
   const _baseViewport = page.getViewport({ scale: 1, rotation: 0 });
 
@@ -260,22 +270,24 @@ export function renderSVGMeasurement(
       hitArea.style.cursor = selectionMode ? 'pointer' : 'default';
       svg.appendChild(hitArea);
       svg.appendChild(polyline);
-      const startPoint = { x: transformedPoints[0].x, y: transformedPoints[0].y };
-      const endPoint = { x: transformedPoints[transformedPoints.length - 1].x, y: transformedPoints[transformedPoints.length - 1].y };
-      const midPoint = { x: (startPoint.x + endPoint.x) / 2, y: (startPoint.y + endPoint.y) / 2 };
-      const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      text.setAttribute('x', midPoint.x.toString());
-      text.setAttribute('y', (midPoint.y - 5).toString());
-      text.setAttribute('fill', strokeColor);
-      text.setAttribute('font-size', '12');
-      text.setAttribute('font-family', 'Arial');
-      text.setAttribute('text-anchor', 'middle');
-      const linearValue = (measurement.unit === 'ft' || measurement.unit === 'feet' || measurement.unit === 'LF' || measurement.unit === 'lf')
-        ? formatFeetAndInches(measurement.calculatedValue)
-        : `${measurement.calculatedValue.toFixed(2)} ${measurement.unit}`;
-      const displayValue = measurement.areaValue ? `${linearValue} LF / ${measurement.areaValue.toFixed(0)} SF` : linearValue;
-      text.textContent = displayValue;
-      svg.appendChild(text);
+      if (showLabel) {
+        const startPoint = { x: transformedPoints[0].x, y: transformedPoints[0].y };
+        const endPoint = { x: transformedPoints[transformedPoints.length - 1].x, y: transformedPoints[transformedPoints.length - 1].y };
+        const midPoint = { x: (startPoint.x + endPoint.x) / 2, y: (startPoint.y + endPoint.y) / 2 };
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('x', midPoint.x.toString());
+        text.setAttribute('y', (midPoint.y - 5).toString());
+        text.setAttribute('fill', strokeColor);
+        text.setAttribute('font-size', '12');
+        text.setAttribute('font-family', 'Arial');
+        text.setAttribute('text-anchor', 'middle');
+        const linearValue = (measurement.unit === 'ft' || measurement.unit === 'feet' || measurement.unit === 'LF' || measurement.unit === 'lf')
+          ? formatFeetAndInches(measurement.calculatedValue)
+          : `${measurement.calculatedValue.toFixed(2)} ${measurement.unit}`;
+        const displayValue = measurement.areaValue ? `${linearValue} LF / ${measurement.areaValue.toFixed(0)} SF` : linearValue;
+        text.textContent = displayValue;
+        svg.appendChild(text);
+      }
       break;
     }
     case 'area':
@@ -319,21 +331,23 @@ export function renderSVGMeasurement(
           svg.appendChild(hitArea);
           svg.appendChild(polygon);
         }
-        const centerX = transformedPoints.reduce((s, p) => s + p.x, 0) / transformedPoints.length;
-        const centerY = transformedPoints.reduce((s, p) => s + p.y, 0) / transformedPoints.length;
-        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        text.setAttribute('x', centerX.toString());
-        text.setAttribute('y', centerY.toString());
-        text.setAttribute('fill', strokeColor);
-        text.setAttribute('font-size', '12');
-        text.setAttribute('font-family', 'Arial');
-        text.setAttribute('font-weight', 'bold');
-        text.setAttribute('text-anchor', 'middle');
-        text.setAttribute('dominant-baseline', 'middle');
-        const displayValue = measurement.netCalculatedValue != null ? measurement.netCalculatedValue : measurement.calculatedValue;
-        const areaValue = `${displayValue.toFixed(0)} SF`;
-        text.textContent = measurement.perimeterValue ? `${areaValue} / ${formatFeetAndInches(measurement.perimeterValue)} LF` : areaValue;
-        svg.appendChild(text);
+        if (showLabel) {
+          const centerX = transformedPoints.reduce((s, p) => s + p.x, 0) / transformedPoints.length;
+          const centerY = transformedPoints.reduce((s, p) => s + p.y, 0) / transformedPoints.length;
+          const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          text.setAttribute('x', centerX.toString());
+          text.setAttribute('y', centerY.toString());
+          text.setAttribute('fill', strokeColor);
+          text.setAttribute('font-size', '12');
+          text.setAttribute('font-family', 'Arial');
+          text.setAttribute('font-weight', 'bold');
+          text.setAttribute('text-anchor', 'middle');
+          text.setAttribute('dominant-baseline', 'middle');
+          const displayValue = measurement.netCalculatedValue != null ? measurement.netCalculatedValue : measurement.calculatedValue;
+          const areaValue = `${displayValue.toFixed(0)} SF`;
+          text.textContent = measurement.perimeterValue ? `${areaValue} / ${formatFeetAndInches(measurement.perimeterValue)} LF` : areaValue;
+          svg.appendChild(text);
+        }
       }
       break;
     case 'volume':
@@ -377,21 +391,23 @@ export function renderSVGMeasurement(
           svg.appendChild(hitArea);
           svg.appendChild(polygon);
         }
-        const centerX = transformedPoints.reduce((s, p) => s + p.x, 0) / transformedPoints.length;
-        const centerY = transformedPoints.reduce((s, p) => s + p.y, 0) / transformedPoints.length;
-        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        text.setAttribute('x', centerX.toString());
-        text.setAttribute('y', centerY.toString());
-        text.setAttribute('fill', strokeColor);
-        text.setAttribute('font-size', '12');
-        text.setAttribute('font-family', 'Arial');
-        text.setAttribute('font-weight', 'bold');
-        text.setAttribute('text-anchor', 'middle');
-        text.setAttribute('dominant-baseline', 'middle');
-        const displayValue = measurement.netCalculatedValue != null ? measurement.netCalculatedValue : measurement.calculatedValue;
-        const volumeValue = `${displayValue.toFixed(0)} CY`;
-        text.textContent = measurement.perimeterValue ? `${volumeValue} / ${formatFeetAndInches(measurement.perimeterValue)} LF` : volumeValue;
-        svg.appendChild(text);
+        if (showLabel) {
+          const centerX = transformedPoints.reduce((s, p) => s + p.x, 0) / transformedPoints.length;
+          const centerY = transformedPoints.reduce((s, p) => s + p.y, 0) / transformedPoints.length;
+          const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          text.setAttribute('x', centerX.toString());
+          text.setAttribute('y', centerY.toString());
+          text.setAttribute('fill', strokeColor);
+          text.setAttribute('font-size', '12');
+          text.setAttribute('font-family', 'Arial');
+          text.setAttribute('font-weight', 'bold');
+          text.setAttribute('text-anchor', 'middle');
+          text.setAttribute('dominant-baseline', 'middle');
+          const displayValue = measurement.netCalculatedValue != null ? measurement.netCalculatedValue : measurement.calculatedValue;
+          const volumeValue = `${displayValue.toFixed(0)} CY`;
+          text.textContent = measurement.perimeterValue ? `${volumeValue} / ${formatFeetAndInches(measurement.perimeterValue)} LF` : volumeValue;
+          svg.appendChild(text);
+        }
       }
       break;
     case 'count': {

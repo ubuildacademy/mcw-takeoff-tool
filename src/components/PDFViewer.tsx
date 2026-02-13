@@ -6,6 +6,7 @@ import { useConditionStore } from '../store/slices/conditionSlice';
 import { useMeasurementStore } from '../store/slices/measurementSlice';
 import { useAnnotationStore } from '../store/slices/annotationSlice';
 import { useUndoStore } from '../store/slices/undoSlice';
+import { useUserPreferencesStore } from '../store/slices/userPreferencesSlice';
 import type { PDFViewerProps, Measurement } from './PDFViewer.types';
 import { usePDFLoad } from './pdf-viewer/usePDFLoad';
 import { usePDFViewerCalibration } from './pdf-viewer/usePDFViewerCalibration';
@@ -220,6 +221,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Required by calibration hook - must be declared before usePDFViewerCalibration
   const currentProjectId = useProjectStore((s) => s.currentProjectId);
+  const crosshairFullScreen = useUserPreferencesStore((s) => s.crosshairFullScreen);
+  const crosshairColor = useUserPreferencesStore((s) => s.crosshairColor);
+  const crosshairStrokeWidth = useUserPreferencesStore((s) => s.crosshairStrokeWidth);
+  const showMeasurementLabels = useUserPreferencesStore((s) => s.showMeasurementLabels);
+  const showRunningLength = useUserPreferencesStore((s) => s.showRunningLength);
 
   // Scale calibration (state and handlers from hook) - after currentViewport so hook can use it
   const calibration = usePDFViewerCalibration({
@@ -352,6 +358,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     calculateRunningLength,
     applyOrthoSnapping,
   } = measurementsState;
+
+  // Shared "renders blocked" flags — reused by multiple effects to avoid
+  // redundant re-computation.  Two variants: one without isDeselecting (for
+  // viewport updates and markup rendering) and one with (for CSS transform
+  // application which must also block during deselection cooldown).
+  const rendersBlocked = useMemo(
+    () => isMeasuring || isCalibrating || currentMeasurement.length > 0 || (isAnnotating && !showTextInput),
+    [isMeasuring, isCalibrating, currentMeasurement.length, isAnnotating, showTextInput]
+  );
+  const rendersBlockedForZoom = useMemo(
+    () => rendersBlocked || isDeselecting,
+    [rendersBlocked, isDeselecting]
+  );
 
   // Annotations + per-page measurements loading (effects live in hook)
   const { localTakeoffMeasurements, setLocalTakeoffMeasurements, measurementsLoading } = usePDFViewerData({
@@ -884,6 +903,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         selectedMarkupIds,
         getConditionColor,
         selectionMode: isSelectionMode,
+        showLabel: showMeasurementLabels,
       });
     });
 
@@ -1054,11 +1074,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Draw crosshair if measuring, calibrating, annotating, or drawing search/titleblock selection box (only if on the page being rendered)
     if (mousePosition && (isMeasuring || isCalibrating || annotationTool || isBoxSelectionMode) && pageNum === currentPage) {
-      renderSVGCrosshair(svgOverlay, mousePosition, viewport, isCalibrating);
+      renderSVGCrosshair(svgOverlay, mousePosition, viewport, isCalibrating, {
+        fullScreen: crosshairFullScreen,
+        strokeColor: crosshairColor,
+        strokeWidth: crosshairStrokeWidth,
+      });
     }
     
     // Draw running length display for continuous linear drawing
-    if (isContinuousDrawing && activePoints.length > 0 && pageNum === currentPage) {
+    if (showRunningLength && isContinuousDrawing && activePoints.length > 0 && pageNum === currentPage) {
       renderRunningLengthDisplay(svgOverlay, viewport, {
         runningLength,
         conditionColor: getSelectedCondition()?.color || '#000000',
@@ -1068,7 +1092,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     
   // eslint-disable-next-line react-hooks/exhaustive-deps -- Large render callback; refs and some deps intentionally omitted to avoid cascade
-  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, annotationDragBox, annotationMoveId, annotationMoveIds, annotationMoveDelta, annotationColor, measurementDragBox, measurementMoveId, measurementMoveIds, measurementMoveDelta, cutoutMode, currentCutout, isBoxSelectionMode, isDrawingBoxSelection, selectionBox, currentProjectId, file.id, getPageTakeoffMeasurements, getSelectedCondition, measurementsLoading, getConditionColor]);
+  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, annotationDragBox, annotationMoveId, annotationMoveIds, annotationMoveDelta, annotationColor, measurementDragBox, measurementMoveId, measurementMoveIds, measurementMoveDelta, cutoutMode, currentCutout, isBoxSelectionMode, isDrawingBoxSelection, selectionBox, currentProjectId, file.id, getPageTakeoffMeasurements, getSelectedCondition, measurementsLoading, getConditionColor, crosshairFullScreen, crosshairColor, crosshairStrokeWidth, showMeasurementLabels, showRunningLength]);
 
   // OPTIMIZED: Update only visual styling of markups when selection changes (no full re-render)
   const updateMarkupSelection = useCallback((newSelectedIds: string[], previousSelectedIds: string[]) => {
@@ -1245,79 +1269,63 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // useEffect runs after paint, which can cause timing issues with requestAnimationFrame callbacks
   renderTakeoffAnnotationsRef.current = renderTakeoffAnnotations;
 
-  // Update pageViewports immediately when scale/rotation changes
-  // This ensures currentViewport is always current even when PDF rendering is blocked
+  // Update pageViewports immediately when scale/rotation changes.
+  // When renders are blocked (measuring/calibrating/annotating), CSS transforms provide
+  // visual zoom while the canvas stays at lastRenderedScale. The viewport MUST match
+  // lastRenderedScale so every coordinate path (mouse handlers, crosshair rendering,
+  // measurement rendering) uses the same reference frame.  Without this, a race between
+  // the viewport update (immediate) and the PDF render (debounced 30ms) can leave
+  // currentViewport at a different scale than lastRenderedScale, producing offset
+  // crosshairs and misplaced markups.
   useEffect(() => {
-    if (pdfDocument && pdfPageRef.current) {
-      // Create fresh viewport with current scale and rotation
-      const freshViewport = pdfPageRef.current.getViewport({ 
-        scale: viewState.scale, 
-        rotation: viewState.rotation 
-      });
-      
-      // Update pageViewports immediately so currentViewport memo recalculates
-      setPageViewports(prev => {
-        // Only update if the viewport actually changed to avoid unnecessary re-renders
-        const existing = prev[currentPage];
-        if (existing && 
-            existing.width === freshViewport.width && 
-            existing.height === freshViewport.height &&
-            existing.scale === freshViewport.scale &&
-            existing.rotation === freshViewport.rotation) {
-          return prev; // No change
-        }
-        
-        return {
-          ...prev,
-          [currentPage]: freshViewport
-        };
-      });
-      
-      // Trigger immediate re-render of markups with new viewport, even if PDF rendering is blocked
-      // This ensures annotations stay aligned during zoom
-      const hasMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0;
-      if (hasMarkups) {
-        renderMarkupsWithPointerEvents(currentPage, freshViewport, pdfPageRef.current ?? undefined);
-      }
-    }
-  }, [pdfDocument, viewState.scale, viewState.rotation, currentPage, localTakeoffMeasurements, localAnnotations, renderMarkupsWithPointerEvents]);
+    if (!pdfDocument || !pdfPageRef.current) return;
 
-  // Force immediate re-render of markups when viewport changes (reserved for future use)
-  const _forceMarkupReRender = useCallback(() => {
-    const hasMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0;
-    if (pdfDocument && pdfPageRef.current && hasMarkups) {
-      // Create fresh viewport with current parameters
-      const freshViewport = pdfPageRef.current.getViewport({ 
-        scale: viewState.scale, 
-        rotation: viewState.rotation 
-      });
+    // Choose target scale: match the actual canvas when blocked, use desired scale otherwise
+    const targetScale = rendersBlocked
+      ? (lastRenderedScaleRef.current || viewState.scale)
+      : viewState.scale;
+
+    const freshViewport = pdfPageRef.current.getViewport({ 
+      scale: targetScale, 
+      rotation: viewState.rotation 
+    });
+    
+    // Only update if viewport actually changed to avoid unnecessary re-renders
+    setPageViewports(prev => {
+      const existing = prev[currentPage];
+      if (existing && 
+          Math.abs(existing.width - freshViewport.width) < 0.01 && 
+          Math.abs(existing.height - freshViewport.height) < 0.01 &&
+          existing.rotation === freshViewport.rotation) {
+        return prev; // No change
+      }
       
-      // Update the page viewports to trigger re-render
-      setPageViewports(prev => ({
+      return {
         ...prev,
         [currentPage]: freshViewport
-      }));
-      
-      // Immediately re-render all markups
+      };
+    });
+    
+    // When blocked, CSS transforms handle visual zoom — don't re-render markups
+    if (rendersBlocked) return;
+
+    // Trigger immediate re-render of markups with new viewport
+    const hasMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0;
+    if (hasMarkups) {
       renderMarkupsWithPointerEvents(currentPage, freshViewport, pdfPageRef.current ?? undefined);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- Re-render on scale/rotation; renderMarkupsWithPointerEvents intentionally omitted to avoid cascade
-  }, [pdfDocument, viewState.scale, viewState.rotation, localTakeoffMeasurements, localAnnotations, currentPage, renderTakeoffAnnotations]);
+  }, [pdfDocument, viewState.scale, viewState.rotation, currentPage, localTakeoffMeasurements, localAnnotations, renderMarkupsWithPointerEvents, rendersBlocked]);
 
-  // Force re-render measurements and annotations when viewport state changes (zoom, rotation)
-  // NOTE: isDeselecting removed from blocking - markup rendering should always work in selection mode
+  // Re-render overlay when user display preferences change (e.g. toggling measurement labels)
+  // The preferences are captured in renderTakeoffAnnotations via ref, but nothing in the
+  // main render effect's dep array changes when a preference toggles, so we need this.
   useEffect(() => {
-    const rendersBlocked = (isMeasuring || isCalibrating || currentMeasurement.length > 0 || (isAnnotating && !showTextInput));
-    if (rendersBlocked) {
-      // During interactive zoom/draw, rely solely on CSS transforms to keep overlay in sync
-      return;
-    }
     const hasMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0;
     if (pdfDocument && currentViewport && hasMarkups) {
-      // Render markups with updated viewport state
       renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current ?? undefined);
     }
-  }, [viewState.scale, viewState.rotation, pdfDocument, currentViewport, localTakeoffMeasurements, localAnnotations, currentPage, renderMarkupsWithPointerEvents, currentMeasurement.length, isAnnotating, isCalibrating, isMeasuring, showTextInput]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Only re-render when display prefs change
+  }, [showMeasurementLabels, showRunningLength]);
 
   // SIMPLIFIED: Update pointer-events when mode changes (no re-rendering needed)
   // This handles SVG element, hit-area, and individual markup elements
@@ -2155,8 +2163,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Apply or clear interactive CSS zoom when external scale changes while renders are blocked
   useEffect(() => {
-    const rendersBlocked = (isMeasuring || isCalibrating || currentMeasurement.length > 0 || isDeselecting || (isAnnotating && !showTextInput));
-    if (rendersBlocked) {
+    if (rendersBlockedForZoom) {
       applyInteractiveZoomTransforms();
     } else {
       // Clear transforms if any
@@ -2180,7 +2187,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         renderMarkupsWithPointerEvents(currentPage, freshViewport, pdfPageRef.current ?? undefined);
       }
     }
-  }, [viewState.scale, viewState.rotation, isMeasuring, isCalibrating, currentMeasurement.length, isDeselecting, isAnnotating, showTextInput, applyInteractiveZoomTransforms, pdfDocument, localTakeoffMeasurements, localAnnotations, currentPage, renderMarkupsWithPointerEvents]);
+  }, [viewState.scale, viewState.rotation, rendersBlockedForZoom, applyInteractiveZoomTransforms, pdfDocument, localTakeoffMeasurements, localAnnotations, currentPage, renderMarkupsWithPointerEvents]);
 
   // Keep currentPageRef in sync so renderPDFPage's finally block can re-trigger for the right page
   currentPageRef.current = currentPage;

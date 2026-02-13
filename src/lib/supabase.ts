@@ -77,12 +77,64 @@ export const authHelpers = {
     return validSessionPromise
   },
 
-  // Sign in with email and password
+  // Sign in with email and password (direct Supabase - may fail with CORS)
   async signIn(email: string, password: string) {
     return await supabase.auth.signInWithPassword({
       email,
       password
     })
+  },
+
+  /**
+   * Sign in via backend proxy - avoids CORS issues when Supabase is unreachable from the browser.
+   * Use this for login when direct Supabase calls fail (e.g. CORS, ERR_FAILED 522).
+   */
+  async signInViaProxy(email: string, password: string) {
+    const base = (await import('./apiConfig')).getApiBaseUrl()
+    const url = base.startsWith('http') ? `${base}/auth/login` : `${window.location.origin}${base}/auth/login`
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15000) // 15s timeout
+    let res: Response
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+        signal: controller.signal,
+      })
+    } catch (fetchErr: unknown) {
+      clearTimeout(timeout)
+      const isTimeout = fetchErr instanceof Error && fetchErr.name === 'AbortError'
+      const msg = isTimeout
+        ? 'Login timed out — the authentication service may be unavailable. Please try again shortly.'
+        : 'Unable to reach the server. Please check your connection.'
+      return { data: { user: null, session: null }, error: { message: msg } }
+    }
+    clearTimeout(timeout)
+    type ProxyLoginResponse = {
+      session?: { access_token: string; refresh_token: string; user: User }
+      error?: string
+    }
+    let data: ProxyLoginResponse
+    try {
+      data = await res.json()
+    } catch {
+      return { data: { user: null, session: null }, error: { message: 'Server returned an unexpected response. It may be starting up — please try again.' } }
+    }
+    if (!res.ok) {
+      return { data: { user: null, session: null }, error: { message: data.error || 'Login failed' } }
+    }
+    if (!data.session?.access_token) {
+      return { data: { user: null, session: null }, error: { message: data.error || 'No session returned' } }
+    }
+    const { error } = await supabase.auth.setSession({
+      access_token: data.session.access_token,
+      refresh_token: data.session.refresh_token,
+    })
+    if (error) {
+      return { data: { user: null, session: null }, error }
+    }
+    return { data: { user: data.session.user, session: await supabase.auth.getSession().then(s => s.data.session) }, error: null }
   },
 
   // Sign up with email and password

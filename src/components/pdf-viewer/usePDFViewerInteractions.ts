@@ -348,10 +348,7 @@ export function usePDFViewerInteractions(
         if (onScaleChange) onScaleChange(newScale);
 
         if (rendersBlocked) {
-          // Pass newScale so transform uses it immediately (viewState not updated yet)
-          requestAnimationFrame(() => {
-            applyInteractiveZoomTransforms(newScale);
-          });
+          // Scroll adjustment FIRST (sync) — before CSS transform so layout is settled
           const container = containerRef.current;
           if (container) {
             const rect = container.getBoundingClientRect();
@@ -361,6 +358,33 @@ export function usePDFViewerInteractions(
             container.scrollLeft = (container.scrollLeft + offsetX) * r - offsetX;
             container.scrollTop = (container.scrollTop + offsetY) * r - offsetY;
           }
+
+          // Apply CSS transform, then recalculate mousePosition so crosshair
+          // stays at the cursor. Without this, the crosshair drifts because the
+          // old normalised coords × CSS transform produce a different screen
+          // position than the actual cursor (due to canvas offset in the container).
+          requestAnimationFrame(() => {
+            applyInteractiveZoomTransforms(newScale);
+
+            if ((isMeasuring || isCalibrating) && pdfCanvasRef.current && pdfPageRef.current) {
+              const postRect = pdfCanvasRef.current.getBoundingClientRect();
+              const newIS = newScale / (lastRenderedScaleRef.current || 1);
+              let mx = event.clientX - postRect.left;
+              let my = event.clientY - postRect.top;
+              if (Math.abs(newIS - 1) > 0.0001) {
+                mx /= newIS;
+                my /= newIS;
+              }
+              const normVP = pdfPageRef.current.getViewport({
+                scale: lastRenderedScaleRef.current || 1,
+                rotation: viewState.rotation,
+              });
+              setMousePosition({
+                x: mx / normVP.width,
+                y: my / normVP.height,
+              });
+            }
+          });
           return;
         }
 
@@ -1087,13 +1111,26 @@ export function usePDFViewerInteractions(
       let viewport = currentViewport;
       if (!viewport && pdfPageRef.current) {
         const newViewport = pdfPageRef.current.getViewport({
-          scale: viewState.scale,
+          scale: lastRenderedScaleRef.current || viewState.scale,
           rotation: viewState.rotation,
         });
         viewport = newViewport;
         setPageViewports((prev) => ({ ...prev, [currentPage]: newViewport }));
       }
       if (!viewport) return;
+
+      // CRITICAL: When interactive zoom is active (CSS transforms providing visual zoom),
+      // the interactiveScale compensation converts screen coords to old-viewport pixel space.
+      // We MUST use a viewport at lastRenderedScale for normalization so the division gives
+      // correct 0-1 coordinates. Without this, zooming mid-draw produces misplaced markups.
+      const mmInteractiveScale = (viewState.scale || 1) / (lastRenderedScaleRef.current || 1);
+      if (Math.abs(mmInteractiveScale - 1) > 0.0001 && pdfPageRef.current) {
+        viewport = pdfPageRef.current.getViewport({
+          scale: lastRenderedScaleRef.current,
+          rotation: viewState.rotation,
+        });
+      }
+
       if (isDeselecting) setIsDeselecting(false);
       if (measurementMoveId && measurementMoveStart && viewport) {
         const coords = getCssCoordsFromEvent(event);
@@ -1204,7 +1241,7 @@ export function usePDFViewerInteractions(
         y: cssY / viewport.height,
       };
       if (isOrthoSnapping) {
-        const referencePoints = isContinuousDrawing ? activePoints : currentMeasurement;
+        const referencePoints = cutoutMode ? currentCutout : isContinuousDrawing ? activePoints : currentMeasurement;
         pdfCoords = applyOrthoSnapping(pdfCoords, referencePoints);
       }
       setMousePosition(pdfCoords);
@@ -1236,7 +1273,7 @@ export function usePDFViewerInteractions(
         }
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- pdfCanvasRef omit; added isOrthoSnapping
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- pdfCanvasRef omit; added isOrthoSnapping, cutoutMode, currentCutout
     [
       annotationTool,
       annotationDragStart,
@@ -1279,6 +1316,8 @@ export function usePDFViewerInteractions(
       pageRubberBandRefs,
       currentMeasurement,
       setIsDeselecting,
+      cutoutMode,
+      currentCutout,
     ]
   );
 
@@ -1288,7 +1327,7 @@ export function usePDFViewerInteractions(
       let viewport = currentViewport;
       if (!viewport && pdfPageRef.current) {
         const newViewport = pdfPageRef.current.getViewport({
-          scale: viewState.scale,
+          scale: lastRenderedScaleRef.current || viewState.scale,
           rotation: viewState.rotation,
         });
         viewport = newViewport;
@@ -1298,7 +1337,7 @@ export function usePDFViewerInteractions(
           const page = await (pdfDocument as { getPage: (n: number) => Promise<PDFPageProxy> }).getPage(currentPage);
           (pdfPageRef as MutableRefObject<PDFPageProxy | null>).current = page;
           const newViewport = page.getViewport({
-            scale: viewState.scale,
+            scale: lastRenderedScaleRef.current || viewState.scale,
             rotation: viewState.rotation,
           });
           viewport = newViewport;
@@ -1314,6 +1353,16 @@ export function usePDFViewerInteractions(
       let cssX = event.clientX - rect.left;
       let cssY = event.clientY - rect.top;
       const interactiveScale = (viewState.scale || 1) / (lastRenderedScaleRef.current || 1);
+
+      // CRITICAL: When interactive zoom is active, override viewport to one at lastRenderedScale.
+      // The interactiveScale compensation above converts screen coords to old-viewport pixel space,
+      // so we MUST normalize by old viewport dimensions to get correct 0-1 coordinates.
+      if (Math.abs(interactiveScale - 1) > 0.0001 && pdfPageRef.current) {
+        viewport = pdfPageRef.current.getViewport({
+          scale: lastRenderedScaleRef.current,
+          rotation: viewState.rotation,
+        });
+      }
       if (Math.abs(interactiveScale - 1) > 0.0001) {
         cssX = cssX / interactiveScale;
         cssY = cssY / interactiveScale;
@@ -1378,7 +1427,13 @@ export function usePDFViewerInteractions(
           baseX = (cssX / viewport.width) * baseViewport.width;
           baseY = (cssY / viewport.height) * baseViewport.height;
         }
-        const pdfCoords = { x: baseX / baseViewport.width, y: baseY / baseViewport.height };
+        let pdfCoords = { x: baseX / baseViewport.width, y: baseY / baseViewport.height };
+        // Apply ortho snapping to cutout points (use snapped mouse position when available)
+        if (isOrthoSnapping && mousePosition) {
+          pdfCoords = mousePosition;
+        } else if (isOrthoSnapping) {
+          pdfCoords = applyOrthoSnapping(pdfCoords, currentCutout);
+        }
         setCurrentCutout((prev) => [...prev, pdfCoords]);
         return;
       }

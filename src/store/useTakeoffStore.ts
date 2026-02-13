@@ -10,10 +10,12 @@
  * - useCalibrationStore: Calibrations
  * - useAnnotationStore: Annotations
  * - useDocumentViewStore: Document view (rotation, scale, page, location)
+ * - useUserPreferencesStore: User preferences (crosshair, ortho, labels)
  */
 
 export { useProjectStore } from './slices/projectSlice';
 export { useConditionStore } from './slices/conditionSlice';
+export { useUserPreferencesStore } from './slices/userPreferencesSlice';
 export { useMeasurementStore } from './slices/measurementSlice';
 export { useCalibrationStore } from './slices/calibrationSlice';
 export { useAnnotationStore } from './slices/annotationSlice';
