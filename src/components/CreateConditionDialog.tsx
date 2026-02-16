@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -22,22 +22,31 @@ interface CreateConditionDialogProps {
 
 type ConditionFormType = 'area' | 'volume' | 'linear' | 'count' | 'auto-count' | 'cv-takeoff';
 
+function getImageSrc(img: string): string {
+  return img.startsWith('data:') || img.startsWith('http') ? img : `data:image/png;base64,${img}`;
+}
+
+function getDefaultUnit(type: string, includeHeight?: boolean): string {
+  switch (type) {
+    case 'area': return 'SF';
+    case 'volume': return 'CY';
+    case 'linear': return includeHeight ? 'SF' : 'LF';
+    case 'count': return 'EA';
+    case 'auto-count': return 'EA';
+    case 'cv-takeoff': return 'EA';
+    default: return '';
+  }
+}
+
 export function CreateConditionDialog({ projectId, onClose, onConditionCreated, onConditionSelect, editingCondition, onOpenCVTakeoff }: CreateConditionDialogProps) {
   const addCondition = useConditionStore((s) => s.addCondition);
   const updateCondition = useConditionStore((s) => s.updateCondition);
   const conditions = useConditionStore((s) => s.conditions);
 
-  const _existingColors = useMemo(() => {
-    return conditions
-      .filter((c: { projectId: string; color?: string }) => c.projectId === projectId)
-      .map((c: { color?: string }) => c.color)
-      .filter(Boolean);
-  }, [conditions, projectId]);
-
   const [formData, setFormData] = useState({
     name: editingCondition?.name || '',
     type: (editingCondition?.type || 'area') as ConditionFormType,
-    unit: editingCondition?.unit || 'SF', // Initialize with default unit for 'area' type
+    unit: editingCondition?.unit || getDefaultUnit(editingCondition?.type || 'area', editingCondition?.includeHeight ?? false),
     wasteFactor: editingCondition?.wasteFactor?.toString() || '',
     color: editingCondition?.color || generateDistinctColor(conditions.filter((c: { projectId: string; color?: string }) => c.projectId === projectId).map((c: { color?: string }) => c.color).filter((color): color is string => typeof color === 'string')),
     description: editingCondition?.description || '',
@@ -57,14 +66,14 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
   const [loading, setLoading] = useState(false);
   const [depthError, setDepthError] = useState<string>('');
   const [heightError, setHeightError] = useState<string>('');
+  // For future auto-count: manual image upload + preview (currently symbol comes from PDF selection)
   const [_imagePreview, _setImagePreview] = useState<string | null>(null);
   const [_imageFile, _setImageFile] = useState<File | null>(null);
-
 
   // Ensure unit is set when component mounts
   useEffect(() => {
     if (!formData.unit) {
-      const defaultUnit = getDefaultUnit(formData.type);
+      const defaultUnit = getDefaultUnit(formData.type, formData.includeHeight);
       setFormData(prev => ({ ...prev, unit: defaultUnit }));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount to set default unit
@@ -76,7 +85,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
     setFormData({
       name: editingCondition.name || '',
       type: (editingCondition.type || 'area') as ConditionFormType,
-      unit: editingCondition.unit || 'SF',
+      unit: editingCondition.unit || getDefaultUnit(editingCondition.type, editingCondition.includeHeight),
       wasteFactor: editingCondition.wasteFactor?.toString() || '',
       color: editingCondition.color || generateDistinctColor(conditions.filter((c: { projectId: string; color?: string }) => c.projectId === projectId).map((c: { color?: string }) => c.color).filter((color): color is string => typeof color === 'string')),
       description: editingCondition.description || '',
@@ -95,25 +104,6 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
   // eslint-disable-next-line react-hooks/exhaustive-deps -- Sync only when switching to edit a condition
   }, [editingCondition?.id]);
 
-  // Auto-switch unit when includeHeight changes for linear conditions
-  useEffect(() => {
-    if (formData.type === 'linear') {
-      if (formData.includeHeight) {
-        // Switch to SF when height is enabled (if not already an area unit)
-        if (formData.unit !== 'SF' && formData.unit !== 'SY' && formData.unit !== 'SM') {
-          setFormData(prev => ({ ...prev, unit: 'SF' }));
-        }
-      } else {
-        // Switch back to LF when height is disabled (if currently an area unit)
-        if (formData.unit === 'SF' || formData.unit === 'SY' || formData.unit === 'SM') {
-          setFormData(prev => ({ ...prev, unit: 'LF' }));
-        }
-      }
-    }
-  // formData.unit intentionally omitted to avoid loop when we set it
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formData.includeHeight, formData.type]);
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     // CV Takeoff is a launcher only — no condition is created from this form
@@ -121,8 +111,6 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
     setLoading(true);
 
     try {
-      // Ensure unit is set - use formData.unit or fall back to default for the type
-      const unit = formData.unit || getDefaultUnit(formData.type);
       
       // Parse depth value (supports both decimal feet and feet/inches format)
       // Depth is required for volume conditions
@@ -186,7 +174,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
         projectId,
         name: formData.name,
         type: formData.type,
-        unit: unit,
+        unit: effectiveUnit,
         wasteFactor: formData.wasteFactor ? parseFloat(formData.wasteFactor) : 0,
         color: formData.color,
         description: formData.description,
@@ -280,31 +268,24 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
         unit: defaultUnit,
         // Set waste factor to 0 for count conditions since they don't have waste
         wasteFactor: value === 'count' ? '0' : prev.wasteFactor,
-        // Reset height-related fields when type changes
+        // Reset type-specific fields when type changes
         includeHeight: false,
         height: '',
-        lineThickness: value === 'linear' ? prev.lineThickness || '2' : ''
+        depth: value === 'volume' ? prev.depth : '',
+        lineThickness: value === 'linear' ? prev.lineThickness || '2' : '',
+        searchImage: value === 'auto-count' ? prev.searchImage : '',
+        searchImageId: value === 'auto-count' ? prev.searchImageId : ''
       };
       return newData;
     });
-  };
-
-  const getDefaultUnit = (type: string) => {
-    switch (type) {
-      case 'area': return 'SF';
-      case 'volume': return 'CY';
-      case 'linear': return 'LF';
-      case 'count': return 'EA';
-      case 'auto-count': return 'EA';
-      case 'cv-takeoff': return 'EA';
-      default: return '';
-    }
   };
 
   const handleStartCVTakeoff = () => {
     onClose();
     onOpenCVTakeoff?.();
   };
+
+  const effectiveUnit = formData.unit || getDefaultUnit(formData.type, formData.includeHeight);
 
   return (
     <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -351,7 +332,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
             {formData.type !== 'cv-takeoff' && (
             <div>
               <Label htmlFor="unit">Unit *</Label>
-              <Select value={formData.unit || getDefaultUnit(formData.type)} onValueChange={(value) => {
+              <Select value={effectiveUnit} onValueChange={(value) => {
                 handleInputChange('unit', value);
               }}>
                 <SelectTrigger id="unit">
@@ -389,14 +370,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
                       <SelectItem value="CM">CM (Cubic Meters)</SelectItem>
                     </>
                   )}
-                  {formData.type === 'count' && (
-                    <>
-                      <SelectItem value="EA">EA (Each)</SelectItem>
-                      <SelectItem value="PC">PC (Piece)</SelectItem>
-                      <SelectItem value="LS">LS (Lump Sum)</SelectItem>
-                    </>
-                  )}
-                  {formData.type === 'auto-count' && (
+                  {(formData.type === 'count' || formData.type === 'auto-count') && (
                     <>
                       <SelectItem value="EA">EA (Each)</SelectItem>
                       <SelectItem value="PC">PC (Piece)</SelectItem>
@@ -452,7 +426,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
                     onChange={(e) => handleInputChange('includeHeight', e.target.checked)}
                     className="rounded"
                   />
-                  <span>Include height for area calculation (SF)</span>
+                  <span>Include height for area calculation</span>
                 </Label>
               </div>
               <div>
@@ -553,6 +527,18 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
 
           {formData.type === 'auto-count' && (
             <>
+              {formData.searchImage && (
+                <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-2">
+                  <p className="text-xs font-medium text-indigo-900 mb-1.5">Searched symbol</p>
+                  <img
+                    src={getImageSrc(formData.searchImage)}
+                    alt="Searched symbol"
+                    className="max-w-full h-auto max-h-20 rounded border border-indigo-300"
+                    style={{ imageRendering: 'crisp-edges' }}
+                  />
+                  <p className="text-xs text-indigo-600 mt-1">Defined by selection on PDF. Re-run search to change.</p>
+                </div>
+              )}
               <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
                 <div className="flex items-start space-x-2">
                   <div className="flex-shrink-0">
@@ -613,7 +599,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
 
           <div>
             <Label htmlFor="materialCost">
-              Material Cost ({formData.type === 'count' ? '$/unit' : `$/${formData.unit || getDefaultUnit(formData.type)}`})
+              Material Cost ({formData.type === 'count' ? '$/unit' : `$/${effectiveUnit}`})
             </Label>
             <Input
               id="materialCost"
