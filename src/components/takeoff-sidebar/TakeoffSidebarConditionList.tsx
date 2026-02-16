@@ -1,6 +1,7 @@
 /**
  * Renders the list of takeoff conditions (search + condition cards) for the Conditions tab.
  */
+import { useState, type ReactNode } from 'react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
@@ -16,9 +17,47 @@ import {
   Scissors,
   Bot,
   Search,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import type { TakeoffCondition } from '../../types';
-import { formatFeetAndInches } from '../../lib/utils';
+import { cn, formatFeetAndInches } from '../../lib/utils';
+
+function getImageSrc(img: string): string {
+  return img.startsWith('data:') || img.startsWith('http') ? img : `data:image/png;base64,${img}`;
+}
+
+function formatConditionValue(
+  condition: TakeoffCondition,
+  measurements: Array<{ sheetId: string; netCalculatedValue?: number | null; calculatedValue: number; perimeterValue?: number | null; areaValue?: number | null }>,
+  selectedDocumentId?: string | null
+): ReactNode {
+  const current = selectedDocumentId ? measurements.filter((m) => m.sheetId === selectedDocumentId) : measurements;
+  const totalValue = current.reduce((sum, m) => sum + (m.netCalculatedValue ?? m.calculatedValue ?? 0), 0);
+  const totalPerimeter = current.reduce((sum, m) => sum + (m.perimeterValue ?? 0), 0);
+  const totalAreaValue = current.reduce((sum, m) => sum + (m.areaValue ?? 0), 0);
+  if (totalValue <= 0) return '0';
+  if (condition.type === 'linear' && condition.includeHeight && condition.height && totalAreaValue > 0) {
+    return (
+      <div className="space-y-1">
+        <div>{formatFeetAndInches(totalValue)} LF</div>
+        <div className="text-xs text-gray-500">{totalAreaValue.toFixed(0)} SF</div>
+      </div>
+    );
+  }
+  if (condition.unit === 'ft' || condition.unit === 'feet' || (condition.type === 'linear' && (condition.unit === 'LF' || condition.unit === 'lf'))) {
+    return formatFeetAndInches(totalValue);
+  }
+  if (condition.unit === 'SF' || condition.unit === 'sq ft') {
+    return (
+      <div className="space-y-1">
+        <div>{totalValue.toFixed(0)} SF</div>
+        {totalPerimeter > 0 && <div className="text-xs text-gray-500">{formatFeetAndInches(totalPerimeter)} LF</div>}
+      </div>
+    );
+  }
+  return `${totalValue.toFixed(2)} ${condition.unit}`;
+}
 
 export interface TakeoffSidebarConditionListProps {
   conditions: TakeoffCondition[];
@@ -83,6 +122,18 @@ export function TakeoffSidebarConditionList({
   onDeleteClick,
   onAddCondition,
 }: TakeoffSidebarConditionListProps) {
+  const [collapsedSearchedSymbols, setCollapsedSearchedSymbols] = useState<Set<string>>(new Set());
+
+  const toggleSearchedSymbol = (conditionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCollapsedSearchedSymbols((prev) => {
+      const next = new Set(prev);
+      if (next.has(conditionId)) next.delete(conditionId);
+      else next.add(conditionId);
+      return next;
+    });
+  };
+
   return (
     <>
       <Input
@@ -93,11 +144,11 @@ export function TakeoffSidebarConditionList({
         placeholder="Search conditions..."
         value={searchQuery}
         onChange={(e) => onSearchChange(e.target.value)}
-        className="mb-4"
+        className="mb-2 h-8"
       />
-      <div className="p-4 space-y-3">
+      <div className="p-2 space-y-2">
         {conditions.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground">
+          <div className="text-center py-6 text-muted-foreground">
             <Calculator className="w-12 h-12 mx-auto mb-2 opacity-50" />
             <p>No takeoff conditions yet</p>
             <p className="text-sm">{onAddCondition ? 'Click the + button to create your first condition' : 'Create your first condition from the header.'}</p>
@@ -106,47 +157,60 @@ export function TakeoffSidebarConditionList({
           conditions.map((condition) => (
             <div
               key={condition.id}
-              className={`p-3 border rounded-lg cursor-pointer transition-colors ${
-                selectedConditionId === condition.id
-                  ? 'border-blue-500 bg-blue-50 shadow-sm'
-                  : (condition as TakeoffCondition & { aiGenerated?: boolean }).aiGenerated
-                    ? 'border-blue-400 bg-blue-100/50 hover:bg-blue-100/70 shadow-sm'
-                    : 'border-gray-200 hover:bg-accent/50'
-              }`}
+              className={cn(
+                'p-2 border rounded-lg cursor-pointer transition-colors',
+                selectedConditionId === condition.id && 'border-blue-500 bg-blue-50 shadow-sm',
+                selectedConditionId !== condition.id && condition.aiGenerated && 'border-blue-400 bg-blue-100/50 hover:bg-blue-100/70 shadow-sm',
+                selectedConditionId !== condition.id && !condition.aiGenerated && 'border-gray-200 hover:bg-accent/50'
+              )}
               onClick={() => onConditionClick(condition)}
             >
-              <div className="flex items-start justify-between mb-2">
+              {(() => {
+                const measurements = getConditionTakeoffMeasurements(projectId, condition.id);
+                const thumbnails = matchThumbnails[condition.id] || [];
+                const isLoadingThumbnails = loadingThumbnails.has(condition.id);
+                return (
+              <>
+              <div className="flex items-start justify-between mb-1">
                 <div className="flex items-start gap-2 min-w-0 flex-1">
                   {getTypeIcon(condition.type)}
                   <div className="min-w-0 flex-1">
-                    <span className="font-medium break-words">{condition.name}</span>
-                    <div className="flex items-center gap-2 mt-1">
-                      <Badge variant="outline" className="text-xs flex-shrink-0">
+                    <div className="relative pr-12">
+                      <span className="font-medium break-words block">{condition.name}</span>
+                      <Badge variant="outline" className="absolute top-0 right-0 text-xs flex-shrink-0">
                         {condition.unit}
                       </Badge>
-                      {(condition as TakeoffCondition & { aiGenerated?: boolean }).aiGenerated && (
-                        <div className="flex items-center gap-1">
-                          <Bot className="w-4 h-4 text-blue-600" />
-                        </div>
-                      )}
                     </div>
-                    {(condition as TakeoffCondition & { searchImage?: string }).searchImage && condition.type === 'auto-count' && (() => {
-                      const img = (condition as TakeoffCondition & { searchImage?: string }).searchImage ?? '';
-                      return (
-                      <div className="mt-2 p-2 bg-indigo-50 border border-indigo-200 rounded-lg">
-                        <div className="text-xs font-medium text-indigo-900 mb-1">Searched Symbol:</div>
-                        <img
-                          src={
-                            img.startsWith('data:') || img.startsWith('http')
-                              ? img
-                              : `data:image/png;base64,${img}`
-                          }
-                          alt="Searched symbol"
-                          className="max-w-full h-auto max-h-24 rounded border border-indigo-300"
-                          style={{ imageRendering: 'crisp-edges' }}
-                        />
+                    {(selectedConditionId === condition.id || condition.aiGenerated) && (
+                      <div className="flex items-center gap-1 mt-1 flex-wrap">
+                        {selectedConditionId === condition.id && (
+                          <Badge variant="default" className="text-xs bg-blue-600" title="Click to deactivate">Active</Badge>
+                        )}
+                        {condition.aiGenerated && <Bot className="w-3 h-3 text-blue-600 flex-shrink-0" />}
                       </div>
-                    ); })()}
+                    )}
+                    {condition.searchImage && condition.type === 'auto-count' && (
+                      <div className="mt-1.5 bg-indigo-50 border border-indigo-200 rounded-lg overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={(e) => toggleSearchedSymbol(condition.id, e)}
+                          className="w-full flex items-center justify-between gap-2 px-2 py-1 text-xs font-medium text-indigo-900 hover:bg-indigo-100/70 transition-colors text-left"
+                        >
+                          Searched symbol
+                          {collapsedSearchedSymbols.has(condition.id) ? <ChevronDown className="w-3 h-3 flex-shrink-0" /> : <ChevronUp className="w-3 h-3 flex-shrink-0" />}
+                        </button>
+                        {!collapsedSearchedSymbols.has(condition.id) && (
+                          <div className="px-2 pb-2 pt-0">
+                            <img
+                              src={getImageSrc(condition.searchImage)}
+                              alt="Searched symbol"
+                              className="max-w-full h-auto max-h-14 rounded border border-indigo-300"
+                              style={{ imageRendering: 'crisp-edges' }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0 ml-2">
@@ -180,51 +244,33 @@ export function TakeoffSidebarConditionList({
                   </Button>
                 </div>
               </div>
-              {selectedConditionId === condition.id && (
-                <div className="mb-2">
-                  <Badge variant="default" className="text-xs bg-blue-600">Active</Badge>
-                  <div className="text-xs text-blue-600 mt-1 font-medium">Click to deactivate</div>
-                </div>
-              )}
-              <p className="text-sm text-muted-foreground mb-2">{condition.description}</p>
+              <p
+                className={`text-sm text-muted-foreground mb-1 ${selectedConditionId === condition.id ? '' : 'line-clamp-2'}`}
+                title={condition.description || undefined}
+              >
+                {condition.description}
+              </p>
               {(condition.type as string) === 'visual-search' && (
                 <>
-                  {(condition as TakeoffCondition & { searchImage?: string }).searchImage
-                    ? (() => {
-                        const img = (condition as TakeoffCondition & { searchImage?: string }).searchImage ?? '';
-                        return (
-                          <div className="mb-3">
-                            <div className="text-xs text-gray-500 mb-1">Search Image:</div>
-                            <div className="border border-gray-200 rounded-lg p-2 bg-gray-50 flex items-center justify-center min-h-[80px]">
-                              <img
-                                src={
-                                  img.startsWith('data:') || img.startsWith('http')
-                                    ? img
-                                    : `data:image/png;base64,${img}`
-                                }
-                                alt="Search template"
-                                className="max-w-full max-h-32 object-contain rounded"
-                                onError={(e) => {
-                                  (e.target as HTMLImageElement).style.display = 'none';
-                                }}
-                              />
-                            </div>
-                          </div>
-                        );
-                      })()
-                    : (
+                  {condition.searchImage ? (
+                    <div className="mb-3">
+                      <div className="text-xs text-gray-500 mb-1">Search Image:</div>
+                      <div className="border border-gray-200 rounded-lg p-2 bg-gray-50 flex items-center justify-center min-h-[80px]">
+                        <img
+                          src={getImageSrc(condition.searchImage)}
+                          alt="Search template"
+                          className="max-w-full max-h-32 object-contain rounded"
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                        />
+                      </div>
+                    </div>
+                  ) : (
                     <div className="mb-2 text-xs text-gray-400 italic">No search image set</div>
                   )}
-                  {(() => {
-                    const measurements = getConditionTakeoffMeasurements(projectId, condition.id);
-                    const hasMatches = measurements.length > 0;
-                    const thumbnails = matchThumbnails[condition.id] || [];
-                    const isLoading = loadingThumbnails.has(condition.id);
-                    if (!hasMatches) return null;
-                    return (
+                  {measurements.length > 0 && (
                       <div className="mb-3">
                         <div className="text-xs text-gray-500 mb-1">Found Items ({measurements.length}):</div>
-                        {isLoading ? (
+                        {isLoadingThumbnails ? (
                           <div className="text-xs text-gray-400 italic">Loading previews...</div>
                         ) : thumbnails.length > 0 ? (
                           <div className="grid grid-cols-3 gap-1">
@@ -248,57 +294,19 @@ export function TakeoffSidebarConditionList({
                           </div>
                         )}
                       </div>
-                    );
-                  })()}
+                  )}
                 </>
               )}
-              <div className="flex items-center gap-4 text-xs">
-                <div className="flex items-center gap-1">
-                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: condition.color }} />
-                  <span>Color</span>
-                </div>
+              <div className="flex items-center gap-3 text-xs">
+                <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: condition.color }} />
                 {condition.type !== 'count' && <span>Waste: {condition.wasteFactor}%</span>}
                 <div className="font-medium text-blue-600">
-                  {(() => {
-                    const measurements = getConditionTakeoffMeasurements(projectId, condition.id);
-                    const currentDocumentMeasurements = selectedDocumentId
-                      ? measurements.filter((m) => m.sheetId === selectedDocumentId)
-                      : measurements;
-                    const totalValue = currentDocumentMeasurements.reduce((sum, m) => {
-                      const value = m.netCalculatedValue !== undefined && m.netCalculatedValue !== null ? m.netCalculatedValue : m.calculatedValue;
-                      return sum + (value || 0);
-                    }, 0);
-                    const totalPerimeter = currentDocumentMeasurements.reduce((sum, m) => sum + (m.perimeterValue || 0), 0);
-                    const totalAreaValue = currentDocumentMeasurements.reduce((sum, m) => sum + (m.areaValue || 0), 0);
-                    const cond = condition as TakeoffCondition & { includeHeight?: boolean; height?: number; unit?: string };
-                    if (totalValue > 0) {
-                      if (cond.type === 'linear' && cond.includeHeight && cond.height && totalAreaValue > 0) {
-                        return (
-                          <div className="space-y-1">
-                            <div>{formatFeetAndInches(totalValue)} LF</div>
-                            <div className="text-xs text-gray-500">{totalAreaValue.toFixed(0)} SF</div>
-                          </div>
-                        );
-                      }
-                      if (cond.unit === 'ft' || cond.unit === 'feet' || (cond.type === 'linear' && (cond.unit === 'LF' || cond.unit === 'lf'))) {
-                        return formatFeetAndInches(totalValue);
-                      }
-                      if (cond.unit === 'SF' || cond.unit === 'sq ft') {
-                        return (
-                          <div className="space-y-1">
-                            <div>{totalValue.toFixed(0)} SF</div>
-                            {totalPerimeter > 0 && (
-                              <div className="text-xs text-gray-500">{formatFeetAndInches(totalPerimeter)} LF</div>
-                            )}
-                          </div>
-                        );
-                      }
-                      return `${totalValue.toFixed(2)} ${cond.unit}`;
-                    }
-                    return '0';
-                  })()}
+                  {formatConditionValue(condition, measurements, selectedDocumentId)}
                 </div>
               </div>
+            </>
+                );
+              })()}
             </div>
           ))
         )}
