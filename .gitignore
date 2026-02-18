@@ -45,6 +45,10 @@ coverage/
 # nyc test coverage
 .nyc_output
 
+# Playwright test artifacts
+playwright-report/
+test-results/
+
 # Uploads and test files
 server/uploads/
 server/data/*.json

@@ -8,7 +8,7 @@ import type { PDFPageProxy, PageViewport } from 'pdfjs-dist';
 import { useAnnotationStore } from '../../store/slices/annotationSlice';
 import { useConditionStore } from '../../store/slices/conditionSlice';
 import { useMeasurementStore } from '../../store/slices/measurementSlice';
-import { useUndoStore } from '../../store/slices/undoSlice';
+import { useUndoStore } from '../../store';
 
 const PASTE_OFFSET = 0.02;
 

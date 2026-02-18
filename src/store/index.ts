@@ -7,6 +7,7 @@ export {
   useAnnotationStore,
   useDocumentViewStore,
   useUserPreferencesStore,
+  useUndoStore,
 } from './useTakeoffStore';
 
 export type {

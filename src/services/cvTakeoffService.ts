@@ -1,10 +1,12 @@
 /**
  * CV Takeoff Service (Frontend)
- * 
- * Client-side service for computer vision-based takeoff detection
+ *
+ * Client-side service for computer vision-based takeoff detection.
+ * Uses apiClient for consistent auth handling, 401 retry, and timeout.
  */
 
-import { supabase } from '../lib/supabase';
+import { apiClient } from './apiService';
+import { extractErrorMessage } from '../utils/commonUtils';
 
 export interface CVTakeoffOptions {
   detectRooms?: boolean;
@@ -45,26 +47,14 @@ export const cvTakeoffService = {
   /**
    * Check if CV takeoff service is available
    */
-  async checkStatus(): Promise<{ 
-    available: boolean; 
+  async checkStatus(): Promise<{
+    available: boolean;
     message: string;
     details?: Record<string, unknown>;
     diagnostics?: unknown;
   }> {
     try {
-      const response = await fetch('/api/cv-takeoff/status', {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(`HTTP error! status: ${response.status}. ${errorData.error || ''}`);
-      }
-
-      const data = await response.json();
+      const { data } = await apiClient.get('/cv-takeoff/status');
       return {
         available: data.available || false,
         message: data.message || 'CV takeoff service status unknown',
@@ -73,10 +63,11 @@ export const cvTakeoffService = {
       };
     } catch (error) {
       console.error('Error checking CV takeoff status:', error);
+      const msg = extractErrorMessage(error);
       return {
         available: false,
-        message: `Failed to check CV takeoff service status: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        details: { error: error instanceof Error ? error.message : 'Unknown error' }
+        message: `Failed to check CV takeoff service status: ${msg}`,
+        details: { error: msg }
       };
     }
   },
@@ -94,27 +85,11 @@ export const cvTakeoffService = {
     completedAt?: Date;
   }> {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const authToken = session?.access_token;
-
-      const response = await fetch(`/api/cv-takeoff/job/${jobId}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(authToken && { 'Authorization': `Bearer ${authToken}` }),
-        },
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
+      const { data } = await apiClient.get(`/cv-takeoff/job/${jobId}`);
       return data;
     } catch (error) {
       console.error('Error getting job status:', error);
-      throw new Error(`Failed to get job status: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw new Error(`Failed to get job status: ${extractErrorMessage(error)}`);
     }
   },
 
@@ -130,41 +105,14 @@ export const cvTakeoffService = {
     onProgress?: (progress: number, status: string) => void
   ): Promise<PageDetectionResult> {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const authToken = session?.access_token;
-
-      // Start the job
-      const startResponse = await fetch('/api/cv-takeoff/process-page', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(authToken && { 'Authorization': `Bearer ${authToken}` }),
-        },
-        body: JSON.stringify({
-          documentId,
-          pageNumber,
-          projectId,
-          scaleFactor,
-          options
-        }),
+      const { data: startData } = await apiClient.post('/cv-takeoff/process-page', {
+        documentId,
+        pageNumber,
+        projectId,
+        scaleFactor,
+        options
       });
 
-      if (!startResponse.ok) {
-        let errorData: Record<string, unknown> = {};
-        try {
-          errorData = (await startResponse.json()) as Record<string, unknown>;
-        } catch {
-          errorData = { error: `HTTP error! status: ${startResponse.status}` };
-        }
-        
-        const errorMessage = (typeof errorData.error === 'string' ? errorData.error : null) ?? `HTTP error! status: ${startResponse.status}`;
-        const errorMessageStr = typeof errorMessage === 'string' 
-          ? errorMessage 
-          : JSON.stringify(errorMessage);
-        throw new Error(errorMessageStr);
-      }
-
-      const startData = await startResponse.json();
       const jobId = startData.jobId;
 
       if (!jobId) {
@@ -201,28 +149,7 @@ export const cvTakeoffService = {
       throw new Error('Job timeout - processing took too long');
     } catch (error) {
       console.error('Error processing page:', error);
-      let errorMessage = 'Unknown error';
-      if (error instanceof Error) {
-        errorMessage = error.message || String(error);
-        if (errorMessage === '[object Object]' || errorMessage.includes('[object Object]')) {
-          try {
-            const err = error as unknown as Record<string, unknown>;
-            errorMessage = (typeof err.message === 'string' ? err.message : null) ?? (typeof err.error === 'string' ? err.error : null) ?? JSON.stringify(error) ?? 'Unknown error';
-          } catch {
-            errorMessage = 'Failed to process page - unknown error';
-          }
-        }
-      } else if (error && typeof error === 'object') {
-        try {
-          const err = error as unknown as Record<string, unknown>;
-          errorMessage = (typeof err.message === 'string' ? err.message : null) ?? (typeof err.error === 'string' ? err.error : null) ?? JSON.stringify(error) ?? 'Unknown error';
-        } catch {
-          errorMessage = 'Failed to process page - unknown error';
-        }
-      } else {
-        errorMessage = String(error);
-      }
-      throw new Error(`Failed to process page: ${errorMessage}`);
+      throw new Error(`Failed to process page: ${extractErrorMessage(error, 'unknown error')}`);
     }
   },
 
@@ -237,34 +164,17 @@ export const cvTakeoffService = {
     options: CVTakeoffOptions = {}
   ): Promise<CVTakeoffResult> {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const authToken = session?.access_token;
-
-      const response = await fetch('/api/cv-takeoff/process-pages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(authToken && { 'Authorization': `Bearer ${authToken}` }),
-        },
-        body: JSON.stringify({
-          documentId,
-          pageNumbers,
-          projectId,
-          scaleFactor,
-          options
-        }),
+      const { data } = await apiClient.post('/cv-takeoff/process-pages', {
+        documentId,
+        pageNumbers,
+        projectId,
+        scaleFactor,
+        options
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
       return data.result;
     } catch (error) {
       console.error('Error processing pages:', error);
-      throw new Error(`Failed to process pages: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw new Error(`Failed to process pages: ${extractErrorMessage(error)}`);
     }
   }
 };

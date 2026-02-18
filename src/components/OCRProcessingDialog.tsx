@@ -66,8 +66,8 @@ export function OCRProcessingDialog({
       const progressInterval = setInterval(async () => {
         try {
           // Get the latest job status
-          const { ocrService } = await import('../services/apiService');
-          const jobStatus = await ocrService.getJobStatus(documentId);
+          const { ocrApiService } = await import('../services/apiService');
+          const jobStatus = await ocrApiService.getJobStatus(documentId);
           
           if (jobStatus) {
             setProgress(jobStatus.progress || 0);

@@ -294,6 +294,28 @@ export const safeJsonStringify = (obj: unknown, fallback: string = '{}'): string
 };
 
 /**
+ * Extract a human-readable error message from unknown error values.
+ * Handles Error instances, objects with .message or .error, and primitives.
+ */
+export const extractErrorMessage = (error: unknown, fallback = 'Unknown error'): string => {
+  if (error instanceof Error) {
+    const msg = error.message || String(error);
+    if (msg !== '[object Object]' && !msg.includes('[object Object]')) return msg;
+  }
+  if (error && typeof error === 'object') {
+    try {
+      const err = error as Record<string, unknown>;
+      const msg = typeof err.message === 'string' ? err.message : null;
+      const errProp = typeof err.error === 'string' ? err.error : null;
+      return msg ?? errProp ?? JSON.stringify(error) ?? fallback;
+    } catch {
+      return fallback;
+    }
+  }
+  return error != null ? String(error) : fallback;
+};
+
+/**
  * Check if a value is empty (null, undefined, empty string, empty array, empty object)
  */
 export const isEmpty = (value: unknown): boolean => {

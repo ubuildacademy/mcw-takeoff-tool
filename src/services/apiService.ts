@@ -83,7 +83,8 @@ interface ApiMeasurementRow {
 // If not set, it falls back to '/api' which relies on vercel.json rewrites
 // For best results, set VITE_API_BASE_URL=https://your-railway-url.up.railway.app/api in Vercel
 
-const apiClient = axios.create({
+/** Axios client with auth interceptors; use for all authenticated API calls. */
+export const apiClient = axios.create({
   baseURL: API_BASE_URL,
   timeout: 600000, // 10 minutes for large file uploads
   headers: {
@@ -602,8 +603,8 @@ export const settingsService = {
   }
 };
 
-// OCR service
-export const ocrService = {
+// OCR API (server-side REST endpoints)
+export const ocrApiService = {
   async processDocument(documentId: string, projectId: string) {
     // Use the correct OCR endpoint that matches the backend
     const response = await apiClient.post(`/ocr/process-document/${documentId}`, {

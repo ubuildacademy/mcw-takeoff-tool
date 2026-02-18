@@ -962,5 +962,5 @@ class OCRService {
   }
 }
 
-// Export singleton instance
-export const ocrService = new OCRService();
+// Export singleton instance (client-side Tesseract OCR)
+export const clientOcrService = new OCRService();

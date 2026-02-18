@@ -10,7 +10,7 @@ import { useMeasurementStore } from '../store/slices/measurementSlice';
 import { useCalibrationStore } from '../store/slices/calibrationSlice';
 import { useAnnotationStore } from '../store/slices/annotationSlice';
 import { useDocumentViewStore } from '../store/slices/documentViewSlice';
-import { useUndoStore } from '../store/slices/undoSlice';
+import { useUndoStore } from '../store';
 import type { TakeoffCondition, Sheet, ProjectFile, PDFDocument, SearchResult } from '../types';
 import { toast } from 'sonner';
 import { triggerCalibration, triggerFitToWindow, getCurrentScrollPosition } from '../lib/windowBridge';

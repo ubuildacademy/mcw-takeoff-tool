@@ -1,4 +1,4 @@
-import { ocrService } from './apiService';
+import { ocrApiService } from './apiService';
 
 export interface OCRResult {
   pageNumber: number;
@@ -65,12 +65,12 @@ class ServerOCRService {
     
     try {
       // Start OCR processing on server
-      const startResponse = await ocrService.processDocument(documentId, projectId);
+      const startResponse = await ocrApiService.processDocument(documentId, projectId);
       
       if (startResponse.alreadyProcessed) {
         // Document already processed, fetching results
         // Document already processed, fetch results
-        const resultsResponse = await ocrService.getDocumentResults(documentId, projectId);
+        const resultsResponse = await ocrApiService.getDocumentResults(documentId, projectId);
         return resultsResponse;
       }
 
@@ -96,7 +96,7 @@ class ServerOCRService {
 
     while (attempts < maxAttempts) {
       try {
-        const statusResponse = await ocrService.getJobStatus(jobId);
+        const statusResponse = await ocrApiService.getJobStatus(jobId);
         
         // OCR progress update
         
@@ -106,7 +106,7 @@ class ServerOCRService {
             console.log('📸 Server found no embedded text, triggering client-side image-based OCR fallback...');
             
             // Fetch results to check if we got any
-            const resultsResponse = await ocrService.getDocumentResults(documentId, projectId);
+            const resultsResponse = await ocrApiService.getDocumentResults(documentId, projectId);
             
             // If no results, trigger client-side OCR
             if (!resultsResponse.results || resultsResponse.results.length === 0) {
@@ -118,7 +118,7 @@ class ServerOCRService {
           }
           
           // OCR processing completed with results
-          const resultsResponse = await ocrService.getDocumentResults(documentId, projectId);
+          const resultsResponse = await ocrApiService.getDocumentResults(documentId, projectId);
           return resultsResponse;
         }
         
@@ -163,7 +163,7 @@ class ServerOCRService {
       console.log('📄 PDF URL obtained, starting Tesseract.js OCR...');
       
       // Use existing client-side OCR service
-      const { ocrService: clientOcrService } = await import('./ocrService');
+      const { clientOcrService } = await import('./clientOcrService');
       const ocrResult = await clientOcrService.processDocument(documentId, pdfUrl);
       
       console.log(`✅ Client-side OCR completed: ${ocrResult.pages.length} pages processed`);
@@ -178,7 +178,7 @@ class ServerOCRService {
       }));
       
       // Send results back to server
-      await ocrService.submitClientResults(documentId, projectId, serverResults, jobId);
+      await ocrApiService.submitClientResults(documentId, projectId, serverResults, jobId);
       
       console.log('✅ Client-side OCR results submitted to server');
       
@@ -218,7 +218,7 @@ class ServerOCRService {
     try {
       if (documentId) {
         // Search specific document
-        const searchResponse = await ocrService.searchDocument(documentId, query, projectId);
+        const searchResponse = await ocrApiService.searchDocument(documentId, query, projectId);
         return this.formatSearchResults(searchResponse, documentId);
       } else {
         // Search all documents (would need to implement this on server)
@@ -253,7 +253,7 @@ class ServerOCRService {
   async getDocumentData(documentId: string, projectId: string): Promise<DocumentOCRData | null> {
     try {
       // Getting OCR data for document
-      const resultsResponse = await ocrService.getDocumentResults(documentId, projectId);
+      const resultsResponse = await ocrApiService.getDocumentResults(documentId, projectId);
       
       // CRITICAL FIX: Ensure resultsResponse is valid and has a results array
       if (!resultsResponse || typeof resultsResponse !== 'object') {

@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { ocrService } from '../../services/apiService';
+import { ocrApiService } from '../../services/apiService';
 import type { ProjectFile } from '../../types';
 import type { OcrJobEntry } from './TakeoffWorkspaceHeader.types';
 
@@ -48,7 +48,7 @@ export function useTakeoffWorkspaceOCR({
       const pollInterval = setInterval(async () => {
         try {
           if (!projectId) return;
-          const results = await ocrService.getDocumentResults(documentId, projectId);
+          const results = await ocrApiService.getDocumentResults(documentId, projectId);
 
           if (results && results.results && results.results.length > 0) {
             setOcrJobs((prev) => {

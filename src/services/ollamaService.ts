@@ -64,104 +64,58 @@ export interface OllamaStreamResponse {
 }
 
 class OllamaService {
-  private baseUrl: string;
   private apiKey: string;
   private defaultModel: string = 'gpt-oss:120b'; // Default to largest GPT-OSS model available
   private isConnected: boolean = false;
   private connectionRetries: number = 0;
-  private maxRetries: number = 3;
-  private retryDelay: number = 1000; // 1 second
+  private retryDelay: number = 1000; // Used by chatStream retries
   /** Last error message from server (e.g. "Ollama API key not configured") for UI display */
   private lastErrorMessage: string | null = null;
 
   constructor() {
-    // Use consistent API base URL logic - backend proxy avoids CORS issues
-    // Initialize baseUrl lazily to avoid require() issues in browser
-    this.baseUrl = '/api/ollama'; // Default, will be updated by _initializeBaseUrl()
-    this._initializeBaseUrl();
-    
-    // Note: API key is handled by backend, this is just for reference
     this.apiKey = import.meta.env.VITE_OLLAMA_API_KEY || '';
-    
-    // Debug logging - will log after baseUrl is initialized
-    this._initializeBaseUrl().then(() => {
-      console.log('OllamaService initialized with:', {
-        baseUrl: this.baseUrl,
-        hasApiKey: !!this.apiKey,
-        apiKeyLength: this.apiKey.length,
-        note: 'API key is handled by backend'
-      });
-    });
-  }
-
-  private async _initializeBaseUrl() {
-    try {
-      const { getApiBaseUrl } = await import('../lib/apiConfig');
-      const API_BASE_URL = getApiBaseUrl();
-      this.baseUrl = `${API_BASE_URL}/ollama`;
-    } catch {
-      // Fallback to default
-      this.baseUrl = '/api/ollama';
+    if (import.meta.env.DEV) {
+      console.log('OllamaService initialized (uses apiClient for auth)');
     }
   }
 
-  private async getBaseUrl(): Promise<string> {
-    if (this.baseUrl === '/api/ollama') {
-      await this._initializeBaseUrl();
+  private setLastErrorFromAxios(error: { response?: { data?: { error?: string }; status?: number } }): void {
+    if (error.response?.status != null && error.response.status >= 400 && error.response.status < 500) {
+      const err = error.response.data;
+      this.lastErrorMessage = err && typeof err === 'object' && typeof err.error === 'string'
+        ? err.error
+        : null;
     }
-    return this.baseUrl;
   }
 
   // Get list of available models (cloud models)
   async getModels(): Promise<OllamaModel[]> {
+    const { apiClient } = await import('./apiService');
     try {
-      const response = await this.makeRequest('/models', {
-        method: 'GET'
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch models: ${response.statusText}`);
-      }
-      
-      const data = await response.json();
-      
-      // Update connection status on successful response
+      const { data } = await apiClient.get('/ollama/models');
       this.isConnected = true;
       this.connectionRetries = 0;
-      
       return data.models || [];
     } catch (error) {
       console.error('Error fetching Ollama models:', error);
       this.isConnected = false;
       this.connectionRetries++;
+      this.setLastErrorFromAxios(error as Parameters<typeof this.setLastErrorFromAxios>[0]);
       throw new Error('Failed to connect to Ollama cloud API. Check your API key.');
     }
   }
 
-  // Check if Ollama cloud API is accessible with retry logic
+  // Check if Ollama cloud API is accessible
   async isAvailable(): Promise<boolean> {
     this.lastErrorMessage = null;
+    const { apiClient } = await import('./apiService');
     try {
-      const response = await this.makeRequest('/models', {
-        method: 'GET',
-        signal: AbortSignal.timeout(15000) // 15s — server may need to call ollama.com
-      });
-      
-      this.isConnected = response.ok;
+      await apiClient.get('/ollama/models', { timeout: 15000 });
+      this.isConnected = true;
       this.connectionRetries = 0;
-      if (!response.ok) {
-        try {
-          const body = await response.json();
-          if (body && typeof body.error === 'string') {
-            this.lastErrorMessage = body.error;
-          }
-        } catch {
-          // ignore parse errors
-        }
-      }
-      return response.ok;
+      return true;
     } catch (error) {
-      console.warn('Ollama cloud API not available:', error);
+      this.setLastErrorFromAxios(error as Parameters<typeof this.setLastErrorFromAxios>[0]);
       this.isConnected = false;
       return false;
     }
@@ -172,64 +126,6 @@ class OllamaService {
     return this.lastErrorMessage;
   }
 
-  // Robust request method with retry logic
-  // Includes Supabase auth token so server requireAuth middleware accepts the request
-  private async makeRequest(endpoint: string, options: RequestInit = {}, retryCount: number = 0): Promise<Response> {
-    try {
-      const { supabase } = await import('../lib/supabase');
-      let { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) {
-        await supabase.auth.refreshSession();
-        const next = await supabase.auth.getSession();
-        session = next.data.session ?? null;
-      }
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        ...(options.headers as Record<string, string>),
-      };
-      if (session?.access_token) {
-        headers['Authorization'] = `Bearer ${session.access_token}`;
-      }
-
-      const baseUrl = await this.getBaseUrl();
-      const response = await fetch(`${baseUrl}${endpoint}`, {
-        ...options,
-        headers,
-      });
-
-      // Don't retry on 4xx (e.g. 400 = API key not configured) — fix config first
-      const is4xx = response.status >= 400 && response.status < 500;
-      if (!response.ok && is4xx) {
-        try {
-          const body = await response.clone().json();
-          if (body && typeof body.error === 'string') {
-            this.lastErrorMessage = body.error;
-          }
-        } catch {
-          // ignore
-        }
-      }
-      if (response.ok) {
-        this.lastErrorMessage = null;
-      }
-      if (!response.ok && !is4xx && retryCount < this.maxRetries) {
-        console.warn(`Request failed (${response.status}), retrying... (${retryCount + 1}/${this.maxRetries})`);
-        await this.delay(this.retryDelay * (retryCount + 1));
-        return this.makeRequest(endpoint, options, retryCount + 1);
-      }
-
-      return response;
-    } catch (error) {
-      if (retryCount < this.maxRetries) {
-        console.warn(`Network error, retrying... (${retryCount + 1}/${this.maxRetries}):`, error);
-        await this.delay(this.retryDelay * (retryCount + 1));
-        return this.makeRequest(endpoint, options, retryCount + 1);
-      }
-      throw error;
-    }
-  }
-
-  // Utility method for delays
   private delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
@@ -244,31 +140,19 @@ class OllamaService {
 
   // Send a chat message to Ollama cloud with robust error handling
   async chat(request: OllamaChatRequest): Promise<OllamaChatResponse> {
+    const { apiClient } = await import('./apiService');
     try {
-      const response = await this.makeRequest('/chat', {
-        method: 'POST',
-        body: JSON.stringify({
-          model: request.model,
-          messages: request.messages,
-          stream: false,
-          options: {
-            temperature: request.options?.temperature || 0.7,
-            top_p: request.options?.top_p || 0.9,
-          }
-        })
+      const { data } = await apiClient.post('/ollama/chat', {
+        model: request.model,
+        messages: request.messages,
+        stream: false,
+        options: {
+          temperature: request.options?.temperature || 0.7,
+          top_p: request.options?.top_p || 0.9,
+        }
       });
-
-      if (!response.ok) {
-        throw new Error(`Ollama API error: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      
-      // Update connection status on successful response
       this.isConnected = true;
       this.connectionRetries = 0;
-      
-      // Ollama API response format
       return {
         model: data.model,
         created_at: data.created_at,
@@ -287,14 +171,24 @@ class OllamaService {
   }
 
   // Send a streaming chat message to Ollama cloud with robust error handling
+  // Uses fetch for streaming (ReadableStream); apiClient does not support streaming responses
   async *chatStream(request: OllamaChatRequest): AsyncGenerator<OllamaStreamResponse, void, unknown> {
     let retryCount = 0;
     const maxStreamRetries = 2;
+    const { getApiBaseUrl } = await import('../lib/apiConfig');
+    const { authHelpers } = await import('../lib/supabase');
 
     while (retryCount <= maxStreamRetries) {
       try {
-        const response = await this.makeRequest('/chat', {
+        const session = await authHelpers.getValidSession();
+        const baseUrl = getApiBaseUrl();
+        const url = `${baseUrl}/ollama/chat`;
+        const response = await fetch(url, {
           method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(session?.access_token && { Authorization: `Bearer ${session.access_token}` }),
+          },
           body: JSON.stringify({
             model: request.model,
             messages: request.messages,
@@ -390,26 +284,13 @@ class OllamaService {
   }
 
   // Generate embeddings for text (useful for document similarity)
+  // Note: Server may not have /embeddings route; will 404 if not implemented
   async generateEmbedding(model: string, prompt: string): Promise<number[]> {
+    const { apiClient } = await import('./apiService');
     try {
-      const response = await this.makeRequest('/embeddings', {
-        method: 'POST',
-        body: JSON.stringify({
-          model,
-          prompt
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`Ollama API error: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      
-      // Update connection status on successful response
+      const { data } = await apiClient.post('/ollama/embeddings', { model, prompt });
       this.isConnected = true;
       this.connectionRetries = 0;
-      
       return data.embedding || [];
     } catch (error) {
       console.error('Error generating embedding:', error);

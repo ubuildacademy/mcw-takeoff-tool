@@ -5,6 +5,7 @@ import {
   safeJsonStringify,
   isEmpty,
   getDefaultUnit,
+  extractErrorMessage,
 } from './commonUtils';
 
 describe('commonUtils', () => {
@@ -73,6 +74,29 @@ describe('commonUtils', () => {
       expect(getDefaultUnit('area')).toBe('SF');
       expect(getDefaultUnit('volume')).toBe('CY');
       expect(getDefaultUnit('count')).toBe('EA');
+    });
+  });
+
+  describe('extractErrorMessage', () => {
+    it('extracts message from Error instance', () => {
+      expect(extractErrorMessage(new Error('foo'))).toBe('foo');
+    });
+
+    it('extracts message from object with .message', () => {
+      expect(extractErrorMessage({ message: 'bar' })).toBe('bar');
+    });
+
+    it('extracts .error string from object', () => {
+      expect(extractErrorMessage({ error: 'baz' })).toBe('baz');
+    });
+
+    it('returns fallback for null/undefined', () => {
+      expect(extractErrorMessage(null)).toBe('Unknown error');
+      expect(extractErrorMessage(null, 'custom')).toBe('custom');
+    });
+
+    it('converts primitives to string', () => {
+      expect(extractErrorMessage(42)).toBe('42');
     });
   });
 });

@@ -12,7 +12,7 @@ import {
   AlertCircle,
   X
 } from 'lucide-react';
-import { ocrService } from '../services/apiService';
+import { ocrApiService } from '../services/apiService';
 import { debounce } from '../utils/commonUtils';
 import type { PDFDocument } from '../types';
 
@@ -77,7 +77,7 @@ export function SearchTab({
 
       if (documentId) {
         try {
-          const response = await ocrService.searchDocument(documentId, query, projectId);
+          const response = await ocrApiService.searchDocument(documentId, query, projectId);
           if (response.results && response.results.length > 0) {
             results[documentId] = response.results;
           }
@@ -87,7 +87,7 @@ export function SearchTab({
       } else {
         for (const doc of ocrEnabledDocuments) {
           try {
-            const response = await ocrService.searchDocument(doc.id, query, projectId);
+            const response = await ocrApiService.searchDocument(doc.id, query, projectId);
             if (response.results && response.results.length > 0) {
               const validResults = response.results.filter((r: unknown): r is SearchResultItem => r != null && typeof r === 'object' && (r as SearchResultItem).pageNumber != null);
               results[doc.id] = validResults;

@@ -5,7 +5,7 @@ import { useProjectStore } from '../store/slices/projectSlice';
 import { useConditionStore } from '../store/slices/conditionSlice';
 import { useMeasurementStore } from '../store/slices/measurementSlice';
 import { useAnnotationStore } from '../store/slices/annotationSlice';
-import { useUndoStore } from '../store/slices/undoSlice';
+import { useUndoStore } from '../store';
 import { useUserPreferencesStore } from '../store/slices/userPreferencesSlice';
 import type { PDFViewerProps, Measurement } from './PDFViewer.types';
 import { usePDFLoad } from './pdf-viewer/usePDFLoad';
