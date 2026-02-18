@@ -1,4 +1,4 @@
-// Meridian Takeoff API server
+/** Meridian Takeoff API server */
 import dotenv from 'dotenv';
 import path from 'path';
 
