@@ -9,7 +9,7 @@ SUPABASE_URL=https://mxjyytwfhmoonkduvybr.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
 PORT=4000
 NODE_ENV=development
-FRONTEND_URL=http://localhost:3000
+FRONTEND_URL=http://localhost:3001
 
 # Redis Configuration (Required for CV Takeoff background processing)
 REDIS_URL=redis://localhost:6379
@@ -20,33 +20,13 @@ REDIS_URL=redis://localhost:6379
 OLLAMA_BASE_URL=https://ollama.com
 OLLAMA_API_KEY=your_ollama_api_key_here
 
-# Email Configuration (choose ONE approach)
-
-# Option A: Supabase Edge Function (recommended - keeps SMTP secrets in Supabase)
-USE_SUPABASE_EDGE_EMAIL=true
-# SMTP_* secrets are set via: supabase secrets set SMTP_HOST=... etc.
-# See docs/EMAIL_SETUP.md for full setup
-
-# Option B: Direct SMTP (server sends via nodemailer)
-SMTP_HOST=smtp.office365.com
-SMTP_PORT=587
-SMTP_USER=mailer@yourdomain.com
-SMTP_PASSWORD=your-mailbox-password
-SMTP_FROM=noreply@meridiantakeoff.com
+# Email (Microsoft Graph - invitation emails)
+GRAPH_CLIENT_ID=your_azure_app_client_id
+GRAPH_TENANT_ID=your_azure_tenant_id
+GRAPH_CLIENT_SECRET=your_azure_client_secret
+GRAPH_SENDER_EMAIL=noreply@yourdomain.com
+FRONTEND_URL=http://localhost:3001
 ```
-
-### Email Configuration
-
-See **docs/EMAIL_SETUP.md** for full setup (Supabase Auth SMTP, Edge Function, Microsoft 365).
-
-**Option A – Supabase Edge Function (recommended):**
-- Deploy `supabase functions deploy send-email-smtp`
-- Set SMTP secrets in Supabase, then set `USE_SUPABASE_EDGE_EMAIL=true` in server `.env`
-
-**Option B – Direct SMTP:**
-- Set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` in server `.env`
-
-**Microsoft 365:** Use `smtp.office365.com`, port `587`, with a mailbox that has SMTP AUTH enabled
 
 **Ollama API Configuration (Optional):**
 - `OLLAMA_BASE_URL`: Ollama API base URL (defaults to `https://ollama.com`)
@@ -54,9 +34,6 @@ See **docs/EMAIL_SETUP.md** for full setup (Supabase Auth SMTP, Edge Function, M
   - Required for: AI Takeoff, Chat features, Sheet analysis
   - Get your API key from: https://ollama.com/account/api-keys
 
-**Other Optional:**
-- `SMTP_FROM`: The "from" email address (defaults to `SMTP_USER`)
-- `FRONTEND_URL`: Base URL for invitation links (defaults to `http://localhost:3000`)
 
 ### Getting Your Supabase Service Role Key
 
