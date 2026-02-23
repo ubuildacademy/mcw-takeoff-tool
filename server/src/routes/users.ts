@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { Router } from 'express';
 import { supabase } from '../supabase';
 import { emailService } from '../services/emailService';
