@@ -20,29 +20,33 @@ REDIS_URL=redis://localhost:6379
 OLLAMA_BASE_URL=https://ollama.com
 OLLAMA_API_KEY=your_ollama_api_key_here
 
-# Email Configuration (Required for user invitations)
-SMTP_HOST=smtp.gmail.com
+# Email Configuration (choose ONE approach)
+
+# Option A: Supabase Edge Function (recommended - keeps SMTP secrets in Supabase)
+USE_SUPABASE_EDGE_EMAIL=true
+# SMTP_* secrets are set via: supabase secrets set SMTP_HOST=... etc.
+# See docs/EMAIL_SETUP.md for full setup
+
+# Option B: Direct SMTP (server sends via nodemailer)
+SMTP_HOST=smtp.office365.com
 SMTP_PORT=587
-SMTP_USER=your-email@gmail.com
-SMTP_PASSWORD=your-app-password
+SMTP_USER=mailer@yourdomain.com
+SMTP_PASSWORD=your-mailbox-password
 SMTP_FROM=noreply@meridiantakeoff.com
 ```
 
 ### Email Configuration
 
-To enable email invitations, configure SMTP settings:
+See **docs/EMAIL_SETUP.md** for full setup (Supabase Auth SMTP, Edge Function, Microsoft 365).
 
-**For Gmail:**
-1. Enable 2-factor authentication on your Google account
-2. Generate an App Password: https://myaccount.google.com/apppasswords
-3. Use the App Password as `SMTP_PASSWORD`
-4. Use `smtp.gmail.com` as `SMTP_HOST` and `587` as `SMTP_PORT`
+**Option A – Supabase Edge Function (recommended):**
+- Deploy `supabase functions deploy send-email-smtp`
+- Set SMTP secrets in Supabase, then set `USE_SUPABASE_EDGE_EMAIL=true` in server `.env`
 
-**For Other Email Providers:**
-- **Outlook/Hotmail**: `smtp-mail.outlook.com`, port `587`
-- **SendGrid**: Use SendGrid SMTP settings
-- **AWS SES**: Use AWS SES SMTP credentials
-- **Custom SMTP**: Configure with your provider's SMTP settings
+**Option B – Direct SMTP:**
+- Set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` in server `.env`
+
+**Microsoft 365:** Use `smtp.office365.com`, port `587`, with a mailbox that has SMTP AUTH enabled
 
 **Ollama API Configuration (Optional):**
 - `OLLAMA_BASE_URL`: Ollama API base URL (defaults to `https://ollama.com`)

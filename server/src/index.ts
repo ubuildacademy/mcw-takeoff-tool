@@ -27,6 +27,7 @@ import settingsRoutes from './routes/settings';
 import titleblockRoutes from './routes/titleblock';
 import calibrationRoutes from './routes/calibrations';
 import authRoutes from './routes/auth';
+import { logEmailConfigStatus } from './services/emailService';
 import { livePreviewService } from './services/livePreviewService';
 // Initialize queue service (starts worker)
 import './services/queueService';
@@ -386,6 +387,7 @@ async function ensureModelExists() {
   await ensureModelExists();
   
   const server = app.listen(PORT, '0.0.0.0', () => {
+    logEmailConfigStatus();
     console.log(`🚀 Takeoff API server running on port ${PORT}`);
     console.log(`🌐 Server accessible at http://0.0.0.0:${PORT}`);
     console.log(`📝 NODE_ENV: ${process.env.NODE_ENV || 'development'}`);

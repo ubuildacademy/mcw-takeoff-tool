@@ -422,13 +422,14 @@ When answering questions:
       if (result?.email_sent) {
         toast.success('Invitation created and email sent successfully!');
       } else {
-        toast.warning(`Invitation created, but email was not sent. Please configure SMTP settings in your backend. Invitation URL: ${result?.invite_url || 'N/A'}`);
+        toast.warning(`Invitation created, but email was not sent. Check server logs for details. Invitation URL: ${result?.invite_url || 'N/A'}`);
       }
     } catch (error: unknown) {
       console.error('Error sending invitation:', error);
       const err = error as Record<string, unknown>;
       const data = (err?.response as Record<string, unknown> | undefined)?.data as Record<string, unknown> | undefined;
-      const errorMessage = typeof data?.error === 'string' ? data.error : (typeof err?.message === 'string' ? err.message : 'Failed to send invitation');
+      let errorMessage = typeof data?.error === 'string' ? data.error : (typeof err?.message === 'string' ? err.message : 'Failed to send invitation');
+      if (typeof data?.details === 'string') errorMessage += ` (${data.details})`;
       toast.error(`Failed to create invitation: ${errorMessage}`);
     } finally {
       setIsInviting(false);

@@ -49,13 +49,17 @@ router.post('/invitations', requireAuth, requireAdmin, async (req, res) => {
     }
 
     // Check if invitation already exists
-    const { data: existingInvitation } = await supabase
+    const { data: existingInvitation, error: existingError } = await supabase
       .from('user_invitations')
-      .select('*')
+      .select('id')
       .eq('email', email)
       .eq('status', 'pending')
-      .single();
+      .maybeSingle();
 
+    if (existingError) {
+      console.error('Error checking existing invitation:', existingError);
+      return res.status(500).json({ error: 'Failed to check invitations', details: existingError.message });
+    }
     if (existingInvitation) {
       return res.status(400).json({ error: 'Invitation already exists' });
     }
@@ -78,7 +82,7 @@ router.post('/invitations', requireAuth, requireAdmin, async (req, res) => {
 
     if (error) {
       console.error('Error creating invitation:', error);
-      return res.status(500).json({ error: 'Failed to create invitation' });
+      return res.status(500).json({ error: 'Failed to create invitation', details: error.message });
     }
 
     // Send email invitation
@@ -102,8 +106,12 @@ router.post('/invitations', requireAuth, requireAdmin, async (req, res) => {
       email_sent: emailSent
     });
   } catch (error) {
-    console.error('Error in create invitation:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    const err = error instanceof Error ? error : new Error(String(error));
+    console.error('Error in create invitation:', err);
+    res.status(500).json({
+      error: 'Internal server error',
+      details: process.env.NODE_ENV !== 'production' ? err.message : undefined,
+    });
   }
 });
 

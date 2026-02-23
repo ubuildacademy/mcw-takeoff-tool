@@ -1,5 +1,5 @@
-// Email service for sending invitations
-// Supports SMTP configuration via environment variables
+// Email service for sending invitations and transactional emails
+// Supports: (1) Supabase Edge Function SMTP, (2) Direct SMTP via nodemailer
 
 import nodemailer from 'nodemailer';
 
@@ -11,65 +11,212 @@ export interface InvitationEmailData {
   expiresAt: string;
 }
 
-// Create reusable transporter
+/** Direct Graph API when all credentials are in server env. */
+const getGraphConfig = () => {
+  const clientId = process.env.GRAPH_CLIENT_ID;
+  const tenantId = process.env.GRAPH_TENANT_ID;
+  const clientSecret = process.env.GRAPH_CLIENT_SECRET;
+  const senderEmail = process.env.GRAPH_SENDER_EMAIL;
+  if (!clientId || !tenantId || !clientSecret || !senderEmail) return null;
+  return { clientId, tenantId, clientSecret, senderEmail };
+};
+
+/** Use Supabase Edge Function when URL and service key are set. */
+const getEdgeFunctionConfig = () => {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  const useGraph = process.env.USE_GRAPH_EMAIL === 'true';
+  const fn = useGraph ? 'send-email-graph' : 'send-email-smtp';
+  return {
+    url: `${url.replace(/\/$/, '')}/functions/v1/${fn}`,
+    key,
+  };
+};
+
+async function sendViaGraph(config: { clientId: string; tenantId: string; clientSecret: string; senderEmail: string }, options: { to: string | string[]; subject: string; text: string; html?: string }): Promise<boolean> {
+  const tokenRes = await fetch(
+    `https://login.microsoftonline.com/${config.tenantId}/oauth2/v2.0/token`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: config.clientId,
+        client_secret: config.clientSecret,
+        grant_type: 'client_credentials',
+        scope: 'https://graph.microsoft.com/.default',
+      }),
+    }
+  );
+  if (!tokenRes.ok) {
+    const err = await tokenRes.text();
+    throw new Error(`Graph token failed: ${err}`);
+  }
+  const tokenData = (await tokenRes.json()) as { access_token: string };
+  const access_token = tokenData.access_token;
+  const toList = Array.isArray(options.to) ? options.to : [options.to];
+  const sendRes = await fetch(
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(config.senderEmail)}/sendMail`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        message: {
+          subject: options.subject,
+          body: { contentType: options.html ? 'HTML' : 'Text', content: options.html || options.text },
+          toRecipients: toList.map((addr) => ({ emailAddress: { address: addr } })),
+        },
+        saveToSentItems: true,
+      }),
+    }
+  );
+  if (!sendRes.ok) {
+    const err = await sendRes.text();
+    throw new Error(`Graph sendMail failed: ${sendRes.status} ${err}`);
+  }
+  return true;
+}
+
+/** Create nodemailer transport for direct SMTP (used when not using Edge Function). */
 const getTransporter = () => {
-  // Check if SMTP is configured
   const smtpHost = process.env.SMTP_HOST;
   const smtpPort = process.env.SMTP_PORT;
   const smtpUser = process.env.SMTP_USER;
   const smtpPassword = process.env.SMTP_PASSWORD;
-  const smtpFrom = process.env.SMTP_FROM || smtpUser || 'noreply@meridiantakeoff.com';
 
-  // If SMTP is not configured, return null (will log instead)
-  if (!smtpHost || !smtpUser || !smtpPassword) {
-    return null;
-  }
+  if (!smtpHost || !smtpUser || !smtpPassword) return null;
 
   return nodemailer.createTransport({
     host: smtpHost,
     port: parseInt(smtpPort || '587'),
-    secure: smtpPort === '465', // true for 465, false for other ports
-    auth: {
-      user: smtpUser,
-      pass: smtpPassword,
-    },
-    // Allow self-signed certificates (useful for some SMTP servers)
-    tls: {
-      rejectUnauthorized: false,
-    },
+    secure: smtpPort === '465',
+    auth: { user: smtpUser, pass: smtpPassword },
+    tls: { rejectUnauthorized: process.env.SMTP_REJECT_UNAUTHORIZED !== 'false' },
   });
 };
 
+/** Log which email method is configured at startup (call from server index). */
+export function logEmailConfigStatus(): void {
+  const graph = getGraphConfig();
+  const edge = getEdgeFunctionConfig();
+  const useEdge = process.env.USE_SUPABASE_EDGE_EMAIL === 'true' && edge;
+  const smtp = getTransporter();
+
+  if (graph) {
+    console.log('📧 Email: Microsoft Graph (direct) – sender:', process.env.GRAPH_SENDER_EMAIL);
+  } else if (useEdge) {
+    console.log('📧 Email: Supabase Edge Function –', process.env.USE_GRAPH_EMAIL === 'true' ? 'Graph' : 'SMTP');
+  } else if (smtp) {
+    console.log('📧 Email: Direct SMTP –', process.env.SMTP_HOST);
+  } else {
+    console.log('📧 Email: Not configured – invitations will not be sent');
+  }
+}
+
+const logInvitationFallback = (data: InvitationEmailData) => {
+  console.log('📧 INVITATION EMAIL (Email not configured - not sent):');
+  console.log('=====================================');
+  console.log(`To: ${data.email}`);
+  console.log(`Role: ${data.role}`);
+  console.log(`Invite URL: ${data.inviteUrl}`);
+  console.log(`Invited by: ${data.invitedBy}`);
+  console.log(`Expires: ${data.expiresAt}`);
+  console.log('=====================================');
+  console.log('⚠️  Configure either:');
+  console.log('   (A) Direct Graph: GRAPH_CLIENT_ID, GRAPH_TENANT_ID, GRAPH_CLIENT_SECRET, GRAPH_SENDER_EMAIL in server .env');
+  console.log('   (B) Edge Function: deploy send-email-graph, set secrets, USE_SUPABASE_EDGE_EMAIL=true, USE_GRAPH_EMAIL=true');
+  console.log('   (C) Direct SMTP: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD');
+};
+
 export const emailService = {
+  /** Send email via Direct Graph, Edge Function, or direct SMTP. Returns true if sent successfully. */
+  async sendEmail(options: {
+    to: string | string[];
+    subject: string;
+    text: string;
+    html?: string;
+  }): Promise<boolean> {
+    const graphConfig = getGraphConfig();
+    if (graphConfig) {
+      try {
+        const ok = await sendViaGraph(graphConfig, options);
+        if (ok) console.log('✅ Email sent via Microsoft Graph:', options.to);
+        return ok;
+      } catch (e) {
+        console.error('❌ Graph send failed:', e);
+        return false;
+      }
+    }
+
+    const edgeConfig = getEdgeFunctionConfig();
+    const useEdge =
+      process.env.USE_SUPABASE_EDGE_EMAIL === 'true' && edgeConfig;
+
+    if (useEdge) {
+      try {
+        const res = await fetch(edgeConfig!.url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${edgeConfig!.key}`,
+          },
+          body: JSON.stringify({
+            to: options.to,
+            subject: options.subject,
+            text: options.text,
+            html: options.html,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.text();
+          throw new Error(err || `HTTP ${res.status}`);
+        }
+        return true;
+      } catch (e) {
+        console.error('❌ Edge function send email failed:', e);
+        return false;
+      }
+    }
+
+    const transporter = getTransporter();
+    if (!transporter) return false;
+
+    const smtpFrom =
+      process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@meridiantakeoff.com';
+
+    try {
+      await transporter.sendMail({
+        from: `"Meridian Takeoff" <${smtpFrom}>`,
+        to: Array.isArray(options.to) ? options.to.join(', ') : options.to,
+        subject: options.subject,
+        text: options.text,
+        html: options.html,
+      });
+      return true;
+    } catch (e) {
+      console.error('❌ Direct SMTP send failed:', e);
+      return false;
+    }
+  },
+
   async sendInvitation(data: InvitationEmailData): Promise<boolean> {
     try {
+      const graphConfig = getGraphConfig();
+      const edgeConfig = getEdgeFunctionConfig();
       const transporter = getTransporter();
-      const smtpFrom = process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@meridiantakeoff.com';
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      const useEdge =
+        process.env.USE_SUPABASE_EDGE_EMAIL === 'true' && edgeConfig;
 
-      // If SMTP is not configured, log the email details instead
-      if (!transporter) {
-        console.log('📧 INVITATION EMAIL (SMTP not configured - email not sent):');
-        console.log('=====================================');
-        console.log(`To: ${data.email}`);
-        console.log(`Role: ${data.role}`);
-        console.log(`Invite URL: ${data.inviteUrl}`);
-        console.log(`Invited by: ${data.invitedBy}`);
-        console.log(`Expires: ${data.expiresAt}`);
-        console.log('=====================================');
-        console.log('⚠️  To enable email sending, configure SMTP environment variables:');
-        console.log('   - SMTP_HOST (e.g., smtp.gmail.com)');
-        console.log('   - SMTP_PORT (e.g., 587)');
-        console.log('   - SMTP_USER (your email address)');
-        console.log('   - SMTP_PASSWORD (your email password or app password)');
-        console.log('   - SMTP_FROM (optional, defaults to SMTP_USER)');
-        return false; // Return false since email wasn't actually sent
+      if (!graphConfig && !useEdge && !transporter) {
+        logInvitationFallback(data);
+        return false;
       }
 
-      // Send the email
-      const htmlContent = this.generateInvitationEmailHTML(data);
       const textContent = `You're invited to join Meridian Takeoff!
-      
+
 You've been invited to join Meridian Takeoff as a ${data.role}.
 
 Click the link below to accept your invitation:
@@ -80,10 +227,38 @@ This invitation will expire on ${new Date(data.expiresAt).toLocaleDateString()}.
 Invited by: ${data.invitedBy}
 `;
 
-      const info = await transporter.sendMail({
+      const htmlContent = this.generateInvitationEmailHTML(data);
+      const subject = "You're invited to join Meridian Takeoff";
+
+      if (graphConfig) {
+        return await this.sendEmail({
+          to: data.email,
+          subject,
+          text: textContent,
+          html: htmlContent,
+        });
+      }
+
+      if (useEdge) {
+        const ok = await this.sendEmail({
+          to: data.email,
+          subject,
+          text: textContent,
+          html: htmlContent,
+        });
+        if (ok) {
+          console.log('✅ Invitation email sent via Edge Function:', data.email);
+        }
+        return ok;
+      }
+
+      const smtpFrom =
+        process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@meridiantakeoff.com';
+
+      const info = await transporter!.sendMail({
         from: `"Meridian Takeoff" <${smtpFrom}>`,
         to: data.email,
-        subject: 'You\'re invited to join Meridian Takeoff',
+        subject,
         text: textContent,
         html: htmlContent,
       });
@@ -92,11 +267,9 @@ Invited by: ${data.invitedBy}
         to: data.email,
         messageId: info.messageId,
       });
-
       return true;
     } catch (error) {
       console.error('❌ Error sending invitation email:', error);
-      // Log detailed error for debugging
       if (error instanceof Error) {
         console.error('Error details:', error.message);
       }
@@ -151,7 +324,7 @@ Invited by: ${data.invitedBy}
           
           <div class="footer">
             <p>This invitation was sent by ${data.invitedBy}</p>
-            <p>&copy; 2024 Meridian Takeoff. All rights reserved.</p>
+            <p>&copy; ${new Date().getFullYear()} Meridian Takeoff. All rights reserved.</p>
           </div>
         </div>
       </body>
