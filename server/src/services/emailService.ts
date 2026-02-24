@@ -113,6 +113,13 @@ export function logEmailConfigStatus(): void {
     console.log('📧 Email: Direct SMTP –', process.env.SMTP_HOST);
   } else {
     console.log('📧 Email: Not configured – invitations will not be sent');
+    console.log('   Graph vars present:', {
+      GRAPH_CLIENT_ID: !!process.env.GRAPH_CLIENT_ID,
+      GRAPH_TENANT_ID: !!process.env.GRAPH_TENANT_ID,
+      GRAPH_CLIENT_SECRET: !!process.env.GRAPH_CLIENT_SECRET,
+      GRAPH_SENDER_EMAIL: !!process.env.GRAPH_SENDER_EMAIL,
+      FRONTEND_URL: process.env.FRONTEND_URL || '(not set)',
+    });
   }
 }
 
