@@ -209,6 +209,20 @@ app.all('/api/debug', (req, res) => {
   });
 });
 
+// Env debug - which email vars the process can see (no secrets exposed)
+app.get('/api/debug-env', (req, res) => {
+  res.json({
+    email: {
+      GRAPH_CLIENT_ID: !!process.env.GRAPH_CLIENT_ID,
+      GRAPH_TENANT_ID: !!process.env.GRAPH_TENANT_ID,
+      GRAPH_CLIENT_SECRET: !!process.env.GRAPH_CLIENT_SECRET,
+      GRAPH_SENDER_EMAIL: !!process.env.GRAPH_SENDER_EMAIL,
+      FRONTEND_URL: process.env.FRONTEND_URL || '(not set)',
+    },
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // Apply rate limiting only to sensitive endpoints
 // Read operations are already protected by authentication, so we don't rate limit them aggressively
 // This prevents 429 errors when loading documents with many pages/sheets
