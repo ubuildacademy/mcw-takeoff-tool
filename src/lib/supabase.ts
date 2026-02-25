@@ -157,8 +157,8 @@ export const authHelpers = {
 
   // Reset password
   async resetPassword(email: string) {
-    const origin = typeof window !== 'undefined' ? window.location.origin : undefined;
-    const redirectTo = origin ? `${origin}/auth/reset-password` : undefined;
+    // Use origin only - Supabase template builds {{ .RedirectTo }}/auth/confirm?token_hash=...
+    const redirectTo = typeof window !== 'undefined' ? window.location.origin : undefined;
     return await supabase.auth.resetPasswordForEmail(email, {
       redirectTo,
     })

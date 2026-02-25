@@ -35,7 +35,8 @@ const AuthConfirmPage: React.FC = () => {
       }
 
       setStatus('success');
-      navigate('/app', { replace: true });
+      // Recovery flow: send to reset-password page to set new password; email confirm goes to app
+      navigate(type === 'recovery' ? '/auth/reset-password' : '/app', { replace: true });
     })();
   }, [searchParams, navigate]);
 
