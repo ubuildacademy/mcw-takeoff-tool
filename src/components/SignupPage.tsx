@@ -3,11 +3,18 @@ import { useNavigate, useParams, Link } from 'react-router-dom';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { authHelpers, UserInvitation } from '../lib/supabase';
+import { authHelpers } from '../lib/supabase';
+import { authService } from '../services/apiService';
+
+/** Minimal invitation shape for signup form (from API validation) */
+interface InvitationInfo {
+  email: string;
+  role: string;
+}
 
 const SignupPage: React.FC = () => {
   const { inviteToken } = useParams<{ inviteToken: string }>();
-  const [invitation, setInvitation] = useState<UserInvitation | null>(null);
+  const [invitation, setInvitation] = useState<InvitationInfo | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isValidating, setIsValidating] = useState(true);
   const [error, setError] = useState('');
@@ -28,9 +35,9 @@ const SignupPage: React.FC = () => {
       }
 
       try {
-        const inv = await authHelpers.getInvitationByToken(inviteToken);
+        const inv = await authService.validateInvite(inviteToken);
         if (inv) {
-          setInvitation(inv);
+          setInvitation({ email: inv.email, role: inv.role });
         } else {
           setError('Invalid or expired invitation');
         }
@@ -82,12 +89,12 @@ const SignupPage: React.FC = () => {
         return;
       }
 
-      // Accept the invitation
+      // Accept the invitation (uses backend API with session from signUp)
       if (!inviteToken) {
         setError('Invalid or missing invitation token.');
         return;
       }
-      await authHelpers.acceptInvitation(inviteToken, {
+      await authService.acceptInvitation(inviteToken, {
         full_name: formData.fullName,
         company: formData.company
       });

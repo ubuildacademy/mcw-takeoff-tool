@@ -95,10 +95,16 @@ const LoginPage: React.FC = () => {
             </Button>
           </div>
 
-          <div className="text-center">
+          <div className="text-center space-y-2">
+            <Link
+              to="/forgot-password"
+              className="block text-sm text-blue-600 hover:text-blue-500"
+            >
+              Forgot password?
+            </Link>
             <Link
               to="/"
-              className="text-sm text-blue-600 hover:text-blue-500"
+              className="block text-sm text-blue-600 hover:text-blue-500"
             >
               ← Back to home
             </Link>

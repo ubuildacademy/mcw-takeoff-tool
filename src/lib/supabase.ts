@@ -139,11 +139,13 @@ export const authHelpers = {
 
   // Sign up with email and password
   async signUp(email: string, password: string, metadata?: { full_name?: string, company?: string }) {
+    const redirectTo = typeof window !== 'undefined' ? window.location.origin : undefined;
     return await supabase.auth.signUp({
       email,
       password,
       options: {
-        data: metadata
+        data: metadata,
+        emailRedirectTo: redirectTo,
       }
     })
   },
@@ -155,7 +157,11 @@ export const authHelpers = {
 
   // Reset password
   async resetPassword(email: string) {
-    return await supabase.auth.resetPasswordForEmail(email)
+    const origin = typeof window !== 'undefined' ? window.location.origin : undefined;
+    const redirectTo = origin ? `${origin}/auth/reset-password` : undefined;
+    return await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo,
+    })
   },
 
   // Update password

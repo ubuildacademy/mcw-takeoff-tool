@@ -364,6 +364,32 @@ export const authService = {
     const response = await apiClient.get('/auth/me');
     return response.data;
   },
+
+  /** Validate an invitation token. Returns { email, role } if valid. No auth required. */
+  async validateInvite(token: string): Promise<{ email: string; role: string } | null> {
+    try {
+      const base = getApiBaseUrl();
+      const url = base.startsWith('http') ? `${base}/auth/validate-invite/${token}` : `${window.location.origin}${base}/auth/validate-invite/${token}`;
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data?.email && data?.role ? { email: data.email, role: data.role } : null;
+    } catch {
+      return null;
+    }
+  },
+
+  /** Accept invitation after signup. Requires authenticated session. */
+  async acceptInvitation(token: string, userData: { full_name?: string; company?: string }): Promise<void> {
+    const res = await apiClient.post('/auth/accept-invitation', {
+      token,
+      full_name: userData.full_name,
+      company: userData.company,
+    });
+    if (!res.data?.success) {
+      throw new Error('Failed to complete invitation');
+    }
+  },
 };
 
 // Calibration service

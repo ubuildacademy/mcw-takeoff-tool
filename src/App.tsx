@@ -14,6 +14,9 @@ const FeaturesPage = lazy(() => import('./components/FeaturesPage'));
 const PricingPage = lazy(() => import('./components/PricingPage'));
 const LoginPage = lazy(() => import('./components/LoginPage'));
 const SignupPage = lazy(() => import('./components/SignupPage'));
+const AuthConfirmPage = lazy(() => import('./components/AuthConfirmPage'));
+const ResetPasswordPage = lazy(() => import('./components/ResetPasswordPage'));
+const ForgotPasswordPage = lazy(() => import('./components/ForgotPasswordPage'));
 
 // Component to handle redirect from old /job/ routes to new /project/ routes
 function JobRedirect() {
@@ -57,7 +60,10 @@ function App() {
           <Route path="/features" element={<FeaturesPage />} />
           <Route path="/pricing" element={<PricingPage />} />
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/signup/:inviteToken" element={<SignupPage />} />
+          <Route path="/auth/confirm" element={<AuthConfirmPage />} />
+          <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
           <Route 
             path="/app" 
             element={

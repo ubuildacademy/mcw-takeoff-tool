@@ -2,6 +2,14 @@
 
 This project deploys the **frontend only** to Vercel. For a short checklist so commits don’t break CI, Vercel, or Railway, see **[Deploy checklist](DEPLOY_CHECKLIST.md)**. The API is hosted elsewhere (e.g. Railway); `vercel.json` rewrites `/api/*` to that backend.
 
+## Invite emails and FRONTEND_URL
+
+When admins invite users via email (Microsoft Graph), the invite link in the email is built on the **backend** (Railway). The backend must know your production frontend URL via `FRONTEND_URL`.
+
+**Railway (backend) env:**
+- `FRONTEND_URL` – Set to your production frontend URL, e.g. `https://mcw-takeoff-tool.vercel.app`
+- Without this, invite links default to `http://localhost:3000` and users get 404s when they click accept.
+
 ## Build setup (known working)
 
 - **Install:** `NODE_ENV=development npm install` (in `vercel.json`). This ensures devDependencies are installed so typecheck and Vite build succeed. Do not switch to `npm ci` or change this without checking Vercel build logs—a previous attempt with `npm ci` caused deploy failures.

@@ -4,6 +4,8 @@
  */
 import { Router, Request, Response } from 'express';
 import { createClient } from '@supabase/supabase-js';
+import { supabase } from '../supabase';
+import { requireAuth } from '../middleware';
 
 const router = Router();
 
@@ -77,6 +79,100 @@ router.post('/login', async (req: Request, res: Response) => {
     }
     const message = err instanceof Error ? err.message : 'Login failed';
     res.status(500).json({ error: message });
+  }
+});
+
+/**
+ * GET /api/auth/validate-invite/:token
+ * Public endpoint - validates an invitation token and returns invitation details.
+ * Used by the signup page to show the accept-invite form. No auth required.
+ */
+router.get('/validate-invite/:token', async (req: Request, res: Response) => {
+  try {
+    const { token } = req.params;
+    if (!token) {
+      return res.status(400).json({ error: 'Token is required' });
+    }
+
+    const { data, error } = await supabase
+      .from('user_invitations')
+      .select('id, email, role, status, expires_at')
+      .eq('invite_token', token)
+      .eq('status', 'pending')
+      .single();
+
+    if (error || !data) {
+      return res.status(404).json({ error: 'Invalid or expired invitation' });
+    }
+
+    if (new Date(data.expires_at) < new Date()) {
+      await supabase
+        .from('user_invitations')
+        .update({ status: 'expired' })
+        .eq('id', data.id);
+      return res.status(404).json({ error: 'Invitation has expired' });
+    }
+
+    res.json({ email: data.email, role: data.role });
+  } catch (err) {
+    console.error('[Auth] Validate invite error:', err);
+    res.status(500).json({ error: 'Failed to validate invitation' });
+  }
+});
+
+/**
+ * POST /api/auth/accept-invitation
+ * Completes invitation acceptance: creates user_metadata and marks invitation as accepted.
+ * Requires auth (user must have just signed up via the invite flow).
+ */
+router.post('/accept-invitation', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { token, full_name, company } = req.body;
+    if (!token || typeof token !== 'string') {
+      return res.status(400).json({ error: 'Invitation token is required' });
+    }
+
+    const userId = req.user!.id;
+    const userEmail = req.user!.email?.toLowerCase();
+
+    const { data: invitation, error: invError } = await supabase
+      .from('user_invitations')
+      .select('id, email, role')
+      .eq('invite_token', token)
+      .eq('status', 'pending')
+      .single();
+
+    if (invError || !invitation) {
+      return res.status(404).json({ error: 'Invalid or expired invitation' });
+    }
+
+    if (invitation.email.toLowerCase() !== userEmail) {
+      return res.status(403).json({ error: 'This invitation was sent to a different email address' });
+    }
+
+    const { error: metadataError } = await supabase
+      .from('user_metadata')
+      .insert({
+        id: userId,
+        role: invitation.role,
+        full_name: full_name || null,
+        company: company || null,
+      });
+
+    if (metadataError) {
+      console.error('[Auth] Error creating user metadata:', metadataError);
+      return res.status(500).json({ error: 'Failed to complete account setup' });
+    }
+
+    await supabase
+      .from('user_invitations')
+      .update({ status: 'accepted', accepted_at: new Date().toISOString() })
+      .eq('id', invitation.id);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Auth] Accept invitation error:', err);
+    res.status(500).json({ error: 'Failed to complete invitation' });
   }
 });
 
