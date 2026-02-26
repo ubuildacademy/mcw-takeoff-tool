@@ -51,8 +51,10 @@ export interface UseTakeoffExportResult {
       totalConditions: number;
     };
   };
-  exportToExcel: () => Promise<void>;
-  exportToPDF: () => Promise<void>;
+  exportToExcel: (skipDownload?: boolean) => Promise<{ buffer: ArrayBuffer; filename: string } | void>;
+  exportToPDF: (skipDownload?: boolean) => Promise<{ buffer: Uint8Array; filename: string } | void>;
+  generateExcelBuffer: () => Promise<{ buffer: ArrayBuffer; filename: string }>;
+  generatePDFBuffer: () => Promise<{ buffer: Uint8Array; filename: string }>;
 }
 
 export function useTakeoffExport({
@@ -235,7 +237,7 @@ export function useTakeoffExport({
     };
   };
 
-  const exportToExcel = async () => {
+  const exportToExcel = async (skipDownload?: boolean): Promise<{ buffer: ArrayBuffer; filename: string } | void> => {
     try {
       const { reportData } = await getQuantityReportDataAsync();
       const conditionIds = Object.keys(reportData);
@@ -832,6 +834,9 @@ export function useTakeoffExport({
       const projectName = currentProject?.name?.replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '-') ?? 'project';
       const filename = `${projectName}-Professional-Takeoff-Report-${timestamp}.xlsx`;
       const buffer = await workbook.xlsx.writeBuffer();
+      if (skipDownload) {
+        return { buffer: buffer as ArrayBuffer, filename };
+      }
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -850,7 +855,13 @@ export function useTakeoffExport({
     }
   };
 
-  const exportToPDF = async () => {
+  const generateExcelBuffer = async (): Promise<{ buffer: ArrayBuffer; filename: string }> => {
+    const result = await exportToExcel(true);
+    if (!result) throw new Error('No data to export');
+    return result;
+  };
+
+  const exportToPDF = async (skipDownload?: boolean): Promise<{ buffer: Uint8Array; filename: string } | void> => {
     try {
       const { reportData } = await getQuantityReportDataAsync();
       const conditionIds = Object.keys(reportData);
@@ -1080,6 +1091,9 @@ export function useTakeoffExport({
       const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
       const projectName = currentProject?.name?.replace(/[^a-zA-Z0-9]/g, '-') ?? 'project';
       const filename = `${projectName}-takeoff-report-${timestamp}.pdf`;
+      if (skipDownload) {
+        return { buffer: finalPdfBytes, filename };
+      }
       downloadPDF(finalPdfBytes, filename);
       onExportStatusUpdate?.('pdf', 100);
       setTimeout(() => onExportStatusUpdate?.(null, 0), 1000);
@@ -1091,11 +1105,19 @@ export function useTakeoffExport({
     }
   };
 
+  const generatePDFBuffer = async (): Promise<{ buffer: Uint8Array; filename: string }> => {
+    const result = await exportToPDF(true);
+    if (!result) throw new Error('No data to export');
+    return result;
+  };
+
   return {
     getQuantityReportData,
     getQuantityReportDataAsync,
     getCostAnalysisData,
     exportToExcel,
     exportToPDF,
+    generateExcelBuffer,
+    generatePDFBuffer,
   };
 }

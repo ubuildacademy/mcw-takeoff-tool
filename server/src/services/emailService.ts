@@ -34,7 +34,13 @@ const getEdgeFunctionConfig = () => {
   };
 };
 
-async function sendViaGraph(config: { clientId: string; tenantId: string; clientSecret: string; senderEmail: string }, options: { to: string | string[]; subject: string; text: string; html?: string }): Promise<boolean> {
+export interface EmailAttachment {
+  filename: string;
+  content: Buffer | string;
+  contentType?: string;
+}
+
+async function sendViaGraph(config: { clientId: string; tenantId: string; clientSecret: string; senderEmail: string }, options: { to: string | string[]; subject: string; text: string; html?: string; attachments?: EmailAttachment[] }): Promise<boolean> {
   const tokenRes = await fetch(
     `https://login.microsoftonline.com/${config.tenantId}/oauth2/v2.0/token`,
     {
@@ -55,6 +61,23 @@ async function sendViaGraph(config: { clientId: string; tenantId: string; client
   const tokenData = (await tokenRes.json()) as { access_token: string };
   const access_token = tokenData.access_token;
   const toList = Array.isArray(options.to) ? options.to : [options.to];
+  const graphAttachments = (options.attachments ?? []).map((att) => {
+    const contentBase64 = Buffer.isBuffer(att.content) ? att.content.toString('base64') : att.content;
+    return {
+      '@odata.type': '#microsoft.graph.fileAttachment',
+      name: att.filename,
+      contentType: att.contentType ?? 'application/octet-stream',
+      contentBytes: contentBase64,
+    };
+  });
+  const messageBody: Record<string, unknown> = {
+    subject: options.subject,
+    body: { contentType: options.html ? 'HTML' : 'Text', content: options.html || options.text },
+    toRecipients: toList.map((addr) => ({ emailAddress: { address: addr } })),
+  };
+  if (graphAttachments.length > 0) {
+    messageBody.attachments = graphAttachments;
+  }
   const sendRes = await fetch(
     `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(config.senderEmail)}/sendMail`,
     {
@@ -64,11 +87,7 @@ async function sendViaGraph(config: { clientId: string; tenantId: string; client
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        message: {
-          subject: options.subject,
-          body: { contentType: options.html ? 'HTML' : 'Text', content: options.html || options.text },
-          toRecipients: toList.map((addr) => ({ emailAddress: { address: addr } })),
-        },
+        message: messageBody,
         saveToSentItems: true,
       }),
     }
@@ -145,6 +164,7 @@ export const emailService = {
     subject: string;
     text: string;
     html?: string;
+    attachments?: EmailAttachment[];
   }): Promise<boolean> {
     const graphConfig = getGraphConfig();
     if (graphConfig) {
@@ -164,18 +184,26 @@ export const emailService = {
 
     if (useEdge) {
       try {
+        const body: Record<string, unknown> = {
+          to: options.to,
+          subject: options.subject,
+          text: options.text,
+          html: options.html,
+        };
+        if (options.attachments?.length) {
+          body.attachments = options.attachments.map((a) => ({
+            filename: a.filename,
+            content: Buffer.isBuffer(a.content) ? a.content.toString('base64') : a.content,
+            contentType: a.contentType,
+          }));
+        }
         const res = await fetch(edgeConfig!.url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${edgeConfig!.key}`,
           },
-          body: JSON.stringify({
-            to: options.to,
-            subject: options.subject,
-            text: options.text,
-            html: options.html,
-          }),
+          body: JSON.stringify(body),
         });
         if (!res.ok) {
           const err = await res.text();
@@ -194,14 +222,22 @@ export const emailService = {
     const smtpFrom =
       process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@meridiantakeoff.com';
 
+    const mailOptions: Record<string, unknown> = {
+      from: `"Meridian Takeoff" <${smtpFrom}>`,
+      to: Array.isArray(options.to) ? options.to.join(', ') : options.to,
+      subject: options.subject,
+      text: options.text,
+      html: options.html,
+    };
+    if (options.attachments?.length) {
+      mailOptions.attachments = options.attachments.map((a) => ({
+        filename: a.filename,
+        content: a.content,
+        contentType: a.contentType,
+      }));
+    }
     try {
-      await transporter.sendMail({
-        from: `"Meridian Takeoff" <${smtpFrom}>`,
-        to: Array.isArray(options.to) ? options.to.join(', ') : options.to,
-        subject: options.subject,
-        text: options.text,
-        html: options.html,
-      });
+      await transporter.sendMail(mailOptions);
       return true;
     } catch (e) {
       console.error('❌ Direct SMTP send failed:', e);

@@ -15,7 +15,8 @@ export {
   strictRateLimit,
   standardRateLimit,
   generousRateLimit,
-  uploadRateLimit
+  uploadRateLimit,
+  sendReportRateLimit
 } from './rateLimit';
 
 // Validation middleware

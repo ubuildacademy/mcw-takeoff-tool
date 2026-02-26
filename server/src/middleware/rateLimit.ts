@@ -123,3 +123,13 @@ export const uploadRateLimit = rateLimit({
   maxRequests: 20,            // 20 uploads per minute
   message: 'Too many uploads, please wait before uploading more files'
 });
+
+/**
+ * Send report rate limiter - 10 emails per project per hour
+ */
+export const sendReportRateLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,  // 1 hour
+  maxRequests: 10,
+  message: 'Too many report emails sent for this project. Please try again in an hour.',
+  keyGenerator: (req) => `send-report:${req.params.id || 'unknown'}:${req.user?.id || 'anonymous'}`
+});

@@ -10,6 +10,7 @@ import {
   Download,
   FileSpreadsheet,
   FileImage,
+  Mail,
   DollarSign,
   Edit3,
 } from 'lucide-react';
@@ -18,6 +19,7 @@ import { useConditionStore } from '../store/slices/conditionSlice';
 import { useMeasurementStore } from '../store/slices/measurementSlice';
 import type { TakeoffCondition, PDFDocument } from '../types';
 import { CreateConditionDialog } from './CreateConditionDialog';
+import { SendReportModal } from './SendReportModal';
 import { formatFeetAndInches } from '../lib/utils';
 import { useTakeoffExport, TakeoffSidebarConditionList } from './takeoff-sidebar';
 
@@ -46,6 +48,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
   const [activeTab, setActiveTab] = useState<'conditions' | 'reports' | 'costs'>('conditions');
   const [expandedConditions, setExpandedConditions] = useState<Set<string>>(new Set());
   const [showExportDropdown, setShowExportDropdown] = useState(false);
+  const [showSendReportModal, setShowSendReportModal] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [matchThumbnails, setMatchThumbnails] = useState<Record<string, Array<{ measurementId: string; thumbnail: string }>>>({});
   const [loadingThumbnails, setLoadingThumbnails] = useState<Set<string>>(new Set());
@@ -66,7 +69,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
   const getProjectCostBreakdown = useMeasurementStore((s) => s.getProjectCostBreakdown);
   const _getConditionCostBreakdown = useMeasurementStore((s) => s.getConditionCostBreakdown);
 
-  const { getQuantityReportData, getCostAnalysisData: _getCostAnalysisData, exportToExcel, exportToPDF } = useTakeoffExport({
+  const { getQuantityReportData, getCostAnalysisData: _getCostAnalysisData, exportToExcel, exportToPDF, generateExcelBuffer, generatePDFBuffer } = useTakeoffExport({
     projectId,
     documents,
     onExportStatusUpdate,
@@ -374,6 +377,18 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                   >
                     <FileImage className="w-4 h-4" />
                     Export PDF Report
+                  </button>
+                  <button
+                    className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setShowExportDropdown(false);
+                      setShowSendReportModal(true);
+                    }}
+                  >
+                    <Mail className="w-4 h-4" />
+                    Email Report…
                   </button>
                 </div>
               )}
@@ -732,7 +747,13 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
         />
       )}
 
-
+      <SendReportModal
+        projectId={projectId}
+        isOpen={showSendReportModal}
+        onClose={() => setShowSendReportModal(false)}
+        generateExcelBuffer={generateExcelBuffer}
+        generatePDFBuffer={generatePDFBuffer}
+      />
     </div>
   );
 }

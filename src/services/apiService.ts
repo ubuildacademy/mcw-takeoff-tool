@@ -105,6 +105,9 @@ apiClient.interceptors.request.use(
       if (session?.access_token) {
         config.headers.Authorization = `Bearer ${session.access_token}`;
       }
+      if (config.data instanceof FormData) {
+        delete config.headers['Content-Type'];
+      }
     } catch (err) {
       if (import.meta.env.DEV) console.error('Error getting session for API request:', err);
     }
@@ -274,6 +277,18 @@ export const projectService = {
     const response = await apiClient.delete(`/projects/${id}`);
     return response.data;
   },
+
+  async sendReport(projectId: string, params: { file: Blob; filename: string; recipients: string[]; format: 'excel' | 'pdf'; message?: string }) {
+    const formData = new FormData();
+    formData.append('file', params.file, params.filename);
+    formData.append('recipients', JSON.stringify(params.recipients));
+    formData.append('format', params.format);
+    if (params.message) formData.append('message', params.message);
+    const response = await apiClient.post(`/projects/${projectId}/send-report`, formData, {
+      timeout: 60000,
+    });
+    return response.data;
+  },
 };
 
 // Conditions service
@@ -350,8 +365,8 @@ export const conditionService = {
 
 // Auth service
 export const authService = {
-  async login(username: string, password: string) {
-    const response = await apiClient.post('/auth/login', { username, password });
+  async login(email: string, password: string) {
+    const response = await apiClient.post('/auth/login', { email, password });
     return response.data;
   },
 
