@@ -6,9 +6,27 @@ This project deploys the **frontend only** to Vercel. For a short checklist so c
 
 When admins invite users via email (Microsoft Graph), the invite link in the email is built on the **backend** (Railway). The backend must know your production frontend URL via `FRONTEND_URL`.
 
-**Railway (backend) env:**
-- `FRONTEND_URL` – Set to your production frontend URL, e.g. `https://mcw-takeoff-tool.vercel.app`
-- Without this, invite links default to `http://localhost:3000` and users get 404s when they click accept.
+**Where to set FRONTEND_URL:**
+1. Go to [Railway Dashboard](https://railway.app)
+2. Open your project (e.g. mcw-takeoff-tool)
+3. Click your backend service
+4. Go to **Variables** (or **Settings** → **Variables**)
+5. Add: `FRONTEND_URL` = `https://mcw-takeoff-tool.vercel.app` (your actual Vercel URL)
+6. Redeploy if needed
+
+Without this, invite links default to `http://localhost:3001` and users get wrong links when they click accept.
+
+## Supabase: disable email confirmation for invite flow
+
+For a smoother invite experience, disable Supabase's "Confirm email" for new signups. Otherwise invited users must confirm their email before they can complete setup.
+
+**Where to set:**
+1. Go to [Supabase Dashboard](https://supabase.com/dashboard)
+2. Open your project
+3. **Authentication** → **Providers** → **Email**
+4. Turn off **"Confirm email"**
+
+With this off, invited users can sign up and use the app immediately.
 
 ## Build setup (known working)
 

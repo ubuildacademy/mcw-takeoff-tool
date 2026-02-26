@@ -32,7 +32,8 @@ router.get('/', requireAuth, requireAdmin, async (req, res) => {
 // Create user invitation (admin only)
 router.post('/invitations', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { email, role } = req.body;
+    const { email: rawEmail, role } = req.body;
+    const email = typeof rawEmail === 'string' ? rawEmail.trim().toLowerCase() : rawEmail;
 
     if (!email || !role) {
       return res.status(400).json({ error: 'Email and role are required' });
@@ -44,7 +45,7 @@ router.post('/invitations', requireAuth, requireAdmin, async (req, res) => {
 
     // Check if user already exists
     const { data: existingUsers } = await supabase.auth.admin.listUsers();
-    const userExists = existingUsers?.users?.some((user: any) => user.email === email);
+    const userExists = existingUsers?.users?.some((user: any) => user.email?.toLowerCase() === email);
     if (userExists) {
       return res.status(400).json({ error: 'User already exists' });
     }
@@ -87,7 +88,7 @@ router.post('/invitations', requireAuth, requireAdmin, async (req, res) => {
     }
 
     // Send email invitation
-    const inviteUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/signup/${inviteToken}`;
+    const inviteUrl = `${process.env.FRONTEND_URL || 'http://localhost:3001'}/signup/${inviteToken}`;
     
     const emailSent = await emailService.sendInvitation({
       email,

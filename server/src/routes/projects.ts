@@ -13,6 +13,7 @@ import {
   sendReportRateLimit
 } from '../middleware';
 import { emailService } from '../services/emailService';
+import { REPORT_DELIVERY } from '../config/reportDelivery';
 
 // Configure multer for file uploads
 const upload = multer({ 
@@ -20,11 +21,17 @@ const upload = multer({
   limits: { fileSize: 1024 * 1024 * 1024 } // 1GB limit
 });
 
-// Multer for send-report: 15MB max (Excel/PDF reports)
+// Multer for send-report: 30MB max per file (link delivery may receive large reports)
 const sendReportUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 15 * 1024 * 1024 }
+  limits: { fileSize: 30 * 1024 * 1024 }
 });
+
+
+const sendReportFields = sendReportUpload.fields([
+  { name: 'file', maxCount: 1 },
+  { name: 'file2', maxCount: 1 },
+]);
 
 const router = express.Router();
 
@@ -454,18 +461,18 @@ router.post(
   validateUUIDParam('id'),
   requireProjectAccess,
   sendReportRateLimit,
-  sendReportUpload.single('file'),
+  sendReportFields,
   async (req, res) => {
     try {
       const { id: projectId } = req.params;
-      const file = req.file as Express.Multer.File | undefined;
-      if (!file) {
-        return res.status(400).json({ error: 'No file uploaded' });
-      }
+      const files = req.files as { file?: Express.Multer.File[]; file2?: Express.Multer.File[] } | undefined;
+      const file = files?.file?.[0];
+      const file2 = files?.file2?.[0];
 
       const recipientsRaw = req.body.recipients;
       const format = req.body.format as string | undefined;
       const message = (req.body.message as string | undefined) || '';
+      const deliveryMethod = (req.body.deliveryMethod as string | undefined) || 'attachment';
 
       if (!recipientsRaw || !format) {
         return res.status(400).json({ error: 'recipients and format are required' });
@@ -489,8 +496,15 @@ router.post(
       }
       const validRecipients = recipients.map((e: string) => e.trim().toLowerCase());
 
-      if (format !== 'excel' && format !== 'pdf') {
-        return res.status(400).json({ error: 'format must be "excel" or "pdf"' });
+      if (format !== 'excel' && format !== 'pdf' && format !== 'both') {
+        return res.status(400).json({ error: 'format must be "excel", "pdf", or "both"' });
+      }
+
+      if (!file) {
+        return res.status(400).json({ error: 'No file uploaded' });
+      }
+      if (format === 'both' && !file2) {
+        return res.status(400).json({ error: 'Both Excel and PDF files are required when format is "both"' });
       }
 
       const project = await storage.getProject(projectId);
@@ -500,7 +514,58 @@ router.post(
 
       const userEmail = req.user?.email || 'Meridian Takeoff User';
       const subject = `Quantity Report: ${project.name} from Meridian Takeoff`;
-      const htmlContent = `
+      const escapedMessage = message ? message.replace(/</g, '&lt;').replace(/>/g, '&gt;') : '';
+
+      let ok: boolean;
+      if (deliveryMethod === 'link') {
+        const deliveryId = uuidv4();
+        const storageDir = `${REPORT_DELIVERY.STORAGE_PREFIX}/${deliveryId}`;
+        const filesToUpload: Array<{ buffer: Buffer; filename: string }> = [];
+        if (format === 'both' && file && file2) {
+          filesToUpload.push({ buffer: file.buffer, filename: file.originalname });
+          filesToUpload.push({ buffer: file2.buffer, filename: file2.originalname });
+        } else {
+          filesToUpload.push({ buffer: file.buffer, filename: file.originalname });
+        }
+
+        for (const { buffer, filename } of filesToUpload) {
+          const storagePath = `${storageDir}/${filename}`;
+          const { error: uploadError } = await supabase.storage
+          .from(REPORT_DELIVERY.BUCKET)
+          .upload(storagePath, buffer, {
+              contentType: filename.endsWith('.xlsx')
+                ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                : 'application/pdf',
+              upsert: false,
+            });
+          if (uploadError) {
+            console.error('Report storage upload error:', uploadError);
+            return res.status(500).json({ error: 'Failed to upload report for link delivery' });
+          }
+        }
+
+        const { data: signedData, error: signedError } = await supabase.storage
+          .from(REPORT_DELIVERY.BUCKET)
+          .createSignedUrls(
+            filesToUpload.map((f) => `${storageDir}/${f.filename}`),
+            REPORT_DELIVERY.LINK_EXPIRY_SECONDS
+          );
+        if (signedError || !signedData?.length) {
+          console.error('Report signed URL error:', signedError);
+          return res.status(500).json({ error: 'Failed to create download links' });
+        }
+
+        const linkListHtml = filesToUpload
+          .map(
+            (f, i) =>
+              `<li><a href="${signedData[i]?.signedUrl || '#'}" style="color: #2563eb;">${f.filename}</a> (expires in 7 days)</li>`
+          )
+          .join('');
+        const linkListText = filesToUpload
+          .map((f, i) => `${f.filename}: ${signedData[i]?.signedUrl || ''}`)
+          .join('\n');
+
+        const htmlContent = `
         <!DOCTYPE html>
         <html>
         <head><meta charset="utf-8"><title>Quantity Report</title></head>
@@ -508,26 +573,69 @@ router.post(
           <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
             <h2 style="color: #2563eb;">Meridian Takeoff - Quantity Report</h2>
             <p>A quantity report has been shared with you for project: <strong>${project.name}</strong>.</p>
-            ${message ? `<p style="margin: 20px 0; padding: 12px; background: #f3f4f6; border-radius: 6px;">${message.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>` : ''}
+            <p><strong>Download your report(s):</strong></p>
+            <ul>${linkListHtml}</ul>
+            <p style="font-size: 13px; color: #6b7280;">Links expire in 7 days. Please download before then.</p>
+            ${escapedMessage ? `<p style="margin: 20px 0; padding: 12px; background: #f3f4f6; border-radius: 6px;">${escapedMessage}</p>` : ''}
             <p style="color: #6b7280; font-size: 14px;">Generated by ${userEmail}</p>
             <p style="color: #6b7280; font-size: 12px; margin-top: 24px;">&copy; ${new Date().getFullYear()} Meridian Takeoff. All rights reserved.</p>
           </div>
         </body>
         </html>
       `;
-      const textContent = `A quantity report has been shared with you for project: ${project.name}. Generated by ${userEmail}`;
+        const textContent = `A quantity report has been shared with you for project: ${project.name}.\n\nDownload links (expire in 7 days):\n${linkListText}\n\nGenerated by ${userEmail}`;
 
-      const contentType = format === 'excel'
-        ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        : 'application/pdf';
+        ok = await emailService.sendEmail({
+          to: validRecipients,
+          subject,
+          text: textContent,
+          html: htmlContent,
+        });
+      } else {
+        const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="utf-8"><title>Quantity Report</title></head>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+          <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #2563eb;">Meridian Takeoff - Quantity Report</h2>
+            <p>A quantity report has been shared with you for project: <strong>${project.name}</strong>.</p>
+            ${escapedMessage ? `<p style="margin: 20px 0; padding: 12px; background: #f3f4f6; border-radius: 6px;">${escapedMessage}</p>` : ''}
+            <p style="color: #6b7280; font-size: 14px;">Generated by ${userEmail}</p>
+            <p style="color: #6b7280; font-size: 12px; margin-top: 24px;">&copy; ${new Date().getFullYear()} Meridian Takeoff. All rights reserved.</p>
+          </div>
+        </body>
+        </html>
+      `;
+        const textContent = `A quantity report has been shared with you for project: ${project.name}. Generated by ${userEmail}`;
 
-      const ok = await emailService.sendEmail({
-        to: validRecipients,
-        subject,
-        text: textContent,
-        html: htmlContent,
-        attachments: [{ filename: file.originalname, content: file.buffer, contentType }],
-      });
+        const attachments: Array<{ filename: string; content: Buffer; contentType: string }> = [];
+        if (format === 'both' && file && file2) {
+          attachments.push({
+            filename: file.originalname,
+            content: file.buffer,
+            contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          });
+          attachments.push({
+            filename: file2.originalname,
+            content: file2.buffer,
+            contentType: 'application/pdf',
+          });
+        } else {
+          const contentType = format === 'excel'
+            ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            : 'application/pdf';
+          attachments.push({ filename: file.originalname, content: file.buffer, contentType });
+        }
+
+        ok = await emailService.sendEmail({
+          to: validRecipients,
+          subject,
+          text: textContent,
+          html: htmlContent,
+          attachments,
+        });
+      }
 
       if (!ok) {
         return res.status(500).json({ error: 'Failed to send email. Please try again later.' });

@@ -74,8 +74,10 @@ const SignupPage: React.FC = () => {
       return;
     }
     try {
+      let hasSession = false;
+
       // Sign up the user
-      const { error: signUpError } = await authHelpers.signUp(
+      const { data: signUpData, error: signUpError } = await authHelpers.signUp(
         email,
         formData.password,
         {
@@ -85,11 +87,30 @@ const SignupPage: React.FC = () => {
       );
 
       if (signUpError) {
-        setError(signUpError.message);
-        return;
+        // User may have already confirmed and returned to complete setup
+        if (
+          signUpError.message?.toLowerCase().includes('already been registered') ||
+          signUpError.message?.toLowerCase().includes('already registered') ||
+          signUpError.message?.toLowerCase().includes('already exists')
+        ) {
+          const { error: signInError } = await authHelpers.signInViaProxy(email, formData.password);
+          if (!signInError) hasSession = true;
+        }
+        if (!hasSession) {
+          setError(signUpError.message);
+          return;
+        }
+      } else {
+        hasSession = !!(await authHelpers.getCurrentUser());
+        if (!hasSession) {
+          setError(
+            'Please check your email to confirm your account. After confirming, return to this page using the same invitation link to complete setup.'
+          );
+          return;
+        }
       }
 
-      // Accept the invitation (uses backend API with session from signUp)
+      // Accept the invitation (uses backend API with session)
       if (!inviteToken) {
         setError('Invalid or missing invitation token.');
         return;

@@ -835,6 +835,7 @@ export function useTakeoffExport({
       const filename = `${projectName}-Professional-Takeoff-Report-${timestamp}.xlsx`;
       const buffer = await workbook.xlsx.writeBuffer();
       if (skipDownload) {
+        onExportStatusUpdate?.(null, 0);
         return { buffer: buffer as ArrayBuffer, filename };
       }
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -1092,6 +1093,7 @@ export function useTakeoffExport({
       const projectName = currentProject?.name?.replace(/[^a-zA-Z0-9]/g, '-') ?? 'project';
       const filename = `${projectName}-takeoff-report-${timestamp}.pdf`;
       if (skipDownload) {
+        onExportStatusUpdate?.(null, 0);
         return { buffer: finalPdfBytes, filename };
       }
       downloadPDF(finalPdfBytes, filename);

@@ -87,11 +87,13 @@ router.post('/login', async (req: Request, res: Response) => {
  * Public endpoint - validates an invitation token and returns invitation details.
  * Used by the signup page to show the accept-invite form. No auth required.
  */
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 router.get('/validate-invite/:token', async (req: Request, res: Response) => {
   try {
     const { token } = req.params;
-    if (!token) {
-      return res.status(400).json({ error: 'Token is required' });
+    if (!token || !UUID_REGEX.test(token)) {
+      return res.status(400).json({ error: 'Invalid invitation link' });
     }
 
     const { data, error } = await supabase
@@ -150,14 +152,18 @@ router.post('/accept-invitation', requireAuth, async (req: Request, res: Respons
       return res.status(403).json({ error: 'This invitation was sent to a different email address' });
     }
 
+    // Use upsert to handle retries (e.g. user refreshed after partial success)
     const { error: metadataError } = await supabase
       .from('user_metadata')
-      .insert({
-        id: userId,
-        role: invitation.role,
-        full_name: full_name || null,
-        company: company || null,
-      });
+      .upsert(
+        {
+          id: userId,
+          role: invitation.role,
+          full_name: full_name || null,
+          company: company || null,
+        },
+        { onConflict: 'id' }
+      );
 
     if (metadataError) {
       console.error('[Auth] Error creating user metadata:', metadataError);

@@ -29,10 +29,11 @@ import calibrationRoutes from './routes/calibrations';
 import authRoutes from './routes/auth';
 import { logEmailConfigStatus } from './services/emailService';
 import { livePreviewService } from './services/livePreviewService';
+import { cleanupExpiredReportDeliveries } from './services/reportDeliveryCleanup';
 // Initialize queue service (starts worker)
 import './services/queueService';
 import { supabase } from './supabase';
-import { standardRateLimit, strictRateLimit, generousRateLimit } from './middleware';
+import { standardRateLimit, strictRateLimit } from './middleware';
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '4000', 10);
@@ -234,8 +235,8 @@ app.use('/api/users/login', strictRateLimit);
 app.use('/api/users/signup', strictRateLimit);
 app.use('/api/users/invite', strictRateLimit);
 
-// Generous rate limit for validate-invite (public but should not be abused)
-app.use('/api/auth/validate-invite', generousRateLimit);
+// Standard rate limit for validate-invite (public endpoint, 100/min)
+app.use('/api/auth/validate-invite', standardRateLimit);
 
 // Standard rate limiting for write operations (POST/PUT/DELETE) on non-auth routes
 app.use('/api', (req, res, next) => {
@@ -421,4 +422,14 @@ async function ensureModelExists() {
   // Initialize live preview service
   livePreviewService.initialize(server);
   console.log(`📡 Live preview service initialized`);
+
+  // Clean up expired report deliveries (7-day links): run daily
+  const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+  const runCleanup = () => {
+    cleanupExpiredReportDeliveries().then(({ deleted, errors }) => {
+      if (errors.length) console.warn('Report cleanup warnings:', errors.join('; '));
+    });
+  };
+  setTimeout(runCleanup, 60_000);
+  setInterval(runCleanup, CLEANUP_INTERVAL_MS);
 })();

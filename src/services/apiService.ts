@@ -278,14 +278,25 @@ export const projectService = {
     return response.data;
   },
 
-  async sendReport(projectId: string, params: { file: Blob; filename: string; recipients: string[]; format: 'excel' | 'pdf'; message?: string }) {
+  async sendReport(
+    projectId: string,
+    params:
+      | { file: Blob; filename: string; recipients: string[]; format: 'excel' | 'pdf'; message?: string; deliveryMethod?: 'attachment' | 'link' }
+      | { files: Array<{ file: Blob; filename: string }>; recipients: string[]; format: 'both'; message?: string; deliveryMethod?: 'attachment' | 'link' }
+  ) {
     const formData = new FormData();
-    formData.append('file', params.file, params.filename);
+    if ('files' in params) {
+      formData.append('file', params.files[0].file, params.files[0].filename);
+      formData.append('file2', params.files[1].file, params.files[1].filename);
+    } else {
+      formData.append('file', params.file, params.filename);
+    }
     formData.append('recipients', JSON.stringify(params.recipients));
     formData.append('format', params.format);
     if (params.message) formData.append('message', params.message);
+    if (params.deliveryMethod === 'link') formData.append('deliveryMethod', 'link');
     const response = await apiClient.post(`/projects/${projectId}/send-report`, formData, {
-      timeout: 60000,
+      timeout: 90000,
     });
     return response.data;
   },
