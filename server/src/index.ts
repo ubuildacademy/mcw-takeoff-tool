@@ -28,6 +28,7 @@ import titleblockRoutes from './routes/titleblock';
 import calibrationRoutes from './routes/calibrations';
 import authRoutes from './routes/auth';
 import sharedImportRoutes from './routes/sharedImport';
+import contactRoutes from './routes/contact';
 import { logEmailConfigStatus } from './services/emailService';
 import { livePreviewService } from './services/livePreviewService';
 import { cleanupExpiredReportDeliveries, cleanupExpiredProjectShares } from './services/reportDeliveryCleanup';
@@ -238,6 +239,8 @@ app.use('/api/users/invite', strictRateLimit);
 
 // Standard rate limit for validate-invite (public endpoint, 100/min)
 app.use('/api/auth/validate-invite', standardRateLimit);
+// Contact form is public - rate limit to prevent abuse
+app.use('/api/contact', standardRateLimit);
 
 // Standard rate limiting for write operations (POST/PUT/DELETE) on non-auth routes
 app.use('/api', (req, res, next) => {
@@ -268,6 +271,7 @@ app.use('/api/settings', settingsRoutes);
 app.use('/api/titleblock', titleblockRoutes);
 app.use('/api/calibrations', calibrationRoutes);
 app.use('/api/shared-import', sharedImportRoutes);
+app.use('/api/contact', contactRoutes);
 
 // Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));

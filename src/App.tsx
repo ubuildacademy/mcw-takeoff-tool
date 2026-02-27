@@ -12,6 +12,7 @@ const TakeoffWorkspace = lazy(() => import('./components/TakeoffWorkspace').then
 const LandingPage = lazy(() => import('./components/LandingPage'));
 const FeaturesPage = lazy(() => import('./components/FeaturesPage'));
 const PricingPage = lazy(() => import('./components/PricingPage'));
+const ContactPage = lazy(() => import('./components/ContactPage'));
 const LoginPage = lazy(() => import('./components/LoginPage'));
 const SignupPage = lazy(() => import('./components/SignupPage'));
 const AuthConfirmPage = lazy(() => import('./components/AuthConfirmPage'));
@@ -60,6 +61,7 @@ function App() {
           <Route path="/" element={<LandingPage />} />
           <Route path="/features" element={<FeaturesPage />} />
           <Route path="/pricing" element={<PricingPage />} />
+          <Route path="/contact" element={<ContactPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/shared/import/:token" element={<SharedProjectImportPage />} />

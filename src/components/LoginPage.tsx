@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { Button } from './ui/button';
+import { LandingNav } from './LandingNav';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { authHelpers } from '../lib/supabase';
@@ -35,15 +36,14 @@ const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center p-4">
-      <div className="max-w-md w-full space-y-8">
-        <div className="text-center">
-          <h1 className="text-3xl font-bold text-slate-900">
-            Meridian <span className="text-blue-600">Takeoff</span>
-          </h1>
-          <h2 className="mt-6 text-2xl font-semibold text-slate-700">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex flex-col">
+      <LandingNav showBackToHome />
+      <div className="flex-1 flex items-center justify-center p-4">
+        <div className="max-w-md w-full space-y-8">
+          <div className="text-center">
+            <h2 className="text-2xl font-semibold text-slate-700">
             Sign in to your account
-          </h2>
+            </h2>
           <p className="mt-2 text-sm text-slate-600">
             Access your construction takeoff projects
           </p>
@@ -97,21 +97,16 @@ const LoginPage: React.FC = () => {
             </Button>
           </div>
 
-          <div className="text-center space-y-2">
+          <div className="text-center">
             <Link
               to="/forgot-password"
-              className="block text-sm text-blue-600 hover:text-blue-500"
+              className="text-sm text-blue-600 hover:text-blue-500"
             >
               Forgot password?
             </Link>
-            <Link
-              to="/"
-              className="block text-sm text-blue-600 hover:text-blue-500"
-            >
-              ← Back to home
-            </Link>
           </div>
         </form>
+        </div>
       </div>
     </div>
   );

@@ -5,6 +5,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { authHelpers } from '../lib/supabase';
 import { authService } from '../services/apiService';
+import { LandingNav } from './LandingNav';
 
 /** Minimal invitation shape for signup form (from API validation) */
 interface InvitationInfo {
@@ -132,10 +133,13 @@ const SignupPage: React.FC = () => {
 
   if (isValidating) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-2 text-slate-600">Validating invitation...</p>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex flex-col">
+        <LandingNav showBackToHome />
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-2 text-slate-600">Validating invitation...</p>
+          </div>
         </div>
       </div>
     );
@@ -143,39 +147,38 @@ const SignupPage: React.FC = () => {
 
   if (!invitation) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center p-4">
-        <div className="max-w-md w-full text-center">
-          <h1 className="text-3xl font-bold text-slate-900 mb-4">
-            Meridian <span className="text-blue-600">Takeoff</span>
-          </h1>
-          <div className="bg-red-50 border border-red-200 rounded-md p-4">
-            <p className="text-red-600">{error}</p>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex flex-col">
+        <LandingNav showBackToHome />
+        <div className="flex-1 flex items-center justify-center p-4">
+          <div className="max-w-md w-full text-center">
+            <div className="bg-red-50 border border-red-200 rounded-md p-4">
+              <p className="text-red-600">{error}</p>
+            </div>
+            <Link
+              to="/"
+              className="mt-4 inline-block text-blue-600 hover:text-blue-500"
+            >
+              ← Back to home
+            </Link>
           </div>
-          <Link
-            to="/"
-            className="mt-4 inline-block text-blue-600 hover:text-blue-500"
-          >
-            ← Back to home
-          </Link>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center p-4">
-      <div className="max-w-md w-full space-y-8">
-        <div className="text-center">
-          <h1 className="text-3xl font-bold text-slate-900">
-            Meridian <span className="text-blue-600">Takeoff</span>
-          </h1>
-          <h2 className="mt-6 text-2xl font-semibold text-slate-700">
-            Complete your account setup
-          </h2>
-          <p className="mt-2 text-sm text-slate-600">
-            You've been invited to join as a {invitation.role}
-          </p>
-        </div>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex flex-col">
+      <LandingNav showBackToHome />
+      <div className="flex-1 flex items-center justify-center p-4">
+        <div className="max-w-md w-full space-y-8">
+          <div className="text-center">
+            <h2 className="text-2xl font-semibold text-slate-700">
+              Complete your account setup
+            </h2>
+            <p className="mt-2 text-sm text-slate-600">
+              You've been invited to join as a {invitation.role}
+            </p>
+          </div>
 
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="space-y-4">
@@ -266,13 +269,14 @@ const SignupPage: React.FC = () => {
 
           <div className="text-center">
             <Link
-              to="/"
+              to="/login"
               className="text-sm text-blue-600 hover:text-blue-500"
             >
-              ← Back to home
+              Already have an account? Sign in
             </Link>
           </div>
         </form>
+        </div>
       </div>
     </div>
   );

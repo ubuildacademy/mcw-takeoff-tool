@@ -19,36 +19,59 @@ const PricingPage: React.FC = () => {
     window.scrollTo(0, 0);
   };
 
+  const handlePricing = () => {
+    navigate('/pricing');
+    window.scrollTo(0, 0);
+  };
+
+  const handleContact = () => {
+    navigate('/contact');
+    window.scrollTo(0, 0);
+  };
+
   return (
     <div className="pricing-page min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
-      {/* Navigation */}
-      <nav className="bg-white/80 backdrop-blur-md border-b border-slate-200 sticky top-0 z-50">
+      {/* Navigation - matches landing page */}
+      <nav className="bg-slate-900 border-b border-slate-800 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <button 
-                  onClick={handleBackToHome}
-                  className="text-2xl font-bold text-slate-900 hover:text-blue-600 transition-colors"
-                >
-                  Meridian <span className="text-blue-600">Takeoff</span>
-                </button>
-              </div>
+              <button
+                onClick={handleBackToHome}
+                className="flex items-center gap-3 flex-shrink-0 hover:opacity-90 transition-opacity"
+                aria-label="Meridian Takeoff home"
+              >
+                <img src="/logo.png" alt="" className="h-9 w-9 rounded-lg object-contain" />
+                <h1 className="text-2xl font-bold text-white">
+                  Meridian <span className="text-blue-400">Takeoff</span>
+                </h1>
+              </button>
             </div>
             <div className="flex items-center space-x-4">
-              <Button 
+              <Button
                 onClick={handleFeatures}
-                variant="ghost" 
-                className="text-slate-600 hover:text-slate-900"
+                variant="ghost"
+                className="text-slate-300 hover:text-white hover:bg-slate-800"
               >
                 Features
               </Button>
-              <Button variant="ghost" className="text-slate-600 hover:text-slate-900">
+              <Button
+                onClick={handlePricing}
+                variant="ghost"
+                className="text-slate-300 hover:text-white hover:bg-slate-800"
+              >
+                Pricing
+              </Button>
+              <Button
+                onClick={handleContact}
+                variant="ghost"
+                className="text-slate-300 hover:text-white hover:bg-slate-800"
+              >
                 Contact
               </Button>
-              <Button 
+              <Button
                 onClick={handleLogin}
-                className="bg-blue-600 hover:bg-blue-700 text-white"
+                className="bg-blue-600 hover:bg-blue-500 text-white"
               >
                 Login
               </Button>
@@ -57,8 +80,8 @@ const PricingPage: React.FC = () => {
         </div>
       </nav>
 
-      {/* Hero Section */}
-      <section className="relative overflow-hidden">
+      {/* Hero Section - slate-50 to differentiate from white content sections */}
+      <section className="relative overflow-hidden bg-slate-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16">
           <div className="text-center">
             <div className="mb-6 bg-blue-100 text-blue-800 border border-blue-200 rounded-full px-4 py-2 text-sm font-medium inline-block">
@@ -87,7 +110,7 @@ const PricingPage: React.FC = () => {
                 <h3 className="text-2xl font-bold text-slate-900 mb-2">Starter</h3>
                 <p className="text-slate-600 mb-6">Perfect for small contractors and freelancers</p>
                 <div className="mb-6">
-                  <span className="text-5xl font-bold text-slate-900">$49</span>
+                  <span className="text-5xl font-bold text-slate-900">$15</span>
                   <span className="text-slate-600">/month</span>
                 </div>
                 <Button 
@@ -104,7 +127,15 @@ const PricingPage: React.FC = () => {
                       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                     </svg>
                   </div>
-                  <span className="text-slate-600">Up to 5 active projects</span>
+                  <span className="text-slate-600">3 projects</span>
+                </div>
+                <div className="flex items-start space-x-3">
+                  <div className="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <svg className="w-3 h-3 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <span className="text-slate-600">AI document chat (rate-limited)</span>
                 </div>
                 <div className="flex items-start space-x-3">
                   <div className="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -113,14 +144,6 @@ const PricingPage: React.FC = () => {
                     </svg>
                   </div>
                   <span className="text-slate-600">PDF takeoff tools</span>
-                </div>
-                <div className="flex items-start space-x-3">
-                  <div className="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <svg className="w-3 h-3 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                    </svg>
-                  </div>
-                  <span className="text-slate-600">Basic AI document chat</span>
                 </div>
                 <div className="flex items-start space-x-3">
                   <div className="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -152,7 +175,7 @@ const PricingPage: React.FC = () => {
                 <h3 className="text-2xl font-bold text-slate-900 mb-2">Professional</h3>
                 <p className="text-slate-600 mb-6">Ideal for growing construction companies</p>
                 <div className="mb-6">
-                  <span className="text-5xl font-bold text-slate-900">$149</span>
+                  <span className="text-5xl font-bold text-slate-900">$30</span>
                   <span className="text-slate-600">/month</span>
                 </div>
                 <Button 
@@ -177,7 +200,7 @@ const PricingPage: React.FC = () => {
                       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                     </svg>
                   </div>
-                  <span className="text-slate-600">Advanced PDF takeoff tools</span>
+                  <span className="text-slate-600">Unlimited AI document chat</span>
                 </div>
                 <div className="flex items-start space-x-3">
                   <div className="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -185,7 +208,7 @@ const PricingPage: React.FC = () => {
                       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                     </svg>
                   </div>
-                  <span className="text-slate-600">Full AI document analysis</span>
+                  <span className="text-slate-600">PDF takeoff tools</span>
                 </div>
                 <div className="flex items-start space-x-3">
                   <div className="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -193,7 +216,7 @@ const PricingPage: React.FC = () => {
                       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                     </svg>
                   </div>
-                  <span className="text-slate-600">Advanced cost calculations</span>
+                  <span className="text-slate-600">Standard calculations</span>
                 </div>
                 <div className="flex items-start space-x-3">
                   <div className="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -201,15 +224,7 @@ const PricingPage: React.FC = () => {
                       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                     </svg>
                   </div>
-                  <span className="text-slate-600">Professional reports</span>
-                </div>
-                <div className="flex items-start space-x-3">
-                  <div className="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <svg className="w-3 h-3 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                    </svg>
-                  </div>
-                  <span className="text-slate-600">Priority support</span>
+                  <span className="text-slate-600">Email support</span>
                 </div>
               </div>
             </div>
@@ -220,8 +235,7 @@ const PricingPage: React.FC = () => {
                 <h3 className="text-2xl font-bold text-slate-900 mb-2">Enterprise</h3>
                 <p className="text-slate-600 mb-6">For large construction firms and GCs</p>
                 <div className="mb-6">
-                  <span className="text-5xl font-bold text-slate-900">$299</span>
-                  <span className="text-slate-600">/month</span>
+                  <span className="text-xl font-semibold text-slate-700">Custom pricing</span>
                 </div>
                 <Button 
                   onClick={handleLogin}
@@ -245,14 +259,6 @@ const PricingPage: React.FC = () => {
                       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                     </svg>
                   </div>
-                  <span className="text-slate-600">Multi-user access</span>
-                </div>
-                <div className="flex items-start space-x-3">
-                  <div className="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <svg className="w-3 h-3 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                    </svg>
-                  </div>
                   <span className="text-slate-600">Custom integrations</span>
                 </div>
                 <div className="flex items-start space-x-3">
@@ -269,15 +275,7 @@ const PricingPage: React.FC = () => {
                       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                     </svg>
                   </div>
-                  <span className="text-slate-600">Dedicated account manager</span>
-                </div>
-                <div className="flex items-start space-x-3">
-                  <div className="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <svg className="w-3 h-3 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                    </svg>
-                  </div>
-                  <span className="text-slate-600">24/7 phone support</span>
+                  <span className="text-slate-600">Priority support</span>
                 </div>
               </div>
             </div>
@@ -372,7 +370,10 @@ const PricingPage: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid md:grid-cols-4 gap-8">
             <div>
-              <h3 className="text-lg font-semibold mb-4">Meridian Takeoff</h3>
+              <div className="flex items-center gap-2 mb-4">
+                <img src="/logo.png" alt="" className="h-8 w-8 rounded-lg object-contain" />
+                <h3 className="text-lg font-semibold">Meridian Takeoff</h3>
+              </div>
               <p className="text-slate-400">
                 Professional construction takeoff software for the modern contractor.
               </p>

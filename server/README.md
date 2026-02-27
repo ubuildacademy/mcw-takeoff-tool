@@ -20,11 +20,13 @@ REDIS_URL=redis://localhost:6379
 OLLAMA_BASE_URL=https://ollama.com
 OLLAMA_API_KEY=your_ollama_api_key_here
 
-# Email (Microsoft Graph - invitation emails)
+# Email (Microsoft Graph - invitation emails, contact form)
 GRAPH_CLIENT_ID=your_azure_app_client_id
 GRAPH_TENANT_ID=your_azure_tenant_id
 GRAPH_CLIENT_SECRET=your_azure_client_secret
 GRAPH_SENDER_EMAIL=noreply@yourdomain.com
+# Where contact form submissions are sent (default: jparido@mcwcompanies.com)
+CONTACT_EMAIL=jparido@mcwcompanies.com
 FRONTEND_URL=http://localhost:3001
 ```
 

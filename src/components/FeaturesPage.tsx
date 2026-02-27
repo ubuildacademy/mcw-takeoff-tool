@@ -17,36 +17,59 @@ const FeaturesPage: React.FC = () => {
     navigate('/pricing');
   };
 
+  const handleFeatures = () => {
+    navigate('/features');
+    window.scrollTo(0, 0);
+  };
+
+  const handleContact = () => {
+    navigate('/contact');
+    window.scrollTo(0, 0);
+  };
+
   return (
     <div className="features-page min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
-      {/* Navigation */}
-      <nav className="bg-white/80 backdrop-blur-md border-b border-slate-200 sticky top-0 z-50">
+      {/* Navigation - matches landing page */}
+      <nav className="bg-slate-900 border-b border-slate-800 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <button 
-                  onClick={handleBackToHome}
-                  className="text-2xl font-bold text-slate-900 hover:text-blue-600 transition-colors"
-                >
-                  Meridian <span className="text-blue-600">Takeoff</span>
-                </button>
-              </div>
+              <button
+                onClick={handleBackToHome}
+                className="flex items-center gap-3 flex-shrink-0 hover:opacity-90 transition-opacity"
+                aria-label="Meridian Takeoff home"
+              >
+                <img src="/logo.png" alt="" className="h-9 w-9 rounded-lg object-contain" />
+                <h1 className="text-2xl font-bold text-white">
+                  Meridian <span className="text-blue-400">Takeoff</span>
+                </h1>
+              </button>
             </div>
             <div className="flex items-center space-x-4">
-              <Button 
+              <Button
+                onClick={handleFeatures}
+                variant="ghost"
+                className="text-slate-300 hover:text-white hover:bg-slate-800"
+              >
+                Features
+              </Button>
+              <Button
                 onClick={handlePricing}
-                variant="ghost" 
-                className="text-slate-600 hover:text-slate-900"
+                variant="ghost"
+                className="text-slate-300 hover:text-white hover:bg-slate-800"
               >
                 Pricing
               </Button>
-              <Button variant="ghost" className="text-slate-600 hover:text-slate-900">
+              <Button
+                onClick={handleContact}
+                variant="ghost"
+                className="text-slate-300 hover:text-white hover:bg-slate-800"
+              >
                 Contact
               </Button>
-              <Button 
+              <Button
                 onClick={handleLogin}
-                className="bg-blue-600 hover:bg-blue-700 text-white"
+                className="bg-blue-600 hover:bg-blue-500 text-white"
               >
                 Login
               </Button>
@@ -55,8 +78,8 @@ const FeaturesPage: React.FC = () => {
         </div>
       </nav>
 
-      {/* Hero Section */}
-      <section className="relative overflow-hidden">
+      {/* Hero Section - slate-50 to differentiate from white content sections */}
+      <section className="relative overflow-hidden bg-slate-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16">
           <div className="text-center">
             <div className="mb-6 bg-blue-100 text-blue-800 border border-blue-200 rounded-full px-4 py-2 text-sm font-medium inline-block">
@@ -554,7 +577,10 @@ const FeaturesPage: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid md:grid-cols-4 gap-8">
             <div>
-              <h3 className="text-lg font-semibold mb-4">Meridian Takeoff</h3>
+              <div className="flex items-center gap-2 mb-4">
+                <img src="/logo.png" alt="" className="h-8 w-8 rounded-lg object-contain" />
+                <h3 className="text-lg font-semibold">Meridian Takeoff</h3>
+              </div>
               <p className="text-slate-400">
                 Professional construction takeoff software for the modern contractor.
               </p>

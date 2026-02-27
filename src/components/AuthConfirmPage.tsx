@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { LandingNav } from './LandingNav';
 
 /**
  * Handles Supabase email confirmation links (signup confirm + password reset).
@@ -42,10 +43,13 @@ const AuthConfirmPage: React.FC = () => {
 
   if (status === 'loading') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto" />
-          <p className="mt-2 text-slate-600">Confirming your email...</p>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex flex-col">
+        <LandingNav showBackToHome />
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto" />
+            <p className="mt-2 text-slate-600">Confirming your email...</p>
+          </div>
         </div>
       </div>
     );
@@ -53,17 +57,17 @@ const AuthConfirmPage: React.FC = () => {
 
   if (status === 'error') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center p-4">
-        <div className="max-w-md w-full text-center">
-          <h1 className="text-3xl font-bold text-slate-900 mb-4">
-            Meridian <span className="text-blue-600">Takeoff</span>
-          </h1>
-          <div className="bg-red-50 border border-red-200 rounded-md p-4">
-            <p className="text-red-600">{errorMessage}</p>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex flex-col">
+        <LandingNav showBackToHome />
+        <div className="flex-1 flex items-center justify-center p-4">
+          <div className="max-w-md w-full text-center">
+            <div className="bg-red-50 border border-red-200 rounded-md p-4">
+              <p className="text-red-600">{errorMessage}</p>
+            </div>
+            <Link to="/" className="mt-4 inline-block text-blue-600 hover:text-blue-500">
+              ← Back to home
+            </Link>
           </div>
-          <Link to="/" className="mt-4 inline-block text-blue-600 hover:text-blue-500">
-            ← Back to home
-          </Link>
         </div>
       </div>
     );
