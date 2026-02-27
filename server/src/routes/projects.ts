@@ -136,7 +136,12 @@ async function buildProjectBackup(
 export async function performImportFromBackup(
   backup: Record<string, unknown>,
   userId: string
-): Promise<{ project: StoredProject; message: string }> {
+): Promise<{
+  project: StoredProject;
+  message: string;
+  annotations: Array<Record<string, unknown>>;
+  documentRotations: Record<string, number>;
+}> {
   const { id: _origId, userId: _origUserId, ...projectData } = backup.project as Record<string, unknown>;
   const newProject = await storage.saveProject({
     ...projectData,
