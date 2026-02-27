@@ -8,6 +8,8 @@ interface AnnotationState {
   
   // Actions
   addAnnotation: (annotation: Omit<Annotation, 'id' | 'timestamp'>) => Annotation;
+  /** Add multiple annotations in a single update (e.g. from backup/import). */
+  addAnnotationsBulk: (annotations: Annotation[]) => void;
   updateAnnotation: (id: string, updates: Partial<Pick<Annotation, 'points' | 'color' | 'text'>>) => void;
   deleteAnnotation: (id: string) => void;
   clearPageAnnotations: (projectId: string, sheetId: string, pageNumber: number) => void;
@@ -36,7 +38,14 @@ export const useAnnotationStore = create<AnnotationState>()(
         }));
         return annotation;
       },
-      
+
+      addAnnotationsBulk: (annotationsToAdd) => {
+        if (annotationsToAdd.length === 0) return;
+        set(state => ({
+          annotations: [...state.annotations, ...annotationsToAdd]
+        }));
+      },
+
       updateAnnotation: (id, updates) => {
         set(state => ({
           annotations: state.annotations.map(a =>

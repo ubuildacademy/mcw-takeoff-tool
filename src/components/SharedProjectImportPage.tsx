@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import type { Annotation } from '../types';
 import { authHelpers } from '../lib/supabase';
 import { projectService } from '../services/apiService';
 import { useProjectStore } from '../store/slices/projectSlice';
+import { useAnnotationStore } from '../store/slices/annotationSlice';
+import { useDocumentViewStore } from '../store/slices/documentViewSlice';
 import { Button } from './ui/button';
 import { Loader2, LogIn } from 'lucide-react';
 
@@ -34,6 +37,18 @@ export function SharedProjectImportPage() {
       try {
         const result = await projectService.importSharedProject(token);
         if (!mounted) return;
+        if (result.annotations?.length) {
+          useAnnotationStore.getState().addAnnotationsBulk(result.annotations as unknown as Annotation[]);
+        }
+        if (result.documentRotations && Object.keys(result.documentRotations).length > 0) {
+          const rotations: Record<string, number> = {};
+          for (const [docId, rot] of Object.entries(result.documentRotations)) {
+            if (typeof rot === 'number') rotations[docId] = rot;
+          }
+          if (Object.keys(rotations).length > 0) {
+            useDocumentViewStore.getState().setDocumentRotations(rotations);
+          }
+        }
         await loadInitialData();
         if (!mounted) return;
         navigate(`/project/${result.project.id}`, { replace: true });

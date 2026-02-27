@@ -18,6 +18,8 @@ interface DocumentViewState {
 
   // Rotation actions
   setDocumentRotation: (documentId: string, rotation: number) => void;
+  /** Set multiple document rotations in a single update (e.g. from backup/import). */
+  setDocumentRotations: (rotations: Record<string, number>) => void;
   getDocumentRotation: (documentId: string) => number;
 
   // Page actions
@@ -57,7 +59,17 @@ export const useDocumentViewStore = create<DocumentViewState>()(
           }
         }));
       },
-      
+
+      setDocumentRotations: (rotations) => {
+        if (Object.keys(rotations).length === 0) return;
+        set(state => ({
+          documentRotations: {
+            ...state.documentRotations,
+            ...rotations
+          }
+        }));
+      },
+
       getDocumentRotation: (documentId) => {
         const state = get();
         return state.documentRotations[documentId] || 0;

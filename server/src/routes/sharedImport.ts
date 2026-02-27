@@ -33,8 +33,8 @@ router.post('/:token', requireAuth, validateUUIDParam('token'), async (req, res)
       return res.status(400).json({ error: 'Invalid backup file format' });
     }
 
-    const { project, message } = await performImportFromBackup(backup, userId);
-    return res.json({ success: true, project, message });
+    const { project, message, annotations, documentRotations } = await performImportFromBackup(backup, userId);
+    return res.json({ success: true, project, message, annotations, documentRotations });
   } catch (error) {
     console.error('Error importing shared project:', error);
     return res.status(500).json({ error: 'Failed to import project' });

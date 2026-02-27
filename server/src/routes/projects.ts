@@ -252,12 +252,37 @@ export async function performImportFromBackup(
     } as Parameters<typeof storage.saveTakeoffMeasurement>[0]);
   }
 
+  const documentRotations: Record<string, number> = {};
+  const backupRotations = backup.documentRotations as Record<string, number> | undefined;
+  if (backupRotations && typeof backupRotations === 'object') {
+    for (const [oldFileId, rot] of Object.entries(backupRotations)) {
+      const newFileId = fileIdMapping[oldFileId];
+      if (newFileId != null && typeof rot === 'number') documentRotations[newFileId] = rot;
+    }
+  }
+
+  const annotations: Array<Record<string, unknown>> = [];
+  const backupAnnotations = backup.annotations as Array<Record<string, unknown>> | undefined;
+  if (Array.isArray(backupAnnotations)) {
+    for (const a of backupAnnotations) {
+      const oldSheetId = (a.sheetId as string) || '';
+      const newSheetId = sheetIdMapping[oldSheetId] ?? oldSheetId;
+      annotations.push({
+        ...a,
+        id: `annotation-${uuidv4()}`,
+        projectId: newProjectId,
+        sheetId: newSheetId,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }
+
   const filesRestored = files.filter((f) => f.fileData).length;
   const filesMissing = files.filter((f) => !f.fileData).length;
   const message = filesMissing > 0
     ? `Project imported. ${filesRestored} PDF(s) restored, ${filesMissing} missing.`
     : `Project imported. All ${filesRestored} PDF(s) restored.`;
-  return { project: newProject, message };
+  return { project: newProject, message, annotations, documentRotations };
 }
 
 router.get('/', requireAuth, async (req, res) => {
@@ -538,6 +563,29 @@ router.post(
       const backup = await buildProjectBackup(projectId, userId, userIsAdmin);
       const project = backup.project as { name?: string };
       const projectName = project?.name || 'Project';
+
+      const files = (backup.files as Array<{ id?: string }>) || [];
+      const fileIds = new Set(files.map((f) => f.id).filter(Boolean));
+
+      const clientDocumentRotations = req.body?.documentRotations as Record<string, number> | undefined;
+      if (clientDocumentRotations && typeof clientDocumentRotations === 'object') {
+        const documentRotations: Record<string, number> = {};
+        for (const [docId, rot] of Object.entries(clientDocumentRotations)) {
+          if (fileIds.has(docId) && typeof rot === 'number') documentRotations[docId] = rot;
+        }
+        if (Object.keys(documentRotations).length > 0) backup.documentRotations = documentRotations;
+      }
+
+      const clientAnnotations = req.body?.annotations;
+      if (Array.isArray(clientAnnotations) && clientAnnotations.length > 0) {
+        const valid = clientAnnotations.filter(
+          (a: unknown) =>
+            a &&
+            typeof a === 'object' &&
+            (a as Record<string, unknown>).projectId === projectId
+        );
+        if (valid.length > 0) backup.annotations = valid;
+      }
 
       const jsonString = JSON.stringify(backup);
       const backupBuffer = Buffer.from(jsonString, 'utf8');
@@ -850,8 +898,8 @@ router.post('/import', requireAuth, uploadRateLimit, upload.single('file'), asyn
     if (!backup.version || !backup.project || !backup.timestamp) {
       return res.status(400).json({ error: 'Invalid backup file format' });
     }
-    const { project, message } = await performImportFromBackup(backup, userId);
-    return res.json({ success: true, project, message });
+    const { project, message, annotations, documentRotations } = await performImportFromBackup(backup, userId);
+    return res.json({ success: true, project, message, annotations, documentRotations });
   } catch (error) {
     console.error('❌ Error importing project:', error);
     return res.status(500).json({ error: 'Failed to import project' });

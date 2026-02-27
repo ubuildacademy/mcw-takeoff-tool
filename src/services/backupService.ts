@@ -1,6 +1,8 @@
 import { Project, TakeoffCondition, ProjectFile, TakeoffMeasurement, Calibration } from '../types';
 import { authHelpers } from '../lib/supabase';
 import { getApiBaseUrl } from '../lib/apiConfig';
+import { useAnnotationStore } from '../store/slices/annotationSlice';
+import { useDocumentViewStore } from '../store/slices/documentViewSlice';
 
 async function getAuthHeaders(): Promise<HeadersInit> {
   const session = await authHelpers.getValidSession();
@@ -51,7 +53,16 @@ export class BackupService {
       }
 
       const backup = await response.json();
-      
+      const fileIds = new Set((backup.files ?? []).map((f: { id?: string }) => f.id).filter(Boolean));
+      const docRotations = useDocumentViewStore.getState().documentRotations;
+      const documentRotations: Record<string, number> = {};
+      for (const [docId, rot] of Object.entries(docRotations)) {
+        if (fileIds.has(docId)) documentRotations[docId] = rot;
+      }
+      if (Object.keys(documentRotations).length > 0) backup.documentRotations = documentRotations;
+      const annotations = useAnnotationStore.getState().annotations.filter((a) => a.projectId === projectId);
+      if (annotations.length > 0) backup.annotations = annotations;
+
       // Convert to JSON and create download
       const jsonString = JSON.stringify(backup, null, 2);
       const blob = new Blob([jsonString], { type: 'application/json' });
@@ -80,9 +91,14 @@ export class BackupService {
   }
 
   /**
-   * Import a project from a backup file
+   * Import a project from a backup file.
+   * Returns project and optionally annotations/documentRotations to apply to stores.
    */
-  static async importProject(file: File): Promise<Project> {
+  static async importProject(file: File): Promise<{
+    project: Project;
+    annotations?: Array<Record<string, unknown>>;
+    documentRotations?: Record<string, number>;
+  }> {
     try {
       console.log('🔄 BACKUP: Starting project import for file:', file.name);
 
@@ -108,7 +124,11 @@ export class BackupService {
 
       const result = await response.json();
       console.log('✅ BACKUP: Project imported successfully');
-      return result.project;
+      return {
+        project: result.project,
+        annotations: result.annotations,
+        documentRotations: result.documentRotations,
+      };
 
     } catch (error) {
       console.error('❌ BACKUP: Failed to import project:', error);

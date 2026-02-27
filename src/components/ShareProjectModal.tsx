@@ -3,6 +3,8 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
+import { useAnnotationStore } from '../store/slices/annotationSlice';
+import { useDocumentViewStore } from '../store/slices/documentViewSlice';
 import {
   Dialog,
   DialogContent,
@@ -67,9 +69,13 @@ export function ShareProjectModal({
 
     setSending(true);
     try {
+      const annotations = useAnnotationStore.getState().annotations.filter((a) => a.projectId === projectId);
+      const documentRotations = useDocumentViewStore.getState().documentRotations;
       const result = await projectService.shareProject(projectId, {
         recipients: valid,
         message: message.trim() || undefined,
+        annotations,
+        documentRotations,
       });
       if (result.deliveryMethod === 'link') {
         toast.success(

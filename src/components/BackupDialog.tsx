@@ -15,9 +15,12 @@ import {
   FileImage,
   Share2
 } from 'lucide-react';
+import type { Annotation } from '../types';
 import { BackupService } from '../services/backupService';
 import { ShareProjectModal } from './ShareProjectModal';
 import { useProjectStore } from '../store/slices/projectSlice';
+import { useAnnotationStore } from '../store/slices/annotationSlice';
+import { useDocumentViewStore } from '../store/slices/documentViewSlice';
 
 interface BackupDialogProps {
   open: boolean;
@@ -134,8 +137,21 @@ export function BackupDialog({
         });
       }, 200);
 
-      await BackupService.importProject(file);
+      const result = await BackupService.importProject(file);
       
+      if (result.annotations?.length) {
+        useAnnotationStore.getState().addAnnotationsBulk(result.annotations as unknown as Annotation[]);
+      }
+      if (result.documentRotations && Object.keys(result.documentRotations).length > 0) {
+        const rotations: Record<string, number> = {};
+        for (const [docId, rot] of Object.entries(result.documentRotations)) {
+          if (typeof rot === 'number') rotations[docId] = rot;
+        }
+        if (Object.keys(rotations).length > 0) {
+          useDocumentViewStore.getState().setDocumentRotations(rotations);
+        }
+      }
+
       clearInterval(progressInterval);
       setProgress(100);
       setSuccess(true);
@@ -204,7 +220,7 @@ export function BackupDialog({
               <div className="flex items-center gap-2 p-3 bg-blue-50 rounded-lg">
                 <Database className="w-4 h-4 text-blue-600" />
                 <span className="text-sm text-blue-800">
-                  This will include all project data, PDFs, conditions, measurements, scale calibrations, and settings.
+                  This will include all project data, PDFs, conditions, measurements, scale calibrations, markups (arrows, text, shapes), page rotations, and settings.
                 </span>
               </div>
 
