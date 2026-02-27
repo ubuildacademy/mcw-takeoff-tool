@@ -132,6 +132,19 @@ async function buildProjectBackup(
   };
 }
 
+/** Remap sheetId for measurements/annotations. Frontend uses file.id; backup may store file id or documentId-pageNumber. */
+function remapSheetIdForFrontend(
+  oldSheetId: string,
+  fileIdMapping: Record<string, string>,
+  sheetIdMapping: Record<string, string>
+): string {
+  let mapped = fileIdMapping[oldSheetId];
+  if (mapped == null && /-\d+$/.test(oldSheetId)) {
+    mapped = fileIdMapping[oldSheetId.replace(/-\d+$/, '')];
+  }
+  return mapped ?? sheetIdMapping[oldSheetId] ?? oldSheetId;
+}
+
 /** Import backup into a new project for the given user. Used by POST /import and shared-import. */
 export async function performImportFromBackup(
   backup: Record<string, unknown>,
@@ -239,21 +252,23 @@ export async function performImportFromBackup(
 
   const calibrations = (backup.calibrations as Array<Record<string, unknown>>) || [];
   for (const cal of calibrations) {
+    const newSheetId = remapSheetIdForFrontend((cal.sheetId as string) || '', fileIdMapping, sheetIdMapping);
     await storage.saveCalibration({
       ...cal,
       id: uuidv4(),
       projectId: newProjectId,
-      sheetId: sheetIdMapping[(cal.sheetId as string) || ''] || (cal.sheetId as string),
+      sheetId: newSheetId,
     } as Parameters<typeof storage.saveCalibration>[0]);
   }
 
   const measurements = (backup.measurements as Array<Record<string, unknown>>) || [];
   for (const m of measurements) {
+    const newSheetId = remapSheetIdForFrontend((m.sheetId as string) || '', fileIdMapping, sheetIdMapping);
     await storage.saveTakeoffMeasurement({
       ...m,
       id: uuidv4(),
       projectId: newProjectId,
-      sheetId: sheetIdMapping[(m.sheetId as string) || ''] || (m.sheetId as string),
+      sheetId: newSheetId,
     } as Parameters<typeof storage.saveTakeoffMeasurement>[0]);
   }
 
@@ -270,8 +285,7 @@ export async function performImportFromBackup(
   const backupAnnotations = backup.annotations as Array<Record<string, unknown>> | undefined;
   if (Array.isArray(backupAnnotations)) {
     for (const a of backupAnnotations) {
-      const oldSheetId = (a.sheetId as string) || '';
-      const newSheetId = sheetIdMapping[oldSheetId] ?? oldSheetId;
+      const newSheetId = remapSheetIdForFrontend((a.sheetId as string) || '', fileIdMapping, sheetIdMapping);
       annotations.push({
         ...a,
         id: `annotation-${uuidv4()}`,
