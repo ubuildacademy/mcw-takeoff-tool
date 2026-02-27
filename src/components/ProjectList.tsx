@@ -10,6 +10,7 @@ import {
   Trash2,
   Settings,
   Download,
+  Share2,
   User
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -17,6 +18,7 @@ import { projectService } from '../services/apiService';
 import { ProjectCreationDialog } from './ProjectCreationDialog';
 import { ProjectSettingsDialog } from './ProjectSettingsDialog';
 import { BackupDialog } from './BackupDialog';
+import { ShareProjectModal } from './ShareProjectModal';
 import { AdminPanel } from './AdminPanel';
 import UserProfile from './UserProfile';
 import { useProjectStore } from '../store/slices/projectSlice';
@@ -37,6 +39,8 @@ export function ProjectList() {
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [backupMode, setBackupMode] = useState<'backup' | 'restore'>('restore');
   const [selectedProjectForBackup, setSelectedProjectForBackup] = useState<Project | null>(null);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [selectedProjectForShare, setSelectedProjectForShare] = useState<Project | null>(null);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [showUserProfile, setShowUserProfile] = useState(false);
   const [isAdmin, _setIsAdmin] = useState(false);
@@ -94,6 +98,12 @@ export function ProjectList() {
     setBackupMode('backup');
     setSelectedProjectForBackup(project);
     setShowBackup(true);
+  };
+
+  const handleProjectShare = (project: Project, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent opening the project
+    setSelectedProjectForShare(project);
+    setShowShareModal(true);
   };
 
   const handleEditProject = (project: Project, e: React.MouseEvent) => {
@@ -227,6 +237,15 @@ export function ProjectList() {
                   <Button
                     variant="ghost"
                     size="sm"
+                    onClick={(e) => handleProjectShare(project, e)}
+                    className="text-green-600 hover:text-green-700 hover:bg-green-50"
+                    title="Share project via email"
+                  >
+                    <Share2 className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={(e) => handleProjectBackup(project, e)}
                     className="text-blue-500 hover:text-blue-700 hover:bg-blue-50"
                     title="Backup project"
@@ -313,6 +332,15 @@ export function ProjectList() {
                     <Button
                       variant="ghost"
                       size="sm"
+                      onClick={(e) => handleProjectShare(project, e)}
+                      className="text-green-600 hover:text-green-700 hover:bg-green-50"
+                      title="Share project via email"
+                    >
+                      <Share2 className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       onClick={(e) => handleProjectBackup(project, e)}
                       className="text-blue-500 hover:text-blue-700 hover:bg-blue-50"
                       title="Backup project"
@@ -394,6 +422,18 @@ export function ProjectList() {
         projectId={selectedProjectForBackup?.id}
         projectName={selectedProjectForBackup?.name}
       />
+
+      {selectedProjectForShare && (
+        <ShareProjectModal
+          projectId={selectedProjectForShare.id}
+          projectName={selectedProjectForShare.name || 'Project'}
+          isOpen={showShareModal}
+          onClose={() => {
+            setShowShareModal(false);
+            setSelectedProjectForShare(null);
+          }}
+        />
+      )}
 
       <AdminPanel
         isOpen={showAdminPanel}

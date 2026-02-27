@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useParams, Link } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -14,6 +14,8 @@ interface InvitationInfo {
 
 const SignupPage: React.FC = () => {
   const { inviteToken } = useParams<{ inviteToken: string }>();
+  const [searchParams] = useSearchParams();
+  const redirect = searchParams.get('redirect') || '/app';
   const [invitation, setInvitation] = useState<InvitationInfo | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isValidating, setIsValidating] = useState(true);
@@ -120,7 +122,7 @@ const SignupPage: React.FC = () => {
         company: formData.company
       });
 
-      navigate('/app');
+      navigate(redirect.startsWith('/') ? redirect : `/${redirect}`, { replace: true });
     } catch {
       setError('An unexpected error occurred');
     } finally {

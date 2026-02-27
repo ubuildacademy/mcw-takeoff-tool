@@ -278,6 +278,16 @@ export const projectService = {
     return response.data;
   },
 
+  async shareProject(projectId: string, params: { recipients: string[]; message?: string }) {
+    const response = await apiClient.post(`/projects/${projectId}/share-project`, params);
+    return response.data;
+  },
+
+  async importSharedProject(token: string) {
+    const response = await apiClient.post(`/shared-import/${token}`);
+    return response.data;
+  },
+
   async sendReport(
     projectId: string,
     params:

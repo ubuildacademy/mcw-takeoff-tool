@@ -133,3 +133,13 @@ export const sendReportRateLimit = rateLimit({
   message: 'Too many report emails sent for this project. Please try again in an hour.',
   keyGenerator: (req) => `send-report:${req.params.id || 'unknown'}:${req.user?.id || 'anonymous'}`
 });
+
+/**
+ * Share project rate limiter - 10 shares per project per hour
+ */
+export const shareProjectRateLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,  // 1 hour
+  maxRequests: 10,
+  message: 'Too many project shares sent for this project. Please try again in an hour.',
+  keyGenerator: (req) => `share-project:${req.params.id || 'unknown'}:${req.user?.id || 'anonymous'}`
+});

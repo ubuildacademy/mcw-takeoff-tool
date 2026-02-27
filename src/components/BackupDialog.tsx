@@ -12,9 +12,11 @@ import {
   Database,
   FolderOpen,
   Ruler,
-  FileImage
+  FileImage,
+  Share2
 } from 'lucide-react';
 import { BackupService } from '../services/backupService';
+import { ShareProjectModal } from './ShareProjectModal';
 import { useProjectStore } from '../store/slices/projectSlice';
 
 interface BackupDialogProps {
@@ -51,6 +53,7 @@ export function BackupDialog({
     timestamp?: string;
   }
   const [fileInfo, setFileInfo] = useState<BackupFileMetadata | null>(null);
+  const [showShareModal, setShowShareModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const loadInitialData = useProjectStore((s) => s.loadInitialData);
 
@@ -235,6 +238,14 @@ export function BackupDialog({
                 <Button variant="outline" onClick={handleClose} disabled={loading}>
                   Cancel
                 </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setShowShareModal(true)}
+                  disabled={loading}
+                >
+                  <Share2 className="w-4 h-4 mr-2" />
+                  Share via Email
+                </Button>
                 <Button onClick={handleBackup} disabled={loading}>
                   {loading ? (
                     <>
@@ -249,6 +260,14 @@ export function BackupDialog({
                   )}
                 </Button>
               </div>
+              {projectId && projectName && (
+                <ShareProjectModal
+                  projectId={projectId}
+                  projectName={projectName}
+                  isOpen={showShareModal}
+                  onClose={() => setShowShareModal(false)}
+                />
+              )}
             </div>
           ) : (
             <div className="space-y-4">

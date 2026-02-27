@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -11,6 +11,8 @@ const LoginPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const redirect = searchParams.get('redirect') || '/app';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,7 +25,7 @@ const LoginPage: React.FC = () => {
       if (error) {
         setError((error as { message?: string })?.message ?? 'An error occurred');
       } else {
-        navigate('/app');
+        navigate(redirect.startsWith('/') ? redirect : `/${redirect}`, { replace: true });
       }
     } catch {
       setError('An unexpected error occurred');

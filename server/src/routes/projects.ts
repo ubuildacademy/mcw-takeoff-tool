@@ -10,10 +10,11 @@ import {
   validateUUIDParam,
   sanitizeBody,
   uploadRateLimit,
-  sendReportRateLimit
+  sendReportRateLimit,
+  shareProjectRateLimit
 } from '../middleware';
 import { emailService } from '../services/emailService';
-import { REPORT_DELIVERY } from '../config/reportDelivery';
+import { REPORT_DELIVERY, PROJECT_SHARE } from '../config/reportDelivery';
 
 // Configure multer for file uploads
 const upload = multer({ 
@@ -34,6 +35,230 @@ const sendReportFields = sendReportUpload.fields([
 ]);
 
 const router = express.Router();
+
+/** Build full project backup (reused by export and share-project). */
+async function buildProjectBackup(
+  id: string,
+  userId: string | undefined,
+  userIsAdmin: boolean
+): Promise<Record<string, unknown>> {
+  let accessQuery = supabase.from(TABLES.PROJECTS).select('id').eq('id', id);
+  if (!userIsAdmin) {
+    accessQuery = accessQuery.eq('user_id', userId!);
+  }
+  const { data: accessCheck, error: accessError } = await accessQuery.single();
+  if (accessError || !accessCheck) {
+    const err = new Error('Project not found or access denied') as Error & { statusCode?: number };
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const project = await storage.getProject(id);
+  if (!project) {
+    const err = new Error('Project not found') as Error & { statusCode?: number };
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const conditions = await storage.getConditionsByProject(id).catch(() => []);
+  const files = await storage.getFilesByProject(id).catch(() => []);
+  const measurements = await storage.getTakeoffMeasurementsByProject(id).catch(() => []);
+  const calibrations = await storage.getCalibrationsByProject(id).catch(() => []);
+
+  const fileIds = files.map((f) => f.id);
+  let sheets: unknown[] = [];
+  if (fileIds.length > 0) {
+    const { data: allSheets } = await supabase
+      .from(TABLES.SHEETS)
+      .select('*')
+      .in('document_id', fileIds)
+      .order('page_number', { ascending: true });
+    sheets = (allSheets || []).map((s) => ({
+      id: (s as Record<string, unknown>).id,
+      documentId: (s as Record<string, unknown>).document_id,
+      pageNumber: (s as Record<string, unknown>).page_number,
+      sheetNumber: (s as Record<string, unknown>).sheet_number,
+      sheetName: (s as Record<string, unknown>).sheet_name,
+      extractedText: (s as Record<string, unknown>).extracted_text,
+      hasTakeoffs: (s as Record<string, unknown>).has_takeoffs,
+      takeoffCount: (s as Record<string, unknown>).takeoff_count,
+      isVisible: (s as Record<string, unknown>).is_visible,
+      ocrProcessed: (s as Record<string, unknown>).ocr_processed,
+      titleblockConfig: (s as Record<string, unknown>).titleblock_config,
+      createdAt: (s as Record<string, unknown>).created_at,
+      updatedAt: (s as Record<string, unknown>).updated_at,
+    }));
+  }
+
+  const filesWithData = await Promise.all(
+    files.map(async (file) => {
+      if (!file.path) {
+        return { ...file, fileData: null, fileDataError: 'No storage path' };
+      }
+      const { data: fileData, error: downloadError } = await supabase.storage
+        .from('project-files')
+        .download(file.path);
+      if (downloadError || !fileData) {
+        return { ...file, fileData: null, fileDataError: downloadError?.message || 'File not found' };
+      }
+      const buffer = Buffer.from(await fileData.arrayBuffer());
+      return {
+        ...file,
+        fileData: buffer.toString('base64'),
+        fileDataMimeType: file.mimetype,
+      };
+    })
+  );
+
+  const filesWithDataCount = filesWithData.filter((f) => (f as Record<string, unknown>).fileData !== null).length;
+  return {
+    version: '2.0',
+    timestamp: new Date().toISOString(),
+    project,
+    conditions,
+    files: filesWithData,
+    sheets,
+    measurements,
+    calibrations,
+    metadata: {
+      totalFiles: files.length,
+      totalConditions: conditions.length,
+      totalMeasurements: measurements.length,
+      totalSheets: sheets.length,
+      totalCalibrations: calibrations.length,
+      filesWithData: filesWithDataCount,
+      filesMissing: filesWithData.length - filesWithDataCount,
+    },
+  };
+}
+
+/** Import backup into a new project for the given user. Used by POST /import and shared-import. */
+export async function performImportFromBackup(
+  backup: Record<string, unknown>,
+  userId: string
+): Promise<{ project: StoredProject; message: string }> {
+  const { id: _origId, userId: _origUserId, ...projectData } = backup.project as Record<string, unknown>;
+  const newProject = await storage.saveProject({
+    ...projectData,
+    id: uuidv4(),
+    userId,
+    createdAt: new Date().toISOString(),
+    lastModified: new Date().toISOString(),
+  } as StoredProject);
+  const newProjectId = newProject.id;
+
+  const conditions = (backup.conditions as Record<string, unknown>[]) || [];
+  if (conditions.length > 0) {
+    await Promise.all(
+      conditions.map((c) => {
+        const { id: _cId, ...rest } = c;
+        return storage.saveCondition({
+          ...rest,
+          id: uuidv4(),
+          projectId: newProjectId,
+        } as Parameters<typeof storage.saveCondition>[0]);
+      })
+    );
+  }
+
+  const fileIdMapping: Record<string, string> = {};
+  const files = (backup.files as Array<Record<string, unknown>>) || [];
+  for (const file of files) {
+    const originalFileId = (file.id as string) || '';
+    const { id: _fId, fileData, fileDataMimeType, fileDataError, ...fileMeta } = file;
+    const newFileId = uuidv4();
+    fileIdMapping[originalFileId] = newFileId;
+    const mime = (fileDataMimeType || fileMeta.mimetype || 'application/pdf') as string;
+    if (fileData && typeof fileData === 'string') {
+      try {
+        const fileBuffer = Buffer.from(fileData as string, 'base64');
+        const ext = fileMeta.filename ? path.extname(fileMeta.filename as string) : '.pdf';
+        const storagePath = `${newProjectId}/${newFileId}${ext}`;
+        const { error: uploadError } = await supabase.storage
+          .from('project-files')
+          .upload(storagePath, fileBuffer, { contentType: mime, upsert: false });
+        if (uploadError) {
+          console.warn(`Failed to upload ${fileMeta.originalName}:`, uploadError);
+        }
+        await storage.saveFile({
+          id: newFileId,
+          projectId: newProjectId,
+          originalName: (fileMeta.originalName as string) || 'unknown',
+          filename: (fileMeta.filename as string) || fileMeta.originalName as string || 'unknown',
+          path: storagePath,
+          size: fileBuffer.length,
+          mimetype: mime,
+          uploadedAt: new Date().toISOString(),
+        });
+      } catch {
+        await storage.saveFile({
+          id: newFileId,
+          projectId: newProjectId,
+          originalName: (fileMeta.originalName as string) || 'unknown',
+          filename: (fileMeta.filename as string) || fileMeta.originalName as string || 'unknown',
+          path: '',
+          size: (fileMeta.size as number) || 0,
+          mimetype: (fileMeta.mimetype as string) || 'application/pdf',
+          uploadedAt: new Date().toISOString(),
+        });
+      }
+    } else {
+      await storage.saveFile({
+        id: newFileId,
+        projectId: newProjectId,
+        originalName: (fileMeta.originalName as string) || 'unknown',
+        filename: (fileMeta.filename as string) || fileMeta.originalName as string || 'unknown',
+        path: '',
+        size: (fileMeta.size as number) || 0,
+        mimetype: (fileMeta.mimetype as string) || 'application/pdf',
+        uploadedAt: new Date().toISOString(),
+      });
+    }
+  }
+
+  const sheetIdMapping: Record<string, string> = {};
+  const sheets = (backup.sheets as Array<Record<string, unknown>>) || [];
+  for (const sheet of sheets) {
+    const { id: _sId, documentId, ...sheetData } = sheet;
+    const newDocumentId = fileIdMapping[(documentId as string) || ''] || (documentId as string);
+    const newSheetId = uuidv4();
+    sheetIdMapping[(sheet.id as string) || ''] = newSheetId;
+    await storage.saveSheet({
+      ...sheetData,
+      id: newSheetId,
+      documentId: newDocumentId,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    } as Parameters<typeof storage.saveSheet>[0]);
+  }
+
+  const calibrations = (backup.calibrations as Array<Record<string, unknown>>) || [];
+  for (const cal of calibrations) {
+    await storage.saveCalibration({
+      ...cal,
+      id: uuidv4(),
+      projectId: newProjectId,
+      sheetId: sheetIdMapping[(cal.sheetId as string) || ''] || (cal.sheetId as string),
+    } as Parameters<typeof storage.saveCalibration>[0]);
+  }
+
+  const measurements = (backup.measurements as Array<Record<string, unknown>>) || [];
+  for (const m of measurements) {
+    await storage.saveTakeoffMeasurement({
+      ...m,
+      id: uuidv4(),
+      projectId: newProjectId,
+      sheetId: sheetIdMapping[(m.sheetId as string) || ''] || (m.sheetId as string),
+    } as Parameters<typeof storage.saveTakeoffMeasurement>[0]);
+  }
+
+  const filesRestored = files.filter((f) => f.fileData).length;
+  const filesMissing = files.filter((f) => !f.fileData).length;
+  const message = filesMissing > 0
+    ? `Project imported. ${filesRestored} PDF(s) restored, ${filesMissing} missing.`
+    : `Project imported. All ${filesRestored} PDF(s) restored.`;
+  return { project: newProject, message };
+}
 
 router.get('/', requireAuth, async (req, res) => {
   try {
@@ -263,196 +488,155 @@ router.get('/:id/export', requireAuth, validateUUIDParam('id'), async (req, res)
     const { id } = req.params;
     const userId = req.user?.id;
     const userIsAdmin = req.user?.role === 'admin';
-    
-    // Verify access
-    let accessQuery = supabase
-      .from(TABLES.PROJECTS)
-      .select('id')
-      .eq('id', id);
-    
-    if (!userIsAdmin) {
-      accessQuery = accessQuery.eq('user_id', userId);
-    }
-    
-    const { data: accessCheck, error: accessError } = await accessQuery.single();
-    if (accessError || !accessCheck) {
-      return res.status(404).json({ error: 'Project not found or access denied' });
-    }
-    
-    console.log('🔄 Starting project export for:', id);
-    
-    // Get all project data with individual error handling
-    let project, conditions, files, measurements, calibrations;
-    
-    try {
-      project = await storage.getProject(id);
-      if (!project) {
-        return res.status(404).json({ error: 'Project not found' });
-      }
-    } catch (error) {
-      console.error('❌ Error fetching project:', error);
-      return res.status(500).json({ error: 'Failed to fetch project data' });
-    }
-
-    try {
-      conditions = await storage.getConditionsByProject(id);
-    } catch (error) {
-      console.error('❌ Error fetching conditions:', error);
-      conditions = []; // Continue with empty conditions
-    }
-
-    try {
-      files = await storage.getFilesByProject(id);
-    } catch (error) {
-      console.error('❌ Error fetching files:', error);
-      files = []; // Continue with empty files
-    }
-
-    try {
-      measurements = await storage.getTakeoffMeasurementsByProject(id);
-    } catch (error) {
-      console.error('❌ Error fetching measurements:', error);
-      measurements = []; // Continue with empty measurements
-    }
-
-    try {
-      calibrations = await storage.getCalibrationsByProject(id);
-    } catch (error) {
-      console.error('❌ Error fetching calibrations:', error);
-      calibrations = []; // Continue with empty calibrations
-    }
-
-    console.log(`📦 Found ${files.length} files, ${conditions.length} conditions, ${measurements.length} measurements, ${calibrations.length} calibrations`);
-
-    // Batch query: Get all sheets for all files in a single query instead of N queries
-    const fileIds = files.map(f => f.id);
-    let sheets: any[] = [];
-    
-    if (fileIds.length > 0) {
-      try {
-        const { data: allSheets, error: sheetsError } = await supabase
-          .from(TABLES.SHEETS)
-          .select('*')
-          .in('document_id', fileIds)
-          .order('page_number', { ascending: true });
-        
-        if (sheetsError) {
-          console.warn('⚠️ Failed to get sheets:', sheetsError);
-        } else {
-          // Transform to camelCase format
-          sheets = (allSheets || []).map(sheet => ({
-            id: sheet.id,
-            documentId: sheet.document_id,
-            pageNumber: sheet.page_number,
-            sheetNumber: sheet.sheet_number,
-            sheetName: sheet.sheet_name,
-            extractedText: sheet.extracted_text,
-            hasTakeoffs: sheet.has_takeoffs,
-            takeoffCount: sheet.takeoff_count,
-            isVisible: sheet.is_visible,
-            ocrProcessed: sheet.ocr_processed,
-            titleblockConfig: sheet.titleblock_config,
-            createdAt: sheet.created_at,
-            updatedAt: sheet.updated_at
-          }));
-        }
-      } catch (error) {
-        console.error('❌ Error fetching sheets:', error);
-        // Continue with empty sheets
-      }
-    }
-
-    // Download and encode PDF files as base64
-    console.log('📄 Downloading PDF files...');
-    const filesWithData = await Promise.all(
-      files.map(async (file) => {
-        try {
-          // Skip if no path
-          if (!file.path) {
-            console.warn(`⚠️ File ${file.id} has no storage path`);
-            return {
-              ...file,
-              fileData: null,
-              fileDataError: 'No storage path'
-            };
-          }
-
-          // Download file from Supabase Storage
-          const { data: fileData, error: downloadError } = await supabase.storage
-            .from('project-files')
-            .download(file.path);
-
-          if (downloadError || !fileData) {
-            console.warn(`⚠️ Failed to download file ${file.id} (${file.originalName}):`, downloadError?.message);
-            return {
-              ...file,
-              fileData: null, // Mark as missing
-              fileDataError: downloadError?.message || 'File not found in storage'
-            };
-          }
-
-          // Convert to base64
-          const arrayBuffer = await fileData.arrayBuffer();
-          const buffer = Buffer.from(arrayBuffer);
-          const base64Data = buffer.toString('base64');
-
-          console.log(`✅ Downloaded and encoded file ${file.id} (${(buffer.length / 1024 / 1024).toFixed(2)} MB)`);
-
-          return {
-            ...file,
-            fileData: base64Data,
-            fileDataMimeType: file.mimetype
-          };
-        } catch (error) {
-          console.error(`❌ Error processing file ${file.id}:`, error);
-          return {
-            ...file,
-            fileData: null,
-            fileDataError: error instanceof Error ? error.message : 'Unknown error'
-          };
-        }
-      })
-    );
-
-    // Create backup object with all data
-    const filesWithDataCount = filesWithData.filter((f) => f.fileData !== null).length;
-    const backup = {
-      version: '2.0', // Bump version to indicate new format with PDFs and calibrations
-      timestamp: new Date().toISOString(),
-      project,
-      conditions,
-      files: filesWithData,
-      sheets,
-      measurements,
-      calibrations,
-      metadata: {
-        totalFiles: files.length,
-        totalConditions: conditions.length,
-        totalMeasurements: measurements.length,
-        totalSheets: sheets.length,
-        totalCalibrations: calibrations.length,
-        filesWithData: filesWithDataCount,
-        filesMissing: filesWithData.length - filesWithDataCount
-      }
-    };
-
-    // Set headers for file download
-    const filename = `${project.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_backup_${new Date().toISOString().split('T')[0]}.json`;
+    const backup = await buildProjectBackup(id, userId, userIsAdmin);
+    const project = backup.project as { name?: string };
+    const filename = `${(project?.name || 'project').replace(/[^a-z0-9]/gi, '_').toLowerCase()}_backup_${new Date().toISOString().split('T')[0]}.json`;
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    
-    console.log('✅ Project export completed successfully');
     return res.json(backup);
   } catch (error) {
-    console.error('❌ Error exporting project:', error);
-    // Provide more detailed error information
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-    return res.status(500).json({ 
-      error: 'Failed to export project', 
-      details: errorMessage 
+    const err = error as Error & { statusCode?: number };
+    const status = err.statusCode ?? 500;
+    return res.status(status).json({
+      error: status === 404 ? err.message : 'Failed to export project',
+      details: status === 500 && err.message ? err.message : undefined,
     });
   }
 });
+
+// Share project via email - requires auth and project access
+router.post(
+  '/:id/share-project',
+  requireAuth,
+  validateUUIDParam('id'),
+  requireProjectAccess,
+  shareProjectRateLimit,
+  async (req, res) => {
+    try {
+      const { id: projectId } = req.params;
+      const { recipients: recipientsRaw, message = '' } = req.body;
+
+      if (!recipientsRaw) {
+        return res.status(400).json({ error: 'recipients is required' });
+      }
+      const recipients: string[] = Array.isArray(recipientsRaw) ? recipientsRaw : [recipientsRaw];
+      if (recipients.length === 0 || recipients.length > 10) {
+        return res.status(400).json({ error: 'recipients must be 1–10 email addresses' });
+      }
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      const validRecipients = [...new Set(
+        recipients
+          .filter((e) => typeof e === 'string' && emailRegex.test((e as string).trim()))
+          .map((e) => (e as string).trim().toLowerCase())
+      )];
+      if (validRecipients.length === 0) {
+        return res.status(400).json({ error: 'No valid email addresses' });
+      }
+
+      const userId = req.user?.id;
+      const userIsAdmin = req.user?.role === 'admin';
+      const backup = await buildProjectBackup(projectId, userId, userIsAdmin);
+      const project = backup.project as { name?: string };
+      const projectName = project?.name || 'Project';
+
+      const jsonString = JSON.stringify(backup);
+      const backupBuffer = Buffer.from(jsonString, 'utf8');
+      const backupSize = backupBuffer.length;
+      const userEmail = req.user?.email || 'Meridian Takeoff User';
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
+      const escapedMessage = (message as string).replace(/</g, '&lt;').replace(/>/g, '&gt;') || '';
+
+      if (backupSize < PROJECT_SHARE.ATTACHMENT_LIMIT_BYTES) {
+        const filename = `${projectName.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_backup_${new Date().toISOString().split('T')[0]}.json`;
+        const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Project Shared</title></head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+  <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+    <h2 style="color: #2563eb;">Meridian Takeoff - Project Shared</h2>
+    <p>A project has been shared with you: <strong>${projectName}</strong>.</p>
+    <p>The project backup is attached to this email. To use it:</p>
+    <ol>
+      <li>Sign in or create an account at <a href="${frontendUrl}" style="color: #2563eb;">Meridian Takeoff</a></li>
+      <li>Go to your projects and click "Restore" (or Open Existing)</li>
+      <li>Select the attached backup file to import the project</li>
+    </ol>
+    ${escapedMessage ? `<p style="margin: 20px 0; padding: 12px; background: #f3f4f6; border-radius: 6px;">${escapedMessage}</p>` : ''}
+    <p style="color: #6b7280; font-size: 14px;">Shared by ${userEmail}</p>
+    <p style="color: #6b7280; font-size: 12px; margin-top: 24px;">&copy; ${new Date().getFullYear()} Meridian Takeoff. All rights reserved.</p>
+  </div>
+</body>
+</html>`;
+        const textContent = `A project has been shared with you: ${projectName}.\n\nThe project backup is attached. Sign in or create an account at ${frontendUrl}, then use Backup → Restore to import the attached file.\n\nShared by ${userEmail}`;
+        const ok = await emailService.sendEmail({
+          to: validRecipients,
+          subject: `Project shared: ${projectName} from Meridian Takeoff`,
+          text: textContent,
+          html: htmlContent,
+          attachments: [
+            { filename, content: backupBuffer, contentType: 'application/json' },
+          ],
+        });
+        if (!ok) {
+          return res.status(500).json({ error: 'Failed to send email. Please try again later.' });
+        }
+        return res.json({ success: true, deliveryMethod: 'attachment' });
+      }
+
+      const shareToken = uuidv4();
+      const storagePath = `${PROJECT_SHARE.STORAGE_PREFIX}/${shareToken}/project_backup.json`;
+      const { error: uploadError } = await supabase.storage
+        .from(PROJECT_SHARE.BUCKET)
+        .upload(storagePath, backupBuffer, {
+          contentType: 'application/json',
+          upsert: false,
+        });
+      if (uploadError) {
+        console.error('Project share upload error:', uploadError);
+        return res.status(500).json({ error: 'Failed to upload project for sharing' });
+      }
+
+      const importUrl = `${frontendUrl}/shared/import/${shareToken}`;
+      const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Project Shared</title></head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+  <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+    <h2 style="color: #2563eb;">Meridian Takeoff - Project Shared</h2>
+    <p>A project has been shared with you: <strong>${projectName}</strong>.</p>
+    <p><strong>Click the link below to access and import this project:</strong></p>
+    <p><a href="${importUrl}" style="color: #2563eb;">${importUrl}</a></p>
+    <p style="font-size: 13px; color: #6b7280;">You will need to sign in or create an account. This link expires in 7 days.</p>
+    ${escapedMessage ? `<p style="margin: 20px 0; padding: 12px; background: #f3f4f6; border-radius: 6px;">${escapedMessage}</p>` : ''}
+    <p style="color: #6b7280; font-size: 14px;">Shared by ${userEmail}</p>
+    <p style="color: #6b7280; font-size: 12px; margin-top: 24px;">&copy; ${new Date().getFullYear()} Meridian Takeoff. All rights reserved.</p>
+  </div>
+</body>
+</html>`;
+      const textContent = `A project has been shared with you: ${projectName}.\n\nAccess and import the project: ${importUrl}\n\nSign in or create an account. This link expires in 7 days.\n\nShared by ${userEmail}`;
+      const ok = await emailService.sendEmail({
+        to: validRecipients,
+        subject: `Project shared: ${projectName} from Meridian Takeoff`,
+        text: textContent,
+        html: htmlContent,
+      });
+      if (!ok) {
+        return res.status(500).json({ error: 'Failed to send email. Please try again later.' });
+      }
+      return res.json({ success: true, deliveryMethod: 'link' });
+    } catch (error) {
+      console.error('Error sharing project:', error);
+      const err = error as Error & { statusCode?: number };
+      const status = err.statusCode ?? 500;
+      return res.status(status).json({
+        error: status === 404 ? err.message : 'Failed to share project',
+        details: status === 500 && err.message ? err.message : undefined,
+      });
+    }
+  }
+);
 
 // Send quantity report via email - requires auth and project access
 router.post(
@@ -658,204 +842,16 @@ router.post('/import', requireAuth, uploadRateLimit, upload.single('file'), asyn
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
-    
     const userId = req.user?.id;
     if (!userId) {
       return res.status(401).json({ error: 'User not authenticated' });
     }
-
-    console.log('🔄 Starting project import...');
-
-    // Parse the backup file
-    const text = req.file.buffer.toString('utf-8');
-    const backup = JSON.parse(text);
-
-    // Validate backup format
+    const backup = JSON.parse(req.file.buffer.toString('utf-8'));
     if (!backup.version || !backup.project || !backup.timestamp) {
       return res.status(400).json({ error: 'Invalid backup file format' });
     }
-
-    console.log(`📦 Importing backup version ${backup.version} from ${backup.timestamp}`);
-
-    // Create the project (without the original ID to avoid conflicts)
-    const { id: originalId, userId: originalUserId, ...projectData } = backup.project;
-    const newProject = await storage.saveProject({
-      ...projectData,
-      id: uuidv4(),
-      userId, // Associate with the authenticated user
-      createdAt: new Date().toISOString(),
-      lastModified: new Date().toISOString()
-    });
-
-    const newProjectId = newProject.id;
-    console.log(`✅ Created project: ${newProjectId}`);
-
-    // Import conditions
-    if (backup.conditions && backup.conditions.length > 0) {
-      console.log(`📋 Importing ${backup.conditions.length} conditions...`);
-      const conditionsPromises = backup.conditions.map(async (condition: any) => {
-        const { id: originalId, ...conditionData } = condition;
-        return storage.saveCondition({
-          ...conditionData,
-          id: uuidv4(),
-          projectId: newProjectId
-        });
-      });
-      await Promise.all(conditionsPromises);
-      console.log('✅ Conditions imported');
-    }
-
-    // Import files with PDF data
-    const fileIdMapping: Record<string, string> = {}; // Map old file IDs to new file IDs
-    if (backup.files && backup.files.length > 0) {
-      console.log(`📄 Importing ${backup.files.length} files...`);
-      
-      for (const file of backup.files) {
-        const { id: originalFileId, fileData, fileDataMimeType, fileDataError, ...fileMeta } = file;
-        const newFileId = uuidv4();
-        fileIdMapping[originalFileId] = newFileId;
-
-        // If file has base64 data, restore it to Supabase Storage
-        if (fileData && typeof fileData === 'string') {
-          try {
-            // Decode base64 to buffer
-            const fileBuffer = Buffer.from(fileData, 'base64');
-            
-            // Generate new storage path
-            const fileExtension = fileMeta.filename ? path.extname(fileMeta.filename) : '.pdf';
-            const storagePath = `${newProjectId}/${newFileId}${fileExtension}`;
-
-            console.log(`📤 Uploading file ${fileMeta.originalName} to storage (${(fileBuffer.length / 1024 / 1024).toFixed(2)} MB)...`);
-
-            // Upload to Supabase Storage
-            const { error: uploadError } = await supabase.storage
-              .from('project-files')
-              .upload(storagePath, fileBuffer, {
-                contentType: fileDataMimeType || fileMeta.mimetype || 'application/pdf',
-                upsert: false
-              });
-
-            if (uploadError) {
-              console.error(`❌ Failed to upload file ${fileMeta.originalName}:`, uploadError);
-              // Continue with file metadata even if upload fails
-            } else {
-              console.log(`✅ File uploaded: ${fileMeta.originalName}`);
-            }
-
-            // Save file metadata with new ID and path
-            await storage.saveFile({
-              id: newFileId,
-              projectId: newProjectId,
-              originalName: fileMeta.originalName,
-              filename: fileMeta.filename || fileMeta.originalName,
-              path: storagePath,
-              size: fileBuffer.length,
-              mimetype: fileDataMimeType || fileMeta.mimetype || 'application/pdf',
-              uploadedAt: new Date().toISOString()
-            });
-          } catch (error) {
-            console.error(`❌ Error restoring file ${fileMeta.originalName}:`, error);
-            // Still save file metadata even if PDF restore fails
-            await storage.saveFile({
-              id: newFileId,
-              projectId: newProjectId,
-              originalName: fileMeta.originalName,
-              filename: fileMeta.filename || fileMeta.originalName,
-              path: '', // Empty path indicates file not restored
-              size: fileMeta.size || 0,
-              mimetype: fileMeta.mimetype || 'application/pdf',
-              uploadedAt: new Date().toISOString()
-            });
-          }
-        } else {
-          // File data not available in backup
-          console.warn(`⚠️ File ${fileMeta.originalName} has no data in backup${fileDataError ? `: ${fileDataError}` : ''}`);
-          // Still save file metadata
-          await storage.saveFile({
-            id: newFileId,
-            projectId: newProjectId,
-            originalName: fileMeta.originalName,
-            filename: fileMeta.filename || fileMeta.originalName,
-            path: '', // Empty path indicates file not restored
-            size: fileMeta.size || 0,
-            mimetype: fileMeta.mimetype || 'application/pdf',
-            uploadedAt: new Date().toISOString()
-          });
-        }
-      }
-      console.log('✅ Files imported');
-    }
-
-    // Import sheets (update file IDs to new ones)
-    const sheetIdMapping: Record<string, string> = {}; // Map old sheet IDs to new sheet IDs
-    if (backup.sheets && backup.sheets.length > 0) {
-      console.log(`📑 Importing ${backup.sheets.length} sheets...`);
-      const sheetsPromises = backup.sheets.map(async (sheet: any) => {
-        const { id: originalSheetId, documentId, ...sheetData } = sheet;
-        const newDocumentId = fileIdMapping[documentId] || documentId; // Use mapped ID if available
-        const newSheetId = uuidv4();
-        sheetIdMapping[originalSheetId] = newSheetId; // Map old to new
-        
-        return storage.saveSheet({
-          ...sheetData,
-          id: newSheetId,
-          documentId: newDocumentId,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        });
-      });
-      await Promise.all(sheetsPromises);
-      console.log('✅ Sheets imported');
-    }
-
-    // Import calibrations (update sheet IDs to new ones)
-    if (backup.calibrations && backup.calibrations.length > 0) {
-      console.log(`📏 Importing ${backup.calibrations.length} calibrations...`);
-      const calibrationsPromises = backup.calibrations.map(async (calibration: any) => {
-        const { id: originalId, sheetId, ...calibrationData } = calibration;
-        const newSheetId = sheetIdMapping[sheetId] || sheetId; // Use mapped sheet ID
-        
-        return storage.saveCalibration({
-          ...calibrationData,
-          id: uuidv4(),
-          projectId: newProjectId,
-          sheetId: newSheetId
-        });
-      });
-      await Promise.all(calibrationsPromises);
-      console.log('✅ Calibrations imported');
-    }
-
-    // Import measurements (update sheet IDs to new ones)
-    if (backup.measurements && backup.measurements.length > 0) {
-      console.log(`📊 Importing ${backup.measurements.length} measurements...`);
-      const measurementsPromises = backup.measurements.map(async (measurement: any) => {
-        const { id: originalId, sheetId, ...measurementData } = measurement;
-        const newSheetId = sheetIdMapping[sheetId] || sheetId; // Use mapped sheet ID
-        
-        return storage.saveTakeoffMeasurement({
-          ...measurementData,
-          id: uuidv4(),
-          projectId: newProjectId,
-          sheetId: newSheetId
-        });
-      });
-      await Promise.all(measurementsPromises);
-      console.log('✅ Measurements imported');
-    }
-
-    const filesRestored = backup.files?.filter((f: any) => f.fileData).length || 0;
-    const filesMissing = backup.files?.filter((f: any) => !f.fileData).length || 0;
-
-    console.log('✅ Project import completed successfully');
-
-    return res.json({ 
-      success: true, 
-      project: newProject,
-      message: filesMissing > 0 
-        ? `Project restored successfully. ${filesRestored} PDF file(s) restored, ${filesMissing} file(s) were missing from backup.`
-        : `Project restored successfully. All ${filesRestored} PDF file(s) restored.`
-    });
+    const { project, message } = await performImportFromBackup(backup, userId);
+    return res.json({ success: true, project, message });
   } catch (error) {
     console.error('❌ Error importing project:', error);
     return res.status(500).json({ error: 'Failed to import project' });

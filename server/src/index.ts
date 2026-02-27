@@ -27,9 +27,10 @@ import settingsRoutes from './routes/settings';
 import titleblockRoutes from './routes/titleblock';
 import calibrationRoutes from './routes/calibrations';
 import authRoutes from './routes/auth';
+import sharedImportRoutes from './routes/sharedImport';
 import { logEmailConfigStatus } from './services/emailService';
 import { livePreviewService } from './services/livePreviewService';
-import { cleanupExpiredReportDeliveries } from './services/reportDeliveryCleanup';
+import { cleanupExpiredReportDeliveries, cleanupExpiredProjectShares } from './services/reportDeliveryCleanup';
 // Initialize queue service (starts worker)
 import './services/queueService';
 import { supabase } from './supabase';
@@ -266,6 +267,7 @@ app.use('/api/visual-search', visualSearchRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/titleblock', titleblockRoutes);
 app.use('/api/calibrations', calibrationRoutes);
+app.use('/api/shared-import', sharedImportRoutes);
 
 // Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
@@ -423,11 +425,14 @@ async function ensureModelExists() {
   livePreviewService.initialize(server);
   console.log(`📡 Live preview service initialized`);
 
-  // Clean up expired report deliveries (7-day links): run daily
+  // Clean up expired report deliveries and project shares (7-day links): run daily
   const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
   const runCleanup = () => {
-    cleanupExpiredReportDeliveries().then(({ deleted, errors }) => {
+    cleanupExpiredReportDeliveries().then(({ errors }) => {
       if (errors.length) console.warn('Report cleanup warnings:', errors.join('; '));
+    });
+    cleanupExpiredProjectShares().then(({ errors }) => {
+      if (errors.length) console.warn('Project share cleanup warnings:', errors.join('; '));
     });
   };
   setTimeout(runCleanup, 60_000);
