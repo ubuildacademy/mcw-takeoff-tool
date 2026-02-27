@@ -1,14 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from './ui/button';
-import { Badge } from './ui/badge';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './ui/dialog';
 import { 
   BarChart3, 
   RefreshCw,
-  Lock,
-  Unlock,
+  Settings,
   Brain,
   CheckCircle,
   Users,
@@ -38,8 +36,6 @@ interface AdminPanelProps {
 export function AdminPanel({ isOpen, onClose, projectId: _projectId }: AdminPanelProps) {
   const [activeTab, setActiveTab] = useState<'overview' | 'ai-prompt' | 'ai-settings' | 'user-management'>('overview');
   const [isLoading, setIsLoading] = useState(false);
-  const [adminKey, setAdminKey] = useState('');
-  const [isUnlocked, setIsUnlocked] = useState(false);
   const [availableModels, setAvailableModels] = useState<OllamaModel[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>('gpt-oss:120b-cloud');
   const [fallbackModel, setFallbackModel] = useState<string>('llama3.1:8b');
@@ -54,23 +50,6 @@ export function AdminPanel({ isOpen, onClose, projectId: _projectId }: AdminPane
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'admin' | 'user'>('user');
   const [isInviting, setIsInviting] = useState(false);
-
-  // Admin authentication (simple key-based for now)
-  const ADMIN_KEY = 'admin'; // In production, this would be more secure
-
-  const handleUnlock = () => {
-    if (adminKey === ADMIN_KEY) {
-      setIsUnlocked(true);
-      setAdminKey('');
-    } else {
-      toast.error('Invalid admin key');
-    }
-  };
-
-  const handleLock = () => {
-    setIsUnlocked(false);
-    setActiveTab('overview');
-  };
 
   // Get default prompt for sheet number extraction
   const getDefaultSheetNumberPrompt = () => {
@@ -370,25 +349,25 @@ When answering questions:
 
   // Load models when AI settings tab becomes active
   useEffect(() => {
-    if (activeTab === 'ai-settings' && isUnlocked) {
+    if (isOpen && activeTab === 'ai-settings') {
       loadAvailableModels();
     }
-    if (activeTab === 'ai-prompt' && isUnlocked) {
+    if (isOpen && activeTab === 'ai-prompt') {
       loadSheetNumberPrompt();
       loadSheetNamePrompt();
       loadChatPrompt();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, isUnlocked]);
+  }, [activeTab, isOpen]);
 
 
   // Load user management data
   useEffect(() => {
-    if (isUnlocked && activeTab === 'user-management') {
+    if (isOpen && activeTab === 'user-management') {
       loadUsers();
       loadInvitations();
     }
-  }, [activeTab, isUnlocked]);
+  }, [activeTab, isOpen]);
 
   const loadUsers = async () => {
     try {
@@ -491,66 +470,17 @@ When answering questions:
         </DialogDescription>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Lock className="w-5 h-5" />
+            <Settings className="w-5 h-5" />
             Admin Panel
-            {isUnlocked && <Badge variant="outline" className="text-green-600">Unlocked</Badge>}
           </DialogTitle>
         </DialogHeader>
 
-        {!isUnlocked ? (
-          // Admin Authentication
-          <div className="flex-1 flex items-center justify-center">
-            <div className="w-96 space-y-6">
-              <div className="text-center">
-                <Lock className="w-16 h-16 mx-auto text-gray-400 mb-4" />
-                <h2 className="text-xl font-semibold mb-2">Admin Access Required</h2>
-                <p className="text-gray-600">Enter admin key to access system management tools</p>
-              </div>
-              
-              <div className="space-y-4">
-                <div>
-                  <Label htmlFor="admin-key">Admin Key</Label>
-                  <Input
-                    id="admin-key"
-                    name="admin-key"
-                    type="password"
-                    autoComplete="current-password"
-                    value={adminKey}
-                    onChange={(e) => setAdminKey(e.target.value)}
-                    placeholder="Enter admin key..."
-                    onKeyPress={(e) => e.key === 'Enter' && handleUnlock()}
-                  />
-                </div>
-                
-                <Button 
-                  onClick={handleUnlock} 
-                  className="w-full"
-                  disabled={!adminKey.trim()}
-                >
-                  <Unlock className="w-4 h-4 mr-2" />
-                  Unlock Admin Panel
-                </Button>
-              </div>
+        <div className="flex-1 flex min-h-0">
+          {/* Sidebar */}
+          <div className="w-64 border-r bg-gray-50 flex flex-col">
+            <div className="p-4 border-b">
+              <h3 className="font-medium">Admin Tools</h3>
             </div>
-          </div>
-        ) : (
-          // Admin Panel Content
-          <div className="flex-1 flex min-h-0">
-            {/* Sidebar */}
-            <div className="w-64 border-r bg-gray-50 flex flex-col">
-              <div className="p-4 border-b">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-medium">Admin Tools</h3>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleLock}
-                    className="text-gray-500"
-                  >
-                    <Lock className="w-4 h-4" />
-                  </Button>
-                </div>
-              </div>
               
               <div className="flex-1 p-2">
                 <nav className="space-y-1">
@@ -1157,7 +1087,6 @@ When answering questions:
 
             </div>
           </div>
-        )}
 
         <DialogFooter>
           <Button onClick={onClose}>

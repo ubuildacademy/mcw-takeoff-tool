@@ -165,18 +165,18 @@ export async function performImportFromBackup(
   } as StoredProject);
   const newProjectId = newProject.id;
 
+  const conditionIdMapping: Record<string, string> = {};
   const conditions = (backup.conditions as Record<string, unknown>[]) || [];
-  if (conditions.length > 0) {
-    await Promise.all(
-      conditions.map((c) => {
-        const { id: _cId, ...rest } = c;
-        return storage.saveCondition({
-          ...rest,
-          id: uuidv4(),
-          projectId: newProjectId,
-        } as Parameters<typeof storage.saveCondition>[0]);
-      })
-    );
+  for (const c of conditions) {
+    const originalConditionId = (c.id as string) || '';
+    const { id: _cId, ...rest } = c;
+    const newConditionId = uuidv4();
+    conditionIdMapping[originalConditionId] = newConditionId;
+    await storage.saveCondition({
+      ...rest,
+      id: newConditionId,
+      projectId: newProjectId,
+    } as Parameters<typeof storage.saveCondition>[0]);
   }
 
   const fileIdMapping: Record<string, string> = {};
@@ -263,12 +263,19 @@ export async function performImportFromBackup(
 
   const measurements = (backup.measurements as Array<Record<string, unknown>>) || [];
   for (const m of measurements) {
+    const oldConditionId = (m.conditionId as string) || '';
+    const newConditionId = conditionIdMapping[oldConditionId];
+    if (!newConditionId) {
+      console.warn(`Import: Skipping measurement - condition ${oldConditionId} not found in backup conditions`);
+      continue;
+    }
     const newSheetId = remapSheetIdForFrontend((m.sheetId as string) || '', fileIdMapping, sheetIdMapping);
     await storage.saveTakeoffMeasurement({
       ...m,
       id: uuidv4(),
       projectId: newProjectId,
       sheetId: newSheetId,
+      conditionId: newConditionId,
     } as Parameters<typeof storage.saveTakeoffMeasurement>[0]);
   }
 

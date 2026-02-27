@@ -43,7 +43,7 @@ export function ProjectList() {
   const [selectedProjectForShare, setSelectedProjectForShare] = useState<Project | null>(null);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [showUserProfile, setShowUserProfile] = useState(false);
-  const [isAdmin, _setIsAdmin] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const projects = useProjectStore((s) => s.projects);
   const loadInitialData = useProjectStore((s) => s.loadInitialData);
@@ -61,8 +61,12 @@ export function ProjectList() {
           setError('User not authenticated');
           return;
         }
-        
-        await loadInitialData();
+
+        const [adminStatus] = await Promise.all([
+          authHelpers.isAdmin(user.id),
+          loadInitialData()
+        ]);
+        if (mounted) setIsAdmin(adminStatus);
         if (!mounted) return;
       } catch (e: unknown) {
         if (!mounted) return;
@@ -167,15 +171,6 @@ export function ProjectList() {
               <Button size="lg" onClick={handleNewProject}>
                 <Plus className="w-5 h-5 mr-2" />
                 New Project
-              </Button>
-              <Button 
-                variant="outline" 
-                size="lg" 
-                onClick={() => setShowAdminPanel(true)}
-                className="text-purple-600 border-purple-200 hover:bg-purple-50"
-              >
-                <Settings className="w-5 h-5 mr-2" />
-                Admin Panel
               </Button>
             </div>
           </div>
@@ -435,11 +430,13 @@ export function ProjectList() {
         />
       )}
 
-      <AdminPanel
-        isOpen={showAdminPanel}
-        onClose={() => setShowAdminPanel(false)}
-        projectId="global" // Global admin panel, not project-specific
-      />
+      {isAdmin && (
+        <AdminPanel
+          isOpen={showAdminPanel}
+          onClose={() => setShowAdminPanel(false)}
+          projectId="global" // Global admin panel, not project-specific
+        />
+      )}
 
       {showUserProfile && (
         <UserProfile
