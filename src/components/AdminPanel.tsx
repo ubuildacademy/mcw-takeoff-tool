@@ -553,31 +553,6 @@ When answering questions:
                     </div>
 
                   </div>
-
-                  <div className="border rounded-lg p-6">
-                    <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
-                    <div className="flex gap-4">
-                      <Button 
-                        size="sm"
-                        onClick={async () => {
-                          try {
-                            const models = await ollamaService.getModels();
-                            if (models && models.length > 0) {
-                              toast.success(`AI models loaded successfully! Found ${models.length} available models.`);
-                            } else {
-                              toast.warning('No AI models found. Please check your Ollama installation.');
-                            }
-                          } catch (error) {
-                            toast.error('Failed to connect to AI models. Check console for details.');
-                            console.error('Model connection error:', error);
-                          }
-                        }}
-                      >
-                        <CheckCircle className="w-4 h-4 mr-2" />
-                        Test AI Models
-                      </Button>
-                    </div>
-                  </div>
                 </div>
               )}
 
@@ -1020,7 +995,11 @@ When answering questions:
                                 <div>
                                   <p className="font-medium">{invitation.email}</p>
                                   <p className="text-sm text-gray-600">
-                                    Role: {invitation.role} • 
+                                    {invitation.source === 'project_share' ? (
+                                      <>Project share: {invitation.project_name || 'Project'} • </>
+                                    ) : (
+                                      <>Role: {invitation.role} • </>
+                                    )}
                                     Expires: {new Date(invitation.expires_at).toLocaleDateString()}
                                   </p>
                                 </div>
