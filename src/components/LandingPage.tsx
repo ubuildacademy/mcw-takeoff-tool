@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from './ui/button';
+import { LandingNav } from './LandingNav';
 
 const LandingPage: React.FC = () => {
   const navigate = useNavigate();
@@ -25,62 +26,18 @@ const LandingPage: React.FC = () => {
 
   return (
     <div className="landing-page min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
-      {/* Navigation - matches footer slate-900 */}
-      <nav className="bg-slate-900 border-b border-slate-800 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center">
-              <button
-                onClick={() => navigate('/')}
-                className="flex items-center gap-3 flex-shrink-0 hover:opacity-90 transition-opacity"
-                aria-label="Meridian Takeoff home"
-              >
-                <img
-                  src="/logo.png"
-                  alt=""
-                  className="h-9 w-9 rounded-lg object-contain"
-                />
-                <h1 className="text-2xl font-bold text-white">
-                  Meridian <span className="text-blue-400">Takeoff</span>
-                </h1>
-              </button>
-            </div>
-            <div className="flex items-center space-x-4">
-              <Button 
-                onClick={handleFeatures}
-                variant="ghost" 
-                className="text-slate-300 hover:text-white hover:bg-slate-800"
-              >
-                Features
-              </Button>
-              <Button 
-                onClick={handlePricing}
-                variant="ghost" 
-                className="text-slate-300 hover:text-white hover:bg-slate-800"
-              >
-                Pricing
-              </Button>
-              <Button
-                onClick={handleContact}
-                variant="ghost"
-                className="text-slate-300 hover:text-white hover:bg-slate-800"
-              >
-                Contact
-              </Button>
-              <Button 
-                onClick={handleLogin}
-                className="bg-blue-600 hover:bg-blue-500 text-white"
-              >
-                Login
-              </Button>
-            </div>
-          </div>
-        </div>
-      </nav>
+      <LandingNav
+        links={[
+          { label: 'Features', onClick: handleFeatures },
+          { label: 'Pricing', onClick: handlePricing },
+          { label: 'Contact', onClick: handleContact },
+        ]}
+        actionButton={{ label: 'Login', onClick: handleLogin }}
+      />
 
       {/* Hero Section - white bg so logo blends cleanly */}
       <section className="relative overflow-hidden bg-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-12 sm:pt-16 md:pt-20 pb-12 sm:pb-16">
           <div className="text-center">
             <div className="flex justify-center mb-8">
               <img
@@ -89,11 +46,11 @@ const LandingPage: React.FC = () => {
                 className="h-40 w-40 sm:h-48 sm:w-48 md:h-56 md:w-56 lg:h-64 lg:w-64 object-contain"
               />
             </div>
-            <h1 className="text-5xl md:text-6xl font-bold text-slate-900 mb-6">
+            <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold text-slate-900 mb-6 px-1">
               Streamline Your
               <span className="text-blue-600 block">Construction Takeoffs</span>
             </h1>
-            <p className="text-xl text-slate-600 mb-8 max-w-3xl mx-auto">
+            <p className="text-base sm:text-lg md:text-xl text-slate-600 mb-8 max-w-3xl mx-auto px-2">
               Professional-grade takeoff software that combines precision measurement tools 
               with AI-powered document analysis. Chat with your blueprints, get instant answers 
               about your projects, and build faster with intelligent assistance.

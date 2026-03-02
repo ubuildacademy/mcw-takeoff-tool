@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
+import { authHelpers } from '../../lib/supabase';
 import { fileService } from '../../services/apiService';
 import { useMeasurementStore } from '../../store/slices/measurementSlice';
 import type { PDFDocument, PDFPage, ProjectFile } from '../../types';
@@ -43,7 +44,6 @@ export function useTakeoffWorkspaceDocuments({
             const { getApiBaseUrl } = await import('../../lib/apiConfig');
             const API_BASE_URL = getApiBaseUrl();
             const pdfUrl = `${API_BASE_URL}/files/${file.id}`;
-            const { authHelpers } = await import('../../lib/supabase');
             const session = await authHelpers.getValidSession();
             const httpHeaders: Record<string, string> = { Accept: 'application/pdf' };
             if (session?.access_token) {

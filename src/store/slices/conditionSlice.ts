@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { TakeoffCondition } from '../../types';
+import { useProjectStore } from './projectSlice';
+import { supabase } from '../../lib/supabase';
 
 interface ConditionState {
   // State
@@ -109,7 +111,6 @@ export const useConditionStore = create<ConditionState>()(
           }));
 
           const { useMeasurementStore } = await import('./measurementSlice');
-          const { useProjectStore } = await import('./projectSlice');
           useMeasurementStore.setState(state => ({
             takeoffMeasurements: state.takeoffMeasurements.filter(m => m.conditionId !== id)
           }));
@@ -166,7 +167,6 @@ export const useConditionStore = create<ConditionState>()(
         }
         
         // Avoid 401: only call API when we have a session (token). Conditions route uses requireAuth.
-        const { supabase } = await import('../../lib/supabase');
         const { data: { session } } = await supabase.auth.getSession();
         if (!session?.access_token) {
           console.warn('🔄 LOAD_PROJECT_CONDITIONS: No session yet, skipping API call (will retry when auth is ready)');

@@ -5,6 +5,7 @@ import { LandingNav } from './LandingNav';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { authHelpers, supabase } from '../lib/supabase';
+import { validatePassword, PASSWORD_REQUIREMENTS } from '../utils/passwordValidation';
 
 /**
  * Landing page when user clicks "Reset Password" in the email.
@@ -35,8 +36,9 @@ const ResetPasswordPage: React.FC = () => {
       setError('Passwords do not match');
       return;
     }
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters');
+    const passwordCheck = validatePassword(password);
+    if (!passwordCheck.valid) {
+      setError(passwordCheck.error);
       return;
     }
     setIsLoading(true);
@@ -92,7 +94,7 @@ const ResetPasswordPage: React.FC = () => {
               Set your new password
             </h2>
             <p className="mt-2 text-sm text-slate-600">
-              Enter your new password below (min 8 characters)
+              Enter your new password below. {PASSWORD_REQUIREMENTS}
             </p>
           </div>
 
@@ -107,7 +109,7 @@ const ResetPasswordPage: React.FC = () => {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter new password"
+                placeholder={PASSWORD_REQUIREMENTS}
               />
             </div>
             <div>

@@ -22,6 +22,7 @@ import { CreateConditionDialog } from './CreateConditionDialog';
 import { SendReportModal } from './SendReportModal';
 import { formatFeetAndInches } from '../lib/utils';
 import { useTakeoffExport, TakeoffSidebarConditionList } from './takeoff-sidebar';
+import { supabase } from '../lib/supabase';
 
 // TakeoffCondition interface imported from shared types
 
@@ -86,19 +87,15 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
   useEffect(() => {
     if (!projectId) return;
     let cancelled = false;
-    let subscription: { unsubscribe: () => void } | undefined;
-    void import('../lib/supabase').then(({ supabase }) => {
-      const result = supabase.auth.onAuthStateChange((event, session) => {
-        if (cancelled || !session?.access_token) return;
-        if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') {
-          ensureConditionsLoaded(projectId).catch((err) => console.error('Retry conditions load:', err));
-        }
-      });
-      subscription = result.data.subscription;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (cancelled || !session?.access_token) return;
+      if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') {
+        ensureConditionsLoaded(projectId).catch((err) => console.error('Retry conditions load:', err));
+      }
     });
     return () => {
       cancelled = true;
-      subscription?.unsubscribe();
+      subscription.unsubscribe();
     };
   }, [projectId, ensureConditionsLoaded]);
 

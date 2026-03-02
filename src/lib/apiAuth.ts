@@ -1,3 +1,5 @@
+import { supabase } from './supabase';
+
 /**
  * Shared auth helpers for API requests (fetch, etc.)
  * Use apiClient (apiService) for axios-based calls; it already attaches auth via interceptors.
@@ -12,7 +14,6 @@ export async function getAuthHeaders(): Promise<Record<string, string>> {
     'Content-Type': 'application/json',
   };
   try {
-    const { supabase } = await import('./supabase');
     const { data: { session } } = await supabase.auth.getSession();
     if (session?.access_token) {
       headers['Authorization'] = `Bearer ${session.access_token}`;

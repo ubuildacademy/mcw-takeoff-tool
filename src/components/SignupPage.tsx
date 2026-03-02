@@ -5,6 +5,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { authHelpers } from '../lib/supabase';
 import { authService } from '../services/apiService';
+import { validatePassword, PASSWORD_REQUIREMENTS } from '../utils/passwordValidation';
 import { LandingNav } from './LandingNav';
 
 /** Minimal invitation shape for signup form (from API validation) */
@@ -65,8 +66,9 @@ const SignupPage: React.FC = () => {
       return;
     }
 
-    if (formData.password.length < 8) {
-      setError('Password must be at least 8 characters long');
+    const passwordCheck = validatePassword(formData.password);
+    if (!passwordCheck.valid) {
+      setError(passwordCheck.error);
       setIsLoading(false);
       return;
     }
@@ -232,7 +234,7 @@ const SignupPage: React.FC = () => {
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                 className="mt-1"
-                placeholder="Create a password (min 8 characters)"
+                placeholder={PASSWORD_REQUIREMENTS}
               />
             </div>
             <div>

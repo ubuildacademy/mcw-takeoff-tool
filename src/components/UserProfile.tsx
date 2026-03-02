@@ -3,6 +3,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { authHelpers, UserMetadata } from '../lib/supabase';
+import { validatePassword, PASSWORD_REQUIREMENTS } from '../utils/passwordValidation';
 
 interface UserProfileProps {
   onClose: () => void;
@@ -83,8 +84,9 @@ const UserProfile: React.FC<UserProfileProps> = ({ onClose }) => {
       return;
     }
 
-    if (formData.newPassword.length < 8) {
-      setError('Password must be at least 8 characters long');
+    const passwordCheck = validatePassword(formData.newPassword);
+    if (!passwordCheck.valid) {
+      setError(passwordCheck.error);
       setIsSaving(false);
       return;
     }
@@ -200,7 +202,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ onClose }) => {
                   value={formData.newPassword}
                   onChange={(e) => setFormData({ ...formData, newPassword: e.target.value })}
                   className="mt-1"
-                  placeholder="Enter new password (min 8 characters)"
+                  placeholder={PASSWORD_REQUIREMENTS}
                 />
               </div>
               <div>

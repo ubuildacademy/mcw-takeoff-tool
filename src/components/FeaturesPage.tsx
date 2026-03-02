@@ -1,16 +1,13 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from './ui/button';
+import { LandingNav } from './LandingNav';
 
 const FeaturesPage: React.FC = () => {
   const navigate = useNavigate();
 
   const handleLogin = () => {
     navigate('/login');
-  };
-
-  const handleBackToHome = () => {
-    navigate('/');
   };
 
   const handlePricing = () => {
@@ -29,54 +26,14 @@ const FeaturesPage: React.FC = () => {
 
   return (
     <div className="features-page min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
-      {/* Navigation - matches landing page */}
-      <nav className="bg-slate-900 border-b border-slate-800 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center">
-              <button
-                onClick={handleBackToHome}
-                className="flex items-center gap-3 flex-shrink-0 hover:opacity-90 transition-opacity"
-                aria-label="Meridian Takeoff home"
-              >
-                <img src="/logo.png" alt="" className="h-9 w-9 rounded-lg object-contain" />
-                <h1 className="text-2xl font-bold text-white">
-                  Meridian <span className="text-blue-400">Takeoff</span>
-                </h1>
-              </button>
-            </div>
-            <div className="flex items-center space-x-4">
-              <Button
-                onClick={handleFeatures}
-                variant="ghost"
-                className="text-slate-300 hover:text-white hover:bg-slate-800"
-              >
-                Features
-              </Button>
-              <Button
-                onClick={handlePricing}
-                variant="ghost"
-                className="text-slate-300 hover:text-white hover:bg-slate-800"
-              >
-                Pricing
-              </Button>
-              <Button
-                onClick={handleContact}
-                variant="ghost"
-                className="text-slate-300 hover:text-white hover:bg-slate-800"
-              >
-                Contact
-              </Button>
-              <Button
-                onClick={handleLogin}
-                className="bg-blue-600 hover:bg-blue-500 text-white"
-              >
-                Login
-              </Button>
-            </div>
-          </div>
-        </div>
-      </nav>
+      <LandingNav
+        links={[
+          { label: 'Features', onClick: handleFeatures },
+          { label: 'Pricing', onClick: handlePricing },
+          { label: 'Contact', onClick: handleContact },
+        ]}
+        actionButton={{ label: 'Login', onClick: handleLogin }}
+      />
 
       {/* Hero Section - slate-50 to differentiate from white content sections */}
       <section className="relative overflow-hidden bg-slate-50">

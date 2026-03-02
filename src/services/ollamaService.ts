@@ -1,3 +1,5 @@
+import { authHelpers } from '../lib/supabase';
+
 export interface OllamaModel {
   name: string;
   size: number;
@@ -176,7 +178,6 @@ class OllamaService {
     let retryCount = 0;
     const maxStreamRetries = 2;
     const { getApiBaseUrl } = await import('../lib/apiConfig');
-    const { authHelpers } = await import('../lib/supabase');
 
     while (retryCount <= maxStreamRetries) {
       try {
