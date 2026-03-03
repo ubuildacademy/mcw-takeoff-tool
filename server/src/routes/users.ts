@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { Router } from 'express';
-import { supabase } from '../supabase';
+import { supabase, TABLES } from '../supabase';
+import { storage } from '../storage';
 import { emailService } from '../services/emailService';
 import { requireAuth, requireAdmin, validateUUIDParam } from '../middleware';
 
@@ -186,19 +187,56 @@ router.patch('/:id/role', requireAuth, requireAdmin, validateUUIDParam('id'), as
   }
 });
 
+/** Delete all projects owned by a user, then the auth user. Shared by self-service and admin delete. */
+async function deleteUserAndData(userId: string): Promise<{ error?: string }> {
+  const { data: projects, error: fetchError } = await supabase
+    .from(TABLES.PROJECTS)
+    .select('id')
+    .eq('user_id', userId);
+
+  if (fetchError) {
+    console.error('Error fetching user projects for deletion:', fetchError);
+    return { error: 'Failed to delete user data' };
+  }
+
+  for (const project of projects || []) {
+    try {
+      await storage.deleteProject(project.id);
+    } catch (deleteErr) {
+      console.error(`Error deleting project ${project.id}:`, deleteErr);
+    }
+  }
+
+  const { error } = await supabase.auth.admin.deleteUser(userId);
+  if (error) {
+    console.error('Error deleting user:', error);
+    return { error: 'Failed to delete user' };
+  }
+  return {};
+}
+
+// Delete own account (self-service) - must be before /:id so "me" is not parsed as id
+router.delete('/me', requireAuth, async (req, res) => {
+  try {
+    const result = await deleteUserAndData(req.user!.id);
+    if (result.error) {
+      return res.status(500).json({ error: 'Failed to delete account' });
+    }
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error in delete own account:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Delete user (admin only)
 router.delete('/:id', requireAuth, requireAdmin, validateUUIDParam('id'), async (req, res) => {
   try {
     const { id } = req.params;
-
-    // Delete user from auth (this will cascade delete user_metadata and all related data)
-    const { error } = await supabase.auth.admin.deleteUser(id);
-
-    if (error) {
-      console.error('Error deleting user:', error);
-      return res.status(500).json({ error: 'Failed to delete user' });
+    const result = await deleteUserAndData(id);
+    if (result.error) {
+      return res.status(500).json({ error: result.error });
     }
-
     res.json({ success: true });
   } catch (error) {
     console.error('Error in delete user:', error);

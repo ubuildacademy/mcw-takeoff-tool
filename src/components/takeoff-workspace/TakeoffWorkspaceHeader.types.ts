@@ -49,6 +49,10 @@ export interface TakeoffWorkspaceHeaderProps {
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
+  onAddHyperlink?: () => void;
+  onExtractHyperlinks?: () => void;
+  canExtractHyperlinks?: boolean;
+  onClearHyperlinks?: () => void;
 }
 
 export interface TakeoffWorkspaceStatusBarProps {

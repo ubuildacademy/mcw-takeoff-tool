@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import type { Annotation } from '../types';
+import type { Annotation, SheetHyperlink } from '../types';
 import { authHelpers } from '../lib/supabase';
 import { projectService } from '../services/apiService';
 import { useProjectStore } from '../store/slices/projectSlice';
 import { useAnnotationStore } from '../store/slices/annotationSlice';
 import { useDocumentViewStore } from '../store/slices/documentViewSlice';
+import { useHyperlinkStore } from '../store/slices/hyperlinkSlice';
 import { Button } from './ui/button';
 import { Loader2, LogIn, UserPlus } from 'lucide-react';
 
@@ -39,6 +40,9 @@ export function SharedProjectImportPage() {
         if (!mounted) return;
         if (result.annotations?.length) {
           useAnnotationStore.getState().addAnnotationsBulk(result.annotations as unknown as Annotation[]);
+        }
+        if (result.hyperlinks?.length) {
+          useHyperlinkStore.getState().addHyperlinksBulk(result.hyperlinks as unknown as SheetHyperlink[]);
         }
         if (result.documentRotations && Object.keys(result.documentRotations).length > 0) {
           const rotations: Record<string, number> = {};

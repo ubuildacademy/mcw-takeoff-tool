@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { authHelpers, UserMetadata } from '../lib/supabase';
 import { validatePassword, PASSWORD_REQUIREMENTS } from '../utils/passwordValidation';
 
@@ -15,6 +16,8 @@ const UserProfile: React.FC<UserProfileProps> = ({ onClose }) => {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [formData, setFormData] = useState({
     fullName: '',
     company: '',
@@ -110,6 +113,20 @@ const UserProfile: React.FC<UserProfileProps> = ({ onClose }) => {
   const handleSignOut = async () => {
     await authHelpers.signOut();
     window.location.href = '/';
+  };
+
+  const handleDeleteAccount = async () => {
+    setIsDeleting(true);
+    setError('');
+    try {
+      await authHelpers.deleteOwnAccount();
+      await authHelpers.signOut();
+      window.location.href = '/';
+    } catch {
+      setError('Failed to delete account. Please try again.');
+      setIsDeleting(false);
+      setShowDeleteConfirm(false);
+    }
   };
 
   if (isLoading) {
@@ -233,8 +250,38 @@ const UserProfile: React.FC<UserProfileProps> = ({ onClose }) => {
               >
                 Sign Out
               </Button>
+              <Button
+                variant="outline"
+                onClick={() => setShowDeleteConfirm(true)}
+                className="w-full border-red-200 text-red-600 hover:bg-red-50"
+              >
+                Delete Account
+              </Button>
             </div>
           </div>
+
+          <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Delete Account</DialogTitle>
+                <DialogDescription>
+                  Are you sure you want to delete your account? This will permanently delete all your projects and data. This action cannot be undone.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setShowDeleteConfirm(false)} disabled={isDeleting}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={handleDeleteAccount}
+                  disabled={isDeleting}
+                >
+                  {isDeleting ? 'Deleting...' : 'Delete my account'}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
     </div>

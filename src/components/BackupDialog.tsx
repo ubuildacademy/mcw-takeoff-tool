@@ -15,12 +15,13 @@ import {
   FileImage,
   Share2
 } from 'lucide-react';
-import type { Annotation } from '../types';
+import type { Annotation, SheetHyperlink } from '../types';
 import { BackupService } from '../services/backupService';
 import { ShareProjectModal } from './ShareProjectModal';
 import { useProjectStore } from '../store/slices/projectSlice';
 import { useAnnotationStore } from '../store/slices/annotationSlice';
 import { useDocumentViewStore } from '../store/slices/documentViewSlice';
+import { useHyperlinkStore } from '../store/slices/hyperlinkSlice';
 
 interface BackupDialogProps {
   open: boolean;
@@ -141,6 +142,9 @@ export function BackupDialog({
       
       if (result.annotations?.length) {
         useAnnotationStore.getState().addAnnotationsBulk(result.annotations as unknown as Annotation[]);
+      }
+      if (result.hyperlinks?.length) {
+        useHyperlinkStore.getState().addHyperlinksBulk(result.hyperlinks as unknown as SheetHyperlink[]);
       }
       if (result.documentRotations && Object.keys(result.documentRotations).length > 0) {
         const rotations: Record<string, number> = {};

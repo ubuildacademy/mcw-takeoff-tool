@@ -119,6 +119,25 @@ export interface Annotation {
   timestamp: string;
 }
 
+/** Sheet hyperlink: clickable region that navigates to another sheet or URL */
+export interface SheetHyperlink {
+  id: string;
+  projectId: string;
+  /** Source: document ID containing the link region */
+  sourceSheetId: string;
+  /** Source: page number (1-based) */
+  sourcePageNumber: number;
+  /** Source region in normalized 0-1 coordinates */
+  sourceRect: { x: number; y: number; width: number; height: number };
+  /** Target: document ID (or empty for external URL) */
+  targetSheetId: string;
+  /** Target: page number (1-based) */
+  targetPageNumber: number;
+  /** Optional external URL (use when targetSheetId is empty) */
+  targetUrl?: string;
+  timestamp: string;
+}
+
 export interface SearchResult {
   documentId: string;
   pageNumber: number;

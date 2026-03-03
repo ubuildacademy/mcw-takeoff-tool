@@ -317,6 +317,12 @@ export const authHelpers = {
   async deleteUser(userId: string) {
     const { userService } = await import('../services/apiService')
     return await userService.deleteUser(userId)
+  },
+
+  // Delete own account (self-service) - deletes all projects, then the account
+  async deleteOwnAccount() {
+    const { userService } = await import('../services/apiService')
+    return await userService.deleteOwnAccount()
   }
 }
 

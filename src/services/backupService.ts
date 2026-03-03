@@ -3,6 +3,7 @@ import { authHelpers } from '../lib/supabase';
 import { getApiBaseUrl } from '../lib/apiConfig';
 import { useAnnotationStore } from '../store/slices/annotationSlice';
 import { useDocumentViewStore } from '../store/slices/documentViewSlice';
+import { useHyperlinkStore } from '../store/slices/hyperlinkSlice';
 
 async function getAuthHeaders(): Promise<HeadersInit> {
   const session = await authHelpers.getValidSession();
@@ -34,6 +35,9 @@ export interface ProjectBackup {
     filesWithData?: number; // Number of files with actual PDF data
     filesMissing?: number; // Number of files missing from backup
   };
+  annotations?: unknown[];
+  hyperlinks?: unknown[];
+  documentRotations?: Record<string, number>;
 }
 
 export class BackupService {
@@ -62,6 +66,8 @@ export class BackupService {
       if (Object.keys(documentRotations).length > 0) backup.documentRotations = documentRotations;
       const annotations = useAnnotationStore.getState().annotations.filter((a) => a.projectId === projectId);
       if (annotations.length > 0) backup.annotations = annotations;
+      const hyperlinks = useHyperlinkStore.getState().hyperlinks.filter((h) => h.projectId === projectId);
+      if (hyperlinks.length > 0) backup.hyperlinks = hyperlinks;
 
       // Convert to JSON and create download
       const jsonString = JSON.stringify(backup, null, 2);
@@ -98,6 +104,7 @@ export class BackupService {
     project: Project;
     annotations?: Array<Record<string, unknown>>;
     documentRotations?: Record<string, number>;
+    hyperlinks?: Array<Record<string, unknown>>;
   }> {
     try {
       console.log('🔄 BACKUP: Starting project import for file:', file.name);
@@ -128,6 +135,7 @@ export class BackupService {
         project: result.project,
         annotations: result.annotations,
         documentRotations: result.documentRotations,
+        hyperlinks: result.hyperlinks,
       };
 
     } catch (error) {

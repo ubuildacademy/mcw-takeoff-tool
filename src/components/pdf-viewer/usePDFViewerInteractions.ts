@@ -111,6 +111,18 @@ export interface UsePDFViewerInteractionsOptions {
     selectionBox: { x: number; y: number; width: number; height: number }
   ) => void;
   onVisualSearchComplete?: (selectionBox: { x: number; y: number; width: number; height: number }) => void;
+  // Hyperlink mode
+  hyperlinkMode?: boolean;
+  hyperlinkDrawStart?: { x: number; y: number } | null;
+  setHyperlinkDrawStart?: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
+  setHyperlinkDrawBox?: React.Dispatch<React.SetStateAction<{ x: number; y: number; width: number; height: number } | null>>;
+  onHyperlinkRegionDrawn?: (
+    rect: { x: number; y: number; width: number; height: number },
+    sheetId: string,
+    pageNumber: number
+  ) => void;
+  onHyperlinkModeChange?: (active: boolean) => void;
+  onHyperlinkClick?: (targetSheetId: string, targetPageNumber: number) => void;
   // Move/drag state (from usePDFViewerMeasurements)
   measurementMoveId: string | null;
   setMeasurementMoveId: React.Dispatch<React.SetStateAction<string | null>>;
@@ -255,6 +267,13 @@ export function usePDFViewerInteractions(
     setIsSelectingSymbol,
     onTitleblockSelectionComplete,
     onVisualSearchComplete,
+    hyperlinkMode = false,
+    hyperlinkDrawStart = null,
+    setHyperlinkDrawStart = () => {},
+    setHyperlinkDrawBox = () => {},
+    onHyperlinkRegionDrawn,
+    onHyperlinkModeChange,
+    onHyperlinkClick,
     measurementMoveId,
     setMeasurementMoveId,
     measurementMoveIds,
@@ -519,6 +538,14 @@ export function usePDFViewerInteractions(
         return;
       }
 
+      if (event.key === 'Escape' && hyperlinkMode) {
+        event.preventDefault();
+        onHyperlinkModeChange?.(false);
+        setHyperlinkDrawStart(null);
+        setHyperlinkDrawBox(null);
+        return;
+      }
+
       if (event.key === 'Escape' && annotationTool) {
         event.preventDefault();
         if (currentAnnotation.length > 0) {
@@ -681,6 +708,10 @@ export function usePDFViewerInteractions(
       setLocalAnnotations,
       pdfPageRef,
       setIsOrthoSnapping,
+      hyperlinkMode,
+      onHyperlinkModeChange,
+      setHyperlinkDrawStart,
+      setHyperlinkDrawBox,
     ]
   );
 
@@ -755,6 +786,18 @@ export function usePDFViewerInteractions(
       const isShapeTool = ['arrow', 'rectangle', 'circle'].includes(annotationTool ?? '');
       const isVisualSearchOrTitleblock = (visualSearchMode || !!titleblockSelectionMode) && isSelectingSymbol;
       const currentSelectedConditionId = useConditionStore.getState().selectedConditionId;
+
+      // Hyperlink mode: start drawing region on left-click
+      if (hyperlinkMode && event.button === 0) {
+        const coords = getCssCoordsFromEvent(event);
+        if (coords) {
+          setHyperlinkDrawStart(coords);
+          setHyperlinkDrawBox(null);
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+      }
 
       if (isSelectionMode && selectedMarkupIds.length > 0) {
         const target = event.target as HTMLElement;
@@ -871,12 +914,45 @@ export function usePDFViewerInteractions(
       setSelectionStart,
       setSelectionBox,
       localAnnotations,
+      hyperlinkMode,
+      setHyperlinkDrawStart,
+      setHyperlinkDrawBox,
     ]
   );
 
   const handleMouseUp = useCallback(
     async (event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
       if (!pdfCanvasRef.current) return;
+
+      if (hyperlinkMode && hyperlinkDrawStart && event.button === 0) {
+        let viewport = currentViewport;
+        if (!viewport && pdfPageRef.current) {
+          viewport = pdfPageRef.current.getViewport({ scale: viewState.scale, rotation: viewState.rotation });
+        }
+        if (viewport) {
+          const coords = getCssCoordsFromEvent(event);
+          if (coords) {
+            const width = Math.abs(coords.x - hyperlinkDrawStart.x);
+            const height = Math.abs(coords.y - hyperlinkDrawStart.y);
+            const x = Math.min(coords.x, hyperlinkDrawStart.x);
+            const y = Math.min(coords.y, hyperlinkDrawStart.y);
+            if (width >= 3 && height >= 3 && onHyperlinkRegionDrawn) {
+              const normRect = {
+                x: x / viewport.width,
+                y: y / viewport.height,
+                width: width / viewport.width,
+                height: height / viewport.height,
+              };
+              onHyperlinkRegionDrawn(normRect, file.id, currentPage);
+            }
+          }
+        }
+        setHyperlinkDrawStart(null);
+        setHyperlinkDrawBox(null);
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
 
       if (measurementMoveId && measurementMoveStart && measurementMoveOriginalPoints) {
         let viewport = currentViewport;
@@ -1153,6 +1229,11 @@ export function usePDFViewerInteractions(
       setSelectionBox,
       setIsSelectingSymbol,
       pdfPageRef,
+      hyperlinkMode,
+      hyperlinkDrawStart,
+      onHyperlinkRegionDrawn,
+      setHyperlinkDrawStart,
+      setHyperlinkDrawBox,
     ]
   );
 
@@ -1183,6 +1264,17 @@ export function usePDFViewerInteractions(
       }
 
       if (isDeselecting) setIsDeselecting(false);
+      if (hyperlinkMode && hyperlinkDrawStart) {
+        const coords = getCssCoordsFromEvent(event);
+        if (coords && viewport) {
+          const width = Math.abs(coords.x - hyperlinkDrawStart.x);
+          const height = Math.abs(coords.y - hyperlinkDrawStart.y);
+          const x = Math.min(coords.x, hyperlinkDrawStart.x);
+          const y = Math.min(coords.y, hyperlinkDrawStart.y);
+          setHyperlinkDrawBox({ x, y, width, height });
+        }
+        return;
+      }
       if (measurementMoveId && measurementMoveStart && viewport) {
         const coords = getCssCoordsFromEvent(event);
         if (coords) {
@@ -1369,6 +1461,9 @@ export function usePDFViewerInteractions(
       setIsDeselecting,
       cutoutMode,
       currentCutout,
+      hyperlinkMode,
+      hyperlinkDrawStart,
+      setHyperlinkDrawBox,
     ]
   );
 
@@ -1400,6 +1495,22 @@ export function usePDFViewerInteractions(
       }
       if (!viewport) return;
       if (isDeselecting) setIsDeselecting(false);
+
+      // Hyperlink click: navigate to target sheet
+      const targetEl = (event.target as Element)?.closest?.('[data-hyperlink-id]');
+      if (targetEl && onHyperlinkClick) {
+        const sheetId = targetEl.getAttribute('data-target-sheet');
+        const pageStr = targetEl.getAttribute('data-target-page');
+        if (sheetId && pageStr) {
+          const pageNumber = parseInt(pageStr, 10);
+          if (!Number.isNaN(pageNumber)) {
+            event.preventDefault();
+            event.stopPropagation();
+            onHyperlinkClick(sheetId, pageNumber);
+            return;
+          }
+        }
+      }
       const rect = pdfCanvasRef.current.getBoundingClientRect();
       let cssX = event.clientX - rect.left;
       let cssY = event.clientY - rect.top;
@@ -1685,6 +1796,20 @@ export function usePDFViewerInteractions(
 
   const handleSvgClick = useCallback(
     (e: React.MouseEvent<SVGSVGElement>) => {
+      const targetEl = (e.target as Element)?.closest?.('[data-hyperlink-id]');
+      if (targetEl && onHyperlinkClick) {
+        const sheetId = targetEl.getAttribute('data-target-sheet');
+        const pageStr = targetEl.getAttribute('data-target-page');
+        if (sheetId && pageStr) {
+          const pageNumber = parseInt(pageStr, 10);
+          if (!Number.isNaN(pageNumber)) {
+            e.preventDefault();
+            e.stopPropagation();
+            onHyperlinkClick(sheetId, pageNumber);
+            return;
+          }
+        }
+      }
       if (annotationMoveJustCompletedRef.current) {
         annotationMoveJustCompletedRef.current = false;
         e.stopPropagation();
@@ -1781,6 +1906,7 @@ export function usePDFViewerInteractions(
       selectedMarkupIds,
       setSelectedMarkupIds,
       handleClick,
+      onHyperlinkClick,
     ]
   );
 

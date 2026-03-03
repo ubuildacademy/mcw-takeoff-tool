@@ -29,10 +29,10 @@ import {
   ZoomIn,
   ZoomOut,
   Maximize2,
-  Settings,
+  Wrench,
 } from 'lucide-react';
 import type { TakeoffWorkspaceHeaderProps } from './TakeoffWorkspaceHeader.types';
-import { UserSettingsDialog } from '../UserSettingsDialog';
+import { ToolsDialog } from '../ToolsDialog';
 
 export function TakeoffWorkspaceHeader({
   onBackToProjects,
@@ -59,6 +59,10 @@ export function TakeoffWorkspaceHeader({
   canRedo,
   onUndo,
   onRedo,
+  onAddHyperlink,
+  onExtractHyperlinks,
+  canExtractHyperlinks = false,
+  onClearHyperlinks,
 }: TakeoffWorkspaceHeaderProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -285,10 +289,10 @@ export function TakeoffWorkspaceHeader({
           variant="ghost"
           size="icon"
           onClick={() => setSettingsOpen(true)}
-          title="User Settings"
+          title="Tools"
           className="shrink-0"
         >
-          <Settings className="w-4 h-4" />
+          <Wrench className="w-4 h-4" />
         </Button>
         {((isOrthoSnapping && isMeasuring) || (isCalibrating && isOrthoSnapping)) && (
           <div className="flex items-center gap-1 bg-green-600 text-white px-2 py-1 rounded text-xs">
@@ -305,7 +309,14 @@ export function TakeoffWorkspaceHeader({
         </div>
       </div>
 
-      <UserSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <ToolsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        onAddHyperlink={onAddHyperlink}
+        onExtractHyperlinks={onExtractHyperlinks}
+        canExtractHyperlinks={canExtractHyperlinks}
+        onClearHyperlinks={onClearHyperlinks}
+      />
     </div>
   );
 }

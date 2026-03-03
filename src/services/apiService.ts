@@ -285,6 +285,7 @@ export const projectService = {
       message?: string;
       annotations?: unknown[];
       documentRotations?: Record<string, number>;
+      hyperlinks?: unknown[];
     }
   ) {
     const response = await apiClient.post(`/projects/${projectId}/share-project`, params);
@@ -510,6 +511,12 @@ export const userService = {
 
   async deleteUser(userId: string) {
     const response = await apiClient.delete(`/users/${userId}`);
+    return response.data;
+  },
+
+  /** Delete the current user's own account (self-service). Deletes all user projects, then the account. */
+  async deleteOwnAccount() {
+    const response = await apiClient.delete('/users/me');
     return response.data;
   },
 };

@@ -155,6 +155,7 @@ export async function performImportFromBackup(
   message: string;
   annotations: Array<Record<string, unknown>>;
   documentRotations: Record<string, number>;
+  hyperlinks: Array<Record<string, unknown>>;
 }> {
   const { id: _origId, userId: _origUserId, ...projectData } = backup.project as Record<string, unknown>;
   const newProject = await storage.saveProject({
@@ -304,12 +305,29 @@ export async function performImportFromBackup(
     }
   }
 
+  const hyperlinks: Array<Record<string, unknown>> = [];
+  const backupHyperlinks = backup.hyperlinks as Array<Record<string, unknown>> | undefined;
+  if (Array.isArray(backupHyperlinks)) {
+    for (const h of backupHyperlinks) {
+      const newSourceSheetId = remapSheetIdForFrontend((h.sourceSheetId as string) || '', fileIdMapping, sheetIdMapping);
+      const newTargetSheetId = remapSheetIdForFrontend((h.targetSheetId as string) || '', fileIdMapping, sheetIdMapping);
+      hyperlinks.push({
+        ...h,
+        id: `hyperlink-${uuidv4()}`,
+        projectId: newProjectId,
+        sourceSheetId: newSourceSheetId,
+        targetSheetId: newTargetSheetId,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }
+
   const filesRestored = files.filter((f) => f.fileData).length;
   const filesMissing = files.filter((f) => !f.fileData).length;
   const message = filesMissing > 0
     ? `Project imported. ${filesRestored} PDF(s) restored, ${filesMissing} missing.`
     : `Project imported. All ${filesRestored} PDF(s) restored.`;
-  return { project: newProject, message, annotations, documentRotations };
+  return { project: newProject, message, annotations, documentRotations, hyperlinks };
 }
 
 router.get('/', requireAuth, async (req, res) => {
@@ -649,6 +667,17 @@ router.post(
         if (valid.length > 0) backup.annotations = valid;
       }
 
+      const clientHyperlinks = req.body?.hyperlinks;
+      if (Array.isArray(clientHyperlinks) && clientHyperlinks.length > 0) {
+        const valid = clientHyperlinks.filter(
+          (h: unknown) =>
+            h &&
+            typeof h === 'object' &&
+            (h as Record<string, unknown>).projectId === projectId
+        );
+        if (valid.length > 0) backup.hyperlinks = valid;
+      }
+
       const jsonString = JSON.stringify(backup);
       const backupBuffer = Buffer.from(jsonString, 'utf8');
       const backupSize = backupBuffer.length;
@@ -960,8 +989,8 @@ router.post('/import', requireAuth, uploadRateLimit, upload.single('file'), asyn
     if (!backup.version || !backup.project || !backup.timestamp) {
       return res.status(400).json({ error: 'Invalid backup file format' });
     }
-    const { project, message, annotations, documentRotations } = await performImportFromBackup(backup, userId);
-    return res.json({ success: true, project, message, annotations, documentRotations });
+    const { project, message, annotations, documentRotations, hyperlinks } = await performImportFromBackup(backup, userId);
+    return res.json({ success: true, project, message, annotations, documentRotations, hyperlinks });
   } catch (error) {
     console.error('❌ Error importing project:', error);
     return res.status(500).json({ error: 'Failed to import project' });

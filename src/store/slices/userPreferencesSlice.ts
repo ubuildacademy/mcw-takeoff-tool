@@ -18,6 +18,10 @@ export interface UserPreferencesState {
   showMeasurementLabels: boolean;
   /** Show running length tooltip while drawing continuous linear measurements */
   showRunningLength: boolean;
+  /** Enable magnifier overlay when drawing/measuring for precise point placement */
+  magnifierEnabled: boolean;
+  /** Magnifier zoom level (2, 3, or 4x) */
+  magnifierZoom: 2 | 3 | 4;
 
   setCrosshairFullScreen: (value: boolean) => void;
   setCrosshairColor: (value: string) => void;
@@ -25,6 +29,8 @@ export interface UserPreferencesState {
   setDefaultOrthoSnapping: (value: boolean) => void;
   setShowMeasurementLabels: (value: boolean) => void;
   setShowRunningLength: (value: boolean) => void;
+  setMagnifierEnabled: (value: boolean) => void;
+  setMagnifierZoom: (value: 2 | 3 | 4) => void;
 }
 
 export const useUserPreferencesStore = create<UserPreferencesState>()(
@@ -36,6 +42,8 @@ export const useUserPreferencesStore = create<UserPreferencesState>()(
       defaultOrthoSnapping: false,
       showMeasurementLabels: true,
       showRunningLength: true,
+      magnifierEnabled: false,
+      magnifierZoom: 3,
 
       setCrosshairFullScreen: (value) => set({ crosshairFullScreen: value }),
       setCrosshairColor: (value) => set({ crosshairColor: value }),
@@ -43,6 +51,8 @@ export const useUserPreferencesStore = create<UserPreferencesState>()(
       setDefaultOrthoSnapping: (value) => set({ defaultOrthoSnapping: value }),
       setShowMeasurementLabels: (value) => set({ showMeasurementLabels: value }),
       setShowRunningLength: (value) => set({ showRunningLength: value }),
+      setMagnifierEnabled: (value) => set({ magnifierEnabled: value }),
+      setMagnifierZoom: (value) => set({ magnifierZoom: value }),
     }),
     {
       name: 'user-preferences-store',
@@ -53,6 +63,8 @@ export const useUserPreferencesStore = create<UserPreferencesState>()(
         defaultOrthoSnapping: state.defaultOrthoSnapping,
         showMeasurementLabels: state.showMeasurementLabels,
         showRunningLength: state.showRunningLength,
+        magnifierEnabled: state.magnifierEnabled,
+        magnifierZoom: state.magnifierZoom,
       }),
     }
   )

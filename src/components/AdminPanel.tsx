@@ -4,7 +4,6 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './ui/dialog';
 import { 
-  BarChart3, 
   RefreshCw,
   Settings,
   Brain,
@@ -34,7 +33,7 @@ interface AdminPanelProps {
 }
 
 export function AdminPanel({ isOpen, onClose, projectId: _projectId }: AdminPanelProps) {
-  const [activeTab, setActiveTab] = useState<'overview' | 'ai-prompt' | 'ai-settings' | 'user-management'>('overview');
+  const [activeTab, setActiveTab] = useState<'ai-prompt' | 'ai-settings' | 'user-management'>('user-management');
   const [isLoading, setIsLoading] = useState(false);
   const [availableModels, setAvailableModels] = useState<OllamaModel[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>('gpt-oss:120b-cloud');
@@ -454,10 +453,9 @@ When answering questions:
   };
 
   const tabs = [
-    { id: 'overview', label: 'Overview', icon: BarChart3 },
+    { id: 'user-management', label: 'User Management', icon: Users },
     { id: 'ai-prompt', label: 'AI Prompt Editor', icon: Brain },
-    { id: 'ai-settings', label: 'AI Settings', icon: Brain },
-    { id: 'user-management', label: 'User Management', icon: Users }
+    { id: 'ai-settings', label: 'AI Settings', icon: Brain }
   ];
 
   if (!isOpen) return null;
@@ -507,55 +505,6 @@ When answering questions:
 
             {/* Main Content */}
             <div className="flex-1 overflow-y-auto">
-              {activeTab === 'overview' && (
-                <div className="p-6 space-y-6">
-                  <div>
-                    <h2 className="text-2xl font-bold mb-4">System Overview</h2>
-                    <p className="text-gray-600 mb-6">
-                      Welcome to the Meridian Takeoff Admin Panel. Here you can manage AI prompts, 
-                      model settings, and system configuration.
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="border rounded-lg p-6 flex flex-col">
-                      <div className="flex items-center gap-3 mb-4">
-                        <Brain className="w-8 h-8 text-blue-600" />
-                        <h3 className="text-lg font-semibold">AI Prompt Editor</h3>
-                      </div>
-                      <p className="text-gray-600 mb-4 flex-grow">
-                        Customize AI prompts for page labeling and chat assistance to improve accuracy for different drawing sets and use cases.
-                      </p>
-                      <Button 
-                        onClick={() => setActiveTab('ai-prompt')}
-                        className="w-full"
-                      >
-                        <Brain className="w-4 h-4 mr-2" />
-                        Edit AI Prompts
-                      </Button>
-                    </div>
-
-                    <div className="border rounded-lg p-6 flex flex-col">
-                      <div className="flex items-center gap-3 mb-4">
-                        <Brain className="w-8 h-8 text-orange-600" />
-                        <h3 className="text-lg font-semibold">AI Settings</h3>
-                      </div>
-                      <p className="text-gray-600 mb-4 flex-grow">
-                        Configure AI models, response parameters, and performance settings for optimal chat and analysis performance.
-                      </p>
-                      <Button 
-                        onClick={() => setActiveTab('ai-settings')}
-                        className="w-full"
-                      >
-                        <Brain className="w-4 h-4 mr-2" />
-                        AI Settings
-                      </Button>
-                    </div>
-
-                  </div>
-                </div>
-              )}
-
               {activeTab === 'ai-prompt' && (
                 <div className="p-6">
                   <div className="mb-6">

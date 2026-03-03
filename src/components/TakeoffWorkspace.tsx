@@ -9,6 +9,7 @@ import { useConditionStore } from '../store/slices/conditionSlice';
 import { useMeasurementStore } from '../store/slices/measurementSlice';
 import { useCalibrationStore } from '../store/slices/calibrationSlice';
 import { useAnnotationStore } from '../store/slices/annotationSlice';
+import { useHyperlinkStore } from '../store/slices/hyperlinkSlice';
 import { useDocumentViewStore } from '../store/slices/documentViewSlice';
 import { useUndoStore } from '../store';
 import type { TakeoffCondition, Sheet, ProjectFile, PDFDocument, SearchResult } from '../types';
@@ -35,6 +36,8 @@ import { useTakeoffWorkspaceProjectInit } from './takeoff-workspace/useTakeoffWo
 import { useTakeoffWorkspaceCalibration } from './takeoff-workspace/useTakeoffWorkspaceCalibration';
 import { useTakeoffWorkspaceDocumentView } from './takeoff-workspace/useTakeoffWorkspaceDocumentView';
 import { SearchResultsList } from './takeoff-workspace/SearchResultsList';
+import { HyperlinkSheetPickerDialog } from './HyperlinkSheetPickerDialog';
+import { HyperlinkContextMenu } from './HyperlinkContextMenu';
 
 // All interfaces now imported from shared types
 
@@ -87,6 +90,9 @@ export function TakeoffWorkspace() {
   // Cut-out states
   const [cutoutMode, setCutoutMode] = useState(false);
   const [cutoutTargetConditionId, setCutoutTargetConditionId] = useState<string | null>(null);
+
+  // Hyperlink mode (H to add manual link; Extract creates from OCR)
+  const [hyperlinkMode, setHyperlinkMode] = useState(false);
   
   // Annotation states
   const [annotationTool, setAnnotationTool] = useState<'text' | 'arrow' | 'rectangle' | 'circle' | null>(null);
@@ -277,9 +283,20 @@ export function TakeoffWorkspace() {
   const canUndo = useUndoStore((s) => s.past.length > 0);
   const canRedo = useUndoStore((s) => s.future.length > 0);
 
-  // Global keydown: Space (deselect condition), Cmd/Ctrl+Z (undo), Cmd/Ctrl+Shift+Z or Cmd/Ctrl+Y (redo)
+  const handleAddHyperlink = useCallback(() => {
+    setAnnotationTool(null); // Exit annotation mode if active
+    setHyperlinkMode(true);
+  }, []);
+
+  // Global keydown: Space (deselect), H (add hyperlink), Cmd/Ctrl+Z (undo), Cmd/Ctrl+Shift+Z or Cmd/Ctrl+Y (redo)
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement;
+      const isTyping =
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.getAttribute?.('contenteditable') === 'true';
+
       const isSpace = event.code === 'Space' || event.key === ' ';
       if (isSpace) {
         const currentlySelected = getSelectedCondition();
@@ -289,6 +306,14 @@ export function TakeoffWorkspace() {
         }
         return;
       }
+
+      // H: Add hyperlink (when not typing)
+      if (!isTyping && (event.key === 'h' || event.key === 'H') && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault();
+        handleAddHyperlink();
+        return;
+      }
+
       const isUndo = (event.metaKey || event.ctrlKey) && event.key === 'z' && !event.shiftKey;
       const isRedo = (event.metaKey || event.ctrlKey) && (event.key === 'y' || (event.key === 'z' && event.shiftKey));
       if (isUndo) {
@@ -307,7 +332,7 @@ export function TakeoffWorkspace() {
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [getSelectedCondition, handleConditionSelect, undo, redo]);
+  }, [getSelectedCondition, handleConditionSelect, handleAddHyperlink, undo, redo]);
 
   const handleToolSelect = (_tool: string) => {
     // Tool selection handled by PDF viewer
@@ -589,6 +614,162 @@ export function TakeoffWorkspace() {
     navigate('/app');
   };
 
+  const handleClearHyperlinks = useCallback(() => {
+    useHyperlinkStore.getState().clearAllHyperlinks();
+    toast.success('All hyperlinks cleared');
+  }, []);
+
+  const handleExtractHyperlinks = useCallback(async () => {
+    if (!projectId || documents.length === 0) return;
+    const loadingToast = toast.loading('Extracting hyperlinks...');
+    try {
+      const { serverOcrService } = await import('../services/serverOcrService');
+      const { getPageTextWithPositions } = await import('../services/pdfTextPositionService');
+      const { extractHyperlinksFromPageSources } = await import('../services/hyperlinkExtractionService');
+
+      const pageSources = new Map<string, Map<number, { type: 'pdf'; data: Awaited<ReturnType<typeof getPageTextWithPositions>> } | { type: 'ocr'; text: string }>>();
+      for (const doc of documents) {
+        const totalPages = doc.totalPages ?? doc.pages?.length ?? 1;
+        const docMap = new Map<number, { type: 'pdf'; data: Awaited<ReturnType<typeof getPageTextWithPositions>> } | { type: 'ocr'; text: string }>();
+        let ocrData: Awaited<ReturnType<typeof serverOcrService.getDocumentData>> | null = null;
+        for (let p = 1; p <= totalPages; p++) {
+          const pdfData = await getPageTextWithPositions(doc.id, projectId, p);
+          if (pdfData != null && pdfData.items.length > 0) {
+            docMap.set(p, { type: 'pdf' as const, data: pdfData });
+          } else {
+            if (!ocrData) ocrData = await serverOcrService.getDocumentData(doc.id, projectId);
+            const pageResult = ocrData?.results?.find((r) => r.pageNumber === p);
+            const text = pageResult?.text ?? '';
+            if (text.trim()) docMap.set(p, { type: 'ocr', text });
+          }
+        }
+        if (docMap.size) pageSources.set(doc.id, docMap);
+      }
+      const extracted = extractHyperlinksFromPageSources(
+        projectId,
+        documents,
+        pageSources as Map<string, Map<number, import('../services/hyperlinkExtractionService').PageTextSource>>
+      );
+      if (extracted.length === 0) {
+        toast.dismiss(loadingToast);
+        toast.info('No sheet references found. Ensure sheets are labeled and OCR has been run.');
+        return;
+      }
+      const { addHyperlinksBulk } = useHyperlinkStore.getState();
+      const hyperlinks = extracted.map((e) => ({
+        projectId,
+        sourceSheetId: e.sourceSheetId,
+        sourcePageNumber: e.sourcePageNumber,
+        sourceRect: e.sourceRect,
+        targetSheetId: e.targetSheetId,
+        targetPageNumber: e.targetPageNumber,
+      }));
+      const now = Date.now();
+      addHyperlinksBulk(
+        hyperlinks.map((h, i) => ({
+          ...h,
+          id: `hyperlink-${now}-${i}-${Math.random().toString(36).slice(2, 9)}`,
+          timestamp: new Date().toISOString(),
+        }))
+      );
+      toast.dismiss(loadingToast);
+      toast.success(`Extracted ${extracted.length} hyperlink${extracted.length === 1 ? '' : 's'}`);
+    } catch (err) {
+      toast.dismiss(loadingToast);
+      console.error('Hyperlink extraction failed:', err);
+      toast.error('Failed to extract hyperlinks. Run OCR first if needed.');
+    }
+  }, [projectId, documents]);
+
+  const [hyperlinkPickerOpen, setHyperlinkPickerOpen] = useState(false);
+  const [hyperlinkContextMenu, setHyperlinkContextMenu] = useState<{
+    hyperlinkId: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [editingHyperlinkId, setEditingHyperlinkId] = useState<string | null>(null);
+  const [pendingHyperlink, setPendingHyperlink] = useState<{
+    rect: { x: number; y: number; width: number; height: number };
+    sourceSheetId: string;
+    sourcePageNumber: number;
+  } | null>(null);
+
+  const handleHyperlinkRegionDrawn = useCallback(
+    (rect: { x: number; y: number; width: number; height: number }, sourceSheetId: string, sourcePageNumber: number) => {
+      setPendingHyperlink({ rect, sourceSheetId, sourcePageNumber });
+      setHyperlinkPickerOpen(true);
+    },
+    []
+  );
+
+  const handleHyperlinkTargetSelect = useCallback(
+    (targetSheetId: string, targetPageNumber: number) => {
+      if (!projectId || !pendingHyperlink) return;
+      const { addHyperlink } = useHyperlinkStore.getState();
+      addHyperlink({
+        projectId,
+        sourceSheetId: pendingHyperlink.sourceSheetId,
+        sourcePageNumber: pendingHyperlink.sourcePageNumber,
+        sourceRect: pendingHyperlink.rect,
+        targetSheetId,
+        targetPageNumber,
+      });
+      setHyperlinkMode(false);
+      setPendingHyperlink(null);
+      setHyperlinkPickerOpen(false);
+      toast.success('Hyperlink created');
+    },
+    [projectId, pendingHyperlink]
+  );
+
+  const handleHyperlinkPickerCancel = useCallback(() => {
+    setHyperlinkMode(false);
+    setPendingHyperlink(null);
+    setEditingHyperlinkId(null);
+    setHyperlinkPickerOpen(false);
+  }, []);
+
+  const handleHyperlinkContextMenu = useCallback((hyperlinkId: string, clientX: number, clientY: number) => {
+    setHyperlinkContextMenu({ hyperlinkId, x: clientX, y: clientY });
+  }, []);
+
+  const handleHyperlinkEdit = useCallback(() => {
+    if (!hyperlinkContextMenu) return;
+    const hyperlink = useHyperlinkStore.getState().getHyperlinkById(hyperlinkContextMenu.hyperlinkId);
+    if (hyperlink) {
+      setPendingHyperlink(null);
+      setEditingHyperlinkId(hyperlink.id);
+      setHyperlinkPickerOpen(true);
+    }
+    setHyperlinkContextMenu(null);
+  }, [hyperlinkContextMenu]);
+
+  const handleHyperlinkDelete = useCallback(() => {
+    if (!hyperlinkContextMenu) return;
+    useHyperlinkStore.getState().deleteHyperlink(hyperlinkContextMenu.hyperlinkId);
+    toast.success('Hyperlink removed');
+    setHyperlinkContextMenu(null);
+  }, [hyperlinkContextMenu]);
+
+  const handleHyperlinkUpdate = useCallback(
+    (targetSheetId: string, targetPageNumber: number) => {
+      if (!editingHyperlinkId) return;
+      useHyperlinkStore.getState().updateHyperlink(editingHyperlinkId, {
+        targetSheetId,
+        targetPageNumber,
+      });
+      setEditingHyperlinkId(null);
+      setHyperlinkPickerOpen(false);
+      toast.success('Hyperlink updated');
+    },
+    [editingHyperlinkId]
+  );
+
+  // Sheets are labeled if any page has sheetNumber or sheetName
+  const canExtractHyperlinks = documents.some(
+    (doc) => doc.pages?.some((p) => p.sheetNumber || p.sheetName)
+  ) ?? false;
+
 
   const storeCurrentProject = getCurrentProject();
   const currentProject = storeCurrentProject || {
@@ -629,6 +810,10 @@ export function TakeoffWorkspace() {
         canRedo={canRedo}
         onUndo={() => undo()}
         onRedo={() => redo()}
+        onAddHyperlink={handleAddHyperlink}
+        onExtractHyperlinks={handleExtractHyperlinks}
+        canExtractHyperlinks={canExtractHyperlinks}
+        onClearHyperlinks={handleClearHyperlinks}
       />
 
       {/* Main Content Area - Fixed height container */}
@@ -673,6 +858,7 @@ export function TakeoffWorkspace() {
           {currentPdfFile ? (
             <PDFViewer 
               file={currentPdfFile}
+              projectId={projectId ?? undefined}
               className="h-full"
               currentPage={currentPage}
               totalPages={totalPages}
@@ -707,6 +893,11 @@ export function TakeoffWorkspace() {
               // but sends regions back through a separate callback.
               titleblockSelectionMode={titleblock.titleblockSelectionMode}
               onTitleblockSelectionComplete={titleblock.handleTitleblockSelectionComplete}
+              hyperlinkMode={hyperlinkMode}
+              onHyperlinkRegionDrawn={handleHyperlinkRegionDrawn}
+              onHyperlinkModeChange={setHyperlinkMode}
+              onHyperlinkClick={(sheetId, pageNumber) => documentView.handlePageSelect(sheetId, pageNumber)}
+              onHyperlinkContextMenu={handleHyperlinkContextMenu}
             />
           ) : (
             <div className="flex items-center justify-center flex-1 bg-gray-100">
@@ -790,6 +981,39 @@ export function TakeoffWorkspace() {
         showCVTakeoffAgent={showCVTakeoffAgent}
         setShowCVTakeoffAgent={setShowCVTakeoffAgent}
       />
+
+      <HyperlinkSheetPickerDialog
+        open={hyperlinkPickerOpen}
+        onOpenChange={setHyperlinkPickerOpen}
+        documents={documents}
+        projectFiles={projectFiles}
+        excludeSheetId={editingHyperlinkId ? undefined : currentPdfFile?.id}
+        excludePageNumber={editingHyperlinkId ? undefined : (currentPage ?? undefined)}
+        initialTargetSheetId={
+          editingHyperlinkId
+            ? useHyperlinkStore.getState().getHyperlinkById(editingHyperlinkId)?.targetSheetId
+            : undefined
+        }
+        initialTargetPageNumber={
+          editingHyperlinkId
+            ? useHyperlinkStore.getState().getHyperlinkById(editingHyperlinkId)?.targetPageNumber
+            : undefined
+        }
+        onSelect={editingHyperlinkId ? handleHyperlinkUpdate : handleHyperlinkTargetSelect}
+        isEditMode={!!editingHyperlinkId}
+        onCancel={handleHyperlinkPickerCancel}
+      />
+
+      {hyperlinkContextMenu && (
+        <HyperlinkContextMenu
+          x={hyperlinkContextMenu.x}
+          y={hyperlinkContextMenu.y}
+          hyperlinkId={hyperlinkContextMenu.hyperlinkId}
+          onEdit={handleHyperlinkEdit}
+          onDelete={handleHyperlinkDelete}
+          onClose={() => setHyperlinkContextMenu(null)}
+        />
+      )}
 
     </div>
   );

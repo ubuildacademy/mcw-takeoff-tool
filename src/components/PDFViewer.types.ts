@@ -19,6 +19,8 @@ export type { Annotation } from '../types';
 export interface PDFViewerProps {
   /** Project file (id, originalName, etc.). Passed from TakeoffWorkspace. */
   file: ProjectFile;
+  /** Optional: use this projectId for hyperlink lookups when store's currentProjectId may be stale (e.g. route param) */
+  projectId?: string | null;
   className?: string;
   currentPage?: number;
   totalPages?: number;
@@ -67,6 +69,22 @@ export interface PDFViewerProps {
   onVisualSearchComplete?: (selectionBox: SelectionBox) => void;
   titleblockSelectionMode?: 'sheetNumber' | 'sheetName' | null;
   onTitleblockSelectionComplete?: (field: 'sheetNumber' | 'sheetName', selectionBox: SelectionBox) => void;
+  /** Hyperlink mode: draw rect to create link */
+  hyperlinkMode?: boolean;
+  /** Call when L is pressed to enter hyperlink mode */
+  onEnterHyperlinkMode?: () => void;
+  /** Call when user finishes drawing hyperlink region */
+  onHyperlinkRegionDrawn?: (
+    rect: { x: number; y: number; width: number; height: number },
+    sheetId: string,
+    pageNumber: number
+  ) => void;
+  /** Call to exit hyperlink mode */
+  onHyperlinkModeChange?: (active: boolean) => void;
+  /** Call when user clicks a hyperlink to navigate */
+  onHyperlinkClick?: (targetSheetId: string, targetPageNumber: number) => void;
+  /** Call when user right-clicks a hyperlink (for Edit/Delete menu) */
+  onHyperlinkContextMenu?: (hyperlinkId: string, clientX: number, clientY: number) => void;
 }
 
 /** Measurement shape used by PDFViewer for rendering (aligned with TakeoffMeasurement + legacy) */

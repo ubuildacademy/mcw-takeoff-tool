@@ -30,6 +30,7 @@ export interface PDFViewerCanvasOverlayProps {
   onSvgMouseLeave: () => void;
   onSvgClick: (event: React.MouseEvent<SVGSVGElement>) => void;
   onSvgDoubleClick: (event: React.MouseEvent<SVGSVGElement>) => void;
+  onSvgContextMenu?: (event: React.MouseEvent<SVGSVGElement>) => void;
   isPDFLoading: boolean;
   textAnnotation: PDFViewerCanvasOverlayTextAnnotationProps | null;
 }
@@ -80,6 +81,7 @@ export const PDFViewerCanvasOverlay: React.FC<PDFViewerCanvasOverlayProps> = ({
   onSvgMouseLeave,
   onSvgClick,
   onSvgDoubleClick,
+  onSvgContextMenu,
   isPDFLoading,
   textAnnotation,
 }) => {
@@ -115,7 +117,7 @@ export const PDFViewerCanvasOverlay: React.FC<PDFViewerCanvasOverlayProps> = ({
         onMouseUp={onSvgMouseUp}
         onMouseLeave={onSvgMouseLeave}
         onClick={onSvgClick}
-        onContextMenu={() => {}}
+        onContextMenu={onSvgContextMenu}
         onDoubleClick={onSvgDoubleClick}
       />
       <PDFViewerLoadingIndicator show={isPDFLoading} />

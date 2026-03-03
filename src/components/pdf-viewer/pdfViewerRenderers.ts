@@ -7,7 +7,7 @@ import type { PDFPageProxy, PageViewport } from 'pdfjs-dist';
 /** Stroke width for annotation hit areas (rect/circle); stroke-only so interior passes through. */
 const ANNOTATION_HIT_STROKE_WIDTH = 12;
 import type { Measurement, SelectionBox } from '../PDFViewer.types';
-import type { Annotation } from '../../types';
+import type { Annotation, SheetHyperlink } from '../../types';
 import { formatFeetAndInches } from '../../lib/utils';
 import { calculateDistance } from '../../utils/commonUtils';
 
@@ -65,6 +65,82 @@ export function renderSVGSelectionBox(
   rect.setAttribute('stroke-dasharray', '5,5');
   rect.setAttribute('vector-effect', 'non-scaling-stroke');
   svg.appendChild(rect);
+}
+
+/** Renders the hyperlink draw preview (dashed, thin - distinct from annotation boxes) */
+export function renderSVGHyperlinkDrawBox(
+  svg: SVGSVGElement,
+  box: SelectionBox,
+  _viewport: { width: number; height: number }
+): void {
+  if (!box) return;
+  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  rect.setAttribute('x', box.x.toString());
+  rect.setAttribute('y', box.y.toString());
+  rect.setAttribute('width', box.width.toString());
+  rect.setAttribute('height', box.height.toString());
+  rect.setAttribute('fill', 'rgba(59, 130, 246, 0.06)');
+  rect.setAttribute('stroke', 'rgba(59, 130, 246, 0.8)');
+  rect.setAttribute('stroke-width', '1');
+  rect.setAttribute('stroke-dasharray', '4,4');
+  rect.setAttribute('vector-effect', 'non-scaling-stroke');
+  svg.appendChild(rect);
+}
+
+/** Transform normalized (0-1) point to viewport coords accounting for rotation. Same logic as measurements/annotations. */
+function transformHyperlinkPoint(
+  nx: number,
+  ny: number,
+  viewport: { width: number; height: number },
+  rotation: number
+): { x: number; y: number } {
+  const r = rotation || 0;
+  if (r === 0) return { x: nx * viewport.width, y: ny * viewport.height };
+  if (r === 90) return { x: viewport.width * (1 - ny), y: viewport.height * nx };
+  if (r === 180) return { x: viewport.width * (1 - nx), y: viewport.height * (1 - ny) };
+  if (r === 270) return { x: viewport.width * ny, y: viewport.height * (1 - nx) };
+  return { x: nx * viewport.width, y: ny * viewport.height };
+}
+
+/** Renders sheet hyperlinks as clickable rectangles (dashed, thin - distinct from annotations).
+ * sourceRect is in normalized 0-1 space (rotation=0); applies same rotation transform as measurements. */
+export function renderSVGHyperlinks(
+  svg: SVGSVGElement,
+  hyperlinks: SheetHyperlink[],
+  viewport: { width: number; height: number; rotation?: number }
+): void {
+  if (!viewport || hyperlinks.length === 0) return;
+  const rotation = viewport.rotation ?? 0;
+  for (const h of hyperlinks) {
+    const { x: nx, y: ny, width: nw, height: nh } = h.sourceRect;
+    const corners = [
+      transformHyperlinkPoint(nx, ny, viewport, rotation),
+      transformHyperlinkPoint(nx + nw, ny, viewport, rotation),
+      transformHyperlinkPoint(nx + nw, ny + nh, viewport, rotation),
+      transformHyperlinkPoint(nx, ny + nh, viewport, rotation),
+    ];
+    const xs = corners.map((c) => c.x);
+    const ys = corners.map((c) => c.y);
+    const x = Math.min(...xs);
+    const y = Math.min(...ys);
+    const w = Math.max(...xs) - x;
+    const ht = Math.max(...ys) - y;
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', x.toString());
+    rect.setAttribute('y', y.toString());
+    rect.setAttribute('width', w.toString());
+    rect.setAttribute('height', ht.toString());
+    rect.setAttribute('fill', 'rgba(59, 130, 246, 0.12)');
+    rect.setAttribute('stroke', 'rgba(59, 130, 246, 0.7)');
+    rect.setAttribute('stroke-width', '1');
+    rect.setAttribute('stroke-dasharray', '4,4');
+    rect.setAttribute('data-hyperlink-id', h.id);
+    rect.setAttribute('data-target-sheet', h.targetSheetId);
+    rect.setAttribute('data-target-page', String(h.targetPageNumber));
+    rect.setAttribute('cursor', 'pointer');
+    rect.setAttribute('vector-effect', 'non-scaling-stroke');
+    svg.appendChild(rect);
+  }
 }
 
 /** Renders the annotation drag-to-draw box (rectangle/circle/arrow) with given stroke color */

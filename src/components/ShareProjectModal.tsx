@@ -5,6 +5,7 @@ import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { useAnnotationStore } from '../store/slices/annotationSlice';
 import { useDocumentViewStore } from '../store/slices/documentViewSlice';
+import { useHyperlinkStore } from '../store/slices/hyperlinkSlice';
 import {
   Dialog,
   DialogContent,
@@ -71,11 +72,13 @@ export function ShareProjectModal({
     try {
       const annotations = useAnnotationStore.getState().annotations.filter((a) => a.projectId === projectId);
       const documentRotations = useDocumentViewStore.getState().documentRotations;
+      const hyperlinks = useHyperlinkStore.getState().hyperlinks.filter((h) => h.projectId === projectId);
       const result = await projectService.shareProject(projectId, {
         recipients: valid,
         message: message.trim() || undefined,
         annotations,
         documentRotations,
+        hyperlinks: hyperlinks.length > 0 ? hyperlinks : undefined,
       });
       if (result.deliveryMethod === 'link') {
         toast.success(
