@@ -89,6 +89,18 @@ router.post('/login', async (req: Request, res: Response) => {
  */
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+/** Mark project_share invitations for this email as accepted (user signed up via shared project link). */
+async function markProjectShareInvitationsAccepted(email: string): Promise<void> {
+  const normalized = email?.trim().toLowerCase();
+  if (!normalized) return;
+  await supabase
+    .from('user_invitations')
+    .update({ status: 'accepted', accepted_at: new Date().toISOString() })
+    .eq('email', normalized)
+    .eq('status', 'pending')
+    .eq('source', 'project_share');
+}
+
 router.get('/validate-invite/:token', async (req: Request, res: Response) => {
   try {
     const { token } = req.params;
@@ -179,6 +191,47 @@ router.post('/accept-invitation', requireAuth, async (req: Request, res: Respons
   } catch (err) {
     console.error('[Auth] Accept invitation error:', err);
     res.status(500).json({ error: 'Failed to complete invitation' });
+  }
+});
+
+/**
+ * POST /api/auth/complete-shared-signup
+ * Completes signup for users who created an account via a shared project link.
+ * Creates user_metadata with role: 'user' only (never admin).
+ * Does not use invitations - used when someone signs up from /signup/shared-project/:token.
+ */
+router.post('/complete-shared-signup', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { full_name, company } = req.body;
+    const userId = req.user!.id;
+
+    const { error: metadataError } = await supabase
+      .from('user_metadata')
+      .insert({
+        id: userId,
+        role: 'user',
+        full_name: full_name || null,
+        company: company || null,
+      });
+
+    if (metadataError) {
+      // 23505 = unique_violation - user already has metadata (e.g. existing user)
+      const isDuplicate =
+        metadataError.code === '23505' ||
+        (typeof metadataError.message === 'string' && metadataError.message.includes('duplicate key'));
+      if (isDuplicate) {
+        await markProjectShareInvitationsAccepted(req.user!.email!);
+        return res.json({ success: true });
+      }
+      console.error('[Auth] Error creating user metadata (shared signup):', metadataError);
+      return res.status(500).json({ error: 'Failed to complete account setup' });
+    }
+
+    await markProjectShareInvitationsAccepted(req.user!.email!);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Auth] Complete shared signup error:', err);
+    res.status(500).json({ error: 'Account setup failed' });
   }
 });
 

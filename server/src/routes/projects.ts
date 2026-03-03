@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import multer from 'multer';
@@ -586,6 +587,41 @@ router.post(
 
       const userId = req.user?.id;
       const userIsAdmin = req.user?.role === 'admin';
+
+      // Create pending invitation records for non-users so they appear in admin panel
+      const { data: existingUsers } = await supabase.auth.admin.listUsers({ perPage: 1000 });
+      const existingEmails = new Set(
+        (existingUsers?.users ?? [])
+          .map((u: { email?: string }) => u.email?.toLowerCase())
+          .filter(Boolean)
+      );
+      const { data: projectRow } = await supabase.from(TABLES.PROJECTS).select('name').eq('id', projectId).single();
+      const inviteProjectName = (projectRow?.name as string) || 'Project';
+
+      for (const email of validRecipients) {
+        if (existingEmails.has(email)) continue;
+        const { data: existingInv } = await supabase
+          .from('user_invitations')
+          .select('id')
+          .eq('email', email)
+          .eq('status', 'pending')
+          .maybeSingle();
+        if (existingInv) continue;
+
+        const inviteToken = crypto.randomUUID();
+        const expiresAt = new Date();
+        expiresAt.setDate(expiresAt.getDate() + 7);
+        await supabase.from('user_invitations').insert({
+          email,
+          role: 'user',
+          invite_token: inviteToken,
+          invited_by: userId,
+          expires_at: expiresAt.toISOString(),
+          source: 'project_share',
+          project_name: inviteProjectName,
+        });
+      }
+
       const backup = await buildProjectBackup(projectId, userId, userIsAdmin);
       const project = backup.project as { name?: string };
       const projectName = project?.name || 'Project';

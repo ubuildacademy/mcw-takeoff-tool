@@ -38,6 +38,8 @@ export interface UserInvitation {
   expires_at: string
   created_at: string
   accepted_at?: string
+  source?: 'admin' | 'project_share'
+  project_name?: string
 }
 
 // Auth helper functions

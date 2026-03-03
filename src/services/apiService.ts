@@ -434,6 +434,17 @@ export const authService = {
       throw new Error('Failed to complete invitation');
     }
   },
+
+  /** Complete signup for users who created an account via shared project link. Always assigns role: user. */
+  async completeSharedSignup(userData: { full_name?: string; company?: string }): Promise<void> {
+    const res = await apiClient.post('/auth/complete-shared-signup', {
+      full_name: userData.full_name,
+      company: userData.company,
+    });
+    if (!res.data?.success) {
+      throw new Error('Failed to complete account setup');
+    }
+  },
 };
 
 // Calibration service

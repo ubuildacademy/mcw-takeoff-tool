@@ -7,7 +7,7 @@ import { useProjectStore } from '../store/slices/projectSlice';
 import { useAnnotationStore } from '../store/slices/annotationSlice';
 import { useDocumentViewStore } from '../store/slices/documentViewSlice';
 import { Button } from './ui/button';
-import { Loader2, LogIn } from 'lucide-react';
+import { Loader2, LogIn, UserPlus } from 'lucide-react';
 
 export function SharedProjectImportPage() {
   const { token } = useParams<{ token: string }>();
@@ -91,14 +91,20 @@ export function SharedProjectImportPage() {
             A project has been shared with you. Sign in or create an account to import it.
           </p>
           <div className="flex flex-col gap-3">
-            <Link to={`/login?redirect=${encodeURIComponent(redirectPath)}`}>
+            <Link to={`/signup/shared-project/${token}`}>
               <Button className="w-full" size="lg">
+                <UserPlus className="h-4 w-4 mr-2" />
+                Create account
+              </Button>
+            </Link>
+            <Link to={`/login?redirect=${encodeURIComponent(redirectPath)}`}>
+              <Button variant="outline" className="w-full" size="lg">
                 <LogIn className="h-4 w-4 mr-2" />
                 Sign in
               </Button>
             </Link>
             <p className="text-sm text-slate-500">
-              New to Meridian Takeoff? Ask your team admin for an invitation, then sign up.
+              Already have an account? Sign in above.
             </p>
             <Link to="/" className="text-sm text-blue-600 hover:text-blue-500">
               Back to home

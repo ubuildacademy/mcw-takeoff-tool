@@ -233,6 +233,7 @@ app.get('/api/debug-env', (req, res) => {
 // Strict rate limiting for auth endpoints (brute force protection)
 app.use('/api/auth/login', strictRateLimit);
 app.use('/api/auth/accept-invitation', strictRateLimit);
+app.use('/api/auth/complete-shared-signup', strictRateLimit);
 app.use('/api/users/login', strictRateLimit);
 app.use('/api/users/signup', strictRateLimit);
 app.use('/api/users/invite', strictRateLimit);
