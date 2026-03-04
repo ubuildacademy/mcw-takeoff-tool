@@ -6,20 +6,7 @@ import type { ProjectFile, Calibration } from '../../types';
 export interface UseTakeoffWorkspaceProjectInitOptions {
   projectId: string | undefined;
   isDev?: boolean;
-  /** When true, document view store has rehydrated from localStorage so saved view state is available */
-  documentViewRehydrated?: boolean;
-  currentPdfFile: ProjectFile | null;
   setProjectFiles: (files: ProjectFile[]) => void;
-  setCurrentPdfFile: (file: ProjectFile | null) => void;
-  setSelectedDocumentId: (id: string | null) => void;
-  setScale: (scale: number) => void;
-  setRotation: (rotation: number) => void;
-  setCurrentPage: (page: number) => void;
-  setSelectedPageNumber: (page: number | null) => void;
-  getLastViewedDocumentId: ((projectId: string) => string | undefined) | undefined;
-  getDocumentPage: (documentId: string) => number;
-  getDocumentScale: (documentId: string) => number;
-  getDocumentRotation: (documentId: string) => number;
   setCurrentProject: (projectId: string) => void;
   clearProjectCalibrations: (projectId: string) => void;
   setCalibration: (
@@ -43,19 +30,7 @@ export interface UseTakeoffWorkspaceProjectInitOptions {
 export function useTakeoffWorkspaceProjectInit({
   projectId,
   isDev = false,
-  documentViewRehydrated = false,
-  currentPdfFile,
   setProjectFiles,
-  setCurrentPdfFile,
-  setSelectedDocumentId,
-  setScale,
-  setRotation,
-  setCurrentPage,
-  setSelectedPageNumber,
-  getLastViewedDocumentId,
-  getDocumentPage,
-  getDocumentScale,
-  getDocumentRotation,
   setCurrentProject,
   clearProjectCalibrations,
   setCalibration,
@@ -63,25 +38,11 @@ export function useTakeoffWorkspaceProjectInit({
   setShowProfitMarginDialog,
 }: UseTakeoffWorkspaceProjectInitOptions): void {
   const loadedProjectIdRef = useRef<string | null>(null);
-  const appliedRehydratedRef = useRef(false);
 
-  // After document view store rehydrates, re-apply saved page/scale/rotation once (scroll restored by handlePDFRendered)
-  useEffect(() => {
-    if (!documentViewRehydrated || !projectId || !currentPdfFile || appliedRehydratedRef.current) return;
-    appliedRehydratedRef.current = true;
-    setScale(getDocumentScale(currentPdfFile.id));
-    setRotation(getDocumentRotation(currentPdfFile.id));
-    const savedPage = getDocumentPage(currentPdfFile.id);
-    setCurrentPage(savedPage);
-    setSelectedPageNumber(savedPage);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- Run once per file when rehydrated; ref guards; omit store setters/getters
-  }, [documentViewRehydrated, projectId, currentPdfFile?.id]);
-
-  // Load project files and restore last viewed document (once per projectId)
+  // Load project files. Tab-based view: tabs drive the view; useTakeoffWorkspaceTabs restores/syncs scale/rotation.
   useEffect(() => {
     if (!projectId) {
       loadedProjectIdRef.current = null;
-      appliedRehydratedRef.current = false;
       return;
     }
     if (loadedProjectIdRef.current === projectId) {
@@ -89,7 +50,6 @@ export function useTakeoffWorkspaceProjectInit({
     }
     const currentProjectId: string = projectId;
     loadedProjectIdRef.current = projectId;
-    appliedRehydratedRef.current = false;
 
     async function loadFiles() {
       try {
@@ -97,25 +57,8 @@ export function useTakeoffWorkspaceProjectInit({
         const files = (res.files || []) as ProjectFile[];
         setProjectFiles(files);
 
-        if (files.length > 0) {
-          const pdfFiles = files.filter((f: ProjectFile) => f.mimetype === 'application/pdf');
-          let target = pdfFiles[0];
-          const lastViewedId = getLastViewedDocumentId?.(currentProjectId);
-          if (lastViewedId) {
-            const match = pdfFiles.find((f: ProjectFile) => f.id === lastViewedId);
-            if (match) target = match;
-          }
-          if (target) {
-            setCurrentPdfFile(target);
-            setSelectedDocumentId(target.id);
-            setScale(getDocumentScale(target.id));
-            setRotation(getDocumentRotation(target.id));
-            const savedPage = getDocumentPage(target.id);
-            setCurrentPage(savedPage);
-            setSelectedPageNumber(savedPage);
-            // Scroll position restored in handlePDFRendered when the PDF has rendered
-          }
-        }
+        // Tab-based view: tabs drive the view. If persisted tabs exist, useTakeoffWorkspaceTabs restores them.
+        // If no tabs, user sees "Select a sheet" until they click one. Don't auto-open a file.
       } catch (e: unknown) {
         if (isDev) console.error('Error loading project files:', e);
         setProjectFiles([]);

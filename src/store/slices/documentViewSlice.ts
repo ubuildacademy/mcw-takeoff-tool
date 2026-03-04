@@ -4,6 +4,7 @@
  */
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { parseDocumentIdFromSheetId } from '../../lib/sheetUtils';
 
 interface DocumentViewState {
   // State
@@ -11,6 +12,10 @@ interface DocumentViewState {
   documentPages: Record<string, number>;
   documentScales: Record<string, number>;
   documentLocations: Record<string, { x: number; y: number }>;
+  /** Per-sheet view state for multi-tab (sheetId = documentId-pageNumber) */
+  documentRotationsBySheet: Record<string, number>;
+  documentScalesBySheet: Record<string, number>;
+  documentLocationsBySheet: Record<string, { x: number; y: number }>;
   /** Per-project last viewed document (projectId -> documentId) so reload restores the right doc per project */
   lastViewedDocumentIds: Record<string, string>;
   /** @deprecated Legacy single last viewed; used as fallback when no per-project entry */
@@ -37,6 +42,14 @@ interface DocumentViewState {
   // Last viewed (per project)
   setLastViewedDocumentId: (projectId: string, documentId: string) => void;
   getLastViewedDocumentId: (projectId: string) => string | null;
+
+  // Per-sheet actions (for multi-tab; sheetId = documentId-pageNumber)
+  setDocumentRotationBySheet: (sheetId: string, rotation: number) => void;
+  getDocumentRotationBySheet: (sheetId: string) => number;
+  setDocumentScaleBySheet: (sheetId: string, scale: number) => void;
+  getDocumentScaleBySheet: (sheetId: string) => number;
+  setDocumentLocationBySheet: (sheetId: string, location: { x: number; y: number }) => void;
+  getDocumentLocationBySheet: (sheetId: string) => { x: number; y: number };
 }
 
 export const useDocumentViewStore = create<DocumentViewState>()(
@@ -47,6 +60,9 @@ export const useDocumentViewStore = create<DocumentViewState>()(
       documentPages: {},
       documentScales: {},
       documentLocations: {},
+      documentRotationsBySheet: {},
+      documentScalesBySheet: {},
+      documentLocationsBySheet: {},
       lastViewedDocumentIds: {},
       lastViewedDocumentId: null,
 
@@ -134,6 +150,54 @@ export const useDocumentViewStore = create<DocumentViewState>()(
         const state = get();
         return state.lastViewedDocumentIds[projectId] ?? state.lastViewedDocumentId ?? null;
       },
+
+      setDocumentRotationBySheet: (sheetId, rotation) => {
+        set(state => ({
+          documentRotationsBySheet: {
+            ...state.documentRotationsBySheet,
+            [sheetId]: rotation,
+          },
+        }));
+      },
+
+      getDocumentRotationBySheet: (sheetId) => {
+        const state = get();
+        const bySheet = state.documentRotationsBySheet[sheetId];
+        if (bySheet != null) return bySheet;
+        return state.documentRotations[parseDocumentIdFromSheetId(sheetId)] ?? 0;
+      },
+
+      setDocumentScaleBySheet: (sheetId, scale) => {
+        set(state => ({
+          documentScalesBySheet: {
+            ...state.documentScalesBySheet,
+            [sheetId]: scale,
+          },
+        }));
+      },
+
+      getDocumentScaleBySheet: (sheetId) => {
+        const state = get();
+        const bySheet = state.documentScalesBySheet[sheetId];
+        if (bySheet != null) return bySheet;
+        return state.documentScales[parseDocumentIdFromSheetId(sheetId)] ?? 1;
+      },
+
+      setDocumentLocationBySheet: (sheetId, location) => {
+        set(state => ({
+          documentLocationsBySheet: {
+            ...state.documentLocationsBySheet,
+            [sheetId]: location,
+          },
+        }));
+      },
+
+      getDocumentLocationBySheet: (sheetId) => {
+        const state = get();
+        const bySheet = state.documentLocationsBySheet[sheetId];
+        if (bySheet != null) return bySheet;
+        return state.documentLocations[parseDocumentIdFromSheetId(sheetId)] ?? { x: 0, y: 0 };
+      },
     }),
     {
       name: 'document-view-store',
@@ -142,6 +206,9 @@ export const useDocumentViewStore = create<DocumentViewState>()(
         documentPages: state.documentPages,
         documentScales: state.documentScales,
         documentLocations: state.documentLocations,
+        documentRotationsBySheet: state.documentRotationsBySheet,
+        documentScalesBySheet: state.documentScalesBySheet,
+        documentLocationsBySheet: state.documentLocationsBySheet,
         lastViewedDocumentIds: state.lastViewedDocumentIds,
         lastViewedDocumentId: state.lastViewedDocumentId,
       }),

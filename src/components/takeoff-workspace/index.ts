@@ -10,7 +10,6 @@ export { useTakeoffWorkspaceTitleblock } from './useTakeoffWorkspaceTitleblock';
 export { useTakeoffWorkspaceOCR } from './useTakeoffWorkspaceOCR';
 export { useTakeoffWorkspaceProjectInit } from './useTakeoffWorkspaceProjectInit';
 export { useTakeoffWorkspaceCalibration } from './useTakeoffWorkspaceCalibration';
-export { useTakeoffWorkspaceDocumentView } from './useTakeoffWorkspaceDocumentView';
 export type {
   TakeoffWorkspaceHeaderProps,
   TakeoffWorkspaceStatusBarProps,
@@ -47,7 +46,3 @@ export type {
   UseTakeoffWorkspaceCalibrationOptions,
   UseTakeoffWorkspaceCalibrationResult,
 } from './useTakeoffWorkspaceCalibration';
-export type {
-  UseTakeoffWorkspaceDocumentViewOptions,
-  UseTakeoffWorkspaceDocumentViewResult,
-} from './useTakeoffWorkspaceDocumentView';

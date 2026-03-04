@@ -34,7 +34,8 @@ import { useTakeoffWorkspaceTitleblock } from './takeoff-workspace/useTakeoffWor
 import { useTakeoffWorkspaceOCR } from './takeoff-workspace/useTakeoffWorkspaceOCR';
 import { useTakeoffWorkspaceProjectInit } from './takeoff-workspace/useTakeoffWorkspaceProjectInit';
 import { useTakeoffWorkspaceCalibration } from './takeoff-workspace/useTakeoffWorkspaceCalibration';
-import { useTakeoffWorkspaceDocumentView } from './takeoff-workspace/useTakeoffWorkspaceDocumentView';
+import { useTakeoffWorkspaceTabs } from './takeoff-workspace/useTakeoffWorkspaceTabs';
+import { PDFViewerTabBar } from './pdf-viewer/PDFViewerTabBar';
 import { SearchResultsList } from './takeoff-workspace/SearchResultsList';
 import { HyperlinkSheetPickerDialog } from './HyperlinkSheetPickerDialog';
 import { HyperlinkContextMenu } from './HyperlinkContextMenu';
@@ -107,24 +108,7 @@ export function TakeoffWorkspace() {
   const _getCalibration = useCalibrationStore((s) => s.getCalibration);
   const clearProjectCalibrations = useCalibrationStore((s) => s.clearProjectCalibrations);
   const clearPageAnnotations = useAnnotationStore((s) => s.clearPageAnnotations);
-  const setDocumentRotation = useDocumentViewStore((s) => s.setDocumentRotation);
-  const getDocumentRotation = useDocumentViewStore((s) => s.getDocumentRotation);
-  const setDocumentPage = useDocumentViewStore((s) => s.setDocumentPage);
-  const getDocumentPage = useDocumentViewStore((s) => s.getDocumentPage);
-  const setDocumentScale = useDocumentViewStore((s) => s.setDocumentScale);
-  const getDocumentScale = useDocumentViewStore((s) => s.getDocumentScale);
-  const setDocumentLocation = useDocumentViewStore((s) => s.setDocumentLocation);
-  const getDocumentLocation = useDocumentViewStore((s) => s.getDocumentLocation);
-  const getLastViewedDocumentId = useDocumentViewStore((s) => s.getLastViewedDocumentId);
-  const setLastViewedDocumentId = useDocumentViewStore((s) => s.setLastViewedDocumentId);
-
-  // Track when document view store has rehydrated from localStorage so we apply saved view state
-  const [documentViewRehydrated, setDocumentViewRehydrated] = useState(false);
-  useEffect(() => {
-    const unsub = useDocumentViewStore.persist?.onFinishHydration?.(() => setDocumentViewRehydrated(true));
-    if (useDocumentViewStore.persist?.hasHydrated?.()) setDocumentViewRehydrated(true);
-    return () => { unsub?.(); };
-  }, []);
+  const setDocumentLocationBySheet = useDocumentViewStore((s) => s.setDocumentLocationBySheet);
 
   const selectedCondition = getSelectedCondition();
 
@@ -140,7 +124,6 @@ export function TakeoffWorkspace() {
   const [searchResults, setSearchResults] = useState<string[]>([]);
   const [ocrSearchResults, setOcrSearchResults] = useState<SearchResult[]>([]);
   const [currentSearchQuery, setCurrentSearchQuery] = useState<string>('');
-  const [currentPdfFile, setCurrentPdfFile] = useState<ProjectFile | null>(null);
   const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
   const [uploading, setUploading] = useState<boolean>(false);
   const [_loading, _setLoading] = useState(true);
@@ -150,11 +133,45 @@ export function TakeoffWorkspace() {
   });
   const [exportStatus, setExportStatus] = useState<{type: 'excel' | 'pdf' | null, progress: number}>({type: null, progress: 0});
 
-  // PDF viewer controls state
-  const [currentPage, setCurrentPage] = useState(1);
+  // PDF viewer controls state (scale/rotation synced by tabs hook)
   const [totalPages, setTotalPages] = useState(0);
   const [scale, setScale] = useState(1);
   const [rotation, setRotation] = useState(0);
+
+  const tabsResult = useTakeoffWorkspaceTabs({
+    projectId: projectId ?? undefined,
+    projectFiles,
+    documents,
+    setScale,
+    setRotation,
+    setSelectedDocumentId,
+    setSelectedPageNumber,
+    setSelectedSheet: (s) =>
+      setSelectedSheet(
+        s
+          ? {
+              ...s,
+              isVisible: s.isVisible ?? true,
+              hasTakeoffs: s.hasTakeoffs ?? false,
+              takeoffCount: s.takeoffCount ?? 0,
+            }
+          : null
+      ),
+  });
+
+  const currentPdfFile = tabsResult.currentPdfFile;
+  const currentPage = tabsResult.currentPage;
+
+  useTakeoffWorkspaceProjectInit({
+    projectId: projectId ?? undefined,
+    isDev,
+    setProjectFiles,
+    setCurrentProject,
+    clearProjectCalibrations,
+    setCalibration,
+    loadProjectTakeoffMeasurements,
+    setShowProfitMarginDialog,
+  });
 
   // Narrow selector: only current page calibration (avoids re-render when other pages' calibrations change)
   const currentCalibration = useCalibrationStore((s) =>
@@ -168,76 +185,23 @@ export function TakeoffWorkspace() {
     selectedSheet,
     isDev,
   });
-  
-  // Scale is now managed by the store
-  
+
   // Current calibration for the active document/page (narrow selector in parent)
   const calibration = useTakeoffWorkspaceCalibration({
     currentCalibration,
     isDev,
   });
 
-  const documentView = useTakeoffWorkspaceDocumentView({
-    projectId: projectId ?? undefined,
-    projectFiles,
-    currentPdfFile,
-    currentPage,
-    totalPages,
-    scale,
-    rotation,
-    isDev,
-    setCurrentPdfFile,
-    setSelectedDocumentId,
-    setSelectedPageNumber,
-    setScale,
-    setRotation,
-    setCurrentPage,
-    setSelectedSheet,
-    getDocumentPage,
-    getDocumentScale,
-    getDocumentRotation,
-    getDocumentLocation,
-    setDocumentPage,
-    setLastViewedDocumentId,
-    setDocumentScale,
-    setDocumentRotation,
-    setDocumentLocation,
-  });
-
-  useTakeoffWorkspaceProjectInit({
-    projectId: projectId ?? undefined,
-    isDev,
-    documentViewRehydrated,
-    currentPdfFile,
-    setProjectFiles,
-    setCurrentPdfFile,
-    setSelectedDocumentId,
-    setScale,
-    setRotation,
-    setCurrentPage,
-    setSelectedPageNumber,
-    getLastViewedDocumentId: (pid: string) => getLastViewedDocumentId(pid) ?? undefined,
-    getDocumentPage,
-    getDocumentScale,
-    getDocumentRotation,
-    setCurrentProject,
-    clearProjectCalibrations,
-    setCalibration,
-    loadProjectTakeoffMeasurements,
-    setShowProfitMarginDialog,
-  });
-
-  // Persist scroll position on unload/refresh so viewport restores to same spot
+  // Persist scroll position on unload/refresh so viewport restores to same spot (per-tab)
   useEffect(() => {
     const handleBeforeUnload = () => {
-      if (!currentPdfFile) return;
+      if (!tabsResult.sheetId) return;
       const pos = getCurrentScrollPosition();
-      if (pos) setDocumentLocation(currentPdfFile.id, pos);
+      if (pos) setDocumentLocationBySheet(tabsResult.sheetId, pos);
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- Only need file id for persist; omit full currentPdfFile
-  }, [currentPdfFile?.id, setDocumentLocation]);
+  }, [tabsResult.sheetId, setDocumentLocationBySheet]);
 
   // Handle measurement state changes from PDFViewer
   // CRITICAL: Wrapped in useCallback to prevent infinite re-render loops
@@ -341,7 +305,7 @@ export function TakeoffWorkspace() {
   const rotatePage = (direction: 'clockwise' | 'counterclockwise') => {
     const rotationStep = direction === 'clockwise' ? 90 : -90;
     const newRotation = (rotation + rotationStep) % 360;
-    documentView.handleRotationChange(newRotation);
+    tabsResult.handleRotationChange(newRotation);
   };
 
   const titleblock = useTakeoffWorkspaceTitleblock({
@@ -349,7 +313,7 @@ export function TakeoffWorkspace() {
     documents,
     projectFiles,
     loadProjectDocuments,
-    handlePageSelect: documentView.handlePageSelect,
+    handlePageSelect: tabsResult.handlePageSelect,
     isDev,
   });
 
@@ -408,7 +372,7 @@ export function TakeoffWorkspace() {
     triggerFitToWindow();
     // Fallback when PDF viewer hasn't registered the global yet (e.g. before PDF loads)
     if (typeof window.triggerFitToWindow !== 'function') {
-      documentView.handleScaleChange(1);
+      tabsResult.handleScaleChange(1);
     }
   };
 
@@ -430,13 +394,7 @@ export function TakeoffWorkspace() {
     rotation?: number | null
   ) => {
     if (currentPdfFile && projectId) {
-      // CRITICAL: Save current page state before any calibration operations
-      // This ensures the page doesn't get reset during calibration save operations
       const currentPageToPreserve = currentPage;
-      if (currentPdfFile) {
-        setDocumentPage(currentPdfFile.id, currentPageToPreserve);
-        if (isDev) console.log('💾 Preserving page state before calibration save:', { documentId: currentPdfFile.id, page: currentPageToPreserve });
-      }
       
       try {
         const { calibrationService } = await import('../services/apiService');
@@ -503,13 +461,10 @@ export function TakeoffWorkspace() {
         }
       }
       
-      // CRITICAL: Ensure page state is preserved after calibration operations
-      // Restore the page if it somehow got changed during the operation
+      // If page changed during calibration, restore via tab replace
       if (currentPdfFile && currentPage !== currentPageToPreserve) {
         if (isDev) console.warn('⚠️ Page changed during calibration, restoring:', { from: currentPage, to: currentPageToPreserve });
-        setCurrentPage(currentPageToPreserve);
-        setSelectedPageNumber(currentPageToPreserve);
-        setDocumentPage(currentPdfFile.id, currentPageToPreserve);
+        tabsResult.handlePageSelect(currentPdfFile.id, currentPageToPreserve);
       }
 
       // Recalculate existing measurements for the calibrated scope so values use the new scale
@@ -527,7 +482,7 @@ export function TakeoffWorkspace() {
         await recalculateMeasurementsForCalibration(projectId, currentPdfFile.id, calibrationPageNumber, scaleFactor, unit, vw, vh);
       }
     }
-  }, [currentPdfFile, projectId, currentPage, setDocumentPage, setCalibration, isDev]);
+  }, [currentPdfFile, projectId, currentPage, documents, tabsResult, setCalibration, isDev]);
 
   const handlePdfUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -585,9 +540,11 @@ export function TakeoffWorkspace() {
         await loadProjectDocuments();
       }
       
-      // Set the first successfully uploaded file as current
+      // Open the first successfully uploaded file in a tab
       if (uploadedFiles.length > 0) {
-        setCurrentPdfFile(uploadedFiles[0]);
+        const file = uploadedFiles[0] as ProjectFile & { originalName?: string };
+        const label = `${file.originalName?.replace(/\.pdf$/i, '') ?? 'Document'} - Page 1`;
+        tabsResult.handlePageSelect(file.id, 1);
       }
       
       // Show summary if there were failures
@@ -785,9 +742,9 @@ export function TakeoffWorkspace() {
         currentPage={currentPage}
         totalPages={totalPages}
         currentPdfFile={currentPdfFile}
-        onPageChange={documentView.handlePageChange}
+        onPageChange={tabsResult.handlePageChange}
         scale={scale}
-        onScaleChange={documentView.handleScaleChange}
+        onScaleChange={tabsResult.handleScaleChange}
         onResetView={handleResetView}
         onRotatePage={rotatePage}
         isPageCalibrated={calibration.isPageCalibrated}
@@ -826,7 +783,8 @@ export function TakeoffWorkspace() {
               onConditionSelect={handleConditionSelect}
               onToolSelect={handleToolSelect}
               documents={documents}
-              onPageSelect={documentView.handlePageSelect}
+              onPageSelect={tabsResult.handlePageSelect}
+              onPageOpenInNewTab={tabsResult.handlePageOpenInNewTab}
               onExportStatusUpdate={handleExportStatusUpdate}
               onCutoutMode={handleCutoutMode}
               cutoutMode={cutoutMode}
@@ -850,6 +808,16 @@ export function TakeoffWorkspace() {
 
         {/* PDF Viewer - Fixed height container */}
         <div className="flex-1 flex flex-col h-full overflow-hidden">
+          {tabsResult.hasTabs && (
+            <PDFViewerTabBar
+              projectId={projectId ?? ''}
+              tabs={tabsResult.openTabs}
+              activeTabId={tabsResult.activeTabId}
+              onTabSelect={tabsResult.handleTabSelect}
+              onTabClose={tabsResult.handleTabClose}
+              onCloseAllOtherTabs={tabsResult.handleCloseAllOtherTabs}
+            />
+          )}
           <TakeoffWorkspaceModeBanners
             visualSearchMode={visualSearch.visualSearchMode}
             visualSearchCondition={visualSearch.visualSearchCondition}
@@ -862,9 +830,9 @@ export function TakeoffWorkspace() {
               className="h-full"
               currentPage={currentPage}
               totalPages={totalPages}
-              onPageChange={documentView.handlePageChange}
+              onPageChange={tabsResult.handlePageChange}
               scale={scale}
-              onScaleChange={documentView.handleScaleChange}
+              onScaleChange={tabsResult.handleScaleChange}
               rotation={rotation}
               onCalibrationRequest={handleCalibrateScale}
               isPageCalibrated={calibration.isPageCalibrated}
@@ -881,8 +849,8 @@ export function TakeoffWorkspace() {
               cutoutTargetConditionId={cutoutTargetConditionId}
               onCutoutModeChange={handleCutoutMode}
               onMeasurementStateChange={handleMeasurementStateChange}
-              onLocationChange={documentView.handleLocationChange}
-              onPDFRendered={documentView.handlePDFRendered}
+              onLocationChange={tabsResult.handleLocationChange}
+              onPDFRendered={tabsResult.handlePDFRendered}
               annotationTool={annotationTool}
               annotationColor={annotationColor}
               onAnnotationToolChange={setAnnotationTool}
@@ -896,12 +864,12 @@ export function TakeoffWorkspace() {
               hyperlinkMode={hyperlinkMode}
               onHyperlinkRegionDrawn={handleHyperlinkRegionDrawn}
               onHyperlinkModeChange={setHyperlinkMode}
-              onHyperlinkClick={(sheetId, pageNumber) => documentView.handlePageSelect(sheetId, pageNumber)}
+              onHyperlinkClick={(sheetId, pageNumber) => tabsResult.handlePageOpenInNewTab(sheetId, pageNumber)}
               onHyperlinkContextMenu={handleHyperlinkContextMenu}
             />
           ) : (
-            <div className="flex items-center justify-center flex-1 bg-gray-100">
-              <div className="text-gray-500">No PDF file selected</div>
+            <div className="flex items-center justify-center flex-1 bg-muted/30">
+              <div className="text-muted-foreground">Select a sheet</div>
             </div>
           )}
           <SearchResultsList results={searchResults} />
@@ -915,7 +883,8 @@ export function TakeoffWorkspace() {
           projectId={storeCurrentProject?.id ?? projectId ?? ''}
           documents={documents}
           documentsLoading={documentsLoading}
-          onPageSelect={documentView.handlePageSelect}
+          onPageSelect={tabsResult.handlePageSelect}
+          onPageOpenInNewTab={tabsResult.handlePageOpenInNewTab}
           selectedDocumentId={selectedDocumentId || undefined}
           selectedPageNumber={selectedPageNumber || undefined}
           onOCRRequest={ocr.handleOCRRequest}

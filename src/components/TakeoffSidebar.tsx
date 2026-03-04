@@ -32,6 +32,7 @@ interface TakeoffSidebarProps {
   onToolSelect: (tool: string) => void;
   documents?: PDFDocument[];
   onPageSelect?: (documentId: string, pageNumber: number) => void;
+  onPageOpenInNewTab?: (documentId: string, pageNumber: number) => void;
   onExportStatusUpdate?: (type: 'excel' | 'pdf' | null, progress: number) => void;
   onCutoutMode?: (conditionId: string | null) => void;
   cutoutMode?: boolean;
@@ -41,7 +42,7 @@ interface TakeoffSidebarProps {
   onOpenCVTakeoff?: () => void;
 }
 
-export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _onToolSelect, documents = [], onPageSelect, onExportStatusUpdate, onCutoutMode, cutoutMode, cutoutTargetConditionId, selectedDocumentId, onOpenCVTakeoff }: TakeoffSidebarProps) {
+export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _onToolSelect, documents = [], onPageSelect, onPageOpenInNewTab, onExportStatusUpdate, onCutoutMode, cutoutMode, cutoutTargetConditionId, selectedDocumentId, onOpenCVTakeoff }: TakeoffSidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -174,7 +175,9 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
 
   const handlePageClick = (sheetId: string, pageNumber: number, event: React.MouseEvent) => {
     event.stopPropagation(); // Prevent expanding/collapsing the condition
-    if (onPageSelect) {
+    if (event.ctrlKey || event.metaKey) {
+      onPageOpenInNewTab?.(sheetId, pageNumber);
+    } else if (onPageSelect) {
       onPageSelect(sheetId, pageNumber);
     }
   };

@@ -104,10 +104,7 @@ Format: **File** | **Line** | **Hook** | **Rule** | **What’s missing / issue**
 
 ### useTakeoffWorkspaceDocumentView.ts
 
-| Line | Hook | Rule | What's missing / issue | Decision | Notes |
-|------|------|------|------------------------|----------|--------|
-| 96 | useEffect | exhaustive-deps | currentPage, currentPdfFile, getDocument*, rotation, scale, setCurrentPage, setRotation, setScale, setSelectedPageNumber | Omit + document | Run only when file id changes; store getters/setters stable |
-| 103 | useEffect | exhaustive-deps | currentPdfFile | Omit + document | Run when file id changes; currentPdfFile?.id sufficient |
+**Removed** – Replaced by useTakeoffWorkspaceTabs for multi-tab support.
 
 ### useTakeoffWorkspaceProjectInit.ts
 
@@ -130,5 +127,5 @@ These already have an eslint-disable with a short comment in code:
 ## Progress
 
 - **Total items in this checklist:** ~45 (some useCallback lines have both exhaustive-deps and preserve-manual-memoization; fixing exhaustive-deps may clear or change preserve-manual-memoization).
-- **Done:** All. SheetSidebar, TakeoffWorkspace, useTakeoffWorkspaceDocumentView, useTakeoffWorkspaceProjectInit, PDFViewer, and usePDFViewerInteractions checklist items have been addressed; Decision and Notes updated.
-- **Suggested order:** Start with SheetSidebar and TakeoffWorkspace (fewer, simpler), then useTakeoffWorkspaceDocumentView / useTakeoffWorkspaceProjectInit, then PDFViewer and usePDFViewerInteractions.
+- **Done:** All. SheetSidebar, TakeoffWorkspace, useTakeoffWorkspaceProjectInit, PDFViewer, and usePDFViewerInteractions checklist items have been addressed; Decision and Notes updated.
+- **Note:** useTakeoffWorkspaceDocumentView was removed and replaced by useTakeoffWorkspaceTabs.

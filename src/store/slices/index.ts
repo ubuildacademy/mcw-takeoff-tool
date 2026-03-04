@@ -5,5 +5,6 @@ export { useMeasurementStore } from './measurementSlice';
 export { useCalibrationStore } from './calibrationSlice';
 export { useAnnotationStore } from './annotationSlice';
 export { useDocumentViewStore } from './documentViewSlice';
+export { usePdfViewerTabsStore, type PDFViewerTab } from './pdfViewerTabsSlice';
 export { useUndoStore } from './undoSlice';
 export type { UndoEntry } from './undoSlice';

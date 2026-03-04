@@ -79,6 +79,7 @@ export interface TakeoffWorkspaceRightSidebarProps {
   documents: PDFDocument[];
   documentsLoading: boolean;
   onPageSelect: (documentId: string, pageNumber: number) => void;
+  onPageOpenInNewTab?: (documentId: string, pageNumber: number) => void;
   selectedDocumentId: string | undefined;
   selectedPageNumber: number | undefined;
   onOCRRequest: (documentId: string, pageNumbers?: number[]) => void;

@@ -15,6 +15,7 @@ export function TakeoffWorkspaceRightSidebar({
   documents,
   documentsLoading,
   onPageSelect,
+  onPageOpenInNewTab,
   selectedDocumentId,
   selectedPageNumber,
   onOCRRequest,
@@ -90,6 +91,7 @@ export function TakeoffWorkspaceRightSidebar({
               documents={documents}
               documentsLoading={documentsLoading}
               onPageSelect={onPageSelect}
+              onPageOpenInNewTab={onPageOpenInNewTab}
               selectedDocumentId={selectedDocumentId}
               selectedPageNumber={selectedPageNumber}
               onOCRRequest={onOCRRequest}

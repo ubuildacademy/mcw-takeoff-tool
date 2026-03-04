@@ -30,6 +30,7 @@ interface SheetSidebarProps {
   documents: PDFDocument[];
   documentsLoading?: boolean;
   onPageSelect: (documentId: string, pageNumber: number) => void;
+  onPageOpenInNewTab?: (documentId: string, pageNumber: number) => void;
   selectedDocumentId?: string;
   selectedPageNumber?: number;
   onOCRRequest?: (documentId: string, pageNumbers: number[]) => void;
@@ -47,7 +48,8 @@ export function SheetSidebar({
   projectId, 
   documents,
   documentsLoading = false,
-  onPageSelect, 
+  onPageSelect,
+  onPageOpenInNewTab,
   selectedDocumentId,
   selectedPageNumber,
   onOCRRequest: _onOCRRequest,
@@ -106,6 +108,14 @@ export function SheetSidebar({
   
   // Document menu dropdown state
   const [openDocumentMenu, setOpenDocumentMenu] = useState<string | null>(null);
+
+  // Page context menu state for "Open in new tab"
+  const [pageContextMenu, setPageContextMenu] = useState<{
+    documentId: string;
+    pageNumber: number;
+    x: number;
+    y: number;
+  } | null>(null);
   
   // Ref to track if we're currently updating documents to prevent infinite loops
   const _isUpdatingDocuments = useRef(false);
@@ -122,13 +132,16 @@ export function SheetSidebar({
       if (openBulkActionsMenu) {
         setOpenBulkActionsMenu(false);
       }
+      if (pageContextMenu) {
+        setPageContextMenu(null);
+      }
     };
 
-    if (openDocumentMenu || openPageMenu || openBulkActionsMenu) {
+    if (openDocumentMenu || openPageMenu || openBulkActionsMenu || pageContextMenu) {
       document.addEventListener('click', handleClickOutside);
       return () => document.removeEventListener('click', handleClickOutside);
     }
-  }, [openDocumentMenu, openPageMenu, openBulkActionsMenu]);
+  }, [openDocumentMenu, openPageMenu, openBulkActionsMenu, pageContextMenu]);
 
   const getProjectTakeoffMeasurements = useMeasurementStore((s) => s.getProjectTakeoffMeasurements);
 
@@ -242,9 +255,13 @@ export function SheetSidebar({
     }
   }, [projectId, documents, onDocumentsUpdate]);
 
-  // Handle page selection
-  const handlePageClick = (documentId: string, pageNumber: number) => {
-    onPageSelect(documentId, pageNumber);
+  // Handle page selection - single-click: replace active tab; Ctrl/Cmd+click: open in new tab
+  const handlePageClick = (documentId: string, pageNumber: number, event: React.MouseEvent) => {
+    if (event.ctrlKey || event.metaKey) {
+      onPageOpenInNewTab?.(documentId, pageNumber);
+    } else {
+      onPageSelect(documentId, pageNumber);
+    }
   };
 
   // Delete document
@@ -469,7 +486,16 @@ export function SheetSidebar({
                           ? 'bg-primary/10 border-l-4 border-primary'
                           : 'hover:bg-accent/30'
                       }`}
-                      onClick={() => handlePageClick(document.id, page.pageNumber)}
+                      onClick={(e) => handlePageClick(document.id, page.pageNumber, e)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setPageContextMenu({
+                          documentId: document.id,
+                          pageNumber: page.pageNumber,
+                          x: e.clientX,
+                          y: e.clientY,
+                        });
+                      }}
                     >
                       <div className="flex items-start gap-3">
                         <FileText className="w-4 h-4 text-muted-foreground mt-0.5" />
@@ -726,7 +752,16 @@ export function SheetSidebar({
                             ? 'bg-primary/10 border-l-4 border-primary'
                             : 'hover:bg-accent/30'
                         }`}
-                        onClick={() => handlePageClick(document.id, page.pageNumber)}
+                        onClick={(e) => handlePageClick(document.id, page.pageNumber, e)}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          setPageContextMenu({
+                            documentId: document.id,
+                            pageNumber: page.pageNumber,
+                            x: e.clientX,
+                            y: e.clientY,
+                          });
+                        }}
                       >
                         <div className="flex items-start gap-3">
                           {/* Page Info */}
@@ -925,6 +960,24 @@ export function SheetSidebar({
           )}
         </div>
       </div>
+
+      {pageContextMenu && onPageOpenInNewTab && (
+        <div
+          className="fixed z-[100] min-w-[180px] rounded-md border bg-popover p-1 shadow-lg"
+          style={{ left: pageContextMenu.x, top: pageContextMenu.y }}
+        >
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm rounded-sm hover:bg-accent"
+            onClick={() => {
+              onPageOpenInNewTab(pageContextMenu.documentId, pageContextMenu.pageNumber);
+              setPageContextMenu(null);
+            }}
+          >
+            Open in new tab
+          </button>
+        </div>
+      )}
 
       <SheetSidebarDialogs
         showRenameDialog={showRenameDialog}

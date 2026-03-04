@@ -1,0 +1,345 @@
+import { useCallback, useEffect, useRef } from 'react';
+import { restoreScrollPosition } from '../../lib/windowBridge';
+import { getSheetId } from '../../lib/sheetUtils';
+import { usePdfViewerTabsStore } from '../../store/slices/pdfViewerTabsSlice';
+import { useDocumentViewStore } from '../../store/slices/documentViewSlice';
+import type { ProjectFile, PDFDocument } from '../../types';
+
+const SCROLL_RESTORE_DELAYS_MS = [50, 150, 300, 500, 700, 1000];
+const SCROLL_RESTORE_AFTER_SWITCH_MS = 200;
+
+export function getSheetLabel(
+  documents: PDFDocument[],
+  projectFiles: ProjectFile[],
+  documentId: string,
+  pageNumber: number
+): string {
+  const doc = documents.find((d) => d.id === documentId);
+  if (doc?.pages) {
+    const page = doc.pages.find((p) => p.pageNumber === pageNumber);
+    if (page) {
+      if (page.sheetName) return page.sheetName;
+      if (page.sheetNumber) return page.sheetNumber;
+    }
+  }
+  const file = projectFiles.find((f) => f.id === documentId);
+  const docName = file?.originalName?.replace(/\.pdf$/i, '') ?? 'Document';
+  return `${docName} - Page ${pageNumber}`;
+}
+
+export interface UseTakeoffWorkspaceTabsOptions {
+  projectId: string | undefined;
+  projectFiles: ProjectFile[];
+  documents: PDFDocument[];
+  setScale: (s: number) => void;
+  setRotation: (r: number) => void;
+  setSelectedDocumentId: (id: string | null) => void;
+  setSelectedPageNumber: (p: number | null) => void;
+  setSelectedSheet: (sheet: { id: string; name: string; pageNumber: number; isVisible?: boolean; hasTakeoffs?: boolean; takeoffCount?: number } | null) => void;
+}
+
+export interface UseTakeoffWorkspaceTabsResult {
+  openTabs: import('../../store/slices/pdfViewerTabsSlice').PDFViewerTab[];
+  activeTabId: string | null;
+  activeTab: import('../../store/slices/pdfViewerTabsSlice').PDFViewerTab | null;
+  currentPdfFile: ProjectFile | null;
+  currentPage: number;
+  sheetId: string | null;
+  handlePageSelect: (documentId: string, pageNumber: number) => void;
+  handlePageOpenInNewTab: (documentId: string, pageNumber: number) => void;
+  handlePageChange: (page: number) => void;
+  handleTabSelect: (tabId: string) => void;
+  handleTabClose: (tabId: string) => void;
+  handleCloseAllOtherTabs: (tabId: string) => void;
+  handleScaleChange: (scale: number) => void;
+  handleRotationChange: (rotation: number) => void;
+  handleLocationChange: (x: number, y: number) => void;
+  handlePDFRendered: () => void;
+  hasTabs: boolean;
+}
+
+export function useTakeoffWorkspaceTabs({
+  projectId,
+  projectFiles,
+  documents,
+  setScale,
+  setRotation,
+  setSelectedDocumentId,
+  setSelectedPageNumber,
+  setSelectedSheet,
+}: UseTakeoffWorkspaceTabsOptions): UseTakeoffWorkspaceTabsResult {
+  const openTabs = usePdfViewerTabsStore((s) =>
+    projectId ? s.getOpenTabs(projectId) : []
+  );
+  const activeTabId = usePdfViewerTabsStore((s) =>
+    projectId ? s.getActiveTabId(projectId) : null
+  );
+  const activeTab = usePdfViewerTabsStore((s) =>
+    projectId ? s.getActiveTab(projectId) : null
+  );
+
+  const addTab = usePdfViewerTabsStore((s) => s.addTab);
+  const replaceActiveTab = usePdfViewerTabsStore((s) => s.replaceActiveTab);
+  const closeTab = usePdfViewerTabsStore((s) => s.closeTab);
+  const closeAllOtherTabs = usePdfViewerTabsStore((s) => s.closeAllOtherTabs);
+  const setActiveTab = usePdfViewerTabsStore((s) => s.setActiveTab);
+
+  const getDocumentScaleBySheet = useDocumentViewStore(
+    (s) => s.getDocumentScaleBySheet
+  );
+  const getDocumentRotationBySheet = useDocumentViewStore(
+    (s) => s.getDocumentRotationBySheet
+  );
+  const getDocumentLocationBySheet = useDocumentViewStore(
+    (s) => s.getDocumentLocationBySheet
+  );
+  const setDocumentScaleBySheet = useDocumentViewStore(
+    (s) => s.setDocumentScaleBySheet
+  );
+  const setDocumentRotationBySheet = useDocumentViewStore(
+    (s) => s.setDocumentRotationBySheet
+  );
+  const setDocumentLocationBySheet = useDocumentViewStore(
+    (s) => s.setDocumentLocationBySheet
+  );
+
+  const currentPdfFile =
+    activeTab != null
+      ? projectFiles.find((f) => f.id === activeTab.documentId) ?? null
+      : null;
+  const currentPage = activeTab?.pageNumber ?? 1;
+  const sheetId =
+    activeTab != null
+      ? getSheetId(activeTab.documentId, activeTab.pageNumber)
+      : null;
+
+  // Sync scale/rotation from store when switching tabs
+  useEffect(() => {
+    if (!sheetId) return;
+    setScale(getDocumentScaleBySheet(sheetId));
+    setRotation(getDocumentRotationBySheet(sheetId));
+  }, [sheetId, getDocumentScaleBySheet, getDocumentRotationBySheet, setScale, setRotation]);
+
+  const handlePageSelect = useCallback(
+    (documentId: string, pageNumber: number) => {
+      if (!projectId) return;
+      const label = getSheetLabel(documents, projectFiles, documentId, pageNumber);
+      replaceActiveTab(projectId, documentId, pageNumber, label);
+      setSelectedDocumentId(documentId);
+      setSelectedPageNumber(pageNumber);
+      const file = projectFiles.find((f) => f.id === documentId);
+      if (file) {
+        setSelectedSheet({
+          id: documentId,
+          name: label,
+          pageNumber,
+          isVisible: true,
+          hasTakeoffs: false,
+          takeoffCount: 0,
+        });
+      }
+      const savedLocation = getDocumentLocationBySheet(
+        getSheetId(documentId, pageNumber)
+      );
+      if (savedLocation.x !== 0 || savedLocation.y !== 0) {
+        setTimeout(
+          () => restoreScrollPosition(savedLocation.x, savedLocation.y),
+          SCROLL_RESTORE_AFTER_SWITCH_MS
+        );
+      }
+    },
+    [
+      projectId,
+      projectFiles,
+      documents,
+      replaceActiveTab,
+      setSelectedDocumentId,
+      setSelectedPageNumber,
+      setSelectedSheet,
+      getDocumentLocationBySheet,
+    ]
+  );
+
+  const handlePageChange = useCallback(
+    (page: number) => {
+      if (!projectId || !activeTab || !currentPdfFile) return;
+      const doc = documents.find((d) => d.id === activeTab.documentId);
+      const totalPages = doc?.totalPages ?? 1;
+      if (page < 1 || page > totalPages) return;
+      const label = getSheetLabel(documents, projectFiles, currentPdfFile.id, page);
+      replaceActiveTab(projectId, currentPdfFile.id, page, label);
+      setSelectedPageNumber(page);
+      setSelectedSheet({
+        id: currentPdfFile.id,
+        name: label,
+        pageNumber: page,
+        isVisible: true,
+        hasTakeoffs: false,
+        takeoffCount: 0,
+      });
+      const sid = getSheetId(currentPdfFile.id, page);
+      const saved = getDocumentLocationBySheet(sid);
+      if (saved.x !== 0 || saved.y !== 0) {
+        setTimeout(() => restoreScrollPosition(saved.x, saved.y), SCROLL_RESTORE_AFTER_SWITCH_MS);
+      }
+    },
+    [
+      projectId,
+      activeTab,
+      currentPdfFile,
+      documents,
+      projectFiles,
+      replaceActiveTab,
+      setSelectedPageNumber,
+      setSelectedSheet,
+      getDocumentLocationBySheet,
+    ]
+  );
+
+  const handlePageOpenInNewTab = useCallback(
+    (documentId: string, pageNumber: number) => {
+      if (!projectId) return;
+      const label = getSheetLabel(documents, projectFiles, documentId, pageNumber);
+      addTab(projectId, {
+        documentId,
+        pageNumber,
+        label,
+      });
+      setSelectedDocumentId(documentId);
+      setSelectedPageNumber(pageNumber);
+      setSelectedSheet({
+        id: documentId,
+        name: label,
+        pageNumber,
+      });
+    },
+    [
+      projectId,
+      projectFiles,
+      documents,
+      addTab,
+      setSelectedDocumentId,
+      setSelectedPageNumber,
+      setSelectedSheet,
+    ]
+  );
+
+  const handleTabSelect = useCallback(
+    (tabId: string) => {
+      if (!projectId) return;
+      setActiveTab(projectId, tabId);
+      const tab = openTabs.find((t) => t.id === tabId);
+      if (tab) {
+        setSelectedPageNumber(tab.pageNumber);
+        setSelectedDocumentId(tab.documentId);
+        setSelectedSheet({
+          id: tab.documentId,
+          name: tab.label,
+          pageNumber: tab.pageNumber,
+          isVisible: true,
+          hasTakeoffs: false,
+          takeoffCount: 0,
+        });
+        const sid = getSheetId(tab.documentId, tab.pageNumber);
+        const saved = getDocumentLocationBySheet(sid);
+        if (saved.x !== 0 || saved.y !== 0) {
+          setTimeout(
+            () => restoreScrollPosition(saved.x, saved.y),
+            SCROLL_RESTORE_AFTER_SWITCH_MS
+          );
+        }
+      }
+    },
+    [
+      projectId,
+      openTabs,
+      setActiveTab,
+      setSelectedDocumentId,
+      setSelectedPageNumber,
+      setSelectedSheet,
+      getDocumentLocationBySheet,
+    ]
+  );
+
+  const handleTabClose = useCallback(
+    (tabId: string) => {
+      if (!projectId) return;
+      closeTab(projectId, tabId);
+    },
+    [projectId, closeTab]
+  );
+
+  const handleCloseAllOtherTabs = useCallback(
+    (tabId: string) => {
+      if (!projectId) return;
+      closeAllOtherTabs(projectId, tabId);
+    },
+    [projectId, closeAllOtherTabs]
+  );
+
+  const handleScaleChange = useCallback(
+    (newScale: number) => {
+      setScale(newScale);
+      if (sheetId) setDocumentScaleBySheet(sheetId, newScale);
+    },
+    [sheetId, setScale, setDocumentScaleBySheet]
+  );
+
+  const handleRotationChange = useCallback(
+    (newRotation: number) => {
+      setRotation(newRotation);
+      if (sheetId) setDocumentRotationBySheet(sheetId, newRotation);
+    },
+    [sheetId, setRotation, setDocumentRotationBySheet]
+  );
+
+  const isInitialRenderRef = useRef(true);
+
+  const handleLocationChange = useCallback(
+    (x: number, y: number) => {
+      if (sheetId) setDocumentLocationBySheet(sheetId, { x, y });
+    },
+    [sheetId, setDocumentLocationBySheet]
+  );
+
+  const handlePDFRendered = useCallback(() => {
+    if (sheetId && isInitialRenderRef.current) {
+      const saved = getDocumentLocationBySheet(sheetId);
+      if (saved.x !== 0 || saved.y !== 0) {
+        requestAnimationFrame(() =>
+          restoreScrollPosition(saved.x, saved.y)
+        );
+        SCROLL_RESTORE_DELAYS_MS.forEach((delay) =>
+          setTimeout(() => restoreScrollPosition(saved.x, saved.y), delay)
+        );
+      }
+      isInitialRenderRef.current = false;
+    }
+  }, [sheetId, getDocumentLocationBySheet]);
+
+  useEffect(() => {
+    if (activeTab) {
+      isInitialRenderRef.current = true;
+    }
+  }, [activeTab?.id]);
+
+  return {
+    openTabs,
+    activeTabId,
+    activeTab,
+    currentPdfFile,
+    currentPage,
+    sheetId,
+    handlePageSelect,
+    handlePageOpenInNewTab,
+    handlePageChange,
+    handleTabSelect,
+    handleTabClose,
+    handleCloseAllOtherTabs,
+    handleScaleChange,
+    handleRotationChange,
+    handleLocationChange,
+    handlePDFRendered,
+    hasTabs: openTabs.length > 0,
+  };
+}
