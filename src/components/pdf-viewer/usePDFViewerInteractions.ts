@@ -41,6 +41,8 @@ function getStackedMarkupIdsAtPoint(svg: SVGSVGElement, clientX: number, clientY
 
 /** Max zoom scale to avoid slow/frozen PDF (canvas size = viewport × devicePixelRatio; ~265%+ becomes very heavy). */
 export const PDF_VIEWER_MAX_SCALE = 2.5;
+/** Min zoom scale; allows zooming out to match fit-to-window on large drawings. */
+export const PDF_VIEWER_MIN_SCALE = 0.25;
 
 export interface UsePDFViewerInteractionsOptions {
   pdfCanvasRef: RefObject<HTMLCanvasElement | null>;
@@ -360,12 +362,10 @@ export function usePDFViewerInteractions(
         event.preventDefault();
 
         const ZOOM_STEP = 1.2;
-        const MIN_SCALE = 0.5;
-
         const zoomFactor = event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
         const newScale = Math.min(
           PDF_VIEWER_MAX_SCALE,
-          Math.max(MIN_SCALE, viewState.scale * zoomFactor)
+          Math.max(PDF_VIEWER_MIN_SCALE, viewState.scale * zoomFactor)
         );
 
         const rendersBlocked =

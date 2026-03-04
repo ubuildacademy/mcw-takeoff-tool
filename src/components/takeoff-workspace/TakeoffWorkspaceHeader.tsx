@@ -33,6 +33,9 @@ import {
 } from 'lucide-react';
 import type { TakeoffWorkspaceHeaderProps } from './TakeoffWorkspaceHeader.types';
 import { ToolsDialog } from '../ToolsDialog';
+import { PDF_VIEWER_MIN_SCALE, PDF_VIEWER_MAX_SCALE } from '../pdf-viewer/usePDFViewerInteractions';
+
+const ZOOM_STEP = 0.1;
 
 export function TakeoffWorkspaceHeader({
   onBackToProjects,
@@ -65,6 +68,11 @@ export function TakeoffWorkspaceHeader({
   onClearHyperlinks,
 }: TakeoffWorkspaceHeaderProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const handleZoomOut = () =>
+    onScaleChange(Math.max(PDF_VIEWER_MIN_SCALE, scale - ZOOM_STEP));
+  const handleZoomIn = () =>
+    onScaleChange(Math.min(PDF_VIEWER_MAX_SCALE, scale + ZOOM_STEP));
 
   return (
     <div className="flex items-center justify-between gap-2 p-2 sm:p-4 border-b bg-muted/30 flex-wrap lg:flex-nowrap min-w-0">
@@ -133,7 +141,8 @@ export function TakeoffWorkspaceHeader({
                     size="sm"
                     variant="ghost"
                     className="h-8 w-8 p-0"
-                    onClick={() => onScaleChange(Math.max(0.5, scale - 0.1))}
+                    onClick={handleZoomOut}
+                    disabled={scale <= PDF_VIEWER_MIN_SCALE}
                     title="Zoom out"
                   >
                     <ZoomOut className="w-4 h-4" />
@@ -143,7 +152,8 @@ export function TakeoffWorkspaceHeader({
                     size="sm"
                     variant="ghost"
                     className="h-8 w-8 p-0"
-                    onClick={() => onScaleChange(Math.min(5, scale + 0.1))}
+                    onClick={handleZoomIn}
+                    disabled={scale >= PDF_VIEWER_MAX_SCALE}
                     title="Zoom in"
                   >
                     <ZoomIn className="w-4 h-4" />
@@ -180,9 +190,9 @@ export function TakeoffWorkspaceHeader({
         {currentPdfFile && (
           <>
             <div className="hidden xl:flex items-center gap-2">
-              <Button size="sm" variant="outline" onClick={() => onScaleChange(Math.max(0.5, scale - 0.1))} title="Zoom out">-</Button>
+              <Button size="sm" variant="outline" onClick={handleZoomOut} disabled={scale <= PDF_VIEWER_MIN_SCALE} title="Zoom out">-</Button>
               <span className="px-3 py-1 bg-gray-100 rounded text-sm min-w-[60px] text-center">{Math.round(scale * 100)}%</span>
-              <Button size="sm" variant="outline" onClick={() => onScaleChange(Math.min(5, scale + 0.1))} title="Zoom in">+</Button>
+              <Button size="sm" variant="outline" onClick={handleZoomIn} disabled={scale >= PDF_VIEWER_MAX_SCALE} title="Zoom in">+</Button>
               <Button size="sm" variant="outline" onClick={onResetView}>Reset View</Button>
             </div>
             <Separator orientation="vertical" className="h-8 hidden xl:block" />
