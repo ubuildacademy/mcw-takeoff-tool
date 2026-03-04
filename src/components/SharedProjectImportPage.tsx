@@ -19,8 +19,10 @@ export function SharedProjectImportPage() {
 
   useEffect(() => {
     if (!token) {
-      setStatus('error');
-      setError('Invalid share link');
+      queueMicrotask(() => {
+        setStatus('error');
+        setError('Invalid share link');
+      });
       return;
     }
 

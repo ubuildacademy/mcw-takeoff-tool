@@ -1402,7 +1402,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Track mode changes
     prevIsSelectionModeRef.current = isSelectionMode;
-  }, [isSelectionMode, isCalibrating, annotationTool, isDrawingBoxSelection, updateMarkupPointerEvents]);
+  }, [isSelectionMode, isCalibrating, annotationTool, isDrawingBoxSelection, hyperlinkMode, updateMarkupPointerEvents]);
 
   // Page visibility handler - ensures overlay is properly initialized when page becomes visible
   const onPageShown = useCallback((pageNum: number, viewport: PageViewport) => {
@@ -1462,7 +1462,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (hasMarkups || isInteractiveMode) {
       renderMarkupsWithPointerEvents(pageNum, viewport, pdfPageRef.current ?? undefined, isSelectionMode);
     }
-  }, [renderMarkupsWithPointerEvents, localTakeoffMeasurements, localAnnotations, effectiveProjectId, file.id, isSelectionMode, isCalibrating, isMeasuring, isAnnotating, isDrawingBoxSelection, annotationTool]);
+  }, [renderMarkupsWithPointerEvents, localTakeoffMeasurements, localAnnotations, effectiveProjectId, file.id, isSelectionMode, isCalibrating, isMeasuring, isAnnotating, isDrawingBoxSelection, annotationTool, hyperlinkMode]);
 
   useEffect(() => {
     onPageShownRef.current = onPageShown;

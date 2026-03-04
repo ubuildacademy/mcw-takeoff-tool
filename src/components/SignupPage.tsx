@@ -82,7 +82,7 @@ const SignupPage: React.FC = () => {
       let hasSession = false;
 
       // Sign up the user
-      const { data: signUpData, error: signUpError } = await authHelpers.signUp(
+      const { data: _signUpData, error: signUpError } = await authHelpers.signUp(
         email,
         formData.password,
         {

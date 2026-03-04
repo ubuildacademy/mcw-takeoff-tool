@@ -458,7 +458,9 @@ export function usePDFViewerInteractions(
       showTextInput,
       applyInteractiveZoomTransforms,
       pdfPageRef,
+      pdfCanvasRef,
       setPageViewports,
+      setMousePosition,
       setInternalViewState,
       lastRenderedScaleRef,
       containerRef,
@@ -1863,7 +1865,7 @@ export function usePDFViewerInteractions(
         if ((annotationId || measurementId) && currentIsSelectionMode) {
           e.stopPropagation();
           const meta = e.metaKey || e.ctrlKey;
-          const clickedId = annotationId ?? measurementId!;
+          const clickedId = annotationId ?? measurementId ?? '';
 
           // Cycle through overlapping markups when re-clicking the sole selection
           if (
@@ -1884,7 +1886,7 @@ export function usePDFViewerInteractions(
             }
           }
 
-          const id = annotationId ?? measurementId!;
+          const id = annotationId ?? measurementId ?? '';
           setSelectedMarkupIds((prev) =>
             meta
               ? prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]

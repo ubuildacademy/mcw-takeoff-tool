@@ -19,7 +19,7 @@ const ContactPage: React.FC = () => {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleBackToHome = () => {
+  const _handleBackToHome = () => {
     navigate('/');
   };
 

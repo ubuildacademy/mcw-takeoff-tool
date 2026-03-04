@@ -482,7 +482,7 @@ export function TakeoffWorkspace() {
         await recalculateMeasurementsForCalibration(projectId, currentPdfFile.id, calibrationPageNumber, scaleFactor, unit, vw, vh);
       }
     }
-  }, [currentPdfFile, projectId, currentPage, documents, tabsResult, setCalibration, isDev]);
+  }, [currentPdfFile, projectId, currentPage, tabsResult, setCalibration, isDev]);
 
   const handlePdfUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -543,7 +543,6 @@ export function TakeoffWorkspace() {
       // Open the first successfully uploaded file in a tab
       if (uploadedFiles.length > 0) {
         const file = uploadedFiles[0] as ProjectFile & { originalName?: string };
-        const label = `${file.originalName?.replace(/\.pdf$/i, '') ?? 'Document'} - Page 1`;
         tabsResult.handlePageSelect(file.id, 1);
       }
       

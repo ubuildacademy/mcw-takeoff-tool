@@ -321,7 +321,7 @@ export function useTakeoffWorkspaceTabs({
     if (activeTab) {
       isInitialRenderRef.current = true;
     }
-  }, [activeTab?.id]);
+  }, [activeTab]);
 
   return {
     openTabs,

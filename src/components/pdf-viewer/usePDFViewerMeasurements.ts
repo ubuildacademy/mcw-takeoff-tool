@@ -193,7 +193,7 @@ export function usePDFViewerMeasurements({
   const prevIsMeasuringRef = useRef(false);
   useEffect(() => {
     if (isMeasuring && !prevIsMeasuringRef.current) {
-      setIsOrthoSnapping(defaultOrthoSnapping);
+      queueMicrotask(() => setIsOrthoSnapping(defaultOrthoSnapping));
     }
     prevIsMeasuringRef.current = isMeasuring;
   }, [isMeasuring, defaultOrthoSnapping]);

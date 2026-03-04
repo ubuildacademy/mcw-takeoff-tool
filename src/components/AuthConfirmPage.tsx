@@ -18,8 +18,10 @@ const AuthConfirmPage: React.FC = () => {
     const type = searchParams.get('type') as 'email' | 'recovery' | undefined;
 
     if (!tokenHash || !type) {
-      setStatus('error');
-      setErrorMessage('Invalid confirmation link. Missing token or type.');
+      queueMicrotask(() => {
+        setStatus('error');
+        setErrorMessage('Invalid confirmation link. Missing token or type.');
+      });
       return;
     }
 

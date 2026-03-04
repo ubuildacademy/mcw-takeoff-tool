@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -11,7 +11,10 @@ import {
   Settings,
   Download,
   Share2,
-  User
+  User,
+  Users,
+  ChevronDown,
+  ChevronRight
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { projectService } from '../services/apiService';
@@ -24,7 +27,173 @@ import UserProfile from './UserProfile';
 import { useProjectStore } from '../store/slices/projectSlice';
 import { useMeasurementStore } from '../store/slices/measurementSlice';
 import { authHelpers } from '../lib/supabase';
+import type { UserMetadata } from '../lib/supabase';
 import type { Project } from '../types';
+
+/** Group projects by owner (for admin view). Returns [{ userId, userName, projects }]. */
+function groupProjectsByUser(
+  projects: Project[],
+  users: UserMetadata[]
+): Array<{ userId: string; userName: string; projects: Project[] }> {
+  const userMap = new Map(users.map((u) => [u.id, u.full_name || u.company || 'Unknown User']));
+  const groups = new Map<string, Project[]>();
+  for (const p of projects) {
+    const uid = p.userId ?? '__unknown__';
+    const list = groups.get(uid);
+    if (list) {
+      list.push(p);
+    } else {
+      groups.set(uid, [p]);
+    }
+  }
+  return Array.from(groups.entries()).map(([userId, projs]) => ({
+    userId,
+    userName: userId === '__unknown__' ? 'Unknown Owner' : (userMap.get(userId) ?? 'Unknown User'),
+    projects: projs,
+  }));
+}
+
+const CARD_BASE = 'bg-white border rounded-lg p-6 cursor-pointer hover:shadow-md transition-shadow';
+const ACTION_BUTTON = 'text-gray-500 hover:text-gray-700 hover:bg-gray-50';
+
+interface ProjectCardsSectionProps {
+  projects: Project[];
+  variant: 'grid' | 'list';
+  getProjectTotalCost: (id: string) => number;
+  onShare: (p: Project, e: React.MouseEvent) => void;
+  onBackup: (p: Project, e: React.MouseEvent) => void;
+  onEdit: (p: Project, e: React.MouseEvent) => void;
+  onDelete: (id: string, e: React.MouseEvent) => void;
+  onClick: (id: string) => void;
+}
+
+function ProjectCardsSection({
+  projects,
+  variant,
+  getProjectTotalCost,
+  onShare,
+  onBackup,
+  onEdit,
+  onDelete,
+  onClick,
+}: ProjectCardsSectionProps) {
+  const cardProps = {
+    getTotalCost: getProjectTotalCost,
+    onShare,
+    onBackup,
+    onEdit,
+    onDelete,
+    onClick,
+  };
+  if (variant === 'grid') {
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {projects.map((project) => (
+          <ProjectCard key={project.id} project={project} variant="grid" {...cardProps} />
+        ))}
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-4">
+      {projects.map((project) => (
+        <ProjectCard key={project.id} project={project} variant="list" {...cardProps} />
+      ))}
+    </div>
+  );
+}
+
+interface ProjectCardProps {
+  project: Project;
+  getTotalCost: (id: string) => number;
+  onShare: (p: Project, e: React.MouseEvent) => void;
+  onBackup: (p: Project, e: React.MouseEvent) => void;
+  onEdit: (p: Project, e: React.MouseEvent) => void;
+  onDelete: (id: string, e: React.MouseEvent) => void;
+  onClick: (id: string) => void;
+  variant: 'grid' | 'list';
+}
+
+function ProjectCard({ project, getTotalCost, onShare, onBackup, onEdit, onDelete, onClick, variant }: ProjectCardProps) {
+  const totalCost = project.totalValue ?? getTotalCost(project.id);
+  const stop = (e: React.MouseEvent) => e.stopPropagation();
+  const actions = (
+    <div className={`flex items-center gap-1 shrink-0 ${variant === 'list' ? 'ml-4' : ''}`}>
+      <Button variant="ghost" size="sm" onClick={(e) => { stop(e); onShare(project, e); }} className="text-green-600 hover:text-green-700 hover:bg-green-50" title="Share project via email">
+        <Share2 className="w-4 h-4" />
+      </Button>
+      <Button variant="ghost" size="sm" onClick={(e) => { stop(e); onBackup(project, e); }} className="text-blue-500 hover:text-blue-700 hover:bg-blue-50" title="Backup project">
+        <Download className="w-4 h-4" />
+      </Button>
+      <Button variant="ghost" size="sm" onClick={(e) => { stop(e); onEdit(project, e); }} className={ACTION_BUTTON} title="Project settings">
+        <Settings className="w-4 h-4" />
+      </Button>
+      <Button variant="ghost" size="sm" onClick={(e) => { stop(e); onDelete(project.id, e); }} className="text-red-500 hover:text-red-700 hover:bg-red-50" title="Delete project">
+        <Trash2 className="w-4 h-4" />
+      </Button>
+    </div>
+  );
+
+  if (variant === 'grid') {
+    return (
+      <div className={CARD_BASE} onClick={() => onClick(project.id)}>
+        <div className="flex items-start justify-between mb-4">
+          <div className="flex-1">
+            <h3 className="text-lg font-semibold text-foreground mb-1">{project.name}</h3>
+            <p className="text-sm text-muted-foreground mb-2">{project.client}</p>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <FolderOpen className="w-3 h-3" />
+              {project.location}
+            </div>
+          </div>
+          {actions}
+        </div>
+        <div className="space-y-3">
+          <div className="flex justify-end">
+            <span className="text-sm font-medium text-foreground">${totalCost.toLocaleString()}</span>
+          </div>
+          <div className="flex items-center justify-between text-sm text-muted-foreground">
+            <span>{project.conditionCount ?? 0} conditions</span>
+            <div className="flex items-center gap-1">
+              <Calendar className="w-3 h-3" />
+              {project.lastModified ? new Date(project.lastModified).toLocaleDateString() : ''}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={CARD_BASE} onClick={() => onClick(project.id)}>
+      <div className="flex items-center justify-between">
+        <div className="flex-1">
+          <div className="flex items-center gap-4">
+            <div className="flex-1">
+              <h3 className="text-lg font-semibold text-foreground mb-1">{project.name}</h3>
+              <p className="text-sm text-muted-foreground mb-2">{project.client}</p>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <FolderOpen className="w-3 h-3" />
+                {project.location}
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              <span className="text-sm font-medium text-foreground">${totalCost.toLocaleString()}</span>
+              <span className="text-sm text-muted-foreground">
+                {project.conditionCount ? `${project.conditionCount} conditions` : `${project.takeoffCount ?? 0} takeoffs`}
+              </span>
+              <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                <Calendar className="w-3 h-3" />
+                {project.lastModified ? new Date(project.lastModified).toLocaleDateString() : ''}
+              </div>
+            </div>
+          </div>
+        </div>
+        {actions}
+      </div>
+    </div>
+  );
+}
 
 export function ProjectList() {
   const navigate = useNavigate();
@@ -44,6 +213,19 @@ export function ProjectList() {
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [showUserProfile, setShowUserProfile] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [users, setUsers] = useState<UserMetadata[]>([]);
+  const [collapsedUserIds, setCollapsedUserIds] = useState<Set<string>>(new Set());
+
+  const toggleUserSection = (userId: string) =>
+    setCollapsedUserIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(userId)) {
+        next.delete(userId);
+      } else {
+        next.add(userId);
+      }
+      return next;
+    });
 
   const projects = useProjectStore((s) => s.projects);
   const loadInitialData = useProjectStore((s) => s.loadInitialData);
@@ -66,7 +248,15 @@ export function ProjectList() {
           authHelpers.isAdmin(user.id),
           loadInitialData()
         ]);
-        if (mounted) setIsAdmin(adminStatus);
+        if (mounted) {
+          setIsAdmin(adminStatus);
+          if (adminStatus) {
+            const userList = await authHelpers.getAllUsers();
+            if (mounted) setUsers(userList ?? []);
+          } else {
+            setUsers([]);
+          }
+        }
         if (!mounted) return;
       } catch (e: unknown) {
         if (!mounted) return;
@@ -80,10 +270,19 @@ export function ProjectList() {
     return () => { mounted = false; };
   }, [loadInitialData]);
 
-  const filteredProjects = (projects || []).filter(project =>
-    (project.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (project.client || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (project.location || '').toLowerCase().includes(searchQuery.toLowerCase())
+  const filteredProjects = useMemo(
+    () => (projects || []).filter((p) => {
+      const q = searchQuery.toLowerCase();
+      return (p.name || '').toLowerCase().includes(q) ||
+        (p.client || '').toLowerCase().includes(q) ||
+        (p.location || '').toLowerCase().includes(q);
+    }),
+    [projects, searchQuery]
+  );
+
+  const groupedByUser = useMemo(
+    () => (isAdmin ? groupProjectsByUser(filteredProjects, users) : null),
+    [isAdmin, filteredProjects, users]
   );
 
   const handleProjectClick = (projectId: string) => {
@@ -143,15 +342,18 @@ export function ProjectList() {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
-      <div className="border-b bg-white">
+      <header className="border-b bg-logoBg">
         <div className="max-w-7xl mx-auto px-6 py-8">
           <div className="flex items-center justify-between mb-8">
-            <div>
-              <h1 className="text-3xl font-bold text-foreground">Meridian Takeoff</h1>
-              <p className="text-muted-foreground mt-2">
-                Professional construction takeoff software
-              </p>
+            <div className="flex items-center gap-4">
+              <img
+                src="/logo.png"
+                alt="Meridian Takeoff"
+                className="h-12 w-12 object-contain"
+                width={48}
+                height={48}
+              />
+              <h1 className="text-3xl font-bold text-foreground tracking-tight">Meridian Takeoff</h1>
             </div>
             <div className="flex items-center gap-3">
               <Button variant="outline" size="lg" onClick={() => setShowUserProfile(true)}>
@@ -203,168 +405,58 @@ export function ProjectList() {
             </div>
           </div>
         </div>
-      </div>
+      </header>
 
-      {/* Projects Container */}
-      <div className="max-w-7xl mx-auto px-6 py-8">
-        {viewMode === 'grid' ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredProjects.map((project) => (
-              <div
-                key={project.id}
-                className="bg-white border rounded-lg p-6 cursor-pointer hover:shadow-md transition-shadow"
-                onClick={() => handleProjectClick(project.id)}
-              >
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex-1">
-                  <h3 className="text-lg font-semibold text-foreground mb-1">
-                    {project.name}
-                  </h3>
-                  <p className="text-sm text-muted-foreground mb-2">
-                    {project.client}
-                  </p>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <FolderOpen className="w-3 h-3" />
-                    {project.location}
-                  </div>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={(e) => handleProjectShare(project, e)}
-                    className="text-green-600 hover:text-green-700 hover:bg-green-50"
-                    title="Share project via email"
-                  >
-                    <Share2 className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={(e) => handleProjectBackup(project, e)}
-                    className="text-blue-500 hover:text-blue-700 hover:bg-blue-50"
-                    title="Backup project"
-                  >
-                    <Download className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={(e) => handleEditProject(project, e)}
-                    className="text-gray-500 hover:text-gray-700 hover:bg-gray-50"
-                    title="Project settings"
-                  >
-                    <Settings className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={(e) => handleDeleteProject(project.id, e)}
-                    className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                    title="Delete project"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-end">
-                  <span className="text-sm font-medium text-foreground">
-                    ${(project.totalValue ?? getProjectTotalCost(project.id)).toLocaleString()}
+      <main className="max-w-7xl mx-auto px-6 py-8">
+        {groupedByUser && groupedByUser.length > 0 ? (
+          <div className="space-y-10">
+            {groupedByUser.map((group) => {
+              const isCollapsed = collapsedUserIds.has(group.userId);
+              return (
+              <div key={group.userId}>
+                <button
+                  type="button"
+                  onClick={() => toggleUserSection(group.userId)}
+                  className="flex items-center gap-2 mb-4 w-full text-left hover:opacity-80 transition-opacity"
+                >
+                  {isCollapsed ? (
+                    <ChevronRight className="w-5 h-5 text-muted-foreground shrink-0" />
+                  ) : (
+                    <ChevronDown className="w-5 h-5 text-muted-foreground shrink-0" />
+                  )}
+                  <Users className="w-5 h-5 text-muted-foreground" />
+                  <h2 className="text-lg font-semibold text-foreground">{group.userName}</h2>
+                  <span className="text-sm text-muted-foreground">
+                    ({group.projects.length} project{group.projects.length !== 1 ? 's' : ''})
                   </span>
-                </div>
-
-                <div className="flex items-center justify-between text-sm text-muted-foreground">
-                  <span>{project.conditionCount ?? 0} conditions</span>
-                  <div className="flex items-center gap-1">
-                    <Calendar className="w-3 h-3" />
-                    {project.lastModified ? new Date(project.lastModified).toLocaleDateString() : ''}
-                  </div>
-                </div>
+                </button>
+                {!isCollapsed && (
+                  <ProjectCardsSection
+                    projects={group.projects}
+                    variant={viewMode}
+                    getProjectTotalCost={getProjectTotalCost}
+                    onShare={handleProjectShare}
+                    onBackup={handleProjectBackup}
+                    onEdit={handleEditProject}
+                    onDelete={handleDeleteProject}
+                    onClick={handleProjectClick}
+                  />
+                )}
               </div>
-            </div>
-          ))}
+            );
+            })}
           </div>
         ) : (
-          <div className="space-y-4">
-            {filteredProjects.map((project) => (
-              <div
-                key={`${project.id}-${project.conditionCount ?? 0}`}
-                className="bg-white border rounded-lg p-6 cursor-pointer hover:shadow-md transition-shadow"
-                onClick={() => handleProjectClick(project.id)}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-4">
-                      <div className="flex-1">
-                        <h3 className="text-lg font-semibold text-foreground mb-1">
-                          {project.name}
-                        </h3>
-                        <p className="text-sm text-muted-foreground mb-2">
-                          {project.client}
-                        </p>
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <FolderOpen className="w-3 h-3" />
-                          {project.location}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <span className="text-sm font-medium text-foreground">
-                          ${(project.totalValue ?? getProjectTotalCost(project.id)).toLocaleString()}
-                        </span>
-                        <span className="text-sm text-muted-foreground">
-                          {project.conditionCount ? `${project.conditionCount} conditions` : `${project.takeoffCount ?? 0} takeoffs`}
-                        </span>
-                        <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                          <Calendar className="w-3 h-3" />
-                          {project.lastModified ? new Date(project.lastModified).toLocaleDateString() : ''}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1 ml-4">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(e) => handleProjectShare(project, e)}
-                      className="text-green-600 hover:text-green-700 hover:bg-green-50"
-                      title="Share project via email"
-                    >
-                      <Share2 className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(e) => handleProjectBackup(project, e)}
-                      className="text-blue-500 hover:text-blue-700 hover:bg-blue-50"
-                      title="Backup project"
-                    >
-                      <Download className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(e) => handleEditProject(project, e)}
-                      className="text-gray-500 hover:text-gray-700 hover:bg-gray-50"
-                      title="Project settings"
-                    >
-                      <Settings className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(e) => handleDeleteProject(project.id, e)}
-                      className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                      title="Delete project"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+          <ProjectCardsSection
+            projects={filteredProjects}
+            variant={viewMode}
+            getProjectTotalCost={getProjectTotalCost}
+            onShare={handleProjectShare}
+            onBackup={handleProjectBackup}
+            onEdit={handleEditProject}
+            onDelete={handleDeleteProject}
+            onClick={handleProjectClick}
+          />
         )}
 
         {filteredProjects.length === 0 && (
@@ -384,16 +476,12 @@ export function ProjectList() {
             )}
           </div>
         )}
-      </div>
+      </main>
 
-        <ProjectCreationDialog
+      <ProjectCreationDialog
         open={showCreate}
         onOpenChange={setShowCreate}
-        onCreated={async (_proj) => {
-          // The project is already added to the store by addProject
-          // Just close the dialog
-          setShowCreate(false);
-        }}
+        onCreated={() => setShowCreate(false)}
       />
 
       {editingProject && (
@@ -401,9 +489,7 @@ export function ProjectList() {
           open={showSettings}
           onOpenChange={setShowSettings}
           project={editingProject}
-          onUpdated={async () => {
-            // The project is already updated in the store by updateProject
-            // Just close the dialog and clear the editing project
+          onUpdated={() => {
             setShowSettings(false);
             setEditingProject(null);
           }}

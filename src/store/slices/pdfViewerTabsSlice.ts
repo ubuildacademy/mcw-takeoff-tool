@@ -118,7 +118,7 @@ export const usePdfViewerTabsStore = create<PdfViewerTabsState>()(
             const closedIndex = tabs.findIndex((t) => t.id === tabId);
             if (next.length > 0) {
               const idx = Math.min(closedIndex, next.length - 1);
-              newActiveId = next[idx]!.id;
+              newActiveId = next[idx]?.id ?? null;
             } else {
               newActiveId = null;
             }
