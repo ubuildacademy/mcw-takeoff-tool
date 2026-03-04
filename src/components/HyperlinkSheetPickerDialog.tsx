@@ -57,6 +57,12 @@ function mergeDocumentsWithFiles(
   return Array.from(byId.values());
 }
 
+/** Treat "Unknown" (from failed titleblock extraction) as meaningless for display. */
+function isMeaningfulSheetValue(value: string | null | undefined): boolean {
+  if (!value || typeof value !== 'string') return false;
+  return value.trim().toLowerCase() !== 'unknown';
+}
+
 /** Build flat list of (documentId, pageNumber, label) for picker. Ensures all pages from all documents are included. */
 function buildSheetOptions(
   documents: PDFDocument[],
@@ -66,9 +72,9 @@ function buildSheetOptions(
   const seen = new Set<string>();
   const options: Array<{ sheetId: string; pageNumber: number; label: string }> = [];
   for (const doc of documents) {
-    // Use pages from doc, or fallback to 1..totalPages if pages is empty/incomplete
+    // Use pages from doc; ensure we never undercount (use max of totalPages and actual page count)
     const pages = doc.pages ?? [];
-    const totalPages = doc.totalPages ?? (pages.length || 1);
+    const totalPages = Math.max(doc.totalPages ?? 0, pages.length) || 1;
     for (let p = 1; p <= totalPages; p++) {
       const page = pages.find((pg) => pg.pageNumber === p);
       const pageNumber = page?.pageNumber ?? p;
@@ -77,9 +83,13 @@ function buildSheetOptions(
       seen.add(key);
       if (excludeSheetId === doc.id && excludePageNumber === pageNumber) continue;
       const docName = doc.name ?? 'Document';
+      // Use sheetNumber/sheetName only when meaningful (not "Unknown" from failed extraction)
       const sheetLabel = page
-        ? [page.sheetNumber, page.sheetName].filter(Boolean).join(' - ') || `Page ${pageNumber}`
-        : `Page ${pageNumber}`;
+        ? (() => {
+            const parts = [page.sheetNumber, page.sheetName].filter(isMeaningfulSheetValue);
+            return parts.length > 0 ? parts.join(' - ') : `P. ${pageNumber}`;
+          })()
+        : `P. ${pageNumber}`;
       const label = `${docName} - ${sheetLabel}`;
       options.push({ sheetId: doc.id, pageNumber, label });
     }
