@@ -19,6 +19,7 @@ export interface Project {
   conditionCount?: number;
   totalValue?: number;
   profitMarginPercent?: number; // Global profit margin percentage (default 15%)
+  userId?: string; // Owner user ID (for admin grouping)
 }
 
 export interface TakeoffCondition {
