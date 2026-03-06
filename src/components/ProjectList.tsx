@@ -14,7 +14,8 @@ import {
   User,
   Users,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  Search
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { projectService } from '../services/apiService';
@@ -30,27 +31,41 @@ import { authHelpers } from '../lib/supabase';
 import type { UserMetadata } from '../lib/supabase';
 import type { Project } from '../types';
 
-/** Group projects by owner (for admin view). Returns [{ userId, userName, projects }]. */
+/** Group projects by owner (for admin view). Returns [{ userId, userName, projects }].
+ * Includes ALL users (even with no projects). Current user first, rest alphabetically. */
 function groupProjectsByUser(
   projects: Project[],
-  users: UserMetadata[]
+  users: UserMetadata[],
+  currentUserId: string | null
 ): Array<{ userId: string; userName: string; projects: Project[] }> {
-  const userMap = new Map(users.map((u) => [u.id, u.full_name || u.company || 'Unknown User']));
-  const groups = new Map<string, Project[]>();
+  const projectMap = new Map<string, Project[]>();
   for (const p of projects) {
     const uid = p.userId ?? '__unknown__';
-    const list = groups.get(uid);
+    const list = projectMap.get(uid);
     if (list) {
       list.push(p);
     } else {
-      groups.set(uid, [p]);
+      projectMap.set(uid, [p]);
     }
   }
-  return Array.from(groups.entries()).map(([userId, projs]) => ({
-    userId,
-    userName: userId === '__unknown__' ? 'Unknown Owner' : (userMap.get(userId) ?? 'Unknown User'),
-    projects: projs,
-  }));
+  const result: Array<{ userId: string; userName: string; projects: Project[] }> = [];
+  for (const u of users) {
+    result.push({
+      userId: u.id,
+      userName: u.full_name || u.company || 'Unknown User',
+      projects: projectMap.get(u.id) ?? [],
+    });
+  }
+  const unknownProjs = projectMap.get('__unknown__');
+  if (unknownProjs && unknownProjs.length > 0) {
+    result.push({ userId: '__unknown__', userName: 'Unknown Owner', projects: unknownProjs });
+  }
+  result.sort((a, b) => {
+    if (currentUserId && a.userId === currentUserId) return -1;
+    if (currentUserId && b.userId === currentUserId) return 1;
+    return a.userName.localeCompare(b.userName, undefined, { sensitivity: 'base' });
+  });
+  return result;
 }
 
 const CARD_BASE = 'bg-white border rounded-lg p-6 cursor-pointer hover:shadow-md transition-shadow';
@@ -214,7 +229,9 @@ export function ProjectList() {
   const [showUserProfile, setShowUserProfile] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [users, setUsers] = useState<UserMetadata[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [collapsedUserIds, setCollapsedUserIds] = useState<Set<string>>(new Set());
+  const [userSearchQuery, setUserSearchQuery] = useState('');
 
   const toggleUserSection = (userId: string) =>
     setCollapsedUserIds((prev) => {
@@ -243,6 +260,7 @@ export function ProjectList() {
           setError('User not authenticated');
           return;
         }
+        if (mounted) setCurrentUserId(user.id);
 
         const [adminStatus] = await Promise.all([
           authHelpers.isAdmin(user.id),
@@ -270,20 +288,31 @@ export function ProjectList() {
     return () => { mounted = false; };
   }, [loadInitialData]);
 
-  const filteredProjects = useMemo(
-    () => (projects || []).filter((p) => {
-      const q = searchQuery.toLowerCase();
-      return (p.name || '').toLowerCase().includes(q) ||
+  const filteredProjects = useMemo(() => {
+    const q = searchQuery.toLowerCase();
+    return (projects || []).filter(
+      (p) =>
+        (p.name || '').toLowerCase().includes(q) ||
         (p.client || '').toLowerCase().includes(q) ||
-        (p.location || '').toLowerCase().includes(q);
-    }),
-    [projects, searchQuery]
-  );
+        (p.location || '').toLowerCase().includes(q)
+    );
+  }, [projects, searchQuery]);
 
   const groupedByUser = useMemo(
-    () => (isAdmin ? groupProjectsByUser(filteredProjects, users) : null),
-    [isAdmin, filteredProjects, users]
+    () => (isAdmin ? groupProjectsByUser(filteredProjects, users, currentUserId) : null),
+    [isAdmin, filteredProjects, users, currentUserId]
   );
+
+  const filteredGroupedByUser = useMemo(() => {
+    if (!groupedByUser) return null;
+    const q = userSearchQuery.trim().toLowerCase();
+    if (!q) return groupedByUser;
+    return groupedByUser.filter(
+      (g) =>
+        (g.userName || '').toLowerCase().includes(q) ||
+        (g.userId !== '__unknown__' && g.userId.toLowerCase().includes(q))
+    );
+  }, [groupedByUser, userSearchQuery]);
 
   const handleProjectClick = (projectId: string) => {
     navigate(`/project/${projectId}`);
@@ -381,6 +410,8 @@ export function ProjectList() {
           <div className="flex items-center gap-4">
             <div className="flex-1 max-w-md">
               <Input
+                id="search-projects"
+                name="search-projects"
                 placeholder="Search projects..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -410,41 +441,67 @@ export function ProjectList() {
       <main className="max-w-7xl mx-auto px-6 py-8">
         {groupedByUser && groupedByUser.length > 0 ? (
           <div className="space-y-10">
-            {groupedByUser.map((group) => {
-              const isCollapsed = collapsedUserIds.has(group.userId);
-              return (
-              <div key={group.userId}>
-                <button
-                  type="button"
-                  onClick={() => toggleUserSection(group.userId)}
-                  className="flex items-center gap-2 mb-4 w-full text-left hover:opacity-80 transition-opacity"
-                >
-                  {isCollapsed ? (
-                    <ChevronRight className="w-5 h-5 text-muted-foreground shrink-0" />
-                  ) : (
-                    <ChevronDown className="w-5 h-5 text-muted-foreground shrink-0" />
-                  )}
-                  <Users className="w-5 h-5 text-muted-foreground" />
-                  <h2 className="text-lg font-semibold text-foreground">{group.userName}</h2>
-                  <span className="text-sm text-muted-foreground">
-                    ({group.projects.length} project{group.projects.length !== 1 ? 's' : ''})
-                  </span>
-                </button>
-                {!isCollapsed && (
-                  <ProjectCardsSection
-                    projects={group.projects}
-                    variant={viewMode}
-                    getProjectTotalCost={getProjectTotalCost}
-                    onShare={handleProjectShare}
-                    onBackup={handleProjectBackup}
-                    onEdit={handleEditProject}
-                    onDelete={handleDeleteProject}
-                    onClick={handleProjectClick}
-                  />
-                )}
+            {/* Admin: user search + collapse/expand all */}
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="relative flex-1 min-w-[200px] max-w-sm">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                <Input
+                  id="search-users"
+                  name="search-users"
+                  placeholder="Search users..."
+                  value={userSearchQuery}
+                  onChange={(e) => setUserSearchQuery(e.target.value)}
+                  className="pl-9"
+                />
               </div>
-            );
-            })}
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => groupedByUser && setCollapsedUserIds(new Set(groupedByUser.map((g) => g.userId)))}>
+                  Collapse all
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setCollapsedUserIds(new Set())}>
+                  Expand all
+                </Button>
+              </div>
+            </div>
+            {filteredGroupedByUser && filteredGroupedByUser.length > 0 ? (
+              filteredGroupedByUser.map((group) => {
+                const isCollapsed = collapsedUserIds.has(group.userId);
+                return (
+                  <div key={group.userId}>
+                    <button
+                      type="button"
+                      onClick={() => toggleUserSection(group.userId)}
+                      className="flex items-center gap-2 mb-4 w-full text-left hover:opacity-80 transition-opacity"
+                    >
+                      {isCollapsed ? (
+                        <ChevronRight className="w-5 h-5 text-muted-foreground shrink-0" />
+                      ) : (
+                        <ChevronDown className="w-5 h-5 text-muted-foreground shrink-0" />
+                      )}
+                      <Users className="w-5 h-5 text-muted-foreground" />
+                      <h2 className="text-lg font-semibold text-foreground">{group.userName}</h2>
+                      <span className="text-sm text-muted-foreground">
+                        ({group.projects.length} project{group.projects.length !== 1 ? 's' : ''})
+                      </span>
+                    </button>
+                    {!isCollapsed && (
+                      <ProjectCardsSection
+                        projects={group.projects}
+                        variant={viewMode}
+                        getProjectTotalCost={getProjectTotalCost}
+                        onShare={handleProjectShare}
+                        onBackup={handleProjectBackup}
+                        onEdit={handleEditProject}
+                        onDelete={handleDeleteProject}
+                        onClick={handleProjectClick}
+                      />
+                    )}
+                  </div>
+                );
+              })
+            ) : (
+              <p className="text-muted-foreground py-4">No users match your search.</p>
+            )}
           </div>
         ) : (
           <ProjectCardsSection

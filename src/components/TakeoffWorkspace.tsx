@@ -39,27 +39,7 @@ import { PDFViewerTabBar } from './pdf-viewer/PDFViewerTabBar';
 import { SearchResultsList } from './takeoff-workspace/SearchResultsList';
 import { HyperlinkSheetPickerDialog } from './HyperlinkSheetPickerDialog';
 import { HyperlinkContextMenu } from './HyperlinkContextMenu';
-
-// All interfaces now imported from shared types
-
-function getErrorMessage(error: unknown): string {
-  const fallback = 'Failed to upload PDF file.';
-  if (error && typeof error === 'object') {
-    const err = error as Record<string, unknown>;
-    if (err.response && typeof err.response === 'object') {
-      const data = (err.response as Record<string, unknown>).data;
-      if (data && typeof data === 'object') {
-        const d = data as Record<string, unknown>;
-        if (typeof d.message === 'string') return d.message;
-        if (typeof d.error === 'string') return d.error;
-      }
-      if (typeof data === 'string') return data;
-    }
-    if (typeof err.message === 'string') return err.message;
-  }
-  if (typeof error === 'string') return error;
-  return fallback;
-}
+import { extractErrorMessage } from '../utils/commonUtils';
 
 export function TakeoffWorkspace() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -105,7 +85,6 @@ export function TakeoffWorkspace() {
   const getCurrentProject = useProjectStore((s) => s.getCurrentProject);
   const loadProjectTakeoffMeasurements = useMeasurementStore((s) => s.loadProjectTakeoffMeasurements);
   const setCalibration = useCalibrationStore((s) => s.setCalibration);
-  const _getCalibration = useCalibrationStore((s) => s.getCalibration);
   const clearProjectCalibrations = useCalibrationStore((s) => s.clearProjectCalibrations);
   const clearPageAnnotations = useAnnotationStore((s) => s.clearPageAnnotations);
   const setDocumentLocationBySheet = useDocumentViewStore((s) => s.setDocumentLocationBySheet);
@@ -121,12 +100,10 @@ export function TakeoffWorkspace() {
   const [measurementType, setMeasurementType] = useState<string>('');
   const [isOrthoSnapping, setIsOrthoSnapping] = useState(false);
   const [rightSidebarTab, setRightSidebarTab] = useState<'documents' | 'search' | 'ai-chat'>('documents');
-  const [searchResults, setSearchResults] = useState<string[]>([]);
   const [ocrSearchResults, setOcrSearchResults] = useState<SearchResult[]>([]);
   const [currentSearchQuery, setCurrentSearchQuery] = useState<string>('');
   const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
   const [uploading, setUploading] = useState<boolean>(false);
-  const [_loading, _setLoading] = useState(true);
   const { documents, documentsLoading, loadProjectDocuments, setDocuments } = useTakeoffWorkspaceDocuments({
     projectId: projectId ?? undefined,
     projectFiles,
@@ -213,6 +190,10 @@ export function TakeoffWorkspace() {
   }, []);
 
   // CRITICAL: Wrapped in useCallback to prevent re-render loops
+  const handleToolSelect = useCallback((_tool: string) => {
+    // Tool selection handled by TakeoffSidebar internally; no-op for now
+  }, []);
+
   const handleConditionSelect = useCallback((condition: TakeoffCondition | null) => {
     if (condition === null) {
       setSelectedCondition(null);
@@ -298,10 +279,6 @@ export function TakeoffWorkspace() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [getSelectedCondition, handleConditionSelect, handleAddHyperlink, undo, redo]);
 
-  const handleToolSelect = (_tool: string) => {
-    // Tool selection handled by PDF viewer
-  };
-
   const rotatePage = (direction: 'clockwise' | 'counterclockwise') => {
     const rotationStep = direction === 'clockwise' ? 90 : -90;
     const newRotation = (rotation + rotationStep) % 360;
@@ -322,15 +299,6 @@ export function TakeoffWorkspace() {
     projectFiles,
     loadProjectDocuments,
   });
-
-  const _handleSearchInDocument = useCallback((query: string) => {
-    const mockResults = [
-      `Found "${query}" in note at coordinates (150, 200)`,
-      `Found "${query}" in dimension at coordinates (300, 350)`,
-      `Found "${query}" in title block at coordinates (600, 50)`
-    ];
-    setSearchResults(mockResults);
-  }, []);
 
   // CRITICAL: Wrapped in useCallback to prevent re-render loops in SheetSidebar
   const handleOcrSearchResults = useCallback((results: SearchResult[], query: string) => {
@@ -525,7 +493,7 @@ export function TakeoffWorkspace() {
           }
         } catch (error: unknown) {
           console.error(`Upload failed for ${file.name}:`, error);
-          const errorMessage = getErrorMessage(error);
+          const errorMessage = extractErrorMessage(error, 'Failed to upload PDF file.');
           failedFiles.push({ name: file.name, error: errorMessage });
         }
       }
@@ -558,7 +526,7 @@ export function TakeoffWorkspace() {
       
     } catch (error: unknown) {
       console.error('Upload failed:', error);
-      const errorMessage = getErrorMessage(error);
+      const errorMessage = extractErrorMessage(error, 'Failed to upload PDF file.');
       
       toast.error(`Upload Error: ${errorMessage}`);
     } finally {
@@ -729,9 +697,9 @@ export function TakeoffWorkspace() {
 
   const storeCurrentProject = getCurrentProject();
   const currentProject = storeCurrentProject || {
-    name: 'Tru Hilton', // Use actual project name instead of generic format
-    client: 'ABC', // Use actual client name
-    lastSaved: new Date().toLocaleString()
+    name: '—',
+    client: '—',
+    lastSaved: '—'
   };
 
   return (
@@ -871,7 +839,7 @@ export function TakeoffWorkspace() {
               <div className="text-muted-foreground">Select a sheet</div>
             </div>
           )}
-          <SearchResultsList results={searchResults} />
+          <SearchResultsList results={[]} />
         </div>
 
         <TakeoffWorkspaceRightSidebar
