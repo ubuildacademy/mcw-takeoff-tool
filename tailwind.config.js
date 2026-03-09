@@ -47,6 +47,7 @@ export default {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        logoBg: "#eef5fc",
       },
       borderRadius: {
         lg: "var(--radius)",
