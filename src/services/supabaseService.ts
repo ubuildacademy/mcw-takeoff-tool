@@ -202,9 +202,13 @@ export const supabaseService = {
     // Convert camelCase to snake_case for database
     const dbUpdates = projectToDbFormat(updates);
 
+    // CRITICAL: Never allow user_id in updates - ownership must never be changed/cleared via update
+    const { user_id: _removed, ...safeUpdates } = dbUpdates as Record<string, unknown>;
+    void _removed;
+
     const { data, error } = await supabase
       .from('takeoff_projects')
-      .update({ ...dbUpdates, last_modified: new Date().toISOString() })
+      .update({ ...safeUpdates, last_modified: new Date().toISOString() })
       .eq('id', id)
       .select()
       .single()

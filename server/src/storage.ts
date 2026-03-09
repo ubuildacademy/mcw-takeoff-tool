@@ -329,9 +329,10 @@ class SupabaseStorage {
       user_id: resolvedUserId,
     };
 
+    // Always include user_id in payload - Supabase upsert omits nothing; we never clear ownership
     const { data, error } = await supabase
       .from(TABLES.PROJECTS)
-      .upsert(dbProject)
+      .upsert(dbProject, { onConflict: 'id' })
       .select()
       .single();
     

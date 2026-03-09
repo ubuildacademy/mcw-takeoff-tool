@@ -157,14 +157,16 @@ export async function performImportFromBackup(
   documentRotations: Record<string, number>;
   hyperlinks: Array<Record<string, unknown>>;
 }> {
-  const { id: _origId, userId: _origUserId, ...projectData } = backup.project as Record<string, unknown>;
+  // CRITICAL: Strip id, userId, AND user_id from backup - ownership MUST go to current user
+  const { id: _origId, userId: _origUserId, user_id: _origUserDbId, ...projectData } = backup.project as Record<string, unknown>;
   const newProject = await storage.saveProject({
     ...projectData,
     id: uuidv4(),
     userId,
+    user_id: userId, // Defensive: set both camelCase and snake_case so backup data cannot override
     createdAt: new Date().toISOString(),
     lastModified: new Date().toISOString(),
-  } as StoredProject);
+  } as unknown as StoredProject);
   const newProjectId = newProject.id;
 
   const conditionIdMapping: Record<string, string> = {};

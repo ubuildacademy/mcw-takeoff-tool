@@ -1,0 +1,30 @@
+---
+description: CRITICAL - Project ownership (user_id) must never be null. Prevents "Unknown Owner" bug.
+globs: 
+  - server/src/**/*.ts
+  - src/**/*.ts
+  - src/**/*.tsx
+---
+
+# Project Ownership - NEVER Break This
+
+Projects MUST always have a valid `user_id`. Projects with `user_id` null appear under "Unknown Owner" and break the admin project list.
+
+## When creating/importing projects
+1. **New project**: Always pass `userId` (current authenticated user) to storage.saveProject
+2. **Backup restore**: Strip `userId` and `user_id` from backup; always set to current user
+3. **Shared import**: Same as backup - ownership goes to the user who imports
+
+## When updating projects
+- NEVER include `user_id` in update payloads - it must not be changed or cleared
+- supabaseService.updateProject explicitly strips user_id
+
+## Database
+- takeoff_projects.user_id has NOT NULL constraint (see ensure_project_user_id_not_null.sql)
+- Storage saveProject uses upsert with `defaultToNull: false`
+
+## Key files
+- server/src/routes/projects.ts: performImportFromBackup
+- server/src/storage.ts: saveProject
+- src/services/supabaseService.ts: createProject, updateProject
+- src/store/slices/projectSlice.ts: addProject (fallback includes userId)

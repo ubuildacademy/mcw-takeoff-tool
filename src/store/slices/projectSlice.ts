@@ -49,13 +49,18 @@ export const useProjectStore = create<ProjectState>()(
         } catch (error: unknown) {
           console.warn('Failed to create project via API, creating locally:', error instanceof Error ? error.message : String(error));
           
+          // Include current user so project shows under correct owner (avoids "Unknown Owner")
+          const { authHelpers } = await import('../../lib/supabase');
+          const user = await authHelpers.getCurrentUser();
+          
           const id = Date.now().toString();
           const project = {
             ...projectData,
             id,
             lastModified: new Date().toISOString(),
             takeoffCount: 0,
-            totalValue: 0
+            totalValue: 0,
+            userId: user?.id
           };
           
           set(state => ({
@@ -147,6 +152,7 @@ export const useProjectStore = create<ProjectState>()(
             conditionCount: (p.conditionCount as number) ?? 0,
             totalValue: (p.totalValue as number | undefined),
             profitMarginPercent: (p.profitMarginPercent as number | undefined),
+            userId: (p.user_id as string) || undefined,
           }));
           
           set({ projects });

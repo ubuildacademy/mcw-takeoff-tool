@@ -2,8 +2,12 @@
 -- Run this in Supabase SQL Editor (Dashboard → SQL Editor)
 --
 -- Projects show under "Unknown Owner" when user_id is NULL.
--- A bug in storage.saveProject (upsert without defaultToNull: false) was clearing
--- user_id on every project update. That's now fixed in server code.
+--
+-- Prevention (already fixed in code):
+-- - server: storage.saveProject uses defaultToNull: false on upsert
+-- - server: performImportFromBackup strips user_id from backup, always sets current user
+-- - client: supabaseService.updateProject never includes user_id in updates
+-- - DB: Run server/migrations/ensure_project_user_id_not_null.sql to enforce NOT NULL
 --
 -- RECOVERY OPTIONS:
 -- 1. Supabase Dashboard → Database → Backups: use point-in-time recovery if available
