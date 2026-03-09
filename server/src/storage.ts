@@ -331,7 +331,7 @@ class SupabaseStorage {
 
     const { data, error } = await supabase
       .from(TABLES.PROJECTS)
-      .upsert(dbProject, { defaultToNull: false })
+      .upsert(dbProject)
       .select()
       .single();
     
