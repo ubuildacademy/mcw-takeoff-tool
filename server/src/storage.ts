@@ -288,7 +288,29 @@ class SupabaseStorage {
   }
 
   async saveProject(project: StoredProject): Promise<StoredProject> {
-    // Map camelCase to snake_case for database
+    // user_id must NEVER be cleared. Supabase upsert sets omitted columns to NULL.
+    // We always include user_id in payload and use defaultToNull: false.
+    const ownerId = project.userId ?? (project as { user_id?: string }).user_id;
+
+    let resolvedUserId: string | null = ownerId ?? null;
+
+    // For existing projects: preserve current user_id if callers omitted it (never clear ownership)
+    let projectExists = false;
+    if (!resolvedUserId && project.id) {
+      const { data: existing } = await supabase
+        .from(TABLES.PROJECTS)
+        .select('user_id')
+        .eq('id', project.id)
+        .maybeSingle();
+      projectExists = existing != null; // Row exists (even if user_id is null)
+      resolvedUserId = existing?.user_id ?? null;
+    }
+
+    // New projects MUST have user_id - create/import paths always provide it
+    if (!resolvedUserId && !projectExists) {
+      throw new Error('Project must have an owner (user_id). New projects require userId.');
+    }
+
     const dbProject: Record<string, any> = {
       id: project.id,
       name: project.name,
@@ -303,17 +325,13 @@ class SupabaseStorage {
       contact_phone: project.contactPhone,
       profit_margin_percent: project.profitMarginPercent,
       created_at: project.createdAt,
-      last_modified: project.lastModified
+      last_modified: project.lastModified,
+      user_id: resolvedUserId,
     };
-    
-    // Only include user_id if it's provided (for new projects)
-    if (project.userId) {
-      dbProject.user_id = project.userId;
-    }
-    
+
     const { data, error } = await supabase
       .from(TABLES.PROJECTS)
-      .upsert(dbProject)
+      .upsert(dbProject, { defaultToNull: false })
       .select()
       .single();
     
