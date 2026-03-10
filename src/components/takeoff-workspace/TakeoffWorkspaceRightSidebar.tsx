@@ -1,10 +1,17 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { FileText, Search, MessageSquare, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { Button } from '../ui/button';
 import { SheetSidebar } from '../SheetSidebar';
-import { SearchTab } from '../SearchTab';
-import { ChatTab } from '../ChatTab';
 import type { TakeoffWorkspaceRightSidebarProps } from './TakeoffWorkspaceHeader.types';
+
+const SearchTab = lazy(() => import('../SearchTab').then((m) => ({ default: m.SearchTab })));
+const ChatTab = lazy(() => import('../ChatTab').then((m) => ({ default: m.ChatTab })));
+
+const TabFallback = () => (
+  <div className="flex-1 flex items-center justify-center p-8" role="status" aria-label="Loading tab">
+    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary" />
+  </div>
+);
 
 export function TakeoffWorkspaceRightSidebar({
   rightSidebarOpen,
@@ -106,17 +113,21 @@ export function TakeoffWorkspaceRightSidebar({
           )}
 
           {rightSidebarTab === 'search' && (
-            <SearchTab
-              projectId={projectId}
-              documents={documents}
-              onPageSelect={onPageSelect}
-              selectedDocumentId={selectedDocumentId}
-              selectedPageNumber={selectedPageNumber}
-            />
+            <Suspense fallback={<TabFallback />}>
+              <SearchTab
+                projectId={projectId}
+                documents={documents}
+                onPageSelect={onPageSelect}
+                selectedDocumentId={selectedDocumentId}
+                selectedPageNumber={selectedPageNumber}
+              />
+            </Suspense>
           )}
 
           {rightSidebarTab === 'ai-chat' && (
-            <ChatTab projectId={projectId} documents={documents} />
+            <Suspense fallback={<TabFallback />}>
+              <ChatTab projectId={projectId} documents={documents} />
+            </Suspense>
           )}
         </div>
       )}

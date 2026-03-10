@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -23,13 +23,22 @@ import { ProjectCreationDialog } from './ProjectCreationDialog';
 import { ProjectSettingsDialog } from './ProjectSettingsDialog';
 import { BackupDialog } from './BackupDialog';
 import { ShareProjectModal } from './ShareProjectModal';
-import { AdminPanel } from './AdminPanel';
 import UserProfile from './UserProfile';
 import { useProjectStore } from '../store/slices/projectSlice';
 import { useMeasurementStore } from '../store/slices/measurementSlice';
 import { authHelpers } from '../lib/supabase';
 import type { UserMetadata } from '../lib/supabase';
 import type { Project } from '../types';
+
+const AdminPanel = lazy(() => import('./AdminPanel').then((m) => ({ default: m.AdminPanel })));
+
+function AdminPanelFallback() {
+  return (
+    <div className="fixed inset-0 bg-black/20 flex items-center justify-center z-50">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" role="status" aria-label="Loading admin panel" />
+    </div>
+  );
+}
 
 /** Group projects by owner (for admin view). Returns [{ userId, userName, projects }].
  * Includes ALL users (even with no projects). Current user first, rest alphabetically. */
@@ -573,12 +582,14 @@ export function ProjectList() {
         />
       )}
 
-      {isAdmin && (
-        <AdminPanel
-          isOpen={showAdminPanel}
-          onClose={() => setShowAdminPanel(false)}
-          projectId="global" // Global admin panel, not project-specific
-        />
+      {isAdmin && showAdminPanel && (
+        <Suspense fallback={<AdminPanelFallback />}>
+          <AdminPanel
+            isOpen={showAdminPanel}
+            onClose={() => setShowAdminPanel(false)}
+            projectId="global" // Global admin panel, not project-specific
+          />
+        </Suspense>
       )}
 
       {showUserProfile && (

@@ -15,6 +15,7 @@ import {
   Edit3,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useShallow } from 'zustand/react/shallow';
 import { useConditionStore } from '../store/slices/conditionSlice';
 import { useMeasurementStore } from '../store/slices/measurementSlice';
 import type { TakeoffCondition, PDFDocument } from '../types';
@@ -56,15 +57,15 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
   const [loadingThumbnails, setLoadingThumbnails] = useState<Set<string>>(new Set());
 
   const addCondition = useConditionStore((s) => s.addCondition);
-  // Narrow selector: only this project's conditions (avoids re-render when other projects' conditions change)
-  const conditions = useConditionStore((s) => s.getProjectConditions(projectId));
+  // Narrow selector with shallow eq: only this project's conditions (avoids re-render when other projects' conditions change)
+  const conditions = useConditionStore(useShallow((s) => s.getProjectConditions(projectId)));
   const setSelectedCondition = useConditionStore((s) => s.setSelectedCondition);
   const selectedConditionId = useConditionStore((s) => s.selectedConditionId);
   const getConditionTakeoffMeasurements = useMeasurementStore((s) => s.getConditionTakeoffMeasurements);
   const _loadProjectConditions = useConditionStore((s) => s.loadProjectConditions);
   const _getProjectTakeoffMeasurements = useMeasurementStore((s) => s.getProjectTakeoffMeasurements);
-  // Narrow selector: summary changes when measurements change; used to trigger thumbnail effect (avoids subscribing to full array)
-  const takeoffSummary = useMeasurementStore((s) => s.getProjectTakeoffSummary(projectId));
+  // Narrow selector with shallow eq: summary changes when measurements change; used to trigger thumbnail effect
+  const takeoffSummary = useMeasurementStore(useShallow((s) => s.getProjectTakeoffSummary(projectId)));
   const loadingConditions = useConditionStore((s) => s.loadingConditions);
   const refreshProjectConditions = useConditionStore((s) => s.refreshProjectConditions);
   const ensureConditionsLoaded = useConditionStore((s) => s.ensureConditionsLoaded);

@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 import { Plugin } from 'vite'
@@ -86,9 +86,28 @@ function spaFallback(): Plugin {
   }
 }
 
+// Inject preconnect hints for faster auth/API (Supabase URL from env at build time)
+function injectPreconnect(mode: string): Plugin {
+  const env = loadEnv(mode, process.cwd(), '');
+  return {
+    name: 'inject-preconnect',
+    transformIndexHtml(html) {
+      const supabaseUrl = env.VITE_SUPABASE_URL;
+      if (!supabaseUrl) return html;
+      try {
+        const origin = new URL(supabaseUrl).origin;
+        const hints = `    <link rel="preconnect" href="${origin}" crossorigin />\n    <link rel="dns-prefetch" href="${origin}" />`;
+        return html.replace('</head>', `${hints}\n  </head>`);
+      } catch {
+        return html;
+      }
+    },
+  };
+}
+
 // https://vitejs.dev/config/
-export default defineConfig({
-  plugins: [react(), spaFallback()],
+export default defineConfig(({ mode }) => ({
+  plugins: [react(), spaFallback(), injectPreconnect(mode)],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -119,6 +138,8 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (id.includes('node_modules/pdfjs-dist')) return 'pdfjs';
+          if (id.includes('node_modules/tesseract')) return 'tesseract';
+          if (id.includes('node_modules/exceljs')) return 'exceljs';
           if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/') || id.includes('node_modules/react-router') || id.includes('node_modules/scheduler')) return 'vendor-react';
           if (id.includes('node_modules/@radix-ui')) return 'vendor-radix';
           if (id.includes('node_modules/zustand')) return 'vendor-zustand';
@@ -130,4 +151,4 @@ export default defineConfig({
   optimizeDeps: {
     include: ['pdfjs-dist']
   }
-})
+}))

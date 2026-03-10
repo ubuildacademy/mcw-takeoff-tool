@@ -31,7 +31,7 @@ Tracking doc for refactoring (structure, hooks, components) and broader improvem
 ### Security & architecture
 - **Auth** – Centralized `requireAuth` (and `requireAdmin`, `hasProjectAccess`) in `server/src/middleware/auth.ts`; all API routes use it.
 - **Security** – Client/server use env vars only (no hardcoded credentials); rate limiting in place; input validation (`validateUUIDParam`, `sanitizeBody`); Supabase security fixes applied (RLS, function `search_path`).
-- **Performance** – N+1 queries fixed (batch queries for measurement counts); code splitting (pdfjs chunk, lazy dialogs, dynamic exceljs/jspdf imports).
+- **Performance** – N+1 queries fixed (batch queries for measurement counts); code splitting (pdfjs chunk, tesseract/exceljs manualChunks, lazy dialogs: AdminPanel, ChatTab, SearchTab, CVTakeoffAgent, CalibrationDialog, ScaleApplicationDialog; dynamic exceljs/jspdf imports in `useTakeoffExport`); Zustand `useShallow` for object/array selectors in TakeoffSidebar and ChatTab; preconnect hints for Supabase injected at build time.
 
 ---
 
@@ -79,8 +79,9 @@ Tracking doc for refactoring (structure, hooks, components) and broader improvem
 
 ### Performance
 
-- **Zustand:** Narrow selectors implemented (see "Store selectors" above). Prefer `(s) => s.field` to avoid re-renders when unrelated state changes.
-- **Code splitting:** Route-level lazy load + Suspense; pdfjs chunk; lazy dialogs (CVTakeoffAgent, CalibrationDialog, ScaleApplicationDialog); dynamic exceljs/jspdf imports in `useTakeoffExport`.
+- **Zustand:** Narrow selectors implemented (see "Store selectors" above). `useShallow` used for selectors returning objects/arrays (`getProjectConditions`, `getProjectTakeoffSummary`) in TakeoffSidebar and ChatTab to avoid unnecessary re-renders.
+- **Code splitting:** Route-level lazy load + Suspense; pdfjs, tesseract, exceljs manualChunks; lazy dialogs and tabs (AdminPanel, ChatTab, SearchTab, CVTakeoffAgent, CalibrationDialog, ScaleApplicationDialog); dynamic exceljs/jspdf imports in `useTakeoffExport`.
+- **Preconnect:** Supabase origin injected into `index.html` via Vite plugin for faster auth/API connection.
 - **Heavy children:** Consider `React.memo` only if profiling shows them as hot. Prefer fewer state updates over memo everywhere.
 
 ### Consistency & hygiene
