@@ -24,6 +24,7 @@ export interface ProjectBackup {
     fileDataError?: string; // Error message if file couldn't be downloaded
   })[];
   sheets: unknown[]; // Sheet data from the API
+  ocrResults?: Array<{ documentId: string; pageNumber: number; text: string; confidence: number; processingTime: number; method: string }>;
   measurements: TakeoffMeasurement[];
   calibrations?: Calibration[]; // Scale calibrations
   metadata: {

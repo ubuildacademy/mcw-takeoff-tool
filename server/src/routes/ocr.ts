@@ -10,111 +10,75 @@ const router = express.Router();
 
 
 
+/** Shared: download PDF, create job, start background processing. Returns jobId or null if skipped. */
+async function startOCRJob(projectId: string, documentId: string, options?: { clearIfProcessed?: boolean }): Promise<string | null> {
+  const { data: documentData, error: documentError } = await supabase
+    .from('takeoff_files')
+    .select('filename, path')
+    .eq('id', documentId)
+    .eq('project_id', projectId)
+    .single();
+
+  if (documentError || !documentData?.path) return null;
+
+  const { data: fileData, error: downloadError } = await supabase.storage
+    .from('project-files')
+    .download(documentData.path);
+
+  if (downloadError || !fileData) return null;
+
+  if (options?.clearIfProcessed) {
+    const isProcessed = await simpleOcrService.isDocumentProcessed(projectId, documentId);
+    if (isProcessed) {
+      await simpleOcrService.clearDocumentResults(projectId, documentId);
+    }
+  }
+
+  const tempDir = path.join(process.cwd(), 'server', 'temp', 'pdf-processing');
+  await fs.ensureDir(tempDir);
+  const documentPath = path.join(tempDir, `${documentId}.pdf`);
+  await fs.writeFile(documentPath, Buffer.from(await fileData.arrayBuffer()));
+
+  const jobId = uuidv4();
+  const { error: jobError } = await supabase.from('ocr_jobs').insert({
+    id: jobId,
+    project_id: projectId,
+    document_id: documentId,
+    status: 'pending',
+    progress: 0,
+    total_pages: 0,
+    processed_pages: 0
+  });
+
+  if (jobError) {
+    console.error('Failed to create OCR job:', jobError);
+    return null;
+  }
+
+  processDocumentOCR(documentPath, jobId, documentId, projectId);
+  return jobId;
+}
+
 // Process entire document with OCR
 router.post('/process-document/:documentId', requireAuth, validateUUIDParam('documentId'), async (req, res) => {
   const { documentId } = req.params;
   const { projectId } = req.body;
 
-  console.log('🔍 OCR Request received:', { documentId, projectId });
-
   if (!projectId) {
     return res.status(400).json({ error: 'Project ID is required' });
   }
 
-  // Verify user has access to this project
   const userIsAdmin = await isAdmin(req.user!.id);
   if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
     return res.status(404).json({ error: 'Project not found or access denied' });
   }
 
   try {
-    // Get document info from database to find the Supabase Storage path
-    const { data: documentData, error: documentError } = await supabase
-      .from('takeoff_files')
-      .select('filename, path')
-      .eq('id', documentId)
-      .eq('project_id', projectId)
-      .single();
-
-    if (documentError || !documentData) {
-      console.error('Document lookup failed:', documentError);
-      return res.status(404).json({ error: 'Document not found' });
+    const jobId = await startOCRJob(projectId, documentId, { clearIfProcessed: true });
+    if (!jobId) {
+      return res.status(404).json({ error: 'Document not found or could not be prepared for OCR' });
     }
-
-    // Download PDF from Supabase Storage to temporary location for processing
-    const storagePath = documentData.path;
-    console.log('Downloading PDF from Supabase Storage:', storagePath);
-    
-    const { data: fileData, error: downloadError } = await supabase.storage
-      .from('project-files')
-      .download(storagePath);
-    
-    if (downloadError || !fileData) {
-      console.error('Document file not found in Supabase Storage:', downloadError);
-      return res.status(404).json({ error: 'Document file not found in storage' });
-    }
-    
-    // Save to temporary file for OCR processing
-    const tempDir = path.join(process.cwd(), 'server', 'temp', 'pdf-processing');
-    await fs.ensureDir(tempDir);
-    const documentPath = path.join(tempDir, `${documentId}.pdf`);
-    
-    const arrayBuffer = await fileData.arrayBuffer();
-    await fs.writeFile(documentPath, Buffer.from(arrayBuffer));
-    
-    console.log('PDF downloaded to temporary location for OCR:', documentPath);
-
-    // Check if document is already processed
-    const isProcessed = await simpleOcrService.isDocumentProcessed(projectId, documentId);
-    if (isProcessed) {
-      // Allow re-processing by clearing existing results
-      console.log('🔄 Document already processed, clearing existing results for re-processing...');
-      await simpleOcrService.clearDocumentResults(projectId, documentId);
-    }
-
-    // Create OCR job in database
-    const jobId = uuidv4();
-    const { data: jobData, error: jobError } = await supabase
-      .from('ocr_jobs')
-      .insert({
-        id: jobId,
-        project_id: projectId,
-        document_id: documentId,
-        status: 'pending',
-        progress: 0,
-        total_pages: 0,
-        processed_pages: 0
-      })
-      .select()
-      .single();
-
-    if (jobError) {
-      console.error('Failed to create OCR job:', jobError);
-      console.error('Job data attempted:', {
-        id: jobId,
-        project_id: projectId,
-        document_id: documentId,
-        status: 'pending',
-        progress: 0,
-        total_pages: 0,
-        processed_pages: 0
-      });
-      return res.status(500).json({ 
-        error: 'Failed to create OCR job',
-        details: jobError.message,
-        code: jobError.code
-      });
-    }
-
-    // Start processing in background
-    processDocumentOCR(documentPath, jobId, documentId, projectId);
-
-    res.json({ 
-      jobId,
-      message: 'OCR processing started',
-      status: 'pending'
-    });
-
+    res.json({ jobId, message: 'OCR processing started', status: 'pending' });
   } catch (error) {
     console.error('Error starting OCR processing:', error);
     res.status(500).json({ error: 'Failed to start OCR processing' });
@@ -394,5 +358,16 @@ async function processDocumentOCR(documentPath: string, jobId: string, documentI
   }
 }
 
+/**
+ * Trigger OCR for a document (e.g. after import). Fire-and-forget; swallows errors.
+ */
+export async function triggerOCRForDocument(projectId: string, documentId: string): Promise<void> {
+  try {
+    const jobId = await startOCRJob(projectId, documentId);
+    if (jobId) console.log(`📄 OCR triggered for document ${documentId}`);
+  } catch (error) {
+    console.error(`OCR trigger failed for ${documentId}:`, error);
+  }
+}
 
 export { router as ocrRoutes };

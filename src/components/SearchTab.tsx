@@ -85,16 +85,21 @@ export function SearchTab({
           if (DEV) console.error('Search failed for document:', error);
         }
       } else {
-        for (const doc of ocrEnabledDocuments) {
+        const searchPromises = ocrEnabledDocuments.map(async (doc) => {
           try {
             const response = await ocrApiService.searchDocument(doc.id, query, projectId);
             if (response.results && response.results.length > 0) {
               const validResults = response.results.filter((r: unknown): r is SearchResultItem => r != null && typeof r === 'object' && (r as SearchResultItem).pageNumber != null);
-              results[doc.id] = validResults;
+              return { docId: doc.id, results: validResults } as const;
             }
           } catch (error) {
             if (DEV) console.error('Search failed for document:', doc.id, error);
           }
+          return null;
+        });
+        const searchResultsList = await Promise.all(searchPromises);
+        for (const item of searchResultsList) {
+          if (item) results[item.docId] = item.results;
         }
       }
 
@@ -196,9 +201,9 @@ export function SearchTab({
         {ocrEnabledDocuments.length === 0 && documents.length > 0 && (
           <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
             <div className="flex items-center gap-2 text-yellow-700">
-              <AlertCircle className="w-4 h-4" />
+              <AlertCircle className="w-4 h-4 shrink-0" />
               <span className="text-sm">
-                No documents have been OCR processed yet. Run OCR processing on your documents first to enable search.
+                OCR data is not yet available. OCR is included in backups and runs automatically when needed—refresh when processing completes, or run OCR from the Documents tab.
               </span>
             </div>
           </div>
@@ -221,6 +226,8 @@ export function SearchTab({
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
             <Input
+              id="search-documents"
+              name="search-documents"
               placeholder="Search in documents..."
               value={searchQuery}
               onChange={(e) => handleSearch(e.target.value)}

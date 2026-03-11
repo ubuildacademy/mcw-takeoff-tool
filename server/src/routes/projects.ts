@@ -5,6 +5,8 @@ import multer from 'multer';
 import path from 'path';
 import { storage, StoredProject } from '../storage';
 import { supabase, TABLES } from '../supabase';
+import { triggerOCRForDocument } from './ocr';
+import { simpleOcrService } from '../services/simpleOcrService';
 import { 
   requireAuth, 
   requireProjectAccess,
@@ -61,35 +63,50 @@ async function buildProjectBackup(
     throw err;
   }
 
-  const conditions = await storage.getConditionsByProject(id).catch(() => []);
-  const files = await storage.getFilesByProject(id).catch(() => []);
-  const measurements = await storage.getTakeoffMeasurementsByProject(id).catch(() => []);
-  const calibrations = await storage.getCalibrationsByProject(id).catch(() => []);
+  const [conditions, files, measurements, calibrations] = await Promise.all([
+    storage.getConditionsByProject(id).catch(() => []),
+    storage.getFilesByProject(id).catch(() => []),
+    storage.getTakeoffMeasurementsByProject(id).catch(() => []),
+    storage.getCalibrationsByProject(id).catch(() => []),
+  ]);
 
   const fileIds = files.map((f) => f.id);
-  let sheets: unknown[] = [];
-  if (fileIds.length > 0) {
-    const { data: allSheets } = await supabase
-      .from(TABLES.SHEETS)
-      .select('*')
-      .in('document_id', fileIds)
-      .order('page_number', { ascending: true });
-    sheets = (allSheets || []).map((s) => ({
-      id: (s as Record<string, unknown>).id,
-      documentId: (s as Record<string, unknown>).document_id,
-      pageNumber: (s as Record<string, unknown>).page_number,
-      sheetNumber: (s as Record<string, unknown>).sheet_number,
-      sheetName: (s as Record<string, unknown>).sheet_name,
-      extractedText: (s as Record<string, unknown>).extracted_text,
-      hasTakeoffs: (s as Record<string, unknown>).has_takeoffs,
-      takeoffCount: (s as Record<string, unknown>).takeoff_count,
-      isVisible: (s as Record<string, unknown>).is_visible,
-      ocrProcessed: (s as Record<string, unknown>).ocr_processed,
-      titleblockConfig: (s as Record<string, unknown>).titleblock_config,
-      createdAt: (s as Record<string, unknown>).created_at,
-      updatedAt: (s as Record<string, unknown>).updated_at,
-    }));
-  }
+
+  const [sheetsRes, ocrRes] = await Promise.all([
+    fileIds.length > 0
+      ? supabase.from(TABLES.SHEETS).select('*').in('document_id', fileIds).order('page_number', { ascending: true })
+      : Promise.resolve<{ data: unknown[] }>({ data: [] }),
+    fileIds.length > 0
+      ? supabase.from('ocr_results').select('document_id, page_number, text_content, confidence_score, processing_time_ms, processing_method').eq('project_id', id).in('document_id', fileIds).order('page_number')
+      : Promise.resolve<{ data: unknown[] }>({ data: [] }),
+  ]);
+
+  const ocrData = Array.isArray(ocrRes.data) ? ocrRes.data : [];
+  const ocrResults = ocrData.map((r: Record<string, unknown>) => ({
+    documentId: r.document_id,
+    pageNumber: r.page_number,
+    text: r.text_content || '',
+    confidence: r.confidence_score || 0,
+    processingTime: r.processing_time_ms || 0,
+    method: r.processing_method || 'direct_extraction',
+  }));
+
+  const allSheets = Array.isArray(sheetsRes.data) ? sheetsRes.data : [];
+  const mappedSheets = allSheets.map((s: Record<string, unknown>) => ({
+    id: s.id,
+    documentId: s.document_id,
+    pageNumber: s.page_number,
+    sheetNumber: s.sheet_number,
+    sheetName: s.sheet_name,
+    extractedText: s.extracted_text,
+    hasTakeoffs: s.has_takeoffs,
+    takeoffCount: s.takeoff_count,
+    isVisible: s.is_visible,
+    ocrProcessed: s.ocr_processed,
+    titleblockConfig: s.titleblock_config,
+    createdAt: s.created_at,
+    updatedAt: s.updated_at,
+  }));
 
   const filesWithData = await Promise.all(
     files.map(async (file) => {
@@ -118,14 +135,15 @@ async function buildProjectBackup(
     project,
     conditions,
     files: filesWithData,
-    sheets,
+    sheets: mappedSheets,
+    ocrResults,
     measurements,
     calibrations,
     metadata: {
       totalFiles: files.length,
       totalConditions: conditions.length,
       totalMeasurements: measurements.length,
-      totalSheets: sheets.length,
+      totalSheets: mappedSheets.length,
       totalCalibrations: calibrations.length,
       filesWithData: filesWithDataCount,
       filesMissing: filesWithData.length - filesWithDataCount,
@@ -184,6 +202,7 @@ export async function performImportFromBackup(
   }
 
   const fileIdMapping: Record<string, string> = {};
+  const importedPdfIds = new Set<string>();
   const files = (backup.files as Array<Record<string, unknown>>) || [];
   for (const file of files) {
     const originalFileId = (file.id as string) || '';
@@ -191,6 +210,7 @@ export async function performImportFromBackup(
     const newFileId = uuidv4();
     fileIdMapping[originalFileId] = newFileId;
     const mime = (fileDataMimeType || fileMeta.mimetype || 'application/pdf') as string;
+    const isPdf = mime === 'application/pdf';
     if (fileData && typeof fileData === 'string') {
       try {
         const fileBuffer = Buffer.from(fileData as string, 'base64');
@@ -201,6 +221,8 @@ export async function performImportFromBackup(
           .upload(storagePath, fileBuffer, { contentType: mime, upsert: false });
         if (uploadError) {
           console.warn(`Failed to upload ${fileMeta.originalName}:`, uploadError);
+        } else if (isPdf) {
+          importedPdfIds.add(newFileId);
         }
         await storage.saveFile({
           id: newFileId,
@@ -324,11 +346,50 @@ export async function performImportFromBackup(
     }
   }
 
+  const migratedOcrDocumentIds = new Set<string>();
+  const backupOcrResults = backup.ocrResults as Array<{ documentId: string; pageNumber: number; text: string; confidence: number; processingTime: number; method: string }> | undefined;
+  if (Array.isArray(backupOcrResults) && backupOcrResults.length > 0) {
+    const byDocument = new Map<string, Array<{ pageNumber: number; text: string; confidence: number; processingTime: number; method: 'direct_extraction' | 'tesseract' }>>();
+    for (const r of backupOcrResults) {
+      if (!r?.documentId) continue;
+      const list = byDocument.get(r.documentId) ?? [];
+      list.push({
+        pageNumber: r.pageNumber,
+        text: r.text,
+        confidence: r.confidence,
+        processingTime: r.processingTime,
+        method: (r.method === 'tesseract' ? 'tesseract' : 'direct_extraction') as 'direct_extraction' | 'tesseract',
+      });
+      byDocument.set(r.documentId, list);
+    }
+    const savePromises: Promise<void>[] = [];
+    for (const [oldDocId, results] of byDocument) {
+      const newDocId = fileIdMapping[oldDocId];
+      if (newDocId && results.length > 0) {
+        migratedOcrDocumentIds.add(newDocId);
+        savePromises.push(simpleOcrService.saveOCRResults(newProjectId, newDocId, results));
+      }
+    }
+    await Promise.all(savePromises);
+    if (migratedOcrDocumentIds.size > 0) {
+      console.log(`📄 Import: Migrated OCR for ${migratedOcrDocumentIds.size} document(s)`);
+    }
+  }
+
   const filesRestored = files.filter((f) => f.fileData).length;
   const filesMissing = files.filter((f) => !f.fileData).length;
   const message = filesMissing > 0
     ? `Project imported. ${filesRestored} PDF(s) restored, ${filesMissing} missing.`
     : `Project imported. All ${filesRestored} PDF(s) restored.`;
+
+  const pdfsNeedingOcr = [...importedPdfIds].filter((id) => !migratedOcrDocumentIds.has(id));
+  for (const documentId of pdfsNeedingOcr) {
+    triggerOCRForDocument(newProjectId, documentId).catch(() => {});
+  }
+  if (pdfsNeedingOcr.length > 0) {
+    console.log(`📄 Import: OCR triggered for ${pdfsNeedingOcr.length} PDF(s) missing OCR data`);
+  }
+
   return { project: newProject, message, annotations, documentRotations, hyperlinks };
 }
 
