@@ -357,6 +357,7 @@ class TitleblockExtractionService {
       const tempScriptPath = path.join(this.tempDir, `extract_region_${Date.now()}.py`);
       const extractScript = `
 import sys
+import traceback
 import fitz  # PyMuPDF
 import io
 import pytesseract
@@ -453,14 +454,61 @@ try:
     
     region_rect = fitz.Rect(x0, y0, x1, y1)
     
-    # Render the clipped region to an image for OCR
+    # Strategy 1: Try PyMuPDF native text extraction first (works for vector PDFs, no OCR needed)
+    vector_text = page.get_text("text", clip=region_rect).strip()
+    if vector_text:
+        print(f"Using vector text extraction ({len(vector_text)} chars)", file=sys.stderr)
+        print(vector_text, end="")
+        doc.close()
+        sys.exit(0)
+    
+    # Strategy 2: Fall back to OCR for scanned/raster PDFs
+    print("Vector text empty, falling back to OCR", file=sys.stderr)
     DPI = 300  # High-enough resolution for crisp text
     zoom = DPI / 72  # 72 points per inch baseline
     matrix = fitz.Matrix(zoom, zoom)
-    pix = page.get_pixmap(matrix=matrix, clip=region_rect, alpha=False)
 
-    img_bytes = pix.tobytes("png")
-    image = Image.open(io.BytesIO(img_bytes))
+    # Extract region as image for OCR. Use fallbacks to avoid PyMuPDF's
+    # "Invalid bandwriter header dimensions/setup" error on rotated pages
+    # or very small clips (pix.tobytes("png") can fail on clipped pixmaps).
+    image = None
+    try:
+        # Attempt 1: Clip + pil_image (avoids PNG encoding, often works)
+        pix = page.get_pixmap(matrix=matrix, clip=region_rect, alpha=False)
+        if pix.width >= 1 and pix.height >= 1:
+            image = pix.pil_image()
+    except Exception as e1:
+        print(f"Clip+pil_image failed: {e1}", file=sys.stderr)
+
+    if image is None:
+        try:
+            # Attempt 2: Full page render + PIL crop (robust for rotated pages)
+            pix = page.get_pixmap(matrix=matrix, alpha=False)
+            pil_full = pix.pil_image()
+            # Region in PDF points -> pixels (scaled by zoom)
+            left = int(x0 * zoom)
+            top = int(y0 * zoom)
+            right = int(x1 * zoom)
+            bottom = int(y1 * zoom)
+            # Clamp to image bounds
+            w, h = pil_full.size
+            left = max(0, min(left, w - 1))
+            top = max(0, min(top, h - 1))
+            right = max(left + 1, min(right, w))
+            bottom = max(top + 1, min(bottom, h))
+            image = pil_full.crop((left, top, right, bottom))
+            print("Using full-page+crop fallback", file=sys.stderr)
+        except Exception as e2:
+            print(f"Full-page+crop failed: {e2}", file=sys.stderr)
+            print(traceback.format_exc(), file=sys.stderr)
+            doc.close()
+            print("", end="")
+            sys.exit(0)
+
+    if image is None or image.size[0] < 1 or image.size[1] < 1:
+        doc.close()
+        print("", end="")
+        sys.exit(0)
 
     # Perform OCR on the rendered image
     # PSM 6: Assume a block of text; OEM 3: default LSTM
