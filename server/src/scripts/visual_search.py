@@ -163,7 +163,6 @@ def visual_search(image_path, template_path, confidence_threshold=0.7, method='c
             all_detections = sorted(all_detections, key=lambda d: d['confidence'], reverse=True)[:1000]
         
         # Group nearby detections to avoid duplicates (distance-based deduplication)
-        # Similar to JP Takeoff prototype approach
         matches = []
         match_id = 0
         detected_positions = []
@@ -176,7 +175,7 @@ def visual_search(image_path, template_path, confidence_threshold=0.7, method='c
             w, h = detection['width'], detection['height']
             
             # Check if this position is too close to existing detections
-            # Use distance-based threshold (like JP Takeoff: max(width, height) * 0.8)
+            # Use distance-based threshold: max(width, height) * 0.8
             min_distance = max(w, h) * 0.8
             too_close = False
             

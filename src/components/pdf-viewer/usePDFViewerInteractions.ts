@@ -12,6 +12,43 @@ import { useUndoStore } from '../../store';
 
 const PASTE_OFFSET = 0.02;
 
+/**
+ * Transform a selection rect from rotated viewport coordinates (0-1) to native PDF page coordinates (0-1).
+ * The server expects native coords; when the user draws on a rotated page, we must convert.
+ * Same inverse transform as calibration/cutout point conversion (viewport -> baseViewport).
+ */
+function transformSelectionRectToNative(
+  rect: { x: number; y: number; width: number; height: number },
+  rotation: number
+): { x: number; y: number; width: number; height: number } {
+  const { x: nx, y: ny, width: nw, height: nh } = rect;
+  const r = rotation % 360;
+  if (r === 0) return rect;
+
+  // Transform 4 corners to native, then take AABB
+  const px = (qx: number, qy: number) => {
+    if (r === 90) return { x: qy, y: 1 - qx };
+    if (r === 180) return { x: 1 - qx, y: 1 - qy };
+    if (r === 270) return { x: 1 - qy, y: qx };
+    return { x: qx, y: qy };
+  };
+  const c1 = px(nx, ny);
+  const c2 = px(nx + nw, ny);
+  const c3 = px(nx + nw, ny + nh);
+  const c4 = px(nx, ny + nh);
+  const xMin = Math.min(c1.x, c2.x, c3.x, c4.x);
+  const xMax = Math.max(c1.x, c2.x, c3.x, c4.x);
+  const yMin = Math.min(c1.y, c2.y, c3.y, c4.y);
+  const yMax = Math.max(c1.y, c2.y, c3.y, c4.y);
+  const out = {
+    x: Math.max(0, Math.min(1, xMin)),
+    y: Math.max(0, Math.min(1, yMin)),
+    width: Math.max(0.001, Math.min(1, xMax - xMin)),
+    height: Math.max(0.001, Math.min(1, yMax - yMin)),
+  };
+  return out;
+}
+
 const ANNOTATION_SHORTCUTS: Record<string, 'rectangle' | 'text' | 'circle' | 'arrow'> = {
   r: 'rectangle',
   t: 'text',
@@ -1162,12 +1199,17 @@ export function usePDFViewerInteractions(
       }
       const finalSelectionBox = { x, y, width, height };
       setSelectionBox(finalSelectionBox);
-      const pdfSelectionBox = {
+      let pdfSelectionBox = {
         x: x / viewport.width,
         y: y / viewport.height,
         width: width / viewport.width,
         height: height / viewport.height,
       };
+      // Transform from rotated viewport space to native page space for server extraction
+      const rotation = viewState.rotation || 0;
+      if (rotation !== 0) {
+        pdfSelectionBox = transformSelectionRectToNative(pdfSelectionBox, rotation);
+      }
       setSelectionStart(null);
       setIsSelectingSymbol(false);
       if (titleblockSelectionMode && onTitleblockSelectionComplete) {

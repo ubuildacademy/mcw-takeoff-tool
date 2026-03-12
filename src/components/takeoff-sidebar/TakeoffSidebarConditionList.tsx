@@ -39,9 +39,9 @@ function formatConditionValue(
   if (totalValue <= 0) return '0';
   if (condition.type === 'linear' && condition.includeHeight && condition.height && totalAreaValue > 0) {
     return (
-      <div className="space-y-1">
-        <div>{formatFeetAndInches(totalValue)} LF</div>
-        <div className="text-xs text-gray-500">{totalAreaValue.toFixed(0)} SF</div>
+      <div className="flex items-center gap-2">
+        <span>{formatFeetAndInches(totalValue)} LF</span>
+        <span className="text-xs text-gray-500">{totalAreaValue.toFixed(0)} SF</span>
       </div>
     );
   }
@@ -50,9 +50,9 @@ function formatConditionValue(
   }
   if (condition.unit === 'SF' || condition.unit === 'sq ft') {
     return (
-      <div className="space-y-1">
-        <div>{totalValue.toFixed(0)} SF</div>
-        {totalPerimeter > 0 && <div className="text-xs text-gray-500">{formatFeetAndInches(totalPerimeter)} LF</div>}
+      <div className="flex items-center gap-2">
+        <span>{totalValue.toFixed(0)} SF</span>
+        {totalPerimeter > 0 && <span className="text-xs text-gray-500">{formatFeetAndInches(totalPerimeter)} LF</span>}
       </div>
     );
   }

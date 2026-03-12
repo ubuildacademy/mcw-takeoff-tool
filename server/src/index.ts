@@ -177,54 +177,39 @@ app.all('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Debug endpoint - explicitly allow OPTIONS
-app.all('/api/debug', (req, res) => {
-  if (req.method === 'OPTIONS') {
-    const origin = req.headers.origin;
-    if (isProduction && typeof allowedOrigins !== 'boolean') {
-      const isAllowed = allowedOrigins.some(allowed => {
-        if (typeof allowed === 'string') return allowed === origin;
-        if (allowed instanceof RegExp) return origin ? allowed.test(origin) : false;
-        return false;
-      });
-      if (origin && isAllowed) {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-        res.setHeader('Access-Control-Allow-Credentials', 'true');
-        return res.status(204).send();
-      }
-    } else if (!isProduction) {
+// Debug endpoints - only in development (security: never expose in production)
+if (!isProduction) {
+  app.all('/api/debug', (req, res) => {
+    if (req.method === 'OPTIONS') {
+      const origin = req.headers.origin;
       if (origin) res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
       res.setHeader('Access-Control-Allow-Credentials', 'true');
       return res.status(204).send();
     }
-    return res.status(403).send();
-  }
-  console.log('🔍 Debug endpoint hit:', req.method, req.path, req.headers);
-  res.json({ 
-    method: req.method,
-    path: req.path,
-    headers: req.headers,
-    timestamp: new Date().toISOString()
+    console.log('🔍 Debug endpoint hit:', req.method, req.path, req.headers);
+    res.json({
+      method: req.method,
+      path: req.path,
+      headers: req.headers,
+      timestamp: new Date().toISOString()
+    });
   });
-});
 
-// Env debug - which email vars the process can see (no secrets exposed)
-app.get('/api/debug-env', (req, res) => {
-  res.json({
-    email: {
-      GRAPH_CLIENT_ID: !!process.env.GRAPH_CLIENT_ID,
-      GRAPH_TENANT_ID: !!process.env.GRAPH_TENANT_ID,
-      GRAPH_CLIENT_SECRET: !!process.env.GRAPH_CLIENT_SECRET,
-      GRAPH_SENDER_EMAIL: !!process.env.GRAPH_SENDER_EMAIL,
-      FRONTEND_URL: process.env.FRONTEND_URL || '(not set)',
-    },
-    timestamp: new Date().toISOString(),
+  app.get('/api/debug-env', (req, res) => {
+    res.json({
+      email: {
+        GRAPH_CLIENT_ID: !!process.env.GRAPH_CLIENT_ID,
+        GRAPH_TENANT_ID: !!process.env.GRAPH_TENANT_ID,
+        GRAPH_CLIENT_SECRET: !!process.env.GRAPH_CLIENT_SECRET,
+        GRAPH_SENDER_EMAIL: !!process.env.GRAPH_SENDER_EMAIL,
+        FRONTEND_URL: process.env.FRONTEND_URL || '(not set)',
+      },
+      timestamp: new Date().toISOString(),
+    });
   });
-});
+}
 
 // Apply rate limiting only to sensitive endpoints
 // Read operations are already protected by authentication, so we don't rate limit them aggressively

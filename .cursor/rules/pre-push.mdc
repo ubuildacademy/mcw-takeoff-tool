@@ -1,0 +1,18 @@
+---
+description: Run pre-push checks before committing or pushing
+alwaysApply: true
+---
+
+# Pre-push checklist
+
+Before **any** `git commit` or `git push`, you MUST:
+
+1. Run the full CI locally:
+   ```bash
+   npm run ci:local
+   ```
+   This runs `typecheck` + `build`. If either fails, do not commit or push.
+
+2. Ensure the pre-push hook is installed (via `npm install`). The hook blocks broken pushes automatically, but running `ci:local` first catches issues before the commit.
+
+Reference: `docs/DEPLOY_CHECKLIST.md`

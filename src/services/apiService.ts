@@ -734,13 +734,14 @@ export const titleblockService = {
     titleblockConfig: {
       sheetNumberField: { x: number; y: number; width: number; height: number };
       sheetNameField: { x: number; y: number; width: number; height: number };
-    }
+    },
+    signal?: AbortSignal
   ) {
-    const response = await apiClient.post('/titleblock/extract', {
-      projectId,
-      documentIds,
-      titleblockConfig,
-    });
+    const response = await apiClient.post(
+      '/titleblock/extract',
+      { projectId, documentIds, titleblockConfig },
+      { signal }
+    );
     return response.data;
   },
 };

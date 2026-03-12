@@ -74,6 +74,7 @@ router.post('/extract', requireAuth, async (req, res) => {
       documentId: string;
       totalPages: number;
       sheets: Array<{ pageNumber: number; sheetNumber: string; sheetName: string }>;
+      diagnostics?: { validCount: number; unknownCount: number; error?: string };
     }> = [];
 
     for (const documentId of documentIds) {
@@ -282,10 +283,29 @@ router.post('/extract', requireAuth, async (req, res) => {
         });
       }
 
+      const validCount = savedSheets.filter(
+        (s) => s.sheetNumber !== 'Unknown' || s.sheetName !== 'Unknown'
+      ).length;
+      const unknownCount = savedSheets.length - validCount;
+      console.log('[Titleblock] Document complete:', {
+        documentId,
+        totalPages,
+        validCount,
+        unknownCount,
+        sample: savedSheets.slice(0, 2),
+      });
+
       results.push({
         documentId,
         totalPages,
         sheets: savedSheets,
+        diagnostics: {
+          validCount,
+          unknownCount,
+          ...(unknownCount === savedSheets.length && validCount === 0
+            ? { error: 'All pages returned Unknown. Check server logs for OCR/LLM failures.' }
+            : {}),
+        },
       });
     }
 
@@ -312,9 +332,15 @@ async function extractTitleblockWithLLM(
   sheetNameRegion: NormalizedBox,
   onProgress?: (currentBatch: number, totalBatches: number, processedPages: number) => void
 ): Promise<Array<{ pageNumber: number; sheetNumber: string; sheetName: string }>> {
-  const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'https://ollama.com';
+  const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
   const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || '';
-  const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'gpt-oss:120b';
+  const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.1:8b';
+
+  console.log('[Titleblock LLM] Config:', {
+    OLLAMA_BASE_URL,
+    hasApiKey: !!OLLAMA_API_KEY,
+    OLLAMA_MODEL,
+  });
 
   const results: Array<{ pageNumber: number; sheetNumber: string; sheetName: string }> = [];
 
@@ -537,14 +563,29 @@ Use "Unknown" if a value cannot be determined.`;
       console.log(`[Titleblock LLM] Success with model: ${tryModel}`);
       break;
     } catch (error) {
-      console.error(`[Titleblock LLM] Model ${tryModel} failed:`, error instanceof Error ? error.message : 'Unknown error');
+      const err = error as { code?: string; response?: { status?: number }; message?: string };
+      console.error(`[Titleblock LLM] Model ${tryModel} failed:`, {
+        message: err?.message ?? (error instanceof Error ? error.message : 'Unknown error'),
+        code: err?.code,
+        status: err?.response?.status,
+        url: ollamaBaseUrl,
+      });
       lastError = error;
       continue;
     }
   }
 
   if (!response) {
-    console.error('[Titleblock LLM] All models failed');
+    const lastErr = lastError as { code?: string; message?: string } | undefined;
+    console.error('[Titleblock LLM] All models failed. Last error:', {
+      message: lastErr?.message ?? 'Unknown',
+      code: lastErr?.code ?? 'Unknown',
+      hint: lastErr?.code === 'ECONNREFUSED'
+        ? 'Ollama may not be running. Start with: ollama serve'
+        : lastErr?.code === 'ENOTFOUND'
+          ? 'Check OLLAMA_BASE_URL - host not found'
+          : undefined,
+    });
     // Return Unknown for all pages
     return batchTexts.map(({ pageNumber }) => ({
       pageNumber,

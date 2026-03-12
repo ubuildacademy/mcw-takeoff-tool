@@ -33,6 +33,7 @@ export function TakeoffWorkspaceRightSidebar({
   uploading,
   onExtractTitleblockForDocument,
   onBulkExtractTitleblock,
+  onRotateAllSheetsInDocument,
 }: TakeoffWorkspaceRightSidebarProps) {
   return (
     <div className="flex">
@@ -109,6 +110,7 @@ export function TakeoffWorkspaceRightSidebar({
               uploading={uploading}
               onExtractTitleblockForDocument={onExtractTitleblockForDocument}
               onBulkExtractTitleblock={onBulkExtractTitleblock}
+              onRotateAllSheetsInDocument={onRotateAllSheetsInDocument}
             />
           )}
 

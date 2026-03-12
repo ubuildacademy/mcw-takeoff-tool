@@ -53,6 +53,7 @@ export interface UseTakeoffWorkspaceTabsResult {
   handleCloseAllOtherTabs: (tabId: string) => void;
   handleScaleChange: (scale: number) => void;
   handleRotationChange: (rotation: number) => void;
+  handleRotateAllSheetsInDocument: (documentId: string, direction: 'clockwise' | 'counterclockwise') => void;
   handleLocationChange: (x: number, y: number) => void;
   handlePDFRendered: () => void;
   hasTabs: boolean;
@@ -98,6 +99,9 @@ export function useTakeoffWorkspaceTabs({
   );
   const setDocumentRotationBySheet = useDocumentViewStore(
     (s) => s.setDocumentRotationBySheet
+  );
+  const setDocumentRotationsForDocument = useDocumentViewStore(
+    (s) => s.setDocumentRotationsForDocument
   );
   const setDocumentLocationBySheet = useDocumentViewStore(
     (s) => s.setDocumentLocationBySheet
@@ -293,6 +297,28 @@ export function useTakeoffWorkspaceTabs({
     [sheetId, setRotation, setDocumentRotationBySheet]
   );
 
+  const handleRotateAllSheetsInDocument = useCallback(
+    (documentId: string, direction: 'clockwise' | 'counterclockwise') => {
+      const doc = documents.find((d) => d.id === documentId);
+      const totalPages = doc?.totalPages ?? 1;
+      const firstSheetId = getSheetId(documentId, 1);
+      const baseRotation = getDocumentRotationBySheet(firstSheetId);
+      const delta = direction === 'clockwise' ? 90 : -90;
+      const newRotation = ((baseRotation + delta) % 360 + 360) % 360;
+      setDocumentRotationsForDocument(documentId, newRotation, totalPages);
+      if (currentPdfFile?.id === documentId) {
+        setRotation(newRotation);
+      }
+    },
+    [
+      documents,
+      currentPdfFile,
+      getDocumentRotationBySheet,
+      setDocumentRotationsForDocument,
+      setRotation,
+    ]
+  );
+
   const isInitialRenderRef = useRef(true);
 
   const handleLocationChange = useCallback(
@@ -338,6 +364,7 @@ export function useTakeoffWorkspaceTabs({
     handleCloseAllOtherTabs,
     handleScaleChange,
     handleRotationChange,
+    handleRotateAllSheetsInDocument,
     handleLocationChange,
     handlePDFRendered,
     hasTabs: openTabs.length > 0,

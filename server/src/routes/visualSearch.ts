@@ -9,7 +9,7 @@ import { autoCountService, type AutoCountResult } from '../services/visualSearch
 import { storage } from '../storage';
 import fs from 'fs-extra';
 import path from 'path';
-import { requireAuth, validateUUIDParam } from '../middleware';
+import { requireAuth, requireProjectAccess, hasProjectAccess, isAdmin, validateUUIDParam } from '../middleware';
 
 const router = Router();
 
@@ -90,6 +90,16 @@ router.post('/extract-template', requireAuth, async (req, res) => {
       });
     }
 
+    // Verify user has access to the project that owns the PDF
+    const file = await storage.getFile(pdfFileId);
+    if (!file) {
+      return res.status(404).json({ error: 'PDF file not found' });
+    }
+    const userIsAdmin = req.user ? await isAdmin(req.user.id) : false;
+    if (!req.user || !(await hasProjectAccess(req.user.id, file.projectId, userIsAdmin))) {
+      return res.status(404).json({ error: 'Project not found or access denied' });
+    }
+
     const selectionError = validateSelectionBox(selectionBox);
     if (selectionError) {
       return res.status(400).json({ error: selectionError });
@@ -122,6 +132,17 @@ router.post('/search-symbols', requireAuth, async (req, res) => {
       });
     }
 
+    // Verify user has access to the project that owns the condition
+    const conditions = await storage.getConditions();
+    const condition = conditions.find(c => c.id === conditionId);
+    if (!condition) {
+      return res.status(404).json({ error: 'Condition not found' });
+    }
+    const userIsAdmin = req.user ? await isAdmin(req.user.id) : false;
+    if (!req.user || !(await hasProjectAccess(req.user.id, condition.projectId, userIsAdmin))) {
+      return res.status(404).json({ error: 'Project not found or access denied' });
+    }
+
     const result = await autoCountService.searchForSymbols(
       conditionId,
       pdfFileId,
@@ -141,7 +162,7 @@ router.post('/search-symbols', requireAuth, async (req, res) => {
 });
 
 // Complete auto-count workflow with Server-Sent Events for real-time progress
-router.post('/complete-search', requireAuth, async (req, res) => {
+router.post('/complete-search', requireAuth, requireProjectAccess, async (req, res) => {
   // Check if client wants SSE (via Accept header or query param)
   const wantsSSE = req.headers.accept?.includes('text/event-stream') || req.query.sse === 'true';
   
@@ -391,6 +412,17 @@ router.get('/results/:conditionId', requireAuth, validateUUIDParam('conditionId'
   try {
     const { conditionId } = req.params;
 
+    // Verify user has access to the project that owns the condition
+    const conditions = await storage.getConditions();
+    const condition = conditions.find(c => c.id === conditionId);
+    if (!condition) {
+      return res.status(404).json({ error: 'Condition not found' });
+    }
+    const userIsAdmin = req.user ? await isAdmin(req.user.id) : false;
+    if (!req.user || !(await hasProjectAccess(req.user.id, condition.projectId, userIsAdmin))) {
+      return res.status(404).json({ error: 'Project not found or access denied' });
+    }
+
     // Get measurements for this condition
     const measurements = await storage.getTakeoffMeasurements();
     const conditionMeasurements = measurements.filter(m => m.conditionId === conditionId);
@@ -415,6 +447,12 @@ router.get('/thumbnails/:conditionId', requireAuth, validateUUIDParam('condition
 
     if (!projectId || typeof projectId !== 'string') {
       return res.status(400).json({ error: 'projectId query parameter is required' });
+    }
+
+    // Verify user has access to the project
+    const userIsAdmin = req.user ? await isAdmin(req.user.id) : false;
+    if (!req.user || !(await hasProjectAccess(req.user.id, projectId, userIsAdmin))) {
+      return res.status(404).json({ error: 'Project not found or access denied' });
     }
 
     const thumbnails = await autoCountService.extractMatchThumbnails(

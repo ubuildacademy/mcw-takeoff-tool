@@ -11,6 +11,17 @@ interface State {
   hasError: boolean;
   error: Error | null;
   errorInfo: ErrorInfo | null;
+  /** When true, show minimal fallback instead of full error UI (avoids loop from re-rendering failing child) */
+  isExpectedError?: boolean;
+}
+
+function isExpectedErrorType(error: Error): boolean {
+  return (
+    error.message?.includes('404') ||
+    error.message?.includes('Failed to load resource') ||
+    error.message?.includes('MissingPDFException') ||
+    error.name === 'MissingPDFException'
+  );
 }
 
 class ErrorBoundary extends Component<Props, State> {
@@ -24,28 +35,17 @@ class ErrorBoundary extends Component<Props, State> {
   }
 
   static getDerivedStateFromError(error: Error): Partial<State> {
-    return { hasError: true, error };
+    const expected = isExpectedErrorType(error);
+    if (import.meta.env.DEV && expected) {
+      console.warn('⚠️ Expected error caught (minimal UI):', error.message);
+    }
+    return { hasError: true, error, isExpectedError: expected };
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    // Check if this is an expected error (like 404s) that we should ignore
-    const isExpectedError = 
-      error.message?.includes('404') ||
-      error.message?.includes('Failed to load resource') ||
-      error.message?.includes('MissingPDFException') ||
-      error.name === 'MissingPDFException';
-    
-    if (isExpectedError) {
-      // Log but don't show error boundary for expected errors
-      console.warn('⚠️ Expected error caught (ignoring):', error.message);
-      return;
-    }
-    
+    if (isExpectedErrorType(error)) return;
     console.error('ErrorBoundary caught an error:', error, errorInfo);
-    this.setState({
-      error,
-      errorInfo,
-    });
+    this.setState({ error, errorInfo });
 
     // Log to console with full details
     console.group('🚨 Error Boundary Caught Error');
@@ -60,6 +60,7 @@ class ErrorBoundary extends Component<Props, State> {
       hasError: false,
       error: null,
       errorInfo: null,
+      isExpectedError: undefined,
     });
   };
 
@@ -73,6 +74,13 @@ class ErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
+      if (this.state.isExpectedError) {
+        return (
+          <div className="flex items-center justify-center p-4 text-slate-500 text-sm" role="alert">
+            Resource could not be loaded.
+          </div>
+        );
+      }
       if (this.props.fallback) {
         return this.props.fallback;
       }

@@ -1,7 +1,8 @@
 import React from 'react';
-import { FileText } from 'lucide-react';
+import { FileText, X } from 'lucide-react';
 import { Badge } from '../ui/badge';
 import { Separator } from '../ui/separator';
+import { Button } from '../ui/button';
 import type { TakeoffWorkspaceStatusBarProps, OcrJobEntry } from './TakeoffWorkspaceHeader.types';
 
 export function TakeoffWorkspaceStatusBar({
@@ -10,6 +11,7 @@ export function TakeoffWorkspaceStatusBar({
   selectedCondition,
   exportStatus,
   titleblockExtractionStatus,
+  onCancelTitleblockExtraction,
   ocrJobs,
   uploading,
   isMeasuring,
@@ -90,6 +92,17 @@ export function TakeoffWorkspaceStatusBar({
                 </span>
               </div>
             </div>
+            {onCancelTitleblockExtraction && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-blue-600 hover:text-blue-800 hover:bg-blue-100 shrink-0"
+                onClick={onCancelTitleblockExtraction}
+                aria-label="Cancel titleblock extraction"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            )}
           </div>
         ) : titleblockExtractionStatus?.status === 'completed' ? (
           <div className="flex items-center gap-3 bg-green-50 px-3 py-2 rounded-lg border border-green-200">

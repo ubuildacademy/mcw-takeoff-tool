@@ -13,7 +13,7 @@ export interface UseTakeoffWorkspaceDocumentsOptions {
 export interface UseTakeoffWorkspaceDocumentsResult {
   documents: PDFDocument[];
   documentsLoading: boolean;
-  loadProjectDocuments: () => Promise<void>;
+  loadProjectDocuments: (filesOverride?: ProjectFile[]) => Promise<void>;
   setDocuments: React.Dispatch<React.SetStateAction<PDFDocument[]>>;
 }
 
@@ -29,13 +29,17 @@ export function useTakeoffWorkspaceDocuments({
   const [documentsLoading, setDocumentsLoading] = useState<boolean>(true);
   const getProjectTakeoffMeasurements = useMeasurementStore((s) => s.getProjectTakeoffMeasurements);
 
-  const loadProjectDocuments = useCallback(async () => {
+  const loadProjectDocuments = useCallback(async (filesOverride?: ProjectFile[]) => {
     if (!projectId) return;
 
     try {
       setDocumentsLoading(true);
       const files =
-        projectFiles.length > 0 ? projectFiles : (await fileService.getProjectFiles(projectId)).files || [];
+        (filesOverride && filesOverride.length > 0)
+          ? filesOverride
+          : projectFiles.length > 0
+            ? projectFiles
+            : (await fileService.getProjectFiles(projectId)).files || [];
       const pdfFiles = files.filter((file: { mimetype?: string }) => file.mimetype === 'application/pdf');
 
       const documentResults = await Promise.allSettled(

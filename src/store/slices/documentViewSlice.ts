@@ -25,6 +25,8 @@ interface DocumentViewState {
   setDocumentRotation: (documentId: string, rotation: number) => void;
   /** Set multiple document rotations in a single update (e.g. from backup/import). */
   setDocumentRotations: (rotations: Record<string, number>) => void;
+  /** Set rotation for all sheets in a document (document-level rotation). */
+  setDocumentRotationsForDocument: (documentId: string, rotation: number, totalPages: number) => void;
   getDocumentRotation: (documentId: string) => number;
 
   // Page actions
@@ -84,6 +86,22 @@ export const useDocumentViewStore = create<DocumentViewState>()(
             ...rotations
           }
         }));
+      },
+
+      setDocumentRotationsForDocument: (documentId, rotation, totalPages) => {
+        set(state => {
+          const nextBySheet = { ...state.documentRotationsBySheet };
+          for (let p = 1; p <= totalPages; p++) {
+            nextBySheet[`${documentId}-${p}`] = rotation;
+          }
+          return {
+            documentRotations: {
+              ...state.documentRotations,
+              [documentId]: rotation,
+            },
+            documentRotationsBySheet: nextBySheet,
+          };
+        });
       },
 
       getDocumentRotation: (documentId) => {
@@ -164,7 +182,14 @@ export const useDocumentViewStore = create<DocumentViewState>()(
         const state = get();
         const bySheet = state.documentRotationsBySheet[sheetId];
         if (bySheet != null) return bySheet;
-        return state.documentRotations[parseDocumentIdFromSheetId(sheetId)] ?? 0;
+        // Only fall back to document-level if NO sheet in this document has explicit rotation.
+        // Otherwise we'd incorrectly apply one sheet's rotation to others when switching tabs.
+        const documentId = parseDocumentIdFromSheetId(sheetId);
+        const hasAnyBySheetForDoc = Object.keys(state.documentRotationsBySheet).some(
+          (sid) => parseDocumentIdFromSheetId(sid) === documentId
+        );
+        if (hasAnyBySheetForDoc) return 0;
+        return state.documentRotations[documentId] ?? 0;
       },
 
       setDocumentScaleBySheet: (sheetId, scale) => {

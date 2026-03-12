@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Textarea } from './ui/textarea';
 import { X } from 'lucide-react';
 import { toast } from 'sonner';
+import { useShallow } from 'zustand/react/shallow';
 import { useConditionStore } from '../store/slices/conditionSlice';
 import type { TakeoffCondition } from '../types';
 import { generateDistinctColor, parseDepthInput, formatDepthOutput } from '../utils/commonUtils';
@@ -41,7 +42,7 @@ function getDefaultUnit(type: string, includeHeight?: boolean): string {
 export function CreateConditionDialog({ projectId, onClose, onConditionCreated, onConditionSelect, editingCondition, onOpenCVTakeoff }: CreateConditionDialogProps) {
   const addCondition = useConditionStore((s) => s.addCondition);
   const updateCondition = useConditionStore((s) => s.updateCondition);
-  const conditions = useConditionStore((s) => s.conditions);
+  const conditions = useConditionStore(useShallow((s) => s.conditions));
 
   const [formData, setFormData] = useState({
     name: editingCondition?.name || '',

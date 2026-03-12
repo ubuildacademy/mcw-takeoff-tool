@@ -61,6 +61,7 @@ export interface TakeoffWorkspaceStatusBarProps {
   selectedCondition: TakeoffCondition | null;
   exportStatus: { type: 'excel' | 'pdf' | null; progress: number };
   titleblockExtractionStatus: TitleblockExtractionStatus | null;
+  onCancelTitleblockExtraction?: () => void;
   ocrJobs: Map<string, OcrJobEntry>;
   uploading: boolean;
   isMeasuring: boolean;
@@ -90,4 +91,5 @@ export interface TakeoffWorkspaceRightSidebarProps {
   uploading: boolean;
   onExtractTitleblockForDocument: (documentId: string) => void;
   onBulkExtractTitleblock: () => void;
+  onRotateAllSheetsInDocument?: (documentId: string, direction: 'clockwise' | 'counterclockwise') => void;
 }

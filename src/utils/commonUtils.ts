@@ -295,7 +295,8 @@ export const safeJsonStringify = (obj: unknown, fallback: string = '{}'): string
 
 /**
  * Extract a human-readable error message from unknown error values.
- * Handles Error instances, objects with .message or .error, and primitives.
+ * Handles Error instances, axios-style errors (response.data.message/error),
+ * objects with .message or .error, and primitives.
  */
 export const extractErrorMessage = (error: unknown, fallback = 'Unknown error'): string => {
   if (error instanceof Error) {
@@ -305,6 +306,17 @@ export const extractErrorMessage = (error: unknown, fallback = 'Unknown error'):
   if (error && typeof error === 'object') {
     try {
       const err = error as Record<string, unknown>;
+      // Axios-style: response.data.message or response.data.error
+      const response = err.response;
+      if (response && typeof response === 'object') {
+        const data = (response as Record<string, unknown>).data;
+        if (data && typeof data === 'object') {
+          const d = data as Record<string, unknown>;
+          if (typeof d.message === 'string') return d.message;
+          if (typeof d.error === 'string') return d.error;
+        }
+        if (typeof data === 'string') return data;
+      }
       const msg = typeof err.message === 'string' ? err.message : null;
       const errProp = typeof err.error === 'string' ? err.error : null;
       return msg ?? errProp ?? JSON.stringify(error) ?? fallback;

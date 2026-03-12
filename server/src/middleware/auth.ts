@@ -23,7 +23,6 @@ export async function getAuthenticatedUser(req: Request) {
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     if (process.env.NODE_ENV !== 'production') {
       console.warn('[Auth] No Bearer token in request to:', req.method, req.path);
-      console.warn('[Auth] Headers:', JSON.stringify(req.headers, null, 2));
     }
     return null;
   }
@@ -37,8 +36,6 @@ export async function getAuthenticatedUser(req: Request) {
       if (process.env.NODE_ENV !== 'production') {
         const msg = error?.message ?? 'No user';
         console.warn('[Auth] getUser failed for', req.method, req.path, ':', msg);
-        console.warn('[Auth] Token (first 20 chars):', token.substring(0, 20) + '...');
-        console.warn('[Auth] Error details:', error);
       }
       return null;
     }

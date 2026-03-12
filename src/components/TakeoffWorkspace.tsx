@@ -4,6 +4,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import PDFViewer from './PDFViewer';
 import { TakeoffSidebar } from './TakeoffSidebar';
 
+import { useShallow } from 'zustand/react/shallow';
 import { useProjectStore } from '../store/slices/projectSlice';
 import { useConditionStore } from '../store/slices/conditionSlice';
 import { useMeasurementStore } from '../store/slices/measurementSlice';
@@ -151,9 +152,9 @@ export function TakeoffWorkspace() {
   });
 
   // Narrow selector: only current page calibration (avoids re-render when other pages' calibrations change)
-  const currentCalibration = useCalibrationStore((s) =>
+  const currentCalibration = useCalibrationStore(useShallow((s) =>
     s.getCalibration(projectId ?? '', currentPdfFile?.id ?? '', currentPage ?? 1)
-  );
+  ));
 
   const visualSearch = useTakeoffWorkspaceVisualSearch({
     projectId: projectId ?? undefined,
@@ -290,6 +291,7 @@ export function TakeoffWorkspace() {
     documents,
     projectFiles,
     loadProjectDocuments,
+    setDocuments,
     handlePageSelect: tabsResult.handlePageSelect,
     isDev,
   });
@@ -500,12 +502,13 @@ export function TakeoffWorkspace() {
       
       // Refresh project files
       const filesRes = await fileService.getProjectFiles(projectId);
-      const projectFilesList = filesRes.files || [];
+      const projectFilesList = (filesRes.files || []) as ProjectFile[];
       setProjectFiles(projectFilesList);
       
       // Refresh documents list to show newly uploaded files in sidebar
+      // Pass fresh files so we use them immediately (setState is async)
       if (uploadedFiles.length > 0) {
-        await loadProjectDocuments();
+        await loadProjectDocuments(projectFilesList);
       }
       
       // Open the first successfully uploaded file in a tab
@@ -862,6 +865,7 @@ export function TakeoffWorkspace() {
           uploading={uploading}
           onExtractTitleblockForDocument={titleblock.handleExtractTitleblockForDocument}
           onBulkExtractTitleblock={titleblock.handleBulkExtractTitleblock}
+          onRotateAllSheetsInDocument={tabsResult.handleRotateAllSheetsInDocument}
         />
       </div>
 
@@ -871,6 +875,7 @@ export function TakeoffWorkspace() {
         selectedCondition={selectedCondition}
         exportStatus={exportStatus}
         titleblockExtractionStatus={titleblock.titleblockExtractionStatus}
+        onCancelTitleblockExtraction={titleblock.cancelTitleblockExtraction}
         ocrJobs={ocr.ocrJobs}
         uploading={uploading}
         isMeasuring={isMeasuring}

@@ -2,6 +2,7 @@
  * Hook that encapsulates takeoff export logic: quantity report data aggregation,
  * cost analysis, Excel export, and PDF export. Used by TakeoffSidebar.
  */
+import { useShallow } from 'zustand/react/shallow';
 import { useConditionStore } from '../../store/slices/conditionSlice';
 import { useMeasurementStore } from '../../store/slices/measurementSlice';
 import { useProjectStore } from '../../store/slices/projectSlice';
@@ -62,7 +63,7 @@ export function useTakeoffExport({
   documents,
   onExportStatusUpdate,
 }: UseTakeoffExportOptions): UseTakeoffExportResult {
-  const conditions = useConditionStore((s) => s.conditions);
+  const conditions = useConditionStore(useShallow((s) => s.conditions));
   const getConditionTakeoffMeasurements = useMeasurementStore((s) => s.getConditionTakeoffMeasurements);
   const getProjectTakeoffMeasurements = useMeasurementStore((s) => s.getProjectTakeoffMeasurements);
   const getProjectCostBreakdown = useMeasurementStore((s) => s.getProjectCostBreakdown);

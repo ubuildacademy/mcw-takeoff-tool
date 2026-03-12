@@ -13,6 +13,7 @@ const defaultOptions = {
   documents: [],
   projectFiles: [],
   loadProjectDocuments: vi.fn().mockResolvedValue(undefined),
+  setDocuments: vi.fn(),
   handlePageSelect: vi.fn(),
 };
 

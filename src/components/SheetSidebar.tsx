@@ -11,7 +11,9 @@ import {
   Edit2,
   Check,
   X,
-  Tag
+  Tag,
+  RotateCw,
+  RotateCcw
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useSheetSidebarFilter, useSheetSidebarSheetEditing, SheetSidebarHeader, SheetSidebarDialogs } from './sheet-sidebar';
@@ -42,6 +44,7 @@ interface SheetSidebarProps {
   // Titleblock extraction flows
   onExtractTitleblockForDocument?: (documentId: string) => void;
   onBulkExtractTitleblock?: () => void;
+  onRotateAllSheetsInDocument?: (documentId: string, direction: 'clockwise' | 'counterclockwise') => void;
 }
 
 export function SheetSidebar({ 
@@ -60,6 +63,7 @@ export function SheetSidebar({
   uploading,
   onExtractTitleblockForDocument,
   onBulkExtractTitleblock,
+  onRotateAllSheetsInDocument,
 }: SheetSidebarProps) {
   const {
     filterBy,
@@ -461,6 +465,34 @@ export function SheetSidebar({
                                 <Tag className="w-4 h-4" />
                                 Extract Titleblock Info
                               </button>
+                              {onRotateAllSheetsInDocument && (
+                                <>
+                                  <button
+                                    className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      onRotateAllSheetsInDocument(document.id, 'clockwise');
+                                      setOpenDocumentMenu(null);
+                                    }}
+                                  >
+                                    <RotateCw className="w-4 h-4" />
+                                    Rotate all sheets 90° clockwise
+                                  </button>
+                                  <button
+                                    className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      onRotateAllSheetsInDocument(document.id, 'counterclockwise');
+                                      setOpenDocumentMenu(null);
+                                    }}
+                                  >
+                                    <RotateCcw className="w-4 h-4" />
+                                    Rotate all sheets 90° counter-clockwise
+                                  </button>
+                                </>
+                              )}
                               <button
                                 className="w-full px-3 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center gap-2"
                                 onClick={(e) => {
@@ -721,6 +753,34 @@ export function SheetSidebar({
                               <Tag className="w-4 h-4" />
                               Extract Titleblock Info
                             </button>
+                            {onRotateAllSheetsInDocument && (
+                              <>
+                                <button
+                                  className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    onRotateAllSheetsInDocument(document.id, 'clockwise');
+                                    setOpenDocumentMenu(null);
+                                  }}
+                                >
+                                  <RotateCw className="w-4 h-4" />
+                                  Rotate all sheets 90° clockwise
+                                </button>
+                                <button
+                                  className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    onRotateAllSheetsInDocument(document.id, 'counterclockwise');
+                                    setOpenDocumentMenu(null);
+                                  }}
+                                >
+                                  <RotateCcw className="w-4 h-4" />
+                                  Rotate all sheets 90° counter-clockwise
+                                </button>
+                              </>
+                            )}
                             <button
                               className="w-full px-3 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center gap-2"
                               onClick={(e) => {

@@ -64,6 +64,7 @@ export function renderSVGSelectionBox(
   rect.setAttribute('stroke-width', '2');
   rect.setAttribute('stroke-dasharray', '5,5');
   rect.setAttribute('vector-effect', 'non-scaling-stroke');
+  rect.setAttribute('pointer-events', 'none'); // Don't intercept events during drag
   svg.appendChild(rect);
 }
 

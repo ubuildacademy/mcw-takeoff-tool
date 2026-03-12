@@ -98,5 +98,19 @@ describe('commonUtils', () => {
     it('converts primitives to string', () => {
       expect(extractErrorMessage(42)).toBe('42');
     });
+
+    it('extracts message from axios-style error (response.data.message)', () => {
+      const axiosError = {
+        response: { data: { message: 'Server validation failed' } },
+      };
+      expect(extractErrorMessage(axiosError)).toBe('Server validation failed');
+    });
+
+    it('extracts .error from axios-style error (response.data.error)', () => {
+      const axiosError = {
+        response: { data: { error: 'Unauthorized' } },
+      };
+      expect(extractErrorMessage(axiosError)).toBe('Unauthorized');
+    });
   });
 });

@@ -57,7 +57,7 @@
     "prepare": "node scripts/install-git-hooks.mjs",
     "ci:local": "npm run typecheck && npm run build",
     "dev": "vite",
-    "dev:fixed": "bash -c 'lsof -ti:3001 | xargs -r kill -9 || true' && vite",
+    "dev:fixed": "bash -c 'lsof -ti:3001 | xargs kill -9 2>/dev/null || true' && vite",
     "copy-pdf-worker": "node scripts/copy-pdf-worker.mjs",
     "build": "npm run copy-pdf-worker && npm run typecheck && vite build",
     "typecheck": "tsc --noEmit",

@@ -23,9 +23,9 @@ export const PDFViewerStatusView: React.FC<PDFViewerStatusViewProps> = ({
 }) => {
   if (status === 'loading') {
     return (
-      <div className={`flex items-center justify-center h-full ${className}`}>
+      <div className={`flex items-center justify-center h-full ${className}`} role="status" aria-label="Loading PDF">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4" />
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4" aria-hidden />
           <p className="text-gray-600">Loading PDF...</p>
         </div>
       </div>

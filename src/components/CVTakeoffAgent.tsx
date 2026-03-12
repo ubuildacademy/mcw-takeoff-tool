@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cvTakeoffService } from '../services/cvTakeoffService';
+import { extractErrorMessage } from '../utils/commonUtils';
 import { useCalibrationStore } from '../store/slices/calibrationSlice';
 import { useConditionStore } from '../store/slices/conditionSlice';
 import { useMeasurementStore } from '../store/slices/measurementSlice';
@@ -183,46 +184,26 @@ export function CVTakeoffAgent({
       setCurrentStage('complete');
     } catch (error) {
       console.error('Error processing page:', error);
-      
-      // Extract error message properly
-      let errorMessage = 'Unknown error';
-      let errorDetails: Record<string, unknown> | null = null;
 
-      const getErrObj = (e: unknown): Record<string, unknown> => (e as unknown as Record<string, unknown>);
+      const errorMessage = extractErrorMessage(error, 'Failed to process page - unknown error');
 
-      if (error instanceof Error) {
-        errorMessage = error.message || String(error);
-        if (errorMessage === '[object Object]' || errorMessage.includes('[object Object]')) {
-          try {
-            const err = getErrObj(error);
-            errorMessage = (typeof err.message === 'string' ? err.message : null) ?? (typeof err.error === 'string' ? err.error : null) ?? JSON.stringify(error) ?? 'Unknown error';
-          } catch {
-            errorMessage = 'Failed to process page - unknown error';
-          }
-        }
-        try {
-          const detailsMatch = errorMessage.match(/Details: ({.*})/s);
+      let errorDetails: Record<string, unknown> | undefined;
+      if (error && typeof error === 'object') {
+        const err = error as Record<string, unknown>;
+        if (err.details != null && typeof err.details === 'object') {
+          errorDetails = err.details as Record<string, unknown>;
+        } else {
+          const detailsMatch = errorMessage.match(/Details: (\{.*\})/s);
           if (detailsMatch) {
-            errorDetails = JSON.parse(detailsMatch[1]) as Record<string, unknown>;
-          } else {
-            const err = getErrObj(error);
-            if (err.details != null) errorDetails = err.details as Record<string, unknown>;
+            try {
+              errorDetails = JSON.parse(detailsMatch[1]) as Record<string, unknown>;
+            } catch {
+              /* ignore parse errors */
+            }
           }
-        } catch {
-          // Ignore parsing errors
         }
-      } else if (error && typeof error === 'object') {
-        try {
-          const err = getErrObj(error);
-          errorMessage = (typeof err.message === 'string' ? err.message : null) ?? (typeof err.error === 'string' ? err.error : null) ?? JSON.stringify(error) ?? 'Unknown error';
-          if (err.details != null) errorDetails = err.details as Record<string, unknown>;
-        } catch {
-          errorMessage = 'Failed to process page - unknown error';
-        }
-      } else {
-        errorMessage = String(error);
       }
-      
+
       setResults({
         conditionsCreated: 0,
         measurementsCreated: 0,
@@ -231,7 +212,7 @@ export function CVTakeoffAgent({
         doorsDetected: 0,
         windowsDetected: 0,
         errors: [errorMessage],
-        errorDetails: errorDetails ?? undefined
+        errorDetails
       });
       setCurrentStage('complete');
     } finally {

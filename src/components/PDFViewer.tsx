@@ -2411,6 +2411,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Set measurement type when condition is selected
   useEffect(() => {
+    // Titleblock selection mode takes precedence - disable measuring so box selection works
+    if (titleblockSelectionMode) {
+      setIsMeasuring(false);
+      return;
+    }
     if (selectedConditionId) {
       const condition = getSelectedCondition();
       if (condition) {
@@ -2496,7 +2501,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       };
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- Setters stable; omit
-  }, [selectedConditionId, getSelectedCondition]);
+  }, [selectedConditionId, getSelectedCondition, titleblockSelectionMode]);
 
   const prevAnnotationToolRef = useRef<'text' | 'arrow' | 'rectangle' | 'circle' | null>(null);
 
