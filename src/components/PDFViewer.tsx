@@ -617,7 +617,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
   }, [localTakeoffMeasurements, currentPage, pdfDocument, currentViewport]);
 
-  // Handle visual search mode
+  // Handle visual search mode and titleblock selection (which has two steps: sheet number, then sheet name)
   useEffect(() => {
     if (isBoxSelectionMode) {
       setIsSelectingSymbol(true);
@@ -629,7 +629,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       setSelectionStart(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Setters stable; omit
-  }, [isBoxSelectionMode]);
+  }, [isBoxSelectionMode, titleblockSelectionMode]);
 
   // Sync external cut-out state with internal state
   useEffect(() => {
