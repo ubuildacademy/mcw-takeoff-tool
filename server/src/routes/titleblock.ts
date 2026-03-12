@@ -332,15 +332,20 @@ async function extractTitleblockWithLLM(
   sheetNameRegion: NormalizedBox,
   onProgress?: (currentBatch: number, totalBatches: number, processedPages: number) => void
 ): Promise<Array<{ pageNumber: number; sheetNumber: string; sheetName: string }>> {
-  const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
+  // Align with rest of app: use Ollama Cloud by default (works in Railway); localhost only when explicitly set
+  const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'https://ollama.com';
   const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || '';
-  const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.1:8b';
+  const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'gpt-oss:20b-cloud';
 
+  const isCloud = OLLAMA_BASE_URL.includes('ollama.com');
   console.log('[Titleblock LLM] Config:', {
     OLLAMA_BASE_URL,
     hasApiKey: !!OLLAMA_API_KEY,
     OLLAMA_MODEL,
   });
+  if (isCloud && !OLLAMA_API_KEY) {
+    console.warn('[Titleblock LLM] OLLAMA_API_KEY not set - Ollama Cloud requires it. Extraction will fall back to OCR-only.');
+  }
 
   const results: Array<{ pageNumber: number; sheetNumber: string; sheetName: string }> = [];
 
@@ -423,6 +428,18 @@ async function extractTitleblockWithLLM(
   }
 
   return results;
+}
+
+/**
+ * Sanitize OCR text for use when LLM is unavailable.
+ * Trims, collapses whitespace, and returns empty string if result is too short/noise.
+ */
+function sanitizeOcrFallback(text: string): string {
+  const sanitized = (text || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .trim();
+  return sanitized;
 }
 
 /**
@@ -534,7 +551,12 @@ Use "Unknown" if a value cannot be determined.`;
     { role: 'user', content: context },
   ];
 
-  const models = [model, 'gpt-oss:20b', 'gpt-oss:7b', 'llama3.1:8b'];
+  // Cloud (ollama.com) uses -cloud models; local Ollama uses standard names. Align with AdminPanel FALLBACK_OLLAMA_MODELS.
+  const isCloud = ollamaBaseUrl.includes('ollama.com');
+  const fallbackModels = isCloud
+    ? ['gpt-oss:20b-cloud', 'gpt-oss:120b-cloud', 'qwen3-coder:480b-cloud']
+    : ['gpt-oss:20b', 'gpt-oss:7b', 'llama3.1:8b'];
+  const models = [model, ...fallbackModels.filter(m => m !== model)];
   let response;
   let lastError;
 
@@ -581,17 +603,22 @@ Use "Unknown" if a value cannot be determined.`;
       message: lastErr?.message ?? 'Unknown',
       code: lastErr?.code ?? 'Unknown',
       hint: lastErr?.code === 'ECONNREFUSED'
-        ? 'Ollama may not be running. Start with: ollama serve'
+        ? (ollamaBaseUrl.includes('ollama.com') ? 'OLLAMA_API_KEY required for Ollama Cloud' : 'Ollama may not be running. Start with: ollama serve')
         : lastErr?.code === 'ENOTFOUND'
           ? 'Check OLLAMA_BASE_URL - host not found'
           : undefined,
     });
-    // Return Unknown for all pages
-    return batchTexts.map(({ pageNumber }) => ({
-      pageNumber,
-      sheetNumber: 'Unknown',
-      sheetName: 'Unknown',
-    }));
+    // Fallback: use OCR text directly when LLM is unavailable (e.g. production without Ollama)
+    console.log('[Titleblock LLM] Using OCR-only fallback (LLM unavailable)');
+    return batchTexts.map(({ pageNumber, sheetNumberText, sheetNameText }) => {
+      const sheetNumber = sanitizeOcrFallback(sheetNumberText);
+      const sheetName = sanitizeOcrFallback(sheetNameText);
+      return {
+        pageNumber,
+        sheetNumber: sheetNumber || 'Unknown',
+        sheetName: sheetName || 'Unknown',
+      };
+    });
   }
 
   const aiResponse = response.data.message?.content || '';
