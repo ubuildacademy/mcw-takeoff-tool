@@ -68,7 +68,7 @@ export interface PDFViewerProps {
   visualSearchCondition?: unknown;
   onVisualSearchComplete?: (selectionBox: SelectionBox) => void;
   titleblockSelectionMode?: 'sheetNumber' | 'sheetName' | null;
-  onTitleblockSelectionComplete?: (field: 'sheetNumber' | 'sheetName', selectionBox: SelectionBox) => void;
+  onTitleblockSelectionComplete?: (field: 'sheetNumber' | 'sheetName', selectionBox: SelectionBox, pageNumber: number) => void;
   /** Hyperlink mode: draw rect to create link */
   hyperlinkMode?: boolean;
   /** Call when L is pressed to enter hyperlink mode */

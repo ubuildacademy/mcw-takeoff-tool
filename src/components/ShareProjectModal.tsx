@@ -71,13 +71,16 @@ export function ShareProjectModal({
     setSending(true);
     try {
       const annotations = useAnnotationStore.getState().annotations.filter((a) => a.projectId === projectId);
-      const documentRotations = useDocumentViewStore.getState().documentRotations;
+      const docViewStore = useDocumentViewStore.getState();
+      const documentRotations = docViewStore.documentRotations;
+      const documentRotationsBySheet = docViewStore.documentRotationsBySheet;
       const hyperlinks = useHyperlinkStore.getState().hyperlinks.filter((h) => h.projectId === projectId);
       const result = await projectService.shareProject(projectId, {
         recipients: valid,
         message: message.trim() || undefined,
         annotations,
         documentRotations,
+        documentRotationsBySheet: Object.keys(documentRotationsBySheet).length > 0 ? documentRotationsBySheet : undefined,
         hyperlinks: hyperlinks.length > 0 ? hyperlinks : undefined,
       });
       if (result.deliveryMethod === 'link') {

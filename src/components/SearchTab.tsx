@@ -203,7 +203,7 @@ export function SearchTab({
             <div className="flex items-center gap-2 text-yellow-700">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span className="text-sm">
-                OCR data is not yet available. OCR is included in backups and runs automatically when needed—refresh when processing completes, or run OCR from the Documents tab.
+                OCR data is not yet available. OCR runs automatically when documents are uploaded and is included in backups—refresh when processing completes.
               </span>
             </div>
           </div>
@@ -215,7 +215,7 @@ export function SearchTab({
             <div className="flex items-center gap-2 text-blue-700">
               <AlertCircle className="w-4 h-4" />
               <span className="text-sm">
-                If search results show incorrect page numbers, re-run OCR processing to get accurate page-by-page results.
+                Page numbers come from document structure. If they seem incorrect, re-upload the document to refresh its OCR data.
               </span>
             </div>
           </div>

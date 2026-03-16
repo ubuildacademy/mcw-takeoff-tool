@@ -46,7 +46,7 @@ export interface PDFViewerInteractionsCallbacks {
   onPageChange?: (page: number) => void;
   onAnnotationToolChange?: (tool: 'text' | 'arrow' | 'rectangle' | 'circle' | null) => void;
   onVisualSearchComplete?: (selectionBox: SelectionBox) => void;
-  onTitleblockSelectionComplete?: (field: 'sheetNumber' | 'sheetName', selectionBox: SelectionBox) => void;
+  onTitleblockSelectionComplete?: (field: 'sheetNumber' | 'sheetName', selectionBox: SelectionBox, pageNumber: number) => void;
   onPageShown?: (pageNum: number, viewport: PageViewport) => void;
 }
 

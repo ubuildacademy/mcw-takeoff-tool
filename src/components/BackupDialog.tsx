@@ -155,6 +155,15 @@ export function BackupDialog({
           useDocumentViewStore.getState().setDocumentRotations(rotations);
         }
       }
+      if (result.documentRotationsBySheet && Object.keys(result.documentRotationsBySheet).length > 0) {
+        const bySheet: Record<string, number> = {};
+        for (const [sheetId, rot] of Object.entries(result.documentRotationsBySheet)) {
+          if (typeof rot === 'number') bySheet[sheetId] = rot;
+        }
+        if (Object.keys(bySheet).length > 0) {
+          useDocumentViewStore.getState().setDocumentRotationsBySheet(bySheet);
+        }
+      }
 
       clearInterval(progressInterval);
       setProgress(100);

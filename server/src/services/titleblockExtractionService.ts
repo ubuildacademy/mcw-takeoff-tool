@@ -334,13 +334,15 @@ class TitleblockExtractionService {
   }
 
   /**
-   * Extract raw text from a specific region of a PDF page
-   * Returns the extracted text as a string
+   * Extract raw text from a specific region of a PDF page.
+   * When templatePageNumber is provided, regions are transformed for pages with different
+   * orientation (portrait vs landscape) so titleblocks on rotated pages are found.
    */
   async extractTextFromRegion(
     pdfPath: string,
     pageNumber: number,
-    region: { x: number; y: number; width: number; height: number }
+    region: { x: number; y: number; width: number; height: number },
+    templatePageNumber: number = 1
   ): Promise<string | null> {
     console.log(`[Titleblock OCR] extractTextFromRegion called: page ${pageNumber}, region:`, region);
     
@@ -432,6 +434,7 @@ region_x = float(sys.argv[3])
 region_y = float(sys.argv[4])
 region_w = float(sys.argv[5])
 region_h = float(sys.argv[6])
+template_page_num = int(sys.argv[7]) if len(sys.argv) > 7 else 1
 
 try:
     doc = fitz.open(pdf_path)
@@ -440,10 +443,36 @@ try:
         sys.exit(0)
     
     page = doc[page_num - 1]
-    page_width = page.rect.width
-    page_height = page.rect.height
+    # CRITICAL: get_text(clip=) and get_pixmap(clip=) expect UNROTATED coordinates.
+    # page.rect reflects rotation; page.cropbox does not. Use cropbox for dimensions.
+    cb = page.cropbox
+    page_width = cb.width
+    page_height = cb.height
     
-    # Convert normalized region to absolute coordinates (clamp to page bounds)
+    # When template and current page have different orientation (portrait vs landscape),
+    # transform the region so the same physical titleblock location is extracted.
+    # Compare using cropbox (unrotated) so we detect intrinsic aspect ratio differences.
+    if template_page_num >= 1 and template_page_num <= len(doc):
+        template_page = doc[template_page_num - 1]
+        tcb = template_page.cropbox
+        tw = tcb.width
+        th = tcb.height
+        template_portrait = th >= tw
+        current_portrait = page_height >= page_width
+        if template_portrait != current_portrait:
+            r_x, r_y, r_w, r_h = region_x, region_y, region_w, region_h
+            if template_portrait:
+                # Template portrait, target landscape: "right" of portrait -> "top" of landscape
+                region_x, region_y, region_w, region_h = r_y, r_x, r_h, r_w
+            else:
+                # Template landscape, target portrait: "right" of landscape -> "bottom" of portrait
+                region_x = r_y
+                region_y = 1.0 - r_x - r_w
+                region_w = r_h
+                region_h = r_w
+            print(f"Page {page_num}: orientation diff, transformed region", file=sys.stderr)
+    
+    # Convert normalized region to absolute UNROTATED coordinates (clamp to page bounds)
     def clamp(value, min_value, max_value):
         return max(min_value, min(value, max_value))
 
@@ -453,6 +482,7 @@ try:
     y1 = clamp(region_y + region_h, 0.0, 1.0) * page_height
     
     region_rect = fitz.Rect(x0, y0, x1, y1)
+    print(f"Page {page_num}: region_rect=({x0:.1f},{y0:.1f},{x1:.1f},{y1:.1f}) cropbox={page_width:.0f}x{page_height:.0f}", file=sys.stderr)
     
     # Strategy 1: Try PyMuPDF native text extraction first (works for vector PDFs, no OCR needed)
     vector_text = page.get_text("text", clip=region_rect).strip()
@@ -483,14 +513,21 @@ try:
     if image is None:
         try:
             # Attempt 2: Full page render + PIL crop (robust for rotated pages)
+            # Pixmap is in rotated/display space; transform our unrotated rect for correct crop
+            rot = getattr(page, 'rotation', 0) or 0
+            if rot != 0:
+                # Transform region_rect to rotated pixmap space for correct crop
+                r_rot = region_rect * page.rotation_matrix
+                rr = r_rot.rect if hasattr(r_rot, 'rect') else r_rot
+                px0, py0, px1, py1 = rr.x0, rr.y0, rr.x1, rr.y1
+            else:
+                px0, py0, px1, py1 = x0, y0, x1, y1
             pix = page.get_pixmap(matrix=matrix, alpha=False)
             pil_full = pix.pil_image()
-            # Region in PDF points -> pixels (scaled by zoom)
-            left = int(x0 * zoom)
-            top = int(y0 * zoom)
-            right = int(x1 * zoom)
-            bottom = int(y1 * zoom)
-            # Clamp to image bounds
+            left = int(px0 * zoom)
+            top = int(py0 * zoom)
+            right = int(px1 * zoom)
+            bottom = int(py1 * zoom)
             w, h = pil_full.size
             left = max(0, min(left, w - 1))
             top = max(0, min(top, h - 1))
@@ -528,14 +565,9 @@ except Exception as e:
       await fs.writeFile(tempScriptPath, extractScript);
 
       const enhancedPath = this.getEnhancedPath();
-      const command = `${pythonCommand} "${tempScriptPath}" "${pdfPath}" "${pageNumber}" "${region.x}" "${region.y}" "${region.width}" "${region.height}"`;
+      const command = `${pythonCommand} "${tempScriptPath}" "${pdfPath}" "${pageNumber}" "${region.x}" "${region.y}" "${region.width}" "${region.height}" "${templatePageNumber}"`;
       
-      console.log(`[Titleblock OCR] Executing OCR for page ${pageNumber}:`, {
-        scriptPath: tempScriptPath,
-        pdfPath,
-        region,
-        command: command.substring(0, 200) + '...',
-      });
+      console.log(`[Titleblock OCR] Page ${pageNumber} region=(${region.x.toFixed(3)},${region.y.toFixed(3)},${region.width.toFixed(3)},${region.height.toFixed(3)}) templatePage=${templatePageNumber}`);
 
       const execResult = await execAsync(command, {
         timeout: 30000,
@@ -549,16 +581,16 @@ except Exception as e:
       // Clean up temp script
       await fs.remove(tempScriptPath).catch(() => {});
 
-      // Log stderr if present (Python errors/OCR issues)
+      // Always log Python stderr (region_rect, orientation transform, OCR fallback, etc.)
       if (execResult.stderr && execResult.stderr.trim()) {
-        console.error(`[Titleblock OCR] Page ${pageNumber} stderr:`, execResult.stderr.trim());
+        console.log(`[Titleblock OCR] Page ${pageNumber} Python:`, execResult.stderr.trim().split('\n').join(' | '));
       }
 
       const text = execResult.stdout.trim();
       
       // Log extracted text for debugging (first few pages and empty results)
       if (pageNumber <= 3 || !text) {
-        console.log(`[Titleblock OCR] Page ${pageNumber} extracted text:`, {
+        console.log(`[Titleblock OCR] Page ${pageNumber} result:`, {
           length: text.length,
           preview: text.substring(0, 200) || '(empty)',
           hasStderr: !!execResult.stderr?.trim(),

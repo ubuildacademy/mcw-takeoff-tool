@@ -151,6 +151,23 @@ async function buildProjectBackup(
   };
 }
 
+/** Remap documentRotationsBySheet keys (docId-pageNum -> newDocId-pageNum). */
+function remapSheetIdForDocumentView(
+  oldSheetId: string,
+  fileIdMapping: Record<string, string>
+): string | null {
+  const dashIdx = oldSheetId.lastIndexOf('-');
+  if (dashIdx < 0) {
+    const newDocId = fileIdMapping[oldSheetId];
+    return newDocId ?? null;
+  }
+  const oldDocId = oldSheetId.slice(0, dashIdx);
+  const pageNum = oldSheetId.slice(dashIdx + 1);
+  const newDocId = fileIdMapping[oldDocId];
+  if (!newDocId) return null;
+  return `${newDocId}-${pageNum}`;
+}
+
 /** Remap sheetId for measurements/annotations. Frontend uses file.id; backup may store file id or documentId-pageNumber. */
 function remapSheetIdForFrontend(
   oldSheetId: string,
@@ -173,6 +190,7 @@ export async function performImportFromBackup(
   message: string;
   annotations: Array<Record<string, unknown>>;
   documentRotations: Record<string, number>;
+  documentRotationsBySheet: Record<string, number>;
   hyperlinks: Array<Record<string, unknown>>;
 }> {
   // CRITICAL: Strip id, userId, AND user_id from backup - ownership MUST go to current user
@@ -314,6 +332,16 @@ export async function performImportFromBackup(
     }
   }
 
+  const documentRotationsBySheet: Record<string, number> = {};
+  const backupRotationsBySheet = backup.documentRotationsBySheet as Record<string, number> | undefined;
+  if (backupRotationsBySheet && typeof backupRotationsBySheet === 'object') {
+    for (const [oldSheetId, rot] of Object.entries(backupRotationsBySheet)) {
+      if (typeof rot !== 'number') continue;
+      const newSheetId = remapSheetIdForDocumentView(oldSheetId, fileIdMapping);
+      if (newSheetId) documentRotationsBySheet[newSheetId] = rot;
+    }
+  }
+
   const annotations: Array<Record<string, unknown>> = [];
   const backupAnnotations = backup.annotations as Array<Record<string, unknown>> | undefined;
   if (Array.isArray(backupAnnotations)) {
@@ -390,7 +418,7 @@ export async function performImportFromBackup(
     console.log(`📄 Import: OCR triggered for ${pdfsNeedingOcr.length} PDF(s) missing OCR data`);
   }
 
-  return { project: newProject, message, annotations, documentRotations, hyperlinks };
+  return { project: newProject, message, annotations, documentRotations, documentRotationsBySheet, hyperlinks };
 }
 
 router.get('/', requireAuth, async (req, res) => {
@@ -717,6 +745,18 @@ router.post(
           if (fileIds.has(docId) && typeof rot === 'number') documentRotations[docId] = rot;
         }
         if (Object.keys(documentRotations).length > 0) backup.documentRotations = documentRotations;
+      }
+
+      const clientDocumentRotationsBySheet = req.body?.documentRotationsBySheet as Record<string, number> | undefined;
+      if (clientDocumentRotationsBySheet && typeof clientDocumentRotationsBySheet === 'object') {
+        const documentRotationsBySheet: Record<string, number> = {};
+        for (const [sheetId, rot] of Object.entries(clientDocumentRotationsBySheet)) {
+          if (typeof rot === 'number') {
+            const docId = sheetId.includes('-') ? sheetId.slice(0, sheetId.lastIndexOf('-')) : sheetId;
+            if (fileIds.has(docId)) documentRotationsBySheet[sheetId] = rot;
+          }
+        }
+        if (Object.keys(documentRotationsBySheet).length > 0) backup.documentRotationsBySheet = documentRotationsBySheet;
       }
 
       const clientAnnotations = req.body?.annotations;
@@ -1052,8 +1092,8 @@ router.post('/import', requireAuth, uploadRateLimit, upload.single('file'), asyn
     if (!backup.version || !backup.project || !backup.timestamp) {
       return res.status(400).json({ error: 'Invalid backup file format' });
     }
-    const { project, message, annotations, documentRotations, hyperlinks } = await performImportFromBackup(backup, userId);
-    return res.json({ success: true, project, message, annotations, documentRotations, hyperlinks });
+    const { project, message, annotations, documentRotations, documentRotationsBySheet, hyperlinks } = await performImportFromBackup(backup, userId);
+    return res.json({ success: true, project, message, annotations, documentRotations, documentRotationsBySheet, hyperlinks });
   } catch (error) {
     console.error('❌ Error importing project:', error);
     return res.status(500).json({ error: 'Failed to import project' });

@@ -21,6 +21,7 @@ export interface TitleblockSelectionContext {
 export interface PendingTitleblockConfig {
   sheetNumberField?: NormalizedBox;
   sheetNameField?: NormalizedBox;
+  templatePageNumber?: number;
 }
 
 export interface UseTakeoffWorkspaceTitleblockOptions {
@@ -39,7 +40,7 @@ export interface UseTakeoffWorkspaceTitleblockResult {
   titleblockSelectionContext: TitleblockSelectionContext | null;
   titleblockExtractionStatus: TitleblockExtractionStatus | null;
   cancelTitleblockExtraction: () => void;
-  handleTitleblockSelectionComplete: (field: TitleblockField, selectionBox: NormalizedBox) => Promise<void>;
+  handleTitleblockSelectionComplete: (field: TitleblockField, selectionBox: NormalizedBox, pageNumber: number) => Promise<void>;
   handleExtractTitleblockForDocument: (documentId: string) => void;
   handleBulkExtractTitleblock: () => void;
 }
@@ -60,8 +61,8 @@ export function useTakeoffWorkspaceTitleblock({
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const handleTitleblockSelectionComplete = useCallback(
-    async (field: TitleblockField, selectionBox: NormalizedBox) => {
-      console.log('[Titleblock] Selection complete:', { field, selectionBox, hasContext: !!titleblockSelectionContext });
+    async (field: TitleblockField, selectionBox: NormalizedBox, pageNumber: number) => {
+      console.log('[Titleblock] Selection complete:', { field, selectionBox, pageNumber, hasContext: !!titleblockSelectionContext });
 
       if (!titleblockSelectionContext) {
         console.error('[Titleblock] No selection context available - extraction cannot proceed');
@@ -74,6 +75,7 @@ export function useTakeoffWorkspaceTitleblock({
         ...(field === 'sheetNumber'
           ? { sheetNumberField: selectionBox }
           : { sheetNameField: selectionBox }),
+        templatePageNumber: pageNumber,
       };
       setPendingTitleblockConfig(nextConfig);
       console.log('[Titleblock] Updated config:', nextConfig);
@@ -90,6 +92,7 @@ export function useTakeoffWorkspaceTitleblock({
       const finalConfig = {
         sheetNumberField: nextConfig.sheetNumberField || selectionBox,
         sheetNameField: nextConfig.sheetNameField || selectionBox,
+        templatePageNumber: nextConfig.templatePageNumber ?? 1,
       };
 
       if (!finalConfig.sheetNumberField || !finalConfig.sheetNameField) {
@@ -161,7 +164,11 @@ export function useTakeoffWorkspaceTitleblock({
         const result = await titleblockService.extractTitleblock(
           projectId,
           targetDocumentIds,
-          finalConfig,
+          {
+            sheetNumberField: finalConfig.sheetNumberField,
+            sheetNameField: finalConfig.sheetNameField,
+            templatePageNumber: finalConfig.templatePageNumber,
+          },
           signal
         );
 

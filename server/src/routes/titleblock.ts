@@ -20,6 +20,7 @@ interface NormalizedBox {
 interface TitleblockConfig {
   sheetNumberField: NormalizedBox;
   sheetNameField: NormalizedBox;
+  templatePageNumber?: number;
 }
 
 /**
@@ -69,6 +70,7 @@ router.post('/extract', requireAuth, async (req, res) => {
     // Keep both regions separate for individual extraction
     const sheetNumberRegion = titleblockConfig.sheetNumberField;
     const sheetNameRegion = titleblockConfig.sheetNameField;
+    const templatePageNumber = titleblockConfig.templatePageNumber ?? 1;
 
     const results: Array<{
       documentId: string;
@@ -127,11 +129,10 @@ router.post('/extract', requireAuth, async (req, res) => {
 
       const pageNumbers = Array.from({ length: totalPages }, (_, idx) => idx + 1);
 
-      console.log('[Titleblock] Starting LLM-based extraction for document:', {
-        documentId,
-        totalPages,
-        sheetNumberRegion,
-        sheetNameRegion,
+      console.log('[Titleblock] === EXTRACTION START ===', documentId, 'pages:', totalPages, 'template:', templatePageNumber, '| Check this terminal for per-page logs');
+      console.log('[Titleblock] Regions:', {
+        sheetNumber: `${sheetNumberRegion.x.toFixed(2)},${sheetNumberRegion.y.toFixed(2)} ${sheetNumberRegion.width.toFixed(2)}x${sheetNumberRegion.height.toFixed(2)}`,
+        sheetName: `${sheetNameRegion.x.toFixed(2)},${sheetNameRegion.y.toFixed(2)} ${sheetNameRegion.width.toFixed(2)}x${sheetNameRegion.height.toFixed(2)}`,
       });
       
       // Validate regions
@@ -159,6 +160,7 @@ router.post('/extract', requireAuth, async (req, res) => {
           pageCount: pageNumbers.length,
           sheetNumberRegion,
           sheetNameRegion,
+          templatePageNumber,
         });
         
         extractedSheets = await extractTitleblockWithLLM(
@@ -166,6 +168,7 @@ router.post('/extract', requireAuth, async (req, res) => {
           pageNumbers,
           sheetNumberRegion,
           sheetNameRegion,
+          templatePageNumber,
           (currentBatch: number, totalBatches: number, processedPages: number) => {
             // Calculate progress: 10% for setup, 80% for extraction, 10% for saving
             const extractionProgress = 10 + Math.round((processedPages / totalPages) * 80);
@@ -330,6 +333,7 @@ async function extractTitleblockWithLLM(
   pageNumbers: number[],
   sheetNumberRegion: NormalizedBox,
   sheetNameRegion: NormalizedBox,
+  templatePageNumber: number = 1,
   onProgress?: (currentBatch: number, totalBatches: number, processedPages: number) => void
 ): Promise<Array<{ pageNumber: number; sheetNumber: string; sheetName: string }>> {
   // Align with rest of app: use Ollama Cloud by default (works in Railway); localhost only when explicitly set
@@ -367,18 +371,20 @@ async function extractTitleblockWithLLM(
       }> = [];
 
       for (const pageNumber of batch) {
-        // Extract text from sheet number region
+        // Extract text from sheet number region (orientation transform applied for rotated pages)
         const sheetNumberText = await titleblockExtractionService.extractTextFromRegion(
           pdfPath,
           pageNumber,
-          sheetNumberRegion
+          sheetNumberRegion,
+          templatePageNumber
         );
 
         // Extract text from sheet name region
         const sheetNameText = await titleblockExtractionService.extractTextFromRegion(
           pdfPath,
           pageNumber,
-          sheetNameRegion
+          sheetNameRegion,
+          templatePageNumber
         );
 
         console.log(`[Titleblock LLM] Page ${pageNumber} extracted text:`, {

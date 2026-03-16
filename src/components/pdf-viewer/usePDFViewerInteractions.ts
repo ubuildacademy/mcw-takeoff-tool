@@ -147,7 +147,8 @@ export interface UsePDFViewerInteractionsOptions {
   setIsSelectingSymbol: React.Dispatch<React.SetStateAction<boolean>>;
   onTitleblockSelectionComplete?: (
     field: 'sheetNumber' | 'sheetName',
-    selectionBox: { x: number; y: number; width: number; height: number }
+    selectionBox: { x: number; y: number; width: number; height: number },
+    pageNumber: number
   ) => void;
   onVisualSearchComplete?: (selectionBox: { x: number; y: number; width: number; height: number }) => void;
   // Hyperlink mode
@@ -1219,7 +1220,7 @@ export function usePDFViewerInteractions(
       setSelectionStart(null);
       setIsSelectingSymbol(false);
       if (titleblockSelectionMode && onTitleblockSelectionComplete) {
-        onTitleblockSelectionComplete(titleblockSelectionMode, pdfSelectionBox);
+        onTitleblockSelectionComplete(titleblockSelectionMode, pdfSelectionBox, currentPage);
       } else if (visualSearchMode && onVisualSearchComplete) {
         onVisualSearchComplete(pdfSelectionBox);
       }

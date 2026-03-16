@@ -285,6 +285,7 @@ export const projectService = {
       message?: string;
       annotations?: unknown[];
       documentRotations?: Record<string, number>;
+      documentRotationsBySheet?: Record<string, number>;
       hyperlinks?: unknown[];
     }
   ) {
@@ -734,6 +735,7 @@ export const titleblockService = {
     titleblockConfig: {
       sheetNumberField: { x: number; y: number; width: number; height: number };
       sheetNameField: { x: number; y: number; width: number; height: number };
+      templatePageNumber?: number;
     },
     signal?: AbortSignal
   ) {

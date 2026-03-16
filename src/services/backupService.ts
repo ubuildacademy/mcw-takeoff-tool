@@ -39,6 +39,8 @@ export interface ProjectBackup {
   annotations?: unknown[];
   hyperlinks?: unknown[];
   documentRotations?: Record<string, number>;
+  /** Per-sheet rotations (sheetId = documentId-pageNumber). Takes precedence over documentRotations for per-sheet. */
+  documentRotationsBySheet?: Record<string, number>;
 }
 
 export class BackupService {
@@ -59,12 +61,19 @@ export class BackupService {
 
       const backup = await response.json();
       const fileIds = new Set((backup.files ?? []).map((f: { id?: string }) => f.id).filter(Boolean));
-      const docRotations = useDocumentViewStore.getState().documentRotations;
+      const store = useDocumentViewStore.getState();
       const documentRotations: Record<string, number> = {};
-      for (const [docId, rot] of Object.entries(docRotations)) {
+      for (const [docId, rot] of Object.entries(store.documentRotations)) {
         if (fileIds.has(docId)) documentRotations[docId] = rot;
       }
       if (Object.keys(documentRotations).length > 0) backup.documentRotations = documentRotations;
+      // Include per-sheet rotations for sheets in this project's files
+      const documentRotationsBySheet: Record<string, number> = {};
+      for (const [sheetId, rot] of Object.entries(store.documentRotationsBySheet)) {
+        const docId = sheetId.includes('-') ? sheetId.slice(0, sheetId.lastIndexOf('-')) : sheetId;
+        if (fileIds.has(docId)) documentRotationsBySheet[sheetId] = rot;
+      }
+      if (Object.keys(documentRotationsBySheet).length > 0) backup.documentRotationsBySheet = documentRotationsBySheet;
       const annotations = useAnnotationStore.getState().annotations.filter((a) => a.projectId === projectId);
       if (annotations.length > 0) backup.annotations = annotations;
       const hyperlinks = useHyperlinkStore.getState().hyperlinks.filter((h) => h.projectId === projectId);
@@ -105,6 +114,7 @@ export class BackupService {
     project: Project;
     annotations?: Array<Record<string, unknown>>;
     documentRotations?: Record<string, number>;
+    documentRotationsBySheet?: Record<string, number>;
     hyperlinks?: Array<Record<string, unknown>>;
   }> {
     try {
@@ -136,6 +146,7 @@ export class BackupService {
         project: result.project,
         annotations: result.annotations,
         documentRotations: result.documentRotations,
+        documentRotationsBySheet: result.documentRotationsBySheet,
         hyperlinks: result.hyperlinks,
       };
 

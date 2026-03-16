@@ -111,17 +111,13 @@ export function TakeoffWorkspace() {
   });
   const [exportStatus, setExportStatus] = useState<{type: 'excel' | 'pdf' | null, progress: number}>({type: null, progress: 0});
 
-  // PDF viewer controls state (scale/rotation synced by tabs hook)
+  // PDF viewer controls state
   const [totalPages, setTotalPages] = useState(0);
-  const [scale, setScale] = useState(1);
-  const [rotation, setRotation] = useState(0);
 
   const tabsResult = useTakeoffWorkspaceTabs({
     projectId: projectId ?? undefined,
     projectFiles,
     documents,
-    setScale,
-    setRotation,
     setSelectedDocumentId,
     setSelectedPageNumber,
     setSelectedSheet: (s) =>
@@ -139,6 +135,15 @@ export function TakeoffWorkspace() {
 
   const currentPdfFile = tabsResult.currentPdfFile;
   const currentPage = tabsResult.currentPage;
+  const sheetId = tabsResult.sheetId;
+
+  // Derive scale/rotation from store so they stay in sync when switching tabs (no useEffect timing issues)
+  const scale = useDocumentViewStore((s) =>
+    sheetId ? s.getDocumentScaleBySheet(sheetId) : 1
+  );
+  const rotation = useDocumentViewStore((s) =>
+    sheetId ? s.getDocumentRotationBySheet(sheetId) : 0
+  );
 
   useTakeoffWorkspaceProjectInit({
     projectId: projectId ?? undefined,

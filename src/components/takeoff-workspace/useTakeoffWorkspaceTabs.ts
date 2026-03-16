@@ -31,8 +31,9 @@ export interface UseTakeoffWorkspaceTabsOptions {
   projectId: string | undefined;
   projectFiles: ProjectFile[];
   documents: PDFDocument[];
-  setScale: (s: number) => void;
-  setRotation: (r: number) => void;
+  /** Optional: called when scale/rotation change from store (for legacy sync). Prefer deriving scale/rotation from store in parent. */
+  setScale?: (s: number) => void;
+  setRotation?: (r: number) => void;
   setSelectedDocumentId: (id: string | null) => void;
   setSelectedPageNumber: (p: number | null) => void;
   setSelectedSheet: (sheet: { id: string; name: string; pageNumber: number; isVisible?: boolean; hasTakeoffs?: boolean; takeoffCount?: number } | null) => void;
@@ -116,13 +117,6 @@ export function useTakeoffWorkspaceTabs({
     activeTab != null
       ? getSheetId(activeTab.documentId, activeTab.pageNumber)
       : null;
-
-  // Sync scale/rotation from store when switching tabs
-  useEffect(() => {
-    if (!sheetId) return;
-    setScale(getDocumentScaleBySheet(sheetId));
-    setRotation(getDocumentRotationBySheet(sheetId));
-  }, [sheetId, getDocumentScaleBySheet, getDocumentRotationBySheet, setScale, setRotation]);
 
   const handlePageSelect = useCallback(
     (documentId: string, pageNumber: number) => {
@@ -283,16 +277,16 @@ export function useTakeoffWorkspaceTabs({
 
   const handleScaleChange = useCallback(
     (newScale: number) => {
-      setScale(newScale);
       if (sheetId) setDocumentScaleBySheet(sheetId, newScale);
+      setScale?.(newScale);
     },
     [sheetId, setScale, setDocumentScaleBySheet]
   );
 
   const handleRotationChange = useCallback(
     (newRotation: number) => {
-      setRotation(newRotation);
       if (sheetId) setDocumentRotationBySheet(sheetId, newRotation);
+      setRotation?.(newRotation);
     },
     [sheetId, setRotation, setDocumentRotationBySheet]
   );
@@ -306,16 +300,12 @@ export function useTakeoffWorkspaceTabs({
       const delta = direction === 'clockwise' ? 90 : -90;
       const newRotation = ((baseRotation + delta) % 360 + 360) % 360;
       setDocumentRotationsForDocument(documentId, newRotation, totalPages);
-      if (currentPdfFile?.id === documentId) {
-        setRotation(newRotation);
-      }
+      // Parent derives rotation from store, so no need to call setRotation
     },
     [
       documents,
-      currentPdfFile,
       getDocumentRotationBySheet,
       setDocumentRotationsForDocument,
-      setRotation,
     ]
   );
 

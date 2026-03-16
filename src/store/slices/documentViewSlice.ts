@@ -25,6 +25,8 @@ interface DocumentViewState {
   setDocumentRotation: (documentId: string, rotation: number) => void;
   /** Set multiple document rotations in a single update (e.g. from backup/import). */
   setDocumentRotations: (rotations: Record<string, number>) => void;
+  /** Set multiple per-sheet rotations in a single update (e.g. from backup/import restore). */
+  setDocumentRotationsBySheet: (rotations: Record<string, number>) => void;
   /** Set rotation for all sheets in a document (document-level rotation). */
   setDocumentRotationsForDocument: (documentId: string, rotation: number, totalPages: number) => void;
   getDocumentRotation: (documentId: string) => number;
@@ -83,6 +85,16 @@ export const useDocumentViewStore = create<DocumentViewState>()(
         set(state => ({
           documentRotations: {
             ...state.documentRotations,
+            ...rotations
+          }
+        }));
+      },
+
+      setDocumentRotationsBySheet: (rotations) => {
+        if (Object.keys(rotations).length === 0) return;
+        set(state => ({
+          documentRotationsBySheet: {
+            ...state.documentRotationsBySheet,
             ...rotations
           }
         }));
