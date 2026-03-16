@@ -1145,8 +1145,14 @@ export function usePDFViewerInteractions(
           const x = Math.min(coords.x, annotationDragStart.x);
           const y = Math.min(coords.y, annotationDragStart.y);
           if (width >= 5 || height >= 5) {
-            const p1 = { x: x / viewport.width, y: y / viewport.height };
-            const p2 = { x: (x + width) / viewport.width, y: (y + height) / viewport.height };
+            const p1 =
+              annotationTool === 'arrow'
+                ? { x: annotationDragStart.x / viewport.width, y: annotationDragStart.y / viewport.height }
+                : { x: x / viewport.width, y: y / viewport.height };
+            const p2 =
+              annotationTool === 'arrow'
+                ? { x: coords.x / viewport.width, y: coords.y / viewport.height }
+                : { x: (x + width) / viewport.width, y: (y + height) / viewport.height };
             if (currentProjectId && file.id) {
               const created = addAnnotation({
                 projectId: currentProjectId,
