@@ -1051,10 +1051,13 @@ export function useTakeoffExport({
         });
 
       onExportStatusUpdate?.('pdf', 30);
-      const getDocumentRotation = useDocumentViewStore.getState().getDocumentRotation;
+      const getDocumentRotationBySheet = useDocumentViewStore.getState().getDocumentRotationBySheet;
       const documentRotations = new Map<string, number>();
       pagesForExport.forEach((page) => {
-        if (!documentRotations.has(page.sheetId)) documentRotations.set(page.sheetId, getDocumentRotation(page.sheetId));
+        const fullSheetId = `${page.sheetId}-${page.pageNumber}`;
+        if (!documentRotations.has(fullSheetId)) {
+          documentRotations.set(fullSheetId, getDocumentRotationBySheet(fullSheetId));
+        }
       });
 
       const { exportPagesWithMeasurementsToPDF, downloadPDF } = await import('../../utils/pdfExportUtils');

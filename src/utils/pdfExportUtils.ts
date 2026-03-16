@@ -1164,8 +1164,9 @@ export async function exportPagesWithMeasurementsToPDF(
         for (const pageMeasurement of pages) {
           const _pageIndex = pageMeasurement.pageNumber - 1; // Convert to 0-based index
 
-          // Get document rotation if available
-          const documentRotation = documentRotations?.get(sheetId) || 0;
+          // Get document rotation for this page (per-sheet rotation, then document-level fallback)
+          const fullSheetId = `${sheetId}-${pageMeasurement.pageNumber}`;
+          const documentRotation = documentRotations?.get(fullSheetId) ?? documentRotations?.get(sheetId) ?? 0;
           
           // Clone bytes for pdf.js rendering to avoid ArrayBuffer detachment issues
           // pdf.js transfers the ArrayBuffer to a worker, which detaches it
