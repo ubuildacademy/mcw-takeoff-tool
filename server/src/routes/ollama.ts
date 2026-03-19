@@ -1,8 +1,5 @@
 import express from 'express';
 import axios from 'axios';
-import { supabase } from '../supabase';
-import * as path from 'path';
-import * as fs from 'fs-extra';
 import { requireAuth } from '../middleware';
 
 const router = express.Router();
@@ -15,13 +12,7 @@ const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY;
 // Cloud-only models list: always hit ollama.com so we don't mix in local models (e.g. OLLAMA_BASE_URL=localhost)
 const OLLAMA_CLOUD_API = 'https://ollama.com';
 
-// Cloud models use the "-cloud" suffix (e.g. gpt-oss:120b-cloud). Filter so we only show cloud models.
-function isCloudModel(name: string): boolean {
-  return typeof name === 'string' && name.endsWith('-cloud');
-}
-
-// Get available models (cloud only). No auth required - list is not sensitive; server uses its own API key.
-// Always uses Ollama cloud API so dropdowns never show locally hosted models.
+// Models endpoint hits Ollama Cloud (ollama.com/api/tags) only. API response is the source of truth.
 router.get('/models', async (req, res) => {
   try {
     if (!OLLAMA_API_KEY) {
@@ -55,8 +46,7 @@ router.get('/models', async (req, res) => {
       return res.status(200).json({ models: [] });
     }
 
-    const cloudOnly = data.models.filter((m: { name?: string }) => isCloudModel(m?.name ?? ''));
-    res.json({ models: cloudOnly });
+    res.json({ models: data.models });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('[Ollama /models] Error fetching models:', error);

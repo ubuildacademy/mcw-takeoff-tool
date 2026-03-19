@@ -18,7 +18,7 @@ import { ollamaService, type OllamaModel } from '../services/ollamaService';
 import { authHelpers, supabase, UserMetadata, UserInvitation } from '../lib/supabase';
 import { settingsService } from '../services/apiService';
 
-// Fallback when /api/ollama/models fails — official Ollama cloud models (https://ollama.com/blog/cloud-models)
+// Fallback when /api/ollama/models fails (https://ollama.com/search?c=cloud)
 const FALLBACK_OLLAMA_MODELS: OllamaModel[] = [
   { name: 'qwen3-coder:480b-cloud', size: 0, digest: '', modified_at: '' },
   { name: 'gpt-oss:120b-cloud', size: 0, digest: '', modified_at: '' },
