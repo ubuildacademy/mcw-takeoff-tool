@@ -86,9 +86,6 @@ export function useTakeoffWorkspaceTabs({
   const closeAllOtherTabs = usePdfViewerTabsStore((s) => s.closeAllOtherTabs);
   const setActiveTab = usePdfViewerTabsStore((s) => s.setActiveTab);
 
-  const getDocumentScaleBySheet = useDocumentViewStore(
-    (s) => s.getDocumentScaleBySheet
-  );
   const getDocumentRotationBySheet = useDocumentViewStore(
     (s) => s.getDocumentRotationBySheet
   );

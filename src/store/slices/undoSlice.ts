@@ -11,6 +11,10 @@ export type UndoEntry =
   | { type: 'annotation_delete'; annotation: Annotation }
   | { type: 'measurement_add'; id: string; createPayload: Omit<TakeoffMeasurement, 'id' | 'timestamp'> }
   | { type: 'measurement_update'; id: string; previous: Partial<TakeoffMeasurement>; next: Partial<TakeoffMeasurement> }
+  | {
+      type: 'measurement_update_batch';
+      entries: { id: string; previous: Partial<TakeoffMeasurement>; next: Partial<TakeoffMeasurement> }[];
+    }
   | { type: 'measurement_delete'; measurement: TakeoffMeasurement };
 
 const MAX_HISTORY = 50;
@@ -80,6 +84,12 @@ export const useUndoStore = create<UndoState>()((set, get) => ({
           break;
         case 'measurement_update':
           await measurement.updateTakeoffMeasurement(entry.id, entry.previous);
+          break;
+        case 'measurement_update_batch':
+          for (let i = entry.entries.length - 1; i >= 0; i--) {
+            const e = entry.entries[i];
+            await measurement.updateTakeoffMeasurement(e.id, e.previous);
+          }
           break;
         case 'measurement_delete': {
           const newId = await measurement.addTakeoffMeasurement({
@@ -162,6 +172,11 @@ export const useUndoStore = create<UndoState>()((set, get) => ({
         }
         case 'measurement_update':
           await measurement.updateTakeoffMeasurement(entry.id, entry.next);
+          break;
+        case 'measurement_update_batch':
+          for (const e of entry.entries) {
+            await measurement.updateTakeoffMeasurement(e.id, e.next);
+          }
           break;
         case 'measurement_delete':
           await measurement.deleteTakeoffMeasurement(entry.measurement.id);

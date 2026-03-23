@@ -9,6 +9,11 @@ import { useAnnotationStore } from '../../store/slices/annotationSlice';
 import { useConditionStore } from '../../store/slices/conditionSlice';
 import { useMeasurementStore } from '../../store/slices/measurementSlice';
 import { useUndoStore } from '../../store';
+import {
+  shiftTakeoffMeasurementGeometry,
+  cssDragRectToPdfQuad,
+  MIN_DRAG_RECT_PX,
+} from '../../utils/measurementGeometry';
 
 const PASTE_OFFSET = 0.02;
 
@@ -178,6 +183,10 @@ export interface UsePDFViewerInteractionsOptions {
   setMeasurementDragStart: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
   measurementDragBox: { x: number; y: number; width: number; height: number } | null;
   setMeasurementDragBox: React.Dispatch<React.SetStateAction<{ x: number; y: number; width: number; height: number } | null>>;
+  cutoutDragStart: { x: number; y: number } | null;
+  setCutoutDragStart: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
+  cutoutDragBox: { x: number; y: number; width: number; height: number } | null;
+  setCutoutDragBox: React.Dispatch<React.SetStateAction<{ x: number; y: number; width: number; height: number } | null>>;
   annotationMoveId: string | null;
   setAnnotationMoveId: React.Dispatch<React.SetStateAction<string | null>>;
   annotationMoveIds: string[];
@@ -207,6 +216,7 @@ export interface UsePDFViewerInteractionsOptions {
   measurementMoveJustCompletedRef: MutableRefObject<boolean>;
   annotationMoveJustCompletedRef: MutableRefObject<boolean>;
   measurementDragJustCompletedRef: MutableRefObject<boolean>;
+  cutoutDragJustCompletedRef: MutableRefObject<boolean>;
   annotationDragJustCompletedRef: MutableRefObject<boolean>;
   isSelectionModeRef: MutableRefObject<boolean>;
   completeMeasurementRef: MutableRefObject<(points: { x: number; y: number }[]) => Promise<void>>;
@@ -326,8 +336,10 @@ export function usePDFViewerInteractions(
     setMeasurementMoveDelta,
     measurementDragStart,
     setMeasurementDragStart,
-    measurementDragBox: _measurementDragBox,
     setMeasurementDragBox,
+    cutoutDragStart,
+    setCutoutDragStart,
+    setCutoutDragBox,
     annotationMoveId,
     setAnnotationMoveId,
     annotationMoveIds,
@@ -345,7 +357,7 @@ export function usePDFViewerInteractions(
     cutoutMode,
     currentCutout,
     setCurrentCutout,
-    cutoutTargetConditionId: _cutoutTargetConditionId,
+    cutoutTargetConditionId,
     onCutoutModeChange: _onCutoutModeChange,
     completeCalibration,
     createRubberBandElementRef,
@@ -354,6 +366,7 @@ export function usePDFViewerInteractions(
     measurementMoveJustCompletedRef,
     annotationMoveJustCompletedRef,
     measurementDragJustCompletedRef,
+    cutoutDragJustCompletedRef,
     annotationDragJustCompletedRef,
     isSelectionModeRef,
     completeMeasurementRef,
@@ -586,6 +599,13 @@ export function usePDFViewerInteractions(
         return;
       }
 
+      if (event.key === 'Escape' && cutoutDragStart) {
+        event.preventDefault();
+        setCutoutDragStart(null);
+        setCutoutDragBox(null);
+        return;
+      }
+
       if (event.key === 'Escape' && annotationTool) {
         event.preventDefault();
         if (currentAnnotation.length > 0) {
@@ -752,6 +772,9 @@ export function usePDFViewerInteractions(
       onHyperlinkModeChange,
       setHyperlinkDrawStart,
       setHyperlinkDrawBox,
+      cutoutDragStart,
+      setCutoutDragStart,
+      setCutoutDragBox,
     ]
   );
 
@@ -889,6 +912,7 @@ export function usePDFViewerInteractions(
 
       if (
         isMeasuring &&
+        !cutoutMode &&
         (measurementType === 'area' || measurementType === 'volume') &&
         currentSelectedConditionId &&
         !annotationTool &&
@@ -898,6 +922,22 @@ export function usePDFViewerInteractions(
         if (coords) {
           setMeasurementDragStart(coords);
           setMeasurementDragBox(null);
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+      }
+
+      if (
+        cutoutMode &&
+        cutoutTargetConditionId &&
+        !annotationTool &&
+        !(visualSearchMode || !!titleblockSelectionMode)
+      ) {
+        const coords = getCssCoordsFromEvent(event);
+        if (coords) {
+          setCutoutDragStart(coords);
+          setCutoutDragBox(null);
           event.preventDefault();
           event.stopPropagation();
           return;
@@ -949,6 +989,10 @@ export function usePDFViewerInteractions(
       setAnnotationMoveDelta,
       setMeasurementDragStart,
       setMeasurementDragBox,
+      cutoutMode,
+      cutoutTargetConditionId,
+      setCutoutDragStart,
+      setCutoutDragBox,
       setAnnotationDragStart,
       setAnnotationDragBox,
       setSelectionStart,
@@ -1009,12 +1053,17 @@ export function usePDFViewerInteractions(
             for (const id of idsToMove) {
               const m = localTakeoffMeasurements.find((meas) => meas.id === id);
               if (m && m.pdfCoordinates?.length) {
-                const newPoints = m.pdfCoordinates.map((p) => ({
-                  x: p.x + deltaPdf.x,
-                  y: p.y + deltaPdf.y,
-                }));
-                const previous = { pdfCoordinates: m.pdfCoordinates, points: m.points };
-                const next = { pdfCoordinates: newPoints, points: newPoints };
+                const shifted = shiftTakeoffMeasurementGeometry(m, deltaPdf);
+                const previous = {
+                  pdfCoordinates: m.pdfCoordinates,
+                  points: m.points,
+                  ...(m.cutouts != null && { cutouts: m.cutouts }),
+                };
+                const next = {
+                  pdfCoordinates: shifted.pdfCoordinates,
+                  points: shifted.points,
+                  ...(shifted.cutouts != null && { cutouts: shifted.cutouts }),
+                };
                 updateTakeoffMeasurement(id, next).then(() => {
                   useUndoStore.getState().push({ type: 'measurement_update', id, previous, next });
                 }).catch(() => {});
@@ -1023,11 +1072,7 @@ export function usePDFViewerInteractions(
             setLocalTakeoffMeasurements((prev) =>
               prev.map((m) => {
                 if (!idsToMove.includes(m.id) || !m.pdfCoordinates?.length) return m;
-                const newPoints = m.pdfCoordinates.map((p) => ({
-                  x: p.x + deltaPdf.x,
-                  y: p.y + deltaPdf.y,
-                }));
-                return { ...m, pdfCoordinates: newPoints, points: newPoints };
+                return { ...m, ...shiftTakeoffMeasurementGeometry(m, deltaPdf) };
               })
             );
             measurementMoveJustCompletedRef.current = true;
@@ -1043,7 +1088,11 @@ export function usePDFViewerInteractions(
         return;
       }
 
-      if (measurementDragStart && (measurementType === 'area' || measurementType === 'volume')) {
+      if (
+        measurementDragStart &&
+        !cutoutMode &&
+        (measurementType === 'area' || measurementType === 'volume')
+      ) {
         let viewport = currentViewport;
         if (!viewport && pdfPageRef.current) {
           viewport = pdfPageRef.current.getViewport({ scale: viewState.scale, rotation: viewState.rotation });
@@ -1055,12 +1104,8 @@ export function usePDFViewerInteractions(
             const height = Math.abs(coords.y - measurementDragStart.y);
             const x = Math.min(coords.x, measurementDragStart.x);
             const y = Math.min(coords.y, measurementDragStart.y);
-            if (width >= 5 && height >= 5) {
-              const p1 = { x: x / viewport.width, y: y / viewport.height };
-              const p2 = { x: (x + width) / viewport.width, y: y / viewport.height };
-              const p3 = { x: (x + width) / viewport.width, y: (y + height) / viewport.height };
-              const p4 = { x: x / viewport.width, y: (y + height) / viewport.height };
-              completeMeasurementRef.current([p1, p2, p3, p4]);
+            if (width >= MIN_DRAG_RECT_PX && height >= MIN_DRAG_RECT_PX) {
+              completeMeasurementRef.current(cssDragRectToPdfQuad(viewport, x, y, width, height));
               measurementDragJustCompletedRef.current = true;
               event.preventDefault();
               event.stopPropagation();
@@ -1069,6 +1114,31 @@ export function usePDFViewerInteractions(
         }
         setMeasurementDragStart(null);
         setMeasurementDragBox(null);
+        return;
+      }
+
+      if (cutoutDragStart && cutoutTargetConditionId) {
+        let viewport = currentViewport;
+        if (!viewport && pdfPageRef.current) {
+          viewport = pdfPageRef.current.getViewport({ scale: viewState.scale, rotation: viewState.rotation });
+        }
+        if (viewport) {
+          const coords = getCssCoordsFromEvent(event);
+          if (coords) {
+            const width = Math.abs(coords.x - cutoutDragStart.x);
+            const height = Math.abs(coords.y - cutoutDragStart.y);
+            const x = Math.min(coords.x, cutoutDragStart.x);
+            const y = Math.min(coords.y, cutoutDragStart.y);
+            if (width >= MIN_DRAG_RECT_PX && height >= MIN_DRAG_RECT_PX) {
+              void completeCutoutRef.current?.(cssDragRectToPdfQuad(viewport, x, y, width, height));
+              cutoutDragJustCompletedRef.current = true;
+              event.preventDefault();
+              event.stopPropagation();
+            }
+          }
+        }
+        setCutoutDragStart(null);
+        setCutoutDragBox(null);
         return;
       }
 
@@ -1234,6 +1304,9 @@ export function usePDFViewerInteractions(
       measurementMoveStart,
       measurementMoveOriginalPoints,
       measurementDragStart,
+      cutoutDragStart,
+      cutoutTargetConditionId,
+      cutoutMode,
       measurementType,
       currentViewport,
       viewState,
@@ -1268,6 +1341,9 @@ export function usePDFViewerInteractions(
       setMeasurementMoveDelta,
       setMeasurementDragStart,
       setMeasurementDragBox,
+      setCutoutDragStart,
+      setCutoutDragBox,
+      completeCutoutRef,
       setAnnotationMoveId,
       setAnnotationMoveIds,
       setAnnotationMoveStart,
@@ -1336,7 +1412,26 @@ export function usePDFViewerInteractions(
         }
         return;
       }
-      if (measurementDragStart && (measurementType === 'area' || measurementType === 'volume')) {
+      if (cutoutDragStart && viewport) {
+        const coords = getCssCoordsFromEvent(event);
+        if (coords) {
+          const width = Math.abs(coords.x - cutoutDragStart.x);
+          const height = Math.abs(coords.y - cutoutDragStart.y);
+          const x = Math.min(coords.x, cutoutDragStart.x);
+          const y = Math.min(coords.y, cutoutDragStart.y);
+          setCutoutDragBox({ x, y, width, height });
+          setMousePosition({
+            x: coords.x / viewport.width,
+            y: coords.y / viewport.height,
+          });
+        }
+        return;
+      }
+      if (
+        measurementDragStart &&
+        !cutoutMode &&
+        (measurementType === 'area' || measurementType === 'volume')
+      ) {
         const coords = getCssCoordsFromEvent(event);
         if (coords) {
           const width = Math.abs(coords.x - measurementDragStart.x);
@@ -1476,6 +1571,7 @@ export function usePDFViewerInteractions(
       measurementMoveId,
       measurementMoveStart,
       measurementDragStart,
+      cutoutDragStart,
       measurementType,
       isCalibrating,
       calibrationPoints,
@@ -1499,6 +1595,7 @@ export function usePDFViewerInteractions(
       pdfPageRef,
       setMeasurementMoveDelta,
       setMeasurementDragBox,
+      setCutoutDragBox,
       setAnnotationMoveDelta,
       setAnnotationDragBox,
       setSelectionBox,
@@ -1620,7 +1717,11 @@ export function usePDFViewerInteractions(
         });
         return;
       }
-      if (cutoutMode) {
+      if (cutoutMode && cutoutTargetConditionId) {
+        if (cutoutDragJustCompletedRef.current) {
+          cutoutDragJustCompletedRef.current = false;
+          return;
+        }
         const baseViewport = pdfPageRef.current?.getViewport({ scale: 1, rotation: 0 }) || viewport;
         const rotation = viewState.rotation || 0;
         let baseX: number, baseY: number;
@@ -1763,6 +1864,7 @@ export function usePDFViewerInteractions(
       isMeasuring,
       mousePosition,
       cutoutMode,
+      cutoutTargetConditionId,
       currentCutout,
       isDeselecting,
       visualSearchMode,
@@ -1802,7 +1904,7 @@ export function usePDFViewerInteractions(
     (event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
       event.preventDefault();
       event.stopPropagation();
-      if (cutoutMode && currentCutout.length >= 3) {
+      if (cutoutMode && cutoutTargetConditionId && currentCutout.length >= 3) {
         completeCutoutRef.current?.(currentCutout);
         return;
       }
@@ -1828,6 +1930,7 @@ export function usePDFViewerInteractions(
       measurementType,
       currentMeasurement,
       cutoutMode,
+      cutoutTargetConditionId,
       currentCutout,
       isMeasuring,
     ]
@@ -1873,6 +1976,11 @@ export function usePDFViewerInteractions(
       }
       if (measurementDragJustCompletedRef.current) {
         measurementDragJustCompletedRef.current = false;
+        e.stopPropagation();
+        return;
+      }
+      if (cutoutDragJustCompletedRef.current) {
+        cutoutDragJustCompletedRef.current = false;
         e.stopPropagation();
         return;
       }

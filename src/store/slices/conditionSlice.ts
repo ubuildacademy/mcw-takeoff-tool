@@ -11,7 +11,10 @@ interface ConditionState {
   loadingConditions: boolean;
   
   // Actions
-  addCondition: (condition: Omit<TakeoffCondition, 'id'>) => Promise<string>;
+  addCondition: (
+    condition: Omit<TakeoffCondition, 'id'>,
+    options?: { insertAfterId?: string }
+  ) => Promise<string>;
   updateCondition: (id: string, updates: Partial<TakeoffCondition>) => Promise<void>;
   deleteCondition: (id: string) => Promise<void>;
   setSelectedCondition: (id: string | null) => void;
@@ -37,7 +40,7 @@ export const useConditionStore = create<ConditionState>()(
       loadingConditions: false,
       
       // Actions
-      addCondition: async (conditionData) => {
+      addCondition: async (conditionData, options) => {
         console.log('🔄 ADD_CONDITION: Starting to create condition:', conditionData);
         try {
           const { conditionService } = await import('../../services/apiService');
@@ -49,9 +52,18 @@ export const useConditionStore = create<ConditionState>()(
           
           set(state => {
             console.log('💾 ADD_CONDITION: Adding condition to store from backend:', condition);
-            return {
-              conditions: [...state.conditions, condition]
-            };
+            const afterId = options?.insertAfterId;
+            const insertAt =
+              afterId != null ? state.conditions.findIndex((c) => c.id === afterId) : -1;
+            const nextConditions =
+              insertAt >= 0
+                ? [
+                    ...state.conditions.slice(0, insertAt + 1),
+                    condition,
+                    ...state.conditions.slice(insertAt + 1),
+                  ]
+                : [...state.conditions, condition];
+            return { conditions: nextConditions };
           });
           
           console.log('✅ ADD_CONDITION: Condition created successfully with ID:', condition.id);

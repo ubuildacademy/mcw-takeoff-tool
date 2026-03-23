@@ -82,6 +82,7 @@ export function TakeoffWorkspace() {
   
   const setCurrentProject = useProjectStore((s) => s.setCurrentProject);
   const setSelectedCondition = useConditionStore((s) => s.setSelectedCondition);
+  const selectedConditionId = useConditionStore((s) => s.selectedConditionId);
   const getSelectedCondition = useConditionStore((s) => s.getSelectedCondition);
   const getCurrentProject = useProjectStore((s) => s.getCurrentProject);
   const loadProjectTakeoffMeasurements = useMeasurementStore((s) => s.loadProjectTakeoffMeasurements);
@@ -331,6 +332,15 @@ export function TakeoffWorkspace() {
     setCutoutMode(!!conditionId);
     setCutoutTargetConditionId(conditionId);
   }, []);
+
+  /** Cut-out mode is invalid without the matching condition selected (e.g. deselect, auto-count completion). */
+  useEffect(() => {
+    if (!cutoutMode || cutoutTargetConditionId == null) return;
+    if (selectedConditionId !== cutoutTargetConditionId) {
+      setCutoutMode(false);
+      setCutoutTargetConditionId(null);
+    }
+  }, [selectedConditionId, cutoutMode, cutoutTargetConditionId]);
 
   const handleCalibrateScale = () => {
     // Trigger the PDF viewer's calibration dialog
@@ -683,6 +693,14 @@ export function TakeoffWorkspace() {
     setHyperlinkContextMenu(null);
   }, [hyperlinkContextMenu]);
 
+  const handleHyperlinkDeleteFromDialog = useCallback(() => {
+    if (!editingHyperlinkId) return;
+    useHyperlinkStore.getState().deleteHyperlink(editingHyperlinkId);
+    setEditingHyperlinkId(null);
+    setHyperlinkPickerOpen(false);
+    toast.success('Hyperlink removed');
+  }, [editingHyperlinkId]);
+
   const handleHyperlinkUpdate = useCallback(
     (targetSheetId: string, targetPageNumber: number) => {
       if (!editingHyperlinkId) return;
@@ -764,7 +782,8 @@ export function TakeoffWorkspace() {
               onCutoutMode={handleCutoutMode}
               cutoutMode={cutoutMode}
               cutoutTargetConditionId={cutoutTargetConditionId}
-              selectedDocumentId={selectedDocumentId}
+              viewerDocumentId={currentPdfFile?.id ?? null}
+              currentPage={currentPage}
               onOpenCVTakeoff={() => setShowCVTakeoffAgent(true)}
             />
           )}
@@ -947,6 +966,7 @@ export function TakeoffWorkspace() {
         }
         onSelect={editingHyperlinkId ? handleHyperlinkUpdate : handleHyperlinkTargetSelect}
         isEditMode={!!editingHyperlinkId}
+        onDeleteLink={editingHyperlinkId ? handleHyperlinkDeleteFromDialog : undefined}
         onCancel={handleHyperlinkPickerCancel}
       />
 

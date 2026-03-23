@@ -38,12 +38,15 @@ interface TakeoffSidebarProps {
   onCutoutMode?: (conditionId: string | null) => void;
   cutoutMode?: boolean;
   cutoutTargetConditionId?: string | null;
-  selectedDocumentId?: string | null;
+  /** Open tab's document id (same source as the PDF viewer). Avoids stale selection state when tabs restore. */
+  viewerDocumentId?: string | null;
+  /** 1-based page in the active PDF tab; condition quantities in the Conditions tab are scoped to this page. */
+  currentPage?: number | null;
   /** Opens the CV Takeoff (experimental) dialog when user chooses it from Create Condition. */
   onOpenCVTakeoff?: () => void;
 }
 
-export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _onToolSelect, documents = [], onPageSelect, onPageOpenInNewTab, onExportStatusUpdate, onCutoutMode, cutoutMode, cutoutTargetConditionId, selectedDocumentId, onOpenCVTakeoff }: TakeoffSidebarProps) {
+export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _onToolSelect, documents = [], onPageSelect, onPageOpenInNewTab, onExportStatusUpdate, onCutoutMode, cutoutMode, cutoutTargetConditionId, viewerDocumentId, currentPage, onOpenCVTakeoff }: TakeoffSidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -115,11 +118,15 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
     }
   }, [showExportDropdown]);
 
-  const filteredConditions = conditions.filter(
-    (c) =>
-      c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.description.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredConditions = conditions
+    .filter(
+      (c) =>
+        c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        c.description.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+    .sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+    );
 
   // Load match thumbnails for auto-count (visual-search) conditions
   useEffect(() => {
@@ -227,7 +234,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
       name: `${condition.name} (Copy)`,
       color: randomColor
     };
-    addCondition(newCondition);
+    addCondition(newCondition, { insertAfterId: condition.id });
   };
 
   const handleEditCondition = (condition: TakeoffCondition) => {
@@ -241,7 +248,8 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
       if (cutoutMode && cutoutTargetConditionId === condition.id) {
         onCutoutMode(null);
       } else {
-        // Turn on cut-out mode for this condition
+        // Activate this condition first — cut-out mode only applies to the selected condition
+        onConditionSelect(condition);
         onCutoutMode(condition.id);
       }
     }
@@ -407,7 +415,8 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
             onSearchChange={(value) => setSearchQuery(value)}
             selectedConditionId={selectedConditionId}
             projectId={projectId}
-            selectedDocumentId={selectedDocumentId}
+            viewerDocumentId={viewerDocumentId}
+            currentPage={currentPage}
             matchThumbnails={matchThumbnails}
             loadingThumbnails={loadingThumbnails}
             getConditionTakeoffMeasurements={getConditionTakeoffMeasurements}

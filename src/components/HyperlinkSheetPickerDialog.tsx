@@ -27,6 +27,8 @@ export interface HyperlinkSheetPickerDialogProps {
   onSelect: (targetSheetId: string, targetPageNumber: number) => void;
   /** Edit mode: when set, dialog is in edit mode (title may differ) */
   isEditMode?: boolean;
+  /** Edit mode only: remove the hyperlink entirely (same as context menu Delete) */
+  onDeleteLink?: () => void;
   onCancel: () => void;
 }
 
@@ -116,6 +118,7 @@ export function HyperlinkSheetPickerDialog({
   initialTargetPageNumber,
   onSelect,
   isEditMode = false,
+  onDeleteLink,
   onCancel,
 }: HyperlinkSheetPickerDialogProps) {
   const mergedDocs = mergeDocumentsWithFiles(documents, projectFiles);
@@ -179,13 +182,33 @@ export function HyperlinkSheetPickerDialog({
           </div>
         </div>
 
-        <DialogFooter className="gap-2 sm:gap-0">
-          <Button variant="outline" onClick={() => handleOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button onClick={handleConfirm} disabled={!selected}>
-            {isEditMode ? 'Update' : 'Create link'}
-          </Button>
+        <DialogFooter
+          className={
+            isEditMode && onDeleteLink
+              ? 'flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between sm:space-x-0'
+              : 'gap-2 sm:gap-0'
+          }
+        >
+          {isEditMode && onDeleteLink ? (
+            <Button
+              type="button"
+              variant="destructive"
+              className="w-full sm:w-auto"
+              onClick={() => {
+                onDeleteLink();
+              }}
+            >
+              Delete hyperlink
+            </Button>
+          ) : null}
+          <div className="flex w-full flex-col-reverse gap-2 sm:w-auto sm:flex-row sm:justify-end">
+            <Button variant="outline" onClick={() => handleOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleConfirm} disabled={!selected}>
+              {isEditMode ? 'Update' : 'Create link'}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

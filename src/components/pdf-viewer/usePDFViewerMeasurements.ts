@@ -82,6 +82,11 @@ export interface UsePDFViewerMeasurementsResult {
   setMeasurementDragStart: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
   measurementDragBox: { x: number; y: number; width: number; height: number } | null;
   setMeasurementDragBox: React.Dispatch<React.SetStateAction<{ x: number; y: number; width: number; height: number } | null>>;
+  // Cut-out drag-to-draw state (rectangle)
+  cutoutDragStart: { x: number; y: number } | null;
+  setCutoutDragStart: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
+  cutoutDragBox: { x: number; y: number; width: number; height: number } | null;
+  setCutoutDragBox: React.Dispatch<React.SetStateAction<{ x: number; y: number; width: number; height: number } | null>>;
   // Measurement move state (drag selected measurement in selection mode; move all selected on drag)
   measurementMoveId: string | null;
   setMeasurementMoveId: React.Dispatch<React.SetStateAction<string | null>>;
@@ -164,6 +169,10 @@ export function usePDFViewerMeasurements({
   // Measurement drag-to-draw state (area/volume)
   const [measurementDragStart, setMeasurementDragStart] = useState<{ x: number; y: number } | null>(null);
   const [measurementDragBox, setMeasurementDragBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+
+  // Cut-out drag-to-draw rectangle (same interaction as area/volume box draw)
+  const [cutoutDragStart, setCutoutDragStart] = useState<{ x: number; y: number } | null>(null);
+  const [cutoutDragBox, setCutoutDragBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
 
   // Measurement move state (drag selected measurement in selection mode; move all selected on drag)
   const [measurementMoveId, setMeasurementMoveId] = useState<string | null>(null);
@@ -301,6 +310,10 @@ export function usePDFViewerMeasurements({
     setMeasurementDragStart,
     measurementDragBox,
     setMeasurementDragBox,
+    cutoutDragStart,
+    setCutoutDragStart,
+    cutoutDragBox,
+    setCutoutDragBox,
     measurementMoveId,
     setMeasurementMoveId,
     measurementMoveIds,

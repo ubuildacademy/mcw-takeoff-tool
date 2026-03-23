@@ -33,6 +33,13 @@ import { PDFViewerMagnifier } from './pdf-viewer/PDFViewerMagnifier';
 import { PDFViewerDialogs } from './pdf-viewer/PDFViewerDialogs';
 import { PDFViewerStatusView } from './pdf-viewer/PDFViewerStatusView';
 import { formatFeetAndInches } from '../lib/utils';
+import { shiftTakeoffMeasurementGeometry } from '../utils/measurementGeometry';
+import {
+  clippedCutoutsFromIntersection,
+  intersectCutoutWithParent,
+  pdfPointsToMultiPolygon,
+} from '../utils/cutoutGeometry';
+import { toast } from 'sonner';
 import { setRestoreScrollPosition, setGetCurrentScrollPosition, setTriggerCalibration, setTriggerFitToWindow } from '../lib/windowBridge';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
@@ -50,6 +57,8 @@ const _PASTE_OFFSET = 0.02;
 
 /** Debounce (ms) for saving scroll position so we persist final position on reload */
 const SCROLL_SAVE_DEBOUNCE_MS = 150;
+
+const WRONG_CUTOUT_TOAST_MS = 3200;
 
 const PDFViewer: React.FC<PDFViewerProps> = ({
   file,
@@ -203,6 +212,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const annotationMoveJustCompletedRef = useRef(false);
   const measurementMoveJustCompletedRef = useRef(false);
   const measurementDragJustCompletedRef = useRef(false);
+  const cutoutDragJustCompletedRef = useRef(false);
   const completeMeasurementRef = useRef<(points: { x: number; y: number }[]) => Promise<void>>(() => Promise.resolve());
   const createRubberBandElementRef = useRef<(() => void) | null>(null);
   const completeCutoutRef = useRef<((points: { x: number; y: number }[]) => Promise<void>) | null>(null);
@@ -350,6 +360,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setMeasurementDragStart,
     measurementDragBox,
     setMeasurementDragBox,
+    cutoutDragStart,
+    setCutoutDragStart,
+    cutoutDragBox,
+    setCutoutDragBox,
     measurementMoveId,
     setMeasurementMoveId,
     measurementMoveIds,
@@ -545,6 +559,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setMeasurementDragStart,
     measurementDragBox,
     setMeasurementDragBox,
+    cutoutDragStart,
+    setCutoutDragStart,
+    cutoutDragBox,
+    setCutoutDragBox,
     annotationMoveId,
     setAnnotationMoveId,
     annotationMoveIds,
@@ -571,6 +589,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     measurementMoveJustCompletedRef,
     annotationMoveJustCompletedRef,
     measurementDragJustCompletedRef,
+    cutoutDragJustCompletedRef,
     annotationDragJustCompletedRef,
     isSelectionModeRef,
     completeMeasurementRef,
@@ -636,6 +655,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (!cutoutMode) {
       // Clear current cut-out when cut-out mode is turned off
       setCurrentCutout([]);
+      setCutoutDragStart(null);
+      setCutoutDragBox(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Setter stable; omit
   }, [cutoutMode]);
@@ -885,7 +906,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Check if we're in any interactive mode that requires rendering crosshairs/previews
     const hasActivePoints = isContinuousDrawing && activePoints.length > 0;
-    const isInteractiveMode = isMeasuring || isCalibrating || currentMeasurement.length > 0 || hasActivePoints || isAnnotating || annotationTool || isDrawingBoxSelection || hyperlinkMode;
+    const isInteractiveMode =
+      isMeasuring ||
+      isCalibrating ||
+      currentMeasurement.length > 0 ||
+      hasActivePoints ||
+      isAnnotating ||
+      annotationTool ||
+      isDrawingBoxSelection ||
+      hyperlinkMode ||
+      cutoutMode;
     
     // CRITICAL: Only clear overlay and return early if:
     // 1. We're sure there are no markups AND measurements have finished loading
@@ -927,19 +957,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     pageMeasurements.forEach((measurement) => {
       const isMoving = measurementMoveDelta && measurementIdsMoving.includes(measurement.id);
       const delta = measurementMoveDelta ?? { x: 0, y: 0 };
-      const measurementToRender = isMoving && measurement.pdfCoordinates
-        ? {
-            ...measurement,
-            points: measurement.pdfCoordinates.map(p => ({
-              x: p.x + delta.x,
-              y: p.y + delta.y
-            })),
-            pdfCoordinates: measurement.pdfCoordinates.map(p => ({
-              x: p.x + delta.x,
-              y: p.y + delta.y
-            }))
-          }
-        : measurement;
+      const measurementToRender =
+        isMoving && measurement.pdfCoordinates
+          ? {
+              ...measurement,
+              ...shiftTakeoffMeasurementGeometry(measurement, delta),
+            }
+          : measurement;
       renderSVGMeasurement(svgOverlay, measurementToRender, viewport, page, {
         rotation: viewState.rotation || 0,
         selectedMarkupIds,
@@ -1077,6 +1101,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const conditionColor = selectedCondition?.color || '#000000';
       renderSVGAnnotationDragBox(svgOverlay, measurementDragBox, viewport, conditionColor);
     }
+
+    // Cut-out rectangle drag (same dashed box UX as area measurement)
+    if (cutoutDragBox && cutoutMode && pageNum === currentPage) {
+      renderSVGAnnotationDragBox(svgOverlay, cutoutDragBox, viewport, '#ff0000');
+    }
     
     // Render completed annotations for this page (apply move offset when dragging)
     localAnnotations.forEach(annotation => {
@@ -1120,7 +1149,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     
     // Draw crosshair if measuring, calibrating, annotating, or drawing search/titleblock selection box (only if on the page being rendered)
-    if (mousePosition && (isMeasuring || isCalibrating || annotationTool || isBoxSelectionMode || hyperlinkMode) && pageNum === currentPage) {
+    if (
+      mousePosition &&
+      (isMeasuring || isCalibrating || annotationTool || isBoxSelectionMode || hyperlinkMode || cutoutMode) &&
+      pageNum === currentPage
+    ) {
       renderSVGCrosshair(svgOverlay, mousePosition, viewport, isCalibrating, {
         fullScreen: crosshairFullScreen,
         strokeColor: crosshairColor,
@@ -1139,7 +1172,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     
   // eslint-disable-next-line react-hooks/exhaustive-deps -- Large render callback; refs and some deps intentionally omitted to avoid cascade
-  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, annotationDragBox, annotationMoveId, annotationMoveIds, annotationMoveDelta, annotationColor, measurementDragBox, measurementMoveId, measurementMoveIds, measurementMoveDelta, cutoutMode, currentCutout, isBoxSelectionMode, isDrawingBoxSelection, selectionBox, hyperlinkMode, hyperlinkDrawBox, effectiveProjectId, file.id, getPageTakeoffMeasurements, getSelectedCondition, measurementsLoading, getConditionColor, getConditionLineThickness, crosshairFullScreen, crosshairColor, crosshairStrokeWidth, showMeasurementLabels, showRunningLength, hyperlinkCountForFile, totalHyperlinksCount]);
+  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, annotationDragBox, annotationMoveId, annotationMoveIds, annotationMoveDelta, annotationColor, measurementDragBox, cutoutDragBox, measurementMoveId, measurementMoveIds, measurementMoveDelta, cutoutMode, currentCutout, isBoxSelectionMode, isDrawingBoxSelection, selectionBox, hyperlinkMode, hyperlinkDrawBox, effectiveProjectId, file.id, getPageTakeoffMeasurements, getSelectedCondition, measurementsLoading, getConditionColor, getConditionLineThickness, crosshairFullScreen, crosshairColor, crosshairStrokeWidth, showMeasurementLabels, showRunningLength, hyperlinkCountForFile, totalHyperlinksCount]);
 
   // OPTIMIZED: Update only visual styling of markups when selection changes (no full re-render)
   const updateMarkupSelection = useCallback((newSelectedIds: string[], previousSelectedIds: string[]) => {
@@ -1257,7 +1290,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // CRITICAL FIX: Include activePoints.length check to ensure continuous linear preview renders
       // CRITICAL: Always render if we have markups OR are in an interactive mode
       const hasActivePoints = isContinuousDrawing && activePoints.length > 0;
-      const isInteractiveMode = isMeasuring || isCalibrating || currentMeasurement.length > 0 || hasActivePoints || isAnnotating || isDrawingBoxSelection || hyperlinkMode;
+      const isInteractiveMode =
+        isMeasuring ||
+        isCalibrating ||
+        currentMeasurement.length > 0 ||
+        hasActivePoints ||
+        isAnnotating ||
+        annotationTool ||
+        isDrawingBoxSelection ||
+        hyperlinkMode ||
+        cutoutMode;
       
       // CRITICAL: Check both local measurements AND store to handle race conditions
       const storeMeasurements = getPageTakeoffMeasurements(effectiveProjectId || '', file.id || '', currentPage);
@@ -1287,7 +1329,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
       }
     }
-  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, renderMarkupsWithPointerEvents, currentPage, currentViewport, isAnnotating, localAnnotations, annotationDragBox, annotationMoveId, annotationMoveIds, annotationMoveDelta, measurementDragBox, measurementMoveId, measurementMoveIds, measurementMoveDelta, isDrawingBoxSelection, selectionBox, currentAnnotation, isContinuousDrawing, activePoints, pdfDocument, measurementsLoading, effectiveProjectId, file.id, getPageTakeoffMeasurements, isSelectionMode, totalPages, conditions, hyperlinkCountForFile, hyperlinkMode, hyperlinkDrawBox, totalHyperlinksCount]);
+  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, renderMarkupsWithPointerEvents, currentPage, currentViewport, isAnnotating, localAnnotations, annotationTool, annotationDragBox, annotationMoveId, annotationMoveIds, annotationMoveDelta, measurementDragBox, cutoutDragBox, cutoutMode, currentCutout, measurementMoveId, measurementMoveIds, measurementMoveDelta, isDrawingBoxSelection, selectionBox, currentAnnotation, isContinuousDrawing, activePoints, pdfDocument, measurementsLoading, effectiveProjectId, file.id, getPageTakeoffMeasurements, isSelectionMode, totalPages, conditions, hyperlinkCountForFile, hyperlinkMode, hyperlinkDrawBox, totalHyperlinksCount]);
 
   // Track previous measurements for comparison (used by other logic)
   const prevLocalTakeoffMeasurementsRef = useRef<Measurement[]>([]);
@@ -1867,138 +1909,120 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     completeMeasurementRef.current = completeMeasurement;
   }, [completeMeasurement]);
 
-  // Complete cut-out measurement
   const completeCutout = useCallback(async (points: { x: number; y: number }[]) => {
     if (!cutoutTargetConditionId || points.length < 3) {
+      return;
+    }
+
+    const selected = getSelectedCondition();
+    if (!selected || selected.id !== cutoutTargetConditionId) {
       return;
     }
 
     const getPageTakeoffMeasurements = useMeasurementStore.getState().getPageTakeoffMeasurements;
     const updateTakeoffMeasurement = useMeasurementStore.getState().updateTakeoffMeasurement;
 
-    // Get existing measurements for the target condition
     if (!file.id || !effectiveProjectId) return;
     const existingMeasurements = getPageTakeoffMeasurements(effectiveProjectId, file.id, currentPage);
-    const targetMeasurement = existingMeasurements.find(m => m.conditionId === cutoutTargetConditionId);
-    
-    if (!targetMeasurement) {
+    const candidates = existingMeasurements.filter(
+      (m) =>
+        m.conditionId === cutoutTargetConditionId &&
+        (m.type === 'area' || m.type === 'volume')
+    );
+
+    if (candidates.length === 0) {
       console.error('Target measurement not found for cut-out');
       return;
     }
 
-    // Calculate cut-out area/volume using enhanced calculator
     const viewport = currentViewport;
     if (!viewport) return;
 
-    // Keep points in normalized coordinates for calculator consistency
-    const viewportPoints = points.map(point => ({
-      x: point.x,
-      y: point.y
-    }));
+    const cutoutMp = pdfPointsToMultiPolygon(points);
+    if (!cutoutMp) return;
 
-    // Import the enhanced measurement calculator
-    const { MeasurementCalculator } = await import('../utils/measurementCalculation');
-    
-    // Create scale info object using calibration base viewport
     const calibBase2 = calibrationViewportRef.current;
     const scaleInfo = {
       scaleFactor,
-      unit: 'ft',
+      unit: 'ft' as const,
       scaleText: 'detected',
       confidence: 0.9,
       viewportWidth: (calibBase2?.viewportWidth) || viewport.width,
-      viewportHeight: (calibBase2?.viewportHeight) || viewport.height
+      viewportHeight: (calibBase2?.viewportHeight) || viewport.height,
     };
-    
-    let cutoutValue = 0;
-    
-    // Calculate area for cut-out
-    const areaResult = MeasurementCalculator.calculateArea(viewportPoints, scaleInfo, viewState.scale);
-    
-    if (areaResult.validation.isValid) {
-      // For volume measurements, multiply by depth
-      if (targetMeasurement.type === 'volume') {
-        const selectedCondition = getSelectedCondition();
-        const depth = selectedCondition?.depth || 1;
-        cutoutValue = areaResult.calculatedValue * depth;
-      } else {
-        cutoutValue = areaResult.calculatedValue;
-      }
-    } else {
-      console.warn('Cutout area calculation failed:', areaResult.validation.errors);
-      // Fallback to simple calculation
-      let area = 0;
-      for (let i = 0; i < viewportPoints.length; i++) {
-        const j = (i + 1) % viewportPoints.length;
-        area += viewportPoints[i].x * viewportPoints[j].y;
-        area -= viewportPoints[j].x * viewportPoints[i].y;
-      }
-      
-      const baseW = (calibrationViewportRef.current?.viewportWidth) || viewport.width;
-      const baseH = (calibrationViewportRef.current?.viewportHeight) || viewport.height;
-      // Convert normalized polygon area to pixel area using base viewport, then to units
-      const pixelArea = Math.abs(area) * (baseW * baseH) / 2;
-      const areaInSquareFeet = pixelArea * (scaleFactor * scaleFactor);
-      
-      if (targetMeasurement.type === 'volume') {
-        const selectedCondition = getSelectedCondition();
-        const depth = selectedCondition?.depth || 1;
-        cutoutValue = areaInSquareFeet * depth;
-      } else {
-        cutoutValue = areaInSquareFeet;
-      }
+
+    const depth = selected.depth ?? 1;
+
+    const planned: { measurement: (typeof candidates)[number]; updated: (typeof candidates)[number] }[] = [];
+    let idSuffix = 0;
+    const baseCutoutId = Date.now();
+
+    for (const m of candidates) {
+      const parentPts = m.pdfCoordinates?.length ? m.pdfCoordinates : m.points;
+      const parentMp = pdfPointsToMultiPolygon(parentPts);
+      if (!parentMp) continue;
+
+      const inter = intersectCutoutWithParent(cutoutMp, parentMp);
+      if (!inter.length) continue;
+
+      const isVolume = m.type === 'volume';
+      const pieces = clippedCutoutsFromIntersection(inter, scaleInfo, depth, isVolume);
+      if (pieces.length === 0) continue;
+
+      const existingCutouts = m.cutouts || [];
+      const newCutoutObjs = pieces.map((p) => ({
+        id: `cutout_${baseCutoutId}_${idSuffix++}`,
+        points: p.pdfPoints,
+        pdfCoordinates: p.pdfPoints,
+        calculatedValue: p.value,
+      }));
+      const allCutouts = [...existingCutouts, ...newCutoutObjs];
+      const totalCutoutValue = allCutouts.reduce((sum, c) => sum + c.calculatedValue, 0);
+      const updated = {
+        ...m,
+        cutouts: allCutouts,
+        netCalculatedValue: m.calculatedValue - totalCutoutValue,
+      };
+      planned.push({ measurement: m, updated });
     }
 
-    // Create cut-out object
-    const cutout = {
-      id: `cutout_${Date.now()}`,
-      points: points, // Store in PDF coordinates (0-1 scale) for rendering
-      pdfCoordinates: points, // Store in PDF coordinates (0-1 scale) for persistence
-      calculatedValue: cutoutValue
-    };
+    if (planned.length === 0) {
+      toast.warning('Wrong condition for this cutout', { duration: WRONG_CUTOUT_TOAST_MS });
+      return;
+    }
 
-    // Add cut-out to existing measurement
-    const existingCutouts = targetMeasurement.cutouts || [];
-    const totalCutoutValue = existingCutouts.reduce((sum, c) => sum + c.calculatedValue, 0) + cutoutValue;
-    
-    const updatedMeasurement = {
-      ...targetMeasurement,
-      cutouts: [...existingCutouts, cutout],
-      netCalculatedValue: targetMeasurement.calculatedValue - totalCutoutValue
-    };
-
-    // Update the measurement
     try {
       useUndoStore.getState().push({
-        type: 'measurement_update',
-        id: targetMeasurement.id,
-        previous: { cutouts: targetMeasurement.cutouts, netCalculatedValue: targetMeasurement.netCalculatedValue },
-        next: { cutouts: updatedMeasurement.cutouts, netCalculatedValue: updatedMeasurement.netCalculatedValue },
+        type: 'measurement_update_batch',
+        entries: planned.map((p) => ({
+          id: p.measurement.id,
+          previous: { cutouts: p.measurement.cutouts, netCalculatedValue: p.measurement.netCalculatedValue },
+          next: { cutouts: p.updated.cutouts, netCalculatedValue: p.updated.netCalculatedValue },
+        })),
       });
-      await updateTakeoffMeasurement(targetMeasurement.id, updatedMeasurement);
-      
-      // Update local measurements immediately with the new data
-      setLocalTakeoffMeasurements(prevMeasurements => 
-        prevMeasurements.map(measurement => 
-          measurement.id === targetMeasurement.id 
-            ? { ...measurement, ...updatedMeasurement }
-            : measurement
-        )
-      );
-      
-      // Exit cut-out mode
+      for (const p of planned) {
+        await updateTakeoffMeasurement(p.measurement.id, p.updated);
+      }
+
+      setLocalTakeoffMeasurements((prevMeasurements) => {
+        const byId = new Map(prevMeasurements.map((m) => [m.id, m]));
+        for (const p of planned) {
+          const prev = byId.get(p.measurement.id) ?? p.measurement;
+          byId.set(p.measurement.id, { ...prev, ...p.updated });
+        }
+        return Array.from(byId.values());
+      });
+
       if (onCutoutModeChange) {
         onCutoutModeChange(null);
       }
       setCurrentCutout([]);
-      
-      // Re-render the page using ref to avoid stale callback
+
       requestAnimationFrame(() => {
         if (renderPDFPageRef.current) {
           renderPDFPageRef.current(currentPage);
         }
       });
-      
     } catch (error) {
       console.error('❌ Failed to add cut-out:', error);
     }

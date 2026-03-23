@@ -21,18 +21,45 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import type { TakeoffCondition } from '../../types';
+import { parseDocumentIdFromSheetId } from '../../lib/sheetUtils';
 import { cn, formatFeetAndInches } from '../../lib/utils';
+
+function samePdfPage(stored: number | string | undefined, viewerPage: number | null | undefined): boolean {
+  if (viewerPage == null || viewerPage < 1) return true;
+  return Number(stored) === Number(viewerPage);
+}
+
+/** True if measurement belongs to the open PDF (document id or legacy composite sheet id). */
+function measurementBelongsToDocument(m: { sheetId: string }, viewerDocumentId: string): boolean {
+  if (m.sheetId === viewerDocumentId) return true;
+  return parseDocumentIdFromSheetId(m.sheetId) === viewerDocumentId;
+}
 
 function getImageSrc(img: string): string {
   return img.startsWith('data:') || img.startsWith('http') ? img : `data:image/png;base64,${img}`;
 }
 
+/** Measurements for the active viewer sheet + page only (standard takeoff sidebar: page totals, not project-wide). */
+function filterMeasurementsForCurrentPage<T extends { sheetId: string; pdfPage: number | string }>(
+  measurements: T[],
+  viewerDocumentId: string | null | undefined,
+  currentPage: number | null | undefined
+): T[] {
+  if (!viewerDocumentId) return [];
+  let current = measurements.filter((m) => measurementBelongsToDocument(m, viewerDocumentId));
+  if (currentPage != null && currentPage >= 1) {
+    current = current.filter((m) => samePdfPage(m.pdfPage, currentPage));
+  }
+  return current;
+}
+
 function formatConditionValue(
   condition: TakeoffCondition,
-  measurements: Array<{ sheetId: string; netCalculatedValue?: number | null; calculatedValue: number; perimeterValue?: number | null; areaValue?: number | null }>,
-  selectedDocumentId?: string | null
+  measurements: Array<{ sheetId: string; pdfPage: number; netCalculatedValue?: number | null; calculatedValue: number; perimeterValue?: number | null; areaValue?: number | null }>,
+  viewerDocumentId?: string | null,
+  currentPage?: number | null
 ): ReactNode {
-  const current = selectedDocumentId ? measurements.filter((m) => m.sheetId === selectedDocumentId) : measurements;
+  const current = filterMeasurementsForCurrentPage(measurements, viewerDocumentId, currentPage);
   const totalValue = current.reduce((sum, m) => sum + (m.netCalculatedValue ?? m.calculatedValue ?? 0), 0);
   const totalPerimeter = current.reduce((sum, m) => sum + (m.perimeterValue ?? 0), 0);
   const totalAreaValue = current.reduce((sum, m) => sum + (m.areaValue ?? 0), 0);
@@ -65,7 +92,10 @@ export interface TakeoffSidebarConditionListProps {
   onSearchChange: (value: string) => void;
   selectedConditionId: string | null;
   projectId: string;
-  selectedDocumentId?: string | null;
+  /** Open tab's document (file) id — use this instead of separate selection state so quantities stay in sync with the viewer. */
+  viewerDocumentId?: string | null;
+  /** 1-based PDF page for the active tab; quantities are scoped to this page. */
+  currentPage?: number | null;
   matchThumbnails: Record<string, Array<{ measurementId: string; thumbnail: string }>>;
   loadingThumbnails: Set<string>;
   getConditionTakeoffMeasurements: (projectId: string, conditionId: string) => Array<{
@@ -109,7 +139,8 @@ export function TakeoffSidebarConditionList({
   onSearchChange,
   selectedConditionId,
   projectId,
-  selectedDocumentId,
+  viewerDocumentId,
+  currentPage,
   matchThumbnails,
   loadingThumbnails,
   getConditionTakeoffMeasurements,
@@ -167,6 +198,7 @@ export function TakeoffSidebarConditionList({
             >
               {(() => {
                 const measurements = getConditionTakeoffMeasurements(projectId, condition.id);
+                const pageMeasurements = filterMeasurementsForCurrentPage(measurements, viewerDocumentId, currentPage);
                 const thumbnails = matchThumbnails[condition.id] || [];
                 const isLoadingThumbnails = loadingThumbnails.has(condition.id);
                 return (
@@ -267,9 +299,9 @@ export function TakeoffSidebarConditionList({
                   ) : (
                     <div className="mb-2 text-xs text-gray-400 italic">No search image set</div>
                   )}
-                  {measurements.length > 0 && (
+                  {pageMeasurements.length > 0 && (
                       <div className="mb-3">
-                        <div className="text-xs text-gray-500 mb-1">Found Items ({measurements.length}):</div>
+                        <div className="text-xs text-gray-500 mb-1">Found Items ({pageMeasurements.length}):</div>
                         {isLoadingThumbnails ? (
                           <div className="text-xs text-gray-400 italic">Loading previews...</div>
                         ) : thumbnails.length > 0 ? (
@@ -290,7 +322,7 @@ export function TakeoffSidebarConditionList({
                           </div>
                         ) : (
                           <div className="text-xs text-gray-400 italic">
-                            {measurements.length} match{measurements.length !== 1 ? 'es' : ''} found
+                            {pageMeasurements.length} match{pageMeasurements.length !== 1 ? 'es' : ''} found
                           </div>
                         )}
                       </div>
@@ -301,7 +333,7 @@ export function TakeoffSidebarConditionList({
                 <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: condition.color }} />
                 {condition.type !== 'count' && <span>Waste: {condition.wasteFactor}%</span>}
                 <div className="font-medium text-blue-600">
-                  {formatConditionValue(condition, measurements, selectedDocumentId)}
+                  {formatConditionValue(condition, measurements, viewerDocumentId, currentPage)}
                 </div>
               </div>
             </>

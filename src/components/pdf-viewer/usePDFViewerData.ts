@@ -157,18 +157,9 @@ export function usePDFViewerData({
       .map((apiMeasurement) => apiMeasurementToDisplay(apiMeasurement))
       .filter((m): m is Measurement => m != null);
 
-    setLocalTakeoffMeasurements((prev) => {
-      const prevIds = new Set(prev.map((m) => m.id));
-      const newIds = new Set(displayMeasurements.map((m) => m.id));
-      if (
-        prev.length !== displayMeasurements.length ||
-        ![...prevIds].every((id) => newIds.has(id)) ||
-        ![...newIds].every((id) => prevIds.has(id))
-      ) {
-        return displayMeasurements;
-      }
-      return prev;
-    });
+    // Always mirror the store for this page. Do not skip updates when ids are unchanged —
+    // coordinates (e.g. after move undo/redo) must refresh local state for the canvas.
+    setLocalTakeoffMeasurements(displayMeasurements);
   }, [allTakeoffMeasurements, currentProjectId, fileId, currentPage, getPageTakeoffMeasurements]);
 
   return {
