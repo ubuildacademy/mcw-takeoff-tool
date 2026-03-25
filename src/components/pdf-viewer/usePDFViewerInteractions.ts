@@ -2022,22 +2022,19 @@ export function usePDFViewerInteractions(
         if ((annotationId || measurementId) && currentIsSelectionMode) {
           e.stopPropagation();
           const meta = e.metaKey || e.ctrlKey;
-          const clickedId = annotationId ?? measurementId ?? '';
 
-          // Cycle through overlapping markups when re-clicking the sole selection
-          if (
-            !meta &&
-            selectedMarkupIds.length === 1 &&
-            selectedMarkupIds[0] === clickedId &&
-            svgOverlayRef.current
-          ) {
+          // Cycle overlapping markups using elementsFromPoint order: the click target is always
+          // the topmost node, so it cannot tell when the sole selection is a lower stacked markup.
+          if (!meta && selectedMarkupIds.length === 1 && svgOverlayRef.current) {
             const stackedIds = getStackedMarkupIdsAtPoint(
               svgOverlayRef.current,
               e.clientX,
               e.clientY
             );
-            if (stackedIds.length > 1) {
-              const nextIdx = (stackedIds.indexOf(clickedId) + 1) % stackedIds.length;
+            const soleSelectedId = selectedMarkupIds[0];
+            const idxInStack = stackedIds.indexOf(soleSelectedId);
+            if (stackedIds.length > 1 && idxInStack >= 0) {
+              const nextIdx = (idxInStack + 1) % stackedIds.length;
               setSelectedMarkupIds([stackedIds[nextIdx]]);
               return;
             }
