@@ -561,68 +561,6 @@ export function TakeoffWorkspace() {
     toast.success('All hyperlinks cleared');
   }, []);
 
-  const handleExtractHyperlinks = useCallback(async () => {
-    if (!projectId || documents.length === 0) return;
-    const loadingToast = toast.loading('Extracting hyperlinks...');
-    try {
-      const { serverOcrService } = await import('../services/serverOcrService');
-      const { getPageTextWithPositions } = await import('../services/pdfTextPositionService');
-      const { extractHyperlinksFromPageSources } = await import('../services/hyperlinkExtractionService');
-
-      const pageSources = new Map<string, Map<number, { type: 'pdf'; data: Awaited<ReturnType<typeof getPageTextWithPositions>> } | { type: 'ocr'; text: string }>>();
-      for (const doc of documents) {
-        const totalPages = doc.totalPages ?? doc.pages?.length ?? 1;
-        const docMap = new Map<number, { type: 'pdf'; data: Awaited<ReturnType<typeof getPageTextWithPositions>> } | { type: 'ocr'; text: string }>();
-        let ocrData: Awaited<ReturnType<typeof serverOcrService.getDocumentData>> | null = null;
-        for (let p = 1; p <= totalPages; p++) {
-          const pdfData = await getPageTextWithPositions(doc.id, projectId, p);
-          if (pdfData != null && pdfData.items.length > 0) {
-            docMap.set(p, { type: 'pdf' as const, data: pdfData });
-          } else {
-            if (!ocrData) ocrData = await serverOcrService.getDocumentData(doc.id, projectId);
-            const pageResult = ocrData?.results?.find((r) => r.pageNumber === p);
-            const text = pageResult?.text ?? '';
-            if (text.trim()) docMap.set(p, { type: 'ocr', text });
-          }
-        }
-        if (docMap.size) pageSources.set(doc.id, docMap);
-      }
-      const extracted = extractHyperlinksFromPageSources(
-        projectId,
-        documents,
-        pageSources as Map<string, Map<number, import('../services/hyperlinkExtractionService').PageTextSource>>
-      );
-      if (extracted.length === 0) {
-        toast.dismiss(loadingToast);
-        toast.info('No sheet references found. Ensure sheets are labeled and OCR has been run.');
-        return;
-      }
-      const { addHyperlinksBulk } = useHyperlinkStore.getState();
-      const hyperlinks = extracted.map((e) => ({
-        projectId,
-        sourceSheetId: e.sourceSheetId,
-        sourcePageNumber: e.sourcePageNumber,
-        sourceRect: e.sourceRect,
-        targetSheetId: e.targetSheetId,
-        targetPageNumber: e.targetPageNumber,
-      }));
-      const now = Date.now();
-      addHyperlinksBulk(
-        hyperlinks.map((h, i) => ({
-          ...h,
-          id: `hyperlink-${now}-${i}-${Math.random().toString(36).slice(2, 9)}`,
-          timestamp: new Date().toISOString(),
-        }))
-      );
-      toast.dismiss(loadingToast);
-      toast.success(`Extracted ${extracted.length} hyperlink${extracted.length === 1 ? '' : 's'}`);
-    } catch (err) {
-      toast.dismiss(loadingToast);
-      console.error('Hyperlink extraction failed:', err);
-      toast.error('Failed to extract hyperlinks. Run OCR first if needed.');
-    }
-  }, [projectId, documents]);
-
   const [hyperlinkPickerOpen, setHyperlinkPickerOpen] = useState(false);
   const [hyperlinkContextMenu, setHyperlinkContextMenu] = useState<{
     hyperlinkId: string;
@@ -715,12 +653,6 @@ export function TakeoffWorkspace() {
     [editingHyperlinkId]
   );
 
-  // Sheets are labeled if any page has sheetNumber or sheetName
-  const canExtractHyperlinks = documents.some(
-    (doc) => doc.pages?.some((p) => p.sheetNumber || p.sheetName)
-  ) ?? false;
-
-
   const storeCurrentProject = getCurrentProject();
   const currentProject = storeCurrentProject || {
     name: '—',
@@ -761,8 +693,6 @@ export function TakeoffWorkspace() {
         onUndo={() => undo()}
         onRedo={() => redo()}
         onAddHyperlink={handleAddHyperlink}
-        onExtractHyperlinks={handleExtractHyperlinks}
-        canExtractHyperlinks={canExtractHyperlinks}
         onClearHyperlinks={handleClearHyperlinks}
       />
 

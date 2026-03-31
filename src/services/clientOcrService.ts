@@ -5,6 +5,14 @@ import type { PDFDocumentProxy, PDFPageProxy, PageViewport } from 'pdfjs-dist';
 // Configure PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
+/** Verbose OCR tracing; silent in production builds. */
+function ocrDevLog(...args: unknown[]): void {
+  if (import.meta.env.DEV) console.log(...args);
+}
+function ocrDevWarn(...args: unknown[]): void {
+  if (import.meta.env.DEV) console.warn(...args);
+}
+
 /** Tesseract logger message (progress updates) */
 interface TesseractLoggerMessage {
   status?: string;
@@ -12,18 +20,10 @@ interface TesseractLoggerMessage {
   [key: string]: unknown;
 }
 
-/** Tesseract recognize result word shape (compatible with Tesseract Page.words) */
-interface TesseractWord {
-  text?: string;
-  bbox?: { x0?: number; y0?: number; x1?: number; y1?: number };
-  confidence?: number;
-}
-
 /** Tesseract recognize result data shape (compatible with Tesseract Page) */
 interface TesseractRecognizeData {
   text?: string;
   confidence?: number;
-  words?: TesseractWord[];
 }
 
 /** Worker config with optional path overrides (omit for CDN) */
@@ -40,11 +40,6 @@ export interface OCRResult {
   text: string;
   confidence: number;
   processingTime: number;
-  words: Array<{
-    text: string;
-    bbox: { x0: number; y0: number; x1: number; y1: number };
-    confidence: number;
-  }>;
 }
 
 export interface DocumentOCRData {
@@ -71,7 +66,7 @@ class OCRService {
         logger: (m: TesseractLoggerMessage) => {
           // Reduce OCR logging to prevent console spam - only log major milestones
           if (m.status === 'recognizing text' && (m.progress === 0.25 || m.progress === 0.5 || m.progress === 0.75 || m.progress === 1.0)) {
-            console.log(`OCR Progress: ${Math.round((m.progress ?? 0) * 100)}%`);
+            ocrDevLog(`OCR Progress: ${Math.round((m.progress ?? 0) * 100)}%`);
           }
         },
         // Try local files first
@@ -90,13 +85,13 @@ class OCRService {
 
       try {
         this.worker = await Tesseract.createWorker('eng', 1, workerConfig);
-        console.log('✅ Tesseract OCR worker initialized with local files');
+        ocrDevLog('✅ Tesseract OCR worker initialized with local files');
       } catch (localError) {
-        console.warn('⚠️ Local Tesseract files not found, trying CDN fallback:', localError);
+        ocrDevWarn('⚠️ Local Tesseract files not found, trying CDN fallback:', localError);
         // Fallback to CDN: omit path overrides so Tesseract uses CDN
         const { workerPath: _w, langPath: _l, corePath: _c, ...cdnConfig } = workerConfig;
         this.worker = await Tesseract.createWorker('eng', 1, cdnConfig as Parameters<typeof Tesseract.createWorker>[2]);
-        console.log('✅ Tesseract OCR worker initialized with CDN fallback');
+        ocrDevLog('✅ Tesseract OCR worker initialized with CDN fallback');
       }
 
       this.isInitialized = true;
@@ -116,7 +111,7 @@ class OCRService {
     }
 
     const startTime = Date.now();
-    console.log(`🔍 Processing page ${pageNumber} with Tesseract...`);
+    ocrDevLog(`🔍 Processing page ${pageNumber} with Tesseract...`);
 
     try {
       // Validate canvas before processing
@@ -154,7 +149,7 @@ class OCRService {
       
       const processingTime = Date.now() - startTime;
       
-      console.log(`✅ Page ${pageNumber} OCR completed:`, {
+      ocrDevLog(`✅ Page ${pageNumber} OCR completed:`, {
         textLength: data.text?.length || 0,
         confidence: data.confidence,
         processingTime: `${processingTime}ms`,
@@ -162,7 +157,7 @@ class OCRService {
       });
 
       return this.createOCRResult(data, pageNumber, processingTime);
-      
+
     } catch (error) {
       console.error(`❌ OCR failed for page ${pageNumber}:`, error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -183,7 +178,7 @@ class OCRService {
     // Check memory usage before starting
     const memoryInfo = this.getMemoryInfo();
     if (memoryInfo.completedOCR > 10) {
-      console.warn('⚠️ High memory usage detected, cleaning up old OCR data');
+      ocrDevWarn('⚠️ High memory usage detected, cleaning up old OCR data');
       this.cleanupOldData();
     }
 
@@ -204,14 +199,14 @@ class OCRService {
   }
 
   private async _processDocument(documentId: string, pdfUrl: string): Promise<DocumentOCRData> {
-    console.log(`🔍 Starting OCR processing for document: ${documentId}`);
-    console.log(`📄 PDF URL: ${pdfUrl}`);
+    ocrDevLog(`🔍 Starting OCR processing for document: ${documentId}`);
+    ocrDevLog(`📄 PDF URL: ${pdfUrl}`);
     
     await this.initializeWorker();
 
     try {
       // Load PDF document with comprehensive error handling
-      console.log(`📥 Loading PDF from: ${pdfUrl}`);
+      ocrDevLog(`📥 Loading PDF from: ${pdfUrl}`);
       
       const pdf = await pdfjsLib.getDocument({
         url: pdfUrl,
@@ -225,7 +220,7 @@ class OCRService {
       }).promise;
       
       const totalPages = pdf.numPages;
-      console.log(`📄 PDF loaded successfully: ${totalPages} pages`);
+      ocrDevLog(`📄 PDF loaded successfully: ${totalPages} pages`);
 
       if (totalPages === 0) {
         throw new Error('PDF contains no pages');
@@ -236,14 +231,14 @@ class OCRService {
 
       // Process pages in smaller batches for better memory management
       const batchSize = Math.min(2, totalPages); // Process max 2 pages at a time
-      console.log(`🔄 Processing in batches of ${batchSize} pages...`);
+      ocrDevLog(`🔄 Processing in batches of ${batchSize} pages...`);
       
       for (let i = 0; i < totalPages; i += batchSize) {
         const batchPromises = [];
         const batchStart = i + 1;
         const batchEnd = Math.min(i + batchSize, totalPages);
         
-        console.log(`📄 Processing batch: pages ${batchStart}-${batchEnd}`);
+        ocrDevLog(`📄 Processing batch: pages ${batchStart}-${batchEnd}`);
         
         for (let j = i; j < batchEnd; j++) {
           const pageNumber = j + 1;
@@ -263,7 +258,7 @@ class OCRService {
               // Emit progress event
               this.emitProgress(documentId, pages.length, totalPages, 'Processing pages');
             } else {
-              console.warn(`⚠️ Page ${result?.pageNumber || 'unknown'} produced no text`);
+              ocrDevWarn(`⚠️ Page ${result?.pageNumber || 'unknown'} produced no text`);
             }
           }
         } catch (batchError) {
@@ -286,7 +281,7 @@ class OCRService {
         searchIndex
       };
 
-      console.log(`✅ OCR processing completed for document: ${documentId}`, {
+      ocrDevLog(`✅ OCR processing completed for document: ${documentId}`, {
         totalPages,
         processedPages: pages.length,
         totalTextLength: pages.reduce((sum, page) => sum + page.text.length, 0)
@@ -319,7 +314,7 @@ class OCRService {
         return await this.processPageNumber(pdf, pageNumber);
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        console.warn(`⚠️ Attempt ${attempt} failed for page ${pageNumber}:`, errorMessage);
+        ocrDevWarn(`⚠️ Attempt ${attempt} failed for page ${pageNumber}:`, errorMessage);
         
         if (attempt === maxRetries) {
           console.error(`❌ All attempts failed for page ${pageNumber}`);
@@ -329,7 +324,6 @@ class OCRService {
             text: '',
             confidence: 0,
             processingTime: 0,
-            words: []
           };
         }
         
@@ -344,7 +338,6 @@ class OCRService {
       text: '',
       confidence: 0,
       processingTime: 0,
-      words: []
     };
   }
 
@@ -354,17 +347,17 @@ class OCRService {
       const page = await pdf.getPage(pageNumber);
       
       // First, try full-page OCR with high resolution
-      console.log(`🔍 Processing page ${pageNumber} with full-page OCR...`);
+      ocrDevLog(`🔍 Processing page ${pageNumber} with full-page OCR...`);
       
       const fullPageResult = await this.processFullPage(page, pageNumber);
       
       // If full page OCR quality is poor, try quadrant-based approach
       if (this.isGarbledText(fullPageResult.text) || fullPageResult.confidence < 40) {
-        console.log(`⚠️ Full page OCR quality poor (confidence: ${fullPageResult.confidence}), trying quadrant approach...`);
+        ocrDevLog(`⚠️ Full page OCR quality poor (confidence: ${fullPageResult.confidence}), trying quadrant approach...`);
         return await this.processPageQuadrants(page, pageNumber);
       }
       
-      console.log(`✅ Page ${pageNumber} processed successfully with full-page OCR (confidence: ${fullPageResult.confidence})`);
+      ocrDevLog(`✅ Page ${pageNumber} processed successfully with full-page OCR (confidence: ${fullPageResult.confidence})`);
       return fullPageResult;
     } catch (error) {
       console.error(`Error processing page ${pageNumber}:`, error);
@@ -412,7 +405,7 @@ class OCRService {
     const quadrantWidth = baseViewport.width / 2;
     const quadrantHeight = baseViewport.height / 2;
     
-    console.log(`📐 Processing page ${pageNumber} in 4 quadrants at ${baseViewport.width}x${baseViewport.height} resolution`);
+    ocrDevLog(`📐 Processing page ${pageNumber} in 4 quadrants at ${baseViewport.width}x${baseViewport.height} resolution`);
     
     const quadrantResults: OCRResult[] = [];
     
@@ -420,7 +413,7 @@ class OCRService {
     for (let row = 0; row < 2; row++) {
       for (let col = 0; col < 2; col++) {
         const quadrantNumber = row * 2 + col + 1;
-        console.log(`🔍 Processing quadrant ${quadrantNumber} (${row}, ${col})`);
+        ocrDevLog(`🔍 Processing quadrant ${quadrantNumber} (${row}, ${col})`);
         
         try {
           const quadrantResult = await this.processQuadrant(
@@ -436,7 +429,7 @@ class OCRService {
           
           if (quadrantResult.text && quadrantResult.text.trim().length > 0) {
             quadrantResults.push(quadrantResult);
-            console.log(`✅ Quadrant ${quadrantNumber} extracted: "${quadrantResult.text.substring(0, 100)}..."`);
+            ocrDevLog(`✅ Quadrant ${quadrantNumber} extracted: "${quadrantResult.text.substring(0, 100)}..."`);
           }
         } catch (error) {
           console.error(`❌ Error processing quadrant ${quadrantNumber}:`, error);
@@ -489,12 +482,15 @@ class OCRService {
       throw new Error('Failed to get canvas context for quadrant rendering');
     }
 
-    // Process with specialized settings for small text
     return this.processPageWithSpecializedSettings(canvas, pageNumber, quadrantNumber);
   }
 
   // Process canvas with specialized settings for architectural drawings
-  private async processPageWithSpecializedSettings(canvas: HTMLCanvasElement, pageNumber: number, quadrantNumber?: number): Promise<OCRResult> {
+  private async processPageWithSpecializedSettings(
+    canvas: HTMLCanvasElement,
+    pageNumber: number,
+    quadrantNumber?: number
+  ): Promise<OCRResult> {
     if (!this.worker) {
       throw new Error('OCR worker not initialized');
     }
@@ -521,7 +517,7 @@ class OCRService {
 
       const { data } = await this.worker.recognize(imageData);
       
-      console.log(`📄 Quadrant ${quadrantNumber || 'full'} OCR result:`, {
+      ocrDevLog(`📄 Quadrant ${quadrantNumber || 'full'} OCR result:`, {
         hasText: !!data.text,
         textLength: data.text?.length || 0,
         confidence: data.confidence,
@@ -543,7 +539,6 @@ class OCRService {
         text: '',
         confidence: 0,
         processingTime: 0,
-        words: []
       };
     }
 
@@ -556,16 +551,12 @@ class OCRService {
     // Calculate average confidence
     const avgConfidence = quadrantResults.reduce((sum, result) => sum + result.confidence, 0) / quadrantResults.length;
 
-    // Combine all words
-    const combinedWords = quadrantResults.flatMap(result => result.words);
-
     // Calculate total processing time
     const totalProcessingTime = quadrantResults.reduce((sum, result) => sum + result.processingTime, 0);
 
-    console.log(`✅ Combined ${quadrantResults.length} quadrants:`, {
+    ocrDevLog(`✅ Combined ${quadrantResults.length} quadrants:`, {
       textLength: combinedText.length,
       avgConfidence: Math.round(avgConfidence),
-      wordCount: combinedWords.length,
       textPreview: combinedText.substring(0, 300) + '...'
     });
 
@@ -574,7 +565,6 @@ class OCRService {
       text: combinedText,
       confidence: avgConfidence,
       processingTime: totalProcessingTime,
-      words: combinedWords
     };
   }
 
@@ -620,13 +610,13 @@ class OCRService {
     const searchQuery = query.toLowerCase().trim();
     if (searchQuery.length < 2) return results;
 
-    console.log('🔍 Searching for:', searchQuery);
-    console.log('📚 Available documents:', Array.from(this.completedOCR.keys()));
-    console.log('📊 Completed OCR data:', this.completedOCR.size, 'documents');
+    ocrDevLog('🔍 Searching for:', searchQuery);
+    ocrDevLog('📚 Available documents:', Array.from(this.completedOCR.keys()));
+    ocrDevLog('📊 Completed OCR data:', this.completedOCR.size, 'documents');
     
     // Only show detailed OCR data if there are results
     if (this.completedOCR.size > 0) {
-      console.log('📋 OCR data details:', Array.from(this.completedOCR.entries()).map(([id, data]) => ({
+      ocrDevLog('📋 OCR data details:', Array.from(this.completedOCR.entries()).map(([id, data]) => ({
         documentId: id,
         totalPages: data.totalPages,
         processedPages: data.pages.length,
@@ -639,14 +629,14 @@ class OCRService {
       : Array.from(this.completedOCR.keys());
 
     if (documentsToSearch.length === 0) {
-      console.log('❌ No documents available for search');
+      ocrDevLog('❌ No documents available for search');
       return results;
     }
 
     documentsToSearch.forEach(docId => {
       const docData = this.completedOCR.get(docId);
       if (!docData) {
-        console.log(`❌ No OCR data for document: ${docId}`);
+        ocrDevLog(`❌ No OCR data for document: ${docId}`);
         return;
       }
 
@@ -665,7 +655,7 @@ class OCRService {
         
         // Only log if there's a potential match to reduce console spam
         if (text.includes(searchQuery) || queryWords.some(word => text.includes(word))) {
-          console.log(`🔍 Potential match on page ${page.pageNumber}:`, {
+          ocrDevLog(`🔍 Potential match on page ${page.pageNumber}:`, {
             query: searchQuery,
             textLength: text.length,
             hasQuery: text.includes(searchQuery)
@@ -677,7 +667,7 @@ class OCRService {
         const hasAllWords = queryWords.every(word => text.includes(word));
         
         if (hasExactMatch || hasAllWords) {
-          console.log(`✅ Found match on page ${page.pageNumber}`, { hasExactMatch, hasAllWords });
+          ocrDevLog(`✅ Found match on page ${page.pageNumber}`, { hasExactMatch, hasAllWords });
           
           // Find context around matches
           const sentences = page.text.split(/[.!?]+/);
@@ -725,7 +715,7 @@ class OCRService {
       });
     });
 
-    console.log('🎯 Final search results:', results);
+    ocrDevLog('🎯 Final search results:', results);
     return results;
   }
 
@@ -784,7 +774,7 @@ class OCRService {
       }
     }));
     
-    console.log(`📊 OCR Progress: ${current}/${total} pages (${percentage}%) - ${stage}`);
+    ocrDevLog(`📊 OCR Progress: ${current}/${total} pages (${percentage}%) - ${stage}`);
   }
 
   // Calculate estimated time remaining based on processing speed
@@ -863,20 +853,16 @@ class OCRService {
     return matches > (text.length * 0.25);
   }
 
-  // Create OCR result from data
-  private createOCRResult(data: TesseractRecognizeData, pageNumber: number, processingTime: number): OCRResult {
-    const words = (data.words || []).map((word: TesseractWord) => ({
-      text: word.text ?? '',
-      bbox: word.bbox ? { x0: word.bbox.x0 ?? 0, y0: word.bbox.y0 ?? 0, x1: word.bbox.x1 ?? 0, y1: word.bbox.y1 ?? 0 } : { x0: 0, y0: 0, x1: 0, y1: 0 },
-      confidence: word.confidence ?? 0
-    }));
-
+  private createOCRResult(
+    data: TesseractRecognizeData,
+    pageNumber: number,
+    processingTime: number
+  ): OCRResult {
     return {
       pageNumber,
       text: data.text ?? '',
       confidence: data.confidence ?? 0,
       processingTime,
-      words
     };
   }
 
@@ -887,7 +873,7 @@ class OCRService {
         await this.worker.terminate();
         this.worker = null;
         this.isInitialized = false;
-        console.log('🧹 OCR worker cleaned up');
+        ocrDevLog('🧹 OCR worker cleaned up');
       } catch (error) {
         console.error('Error cleaning up OCR worker:', error);
       }
@@ -917,7 +903,7 @@ class OCRService {
         canvas.parentNode.removeChild(canvas);
       }
     } catch (error) {
-      console.warn('Error cleaning up canvas resources:', error);
+      ocrDevWarn('Error cleaning up canvas resources:', error);
     }
   }
 
@@ -946,7 +932,7 @@ class OCRService {
         this.completedOCR.set(id, data);
       });
       
-      console.log(`🧹 Cleaned up OCR data, kept ${toKeep.length} most recent documents`);
+      ocrDevLog(`🧹 Cleaned up OCR data, kept ${toKeep.length} most recent documents`);
     }
   }
 

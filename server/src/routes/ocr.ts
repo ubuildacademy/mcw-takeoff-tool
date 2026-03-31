@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs-extra';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../supabase';
-import { simpleOcrService } from '../services/simpleOcrService';
+import { simpleOcrService, type SimpleOCRResult } from '../services/simpleOcrService';
 import { requireAuth, hasProjectAccess, isAdmin, validateUUIDParam } from '../middleware';
 
 const router = express.Router();
@@ -290,14 +290,16 @@ router.post('/client-results/:documentId', requireAuth, validateUUIDParam('docum
   try {
     console.log(`📥 Receiving client-side OCR results for document: ${documentId} (${results.length} pages)`);
 
-    // Convert client-side OCR results to server format
-    const serverResults = results.map((result: any) => ({
-      pageNumber: result.pageNumber,
-      text: result.text || '',
-      confidence: result.confidence || 0,
-      processingTime: result.processingTime || 0,
-      method: 'tesseract' as const // Client-side uses Tesseract.js
-    }));
+    const serverResults: SimpleOCRResult[] = results.map((result: Record<string, unknown>) => {
+      const pageNumber = typeof result.pageNumber === 'number' ? result.pageNumber : Number(result.pageNumber);
+      return {
+        pageNumber: Number.isFinite(pageNumber) ? pageNumber : 0,
+        text: typeof result.text === 'string' ? result.text : '',
+        confidence: typeof result.confidence === 'number' ? result.confidence : 0,
+        processingTime: typeof result.processingTime === 'number' ? result.processingTime : 0,
+        method: 'tesseract' as const,
+      };
+    });
 
     // Save results to database using the simple OCR service
     await simpleOcrService.saveOCRResults(projectId, documentId, serverResults);

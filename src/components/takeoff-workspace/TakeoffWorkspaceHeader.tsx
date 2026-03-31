@@ -63,8 +63,6 @@ export function TakeoffWorkspaceHeader({
   onUndo,
   onRedo,
   onAddHyperlink,
-  onExtractHyperlinks,
-  canExtractHyperlinks = false,
   onClearHyperlinks,
 }: TakeoffWorkspaceHeaderProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -323,8 +321,6 @@ export function TakeoffWorkspaceHeader({
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
         onAddHyperlink={onAddHyperlink}
-        onExtractHyperlinks={onExtractHyperlinks}
-        canExtractHyperlinks={canExtractHyperlinks}
         onClearHyperlinks={onClearHyperlinks}
       />
     </div>

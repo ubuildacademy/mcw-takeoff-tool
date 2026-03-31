@@ -248,7 +248,6 @@ class SimpleOCRService {
           confidence_score: result.confidence,
           processing_method: result.method,
           processing_time_ms: result.processingTime,
-          word_positions: null, // Not available with pdf-parse
         }))
       );
 
@@ -430,13 +429,18 @@ class SimpleOCRService {
       // This prevents "Cannot read properties of undefined (reading 'pageNumber')" errors
       return (data || [])
         .filter(row => row != null && row.page_number != null)
-        .map(row => ({
-          pageNumber: row.page_number,
-          text: row.text_content || '',
-          confidence: row.confidence_score || 0,
-          processingTime: row.processing_time_ms || 0,
-          method: 'direct_extraction' as const
-        }));
+        .map(row => {
+          const methodRaw = row.processing_method as string | undefined;
+          const method: 'direct_extraction' | 'tesseract' =
+            methodRaw === 'tesseract' ? 'tesseract' : 'direct_extraction';
+          return {
+            pageNumber: row.page_number,
+            text: row.text_content || '',
+            confidence: row.confidence_score || 0,
+            processingTime: row.processing_time_ms || 0,
+            method,
+          };
+        });
     } catch (error) {
       console.error('❌ Failed to get document OCR results:', error);
       throw error;

@@ -5,12 +5,7 @@ export interface OCRResult {
   text: string;
   confidence: number;
   processingTime: number;
-  method: 'direct_extraction' | 'trocr' | 'tesseract';
-  wordPositions?: Array<{
-    text: string;
-    bbox: { x0: number; y0: number; x1: number; y1: number };
-    confidence: number;
-  }>;
+  method: 'direct_extraction' | 'tesseract';
 }
 
 export interface DocumentOCRData {
@@ -168,13 +163,13 @@ class ServerOCRService {
       
       console.log(`✅ Client-side OCR completed: ${ocrResult.pages.length} pages processed`);
       
-      // Convert client OCR results to server format
-      const serverResults = ocrResult.pages.map(page => ({
+      // Convert client OCR results to server format (persist normalized word bboxes)
+      const serverResults = ocrResult.pages.map((page) => ({
         pageNumber: page.pageNumber,
         text: page.text,
         confidence: page.confidence,
         processingTime: page.processingTime,
-        method: 'tesseract' as const
+        method: 'tesseract' as const,
       }));
       
       // Send results back to server
@@ -193,11 +188,6 @@ class ServerOCRService {
           confidence: page.confidence,
           processingTime: page.processingTime,
           method: 'tesseract' as const,
-          wordPositions: page.words?.map(word => ({
-            text: word.text,
-            bbox: word.bbox,
-            confidence: word.confidence
-          }))
         })),
         processedAt: ocrResult.processedAt
       };
@@ -264,7 +254,13 @@ class ServerOCRService {
       // CRITICAL FIX: Safely handle results array - filter out null/undefined before mapping
       // This prevents "Cannot read properties of undefined (reading 'pageNumber')" errors
       // Handle case where results might be null, undefined, or not an array
-      type OcrResultRow = { pageNumber?: number; text?: string };
+      type OcrResultRow = {
+        pageNumber?: number;
+        text?: string;
+        confidence?: number;
+        processingTime?: number;
+        method?: string;
+      };
       let safeResults: OcrResultRow[] = [];
       try {
         if (Array.isArray(resultsResponse.results)) {
@@ -303,9 +299,9 @@ class ServerOCRService {
       const resultsAsOCR: OCRResult[] = safeResults.map((r) => ({
         pageNumber: r.pageNumber ?? 0,
         text: r.text ?? '',
-        confidence: 0,
-        processingTime: 0,
-        method: 'direct_extraction' as const
+        confidence: r.confidence ?? 0,
+        processingTime: r.processingTime ?? 0,
+        method: (r.method === 'tesseract' ? 'tesseract' : 'direct_extraction') as OCRResult['method'],
       }));
 
       return {

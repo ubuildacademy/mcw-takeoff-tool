@@ -8,7 +8,7 @@ import {
 } from './ui/dialog';
 import { Label } from './ui/label';
 import { Button } from './ui/button';
-import { Link2, Sparkles, Trash2 } from 'lucide-react';
+import { Link2, Trash2 } from 'lucide-react';
 import { useUserPreferencesStore } from '../store/slices/userPreferencesSlice';
 
 export interface ToolsDialogProps {
@@ -16,10 +16,6 @@ export interface ToolsDialogProps {
   onOpenChange: (open: boolean) => void;
   /** Called when user clicks Add hyperlink. Closes dialog and enters link mode. */
   onAddHyperlink?: () => void;
-  /** Called when user clicks Extract hyperlinks. Runs auto-extract from OCR. */
-  onExtractHyperlinks?: () => void;
-  /** Whether Extract hyperlinks is available (sheets labeled) */
-  canExtractHyperlinks?: boolean;
   /** Called when user clicks Clear all hyperlinks */
   onClearHyperlinks?: () => void;
 }
@@ -63,8 +59,6 @@ export function ToolsDialog({
   open,
   onOpenChange,
   onAddHyperlink,
-  onExtractHyperlinks,
-  canExtractHyperlinks = false,
   onClearHyperlinks,
 }: ToolsDialogProps) {
   const crosshairFullScreen = useUserPreferencesStore((s) => s.crosshairFullScreen);
@@ -87,11 +81,6 @@ export function ToolsDialog({
   const handleAddHyperlink = () => {
     onOpenChange(false);
     onAddHyperlink?.();
-  };
-
-  const handleExtractHyperlinks = () => {
-    onOpenChange(false);
-    onExtractHyperlinks?.();
   };
 
   return (
@@ -212,7 +201,7 @@ export function ToolsDialog({
           <section className="space-y-4">
             <h3 className="text-sm font-medium text-foreground">Hyperlinks</h3>
             <p className="text-sm text-muted-foreground">
-              Jump between sheet references in your drawing set.
+              Draw a region on the sheet and pick a destination sheet (manual links only).
             </p>
 
             <div className="flex flex-col gap-2">
@@ -226,22 +215,6 @@ export function ToolsDialog({
                 <Link2 className="w-4 h-4 mr-2 shrink-0" />
                 Add hyperlink (H)
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="justify-start"
-                onClick={handleExtractHyperlinks}
-                disabled={!onExtractHyperlinks || !canExtractHyperlinks}
-                title={!canExtractHyperlinks ? 'Label sheets first' : 'Experimental: positioning may be inaccurate'}
-              >
-                <Sparkles className="w-4 h-4 mr-2 shrink-0" />
-                Extract hyperlinks (beta)
-              </Button>
-              {!canExtractHyperlinks && (
-                <p className="text-xs text-muted-foreground">
-                  Label sheets first, then use Extract hyperlinks to auto-create links from references.
-                </p>
-              )}
               <Button
                 variant="outline"
                 size="sm"

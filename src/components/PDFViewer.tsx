@@ -249,7 +249,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const hyperlinkCountForFile = useHyperlinkStore((s) =>
     s.hyperlinks.filter((h) => h.projectId === (effectiveProjectId ?? '') && h.sourceSheetId === (file.id ?? '')).length
   );
-  const totalHyperlinksCount = useHyperlinkStore((s) => s.hyperlinks.length);
   const crosshairFullScreen = useUserPreferencesStore((s) => s.crosshairFullScreen);
   const crosshairColor = useUserPreferencesStore((s) => s.crosshairColor);
   const crosshairStrokeWidth = useUserPreferencesStore((s) => s.crosshairStrokeWidth);
@@ -630,7 +629,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Additional effect to ensure measurements are rendered when added
   useEffect(() => {
-    if (localTakeoffMeasurements.length > 0 && pdfDocument && currentViewport && !isRenderingRef.current) {
+    if (localTakeoffMeasurements.length > 0 && pdfDocument && currentViewport) {
       // Removed verbose logging - was causing console spam
       // Note: renderTakeoffAnnotations will be called by the existing useEffect that watches localTakeoffMeasurements
     }
@@ -1172,7 +1171,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     
   // eslint-disable-next-line react-hooks/exhaustive-deps -- Large render callback; refs and some deps intentionally omitted to avoid cascade
-  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, annotationDragBox, annotationMoveId, annotationMoveIds, annotationMoveDelta, annotationColor, measurementDragBox, cutoutDragBox, measurementMoveId, measurementMoveIds, measurementMoveDelta, cutoutMode, currentCutout, isBoxSelectionMode, isDrawingBoxSelection, selectionBox, hyperlinkMode, hyperlinkDrawBox, effectiveProjectId, file.id, getPageTakeoffMeasurements, getSelectedCondition, measurementsLoading, getConditionColor, getConditionLineThickness, crosshairFullScreen, crosshairColor, crosshairStrokeWidth, showMeasurementLabels, showRunningLength, hyperlinkCountForFile, totalHyperlinksCount]);
+  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, annotationDragBox, annotationMoveId, annotationMoveIds, annotationMoveDelta, annotationColor, measurementDragBox, cutoutDragBox, measurementMoveId, measurementMoveIds, measurementMoveDelta, cutoutMode, currentCutout, isBoxSelectionMode, isDrawingBoxSelection, selectionBox, hyperlinkMode, hyperlinkDrawBox, effectiveProjectId, file.id, getPageTakeoffMeasurements, getSelectedCondition, measurementsLoading, getConditionColor, getConditionLineThickness, crosshairFullScreen, crosshairColor, crosshairStrokeWidth, showMeasurementLabels, showRunningLength, hyperlinkCountForFile]);
 
   // OPTIMIZED: Update only visual styling of markups when selection changes (no full re-render)
   const updateMarkupSelection = useCallback((newSelectedIds: string[], previousSelectedIds: string[]) => {
@@ -1285,7 +1284,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // CRITICAL: Allow markup rendering even when isDeselecting is true - we need markups to be selectable
   // isDeselecting only blocks PDF canvas renders, not markup overlay renders
   useEffect(() => {
-    if (pdfDocument && currentViewport && !isRenderingRef.current) {
+    // Do not gate on isRenderingRef — during/after PDF canvas render the overlay was cleared; we must be able
+    // to redraw markups/hyperlinks when the ref flips false, or navigation leaves an empty overlay and stuck view.
+    if (pdfDocument && currentViewport) {
       // Only render if we have measurements, annotations, or if we're in measuring/annotation/visual search mode
       // CRITICAL FIX: Include activePoints.length check to ensure continuous linear preview renders
       // CRITICAL: Always render if we have markups OR are in an interactive mode
@@ -1305,7 +1306,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const storeMeasurements = getPageTakeoffMeasurements(effectiveProjectId || '', file.id || '', currentPage);
       const hasLocalMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0;
       const hasStoreMarkups = storeMeasurements.length > 0;
-      const hasMarkups = hasLocalMarkups || hasStoreMarkups;
+      // Include sheet hyperlinks for this file; otherwise we clear the overlay and break PDF/overlay sync
+      const hasMarkups = hasLocalMarkups || hasStoreMarkups || hyperlinkCountForFile > 0;
       const shouldRender = hasMarkups || isInteractiveMode;
       
       if (shouldRender) {
@@ -1320,16 +1322,17 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         // Only clear if we're absolutely sure there are no markups AND measurements have finished loading
         // AND we've double-checked the store
         if (svgOverlayRef.current && pdfDocument && !measurementsLoading) {
-          // Triple-check: local state, store, and annotations - all must be empty
+          // Triple-check: local state, store, annotations, and no hyperlinks on this file
           if (localTakeoffMeasurements.length === 0 && 
               storeMeasurements.length === 0 && 
-              localAnnotations.length === 0) {
+              localAnnotations.length === 0 &&
+              hyperlinkCountForFile === 0) {
             svgOverlayRef.current.innerHTML = '';
           }
         }
       }
     }
-  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, renderMarkupsWithPointerEvents, currentPage, currentViewport, isAnnotating, localAnnotations, annotationTool, annotationDragBox, annotationMoveId, annotationMoveIds, annotationMoveDelta, measurementDragBox, cutoutDragBox, cutoutMode, currentCutout, measurementMoveId, measurementMoveIds, measurementMoveDelta, isDrawingBoxSelection, selectionBox, currentAnnotation, isContinuousDrawing, activePoints, pdfDocument, measurementsLoading, effectiveProjectId, file.id, getPageTakeoffMeasurements, isSelectionMode, totalPages, conditions, hyperlinkCountForFile, hyperlinkMode, hyperlinkDrawBox, totalHyperlinksCount]);
+  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, renderMarkupsWithPointerEvents, currentPage, currentViewport, isAnnotating, localAnnotations, annotationTool, annotationDragBox, annotationMoveId, annotationMoveIds, annotationMoveDelta, measurementDragBox, cutoutDragBox, cutoutMode, currentCutout, measurementMoveId, measurementMoveIds, measurementMoveDelta, isDrawingBoxSelection, selectionBox, currentAnnotation, isContinuousDrawing, activePoints, pdfDocument, measurementsLoading, effectiveProjectId, file.id, getPageTakeoffMeasurements, isSelectionMode, totalPages, conditions, hyperlinkCountForFile, hyperlinkMode, hyperlinkDrawBox]);
 
   // Track previous measurements for comparison (used by other logic)
   const prevLocalTakeoffMeasurementsRef = useRef<Measurement[]>([]);
@@ -1404,7 +1407,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (hasMarkups) {
       renderMarkupsWithPointerEvents(currentPage, freshViewport, pdfPageRef.current ?? undefined);
     }
-  }, [pdfDocument, viewState.scale, viewState.rotation, currentPage, localTakeoffMeasurements, localAnnotations, renderMarkupsWithPointerEvents, rendersBlocked, hyperlinkCountForFile, totalHyperlinksCount]);
+  }, [pdfDocument, viewState.scale, viewState.rotation, currentPage, localTakeoffMeasurements, localAnnotations, renderMarkupsWithPointerEvents, rendersBlocked, hyperlinkCountForFile]);
 
   // Re-render overlay when user display preferences change (e.g. toggling measurement labels)
   // The preferences are captured in renderTakeoffAnnotations via ref, but nothing in the
@@ -1415,7 +1418,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current ?? undefined);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Only re-render when display prefs change
-  }, [showMeasurementLabels, showRunningLength, hyperlinkCountForFile, totalHyperlinksCount]);
+  }, [showMeasurementLabels, showRunningLength, hyperlinkCountForFile]);
 
   // SIMPLIFIED: Update pointer-events when mode changes (no re-rendering needed)
   // This handles SVG element, hit-area, and individual markup elements
@@ -1496,10 +1499,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       (m) => m.projectId === effectiveProjectId && m.sheetId === file.id && m.pdfPage === pageNum
     );
     const hasAnnotationsOnPage = localAnnotations.filter((a) => a.pageNumber === pageNum).length > 0;
+    const pageHyperlinks = useHyperlinkStore.getState().getPageHyperlinks(effectiveProjectId || '', file.id || '', pageNum);
     const hasMarkups =
       currentMeasurements.length > 0 ||
       localTakeoffMeasurements.length > 0 ||
-      hasAnnotationsOnPage;
+      hasAnnotationsOnPage ||
+      pageHyperlinks.length > 0;
     const isInteractiveMode = isMeasuring || isCalibrating || isAnnotating || isDrawingBoxSelection;
     if (hasMarkups || isInteractiveMode) {
       renderMarkupsWithPointerEvents(pageNum, viewport, pdfPageRef.current ?? undefined, isSelectionMode);
@@ -1624,10 +1629,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           (m) => m.projectId === effectiveProjectId && m.sheetId === file.id && m.pdfPage === pageNum
         );
         const hasAnnotationsOnPage = localAnnotations.filter((a) => a.pageNumber === pageNum).length > 0;
+        const pageHyperlinks = useHyperlinkStore.getState().getPageHyperlinks(effectiveProjectId || '', file.id || '', pageNum);
         const hasMarkups =
           currentMeasurements.length > 0 ||
           localTakeoffMeasurements.length > 0 ||
-          hasAnnotationsOnPage;
+          hasAnnotationsOnPage ||
+          pageHyperlinks.length > 0;
         const isInteractiveMode = isMeasuring || isCalibrating || isAnnotating || isDrawingBoxSelection;
         const currentSelectionMode = isSelectionMode;
         if (hasMarkups || isInteractiveMode) {
@@ -2262,7 +2269,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       
       // CRITICAL: After clearing CSS transforms, re-render annotations with correct viewport
       // This fixes the issue where annotations disappear after zoom completes
-      const hasMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0;
+      const hasMarkups =
+        localTakeoffMeasurements.length > 0 || localAnnotations.length > 0 || hyperlinkCountForFile > 0;
       if (pdfDocument && pdfPageRef.current && hasMarkups) {
         const freshViewport = pdfPageRef.current.getViewport({ 
           scale: viewState.scale, 
@@ -2271,7 +2279,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         renderMarkupsWithPointerEvents(currentPage, freshViewport, pdfPageRef.current ?? undefined);
       }
     }
-  }, [viewState.scale, viewState.rotation, rendersBlockedForZoom, applyInteractiveZoomTransforms, pdfDocument, localTakeoffMeasurements, localAnnotations, currentPage, renderMarkupsWithPointerEvents]);
+  }, [viewState.scale, viewState.rotation, rendersBlockedForZoom, applyInteractiveZoomTransforms, pdfDocument, localTakeoffMeasurements, localAnnotations, currentPage, renderMarkupsWithPointerEvents, hyperlinkCountForFile]);
 
   // Keep currentPageRef in sync so renderPDFPage's finally block can re-trigger for the right page
   currentPageRef.current = currentPage;
@@ -2387,8 +2395,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Page visibility handler - ensures overlays are rendered when returning to a page
   // SIMPLIFIED: Single render call, no cascading timeouts
   useEffect(() => {
-    if (pdfDocument && currentViewport && !isRenderingRef.current && pdfPageRef.current) {
-      // Call onPageShown to initialize overlay
+    if (pdfDocument && currentViewport && pdfPageRef.current) {
+      // Call onPageShown to initialize overlay (must run even while a PDF render is in flight so overlay recovers)
       onPageShown(currentPage, currentViewport);
     }
   }, [currentPage, currentViewport, onPageShown, pdfDocument]);
