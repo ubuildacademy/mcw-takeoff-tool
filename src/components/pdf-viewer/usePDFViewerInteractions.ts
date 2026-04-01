@@ -14,6 +14,7 @@ import {
   cssDragRectToPdfQuad,
   MIN_DRAG_RECT_PX,
 } from '../../utils/measurementGeometry';
+import { isEditableKeyboardTarget } from '../../utils/keyboardUtils';
 
 const PASTE_OFFSET = 0.02;
 
@@ -570,11 +571,7 @@ export function usePDFViewerInteractions(
       if (handled) return;
 
       // Annotation shortcuts R/T/C/A: only when no condition selected and not typing in input
-      const target = event.target as HTMLElement;
-      const isTyping =
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.getAttribute?.('contenteditable') === 'true';
+      const isTyping = isEditableKeyboardTarget(event.target);
       const key = event.key.toLowerCase();
       if (
         !isTyping &&

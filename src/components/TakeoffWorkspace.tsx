@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 
 import { useParams, useNavigate } from 'react-router-dom';
 import PDFViewer from './PDFViewer';
@@ -41,6 +41,7 @@ import { SearchResultsList } from './takeoff-workspace/SearchResultsList';
 import { HyperlinkSheetPickerDialog } from './HyperlinkSheetPickerDialog';
 import { HyperlinkContextMenu } from './HyperlinkContextMenu';
 import { extractErrorMessage } from '../utils/commonUtils';
+import { isEditableKeyboardTarget } from '../utils/keyboardUtils';
 
 export function TakeoffWorkspace() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -240,21 +241,38 @@ export function TakeoffWorkspace() {
     setHyperlinkMode(true);
   }, []);
 
-  // Global keydown: Space (deselect), H (add hyperlink), Cmd/Ctrl+Z (undo), Cmd/Ctrl+Shift+Z or Cmd/Ctrl+Y (redo)
+  /** Condition id last cleared via Space — next Space re-selects it (toggle). */
+  const lastSpaceDeselectedConditionIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    lastSpaceDeselectedConditionIdRef.current = null;
+  }, [projectId]);
+
+  // Global keydown: Space (toggle selection off/on), H (add hyperlink), Cmd/Ctrl+Z (undo), Cmd/Ctrl+Shift+Z or Cmd/Ctrl+Y (redo)
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement;
-      const isTyping =
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.getAttribute?.('contenteditable') === 'true';
+      const isTyping = isEditableKeyboardTarget(event.target);
 
-      const isSpace = event.code === 'Space' || event.key === ' ';
-      if (isSpace) {
+      if (event.code === 'Space') {
+        if (isTyping) return;
+
         const currentlySelected = getSelectedCondition();
         if (currentlySelected) {
           event.preventDefault();
+          lastSpaceDeselectedConditionIdRef.current = currentlySelected.id;
           handleConditionSelect(null);
+          return;
+        }
+
+        const lastId = lastSpaceDeselectedConditionIdRef.current;
+        if (lastId) {
+          const condition = useConditionStore.getState().getConditionById(lastId);
+          if (condition) {
+            event.preventDefault();
+            handleConditionSelect(condition);
+          } else {
+            lastSpaceDeselectedConditionIdRef.current = null;
+          }
         }
         return;
       }
