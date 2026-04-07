@@ -35,10 +35,12 @@ export const useProjectStore = create<ProjectState>()(
           const { supabaseService } = await import('../../services/supabaseService');
           const project = await supabaseService.createProject(projectData);
           
+          const row = project as { user_id?: string | null };
           const localProject: Project = {
             ...project,
             createdAt: project.created_at || new Date().toISOString(),
             lastModified: project.last_modified || new Date().toISOString(),
+            userId: row.user_id ?? undefined,
           } as Project;
           
           set(state => ({
@@ -82,10 +84,12 @@ export const useProjectStore = create<ProjectState>()(
           const { supabaseService } = await import('../../services/supabaseService');
           const updatedProject = await supabaseService.updateProject(id, updates);
           
+          const row = updatedProject as { user_id?: string | null };
           const localProject: Project = {
             ...updatedProject,
             createdAt: updatedProject.created_at || new Date().toISOString(),
             lastModified: updatedProject.last_modified || new Date().toISOString(),
+            userId: row.user_id ?? undefined,
           } as Project;
           
           set(state => ({

@@ -283,12 +283,22 @@ export async function performImportFromBackup(
   for (const sheet of sheets) {
     const { id: _sId, documentId, ...sheetData } = sheet;
     const newDocumentId = fileIdMapping[(documentId as string) || ''] || (documentId as string);
-    const newSheetId = uuidv4();
-    sheetIdMapping[(sheet.id as string) || ''] = newSheetId;
+    const rawPage = (sheetData as { pageNumber?: unknown }).pageNumber;
+    const pageNumber =
+      typeof rawPage === 'number' && !Number.isNaN(rawPage)
+        ? rawPage
+        : parseInt(String(rawPage ?? '1'), 10) || 1;
+    // Must match titleblock + client: sheets.id = `${documentId}-${pageNumber}` (see titleblock.ts, useTakeoffWorkspaceDocuments.ts)
+    const compositeSheetId = `${newDocumentId}-${pageNumber}`;
+    const oldSheetRowId = (sheet.id as string) || '';
+    if (oldSheetRowId) {
+      sheetIdMapping[oldSheetRowId] = compositeSheetId;
+    }
     await storage.saveSheet({
       ...sheetData,
-      id: newSheetId,
+      id: compositeSheetId,
       documentId: newDocumentId,
+      pageNumber,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     } as Parameters<typeof storage.saveSheet>[0]);

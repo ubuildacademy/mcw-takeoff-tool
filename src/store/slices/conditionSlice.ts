@@ -156,7 +156,13 @@ export const useConditionStore = create<ConditionState>()(
       // Getters
       getSelectedCondition: () => {
         const { conditions, selectedConditionId } = get();
-        return conditions.find(condition => condition.id === selectedConditionId) || null;
+        const cond = conditions.find((c) => c.id === selectedConditionId) || null;
+        if (!cond) return null;
+        const currentProjectId = useProjectStore.getState().currentProjectId;
+        if (currentProjectId != null && cond.projectId !== currentProjectId) {
+          return null;
+        }
+        return cond;
       },
       
       getProjectConditions: (projectId) => {
@@ -166,7 +172,13 @@ export const useConditionStore = create<ConditionState>()(
       
       getConditionById: (id) => {
         const { conditions } = get();
-        return conditions.find(c => c.id === id);
+        const currentProjectId = useProjectStore.getState().currentProjectId;
+        const found = conditions.find((c) => c.id === id);
+        if (!found) return undefined;
+        if (currentProjectId != null && found.projectId !== currentProjectId) {
+          return undefined;
+        }
+        return found;
       },
       
       // Data loading

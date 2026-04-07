@@ -340,7 +340,314 @@ export function useTakeoffExport({
         },
       };
 
+      const allMeasurements: Array<{
+        conditionId: string;
+        condition: TakeoffCondition;
+        pageData: { pageNumber: number; sheetName: string; sheetNumber: string | null; sheetId: string };
+        measurement: { netCalculatedValue?: number; calculatedValue: number; timestamp: string; areaValue?: number; perimeterValue?: number };
+      }> = [];
+      conditionIds.forEach((conditionId) => {
+        const conditionData = reportData[conditionId];
+        const condition = conditionData.condition;
+        Object.values(conditionData.pages).forEach((pageData) => {
+          (pageData.measurements as Array<{ netCalculatedValue?: number; calculatedValue: number; timestamp: string; areaValue?: number; perimeterValue?: number }>).forEach((m) => {
+            allMeasurements.push({ conditionId, condition, pageData, measurement: m });
+          });
+        });
+      });
+      allMeasurements.sort((a, b) => {
+        const c = a.condition.name.localeCompare(b.condition.name);
+        if (c !== 0) return c;
+        const p = a.pageData.pageNumber - b.pageData.pageNumber;
+        if (p !== 0) return p;
+        return new Date(a.measurement.timestamp).getTime() - new Date(b.measurement.timestamp).getTime();
+      });
+
       const executiveSheet = workbook.addWorksheet('Executive Summary');
+      const detailSheet = workbook.addWorksheet('Quantities');
+
+      // Column map for Quantities sheet (keep in sync with detailHeaders).
+      const COL = {
+        condition: 1,
+        quantity: 2,
+        unit: 3,
+        areaValue: 4,
+        perimeter: 5,
+        height: 6,
+        sheetNumber: 7,
+        sheetName: 8,
+        pageRef: 9,
+        wastePct: 10,
+        wasteAmt: 11,
+        materialCostPerUnit: 12,
+        equipmentCost: 13,
+        description: 14,
+        timestamp: 15,
+        isTotalRow: 16, // hidden helper
+        pageKey: 17, // hidden helper
+      } as const;
+      detailSheet.getColumn(COL.condition).width = 25;
+      detailSheet.getColumn(COL.quantity).width = 12;
+      detailSheet.getColumn(COL.unit).width = 6;
+      detailSheet.getColumn(COL.areaValue).width = 15;
+      detailSheet.getColumn(COL.perimeter).width = 15;
+      detailSheet.getColumn(COL.height).width = 15;
+      detailSheet.getColumn(COL.sheetNumber).width = 12;
+      detailSheet.getColumn(COL.sheetName).width = 35;
+      detailSheet.getColumn(COL.pageRef).width = 10;
+      detailSheet.getColumn(COL.wastePct).width = 12;
+      detailSheet.getColumn(COL.wasteAmt).width = 15;
+      detailSheet.getColumn(COL.materialCostPerUnit).width = 18;
+      detailSheet.getColumn(COL.equipmentCost).width = 18;
+      detailSheet.getColumn(COL.description).width = 30;
+      detailSheet.getColumn(COL.timestamp).width = 20;
+      detailSheet.getColumn(COL.isTotalRow).width = 10;
+      detailSheet.getColumn(COL.pageKey).width = 20;
+      detailSheet.getColumn(COL.isTotalRow).hidden = true;
+      detailSheet.getColumn(COL.pageKey).hidden = true;
+
+      const detailHeaders = [
+        'Condition', 'Quantity', 'Unit', 'Area Value (SF)', 'Perimeter (LF)', 'Height (LF)', 'Sheet Number', 'Sheet Name', 'Page Reference',
+        'Waste Factor (%)', 'Waste Amount', 'Material Cost/Unit', 'Equipment Cost', 'Description', 'Timestamp',
+        'Is Total Row', 'Page Key',
+      ];
+      const detailHeaderRowNum = 1;
+      detailHeaders.forEach((header, colIdx) => {
+        const cell = detailSheet.getCell(detailHeaderRowNum, colIdx + 1);
+        cell.value = header;
+        cell.style = headerStyle;
+        if (colIdx === 7) cell.style = { ...headerStyle, alignment: { ...headerStyle.alignment, wrapText: true } };
+      });
+
+      type SheetPageData = { pageNumber: number; sheetName: string; sheetNumber: string | null; sheetId: string };
+      const conditionGroups: Record<string, {
+        condition: TakeoffCondition;
+        sheets: Record<string, {
+          pageData: SheetPageData;
+          measurements: Array<{ conditionId: string; condition: TakeoffCondition; pageData: SheetPageData; measurement: unknown }>;
+          total: number;
+        }>;
+        total: number;
+      }> = {};
+      allMeasurements.forEach(({ conditionId, condition, pageData, measurement }) => {
+        if (!conditionGroups[conditionId]) conditionGroups[conditionId] = { condition, sheets: {}, total: 0 };
+        const sheetKey = `${pageData.sheetId}-${pageData.pageNumber}`;
+        if (!conditionGroups[conditionId].sheets[sheetKey]) {
+          conditionGroups[conditionId].sheets[sheetKey] = { pageData, measurements: [], total: 0 };
+        }
+        const value = measurement.netCalculatedValue ?? measurement.calculatedValue;
+        conditionGroups[conditionId].sheets[sheetKey].measurements.push({ conditionId, condition, pageData, measurement });
+        conditionGroups[conditionId].sheets[sheetKey].total += value;
+        conditionGroups[conditionId].total += value;
+      });
+
+      const conditionSummaryStyle = {
+        font: { bold: true, size: 11, color: { argb: 'FF111827' } },
+        fill: { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFE5E7EB' } },
+        border: {
+          top: { style: 'thin' as const, color: { argb: 'FFD1D5DB' } },
+          bottom: { style: 'thin' as const, color: { argb: 'FFD1D5DB' } },
+          left: { style: 'thin' as const, color: { argb: 'FFD1D5DB' } },
+          right: { style: 'thin' as const, color: { argb: 'FFD1D5DB' } },
+        },
+      };
+
+      // Visual cue for editable input cells in Quantities.
+      const inputStyle = {
+        fill: { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFFFFBEB' } }, // light amber
+        border: dataEvenStyle.border,
+      };
+
+      const writeMeasurementRow = (
+        rowNum: number,
+        condition: TakeoffCondition,
+        pageData: { pageNumber: number; sheetName: string; sheetNumber: string | null; sheetId: string },
+        measurement: { netCalculatedValue?: number; calculatedValue: number; areaValue?: number; perimeterValue?: number; timestamp?: string }
+      ) => {
+        const rowStyle = rowNum % 2 === 0 ? dataEvenStyle : dataOddStyle;
+        let col = 1;
+        detailSheet.getCell(rowNum, col++).value = condition.name;
+        const quantityCell = detailSheet.getCell(rowNum, col++);
+        quantityCell.value = measurement.netCalculatedValue ?? measurement.calculatedValue;
+        quantityCell.numFmt = '#,##0.00';
+        quantityCell.style = rowStyle;
+        detailSheet.getCell(rowNum, col++).value = condition.unit;
+        const areaValueCell = detailSheet.getCell(rowNum, col++);
+        if (measurement.areaValue != null) {
+          areaValueCell.value = measurement.areaValue;
+          areaValueCell.numFmt = '#,##0.00';
+        } else if (condition.type === 'linear' && condition.includeHeight && condition.height) {
+          areaValueCell.value = (measurement.netCalculatedValue ?? measurement.calculatedValue) * condition.height;
+          areaValueCell.numFmt = '#,##0.00';
+        }
+        areaValueCell.style = rowStyle;
+        const perimeterCell = detailSheet.getCell(rowNum, col++);
+        if (measurement.perimeterValue != null) {
+          perimeterCell.value = measurement.perimeterValue;
+          perimeterCell.numFmt = '#,##0.00';
+        }
+        perimeterCell.style = rowStyle;
+        const heightCell = detailSheet.getCell(rowNum, col++);
+        if (condition.type === 'linear' && condition.includeHeight && condition.height) {
+          heightCell.value = condition.height;
+          heightCell.numFmt = '#,##0.00';
+        }
+        heightCell.style = rowStyle;
+        detailSheet.getCell(rowNum, col++).value = pageData.sheetNumber ?? '';
+        const sheetNameCell = detailSheet.getCell(rowNum, col++);
+        sheetNameCell.value = pageData.sheetName;
+        sheetNameCell.style = { ...rowStyle, alignment: { horizontal: 'left', vertical: 'top', wrapText: true } };
+        detailSheet.getCell(rowNum, col++).value = `P${pageData.pageNumber}`;
+        const wasteFactorCell = detailSheet.getCell(rowNum, col++);
+        wasteFactorCell.value = condition.wasteFactor ?? 0;
+        wasteFactorCell.numFmt = '0.00"%"';
+        wasteFactorCell.style = { ...rowStyle, ...inputStyle };
+        (wasteFactorCell as unknown as { protection?: { locked?: boolean } }).protection = { locked: false };
+        const wasteAmountCell = detailSheet.getCell(rowNum, col++);
+        const qCol = colIndexToLetter(COL.quantity);
+        const wCol = colIndexToLetter(COL.wastePct);
+        wasteAmountCell.value = { formula: `${qCol}${rowNum}*${wCol}${rowNum}/100` };
+        wasteAmountCell.numFmt = '#,##0.00';
+        wasteAmountCell.style = rowStyle;
+        const materialCostCell = detailSheet.getCell(rowNum, col++);
+        if (condition.materialCost) {
+          materialCostCell.value = condition.materialCost;
+          materialCostCell.numFmt = '"$"#,##0.00';
+        }
+        materialCostCell.style = { ...rowStyle, ...inputStyle };
+        (materialCostCell as unknown as { protection?: { locked?: boolean } }).protection = { locked: false };
+        const equipmentCostCell = detailSheet.getCell(rowNum, col++);
+        if (condition.equipmentCost) {
+          equipmentCostCell.value = condition.equipmentCost;
+          equipmentCostCell.numFmt = '"$"#,##0.00';
+        }
+        equipmentCostCell.style = { ...rowStyle, ...inputStyle };
+        (equipmentCostCell as unknown as { protection?: { locked?: boolean } }).protection = { locked: false };
+        detailSheet.getCell(rowNum, col++).value = condition.description ?? '';
+        detailSheet.getCell(rowNum, col++).value = formatTimestamp((condition as TakeoffCondition & { createdAt?: string }).createdAt);
+        // Helpers (hidden)
+        detailSheet.getCell(rowNum, col++).value = 0;
+        detailSheet.getCell(rowNum, col++).value = `${pageData.sheetId}-${pageData.pageNumber}`;
+        for (let c = 1; c <= detailHeaders.length; c++) {
+          const cell = detailSheet.getCell(rowNum, c);
+          if (!cell.style || Object.keys(cell.style).length === 0) cell.style = rowStyle;
+        }
+      };
+
+      let detailRowNum = 2;
+      Object.entries(conditionGroups).forEach(([_conditionId, conditionGroup]) => {
+        const condition = conditionGroup.condition;
+        const conditionStartRow = detailRowNum;
+        let col = 1;
+        detailSheet.getCell(detailRowNum, col++).value = `${condition.name} - TOTAL`;
+        const quantityCol = col++;
+        detailSheet.getCell(detailRowNum, col++).value = condition.unit;
+        const areaValueCol = col++;
+        const areaValueCell = detailSheet.getCell(detailRowNum, areaValueCol);
+        areaValueCell.style = conditionSummaryStyle;
+        const perimeterCol = col++;
+        const perimeterCell = detailSheet.getCell(detailRowNum, perimeterCol);
+        perimeterCell.style = conditionSummaryStyle;
+        const heightCol = col++;
+        const heightCell = detailSheet.getCell(detailRowNum, heightCol);
+        if (condition.type === 'linear' && condition.includeHeight && condition.height) {
+          heightCell.value = condition.height;
+          heightCell.numFmt = '#,##0.00';
+        }
+        heightCell.style = conditionSummaryStyle;
+        detailSheet.getCell(detailRowNum, col++).value = '';
+        detailSheet.getCell(detailRowNum, col++).value = '';
+        detailSheet.getCell(detailRowNum, col++).value = '';
+        const wasteFactorCol = col++;
+        const wasteFactorSummaryCell = detailSheet.getCell(detailRowNum, wasteFactorCol);
+        wasteFactorSummaryCell.numFmt = '0.00"%"';
+        wasteFactorSummaryCell.style = conditionSummaryStyle;
+        (wasteFactorSummaryCell as unknown as { protection?: { locked?: boolean } }).protection = { locked: false };
+        const wasteAmountCol = col++;
+        const wasteAmountCell = detailSheet.getCell(detailRowNum, wasteAmountCol);
+        wasteAmountCell.style = conditionSummaryStyle;
+        const totalMatCostCell = detailSheet.getCell(detailRowNum, col++);
+        totalMatCostCell.value = condition.materialCost ?? '';
+        totalMatCostCell.numFmt = '"$"#,##0.00';
+        totalMatCostCell.style = { ...conditionSummaryStyle, ...inputStyle };
+        (totalMatCostCell as unknown as { protection?: { locked?: boolean } }).protection = { locked: false };
+
+        const totalEquipCostCell = detailSheet.getCell(detailRowNum, col++);
+        totalEquipCostCell.value = condition.equipmentCost ?? '';
+        totalEquipCostCell.numFmt = '"$"#,##0.00';
+        totalEquipCostCell.style = { ...conditionSummaryStyle, ...inputStyle };
+        (totalEquipCostCell as unknown as { protection?: { locked?: boolean } }).protection = { locked: false };
+        // Helpers (hidden)
+        detailSheet.getCell(detailRowNum, col++).value = 1;
+        detailSheet.getCell(detailRowNum, col++).value = '';
+        for (let c = 1; c <= detailHeaders.length; c++) {
+          const cell = detailSheet.getCell(detailRowNum, c);
+          if (!cell.style || Object.keys(cell.style).length === 0) cell.style = conditionSummaryStyle;
+        }
+        detailSheet.getRow(detailRowNum).outlineLevel = 0;
+        detailRowNum++;
+        Object.entries(conditionGroup.sheets).forEach(([, sheetData]) => {
+          sheetData.measurements.forEach(({ measurement }) => {
+            writeMeasurementRow(detailRowNum, condition, sheetData.pageData, measurement as { netCalculatedValue?: number; calculatedValue: number; areaValue?: number; perimeterValue?: number; timestamp?: string });
+            detailSheet.getRow(detailRowNum).outlineLevel = 1;
+            detailRowNum++;
+          });
+        });
+        const measurementStartRow = conditionStartRow + 1;
+        const measurementEndRowActual = detailRowNum - 1;
+        const quantityColLetter = colIndexToLetter(quantityCol);
+        const quantityFormulaCell = detailSheet.getCell(conditionStartRow, quantityCol);
+        quantityFormulaCell.value = { formula: `SUM(${quantityColLetter}${measurementStartRow}:${quantityColLetter}${measurementEndRowActual})` };
+        quantityFormulaCell.numFmt = '#,##0.00';
+        quantityFormulaCell.style = conditionSummaryStyle;
+        if (condition.type === 'linear' && condition.includeHeight) {
+          const areaValueColLetter = colIndexToLetter(areaValueCol);
+          areaValueCell.value = { formula: `SUM(${areaValueColLetter}${measurementStartRow}:${areaValueColLetter}${measurementEndRowActual})` };
+          areaValueCell.numFmt = '#,##0.00';
+        }
+        if ((condition.type === 'area' || condition.type === 'volume') && condition.includePerimeter) {
+          const perimeterColLetter = colIndexToLetter(perimeterCol);
+          perimeterCell.value = { formula: `SUM(${perimeterColLetter}${measurementStartRow}:${perimeterColLetter}${measurementEndRowActual})` };
+          perimeterCell.numFmt = '#,##0.00';
+        }
+        if (measurementEndRowActual >= measurementStartRow) {
+          const wasteFactorColLetter = colIndexToLetter(wasteFactorCol);
+          wasteFactorSummaryCell.value = {
+            formula: `AVERAGE(${wasteFactorColLetter}${measurementStartRow}:${wasteFactorColLetter}${measurementEndRowActual})`,
+          };
+          const wasteAmountColLetter = colIndexToLetter(wasteAmountCol);
+          wasteAmountCell.value = { formula: `SUM(${wasteAmountColLetter}${measurementStartRow}:${wasteAmountColLetter}${measurementEndRowActual})` };
+          wasteAmountCell.numFmt = '#,##0.00';
+        }
+      });
+
+      const quantitiesLastRow = detailRowNum - 1;
+      const qL = quantitiesLastRow;
+      const isTotalColLetter = colIndexToLetter(COL.isTotalRow);
+      const qtyColLetter = colIndexToLetter(COL.quantity);
+      const wasteAmtColLetter = colIndexToLetter(COL.wasteAmt);
+      const matCostColLetter = colIndexToLetter(COL.materialCostPerUnit);
+      const equipCostColLetter = colIndexToLetter(COL.equipmentCost);
+      const condColLetter = colIndexToLetter(COL.condition);
+
+      const isMeasurementRow = `--(Quantities!$${isTotalColLetter}$2:$${isTotalColLetter}$${qL}=0)`;
+      const isTotalRow = `--(Quantities!$${isTotalColLetter}$2:$${isTotalColLetter}$${qL}=1)`;
+      const hasConditionText = `--(Quantities!$${condColLetter}$2:$${condColLetter}$${qL}<>"")`;
+
+      const materialFromQuantities = `SUMPRODUCT(Quantities!$${qtyColLetter}$2:$${qtyColLetter}$${qL},Quantities!$${matCostColLetter}$2:$${matCostColLetter}$${qL},${isMeasurementRow},${hasConditionText})`;
+      const wasteCostFromQuantities = `SUMPRODUCT(Quantities!$${wasteAmtColLetter}$2:$${wasteAmtColLetter}$${qL},Quantities!$${matCostColLetter}$2:$${matCostColLetter}$${qL},${isMeasurementRow},${hasConditionText})`;
+      const equipmentFromQuantities = `SUMPRODUCT(Quantities!$${equipCostColLetter}$2:$${equipCostColLetter}$${qL},${isTotalRow},${hasConditionText})`;
+      const profitMarginPct = costBreakdown.summary.profitMarginPercent ?? 15;
+
+      // Hidden calc sheet for distinct page counting (page keys won't change via Excel edits,
+      // but this keeps KPI formulas consistent with the rest of the sheet-driven values).
+      const calcSheet = workbook.addWorksheet('_Calc');
+      (calcSheet as unknown as { state?: string }).state = 'veryHidden';
+      const uniquePageKeys = Array.from(new Set(allMeasurements.map((m) => `${m.pageData.sheetId}-${m.pageData.pageNumber}`))).sort();
+      uniquePageKeys.forEach((k, idx) => {
+        calcSheet.getCell(idx + 1, 1).value = k;
+      });
+
       executiveSheet.getColumn(1).width = 28;
       executiveSheet.getColumn(2).width = 50;
       let row = 1;
@@ -450,15 +757,19 @@ export function useTakeoffExport({
       executiveSheet.getRow(row).height = 22;
       row++;
 
-      const uniquePagesSet = new Set<string>();
-      conditionIds.forEach((id) => {
-        Object.keys(reportData[id].pages).forEach((pageKey) => uniquePagesSet.add(pageKey));
-      });
-      const kpiData = [
-        ['Total Conditions', conditionIds.length],
-        ['Conditions with Costs', costBreakdown.summary.conditionsWithCosts],
-        ['Total Pages with Measurements', uniquePagesSet.size],
-        ['Total Measurements', conditionIds.reduce((sum, id) => sum + Object.values(reportData[id].pages).reduce((pageSum, page) => pageSum + page.measurements.length, 0), 0)],
+      const kpiData: Array<[string, string | number | { formula: string }]> = [
+        ['Total Conditions', { formula: `COUNTIF(Quantities!$${isTotalColLetter}$2:$${isTotalColLetter}$${qL},1)` }],
+        [
+          'Conditions with Costs',
+          {
+            formula: `SUMPRODUCT(${isTotalRow},--(((Quantities!$${matCostColLetter}$2:$${matCostColLetter}$${qL}>0)+(Quantities!$${equipCostColLetter}$2:$${equipCostColLetter}$${qL}>0))>0),${hasConditionText})`,
+          },
+        ],
+        ['Total Pages with Measurements', { formula: 'COUNTA(_Calc!A:A)' }],
+        [
+          'Total Measurements',
+          { formula: `SUMPRODUCT(${isMeasurementRow},${hasConditionText})` },
+        ],
       ];
       kpiData.forEach(([label, value], index) => {
         const isEven = index % 2 === 0;
@@ -476,8 +787,14 @@ export function useTakeoffExport({
             right: { style: 'thin', color: { argb: 'FFE5E7EB' } },
           },
         };
-        valueCell.value = value;
-        if (label === 'Conditions with Costs') valueCell.numFmt = '#,##0';
+        if (typeof value === 'object' && value !== null && 'formula' in value) {
+          valueCell.value = { formula: value.formula };
+        } else {
+          valueCell.value = value;
+        }
+        if (label === 'Total Conditions' || label === 'Conditions with Costs' || label === 'Total Measurements') {
+          valueCell.numFmt = '#,##0';
+        }
         valueCell.style = {
           font: { size: 11, color: { argb: 'FF111827' }, bold: true },
           alignment: { horizontal: 'left', vertical: 'middle' },
@@ -511,18 +828,33 @@ export function useTakeoffExport({
       row++;
 
       const costStartRow = row;
-      const materialCostRow = costStartRow;
-      const equipmentCostRow = costStartRow + 1;
-      const wasteCostRow = costStartRow + 2;
-      const subtotalRow = costStartRow + 3;
-      const profitMarginRow = costStartRow + 4;
-      const totalCostRow = costStartRow + 5;
+      const profitRateRow = costStartRow;
+      const materialCostRow = costStartRow + 1;
+      const equipmentCostRow = costStartRow + 2;
+      const wasteCostRow = costStartRow + 3;
+      const subtotalRow = costStartRow + 4;
+      const profitMarginRow = costStartRow + 5;
+      const totalCostRow = costStartRow + 6;
+      const profitRateCellRef = `B${profitRateRow}`;
       const costInfo = [
-        { label: 'Material Cost', formula: null as string | null, value: costBreakdown.summary.totalMaterialCost, row: materialCostRow },
-        { label: 'Equipment Cost', formula: null, value: costBreakdown.summary.totalEquipmentCost, row: equipmentCostRow },
-        { label: 'Waste Factor Cost', formula: null, value: costBreakdown.summary.totalWasteCost, row: wasteCostRow },
+        {
+          label: 'Profit Margin Rate',
+          formula: null as string | null,
+          value: profitMarginPct / 100,
+          row: profitRateRow,
+          isPercent: true,
+        },
+        { label: 'Material Cost', formula: materialFromQuantities, value: null as number | null, row: materialCostRow },
+        { label: 'Equipment Cost', formula: equipmentFromQuantities, value: null, row: equipmentCostRow },
+        { label: 'Waste Factor Cost', formula: wasteCostFromQuantities, value: null, row: wasteCostRow },
         { label: 'Subtotal', formula: `SUM(B${materialCostRow}:B${wasteCostRow})`, value: null, row: subtotalRow },
-        { label: 'Profit Margin', formula: `B${subtotalRow}*${(costBreakdown.summary.profitMarginPercent ?? 0) / 100}`, value: costBreakdown.summary.profitMarginAmount, percent: costBreakdown.summary.profitMarginPercent, row: profitMarginRow },
+        {
+          label: 'Profit Margin',
+          formula: `B${subtotalRow}*${profitRateCellRef}`,
+          value: null,
+          percent: profitMarginPct,
+          row: profitMarginRow,
+        },
         { label: 'Total Project Cost', formula: `B${subtotalRow}+B${profitMarginRow}`, value: null, isHighlighted: true, row: totalCostRow },
       ];
 
@@ -531,7 +863,7 @@ export function useTakeoffExport({
         const isTotalRow = item.isHighlighted ?? false;
         const labelCell = executiveSheet.getCell(`A${row}`);
         const valueCell = executiveSheet.getCell(`B${row}`);
-        const displayLabel = item.label === 'Profit Margin' && item.percent ? `Profit Margin (${item.percent}%)` : item.label;
+        const displayLabel = item.label === 'Profit Margin' && item.percent !== undefined ? `Profit Margin (${item.percent}%)` : item.label;
         labelCell.value = displayLabel;
         labelCell.style = {
           font: { size: 11, color: { argb: isTotalRow ? 'FF111827' : 'FF6B7280' }, bold: isTotalRow },
@@ -547,6 +879,11 @@ export function useTakeoffExport({
         if (item.formula) valueCell.value = { formula: item.formula };
         else if (item.value != null) valueCell.value = item.value;
         else valueCell.value = 0;
+        if ((item as { isPercent?: boolean }).isPercent) {
+          valueCell.numFmt = '0.00%';
+          // Make profit rate editable even if sheet protection is enabled.
+          (valueCell as unknown as { protection?: { locked?: boolean } }).protection = { locked: false };
+        }
         valueCell.style = {
           font: { size: 11, color: { argb: isTotalRow ? 'FF111827' : 'FF111827' }, bold: isTotalRow || item.label === 'Profit Margin' },
           alignment: { horizontal: 'right', vertical: 'middle' },
@@ -558,10 +895,29 @@ export function useTakeoffExport({
             right: { style: 'thin', color: { argb: 'FFE5E7EB' } },
           },
         };
-        valueCell.numFmt = '$#,##0.00';
+        if (!(item as { isPercent?: boolean }).isPercent) valueCell.numFmt = '$#,##0.00';
         executiveSheet.getRow(row).height = isTotalRow ? 25 : 20;
         row++;
       });
+
+      // Protect Executive Summary but allow editing Profit Margin Rate.
+      try {
+        await executiveSheet.protect('', {
+          selectLockedCells: true,
+          selectUnlockedCells: true,
+          formatCells: true,
+          formatColumns: false,
+          formatRows: false,
+          insertColumns: false,
+          insertRows: false,
+          deleteColumns: false,
+          deleteRows: false,
+          sort: false,
+          autoFilter: false,
+        } as Record<string, unknown>);
+      } catch {
+        // ignore
+      }
 
       const reportStartRow = 2;
       const reportEndRow = row - 1;
@@ -591,233 +947,9 @@ export function useTakeoffExport({
         fitToPage: false,
         scale: 100,
       };
-      const lastRow = row - 1;
-      executiveSheet.pageSetup.printArea = `A1:B${lastRow}`;
+      const lastExecRow = row - 1;
+      executiveSheet.pageSetup.printArea = `A1:B${lastExecRow}`;
       onExportStatusUpdate?.('excel', 15);
-
-      const allMeasurements: Array<{
-        conditionId: string;
-        condition: TakeoffCondition;
-        pageData: { pageNumber: number; sheetName: string; sheetNumber: string | null; sheetId: string };
-        measurement: { netCalculatedValue?: number; calculatedValue: number; timestamp: string; areaValue?: number; perimeterValue?: number };
-      }> = [];
-      conditionIds.forEach((conditionId) => {
-        const conditionData = reportData[conditionId];
-        const condition = conditionData.condition;
-        Object.values(conditionData.pages).forEach((pageData) => {
-          (pageData.measurements as Array<{ netCalculatedValue?: number; calculatedValue: number; timestamp: string; areaValue?: number; perimeterValue?: number }>).forEach((m) => {
-            allMeasurements.push({ conditionId, condition, pageData, measurement: m });
-          });
-        });
-      });
-      allMeasurements.sort((a, b) => {
-        const c = a.condition.name.localeCompare(b.condition.name);
-        if (c !== 0) return c;
-        const p = a.pageData.pageNumber - b.pageData.pageNumber;
-        if (p !== 0) return p;
-        return new Date(a.measurement.timestamp).getTime() - new Date(b.measurement.timestamp).getTime();
-      });
-
-      const detailSheet = workbook.addWorksheet('Quantities');
-      detailSheet.getColumn(1).width = 25;
-      detailSheet.getColumn(2).width = 12;
-      detailSheet.getColumn(3).width = 6;
-      detailSheet.getColumn(4).width = 15;
-      detailSheet.getColumn(5).width = 15;
-      detailSheet.getColumn(6).width = 15;
-      detailSheet.getColumn(7).width = 12;
-      detailSheet.getColumn(8).width = 35;
-      detailSheet.getColumn(9).width = 10;
-      detailSheet.getColumn(10).width = 12;
-      detailSheet.getColumn(11).width = 15;
-      detailSheet.getColumn(12).width = 18;
-      detailSheet.getColumn(13).width = 18;
-      detailSheet.getColumn(14).width = 30;
-      detailSheet.getColumn(15).width = 20;
-
-      const detailHeaders = [
-        'Condition', 'Quantity', 'Unit', 'Area Value (SF)', 'Perimeter (LF)', 'Height (LF)', 'Sheet Number', 'Sheet Name', 'Page Reference',
-        'Waste Factor (%)', 'Waste Amount', 'Material Cost/Unit', 'Equipment Cost', 'Description', 'Timestamp',
-      ];
-      const detailHeaderRowNum = 1;
-      detailHeaders.forEach((header, colIdx) => {
-        const cell = detailSheet.getCell(detailHeaderRowNum, colIdx + 1);
-        cell.value = header;
-        cell.style = headerStyle;
-        if (colIdx === 7) cell.style = { ...headerStyle, alignment: { ...headerStyle.alignment, wrapText: true } };
-      });
-
-      type SheetPageData = { pageNumber: number; sheetName: string; sheetNumber: string | null; sheetId: string };
-      const conditionGroups: Record<string, {
-        condition: TakeoffCondition;
-        sheets: Record<string, {
-          pageData: SheetPageData;
-          measurements: Array<{ conditionId: string; condition: TakeoffCondition; pageData: SheetPageData; measurement: unknown }>;
-          total: number;
-        }>;
-        total: number;
-      }> = {};
-      allMeasurements.forEach(({ conditionId, condition, pageData, measurement }) => {
-        if (!conditionGroups[conditionId]) conditionGroups[conditionId] = { condition, sheets: {}, total: 0 };
-        const sheetKey = `${pageData.sheetId}-${pageData.pageNumber}`;
-        if (!conditionGroups[conditionId].sheets[sheetKey]) {
-          conditionGroups[conditionId].sheets[sheetKey] = { pageData, measurements: [], total: 0 };
-        }
-        const value = measurement.netCalculatedValue ?? measurement.calculatedValue;
-        conditionGroups[conditionId].sheets[sheetKey].measurements.push({ conditionId, condition, pageData, measurement });
-        conditionGroups[conditionId].sheets[sheetKey].total += value;
-        conditionGroups[conditionId].total += value;
-      });
-
-      const conditionSummaryStyle = {
-        font: { bold: true, size: 11, color: { argb: 'FF111827' } },
-        fill: { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFE5E7EB' } },
-        border: {
-          top: { style: 'thin' as const, color: { argb: 'FFD1D5DB' } },
-          bottom: { style: 'thin' as const, color: { argb: 'FFD1D5DB' } },
-          left: { style: 'thin' as const, color: { argb: 'FFD1D5DB' } },
-          right: { style: 'thin' as const, color: { argb: 'FFD1D5DB' } },
-        },
-      };
-
-      const writeMeasurementRow = (
-        rowNum: number,
-        condition: TakeoffCondition,
-        pageData: { pageNumber: number; sheetName: string; sheetNumber: string | null; sheetId: string },
-        measurement: { netCalculatedValue?: number; calculatedValue: number; areaValue?: number; perimeterValue?: number; timestamp?: string }
-      ) => {
-        const rowStyle = rowNum % 2 === 0 ? dataEvenStyle : dataOddStyle;
-        let col = 1;
-        detailSheet.getCell(rowNum, col++).value = condition.name;
-        const quantityCell = detailSheet.getCell(rowNum, col++);
-        quantityCell.value = measurement.netCalculatedValue ?? measurement.calculatedValue;
-        quantityCell.numFmt = '#,##0.00';
-        quantityCell.style = rowStyle;
-        detailSheet.getCell(rowNum, col++).value = condition.unit;
-        const areaValueCell = detailSheet.getCell(rowNum, col++);
-        if (measurement.areaValue != null) {
-          areaValueCell.value = measurement.areaValue;
-          areaValueCell.numFmt = '#,##0.00';
-        } else if (condition.type === 'linear' && condition.includeHeight && condition.height) {
-          areaValueCell.value = (measurement.netCalculatedValue ?? measurement.calculatedValue) * condition.height;
-          areaValueCell.numFmt = '#,##0.00';
-        }
-        areaValueCell.style = rowStyle;
-        const perimeterCell = detailSheet.getCell(rowNum, col++);
-        if (measurement.perimeterValue != null) {
-          perimeterCell.value = measurement.perimeterValue;
-          perimeterCell.numFmt = '#,##0.00';
-        }
-        perimeterCell.style = rowStyle;
-        const heightCell = detailSheet.getCell(rowNum, col++);
-        if (condition.type === 'linear' && condition.includeHeight && condition.height) {
-          heightCell.value = condition.height;
-          heightCell.numFmt = '#,##0.00';
-        }
-        heightCell.style = rowStyle;
-        detailSheet.getCell(rowNum, col++).value = pageData.sheetNumber ?? '';
-        const sheetNameCell = detailSheet.getCell(rowNum, col++);
-        sheetNameCell.value = pageData.sheetName;
-        sheetNameCell.style = { ...rowStyle, alignment: { horizontal: 'left', vertical: 'top', wrapText: true } };
-        detailSheet.getCell(rowNum, col++).value = `P${pageData.pageNumber}`;
-        const wasteFactorCell = detailSheet.getCell(rowNum, col++);
-        wasteFactorCell.value = condition.wasteFactor ?? 0;
-        wasteFactorCell.numFmt = '0.00"%"';
-        wasteFactorCell.style = rowStyle;
-        const wasteAmountCell = detailSheet.getCell(rowNum, col++);
-        const val = measurement.netCalculatedValue ?? measurement.calculatedValue;
-        if (condition.wasteFactor && condition.wasteFactor > 0 && val > 0) {
-          wasteAmountCell.value = val * (condition.wasteFactor / 100);
-          wasteAmountCell.numFmt = '#,##0.00';
-        }
-        wasteAmountCell.style = rowStyle;
-        const materialCostCell = detailSheet.getCell(rowNum, col++);
-        if (condition.materialCost) {
-          materialCostCell.value = condition.materialCost;
-          materialCostCell.numFmt = '"$"#,##0.00';
-        }
-        materialCostCell.style = rowStyle;
-        const equipmentCostCell = detailSheet.getCell(rowNum, col++);
-        if (condition.equipmentCost) {
-          equipmentCostCell.value = condition.equipmentCost;
-          equipmentCostCell.numFmt = '"$"#,##0.00';
-        }
-        equipmentCostCell.style = rowStyle;
-        detailSheet.getCell(rowNum, col++).value = condition.description ?? '';
-        detailSheet.getCell(rowNum, col++).value = formatTimestamp((condition as TakeoffCondition & { createdAt?: string }).createdAt);
-        for (let c = 1; c <= detailHeaders.length; c++) {
-          const cell = detailSheet.getCell(rowNum, c);
-          if (!cell.style || Object.keys(cell.style).length === 0) cell.style = rowStyle;
-        }
-      };
-
-      let detailRowNum = 2;
-      Object.entries(conditionGroups).forEach(([_conditionId, conditionGroup]) => {
-        const condition = conditionGroup.condition;
-        const conditionStartRow = detailRowNum;
-        let col = 1;
-        detailSheet.getCell(detailRowNum, col++).value = `${condition.name} - TOTAL`;
-        const quantityCol = col++;
-        detailSheet.getCell(detailRowNum, col++).value = condition.unit;
-        const areaValueCol = col++;
-        const areaValueCell = detailSheet.getCell(detailRowNum, areaValueCol);
-        areaValueCell.style = conditionSummaryStyle;
-        const perimeterCol = col++;
-        const perimeterCell = detailSheet.getCell(detailRowNum, perimeterCol);
-        perimeterCell.style = conditionSummaryStyle;
-        const heightCol = col++;
-        const heightCell = detailSheet.getCell(detailRowNum, heightCol);
-        if (condition.type === 'linear' && condition.includeHeight && condition.height) {
-          heightCell.value = condition.height;
-          heightCell.numFmt = '#,##0.00';
-        }
-        heightCell.style = conditionSummaryStyle;
-        detailSheet.getCell(detailRowNum, col++).value = '';
-        detailSheet.getCell(detailRowNum, col++).value = '';
-        detailSheet.getCell(detailRowNum, col++).value = '';
-        detailSheet.getCell(detailRowNum, col++).value = condition.wasteFactor ?? 0;
-        const wasteAmountCol = col++;
-        const wasteAmountCell = detailSheet.getCell(detailRowNum, wasteAmountCol);
-        wasteAmountCell.style = conditionSummaryStyle;
-        detailSheet.getCell(detailRowNum, col++).value = condition.materialCost ?? '';
-        detailSheet.getCell(detailRowNum, col++).value = condition.equipmentCost ?? '';
-        col += 2;
-        for (let c = 1; c <= detailHeaders.length; c++) {
-          const cell = detailSheet.getCell(detailRowNum, c);
-          if (!cell.style || Object.keys(cell.style).length === 0) cell.style = conditionSummaryStyle;
-        }
-        detailSheet.getRow(detailRowNum).outlineLevel = 0;
-        detailRowNum++;
-        Object.entries(conditionGroup.sheets).forEach(([, sheetData]) => {
-          sheetData.measurements.forEach(({ measurement }) => {
-            writeMeasurementRow(detailRowNum, condition, sheetData.pageData, measurement as { netCalculatedValue?: number; calculatedValue: number; areaValue?: number; perimeterValue?: number; timestamp?: string });
-            detailSheet.getRow(detailRowNum).outlineLevel = 1;
-            detailRowNum++;
-          });
-        });
-        const measurementStartRow = conditionStartRow + 1;
-        const measurementEndRowActual = detailRowNum - 1;
-        const quantityColLetter = colIndexToLetter(quantityCol);
-        const quantityFormulaCell = detailSheet.getCell(conditionStartRow, quantityCol);
-        quantityFormulaCell.value = { formula: `SUM(${quantityColLetter}${measurementStartRow}:${quantityColLetter}${measurementEndRowActual})` };
-        quantityFormulaCell.numFmt = '#,##0.00';
-        quantityFormulaCell.style = conditionSummaryStyle;
-        if (condition.type === 'linear' && condition.includeHeight) {
-          const areaValueColLetter = colIndexToLetter(areaValueCol);
-          areaValueCell.value = { formula: `SUM(${areaValueColLetter}${measurementStartRow}:${areaValueColLetter}${measurementEndRowActual})` };
-          areaValueCell.numFmt = '#,##0.00';
-        }
-        if ((condition.type === 'area' || condition.type === 'volume') && condition.includePerimeter) {
-          const perimeterColLetter = colIndexToLetter(perimeterCol);
-          perimeterCell.value = { formula: `SUM(${perimeterColLetter}${measurementStartRow}:${perimeterColLetter}${measurementEndRowActual})` };
-          perimeterCell.numFmt = '#,##0.00';
-        }
-        if (condition.wasteFactor && condition.wasteFactor > 0) {
-          const wasteAmountColLetter = colIndexToLetter(wasteAmountCol);
-          wasteAmountCell.value = { formula: `SUM(${wasteAmountColLetter}${measurementStartRow}:${wasteAmountColLetter}${measurementEndRowActual})` };
-          wasteAmountCell.numFmt = '#,##0.00';
-        }
-      });
 
       const props = detailSheet.properties as unknown as Record<string, unknown>;
       props.outlineLevelRow = 1;
@@ -829,6 +961,26 @@ export function useTakeoffExport({
         printOptions: { gridLines: true, horizontalCentered: false },
         repeatRows: '1:1',
       };
+
+      // Protect the Quantities sheet so derived formulas stay intact while allowing edits
+      // to the intended input cells (waste %, material cost/unit, equipment cost).
+      try {
+        await detailSheet.protect('', {
+          selectLockedCells: true,
+          selectUnlockedCells: true,
+          formatCells: true,
+          formatColumns: false,
+          formatRows: false,
+          insertColumns: false,
+          insertRows: false,
+          deleteColumns: false,
+          deleteRows: false,
+          sort: false,
+          autoFilter: false,
+        } as Record<string, unknown>);
+      } catch {
+        // If protection isn't supported in the current ExcelJS build, skip silently.
+      }
       onExportStatusUpdate?.('excel', 90);
 
       const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');

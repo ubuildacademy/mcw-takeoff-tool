@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useLayoutEffect, useState, useCallback, useRef } from 'react';
 
 import { useParams, useNavigate } from 'react-router-dom';
 import PDFViewer from './PDFViewer';
@@ -61,7 +61,7 @@ export function TakeoffWorkspace() {
   useEffect(() => {
     if (projectId) useUndoStore.getState().clear();
   }, [projectId]);
-  
+
   const [selectedSheet, setSelectedSheet] = useState<Sheet | null>(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const [selectedPageNumber, setSelectedPageNumber] = useState<number | null>(null);
@@ -83,6 +83,11 @@ export function TakeoffWorkspace() {
   
   const setCurrentProject = useProjectStore((s) => s.setCurrentProject);
   const setSelectedCondition = useConditionStore((s) => s.setSelectedCondition);
+  useLayoutEffect(() => {
+    if (!projectId) return;
+    setCurrentProject(projectId);
+    setSelectedCondition(null);
+  }, [projectId, setCurrentProject, setSelectedCondition]);
   const selectedConditionId = useConditionStore((s) => s.selectedConditionId);
   const getSelectedCondition = useConditionStore((s) => s.getSelectedCondition);
   const getCurrentProject = useProjectStore((s) => s.getCurrentProject);
