@@ -370,6 +370,9 @@ export function renderSVGMeasurement(
           : `${measurement.calculatedValue.toFixed(2)} ${measurement.unit}`;
         const displayValue = measurement.areaValue ? `${linearValue} LF / ${measurement.areaValue.toFixed(0)} SF` : linearValue;
         text.textContent = displayValue;
+        text.setAttribute('data-measurement-id', measurement.id);
+        text.style.pointerEvents = selectionMode ? 'auto' : 'none';
+        text.style.cursor = selectionMode ? 'pointer' : 'default';
         svg.appendChild(text);
       }
       break;
@@ -430,6 +433,9 @@ export function renderSVGMeasurement(
           const displayValue = measurement.netCalculatedValue != null ? measurement.netCalculatedValue : measurement.calculatedValue;
           const areaValue = `${displayValue.toFixed(0)} SF`;
           text.textContent = measurement.perimeterValue ? `${areaValue} / ${formatFeetAndInches(measurement.perimeterValue)} LF` : areaValue;
+          text.setAttribute('data-measurement-id', measurement.id);
+          text.style.pointerEvents = selectionMode ? 'auto' : 'none';
+          text.style.cursor = selectionMode ? 'pointer' : 'default';
           svg.appendChild(text);
         }
       }
@@ -490,6 +496,9 @@ export function renderSVGMeasurement(
           const displayValue = measurement.netCalculatedValue != null ? measurement.netCalculatedValue : measurement.calculatedValue;
           const volumeValue = `${displayValue.toFixed(0)} CY`;
           text.textContent = measurement.perimeterValue ? `${volumeValue} / ${formatFeetAndInches(measurement.perimeterValue)} LF` : volumeValue;
+          text.setAttribute('data-measurement-id', measurement.id);
+          text.style.pointerEvents = selectionMode ? 'auto' : 'none';
+          text.style.cursor = selectionMode ? 'pointer' : 'default';
           svg.appendChild(text);
         }
       }

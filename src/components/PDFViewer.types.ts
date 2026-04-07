@@ -85,6 +85,11 @@ export interface PDFViewerProps {
   onHyperlinkClick?: (targetSheetId: string, targetPageNumber: number) => void;
   /** Call when user right-clicks a hyperlink (for Edit/Delete menu) */
   onHyperlinkContextMenu?: (hyperlinkId: string, clientX: number, clientY: number) => void;
+  /**
+   * Register the handler Space invokes to leave plan-only markup selection and enter draw mode
+   * for the already-selected condition. Pass `null` on unregister (e.g. unmount).
+   */
+  onRegisterEnterConditionDrawMode?: (handler: (() => void) | null) => void;
 }
 
 /** Measurement shape used by PDFViewer for rendering (aligned with TakeoffMeasurement + legacy) */
@@ -111,6 +116,8 @@ export interface PDFViewerMeasurement {
     calculatedValue: number;
   }>;
   netCalculatedValue?: number;
+  /** Z-order on page; lower = behind, higher = in front. */
+  stackOrder?: number;
   color?: string;
 }
 

@@ -8,6 +8,11 @@ export function isValidUUID(str: string): boolean {
   return uuidRegex.test(str);
 }
 
+/** RFC 4122 UUID (versions 1–5); use when ids may not be strictly v4. */
+export function isValidUUIDAnyVersion(str: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str);
+}
+
 /**
  * Validate email format
  */

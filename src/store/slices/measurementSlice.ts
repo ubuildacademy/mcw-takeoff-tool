@@ -4,6 +4,18 @@ import { MeasurementCalculator } from '../../utils/measurementCalculation';
 import { useConditionStore } from './conditionSlice';
 import { useProjectStore } from './projectSlice';
 
+export function compareMeasurementsByStackOrder(a: TakeoffMeasurement, b: TakeoffMeasurement): number {
+  const oa = a.stackOrder ?? 0;
+  const ob = b.stackOrder ?? 0;
+  if (oa !== ob) return oa - ob;
+  return a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id);
+}
+
+/** API/legacy rows may use string or number for pdf_page; keep page grouping consistent for z-order. */
+function samePdfPageKey(a: number | string | undefined, b: number | string | undefined): boolean {
+  return Number(a) === Number(b);
+}
+
 interface MeasurementState {
   // State
   takeoffMeasurements: TakeoffMeasurement[];
@@ -18,6 +30,13 @@ interface MeasurementState {
   // Actions
   addTakeoffMeasurement: (measurement: Omit<TakeoffMeasurement, 'id' | 'timestamp'>) => Promise<string>;
   updateTakeoffMeasurement: (id: string, updates: Partial<TakeoffMeasurement>) => Promise<void>;
+  /** Swap z-order with the neighbor on the same page (forward = toward front / on top). */
+  reorderTakeoffMeasurementStack: (
+    measurementId: string,
+    direction: 'forward' | 'backward'
+  ) => Promise<void>;
+  /** Move this markup to the back-most layer (behind everything else on the page). */
+  sendTakeoffMeasurementToBack: (measurementId: string) => Promise<void>;
   deleteTakeoffMeasurement: (id: string) => Promise<void>;
   clearProjectMeasurements: (projectId: string) => void;
   /** Clear measurements when switching project (so new project load is clean). */
@@ -61,8 +80,57 @@ interface MeasurementState {
   loadPageTakeoffMeasurements: (projectId: string, sheetId: string, pageNumber: number) => Promise<void>;
 }
 
-export const useMeasurementStore = create<MeasurementState>()(
-  (set, get) => ({
+export const useMeasurementStore = create<MeasurementState>()((set, get) => {
+  const persistStackOrderUpdates = async (
+    stackUpdates: { id: string; stackOrder: number }[],
+    logPrefix: string
+  ) => {
+    const { takeoffMeasurementService } = await import('../../services/apiService');
+    const applyStackOrdersLocally = () => {
+      const orderById = new Map(stackUpdates.map((u) => [u.id, u.stackOrder]));
+      set((state) => ({
+        takeoffMeasurements: state.takeoffMeasurements.map((meas) => {
+          const so = orderById.get(meas.id);
+          return so !== undefined ? { ...meas, stackOrder: so } : meas;
+        }),
+      }));
+      get().updateMarkupsByPage();
+    };
+    applyStackOrdersLocally();
+    let persistOk = false;
+    try {
+      await takeoffMeasurementService.batchUpdateTakeoffMeasurementStackOrder(stackUpdates);
+      persistOk = true;
+    } catch (error: unknown) {
+      console.warn(`${logPrefix}: batch stack-order failed, falling back to sequential PUT`, error);
+      for (const u of stackUpdates) {
+        try {
+          const response = await takeoffMeasurementService.updateTakeoffMeasurement(u.id, {
+            stackOrder: u.stackOrder,
+          });
+          const row = (response as { measurement?: TakeoffMeasurement }).measurement;
+          if (row) {
+            set((state) => ({
+              takeoffMeasurements: state.takeoffMeasurements.map((measurement) =>
+                measurement.id === u.id ? { ...measurement, ...row } : measurement
+              ),
+            }));
+          }
+          persistOk = true;
+        } catch (putErr: unknown) {
+          console.error(`${logPrefix}: PUT stackOrder failed for ${u.id}`, putErr);
+        }
+      }
+      get().updateMarkupsByPage();
+    }
+    if (!persistOk) {
+      console.error(
+        `${logPrefix}: stack order could not be saved to the server; UI keeps your last order locally. Check network and DB migration for stack_order.`
+      );
+    }
+  };
+
+  return {
     // Initial state
     takeoffMeasurements: [],
     markupsByPage: {},
@@ -93,8 +161,16 @@ export const useMeasurementStore = create<MeasurementState>()(
         const { takeoffMeasurementService } = await import('../../services/apiService');
         
         const condition = useConditionStore.getState().getConditionById(measurementData.conditionId);
+        const pageMeas = get().getPageTakeoffMeasurements(
+          measurementData.projectId,
+          measurementData.sheetId,
+          measurementData.pdfPage
+        );
+        const maxOrder = pageMeas.reduce((acc, x) => Math.max(acc, x.stackOrder ?? 0), -1);
+        const stackOrder = maxOrder + 1;
         const measurementPayload = {
           ...measurementData,
+          stackOrder,
           conditionColor: condition?.color || '#000000',
           conditionName: condition?.name || 'Unknown',
           ...(measurementData.type === 'linear' && condition?.lineThickness != null && {
@@ -158,6 +234,46 @@ export const useMeasurementStore = create<MeasurementState>()(
         get().updateMarkupsByPage();
       }
     },
+
+    reorderTakeoffMeasurementStack: async (measurementId, direction) => {
+      const { takeoffMeasurements } = get();
+      const m = takeoffMeasurements.find((x) => x.id === measurementId);
+      if (!m) return;
+      const page = takeoffMeasurements.filter(
+        (x) =>
+          x.projectId === m.projectId &&
+          x.sheetId === m.sheetId &&
+          samePdfPageKey(x.pdfPage, m.pdfPage)
+      );
+      const sorted = [...page].sort(compareMeasurementsByStackOrder);
+      const i = sorted.findIndex((x) => x.id === measurementId);
+      if (i < 0) return;
+      const j = direction === 'forward' ? i + 1 : i - 1;
+      if (j < 0 || j >= sorted.length) return;
+      const next = [...sorted];
+      [next[i], next[j]] = [next[j], next[i]];
+      const stackUpdates = next.map((meas, idx) => ({ id: meas.id, stackOrder: idx }));
+      await persistStackOrderUpdates(stackUpdates, 'REORDER_STACK');
+    },
+
+    sendTakeoffMeasurementToBack: async (measurementId) => {
+      const { takeoffMeasurements } = get();
+      const m = takeoffMeasurements.find((x) => x.id === measurementId);
+      if (!m) return;
+      const page = takeoffMeasurements.filter(
+        (x) =>
+          x.projectId === m.projectId &&
+          x.sheetId === m.sheetId &&
+          samePdfPageKey(x.pdfPage, m.pdfPage)
+      );
+      const sorted = [...page].sort(compareMeasurementsByStackOrder);
+      const i = sorted.findIndex((x) => x.id === measurementId);
+      if (i < 0 || i === 0) return;
+      const selected = sorted[i];
+      const next = [selected, ...sorted.filter((x) => x.id !== measurementId)];
+      const stackUpdates = next.map((meas, idx) => ({ id: meas.id, stackOrder: idx }));
+      await persistStackOrderUpdates(stackUpdates, 'SEND_TO_BACK');
+    },
     
     deleteTakeoffMeasurement: async (id) => {
       try {
@@ -217,13 +333,21 @@ export const useMeasurementStore = create<MeasurementState>()(
       const markupsByPage: Record<string, TakeoffMeasurement[]> = {};
       
       takeoffMeasurements.forEach(measurement => {
-        const pageKey = get().getPageKey(measurement.projectId, measurement.sheetId, measurement.pdfPage);
+        const pageKey = get().getPageKey(
+          measurement.projectId,
+          measurement.sheetId,
+          Number(measurement.pdfPage) || 1
+        );
         if (!markupsByPage[pageKey]) {
           markupsByPage[pageKey] = [];
         }
         markupsByPage[pageKey].push(measurement);
       });
-      
+
+      for (const key of Object.keys(markupsByPage)) {
+        markupsByPage[key].sort(compareMeasurementsByStackOrder);
+      }
+
       set({ markupsByPage });
     },
 
@@ -383,11 +507,13 @@ export const useMeasurementStore = create<MeasurementState>()(
     
     getPageTakeoffMeasurements: (projectId, sheetId, pageNumber) => {
       const { takeoffMeasurements } = get();
-      return takeoffMeasurements.filter(m => 
-        m.projectId === projectId && 
-        m.sheetId === sheetId && 
-        m.pdfPage === pageNumber
-      );
+      return takeoffMeasurements
+        .filter(m =>
+          m.projectId === projectId &&
+          m.sheetId === sheetId &&
+          samePdfPageKey(m.pdfPage, pageNumber)
+        )
+        .sort(compareMeasurementsByStackOrder);
     },
     
     getConditionTakeoffMeasurements: (projectId, conditionId) => {
@@ -564,19 +690,31 @@ export const useMeasurementStore = create<MeasurementState>()(
         }
         
         const projectMeasurements = measurementsResponse.measurements || [];
-        
-        set(state => {
-          const otherProjectMeasurements = state.takeoffMeasurements.filter(m => m.projectId !== projectId);
-          const allMeasurements = [...otherProjectMeasurements, ...projectMeasurements];
+
+        set((state) => {
+          const otherProjectMeasurements = state.takeoffMeasurements.filter((m) => m.projectId !== projectId);
+          const byId = new Map(state.takeoffMeasurements.map((m) => [m.id, m]));
+
+          // Prefer store stackOrder when we already have this row: in-flight GETs often return
+          // stack_order from before the latest batch/PUT completed, which overwrote optimistic order.
+          const mergedProject = projectMeasurements.map((m: TakeoffMeasurement) => {
+            const existing = byId.get(m.id);
+            if (existing) {
+              return { ...existing, ...m, stackOrder: existing.stackOrder ?? m.stackOrder ?? 0 };
+            }
+            return m;
+          });
+
+          const allMeasurements = [...otherProjectMeasurements, ...mergedProject];
           console.log(`💾 LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Loaded ${projectMeasurements.length} measurements from Supabase for project ${projectId}`, {
             projectMeasurementsCount: projectMeasurements.length,
             totalMeasurementsInStore: allMeasurements.length,
-            source: 'Supabase'
+            source: 'Supabase',
           });
-          return { 
+          return {
             takeoffMeasurements: allMeasurements,
             loadingMeasurements: false,
-            loadingMeasurementsProjectId: null
+            loadingMeasurementsProjectId: null,
           };
         });
         
@@ -586,21 +724,11 @@ export const useMeasurementStore = create<MeasurementState>()(
       } catch (error) {
         console.error(`❌ LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Failed to load measurements for project ${projectId} from Supabase:`, error);
         
-        const currentProjectStore = useProjectStore.getState();
-        if (currentProjectStore.currentProjectId === projectId) {
-          set(state => ({
-            takeoffMeasurements: state.takeoffMeasurements.filter(m => m.projectId !== projectId),
-            markupsByPage: {},
-            loadingMeasurements: false,
-            loadingMeasurementsProjectId: null
-          }));
-          get().updateMarkupsByPage();
-        } else {
-          set({ 
-            loadingMeasurements: false,
-            loadingMeasurementsProjectId: null
-          });
-        }
+        // Keep existing measurements on failure (network/CORS/etc.); clearing looked like "all markups vanished".
+        set({
+          loadingMeasurements: false,
+          loadingMeasurementsProjectId: null,
+        });
       }
     },
 
@@ -624,23 +752,34 @@ export const useMeasurementStore = create<MeasurementState>()(
       
       try {
         const { takeoffMeasurementService } = await import('../../services/apiService');
-        
+
         const response = await takeoffMeasurementService.getPageTakeoffMeasurements(sheetId, pageNumber);
         const pageMeasurements = response.measurements || [];
-        
-        set(state => {
+
+        set((state) => {
           const existingIds = new Set(state.takeoffMeasurements.map((m: TakeoffMeasurement) => m.id));
+          // Merge server rows into existing measurements so fields like stackOrder stay in sync
+          // when the same page is loaded again or after reorder elsewhere.
+          const merged = state.takeoffMeasurements.map((m) => {
+            const fresh = pageMeasurements.find((p: TakeoffMeasurement) => p.id === m.id);
+            if (!fresh) return m;
+            return {
+              ...m,
+              ...fresh,
+              stackOrder: m.stackOrder ?? fresh.stackOrder ?? 0,
+            };
+          });
           const newMeasurements = pageMeasurements.filter((m: TakeoffMeasurement) => !existingIds.has(m.id));
-          
+
           const updatedLoadedPages = new Set(state.loadedPages);
           updatedLoadedPages.add(pageKey);
           const updatedLoadingPages = new Set(state.loadingPages);
           updatedLoadingPages.delete(pageKey);
-          
+
           return {
-            takeoffMeasurements: [...state.takeoffMeasurements, ...newMeasurements],
+            takeoffMeasurements: [...merged, ...newMeasurements],
             loadedPages: updatedLoadedPages,
-            loadingPages: updatedLoadingPages
+            loadingPages: updatedLoadingPages,
           };
         });
         
@@ -655,6 +794,6 @@ export const useMeasurementStore = create<MeasurementState>()(
           return { loadingPages: updatedLoadingPages };
         });
       }
-    }
-  })
-);
+    },
+  };
+});

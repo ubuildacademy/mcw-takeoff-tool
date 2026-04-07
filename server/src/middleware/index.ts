@@ -23,6 +23,7 @@ export {
 // Validation middleware
 export {
   isValidUUID,
+  isValidUUIDAnyVersion,
   isValidEmail,
   sanitizeString,
   validateUUIDParam,

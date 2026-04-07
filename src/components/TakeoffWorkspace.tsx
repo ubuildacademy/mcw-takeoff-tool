@@ -20,9 +20,8 @@ import * as pdfjsLib from 'pdfjs-dist';
 
 // Configure PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
-import { Button } from "./ui/button";
-import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { fileService } from '../services/apiService';
+import { SidebarEdgeToggle } from './takeoff-workspace/SidebarEdgeToggle';
 import { TakeoffWorkspaceHeader } from './takeoff-workspace/TakeoffWorkspaceHeader';
 import { TakeoffWorkspaceStatusBar } from './takeoff-workspace/TakeoffWorkspaceStatusBar';
 import { TakeoffWorkspaceRightSidebar } from './takeoff-workspace/TakeoffWorkspaceRightSidebar';
@@ -246,6 +245,23 @@ export function TakeoffWorkspace() {
     setHyperlinkMode(true);
   }, []);
 
+  const titleblock = useTakeoffWorkspaceTitleblock({
+    projectId: projectId ?? undefined,
+    documents,
+    projectFiles,
+    loadProjectDocuments,
+    setDocuments,
+    handlePageSelect: tabsResult.handlePageSelect,
+    isDev,
+  });
+
+  /** Invoked by PDFViewer when mounted: Space uses this to enter draw mode from plan-only selection. */
+  const enterConditionDrawModeFromPlanRef = useRef<(() => void) | null>(null);
+
+  const handleRegisterEnterConditionDrawMode = useCallback((handler: (() => void) | null) => {
+    enterConditionDrawModeFromPlanRef.current = handler;
+  }, []);
+
   /** Condition id last cleared via Space — next Space re-selects it (toggle). */
   const lastSpaceDeselectedConditionIdRef = useRef<string | null>(null);
 
@@ -263,6 +279,23 @@ export function TakeoffWorkspace() {
 
         const currentlySelected = getSelectedCondition();
         if (currentlySelected) {
+          // Condition highlighted from the plan (selection-only) — Space enters draw mode for that condition instead of clearing it.
+          const canEnterDrawFromPlanSelection =
+            !isMeasuring &&
+            !isCalibrating &&
+            !cutoutMode &&
+            !hyperlinkMode &&
+            !annotationTool &&
+            !titleblock.titleblockSelectionMode &&
+            !visualSearch.visualSearchMode &&
+            currentlySelected.type !== 'auto-count';
+
+          if (canEnterDrawFromPlanSelection) {
+            event.preventDefault();
+            enterConditionDrawModeFromPlanRef.current?.();
+            return;
+          }
+
           event.preventDefault();
           lastSpaceDeselectedConditionIdRef.current = currentlySelected.id;
           handleConditionSelect(null);
@@ -307,23 +340,26 @@ export function TakeoffWorkspace() {
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [getSelectedCondition, handleConditionSelect, handleAddHyperlink, undo, redo]);
+  }, [
+    getSelectedCondition,
+    handleConditionSelect,
+    handleAddHyperlink,
+    undo,
+    redo,
+    isMeasuring,
+    isCalibrating,
+    cutoutMode,
+    hyperlinkMode,
+    annotationTool,
+    titleblock.titleblockSelectionMode,
+    visualSearch.visualSearchMode,
+  ]);
 
   const rotatePage = (direction: 'clockwise' | 'counterclockwise') => {
     const rotationStep = direction === 'clockwise' ? 90 : -90;
     const newRotation = (rotation + rotationStep) % 360;
     tabsResult.handleRotationChange(newRotation);
   };
-
-  const titleblock = useTakeoffWorkspaceTitleblock({
-    projectId: projectId ?? undefined,
-    documents,
-    projectFiles,
-    loadProjectDocuments,
-    setDocuments,
-    handlePageSelect: tabsResult.handlePageSelect,
-    isDev,
-  });
 
   const ocr = useTakeoffWorkspaceOCR({
     projectId: projectId ?? undefined,
@@ -724,7 +760,7 @@ export function TakeoffWorkspace() {
         {/* Left Sidebar Toggle */}
         <div className="flex">
           {leftSidebarOpen && (
-                        <TakeoffSidebar
+            <TakeoffSidebar
               projectId={storeCurrentProject?.id ?? projectId ?? ''}
               onConditionSelect={handleConditionSelect}
               onToolSelect={handleToolSelect}
@@ -740,17 +776,11 @@ export function TakeoffWorkspace() {
               onOpenCVTakeoff={() => setShowCVTakeoffAgent(true)}
             />
           )}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-full w-8 rounded-none border-r"
-            onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
-          >
-            {leftSidebarOpen ? 
-              <PanelLeftClose className="w-4 h-4" /> : 
-              <PanelLeftOpen className="w-4 h-4" />
-            }
-          </Button>
+          <SidebarEdgeToggle
+            side="left"
+            open={leftSidebarOpen}
+            onOpenChange={setLeftSidebarOpen}
+          />
         </div>
 
         {/* PDF Viewer - Fixed height container */}
@@ -813,6 +843,7 @@ export function TakeoffWorkspace() {
               onHyperlinkModeChange={setHyperlinkMode}
               onHyperlinkClick={(sheetId, pageNumber) => tabsResult.handlePageOpenInNewTab(sheetId, pageNumber)}
               onHyperlinkContextMenu={handleHyperlinkContextMenu}
+              onRegisterEnterConditionDrawMode={handleRegisterEnterConditionDrawMode}
             />
           ) : (
             <div className="flex items-center justify-center flex-1 bg-muted/30">

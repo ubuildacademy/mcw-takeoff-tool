@@ -1,59 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useLayoutEffect } from 'react';
 import { useMeasurementStore } from '../../store/slices/measurementSlice';
 import { useAnnotationStore } from '../../store/slices/annotationSlice';
 import type { Annotation } from '../../types';
 import type { Measurement } from '../PDFViewer.types';
-
-/** Safely convert API timestamp to ISO string; avoids RangeError for invalid dates */
-function safeTimestampToISO(ts: string | number | undefined | null): string {
-  if (ts == null || ts === '') return new Date().toISOString();
-  const d = new Date(ts);
-  return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
-}
-
-function apiMeasurementToDisplay(m: {
-  id: string;
-  projectId: string;
-  sheetId: string;
-  conditionId: string;
-  type: 'linear' | 'area' | 'volume' | 'count';
-  points: Array<{ x: number; y: number }>;
-  calculatedValue: number;
-  unit: string;
-  timestamp: string | number | undefined | null;
-  pdfPage: number;
-  pdfCoordinates: Array<{ x: number; y: number }>;
-  conditionColor: string;
-  conditionName: string;
-  perimeterValue?: number | null;
-  areaValue?: number | null;
-  cutouts?: unknown;
-  netCalculatedValue?: number | null;
-}): Measurement | null {
-  try {
-    return {
-      id: m.id,
-      projectId: m.projectId,
-      sheetId: m.sheetId,
-      conditionId: m.conditionId,
-      type: m.type,
-      points: m.points,
-      calculatedValue: m.calculatedValue,
-      unit: m.unit,
-      timestamp: safeTimestampToISO(m.timestamp),
-      pdfPage: m.pdfPage,
-      pdfCoordinates: m.pdfCoordinates,
-      conditionColor: m.conditionColor,
-      conditionName: m.conditionName,
-      perimeterValue: m.perimeterValue ?? undefined,
-      areaValue: m.areaValue ?? undefined,
-      cutouts: m.cutouts as Measurement['cutouts'],
-      netCalculatedValue: m.netCalculatedValue ?? undefined,
-    };
-  } catch {
-    return null;
-  }
-}
+import { takeoffMeasurementToPdfViewerMeasurement } from '../../utils/takeoffMeasurementDisplay';
 
 export interface UsePDFViewerDataOptions {
   currentProjectId: string | null | undefined;
@@ -116,11 +66,13 @@ export function usePDFViewerData({
         await loadPageTakeoffMeasurements(currentProjectId, fileId, currentPage);
         if (isCancelled) return;
 
-        const pageMeasurements = getPageTakeoffMeasurements(currentProjectId, fileId, currentPage);
+        const pageMeasurements = useMeasurementStore
+          .getState()
+          .getPageTakeoffMeasurements(currentProjectId, fileId, currentPage);
         if (isCancelled) return;
 
         const displayMeasurements = pageMeasurements
-          .map((apiMeasurement) => apiMeasurementToDisplay(apiMeasurement))
+          .map((apiMeasurement) => takeoffMeasurementToPdfViewerMeasurement(apiMeasurement))
           .filter((m): m is Measurement => m != null);
 
         if (!isCancelled) {
@@ -142,10 +94,10 @@ export function usePDFViewerData({
       isCancelled = true;
       setMeasurementsLoading(false);
     };
-  }, [currentProjectId, fileId, currentPage, loadPageTakeoffMeasurements, getPageTakeoffMeasurements]);
+  }, [currentProjectId, fileId, currentPage, loadPageTakeoffMeasurements]);
 
-  // REACTIVE UPDATE: Update localTakeoffMeasurements when store changes
-  useEffect(() => {
+  // REACTIVE UPDATE: mirror store → local before paint so layer/order changes feel instant (useEffect was one frame late).
+  useLayoutEffect(() => {
     if (!currentProjectId || !fileId || !currentPage) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: clear when deps invalid
       setLocalTakeoffMeasurements([]);
@@ -154,11 +106,12 @@ export function usePDFViewerData({
 
     const pageMeasurements = getPageTakeoffMeasurements(currentProjectId, fileId, currentPage);
     const displayMeasurements = pageMeasurements
-      .map((apiMeasurement) => apiMeasurementToDisplay(apiMeasurement))
+      .map((apiMeasurement) => takeoffMeasurementToPdfViewerMeasurement(apiMeasurement))
       .filter((m): m is Measurement => m != null);
 
     // Always mirror the store for this page. Do not skip updates when ids are unchanged —
     // coordinates (e.g. after move undo/redo) must refresh local state for the canvas.
+    // Order matches getPageTakeoffMeasurements (sorted by stackOrder); PDFViewer draws in this order.
     setLocalTakeoffMeasurements(displayMeasurements);
   }, [allTakeoffMeasurements, currentProjectId, fileId, currentPage, getPageTakeoffMeasurements]);
 

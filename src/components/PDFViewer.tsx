@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFPageProxy, PageViewport } from 'pdfjs-dist';
 import { useProjectStore } from '../store/slices/projectSlice';
@@ -32,6 +32,7 @@ import { PDFViewerCanvasOverlay } from './pdf-viewer/PDFViewerCanvasOverlay';
 import { PDFViewerMagnifier } from './pdf-viewer/PDFViewerMagnifier';
 import { PDFViewerDialogs } from './pdf-viewer/PDFViewerDialogs';
 import { PDFViewerStatusView } from './pdf-viewer/PDFViewerStatusView';
+import { MeasurementContextMenu } from './MeasurementContextMenu';
 import { formatFeetAndInches } from '../lib/utils';
 import { shiftTakeoffMeasurementGeometry } from '../utils/measurementGeometry';
 import {
@@ -40,17 +41,15 @@ import {
   pdfPointsToMultiPolygon,
 } from '../utils/cutoutGeometry';
 import { toast } from 'sonner';
+import { takeoffMeasurementToPdfViewerMeasurement } from '../utils/takeoffMeasurementDisplay';
+import {
+  canvasMeasurementSelectionMatchesCondition,
+  findTakeoffMeasurementOnPage,
+} from '../utils/takeoffMeasurementLookup';
 import { setRestoreScrollPosition, setGetCurrentScrollPosition, setTriggerCalibration, setTriggerFitToWindow } from '../lib/windowBridge';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 pdfjsLib.GlobalWorkerOptions.workerPort = null;
-
-/** Safely convert API timestamp to ISO string; avoids RangeError for invalid dates */
-function safeTimestampToISO(ts: string | number | undefined | null): string {
-  if (ts == null || ts === '') return new Date().toISOString();
-  const d = new Date(ts);
-  return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
-}
 
 /** Normalized offset for pasted markups (~2% of page) so pasted markup is visible next to original */
 const _PASTE_OFFSET = 0.02;
@@ -106,6 +105,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   onHyperlinkModeChange,
   onHyperlinkClick,
   onHyperlinkContextMenu,
+  onRegisterEnterConditionDrawMode,
 }) => {
   const {
     pdfDocument,
@@ -414,6 +414,56 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setLocalAnnotations,
   });
 
+  const [measurementContextMenu, setMeasurementContextMenu] = useState<{
+    measurementId: string;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  useEffect(() => {
+    setMeasurementContextMenu(null);
+  }, [currentPage, file.id]);
+
+  const handleMeasurementSelectAllSimilar = useCallback(() => {
+    if (!measurementContextMenu) return;
+    const clicked = localTakeoffMeasurements.find((m) => m.id === measurementContextMenu.measurementId);
+    if (!clicked) {
+      setMeasurementContextMenu(null);
+      return;
+    }
+    const ids = localTakeoffMeasurements
+      .filter((m) => m.conditionId === clicked.conditionId)
+      .map((m) => m.id);
+    setSelectedMarkupIds(ids);
+    setMeasurementContextMenu(null);
+  }, [measurementContextMenu, localTakeoffMeasurements, setSelectedMarkupIds]);
+
+  const handleSvgContextMenu = useCallback(
+    (e: React.MouseEvent<SVGSVGElement>) => {
+      const hyperlinkTarget = (e.target as Element)?.closest?.('[data-hyperlink-id]');
+      if (hyperlinkTarget && onHyperlinkContextMenu) {
+        const id = hyperlinkTarget.getAttribute('data-hyperlink-id');
+        if (id) {
+          e.preventDefault();
+          setMeasurementContextMenu(null);
+          onHyperlinkContextMenu(id, e.clientX, e.clientY);
+        }
+        return;
+      }
+      if (isSelectionMode) {
+        const measurementTarget = (e.target as Element)?.closest?.('[data-measurement-id]');
+        if (measurementTarget) {
+          const measurementId = measurementTarget.getAttribute('data-measurement-id');
+          if (measurementId) {
+            e.preventDefault();
+            setMeasurementContextMenu({ measurementId, x: e.clientX, y: e.clientY });
+          }
+        }
+      }
+    },
+    [isSelectionMode, onHyperlinkContextMenu]
+  );
+
   // Keep ref in sync with state (runs synchronously during render)
   isSelectionModeRef.current = isSelectionMode;
 
@@ -445,12 +495,53 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   }, [externalIsPageCalibrated, externalCalibrationRotation, viewState.rotation]);
 
   const selectedConditionId = useConditionStore((s) => s.selectedConditionId);
+  const setSelectedCondition = useConditionStore((s) => s.setSelectedCondition);
   const getSelectedCondition = useConditionStore((s) => s.getSelectedCondition);
   const conditions = useConditionStore((s) => s.conditions);
   const addAnnotation = useAnnotationStore((s) => s.addAnnotation);
   const updateAnnotation = useAnnotationStore((s) => s.updateAnnotation);
   const getPageTakeoffMeasurements = useMeasurementStore((s) => s.getPageTakeoffMeasurements);
   const updateTakeoffMeasurement = useMeasurementStore((s) => s.updateTakeoffMeasurement);
+  const reorderTakeoffMeasurementStack = useMeasurementStore((s) => s.reorderTakeoffMeasurementStack);
+  const sendTakeoffMeasurementToBack = useMeasurementStore((s) => s.sendTakeoffMeasurementToBack);
+
+  const measurementContextMenuStack = useMemo(() => {
+    if (!measurementContextMenu || !effectiveProjectId || !file.id) {
+      return { canBringForward: false, canSendBackward: false, canSendToBack: false };
+    }
+    const page = getPageTakeoffMeasurements(effectiveProjectId, file.id, currentPage);
+    const idx = page.findIndex((m) => m.id === measurementContextMenu.measurementId);
+    if (idx < 0) {
+      return { canBringForward: false, canSendBackward: false, canSendToBack: false };
+    }
+    return {
+      canBringForward: idx < page.length - 1,
+      canSendBackward: idx > 0,
+      canSendToBack: idx > 0,
+    };
+  }, [measurementContextMenu, effectiveProjectId, file.id, currentPage, getPageTakeoffMeasurements]);
+
+  const handleMeasurementBringForward = useCallback(async () => {
+    if (!measurementContextMenu) return;
+    const id = measurementContextMenu.measurementId;
+    setMeasurementContextMenu(null);
+    // Must await: void + refresh races the POST and layer order looks "not persistent".
+    await reorderTakeoffMeasurementStack(id, 'forward');
+  }, [measurementContextMenu, reorderTakeoffMeasurementStack]);
+
+  const handleMeasurementSendBackward = useCallback(async () => {
+    if (!measurementContextMenu) return;
+    const id = measurementContextMenu.measurementId;
+    setMeasurementContextMenu(null);
+    await reorderTakeoffMeasurementStack(id, 'backward');
+  }, [measurementContextMenu, reorderTakeoffMeasurementStack]);
+
+  const handleMeasurementSendToBack = useCallback(async () => {
+    if (!measurementContextMenu) return;
+    const id = measurementContextMenu.measurementId;
+    setMeasurementContextMenu(null);
+    await sendTakeoffMeasurementToBack(id);
+  }, [measurementContextMenu, sendTakeoffMeasurementToBack]);
 
   /** Split selection into measurement vs annotation IDs (computed once, reused for copy/paste/move/delete) */
   const { selectedMeasurementIds, selectedAnnotationIds } = useMemo(() => {
@@ -463,6 +554,38 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     return { selectedMeasurementIds: measurementIds, selectedAnnotationIds: annotationIds };
   }, [selectedMarkupIds, localAnnotations]);
+
+  // When the user selects a measurement on the canvas, sync the sidebar to that measurement's condition.
+  // Handlers also call syncStoreConditionFromMeasurementId synchronously; this effect covers any other paths.
+  useEffect(() => {
+    if (titleblockSelectionMode) return;
+    if (selectedMeasurementIds.length !== 1 || selectedAnnotationIds.length > 0) return;
+    const mid = selectedMeasurementIds[0];
+    const m = findTakeoffMeasurementOnPage(
+      mid,
+      localTakeoffMeasurements,
+      effectiveProjectId || '',
+      file.id || '',
+      currentPage,
+      getPageTakeoffMeasurements
+    );
+    if (!m?.conditionId) return;
+    if (selectedConditionId === m.conditionId) return;
+    setSelectedCondition(m.conditionId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Intentionally sync when markup selection changes; titleblock guard
+  }, [
+    titleblockSelectionMode,
+    selectedMeasurementIds,
+    selectedAnnotationIds,
+    selectedMarkupIds,
+    localTakeoffMeasurements,
+    effectiveProjectId,
+    file.id,
+    currentPage,
+    getPageTakeoffMeasurements,
+    selectedConditionId,
+    setSelectedCondition,
+  ]);
 
   const {
     getCssCoordsFromEvent: _getCssCoordsFromEvent,
@@ -868,34 +991,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // If local measurements are empty but store has measurements, convert store measurements to display format
     if (pageMeasurements.length === 0 && storeMeasurements.length > 0) {
-      pageMeasurements = storeMeasurements.map(apiMeasurement => {
-        try {
-          const m: Measurement = {
-            id: apiMeasurement.id,
-            projectId: apiMeasurement.projectId,
-            sheetId: apiMeasurement.sheetId,
-            conditionId: apiMeasurement.conditionId,
-            type: apiMeasurement.type,
-            points: apiMeasurement.points,
-            calculatedValue: apiMeasurement.calculatedValue,
-            unit: apiMeasurement.unit,
-            timestamp: safeTimestampToISO(apiMeasurement.timestamp),
-            pdfPage: apiMeasurement.pdfPage,
-            pdfCoordinates: apiMeasurement.pdfCoordinates,
-            conditionColor: apiMeasurement.conditionColor,
-            conditionName: apiMeasurement.conditionName,
-            perimeterValue: apiMeasurement.perimeterValue,
-            areaValue: apiMeasurement.areaValue,
-            cutouts: apiMeasurement.cutouts,
-            netCalculatedValue: apiMeasurement.netCalculatedValue,
-          };
-          return m;
-        } catch (error) {
-          console.error('Error processing measurement:', error, apiMeasurement);
-          return null;
-        }
-      }).filter((m): m is Measurement => m != null);
+      pageMeasurements = storeMeasurements
+        .map((apiMeasurement) => takeoffMeasurementToPdfViewerMeasurement(apiMeasurement))
+        .filter((m): m is Measurement => m != null);
     }
+
+    // Paint order matches store: usePDFViewerData mirrors getPageTakeoffMeasurements(), which sorts by stackOrder.
     
     const hasLocalMeasurements = pageMeasurements.length > 0;
     const hasAnnotations = localAnnotations.filter(a => a.pageNumber === pageNum).length > 0;
@@ -2451,6 +2552,25 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (selectedConditionId) {
       const condition = getSelectedCondition();
       if (condition) {
+        // Selecting measurement(s) on the canvas syncs selectedConditionId to that condition.
+        // Keep markup selection mode for any single- or multi-select (e.g. "Select all similar") —
+        // do not clear markups or enter "draw new measurements" mode (that path is for picking a
+        // condition in the sidebar).
+        if (
+          canvasMeasurementSelectionMatchesCondition(
+            selectedMeasurementIds,
+            selectedAnnotationIds,
+            selectedMarkupIds,
+            selectedConditionId,
+            localTakeoffMeasurements,
+            effectiveProjectId || '',
+            file.id || '',
+            currentPage,
+            getPageTakeoffMeasurements
+          )
+        ) {
+          return;
+        }
         // Auto-count conditions use box selection, NOT measurement mode
         // Check this FIRST before enabling measurement mode
         if (condition.type === 'auto-count') {
@@ -2533,7 +2653,33 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       };
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- Setters stable; omit
-  }, [selectedConditionId, getSelectedCondition, titleblockSelectionMode]);
+  }, [
+    selectedConditionId,
+    getSelectedCondition,
+    titleblockSelectionMode,
+    selectedMeasurementIds,
+    selectedAnnotationIds,
+    selectedMarkupIds,
+    localTakeoffMeasurements,
+    effectiveProjectId,
+    file.id,
+    currentPage,
+    getPageTakeoffMeasurements,
+  ]);
+
+  // Space from workspace: leave plan-only markup selection and enable drawing for the already-selected condition.
+  useLayoutEffect(() => {
+    if (!onRegisterEnterConditionDrawMode) return;
+    const handler = () => {
+      if (titleblockSelectionMode) return;
+      const cond = useConditionStore.getState().getSelectedCondition();
+      if (!cond || cond.type === 'auto-count') return;
+      setSelectedMarkupIds([]);
+      setIsDeselecting(false);
+    };
+    onRegisterEnterConditionDrawMode(handler);
+    return () => onRegisterEnterConditionDrawMode(null);
+  }, [onRegisterEnterConditionDrawMode, titleblockSelectionMode, setSelectedMarkupIds, setIsDeselecting]);
 
   const prevAnnotationToolRef = useRef<'text' | 'arrow' | 'rectangle' | 'circle' | null>(null);
 
@@ -2728,21 +2874,27 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             onSvgMouseLeave={() => setMousePosition(null)}
             onSvgClick={handleSvgClick}
             onSvgDoubleClick={handleSvgDoubleClick}
-            onSvgContextMenu={(e) => {
-              const target = (e.target as Element)?.closest?.('[data-hyperlink-id]');
-              if (target && onHyperlinkContextMenu) {
-                const id = target.getAttribute('data-hyperlink-id');
-                if (id) {
-                  e.preventDefault();
-                  onHyperlinkContextMenu(id, e.clientX, e.clientY);
-                }
-              }
-            }}
+            onSvgContextMenu={handleSvgContextMenu}
             isPDFLoading={isPDFLoading}
             textAnnotation={textAnnotationProps}
           />
         </div>
       </div>
+
+      {measurementContextMenu && (
+        <MeasurementContextMenu
+          x={measurementContextMenu.x}
+          y={measurementContextMenu.y}
+          onBringForward={handleMeasurementBringForward}
+          onSendBackward={handleMeasurementSendBackward}
+          onSendToBack={handleMeasurementSendToBack}
+          canBringForward={measurementContextMenuStack.canBringForward}
+          canSendBackward={measurementContextMenuStack.canSendBackward}
+          canSendToBack={measurementContextMenuStack.canSendToBack}
+          onSelectAllSimilar={handleMeasurementSelectAllSimilar}
+          onClose={() => setMeasurementContextMenu(null)}
+        />
+      )}
 
       <PDFViewerMagnifier
         pdfCanvasRef={pdfCanvasRef}

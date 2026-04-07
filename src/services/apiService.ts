@@ -76,7 +76,20 @@ interface ApiMeasurementRow {
   timestamp?: string;
   unit?: string;
   cutouts?: Array<{ id: string; points: Array<{ x: number; y: number }>; pdfCoordinates?: Array<{ x: number; y: number }>; calculatedValue?: number }>;
+  stack_order?: number | null;
+  stackOrder?: number | null;
   [key: string]: unknown;
+}
+
+function normalizeMeasurementPdfPage(raw: ApiMeasurementRow): number {
+  const v = Number(raw.pdf_page ?? raw.pdfPage);
+  return Number.isFinite(v) && v >= 1 ? Math.floor(v) : 1;
+}
+
+function stackOrderFromApiRow(raw: ApiMeasurementRow): number {
+  const n = Number(raw.stack_order ?? raw.stackOrder ?? 0);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.trunc(n));
 }
 
 // Note: In production, we prefer VITE_API_BASE_URL to be set directly in Vercel
@@ -575,7 +588,7 @@ export const takeoffMeasurementService = {
           : (measurement.calculatedValue ?? 0),
         unit: measurement.unit ?? '',
         timestamp: measurement.timestamp ?? new Date().toISOString(),
-        pdfPage: measurement.pdf_page ?? measurement.pdfPage ?? 1,
+        pdfPage: normalizeMeasurementPdfPage(measurement),
         pdfCoordinates: measurement.pdf_coordinates ?? measurement.pdfCoordinates ?? [],
         conditionColor: measurement.condition_color ?? measurement.conditionColor ?? '#000000',
         conditionName: measurement.condition_name ?? measurement.conditionName ?? 'Unknown',
@@ -588,7 +601,8 @@ export const takeoffMeasurementService = {
         ...(measurement.cutouts && { cutouts: measurement.cutouts }),
         ...(measurement.net_calculated_value !== undefined || measurement.netCalculatedValue !== undefined) && {
           netCalculatedValue: measurement.net_calculated_value ?? measurement.netCalculatedValue
-        }
+        },
+        stackOrder: stackOrderFromApiRow(measurement)
       } as TakeoffMeasurement;
       if (import.meta.env.DEV && !transformed.conditionId) {
         console.warn('⚠️ Measurement missing conditionId:', transformed);
@@ -622,7 +636,7 @@ export const takeoffMeasurementService = {
         calculatedValue: measurement.calculated_value ?? measurement.calculatedValue ?? 0,
         unit: measurement.unit ?? '',
         timestamp: measurement.timestamp ?? new Date().toISOString(),
-        pdfPage: measurement.pdf_page ?? measurement.pdfPage ?? 1,
+        pdfPage: normalizeMeasurementPdfPage(measurement),
         pdfCoordinates: measurement.pdf_coordinates ?? measurement.pdfCoordinates ?? [],
         conditionColor: measurement.condition_color ?? measurement.conditionColor ?? '#000000',
         conditionName: measurement.condition_name ?? measurement.conditionName ?? 'Unknown',
@@ -635,7 +649,8 @@ export const takeoffMeasurementService = {
         ...(measurement.cutouts && { cutouts: measurement.cutouts }),
         ...(measurement.net_calculated_value !== undefined || measurement.netCalculatedValue !== undefined) && {
           netCalculatedValue: measurement.net_calculated_value ?? measurement.netCalculatedValue
-        }
+        },
+        stackOrder: stackOrderFromApiRow(measurement)
       } as TakeoffMeasurement;
       if (import.meta.env.DEV && !transformed.conditionId) {
         console.warn('⚠️ Measurement missing conditionId:', transformed);
@@ -660,6 +675,12 @@ export const takeoffMeasurementService = {
 
   async updateTakeoffMeasurement(id: string, updates: Partial<TakeoffMeasurement>) {
     const response = await apiClient.put(`/takeoff-measurements/${id}`, updates);
+    return response.data;
+  },
+
+  /** Single request to persist many stackOrder values (layer / z-order). */
+  async batchUpdateTakeoffMeasurementStackOrder(updates: { id: string; stackOrder: number }[]) {
+    const response = await apiClient.post('/takeoff-measurements/batch/stack-order', { updates });
     return response.data;
   },
 

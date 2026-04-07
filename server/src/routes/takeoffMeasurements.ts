@@ -1,14 +1,22 @@
 import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { storage, StoredTakeoffMeasurement } from '../storage';
-import { supabase, TABLES } from '../supabase';
 import { 
   requireAuth, 
   validateUUIDParam,
-  hasProjectAccess
+  hasProjectAccess,
+  isValidUUIDAnyVersion
 } from '../middleware';
 
 const router = express.Router();
+
+// Never cache measurement lists: stale responses look like "layer order didn't persist" after refresh.
+router.use((req, res, next) => {
+  if (req.method === 'GET') {
+    res.setHeader('Cache-Control', 'private, no-store, must-revalidate');
+  }
+  next();
+});
 
 // Get all takeoff measurements - admin only (returns all data)
 router.get('/', requireAuth, async (req, res) => {
@@ -129,7 +137,8 @@ router.post('/', requireAuth, async (req, res) => {
       conditionColor,
       conditionName,
       perimeterValue,
-      areaValue
+      areaValue,
+      stackOrder
     } = req.body;
 
     // Validation
@@ -169,7 +178,8 @@ router.post('/', requireAuth, async (req, res) => {
       conditionColor: conditionColor || '#000000',
       conditionName: conditionName || 'Unknown',
       perimeterValue,
-      areaValue
+      areaValue,
+      stackOrder: typeof stackOrder === 'number' && Number.isFinite(stackOrder) ? stackOrder : 0
     };
     
     const savedMeasurement = await storage.saveTakeoffMeasurement(newMeasurement);
@@ -189,6 +199,63 @@ router.post('/', requireAuth, async (req, res) => {
       error: 'Failed to create takeoff measurement',
       details: error instanceof Error ? error.message : JSON.stringify(error)
     });
+  }
+});
+
+// Batch update stack_order only (one HTTP round-trip for z-order / layer changes)
+router.post('/batch/stack-order', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const userIsAdmin = req.user?.role === 'admin';
+    const { updates } = req.body as { updates?: unknown };
+
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return res.status(400).json({ error: 'Body must include a non-empty updates array' });
+    }
+
+    const normalized: { id: string; stackOrder: number }[] = [];
+    for (const item of updates) {
+      if (!item || typeof item !== 'object') {
+        return res.status(400).json({ error: 'Each update must be an object with id and stackOrder' });
+      }
+      const row = item as { id?: unknown; stackOrder?: unknown };
+      if (typeof row.id !== 'string' || !isValidUUIDAnyVersion(row.id)) {
+        return res.status(400).json({ error: 'Each update must have a valid id (UUID)' });
+      }
+      if (typeof row.stackOrder !== 'number' || !Number.isFinite(row.stackOrder)) {
+        return res.status(400).json({ error: 'Each update must have a finite numeric stackOrder' });
+      }
+      normalized.push({
+        id: row.id,
+        stackOrder: Math.max(0, Math.trunc(row.stackOrder)),
+      });
+    }
+
+    const ids = [...new Set(normalized.map((u) => u.id))];
+    const rowsById = await storage.getTakeoffMeasurementsByIds(ids);
+    const rowMap = new Map(rowsById.map((m) => [m.id, m]));
+    const seenProjects = new Set<string>();
+    for (const u of normalized) {
+      const existing = rowMap.get(u.id);
+      if (!existing) {
+        return res.status(404).json({ error: `Takeoff measurement not found: ${u.id}` });
+      }
+      const hasAccess = await hasProjectAccess(userId!, existing.projectId, userIsAdmin);
+      if (!hasAccess) {
+        return res.status(404).json({ error: 'Measurement not found or access denied' });
+      }
+      seenProjects.add(existing.projectId);
+    }
+
+    if (seenProjects.size > 1) {
+      return res.status(400).json({ error: 'All measurements in one batch must belong to the same project' });
+    }
+
+    await storage.batchUpdateTakeoffMeasurementStackOrders(normalized);
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('Error batch-updating takeoff measurement stack order:', error);
+    return res.status(500).json({ error: 'Failed to batch update stack order' });
   }
 });
 
@@ -215,8 +282,15 @@ router.put('/:id', requireAuth, validateUUIDParam('id'), async (req, res) => {
     
     // Don't allow changing project ownership
     delete updates.projectId;
-    
-    const updatedMeasurement = { ...existingMeasurement, ...updates };
+
+    // Client or proxies may send snake_case; saveTakeoffMeasurement only reads stackOrder (camelCase).
+    const body = updates as Record<string, unknown>;
+    if ('stack_order' in body && body.stackOrder === undefined && typeof body.stack_order === 'number') {
+      body.stackOrder = body.stack_order;
+    }
+    delete body.stack_order;
+
+    const updatedMeasurement = { ...existingMeasurement, ...body };
     const savedMeasurement = await storage.saveTakeoffMeasurement(updatedMeasurement);
     
     return res.json({ 

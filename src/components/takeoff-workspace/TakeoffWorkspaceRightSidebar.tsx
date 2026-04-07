@@ -1,6 +1,7 @@
 import React, { lazy, Suspense } from 'react';
-import { FileText, Search, MessageSquare, PanelRightClose, PanelRightOpen } from 'lucide-react';
-import { Button } from '../ui/button';
+import { FileText, MessageSquare, Search } from 'lucide-react';
+
+import { SidebarEdgeToggle } from './SidebarEdgeToggle';
 import { SheetSidebar } from '../SheetSidebar';
 import type { TakeoffWorkspaceRightSidebarProps } from './TakeoffWorkspaceHeader.types';
 
@@ -37,18 +38,11 @@ export function TakeoffWorkspaceRightSidebar({
 }: TakeoffWorkspaceRightSidebarProps) {
   return (
     <div className="flex">
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-full w-8 rounded-none border-l"
-        onClick={() => onRightSidebarOpenChange(!rightSidebarOpen)}
-      >
-        {rightSidebarOpen ? (
-          <PanelRightClose className="w-4 h-4" />
-        ) : (
-          <PanelRightOpen className="w-4 h-4" />
-        )}
-      </Button>
+      <SidebarEdgeToggle
+        side="right"
+        open={rightSidebarOpen}
+        onOpenChange={onRightSidebarOpenChange}
+      />
       {rightSidebarOpen && (
         <div className="w-96 bg-white border-l flex flex-col h-full">
           <div className="flex border-b">

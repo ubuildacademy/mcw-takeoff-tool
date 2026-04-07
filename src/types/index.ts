@@ -73,6 +73,8 @@ export interface TakeoffMeasurement {
     calculatedValue: number;
   }>;
   netCalculatedValue?: number; // calculatedValue - sum of all cutouts
+  /** Z-order on this PDF page: lower = behind, higher = in front (SVG paint order). */
+  stackOrder?: number;
 }
 
 export interface Sheet {

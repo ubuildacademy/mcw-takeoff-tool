@@ -15,6 +15,11 @@ import {
   MIN_DRAG_RECT_PX,
 } from '../../utils/measurementGeometry';
 import { isEditableKeyboardTarget } from '../../utils/keyboardUtils';
+import { getMarkupIdsFromElementsFromPoint } from '../../utils/markupHitTest';
+import {
+  clearCanvasConditionSelection,
+  syncStoreConditionFromMeasurementId,
+} from '../../utils/takeoffMeasurementLookup';
 
 const PASTE_OFFSET = 0.02;
 
@@ -61,26 +66,6 @@ const ANNOTATION_SHORTCUTS: Record<string, 'rectangle' | 'text' | 'circle' | 'ar
   c: 'circle',
   a: 'arrow',
 };
-
-/** Returns markup IDs at point in z-order (top to bottom), for click-to-cycle selection. */
-function getStackedMarkupIdsAtPoint(svg: SVGSVGElement, clientX: number, clientY: number): string[] {
-  const elements = document.elementsFromPoint(clientX, clientY);
-  const seen = new Set<string>();
-  const ids: string[] = [];
-  for (const el of elements) {
-    if (!svg.contains(el)) continue;
-    const elem = el as Element;
-    const marked = elem.closest?.('[data-annotation-id], [data-measurement-id]');
-    if (!marked) continue;
-    const id =
-      marked.getAttribute?.('data-annotation-id') ?? marked.getAttribute?.('data-measurement-id');
-    if (id && !seen.has(id)) {
-      seen.add(id);
-      ids.push(id);
-    }
-  }
-  return ids;
-}
 
 /** Max zoom scale to avoid slow/frozen PDF (canvas size = viewport × devicePixelRatio; ~265%+ becomes very heavy). */
 export const PDF_VIEWER_MAX_SCALE = 2.5;
@@ -389,6 +374,7 @@ export function usePDFViewerInteractions(
   const copyMarkupsByIds = useMeasurementStore((s) => s.copyMarkupsByIds);
   const copiedMarkups = useMeasurementStore((s) => s.copiedMarkups);
   const addTakeoffMeasurement = useMeasurementStore((s) => s.addTakeoffMeasurement);
+  const getPageTakeoffMeasurements = useMeasurementStore((s) => s.getPageTakeoffMeasurements);
   const _getSelectedCondition = useConditionStore((s) => s.getSelectedCondition);
   const selectedConditionId = useConditionStore((s) => s.selectedConditionId);
 
@@ -677,6 +663,18 @@ export function usePDFViewerInteractions(
             return newMeasurement;
           });
         }
+      } else if (
+        event.key === 'Escape' &&
+        !isTyping &&
+        isSelectionMode &&
+        selectedMarkupIds.length > 0 &&
+        !isMeasuring &&
+        !isCalibrating &&
+        !annotationTool
+      ) {
+        event.preventDefault();
+        setSelectedMarkupIds([]);
+        clearCanvasConditionSelection();
       } else if (
         (event.key === 'Delete' || event.key === 'Backspace') &&
         selectedMarkupIds.length > 0 &&
@@ -1681,6 +1679,7 @@ export function usePDFViewerInteractions(
       }
       if (isSelectionMode && selectedMarkupIds.length > 0 && !isMeasuring && !isCalibrating && !annotationTool) {
         setSelectedMarkupIds([]);
+        clearCanvasConditionSelection();
         return;
       }
       if (isCalibrating) {
@@ -2016,33 +2015,57 @@ export function usePDFViewerInteractions(
             }
           }
         }
+        // Label <text> nodes sit on top of shapes but often had no data-measurement-id; target is then
+        // plain text with no ancestor carrying the id. Resolve from hit-test stack instead.
+        if (
+          !measurementId &&
+          !annotationId &&
+          currentIsSelectionMode &&
+          svgOverlayRef.current
+        ) {
+          const { measurementIdsInOrder, annotationIdsInOrder } = getMarkupIdsFromElementsFromPoint(
+            svgOverlayRef.current,
+            e.clientX,
+            e.clientY
+          );
+          if (measurementIdsInOrder.length > 0) {
+            measurementId = measurementIdsInOrder[0];
+          } else if (annotationIdsInOrder.length > 0) {
+            annotationId = annotationIdsInOrder[0];
+          }
+        }
         if ((annotationId || measurementId) && currentIsSelectionMode) {
           e.stopPropagation();
           const meta = e.metaKey || e.ctrlKey;
 
-          // Cycle overlapping markups using elementsFromPoint order: the click target is always
-          // the topmost node, so it cannot tell when the sole selection is a lower stacked markup.
-          if (!meta && selectedMarkupIds.length === 1 && svgOverlayRef.current) {
-            const stackedIds = getStackedMarkupIdsAtPoint(
-              svgOverlayRef.current,
-              e.clientX,
-              e.clientY
-            );
-            const soleSelectedId = selectedMarkupIds[0];
-            const idxInStack = stackedIds.indexOf(soleSelectedId);
-            if (stackedIds.length > 1 && idxInStack >= 0) {
-              const nextIdx = (idxInStack + 1) % stackedIds.length;
-              setSelectedMarkupIds([stackedIds[nextIdx]]);
-              return;
-            }
-          }
-
           const id = annotationId ?? measurementId ?? '';
-          setSelectedMarkupIds((prev) =>
-            meta
-              ? prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-              : prev.includes(id) && prev.length === 1 ? [] : [id]
-          );
+          const prev = selectedMarkupIds;
+          const next = meta
+            ? prev.includes(id)
+              ? prev.filter((x) => x !== id)
+              : [...prev, id]
+            : prev.includes(id) && prev.length === 1
+              ? []
+              : [id];
+          setSelectedMarkupIds(next);
+          if (next.length === 0) {
+            clearCanvasConditionSelection();
+          } else if (
+            !titleblockSelectionMode &&
+            !meta &&
+            measurementId &&
+            !annotationId &&
+            next.length === 1
+          ) {
+            syncStoreConditionFromMeasurementId(
+              measurementId,
+              localTakeoffMeasurements,
+              currentProjectId,
+              file.id,
+              currentPage,
+              getPageTakeoffMeasurements
+            );
+          }
           return;
         }
         e.stopPropagation();
@@ -2060,6 +2083,11 @@ export function usePDFViewerInteractions(
       setSelectedMarkupIds,
       handleClick,
       onHyperlinkClick,
+      localTakeoffMeasurements,
+      currentPage,
+      getPageTakeoffMeasurements,
+      currentProjectId,
+      file,
     ]
   );
 

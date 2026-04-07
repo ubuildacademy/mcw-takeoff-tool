@@ -1,7 +1,7 @@
 /**
  * Renders the list of takeoff conditions (search + condition cards) for the Conditions tab.
  */
-import { useState, type ReactNode } from 'react';
+import { useState, useRef, useLayoutEffect, type ReactNode } from 'react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
@@ -154,6 +154,14 @@ export function TakeoffSidebarConditionList({
   onAddCondition,
 }: TakeoffSidebarConditionListProps) {
   const [collapsedSearchedSymbols, setCollapsedSearchedSymbols] = useState<Set<string>>(new Set());
+  const conditionRowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+
+  useLayoutEffect(() => {
+    if (!selectedConditionId) return;
+    const el = conditionRowRefs.current.get(selectedConditionId);
+    if (!el) return;
+    el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+  }, [selectedConditionId]);
 
   const toggleSearchedSymbol = (conditionId: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -188,6 +196,10 @@ export function TakeoffSidebarConditionList({
           conditions.map((condition) => (
             <div
               key={condition.id}
+              ref={(el) => {
+                if (el) conditionRowRefs.current.set(condition.id, el);
+                else conditionRowRefs.current.delete(condition.id);
+              }}
               className={cn(
                 'p-2 border rounded-lg cursor-pointer transition-colors',
                 selectedConditionId === condition.id && 'border-blue-500 bg-blue-50 shadow-sm',

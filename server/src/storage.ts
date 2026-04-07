@@ -148,6 +148,7 @@ interface TakeoffMeasurementRow {
   area_value?: number;
   cutouts?: unknown;
   net_calculated_value?: number;
+  stack_order?: number;
   created_at?: string;
 }
 interface SheetRow {
@@ -203,6 +204,8 @@ export interface StoredTakeoffMeasurement {
     calculatedValue: number;
   }>;
   netCalculatedValue?: number;
+  /** Z-order on page; lower = behind, higher = in front. */
+  stackOrder?: number;
 }
 
 export interface StoredCalibration {
@@ -743,8 +746,48 @@ class SupabaseStorage {
       perimeterValue: item.perimeter_value,
       areaValue: item.area_value,
       cutouts: item.cutouts as StoredTakeoffMeasurement['cutouts'],
-      netCalculatedValue: item.net_calculated_value
+      netCalculatedValue: item.net_calculated_value,
+      stackOrder: item.stack_order ?? 0
     }));
+  }
+
+  async getTakeoffMeasurementsByIds(ids: string[]): Promise<StoredTakeoffMeasurement[]> {
+    if (ids.length === 0) return [];
+    const unique = [...new Set(ids)];
+    const CHUNK = 100;
+    const mapRow = (item: TakeoffMeasurementRow): StoredTakeoffMeasurement => ({
+      id: item.id,
+      projectId: item.project_id,
+      sheetId: item.sheet_id,
+      conditionId: item.condition_id,
+      type: item.type as StoredTakeoffMeasurement['type'],
+      points: (item.points as StoredTakeoffMeasurement['points']) ?? [],
+      calculatedValue: item.calculated_value,
+      unit: item.unit,
+      timestamp: item.timestamp,
+      pdfPage: item.pdf_page,
+      pdfCoordinates: (item.pdf_coordinates as StoredTakeoffMeasurement['pdfCoordinates']) ?? [],
+      conditionColor: item.condition_color,
+      conditionName: item.condition_name,
+      perimeterValue: item.perimeter_value,
+      areaValue: item.area_value,
+      cutouts: item.cutouts as StoredTakeoffMeasurement['cutouts'],
+      netCalculatedValue: item.net_calculated_value,
+      stackOrder: item.stack_order ?? 0
+    });
+    const out: StoredTakeoffMeasurement[] = [];
+    for (let i = 0; i < unique.length; i += CHUNK) {
+      const chunk = unique.slice(i, i + CHUNK);
+      const { data, error } = await supabase
+        .from(TABLES.TAKEOFF_MEASUREMENTS)
+        .select('*')
+        .in('id', chunk);
+      if (error) {
+        throw new DatabaseError('Failed to fetch takeoff measurements by ids', error, { count: chunk.length });
+      }
+      out.push(...(data || []).map(mapRow));
+    }
+    return out;
   }
 
   async getTakeoffMeasurementsByProject(projectId: string): Promise<StoredTakeoffMeasurement[]> {
@@ -776,7 +819,8 @@ class SupabaseStorage {
       perimeterValue: item.perimeter_value,
       areaValue: item.area_value,
       cutouts: item.cutouts as StoredTakeoffMeasurement['cutouts'],
-      netCalculatedValue: item.net_calculated_value
+      netCalculatedValue: item.net_calculated_value,
+      stackOrder: item.stack_order ?? 0
     }));
   }
 
@@ -809,7 +853,8 @@ class SupabaseStorage {
       perimeterValue: item.perimeter_value,
       areaValue: item.area_value,
       cutouts: item.cutouts as StoredTakeoffMeasurement['cutouts'],
-      netCalculatedValue: item.net_calculated_value
+      netCalculatedValue: item.net_calculated_value,
+      stackOrder: item.stack_order ?? 0
     }));
   }
 
@@ -843,7 +888,8 @@ class SupabaseStorage {
       perimeterValue: item.perimeter_value,
       areaValue: item.area_value,
       cutouts: item.cutouts as StoredTakeoffMeasurement['cutouts'],
-      netCalculatedValue: item.net_calculated_value
+      netCalculatedValue: item.net_calculated_value,
+      stackOrder: item.stack_order ?? 0
     }));
   }
 
@@ -866,7 +912,8 @@ class SupabaseStorage {
       perimeter_value: measurement.perimeterValue,
       area_value: measurement.areaValue,
       cutouts: measurement.cutouts,
-      net_calculated_value: measurement.netCalculatedValue
+      net_calculated_value: measurement.netCalculatedValue,
+      stack_order: measurement.stackOrder ?? 0
     };
     
     
@@ -906,7 +953,8 @@ class SupabaseStorage {
       perimeterValue: data.perimeter_value,
       areaValue: data.area_value,
       cutouts: data.cutouts,
-      netCalculatedValue: data.net_calculated_value
+      netCalculatedValue: data.net_calculated_value,
+      stackOrder: data.stack_order ?? 0
     };
   }
 
@@ -936,7 +984,8 @@ class SupabaseStorage {
       perimeter_value: measurement.perimeterValue,
       area_value: measurement.areaValue,
       cutouts: measurement.cutouts,
-      net_calculated_value: measurement.netCalculatedValue
+      net_calculated_value: measurement.netCalculatedValue,
+      stack_order: measurement.stackOrder ?? 0
     }));
 
     // Batch insert in chunks of 100 to avoid overwhelming the database
@@ -981,7 +1030,8 @@ class SupabaseStorage {
         perimeterValue: item.perimeter_value,
         areaValue: item.area_value,
         cutouts: item.cutouts as StoredTakeoffMeasurement['cutouts'],
-        netCalculatedValue: item.net_calculated_value
+        netCalculatedValue: item.net_calculated_value,
+        stackOrder: item.stack_order ?? 0
       }));
       
       results.push(...mappedResults);
@@ -1004,6 +1054,35 @@ class SupabaseStorage {
     if (error) {
       console.error('Error deleting takeoff measurement:', error);
       throw error;
+    }
+  }
+
+  /** Update stack_order for many rows in one server request (client calls once; DB runs parallel updates). */
+  async batchUpdateTakeoffMeasurementStackOrders(
+    updates: { id: string; stackOrder: number }[]
+  ): Promise<void> {
+    if (updates.length === 0) return;
+    const results = await Promise.all(
+      updates.map(async ({ id, stackOrder }) => {
+        const { data, error } = await supabase
+          .from(TABLES.TAKEOFF_MEASUREMENTS)
+          .update({ stack_order: stackOrder })
+          .eq('id', id)
+          .select('id');
+        return { id, data, error };
+      })
+    );
+    for (const { id, data, error } of results) {
+      if (error) {
+        throw new DatabaseError('Failed to batch update takeoff measurement stack order', error);
+      }
+      if (!data?.length) {
+        throw new DatabaseError(
+          `stack_order update affected 0 rows for id=${id} (check RLS / stack_order column)`,
+          undefined,
+          { measurementId: id }
+        );
+      }
     }
   }
 
