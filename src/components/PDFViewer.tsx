@@ -572,7 +572,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (!m?.conditionId) return;
     if (selectedConditionId === m.conditionId) return;
     setSelectedCondition(m.conditionId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- Intentionally sync when markup selection changes; titleblock guard
   }, [
     titleblockSelectionMode,
     selectedMeasurementIds,

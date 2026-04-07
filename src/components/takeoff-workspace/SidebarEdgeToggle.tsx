@@ -11,16 +11,11 @@ export interface SidebarEdgeToggleProps {
   onOpenChange: (open: boolean) => void;
 }
 
-function iconFor(side: SidebarEdgeSide, open: boolean) {
-  if (side === 'left') {
-    return open ? ChevronLeft : ChevronRight;
-  }
-  return open ? ChevronRight : ChevronLeft;
-}
+const iconClass = 'size-5';
+const iconStroke = 2.25;
 
 export function SidebarEdgeToggle({ side, open, onOpenChange }: SidebarEdgeToggleProps) {
   const label = open ? `Hide ${side} panel` : `Show ${side} panel`;
-  const Icon = iconFor(side, open);
 
   return (
     <Button
@@ -36,7 +31,17 @@ export function SidebarEdgeToggle({ side, open, onOpenChange }: SidebarEdgeToggl
       aria-label={label}
       title={label}
     >
-      <Icon className="size-5" strokeWidth={2.25} aria-hidden />
+      {side === 'left' ? (
+        open ? (
+          <ChevronLeft className={iconClass} strokeWidth={iconStroke} aria-hidden />
+        ) : (
+          <ChevronRight className={iconClass} strokeWidth={iconStroke} aria-hidden />
+        )
+      ) : open ? (
+        <ChevronRight className={iconClass} strokeWidth={iconStroke} aria-hidden />
+      ) : (
+        <ChevronLeft className={iconClass} strokeWidth={iconStroke} aria-hidden />
+      )}
     </Button>
   );
 }
