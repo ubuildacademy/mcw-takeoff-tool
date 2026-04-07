@@ -6,6 +6,10 @@ import { formatFeetAndInches } from '../lib/utils';
 // Configure PDF.js worker for viewport calculations
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
+// Render sheets at a slightly higher resolution so zooming is less blurry,
+// while preserving the physical PDF page size by downscaling the embedded image.
+const EXPORT_RENDER_SCALE = 1.5;
+
 interface PageMeasurements {
   pageNumber: number;
   sheetName: string;
@@ -1173,28 +1177,29 @@ export async function exportPagesWithMeasurementsToPDF(
           // Creating a new Uint8Array creates a copy with a new underlying ArrayBuffer
           const pdfBytesForRender = new Uint8Array(pdfBytes);
           
-          // Render page with markups to canvas at scale 1.0
-          // Use the canvas dimensions directly to ensure perfect aspect ratio match
+          // Render page with markups at a higher scale for sharper zoom in the exported PDF.
+          // We keep the PDF page's physical size the same by drawing the higher-res image downscaled.
           const { imageData, width, height } = await renderPageWithMarkupsToCanvas(
             pdfBytesForRender,
             pageMeasurement.pageNumber,
             pageMeasurement.measurements,
             pageMeasurement.annotations || [],
             documentRotation,
-            1.0 // Use scale 1.0 to match PDF page dimensions
+            EXPORT_RENDER_SCALE
           );
           
-          // Embed the rendered image as a new page
-          // Use canvas dimensions directly to ensure aspect ratio matches exactly
+          // Embed the rendered image as a new page (downscaled to preserve page size).
           const pngImage = await outputPdf.embedPng(imageData);
-          const addedPage = outputPdf.addPage([width, height]);
+          const pageWidth = width / EXPORT_RENDER_SCALE;
+          const pageHeight = height / EXPORT_RENDER_SCALE;
+          const addedPage = outputPdf.addPage([pageWidth, pageHeight]);
           
-          // Draw the image to fill the page exactly (dimensions match canvas)
+          // Draw the image to fill the page exactly (same aspect ratio, higher effective DPI).
           addedPage.drawImage(pngImage, {
             x: 0,
             y: 0,
-            width: width,
-            height: height,
+            width: pageWidth,
+            height: pageHeight,
           });
 
           processedPages++;

@@ -240,10 +240,13 @@ export function useTakeoffExport({
 
   const exportToExcel = async (skipDownload?: boolean): Promise<{ buffer: ArrayBuffer; filename: string } | void> => {
     try {
+      // Show progress immediately so the UI doesn't feel unresponsive while we gather data.
+      onExportStatusUpdate?.('excel', 1);
       const { reportData } = await getQuantityReportDataAsync();
       const conditionIds = Object.keys(reportData);
       if (conditionIds.length === 0) {
         toast.warning('No data to export');
+        onExportStatusUpdate?.(null, 0);
         return;
       }
       onExportStatusUpdate?.('excel', 5);
@@ -1017,10 +1020,13 @@ export function useTakeoffExport({
 
   const exportToPDF = async (skipDownload?: boolean): Promise<{ buffer: Uint8Array; filename: string } | void> => {
     try {
+      // Show progress immediately so the UI doesn't feel unresponsive while we gather data.
+      onExportStatusUpdate?.('pdf', 1);
       const { reportData } = await getQuantityReportDataAsync();
       const conditionIds = Object.keys(reportData);
       if (conditionIds.length === 0) {
         toast.warning('No data to export');
+        onExportStatusUpdate?.(null, 0);
         return;
       }
       onExportStatusUpdate?.('pdf', 10);

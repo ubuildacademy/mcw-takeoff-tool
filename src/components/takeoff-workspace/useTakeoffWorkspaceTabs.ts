@@ -1,12 +1,51 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { restoreScrollPosition } from '../../lib/windowBridge';
+import { restoreScrollPosition, triggerFitToWindow } from '../../lib/windowBridge';
 import { getSheetId } from '../../lib/sheetUtils';
 import { usePdfViewerTabsStore } from '../../store/slices/pdfViewerTabsSlice';
 import { useDocumentViewStore } from '../../store/slices/documentViewSlice';
 import type { ProjectFile, PDFDocument } from '../../types';
 
 const SCROLL_RESTORE_DELAYS_MS = [50, 150, 300, 500, 700, 1000];
+/** Fewer follow-ups than scroll restore: fit is heavier; rAF + two delays covers layout timing. */
+const FIT_TO_WINDOW_RETRY_DELAYS_MS = [150, 500];
 const SCROLL_RESTORE_AFTER_SWITCH_MS = 200;
+
+/** After tab/page switch: restore saved scroll, or (0,0) so we never inherit the previous sheet’s scroll. */
+function scheduleScrollRestoreAfterSwitch(
+  saved: { x: number; y: number },
+  isStale: () => boolean
+) {
+  setTimeout(() => {
+    if (isStale()) return;
+    const restore =
+      saved.x !== 0 || saved.y !== 0
+        ? () => restoreScrollPosition(saved.x, saved.y)
+        : () => restoreScrollPosition(0, 0);
+    restore();
+  }, SCROLL_RESTORE_AFTER_SWITCH_MS);
+}
+
+function runScrollRestoreWithRetries(
+  saved: { x: number; y: number },
+  isStale: () => boolean
+) {
+  const apply = () => {
+    if (isStale()) return;
+    restoreScrollPosition(saved.x, saved.y);
+  };
+  requestAnimationFrame(apply);
+  SCROLL_RESTORE_DELAYS_MS.forEach((delay) => setTimeout(apply, delay));
+}
+
+function runFitToWindowWithRetries(isStale: () => boolean) {
+  const fit = () => {
+    if (isStale()) return;
+    restoreScrollPosition(0, 0);
+    triggerFitToWindow();
+  };
+  requestAnimationFrame(fit);
+  FIT_TO_WINDOW_RETRY_DELAYS_MS.forEach((delay) => setTimeout(fit, delay));
+}
 
 export function getSheetLabel(
   documents: PDFDocument[],
@@ -105,6 +144,9 @@ export function useTakeoffWorkspaceTabs({
     (s) => s.setDocumentLocationBySheet
   );
 
+  /** Bumped when `activeTab` changes so pending scroll/fit work can no-op (fast tab switching). */
+  const viewportSessionRef = useRef(0);
+
   const currentPdfFile =
     activeTab != null
       ? projectFiles.find((f) => f.id === activeTab.documentId) ?? null
@@ -133,15 +175,15 @@ export function useTakeoffWorkspaceTabs({
           takeoffCount: 0,
         });
       }
-      const savedLocation = getDocumentLocationBySheet(
-        getSheetId(documentId, pageNumber)
-      );
-      if (savedLocation.x !== 0 || savedLocation.y !== 0) {
-        setTimeout(
-          () => restoreScrollPosition(savedLocation.x, savedLocation.y),
-          SCROLL_RESTORE_AFTER_SWITCH_MS
+      // Defer until after activeTab commit + session bump so stale checks match this navigation.
+      setTimeout(() => {
+        const session = viewportSessionRef.current;
+        const isStale = () => session !== viewportSessionRef.current;
+        scheduleScrollRestoreAfterSwitch(
+          getDocumentLocationBySheet(getSheetId(documentId, pageNumber)),
+          isStale
         );
-      }
+      }, 0);
     },
     [
       projectId,
@@ -172,11 +214,14 @@ export function useTakeoffWorkspaceTabs({
         hasTakeoffs: false,
         takeoffCount: 0,
       });
-      const sid = getSheetId(currentPdfFile.id, page);
-      const saved = getDocumentLocationBySheet(sid);
-      if (saved.x !== 0 || saved.y !== 0) {
-        setTimeout(() => restoreScrollPosition(saved.x, saved.y), SCROLL_RESTORE_AFTER_SWITCH_MS);
-      }
+      setTimeout(() => {
+        const session = viewportSessionRef.current;
+        const isStale = () => session !== viewportSessionRef.current;
+        scheduleScrollRestoreAfterSwitch(
+          getDocumentLocationBySheet(getSheetId(currentPdfFile.id, page)),
+          isStale
+        );
+      }, 0);
     },
     [
       projectId,
@@ -235,14 +280,14 @@ export function useTakeoffWorkspaceTabs({
           hasTakeoffs: false,
           takeoffCount: 0,
         });
-        const sid = getSheetId(tab.documentId, tab.pageNumber);
-        const saved = getDocumentLocationBySheet(sid);
-        if (saved.x !== 0 || saved.y !== 0) {
-          setTimeout(
-            () => restoreScrollPosition(saved.x, saved.y),
-            SCROLL_RESTORE_AFTER_SWITCH_MS
+        setTimeout(() => {
+          const session = viewportSessionRef.current;
+          const isStale = () => session !== viewportSessionRef.current;
+          scheduleScrollRestoreAfterSwitch(
+            getDocumentLocationBySheet(getSheetId(tab.documentId, tab.pageNumber)),
+            isStale
           );
-        }
+        }, 0);
       }
     },
     [
@@ -308,6 +353,13 @@ export function useTakeoffWorkspaceTabs({
 
   const isInitialRenderRef = useRef(true);
 
+  useEffect(() => {
+    if (activeTab) {
+      viewportSessionRef.current += 1;
+      isInitialRenderRef.current = true;
+    }
+  }, [activeTab]);
+
   const handleLocationChange = useCallback(
     (x: number, y: number) => {
       if (sheetId) setDocumentLocationBySheet(sheetId, { x, y });
@@ -317,24 +369,19 @@ export function useTakeoffWorkspaceTabs({
 
   const handlePDFRendered = useCallback(() => {
     if (sheetId && isInitialRenderRef.current) {
+      const session = viewportSessionRef.current;
+      const isStale = () => session !== viewportSessionRef.current;
       const saved = getDocumentLocationBySheet(sheetId);
+      const hasExplicit = useDocumentViewStore.getState().hasExplicitViewStateForSheet(sheetId);
+
       if (saved.x !== 0 || saved.y !== 0) {
-        requestAnimationFrame(() =>
-          restoreScrollPosition(saved.x, saved.y)
-        );
-        SCROLL_RESTORE_DELAYS_MS.forEach((delay) =>
-          setTimeout(() => restoreScrollPosition(saved.x, saved.y), delay)
-        );
+        runScrollRestoreWithRetries(saved, isStale);
+      } else if (!hasExplicit) {
+        runFitToWindowWithRetries(isStale);
       }
       isInitialRenderRef.current = false;
     }
   }, [sheetId, getDocumentLocationBySheet]);
-
-  useEffect(() => {
-    if (activeTab) {
-      isInitialRenderRef.current = true;
-    }
-  }, [activeTab]);
 
   return {
     openTabs,

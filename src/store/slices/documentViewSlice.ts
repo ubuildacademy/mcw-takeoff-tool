@@ -54,6 +54,11 @@ interface DocumentViewState {
   getDocumentScaleBySheet: (sheetId: string) => number;
   setDocumentLocationBySheet: (sheetId: string, location: { x: number; y: number }) => void;
   getDocumentLocationBySheet: (sheetId: string) => { x: number; y: number };
+  /**
+   * True if this sheet has persisted per-sheet location or scale (not only document-level fallbacks).
+   * Used to tell “never positioned” from “saved at default-looking values”.
+   */
+  hasExplicitViewStateForSheet: (sheetId: string) => boolean;
 }
 
 export const useDocumentViewStore = create<DocumentViewState>()(
@@ -234,6 +239,14 @@ export const useDocumentViewStore = create<DocumentViewState>()(
         const bySheet = state.documentLocationsBySheet[sheetId];
         if (bySheet != null) return bySheet;
         return state.documentLocations[parseDocumentIdFromSheetId(sheetId)] ?? { x: 0, y: 0 };
+      },
+
+      hasExplicitViewStateForSheet: (sheetId) => {
+        const state = get();
+        return (
+          state.documentLocationsBySheet[sheetId] != null ||
+          state.documentScalesBySheet[sheetId] != null
+        );
       },
     }),
     {

@@ -358,9 +358,9 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                     onClick={async (e) => {
                       e.preventDefault();
                       e.stopPropagation();
+                      setShowExportDropdown(false);
                       try {
                         await exportToExcel();
-                        setShowExportDropdown(false);
                       } catch (error) {
                         console.error('Excel export error:', error);
                         toast.error('Error exporting Excel file. Please try again.');
@@ -375,9 +375,9 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                     onClick={async (e) => {
                       e.preventDefault();
                       e.stopPropagation();
+                      setShowExportDropdown(false);
                       try {
                         await exportToPDF();
-                        setShowExportDropdown(false);
                       } catch (error) {
                         console.error('PDF export error:', error);
                         toast.error('Error exporting PDF file. Please try again.');

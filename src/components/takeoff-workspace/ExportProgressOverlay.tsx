@@ -45,10 +45,19 @@ export function ExportProgressOverlay({ exportStatus }: ExportProgressOverlayPro
           </div>
         </div>
 
-        {exportStatus.type === 'pdf' && exportStatus.progress > 20 && (
+        {exportStatus.type === 'pdf' && (
           <div className="mt-4 text-xs text-gray-500">
-            <p>📄 Capturing PDF pages with measurements...</p>
-            <p>This may take a moment for large projects.</p>
+            {exportStatus.progress > 20 ? (
+              <>
+                <p>📄 Capturing PDF pages with measurements...</p>
+                <p>This may take a moment for large projects.</p>
+              </>
+            ) : (
+              <>
+                <p>Preparing report data…</p>
+                <p>This may take a moment for large projects.</p>
+              </>
+            )}
           </div>
         )}
       </div>
