@@ -1,4 +1,5 @@
 import React from 'react';
+import { PDF_UPLOAD_ACCEPT } from '../../lib/pdfUpload';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Upload, Settings, Filter, Search, Tag, Trash2 } from 'lucide-react';
@@ -92,7 +93,7 @@ export function SheetSidebarHeader({
           id="pdf-upload"
           name="pdf-upload"
           type="file"
-          accept=".pdf,application/pdf"
+          accept={PDF_UPLOAD_ACCEPT}
           onChange={onPdfUpload}
           className="hidden"
           multiple

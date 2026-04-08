@@ -85,6 +85,8 @@ export interface TakeoffWorkspaceRightSidebarProps {
   onOcrSearchResults: (results: SearchResult[], query: string) => void;
   onDocumentsUpdate: (documents: PDFDocument[]) => void;
   onReloadDocuments: () => void;
+  /** After server OCR is queued, start status-bar polling (upload + Search “Queue OCR”). */
+  onStartOcrTracking?: (documentId: string, documentName: string) => void;
   onPdfUpload: (event: React.ChangeEvent<HTMLInputElement>) => void;
   uploading: boolean;
   onExtractTitleblockForDocument: (documentId: string) => void;

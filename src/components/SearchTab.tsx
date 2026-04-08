@@ -12,8 +12,9 @@ import {
   AlertCircle,
   X
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { ocrApiService } from '../services/apiService';
-import { debounce } from '../utils/commonUtils';
+import { debounce, extractErrorMessage } from '../utils/commonUtils';
 import type { PDFDocument } from '../types';
 
 const DEV = import.meta.env.DEV;
@@ -36,6 +37,10 @@ interface SearchTabProps {
   onPageSelect: (documentId: string, pageNumber: number) => void;
   selectedDocumentId?: string;
   selectedPageNumber?: number;
+  /** Refresh document list after queuing OCR (optional). */
+  onReloadDocuments?: () => void | Promise<void>;
+  /** Start status-bar polling after each job is queued (same as upload flow). */
+  onStartOcrTracking?: (documentId: string, documentName: string) => void;
 }
 
 export function SearchTab({ 
@@ -43,7 +48,9 @@ export function SearchTab({
   documents, 
   onPageSelect,
   selectedDocumentId,
-  selectedPageNumber
+  selectedPageNumber,
+  onReloadDocuments,
+  onStartOcrTracking,
 }: SearchTabProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Record<string, SearchResult[]>>({});
@@ -51,21 +58,47 @@ export function SearchTab({
   const [searchError, setSearchError] = useState<string | null>(null);
   const [selectedDocument, setSelectedDocument] = useState<string | null>(null);
   const [expandedResults, setExpandedResults] = useState<Set<string>>(new Set());
+  const [queueOcrBusy, setQueueOcrBusy] = useState(false);
 
   // Get documents that have OCR processing enabled or completed
   const ocrEnabledDocuments = documents.filter(doc => 
     doc.ocrEnabled || doc.pages.some(page => page.ocrProcessed)
   );
 
+  const documentsMissingOcr = useMemo(() => {
+    const enabledIds = new Set(ocrEnabledDocuments.map((d) => d.id));
+    return documents.filter((d) => !enabledIds.has(d.id));
+  }, [documents, ocrEnabledDocuments]);
+
+  const queueOcrForMissingPdfs = useCallback(async () => {
+    if (documentsMissingOcr.length === 0 || !projectId) return;
+    setQueueOcrBusy(true);
+    try {
+      for (const doc of documentsMissingOcr) {
+        await ocrApiService.processDocument(doc.id, projectId);
+        onStartOcrTracking?.(doc.id, doc.name);
+      }
+      toast.success(
+        `OCR started for ${documentsMissingOcr.length} PDF(s). Watch the purple progress bar in the status bar below.`
+      );
+      await onReloadDocuments?.();
+    } catch (e: unknown) {
+      toast.error(extractErrorMessage(e, 'Could not queue OCR'));
+    } finally {
+      setQueueOcrBusy(false);
+    }
+  }, [documentsMissingOcr, projectId, onReloadDocuments, onStartOcrTracking]);
+
   // Search function (called by debounced wrapper or directly when changing document filter)
   const performSearch = useCallback(async (query: string, documentId?: string) => {
-    if (!query.trim() || query.length < 2) {
+    const trimmed = query.trim();
+    if (trimmed.length < 2) {
       setSearchResults({});
       return;
     }
 
     if (DEV) {
-      console.log('🔍 Search:', query, documentId ? `(document: ${documentId})` : '(all documents)');
+      console.log('🔍 Search:', trimmed, documentId ? `(document: ${documentId})` : '(all documents)');
     }
 
     setIsSearching(true);
@@ -77,29 +110,35 @@ export function SearchTab({
 
       if (documentId) {
         try {
-          const response = await ocrApiService.searchDocument(documentId, query, projectId);
+          const response = await ocrApiService.searchDocument(documentId, trimmed, projectId);
           if (response.results && response.results.length > 0) {
             results[documentId] = response.results;
           }
         } catch (error) {
           if (DEV) console.error('Search failed for document:', error);
+          setSearchError('Search failed. Please try again.');
         }
       } else {
-        const searchPromises = ocrEnabledDocuments.map(async (doc) => {
-          try {
-            const response = await ocrApiService.searchDocument(doc.id, query, projectId);
-            if (response.results && response.results.length > 0) {
-              const validResults = response.results.filter((r: unknown): r is SearchResultItem => r != null && typeof r === 'object' && (r as SearchResultItem).pageNumber != null);
-              return { docId: doc.id, results: validResults } as const;
-            }
-          } catch (error) {
-            if (DEV) console.error('Search failed for document:', doc.id, error);
+        const settled = await Promise.allSettled(
+          ocrEnabledDocuments.map((doc) => ocrApiService.searchDocument(doc.id, trimmed, projectId))
+        );
+        let failureCount = 0;
+        for (let i = 0; i < settled.length; i++) {
+          const doc = ocrEnabledDocuments[i];
+          const outcome = settled[i];
+          if (outcome.status === 'rejected') {
+            failureCount++;
+            if (DEV) console.error('Search failed for document:', doc.id, outcome.reason);
+            continue;
           }
-          return null;
-        });
-        const searchResultsList = await Promise.all(searchPromises);
-        for (const item of searchResultsList) {
-          if (item) results[item.docId] = item.results;
+          const response = outcome.value;
+          if (response.results && response.results.length > 0) {
+            const validResults = response.results.filter((r: unknown): r is SearchResultItem => r != null && typeof r === 'object' && (r as SearchResultItem).pageNumber != null);
+            results[doc.id] = validResults;
+          }
+        }
+        if (failureCount > 0 && failureCount === ocrEnabledDocuments.length && ocrEnabledDocuments.length > 0) {
+          setSearchError('Search failed. Please try again.');
         }
       }
 
@@ -204,18 +243,6 @@ export function SearchTab({
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span className="text-sm">
                 OCR data is not yet available. OCR runs automatically when documents are uploaded and is included in backups—refresh when processing completes.
-              </span>
-            </div>
-          </div>
-        )}
-
-        {/* Page Number Info */}
-        {ocrEnabledDocuments.length > 0 && (
-          <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-            <div className="flex items-center gap-2 text-blue-700">
-              <AlertCircle className="w-4 h-4" />
-              <span className="text-sm">
-                Page numbers come from document structure. If they seem incorrect, re-upload the document to refresh its OCR data.
               </span>
             </div>
           </div>
@@ -429,8 +456,37 @@ export function SearchTab({
 
       {/* Footer */}
       <div className="p-4 border-t bg-muted/30">
-        <div className="text-center text-sm text-muted-foreground">
-          {ocrEnabledDocuments.length} document{ocrEnabledDocuments.length !== 1 ? 's' : ''} with OCR
+        <div className="text-center text-sm text-muted-foreground space-y-3">
+          <div>
+            {ocrEnabledDocuments.length} of {documents.length} PDF{documents.length !== 1 ? 's' : ''} have searchable text
+          </div>
+          {documentsMissingOcr.length > 0 && (
+            <>
+              <p className="text-xs text-left leading-relaxed">
+                The others don&apos;t have OCR saved yet (older projects, a failed run, or processing still in progress). You can queue OCR for those PDFs without re-uploading.
+              </p>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="w-full"
+                disabled={queueOcrBusy}
+                onClick={() => void queueOcrForMissingPdfs()}
+              >
+                {queueOcrBusy ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Queuing…
+                  </>
+                ) : (
+                  `Queue OCR for ${documentsMissingOcr.length} PDF(s)`
+                )}
+              </Button>
+              <p className="text-[11px] text-muted-foreground text-left leading-snug">
+                After you queue, a purple progress bar appears in the <span className="font-medium text-foreground">bottom status bar</span> for each PDF until text is saved.
+              </p>
+            </>
+          )}
         </div>
       </div>
     </div>

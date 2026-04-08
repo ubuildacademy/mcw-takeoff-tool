@@ -30,6 +30,7 @@ export function TakeoffWorkspaceRightSidebar({
   onOcrSearchResults,
   onDocumentsUpdate,
   onReloadDocuments,
+  onStartOcrTracking,
   onPdfUpload,
   uploading,
   onExtractTitleblockForDocument,
@@ -116,6 +117,8 @@ export function TakeoffWorkspaceRightSidebar({
                 onPageSelect={onPageSelect}
                 selectedDocumentId={selectedDocumentId}
                 selectedPageNumber={selectedPageNumber}
+                onReloadDocuments={onReloadDocuments}
+                onStartOcrTracking={onStartOcrTracking}
               />
             </Suspense>
           )}

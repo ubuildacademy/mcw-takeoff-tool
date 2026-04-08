@@ -9,7 +9,9 @@ interface ConditionState {
   conditions: TakeoffCondition[];
   selectedConditionId: string | null;
   loadingConditions: boolean;
-  
+  /** Per project: condition IDs whose on-page markups are hidden in the viewer and excluded from PDF/Excel exports. */
+  hiddenMarkupConditionIdsByProject: Record<string, string[]>;
+
   // Actions
   addCondition: (
     condition: Omit<TakeoffCondition, 'id'>,
@@ -29,6 +31,10 @@ interface ConditionState {
   loadProjectConditions: (projectId: string) => Promise<void>;
   refreshProjectConditions: (projectId: string) => Promise<void>;
   ensureConditionsLoaded: (projectId: string) => Promise<void>;
+
+  isConditionMarkupHidden: (projectId: string, conditionId: string) => boolean;
+  setConditionMarkupHidden: (projectId: string, conditionId: string, hidden: boolean) => void;
+  toggleConditionMarkupHidden: (projectId: string, conditionId: string) => void;
 }
 
 export const useConditionStore = create<ConditionState>()(
@@ -38,7 +44,8 @@ export const useConditionStore = create<ConditionState>()(
       conditions: [],
       selectedConditionId: null,
       loadingConditions: false,
-      
+      hiddenMarkupConditionIdsByProject: {},
+
       // Actions
       addCondition: async (conditionData, options) => {
         console.log('🔄 ADD_CONDITION: Starting to create condition:', conditionData);
@@ -117,10 +124,25 @@ export const useConditionStore = create<ConditionState>()(
           const { conditionService } = await import('../../services/apiService');
           await conditionService.deleteCondition(id);
 
-          set(state => ({
-            conditions: state.conditions.filter(condition => condition.id !== id),
-            selectedConditionId: state.selectedConditionId === id ? null : state.selectedConditionId
-          }));
+          set((state) => {
+            const removed = state.conditions.find((c) => c.id === id);
+            const pid = removed?.projectId;
+            let hiddenMarkupConditionIdsByProject = state.hiddenMarkupConditionIdsByProject ?? {};
+            if (pid) {
+              const prev = hiddenMarkupConditionIdsByProject[pid] ?? [];
+              if (prev.includes(id)) {
+                hiddenMarkupConditionIdsByProject = {
+                  ...hiddenMarkupConditionIdsByProject,
+                  [pid]: prev.filter((x) => x !== id),
+                };
+              }
+            }
+            return {
+              conditions: state.conditions.filter((condition) => condition.id !== id),
+              selectedConditionId: state.selectedConditionId === id ? null : state.selectedConditionId,
+              hiddenMarkupConditionIdsByProject,
+            };
+          });
 
           const { useMeasurementStore } = await import('./measurementSlice');
           useMeasurementStore.setState(state => ({
@@ -252,12 +274,37 @@ export const useConditionStore = create<ConditionState>()(
         
         console.log(`🔄 ENSURE_CONDITIONS_LOADED: Loading conditions for project ${projectId} from API (found ${existingProjectConditions.length} in local storage)`);
         await get().loadProjectConditions(projectId);
-      }
+      },
+
+      isConditionMarkupHidden: (projectId, conditionId) =>
+        (get().hiddenMarkupConditionIdsByProject?.[projectId] ?? []).includes(conditionId),
+
+      setConditionMarkupHidden: (projectId, conditionId, hidden) => {
+        set((state) => {
+          const byProject = state.hiddenMarkupConditionIdsByProject ?? {};
+          const prev = byProject[projectId] ?? [];
+          const next = hidden
+            ? [...new Set([...prev, conditionId])]
+            : prev.filter((x) => x !== conditionId);
+          return {
+            hiddenMarkupConditionIdsByProject: {
+              ...byProject,
+              [projectId]: next,
+            },
+          };
+        });
+      },
+
+      toggleConditionMarkupHidden: (projectId, conditionId) => {
+        const hidden = get().isConditionMarkupHidden(projectId, conditionId);
+        get().setConditionMarkupHidden(projectId, conditionId, !hidden);
+      },
     }),
     {
       name: 'condition-store',
       partialize: (state) => ({
-        conditions: state.conditions
+        conditions: state.conditions,
+        hiddenMarkupConditionIdsByProject: state.hiddenMarkupConditionIdsByProject,
       })
     }
   )

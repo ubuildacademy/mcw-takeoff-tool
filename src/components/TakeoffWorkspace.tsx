@@ -41,6 +41,7 @@ import { HyperlinkSheetPickerDialog } from './HyperlinkSheetPickerDialog';
 import { HyperlinkContextMenu } from './HyperlinkContextMenu';
 import { extractErrorMessage } from '../utils/commonUtils';
 import { isEditableKeyboardTarget } from '../utils/keyboardUtils';
+import { EmptyDocumentsPlaceholder } from './takeoff-workspace/EmptyDocumentsPlaceholder';
 
 export function TakeoffWorkspace() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -529,85 +530,88 @@ export function TakeoffWorkspace() {
   }, [currentPdfFile, projectId, currentPage, tabsResult, setCalibration, isDev]);
 
   const handlePdfUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    
-    if (!files || files.length === 0 || !projectId) {
-      return;
-    }
-    
-    // Check file sizes before uploading (1GB = 1024 * 1024 * 1024 bytes)
-    const maxSizeMB = 1024;
-    const maxSizeBytes = maxSizeMB * 1024 * 1024;
-    const invalidFiles: string[] = [];
-    
-    Array.from(files).forEach((file) => {
-      if (file.size > maxSizeBytes) {
-        invalidFiles.push(`${file.name} (${(file.size / (1024 * 1024)).toFixed(2)}MB)`);
-      }
-    });
-    
-    if (invalidFiles.length > 0) {
-      toast.error(`Some files are too large! Maximum size is ${maxSizeMB}MB (1GB). Large files: ${invalidFiles.join(', ')}. Please contact your admin to increase the Supabase Storage file size limit.`);
-      return;
-    }
-    
+    const input = event.target;
     try {
-      setUploading(true);
-      
-      // Process files sequentially to avoid overwhelming the server
-      const uploadedFiles: ProjectFile[] = [];
-      const failedFiles: Array<{name: string, error: string}> = [];
-      
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        try {
-          const uploadRes = await fileService.uploadPDF(file, projectId);
-          
-          if (uploadRes.file) {
-            uploadedFiles.push(uploadRes.file);
-            ocr.startOcrTracking(uploadRes.file.id, uploadRes.file.originalName || file.name);
-          }
-        } catch (error: unknown) {
-          console.error(`Upload failed for ${file.name}:`, error);
-          const errorMessage = extractErrorMessage(error, 'Failed to upload PDF file.');
-          failedFiles.push({ name: file.name, error: errorMessage });
+      const files = input.files;
+
+      if (!files || files.length === 0 || !projectId) {
+        return;
+      }
+
+      // Check file sizes before uploading (1GB = 1024 * 1024 * 1024 bytes)
+      const maxSizeMB = 1024;
+      const maxSizeBytes = maxSizeMB * 1024 * 1024;
+      const invalidFiles: string[] = [];
+
+      Array.from(files).forEach((file) => {
+        if (file.size > maxSizeBytes) {
+          invalidFiles.push(`${file.name} (${(file.size / (1024 * 1024)).toFixed(2)}MB)`);
         }
+      });
+
+      if (invalidFiles.length > 0) {
+        toast.error(`Some files are too large! Maximum size is ${maxSizeMB}MB (1GB). Large files: ${invalidFiles.join(', ')}. Please contact your admin to increase the Supabase Storage file size limit.`);
+        return;
       }
-      
-      // Refresh project files
-      const filesRes = await fileService.getProjectFiles(projectId);
-      const projectFilesList = (filesRes.files || []) as ProjectFile[];
-      setProjectFiles(projectFilesList);
-      
-      // Refresh documents list to show newly uploaded files in sidebar
-      // Pass fresh files so we use them immediately (setState is async)
-      if (uploadedFiles.length > 0) {
-        await loadProjectDocuments(projectFilesList);
+
+      setUploading(true);
+      try {
+        // Process files sequentially to avoid overwhelming the server
+        const uploadedFiles: ProjectFile[] = [];
+        const failedFiles: Array<{ name: string; error: string }> = [];
+
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          try {
+            const uploadRes = await fileService.uploadPDF(file, projectId);
+
+            if (uploadRes.file) {
+              uploadedFiles.push(uploadRes.file);
+              ocr.startOcrTracking(uploadRes.file.id, uploadRes.file.originalName || file.name);
+            }
+          } catch (error: unknown) {
+            console.error(`Upload failed for ${file.name}:`, error);
+            const errorMessage = extractErrorMessage(error, 'Failed to upload PDF file.');
+            failedFiles.push({ name: file.name, error: errorMessage });
+          }
+        }
+
+        // Refresh project files
+        const filesRes = await fileService.getProjectFiles(projectId);
+        const projectFilesList = (filesRes.files || []) as ProjectFile[];
+        setProjectFiles(projectFilesList);
+
+        // Refresh documents list to show newly uploaded files in sidebar
+        // Pass fresh files so we use them immediately (setState is async)
+        if (uploadedFiles.length > 0) {
+          await loadProjectDocuments(projectFilesList);
+        }
+
+        // Open the first successfully uploaded file in a tab
+        if (uploadedFiles.length > 0) {
+          const file = uploadedFiles[0] as ProjectFile & { originalName?: string };
+          tabsResult.handlePageSelect(file.id, 1);
+        }
+
+        // Show summary if there were failures
+        if (failedFiles.length > 0) {
+          const successCount = uploadedFiles.length;
+          const failCount = failedFiles.length;
+          const failMessages = failedFiles.map((f) => `${f.name}: ${f.error}`).join('; ');
+          toast.warning(`Upload: ${successCount} succeeded, ${failCount} failed. ${failMessages}`);
+        } else if (uploadedFiles.length > 1) {
+          toast.success(`Successfully uploaded ${uploadedFiles.length} files! OCR processing has started automatically in the background.`);
+        }
+      } catch (error: unknown) {
+        console.error('Upload failed:', error);
+        const errorMessage = extractErrorMessage(error, 'Failed to upload PDF file.');
+
+        toast.error(`Upload Error: ${errorMessage}`);
+      } finally {
+        setUploading(false);
       }
-      
-      // Open the first successfully uploaded file in a tab
-      if (uploadedFiles.length > 0) {
-        const file = uploadedFiles[0] as ProjectFile & { originalName?: string };
-        tabsResult.handlePageSelect(file.id, 1);
-      }
-      
-      // Show summary if there were failures
-      if (failedFiles.length > 0) {
-        const successCount = uploadedFiles.length;
-        const failCount = failedFiles.length;
-        const failMessages = failedFiles.map(f => `${f.name}: ${f.error}`).join('; ');
-        toast.warning(`Upload: ${successCount} succeeded, ${failCount} failed. ${failMessages}`);
-      } else if (uploadedFiles.length > 1) {
-        toast.success(`Successfully uploaded ${uploadedFiles.length} files! OCR processing has started automatically in the background.`);
-      }
-      
-    } catch (error: unknown) {
-      console.error('Upload failed:', error);
-      const errorMessage = extractErrorMessage(error, 'Failed to upload PDF file.');
-      
-      toast.error(`Upload Error: ${errorMessage}`);
     } finally {
-      setUploading(false);
+      input.value = '';
     }
   };
 
@@ -845,6 +849,13 @@ export function TakeoffWorkspace() {
               onHyperlinkContextMenu={handleHyperlinkContextMenu}
               onRegisterEnterConditionDrawMode={handleRegisterEnterConditionDrawMode}
             />
+          ) : documentsLoading ? (
+            <div className="flex flex-col items-center justify-center flex-1 bg-muted/30 gap-3" role="status" aria-live="polite">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+              <p className="text-sm text-muted-foreground">Loading documents…</p>
+            </div>
+          ) : documents.length === 0 ? (
+            <EmptyDocumentsPlaceholder onPdfUpload={handlePdfUpload} uploading={uploading} />
           ) : (
             <div className="flex items-center justify-center flex-1 bg-muted/30">
               <div className="text-muted-foreground">Select a sheet</div>
@@ -869,6 +880,7 @@ export function TakeoffWorkspace() {
           onOcrSearchResults={handleOcrSearchResults}
           onDocumentsUpdate={handleDocumentsUpdate}
           onReloadDocuments={loadProjectDocuments}
+          onStartOcrTracking={ocr.startOcrTracking}
           onPdfUpload={handlePdfUpload}
           uploading={uploading}
           onExtractTitleblockForDocument={titleblock.handleExtractTitleblockForDocument}

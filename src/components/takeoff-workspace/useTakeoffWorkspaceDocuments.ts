@@ -42,6 +42,17 @@ export function useTakeoffWorkspaceDocuments({
             : (await fileService.getProjectFiles(projectId)).files || [];
       const pdfFiles = files.filter((file: { mimetype?: string }) => file.mimetype === 'application/pdf');
 
+      const { ocrApiService } = await import('../../services/apiService');
+      let ocrDocumentIds = new Set<string>();
+      try {
+        const { documentIds } = await ocrApiService.getProjectDocumentIdsWithOcr(projectId);
+        if (Array.isArray(documentIds)) {
+          ocrDocumentIds = new Set(documentIds);
+        }
+      } catch (e) {
+        console.warn('Could not load OCR document list for project; OCR flags may be incomplete:', e);
+      }
+
       const documentResults = await Promise.allSettled(
         pdfFiles.map(async (file: ProjectFile & { originalName?: string }) => {
           try {
@@ -102,9 +113,7 @@ export function useTakeoffWorkspaceDocuments({
               )
               .filter((page): page is PDFPage => page != null && page.pageNumber != null);
 
-            const { serverOcrService } = await import('../../services/serverOcrService');
-            const ocrData = await serverOcrService.getDocumentData(file.id, projectId);
-            const hasOCRData = ocrData && Array.isArray(ocrData.results) && ocrData.results.length > 0;
+            const hasOCRData = ocrDocumentIds.has(file.id);
 
             return {
               id: file.id,
@@ -116,44 +125,22 @@ export function useTakeoffWorkspaceDocuments({
             };
           } catch (error) {
             console.error(`Error loading PDF ${file.originalName}:`, error);
-            try {
-              const { serverOcrService } = await import('../../services/serverOcrService');
-              const ocrData = await serverOcrService.getDocumentData(file.id, projectId);
-              const hasOCRData = ocrData && Array.isArray(ocrData.results) && ocrData.results.length > 0;
-              return {
-                id: file.id,
-                name: (file.originalName ?? 'Unknown').replace(/\.pdf$/i, ''),
-                totalPages: 1,
-                pages: [
-                  {
-                    pageNumber: 1,
-                    hasTakeoffs: false,
-                    takeoffCount: 0,
-                    isVisible: true,
-                    ocrProcessed: false,
-                  },
-                ],
-                isExpanded: false,
-                ocrEnabled: hasOCRData,
-              };
-            } catch {
-              return {
-                id: file.id,
-                name: (file.originalName ?? 'Unknown').replace(/\.pdf$/i, ''),
-                totalPages: 1,
-                pages: [
-                  {
-                    pageNumber: 1,
-                    hasTakeoffs: false,
-                    takeoffCount: 0,
-                    isVisible: true,
-                    ocrProcessed: false,
-                  },
-                ],
-                isExpanded: false,
-                ocrEnabled: false,
-              };
-            }
+            return {
+              id: file.id,
+              name: (file.originalName ?? 'Unknown').replace(/\.pdf$/i, ''),
+              totalPages: 1,
+              pages: [
+                {
+                  pageNumber: 1,
+                  hasTakeoffs: false,
+                  takeoffCount: 0,
+                  isVisible: true,
+                  ocrProcessed: false,
+                },
+              ],
+              isExpanded: false,
+              ocrEnabled: ocrDocumentIds.has(file.id),
+            };
           }
         })
       );
@@ -162,8 +149,9 @@ export function useTakeoffWorkspaceDocuments({
         .map((result, index) => {
           if (result.status === 'fulfilled') return result.value;
           const file = pdfFiles[index] as ProjectFile | undefined;
+          const fid = file?.id;
           return {
-            id: file?.id ?? `error-${index}`,
+            id: fid ?? `error-${index}`,
             name: (file?.originalName ?? 'Unknown').replace(/\.pdf$/i, ''),
             totalPages: 1,
             pages: [
@@ -176,7 +164,7 @@ export function useTakeoffWorkspaceDocuments({
               },
             ],
             isExpanded: false,
-            ocrEnabled: false,
+            ocrEnabled: typeof fid === 'string' && ocrDocumentIds.has(fid),
           };
         })
         .filter((doc): doc is PDFDocument => doc != null);
@@ -206,6 +194,7 @@ export function useTakeoffWorkspaceDocuments({
 
   useEffect(() => {
     if (projectId) {
+      setDocuments([]);
       loadProjectDocuments();
     }
     // Only re-run when project changes. loadProjectDocuments is recreated when

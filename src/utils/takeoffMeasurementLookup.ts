@@ -1,5 +1,20 @@
 import { useConditionStore } from '../store/slices/conditionSlice';
-import type { TakeoffMeasurement } from '../types';
+import type { TakeoffCondition, TakeoffMeasurement } from '../types';
+
+/** Tool mode for placing takeoff measurements; matches PDFViewer condition-selection logic. */
+export type MeasurementDrawMode = 'linear' | 'area' | 'volume' | 'count';
+
+/** Map a takeoff condition to draw mode (excludes auto-count — use caller guards). */
+export function measurementDrawModeForCondition(condition: TakeoffCondition): MeasurementDrawMode {
+  if (condition.type === 'count') return 'count';
+  if (condition.type === 'volume') return 'volume';
+  if (condition.type === 'area') return 'area';
+  if (condition.type === 'linear') return 'linear';
+  if (condition.unit === 'EA' || condition.unit === 'each') return 'count';
+  if (condition.unit === 'SF' || condition.unit === 'sq ft') return 'area';
+  if (condition.unit === 'CY' || condition.unit === 'cu yd') return 'volume';
+  return 'linear';
+}
 
 export type PageTakeoffMeasurementsGetter = (
   projectId: string,

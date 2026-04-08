@@ -4,11 +4,18 @@ import fs from 'fs-extra';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../supabase';
 import { simpleOcrService, type SimpleOCRResult } from '../services/simpleOcrService';
-import { requireAuth, hasProjectAccess, isAdmin, validateUUIDParam } from '../middleware';
+import { requireAuth, hasProjectAccess, isAdmin, validateUUIDParam, isValidUUID } from '../middleware';
 
 const router = express.Router();
 
-
+/** Express may parse repeated keys as arrays; normalize to a single string. */
+function firstQueryString(value: unknown): string | undefined {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value) && value.length > 0 && typeof value[0] === 'string') {
+    return value[0];
+  }
+  return undefined;
+}
 
 /** Shared: download PDF, create job, start background processing. Returns jobId or null if skipped. */
 async function startOCRJob(projectId: string, documentId: string, options?: { clearIfProcessed?: boolean }): Promise<string | null> {
@@ -116,41 +123,77 @@ router.get('/status/:jobId', requireAuth, validateUUIDParam('jobId'), async (req
   }
 });
 
-// Search OCR results
-router.get('/search/:documentId', requireAuth, validateUUIDParam('documentId'), async (req, res) => {
-  const { documentId } = req.params;
-  const { query, projectId } = req.query;
-
-  if (!query || typeof query !== 'string') {
-    return res.status(400).json({ error: 'Search query is required' });
+// Distinct document IDs that have OCR text stored for this project (Search tab, badges)
+router.get('/documents-with-ocr', requireAuth, async (req, res) => {
+  const projectId = firstQueryString(req.query.projectId);
+  if (!projectId) {
+    return res.status(400).json({ error: 'Project ID is required' });
+  }
+  if (!isValidUUID(projectId)) {
+    return res.status(400).json({ error: 'Invalid project ID format' });
   }
 
-  if (!projectId || typeof projectId !== 'string') {
-    return res.status(400).json({ error: 'Project ID is required' });
+  const userIsAdmin = await isAdmin(req.user!.id);
+  if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+    return res.status(404).json({ error: 'Project not found or access denied' });
   }
 
   try {
+    const documentIds = await simpleOcrService.getDocumentIdsWithOcrForProject(projectId);
+    res.json({ documentIds });
+  } catch (error) {
+    console.error('Error listing OCR documents:', error);
+    res.status(500).json({ error: 'Failed to list OCR documents' });
+  }
+});
+
+// Search OCR results
+router.get('/search/:documentId', requireAuth, validateUUIDParam('documentId'), async (req, res) => {
+  const { documentId } = req.params;
+  const query = firstQueryString(req.query.query);
+  const projectId = firstQueryString(req.query.projectId);
+
+  if (!query || !query.trim()) {
+    return res.status(400).json({ error: 'Search query is required' });
+  }
+
+  if (!projectId) {
+    return res.status(400).json({ error: 'Project ID is required' });
+  }
+
+  const userIsAdmin = await isAdmin(req.user!.id);
+  if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+    return res.status(404).json({ error: 'Project not found or access denied' });
+  }
+
+  const trimmedQuery = query.trim();
+
+  try {
       // Search OCR results using the simple OCR service
-      const searchResults = await simpleOcrService.searchOCRResults(projectId, documentId, query);
+      const searchResults = await simpleOcrService.searchOCRResults(projectId, documentId, trimmedQuery);
       
-      console.log(`🔍 Raw search results from database:`, searchResults.map(r => ({ page_number: r.page_number, text_preview: r.text_content.substring(0, 50) })));
+      console.log(`🔍 Raw search results from database:`, searchResults.map((r: { page_number?: number; text_content?: string | null }) => ({
+        page_number: r.page_number,
+        text_preview: (typeof r.text_content === 'string' ? r.text_content : '').substring(0, 50),
+      })));
 
     // Format results for frontend
-    const formattedResults = searchResults.map(result => {
-      const text = result.text_content.toLowerCase();
-      const queryLower = query.toLowerCase();
+    const formattedResults = searchResults.map((result: { page_number?: number; text_content?: string | null; confidence_score?: number; processing_method?: string; processing_time_ms?: number }) => {
+      const rawText = typeof result.text_content === 'string' ? result.text_content : '';
+      const text = rawText.toLowerCase();
+      const queryLower = trimmedQuery.toLowerCase();
       const matches = [];
       let index = text.indexOf(queryLower);
       
       while (index !== -1) {
         const start = Math.max(0, index - 50);
-        const end = Math.min(text.length, index + query.length + 50);
-        const snippet = result.text_content.substring(start, end);
+        const end = Math.min(text.length, index + trimmedQuery.length + 50);
+        const snippet = rawText.substring(start, end);
         
         matches.push({
           snippet,
           position: index,
-          confidence: result.confidence_score
+          confidence: result.confidence_score ?? 0
         });
         
         index = text.indexOf(queryLower, index + 1);
@@ -160,16 +203,20 @@ router.get('/search/:documentId', requireAuth, validateUUIDParam('documentId'), 
         pageNumber: result.page_number,
         matches,
         totalMatches: matches.length,
-        method: result.processing_method,
-        processingTime: result.processing_time_ms
+        method: result.processing_method ?? 'direct_extraction',
+        processingTime: result.processing_time_ms ?? 0
       };
-    }).filter(result => result.totalMatches > 0)
+    })
+      .filter(
+        (result): result is typeof result & { pageNumber: number } =>
+          result.totalMatches > 0 && result.pageNumber != null && Number.isFinite(result.pageNumber)
+      )
       .sort((a, b) => b.totalMatches - a.totalMatches);
 
     console.log(`📊 Formatted results being sent to frontend:`, formattedResults.map(r => ({ pageNumber: r.pageNumber, totalMatches: r.totalMatches })));
 
     res.json({
-      query,
+      query: trimmedQuery,
       totalResults: formattedResults.reduce((sum, result) => sum + result.totalMatches, 0),
       results: formattedResults
     });

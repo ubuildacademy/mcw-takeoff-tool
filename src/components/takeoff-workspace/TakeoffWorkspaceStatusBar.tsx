@@ -131,27 +131,42 @@ export function TakeoffWorkspaceStatusBar({
             </div>
           </div>
         ) : ocrJobs.size > 0 ? (
-          <div className="flex items-center gap-3 bg-purple-50 px-3 py-2 rounded-lg border border-purple-200">
-            <div className="animate-spin w-5 h-5 border-2 border-purple-500 border-t-transparent rounded-full"></div>
-            <div className="flex flex-col">
-              <span className="text-sm font-medium text-purple-700">
+          <div className="flex items-center gap-3 bg-purple-50 px-3 py-2 rounded-lg border border-purple-200 max-w-md">
+            <div className="animate-spin w-5 h-5 border-2 border-purple-500 border-t-transparent rounded-full shrink-0"></div>
+            <div className="flex flex-col min-w-0 flex-1">
+              <span className="text-sm font-medium text-purple-700 truncate">
                 {ocrJobs.size === 1
-                  ? `OCR Processing: ${Array.from(ocrJobs.values())[0].documentName}`
-                  : `OCR Processing ${ocrJobs.size} documents...`}
+                  ? `OCR: ${Array.from(ocrJobs.values())[0].documentName}`
+                  : `OCR: ${ocrJobs.size} documents`}
               </span>
-              {ocrJobs.size === 1 && (() => {
-                const job: OcrJobEntry = Array.from(ocrJobs.values())[0];
+              {(() => {
+                const jobs = Array.from(ocrJobs.values()) as OcrJobEntry[];
+                const avgProgress = jobs.length
+                  ? Math.round(
+                      jobs.reduce((sum, j) => sum + (typeof j.progress === 'number' ? j.progress : 0), 0) /
+                        jobs.length
+                    )
+                  : 0;
+                const single = jobs[0];
+                const pageHint =
+                  ocrJobs.size === 1 &&
+                  single?.processedPages &&
+                  single?.totalPages &&
+                  single.totalPages > 0
+                    ? ` (${single.processedPages}/${single.totalPages} pages)`
+                    : ocrJobs.size > 1
+                      ? ` · avg across ${ocrJobs.size} files`
+                      : '';
                 return (
                   <div className="flex items-center gap-2 mt-1">
-                    <div className="w-32 h-2 bg-purple-200 rounded-full overflow-hidden">
+                    <div className="w-36 h-2 bg-purple-200 rounded-full overflow-hidden shrink-0">
                       <div
                         className="h-full bg-purple-500 transition-all duration-300 ease-out rounded-full"
-                        style={{ width: `${job.progress}%` }}
+                        style={{ width: `${Math.min(100, avgProgress)}%` }}
                       ></div>
                     </div>
-                    <span className="text-xs text-purple-600 font-medium">
-                      {job.progress}%
-                      {job.processedPages && job.totalPages ? ` (${job.processedPages}/${job.totalPages})` : ''}
+                    <span className="text-xs text-purple-600 font-medium tabular-nums shrink-0">
+                      {avgProgress}%{pageHint}
                     </span>
                   </div>
                 );

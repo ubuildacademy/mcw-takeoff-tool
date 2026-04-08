@@ -3,7 +3,7 @@
  * plus pure helpers (calculateRunningLength, applyOrthoSnapping). Event handlers
  * remain in PDFViewer and use this state. Used by PDFViewer.
  */
-import { useState, useRef, useCallback, useEffect, type RefObject } from 'react';
+import { useState, useRef, useCallback, useEffect, useLayoutEffect, type RefObject } from 'react';
 import type { Annotation } from '../../types';
 import type { Measurement, SelectionBox } from '../PDFViewer.types';
 import { useUserPreferencesStore } from '../../store/slices/userPreferencesSlice';
@@ -106,6 +106,10 @@ export interface UsePDFViewerMeasurementsResult {
   // Continuous linear drawing state
   isContinuousDrawing: boolean;
   setIsContinuousDrawing: React.Dispatch<React.SetStateAction<boolean>>;
+  /** Latest arrays for double-click completion (state alone can lag one click behind dblclick). */
+  activePointsRef: React.MutableRefObject<{ x: number; y: number }[]>;
+  currentMeasurementRef: React.MutableRefObject<{ x: number; y: number }[]>;
+  isContinuousDrawingRef: React.MutableRefObject<boolean>;
   activePoints: { x: number; y: number }[];
   setActivePoints: React.Dispatch<React.SetStateAction<{ x: number; y: number }[]>>;
   rubberBandElement: SVGLineElement | null;
@@ -188,6 +192,18 @@ export function usePDFViewerMeasurements({
   // Continuous linear drawing state
   const [isContinuousDrawing, setIsContinuousDrawing] = useState(false);
   const [activePoints, setActivePoints] = useState<{ x: number; y: number }[]>([]);
+  const activePointsRef = useRef<{ x: number; y: number }[]>([]);
+  const currentMeasurementRef = useRef<{ x: number; y: number }[]>([]);
+  const isContinuousDrawingRef = useRef(false);
+  useLayoutEffect(() => {
+    activePointsRef.current = activePoints;
+  }, [activePoints]);
+  useLayoutEffect(() => {
+    currentMeasurementRef.current = currentMeasurement;
+  }, [currentMeasurement]);
+  useLayoutEffect(() => {
+    isContinuousDrawingRef.current = isContinuousDrawing;
+  }, [isContinuousDrawing]);
   const [rubberBandElement, setRubberBandElement] = useState<SVGLineElement | null>(null);
   const [runningLength, setRunningLength] = useState<number>(0);
   const pageRubberBandRefs = useRef<Record<number, SVGLineElement | null>>({});
@@ -330,6 +346,9 @@ export function usePDFViewerMeasurements({
     setIsSelectionMode,
     isContinuousDrawing,
     setIsContinuousDrawing,
+    activePointsRef,
+    currentMeasurementRef,
+    isContinuousDrawingRef,
     activePoints,
     setActivePoints,
     rubberBandElement,

@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { storage, StoredFileMeta } from '../storage';
 import { supabase, TABLES } from '../supabase';
 import { requireAuth, isAdmin, hasProjectAccess, validateUUIDParam } from '../middleware';
+import { triggerOCRForDocument } from './ocr';
 
 const router = express.Router();
 
@@ -188,6 +189,13 @@ router.post('/upload', requireAuth, handleUpload, async (req, res) => {
     
     console.log('File saved to storage successfully');
     console.log('File saved:', savedFile);
+
+    // Server-side OCR so every upload gets text search / AI, even if the browser skips the client kick.
+    if (savedFile.mimetype === 'application/pdf' && projectId && projectId !== 'default') {
+      void triggerOCRForDocument(projectId, savedFile.id).catch((err) => {
+        console.error('OCR trigger after upload failed:', err);
+      });
+    }
 
     return res.json({ success: true, file: savedFile });
   } catch (e) {

@@ -10,7 +10,7 @@ import { useAnnotationStore } from '../../store/slices/annotationSlice';
 import { useDocumentViewStore } from '../../store/slices/documentViewSlice';
 import { toast } from 'sonner';
 import { sheetService } from '../../services/apiService';
-import type { TakeoffCondition, TakeoffMeasurement, PDFDocument, Sheet } from '../../types';
+import type { TakeoffCondition, TakeoffMeasurement, PDFDocument, ProjectCostBreakdown, Sheet } from '../../types';
 
 export interface UseTakeoffExportOptions {
   projectId: string;
@@ -25,6 +25,47 @@ export interface ReportDataPage {
   sheetId: string;
   measurements: unknown[];
   total: number;
+}
+
+function getHiddenMarkupConditionIdsSet(projectId: string): Set<string> {
+  const map = useConditionStore.getState().hiddenMarkupConditionIdsByProject;
+  return new Set(map?.[projectId] ?? []);
+}
+
+/** Cost summary for exports: omit conditions the user hid from the canvas/reports. */
+function filterCostBreakdownForExport(
+  breakdown: ProjectCostBreakdown,
+  hiddenIds: Set<string>
+): ProjectCostBreakdown {
+  const conditions = breakdown.conditions.filter((c) => !hiddenIds.has(c.condition.id));
+  let totalMaterialCost = 0;
+  let totalEquipmentCost = 0;
+  let totalWasteCost = 0;
+  let conditionsWithCosts = 0;
+  conditions.forEach((b) => {
+    totalMaterialCost += b.materialCost;
+    totalEquipmentCost += b.equipmentCost;
+    totalWasteCost += b.wasteCost;
+    if (b.hasCosts) conditionsWithCosts++;
+  });
+  const subtotal = totalMaterialCost + totalEquipmentCost + totalWasteCost;
+  const profitMarginPercent = breakdown.summary.profitMarginPercent;
+  const profitMarginAmount = subtotal * (profitMarginPercent / 100);
+  const totalCost = subtotal + profitMarginAmount;
+  return {
+    conditions,
+    summary: {
+      totalMaterialCost,
+      totalEquipmentCost,
+      totalWasteCost,
+      subtotal,
+      profitMarginPercent,
+      profitMarginAmount,
+      totalCost,
+      conditionsWithCosts,
+      totalConditions: conditions.length,
+    },
+  };
 }
 
 export interface UseTakeoffExportResult {
@@ -98,7 +139,10 @@ export function useTakeoffExport({
   };
 
   const getQuantityReportDataAsync = async () => {
-    const projectMeasurements = getProjectTakeoffMeasurements(projectId);
+    const hiddenIds = getHiddenMarkupConditionIdsSet(projectId);
+    const projectMeasurements = getProjectTakeoffMeasurements(projectId).filter(
+      (m) => !hiddenIds.has(m.conditionId)
+    );
     const projectConditions = conditions.filter((c) => c.projectId === projectId);
     const pagesWithMeasurements = new Map<string, { pageNumber: number; sheetName: string; sheetNumber: string | null; sheetId: string }>();
 
@@ -122,6 +166,7 @@ export function useTakeoffExport({
     const reportData: Record<string, { condition: TakeoffCondition; pages: Record<string, ReportDataPage>; grandTotal: number }> = {};
 
     projectConditions.forEach((condition) => {
+      if (hiddenIds.has(condition.id)) return;
       const conditionMeasurements = getConditionTakeoffMeasurements(projectId, condition.id);
       if (conditionMeasurements.length > 0) {
         const pages: Record<string, ReportDataPage> = {};
@@ -254,7 +299,8 @@ export function useTakeoffExport({
       const ExcelJS = (await import('exceljs')).default;
       const workbook = new ExcelJS.Workbook();
       const currentProject = useProjectStore.getState().getCurrentProject();
-      const costBreakdown = getProjectCostBreakdown(projectId);
+      const hiddenCostIds = getHiddenMarkupConditionIdsSet(projectId);
+      const costBreakdown = filterCostBreakdownForExport(getProjectCostBreakdown(projectId), hiddenCostIds);
 
       const formatDate = (dateString: string | undefined): string => {
         if (!dateString) return 'N/A';
@@ -1071,7 +1117,8 @@ export function useTakeoffExport({
       const jsPDF = (await import('jspdf')).default;
       const pdf = new jsPDF('p', 'mm', 'a4');
       const currentProject = useProjectStore.getState().getCurrentProject();
-      const costBreakdown = getProjectCostBreakdown(projectId);
+      const hiddenCostIds = getHiddenMarkupConditionIdsSet(projectId);
+      const costBreakdown = filterCostBreakdownForExport(getProjectCostBreakdown(projectId), hiddenCostIds);
 
       pdf.setFontSize(20);
       pdf.setFont('helvetica', 'bold');
@@ -1185,6 +1232,7 @@ export function useTakeoffExport({
       const storeAnnotations = useAnnotationStore.getState().annotations;
       const pagesForExport = Array.from(pagesWithMeasurements.values())
         .map((pageInfo) => {
+          const pageKey = `${pageInfo.sheetId}-${pageInfo.pageNumber}`;
           const pageMeasurements: TakeoffMeasurement[] = [];
           conditionIds.forEach((conditionId) => {
             const conditionMeasurements = getConditionTakeoffMeasurementsFromStore(projectId, conditionId);
@@ -1200,6 +1248,7 @@ export function useTakeoffExport({
             sheetId: pageInfo.sheetId,
             measurements: pageMeasurements,
             annotations: pageAnnotations,
+            pageLegendItems: pageBreakdown.get(pageKey),
           };
         })
         .filter((page) => page.measurements.length > 0 || page.annotations.length > 0)

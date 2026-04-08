@@ -39,8 +39,16 @@ class SimpleOCRService {
       console.log(`📄 PDF parsed: ${data.numpages} pages, ${data.text.length} characters`);
       
       if (!data.text || data.text.trim().length === 0) {
-        console.log('⚠️ No text found in PDF');
-        return [];
+        console.log('⚠️ No extractable text (often scanned PDFs); returning empty page rows');
+        const totalPages = Math.max(1, data.numpages || 1);
+        const processingTime = Math.max(1, Date.now() - startTime);
+        return Array.from({ length: totalPages }, (_, i) => ({
+          pageNumber: i + 1,
+          text: '',
+          confidence: 0,
+          processingTime: Math.max(1, Math.round(processingTime / totalPages)),
+          method: 'direct_extraction' as const,
+        }));
       }
       
       // Try to extract text per page if available
@@ -130,8 +138,16 @@ class SimpleOCRService {
       console.log(`📄 PDF parsed: ${data.numpages} pages, ${data.text.length} characters`);
       
       if (!data.text || data.text.trim().length === 0) {
-        console.log('⚠️ No text found in PDF');
-        return [];
+        console.log('⚠️ No extractable text in PDF (often scanned drawings); saving empty page rows so the job counts as processed');
+        const totalPages = Math.max(1, data.numpages || 1);
+        const perPageMs = Math.max(1, Math.round(processingTime / totalPages));
+        return Array.from({ length: totalPages }, (_, i) => ({
+          pageNumber: i + 1,
+          text: '',
+          confidence: 0,
+          processingTime: perPageMs,
+          method: 'direct_extraction' as const,
+        }));
       }
       
       // Update progress: PDF parsing complete, starting text processing (20%)
@@ -230,24 +246,23 @@ class SimpleOCRService {
   // Save OCR results to database
   async saveOCRResults(projectId: string, documentId: string, results: SimpleOCRResult[]): Promise<void> {
     try {
-      // Filter out empty results before inserting
-      const filteredResults = results.filter(r => r.text && r.text.trim().length > 0);
-
-      if (filteredResults.length === 0) {
-        console.log('⚠️ No valid OCR results to save.');
+      const rows = results.filter((r) => r != null && typeof r.pageNumber === 'number' && r.pageNumber >= 1);
+      if (rows.length === 0) {
+        console.log('⚠️ No OCR result rows to save.');
         return;
       }
 
-      // Insert results into ocr_results table
+      // Persist every page, including empty text (scanned PDFs / blank pages). Omitting empty pages
+      // used to save nothing, so the UI never showed those PDFs as "OCR'd" even after a successful job.
       const { error } = await supabase.from('ocr_results').insert(
-        filteredResults.map(result => ({
+        rows.map((result) => ({
           project_id: projectId,
           document_id: documentId,
           page_number: result.pageNumber,
-          text_content: result.text,
-          confidence_score: result.confidence,
+          text_content: typeof result.text === 'string' ? result.text : '',
+          confidence_score: result.confidence ?? 0,
           processing_method: result.method,
-          processing_time_ms: result.processingTime,
+          processing_time_ms: result.processingTime ?? 0,
         }))
       );
 
@@ -377,26 +392,59 @@ class SimpleOCRService {
   // Search OCR results from database
   async searchOCRResults(projectId: string, documentId: string, query: string): Promise<any[]> {
     try {
-      console.log(`🔍 Searching OCR results for: "${query}"`);
+      const q = query.trim();
+      if (!q) {
+        return [];
+      }
+      const qLower = q.toLowerCase();
+      console.log(`🔍 Searching OCR results for: "${q}"`);
 
+      // Load all pages for this document and match in-process. PostgREST ILIKE + escape
+      // rules can miss real matches; in-memory search matches the formatter below.
       const { data, error } = await supabase
         .from('ocr_results')
         .select('*')
         .eq('project_id', projectId)
         .eq('document_id', documentId)
-        .ilike('text_content', `%${query}%`);
+        .order('page_number');
 
       if (error) {
         console.error('❌ Failed to search OCR results:', error);
         throw error;
       }
 
-      console.log(`✅ Found ${data?.length || 0} matching results`);
-      return data || [];
+      const rows = data || [];
+      const matched = rows.filter((row) => {
+        const t = typeof row.text_content === 'string' ? row.text_content.toLowerCase() : '';
+        return t.includes(qLower);
+      });
+
+      console.log(`✅ Found ${matched.length} matching page(s) (${rows.length} total OCR row(s))`);
+      return matched;
     } catch (error) {
       console.error('❌ OCR search failed:', error);
       throw error;
     }
+  }
+
+  /** Distinct document IDs that have at least one row in ocr_results for this project. */
+  async getDocumentIdsWithOcrForProject(projectId: string): Promise<string[]> {
+    const { data, error } = await supabase
+      .from('ocr_results')
+      .select('document_id')
+      .eq('project_id', projectId);
+
+    if (error) {
+      console.error('❌ Failed to list OCR document ids for project:', error);
+      throw error;
+    }
+
+    const ids = new Set<string>();
+    for (const row of data || []) {
+      const id = (row as { document_id?: string | null }).document_id;
+      if (typeof id === 'string' && id.length > 0) ids.add(id);
+    }
+    return [...ids];
   }
 
   // Get OCR results for a document

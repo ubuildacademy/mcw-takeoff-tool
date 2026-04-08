@@ -211,22 +211,8 @@ export const fileService = {
       },
     });
 
-    // Automatically start OCR processing after successful upload (server-side)
-    // OCR runs in background for all PDF uploads to enable AI features
-    if (response.data.success && response.data.file) {
-      const { serverOcrService } = await import('./serverOcrService');
-      
-      // Start OCR processing in background (don't await)
-      serverOcrService.processDocument(response.data.file.id, projectId)
-        .then(() => {
-          if (import.meta.env.DEV) console.log(`✅ OCR processing completed for ${response.data.file.originalName}`);
-        })
-        .catch((error) => {
-          if (import.meta.env.DEV) console.error(`❌ OCR processing failed for ${response.data.file.originalName}:`, error);
-          // Don't throw the error, just log it since OCR is optional
-          // User can retry later via the analyze documents feature
-        });
-    }
+    // OCR is started on the server when the file is saved (see server routes/files upload).
+    // Avoid duplicating jobs here.
 
     return response.data;
   },
@@ -729,12 +715,24 @@ export const ocrApiService = {
   },
 
   async searchDocument(documentId: string, query: string, projectId: string) {
-    const response = await apiClient.get(`/ocr/search/${documentId}?query=${encodeURIComponent(query)}&projectId=${projectId}`);
+    const params = new URLSearchParams({
+      query,
+      projectId,
+    });
+    const response = await apiClient.get(`/ocr/search/${documentId}?${params.toString()}`);
+    return response.data;
+  },
+
+  /** Which file IDs in this project have at least one OCR row (source of truth vs N× /results calls). */
+  async getProjectDocumentIdsWithOcr(projectId: string): Promise<{ documentIds: string[] }> {
+    const params = new URLSearchParams({ projectId });
+    const response = await apiClient.get(`/ocr/documents-with-ocr?${params.toString()}`);
     return response.data;
   },
 
   async getDocumentResults(documentId: string, projectId: string) {
-    const response = await apiClient.get(`/ocr/results/${documentId}?projectId=${projectId}`);
+    const params = new URLSearchParams({ projectId });
+    const response = await apiClient.get(`/ocr/results/${documentId}?${params.toString()}`);
     return response.data;
   },
 

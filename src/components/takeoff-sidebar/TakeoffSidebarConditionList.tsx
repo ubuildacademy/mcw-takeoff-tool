@@ -2,6 +2,7 @@
  * Renders the list of takeoff conditions (search + condition cards) for the Conditions tab.
  */
 import { useState, useRef, useLayoutEffect, type ReactNode } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
@@ -19,7 +20,10 @@ import {
   Search,
   ChevronDown,
   ChevronUp,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
+import { useConditionStore } from '../../store/slices/conditionSlice';
 import type { TakeoffCondition } from '../../types';
 import { parseDocumentIdFromSheetId } from '../../lib/sheetUtils';
 import { cn, formatFeetAndInches } from '../../lib/utils';
@@ -155,6 +159,10 @@ export function TakeoffSidebarConditionList({
 }: TakeoffSidebarConditionListProps) {
   const [collapsedSearchedSymbols, setCollapsedSearchedSymbols] = useState<Set<string>>(new Set());
   const conditionRowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const hiddenMarkupConditionIds = useConditionStore(
+    useShallow((s) => (s.hiddenMarkupConditionIdsByProject ?? {})[projectId] ?? [])
+  );
+  const toggleMarkupHidden = useConditionStore((s) => s.toggleConditionMarkupHidden);
 
   useLayoutEffect(() => {
     if (!selectedConditionId) return;
@@ -258,6 +266,26 @@ export function TakeoffSidebarConditionList({
                   </div>
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleMarkupHidden(projectId, condition.id);
+                    }}
+                    className={`h-6 w-6 p-0 ${hiddenMarkupConditionIds.includes(condition.id) ? 'text-muted-foreground' : ''}`}
+                    title={
+                      hiddenMarkupConditionIds.includes(condition.id)
+                        ? 'Show markups on page'
+                        : 'Hide markups on page (still in sidebar; excluded from PDF/Excel)'
+                    }
+                  >
+                    {hiddenMarkupConditionIds.includes(condition.id) ? (
+                      <EyeOff className="w-3 h-3" />
+                    ) : (
+                      <Eye className="w-3 h-3" />
+                    )}
+                  </Button>
                   {(condition.type === 'area' || condition.type === 'volume') && onCutoutMode && (
                     <Button
                       variant="ghost"

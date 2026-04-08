@@ -153,12 +153,40 @@ router.post('/', requireAuth, async (req, res) => {
         error: 'Invalid type. Must be one of: area, volume, linear, count' 
       });
     }
+
+    if (!Array.isArray(points)) {
+      return res.status(400).json({ error: 'points must be an array' });
+    }
     
     // Verify access to project
     const hasAccess = await hasProjectAccess(userId!, projectId, userIsAdmin);
     if (!hasAccess) {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
+
+    const file = await storage.getFile(sheetId);
+    if (!file || file.projectId !== projectId) {
+      return res.status(400).json({
+        error: 'Document not found or does not belong to this project'
+      });
+    }
+
+    const conditionProjectId = await storage.getConditionProjectId(conditionId);
+    if (!conditionProjectId || conditionProjectId !== projectId) {
+      return res.status(400).json({
+        error: 'Condition not found for this project'
+      });
+    }
+
+    const finite = (v: unknown, fallback: number): number => {
+      const n = typeof v === 'number' ? v : Number(v);
+      return Number.isFinite(n) ? n : fallback;
+    };
+    const optionalFinite = (v: unknown): number | undefined => {
+      if (v === undefined || v === null) return undefined;
+      const n = typeof v === 'number' ? v : Number(v);
+      return Number.isFinite(n) ? n : undefined;
+    };
 
     const id = uuidv4();
     const now = Date.now().toString(); // Use Unix timestamp as string
@@ -170,15 +198,15 @@ router.post('/', requireAuth, async (req, res) => {
       conditionId,
       type,
       points,
-      calculatedValue,
+      calculatedValue: finite(calculatedValue, 0),
       unit,
       timestamp: now,
-      pdfPage: pdfPage || 1,
-      pdfCoordinates: pdfCoordinates || [],
+      pdfPage: Math.max(1, Math.trunc(finite(pdfPage, 1))),
+      pdfCoordinates: Array.isArray(pdfCoordinates) ? pdfCoordinates : [],
       conditionColor: conditionColor || '#000000',
       conditionName: conditionName || 'Unknown',
-      perimeterValue,
-      areaValue,
+      perimeterValue: optionalFinite(perimeterValue),
+      areaValue: optionalFinite(areaValue),
       stackOrder: typeof stackOrder === 'number' && Number.isFinite(stackOrder) ? stackOrder : 0
     };
     

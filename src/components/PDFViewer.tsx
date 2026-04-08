@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFPageProxy, PageViewport } from 'pdfjs-dist';
 import { useProjectStore } from '../store/slices/projectSlice';
@@ -45,6 +46,7 @@ import { takeoffMeasurementToPdfViewerMeasurement } from '../utils/takeoffMeasur
 import {
   canvasMeasurementSelectionMatchesCondition,
   findTakeoffMeasurementOnPage,
+  measurementDrawModeForCondition,
 } from '../utils/takeoffMeasurementLookup';
 import { setRestoreScrollPosition, setGetCurrentScrollPosition, setTriggerCalibration, setTriggerFitToWindow } from '../lib/windowBridge';
 
@@ -379,6 +381,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setIsSelectionMode,
     isContinuousDrawing,
     setIsContinuousDrawing,
+    activePointsRef,
+    currentMeasurementRef,
+    isContinuousDrawingRef,
     activePoints,
     setActivePoints,
     rubberBandElement: _rubberBandElement,
@@ -498,6 +503,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const setSelectedCondition = useConditionStore((s) => s.setSelectedCondition);
   const getSelectedCondition = useConditionStore((s) => s.getSelectedCondition);
   const conditions = useConditionStore((s) => s.conditions);
+  const hiddenMarkupConditionIds = useConditionStore(
+    useShallow((s) => (s.hiddenMarkupConditionIdsByProject ?? {})[effectiveProjectId ?? ''] ?? [])
+  );
   const addAnnotation = useAnnotationStore((s) => s.addAnnotation);
   const updateAnnotation = useAnnotationStore((s) => s.updateAnnotation);
   const getPageTakeoffMeasurements = useMeasurementStore((s) => s.getPageTakeoffMeasurements);
@@ -554,6 +562,39 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     return { selectedMeasurementIds: measurementIds, selectedAnnotationIds: annotationIds };
   }, [selectedMarkupIds, localAnnotations]);
+
+  /** Matches PDFViewer's "stay in markup selection" branch — plan selection aligns with sidebar condition but draw mode is off. */
+  const canvasSelectionMatchesCondition = useMemo(
+    () =>
+      canvasMeasurementSelectionMatchesCondition(
+        selectedMeasurementIds,
+        selectedAnnotationIds,
+        selectedMarkupIds,
+        selectedConditionId,
+        localTakeoffMeasurements,
+        effectiveProjectId || '',
+        file.id || '',
+        currentPage,
+        getPageTakeoffMeasurements
+      ),
+    [
+      selectedMeasurementIds,
+      selectedAnnotationIds,
+      selectedMarkupIds,
+      selectedConditionId,
+      localTakeoffMeasurements,
+      effectiveProjectId,
+      file.id,
+      currentPage,
+      getPageTakeoffMeasurements,
+    ]
+  );
+
+  const syncMeasurementTypeFromSelectedCondition = useCallback(() => {
+    const condition = getSelectedCondition();
+    if (!condition || condition.type === 'auto-count') return;
+    setMeasurementType(measurementDrawModeForCondition(condition));
+  }, [getSelectedCondition, setMeasurementType]);
 
   // When the user selects a measurement on the canvas, sync the sidebar to that measurement's condition.
   // Handlers also call syncStoreConditionFromMeasurementId synchronously; this effect covers any other paths.
@@ -629,6 +670,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     measurementType,
     isContinuousDrawing,
     setIsContinuousDrawing,
+    activePointsRef,
+    currentMeasurementRef,
+    isContinuousDrawingRef,
     activePoints,
     pageRubberBandRefs,
     setActivePoints,
@@ -640,7 +684,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setSelectedMarkupIds,
     selectedMeasurementIds,
     selectedAnnotationIds,
+    canvasSelectionMatchesCondition,
     isSelectionMode,
+    setIsSelectionMode,
+    syncMeasurementTypeFromSelectedCondition,
     currentProjectId: effectiveProjectId,
     file,
     currentViewport,
@@ -935,7 +982,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // CRITICAL FIX: Also ensure SVG element has correct pointer-events
       // This must be done after rendering in case rendering reset it
       if (svgOverlayRef.current) {
-        const shouldReceiveClicks = isSelectionMode || isCalibrating || annotationTool || isDrawingBoxSelection;
+        const shouldReceiveClicks =
+          (isSelectionMode || isCalibrating || annotationTool || isDrawingBoxSelection) &&
+          !isMeasuring &&
+          !cutoutMode;
         svgOverlayRef.current.style.pointerEvents = shouldReceiveClicks ? 'auto' : 'none';
       }
     } finally {
@@ -954,7 +1004,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         ), 0);
       }
     }
-  }, [updateMarkupPointerEvents, isSelectionMode, isCalibrating, annotationTool, isDrawingBoxSelection]);
+  }, [
+    updateMarkupPointerEvents,
+    isSelectionMode,
+    isCalibrating,
+    annotationTool,
+    isDrawingBoxSelection,
+    isMeasuring,
+    cutoutMode,
+  ]);
 
   useEffect(() => {
     renderMarkupsWithPointerEventsRef.current = renderMarkupsWithPointerEvents;
@@ -994,6 +1052,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         .map((apiMeasurement) => takeoffMeasurementToPdfViewerMeasurement(apiMeasurement))
         .filter((m): m is Measurement => m != null);
     }
+
+    const hiddenMarkupSet = new Set(hiddenMarkupConditionIds);
+    pageMeasurements = pageMeasurements.filter((m) => !hiddenMarkupSet.has(m.conditionId));
 
     // Paint order matches store: usePDFViewerData mirrors getPageTakeoffMeasurements(), which sorts by stackOrder.
     
@@ -1271,7 +1332,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
     
   // eslint-disable-next-line react-hooks/exhaustive-deps -- Large render callback; refs and some deps intentionally omitted to avoid cascade
-  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, annotationDragBox, annotationMoveId, annotationMoveIds, annotationMoveDelta, annotationColor, measurementDragBox, cutoutDragBox, measurementMoveId, measurementMoveIds, measurementMoveDelta, cutoutMode, currentCutout, isBoxSelectionMode, isDrawingBoxSelection, selectionBox, hyperlinkMode, hyperlinkDrawBox, effectiveProjectId, file.id, getPageTakeoffMeasurements, getSelectedCondition, measurementsLoading, getConditionColor, getConditionLineThickness, crosshairFullScreen, crosshairColor, crosshairStrokeWidth, showMeasurementLabels, showRunningLength, hyperlinkCountForFile]);
+  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, annotationDragBox, annotationMoveId, annotationMoveIds, annotationMoveDelta, annotationColor, measurementDragBox, cutoutDragBox, measurementMoveId, measurementMoveIds, measurementMoveDelta, cutoutMode, currentCutout, isBoxSelectionMode, isDrawingBoxSelection, selectionBox, hyperlinkMode, hyperlinkDrawBox, effectiveProjectId, file.id, getPageTakeoffMeasurements, getSelectedCondition, measurementsLoading, getConditionColor, getConditionLineThickness, crosshairFullScreen, crosshairColor, crosshairStrokeWidth, showMeasurementLabels, showRunningLength, hyperlinkCountForFile, hiddenMarkupConditionIds]);
 
   // OPTIMIZED: Update only visual styling of markups when selection changes (no full re-render)
   const updateMarkupSelection = useCallback((newSelectedIds: string[], previousSelectedIds: string[]) => {
@@ -1432,7 +1493,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
       }
     }
-  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, renderMarkupsWithPointerEvents, currentPage, currentViewport, isAnnotating, localAnnotations, annotationTool, annotationDragBox, annotationMoveId, annotationMoveIds, annotationMoveDelta, measurementDragBox, cutoutDragBox, cutoutMode, currentCutout, measurementMoveId, measurementMoveIds, measurementMoveDelta, isDrawingBoxSelection, selectionBox, currentAnnotation, isContinuousDrawing, activePoints, pdfDocument, measurementsLoading, effectiveProjectId, file.id, getPageTakeoffMeasurements, isSelectionMode, totalPages, conditions, hyperlinkCountForFile, hyperlinkMode, hyperlinkDrawBox]);
+  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, renderMarkupsWithPointerEvents, currentPage, currentViewport, isAnnotating, localAnnotations, annotationTool, annotationDragBox, annotationMoveId, annotationMoveIds, annotationMoveDelta, measurementDragBox, cutoutDragBox, cutoutMode, currentCutout, measurementMoveId, measurementMoveIds, measurementMoveDelta, isDrawingBoxSelection, selectionBox, currentAnnotation, isContinuousDrawing, activePoints, pdfDocument, measurementsLoading, effectiveProjectId, file.id, getPageTakeoffMeasurements, isSelectionMode, totalPages, conditions, hyperlinkCountForFile, hyperlinkMode, hyperlinkDrawBox, hiddenMarkupConditionIds]);
 
   // Track previous measurements for comparison (used by other logic)
   const prevLocalTakeoffMeasurementsRef = useRef<Measurement[]>([]);
@@ -1527,7 +1588,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // CRITICAL FIX: Update SVG element's pointer-events directly
     // This ensures the SVG receives clicks even if React hasn't re-rendered
-    const shouldSVGReceiveClicks = isSelectionMode || isCalibrating || annotationTool || isDrawingBoxSelection;
+    const shouldSVGReceiveClicks =
+      (isSelectionMode || isCalibrating || annotationTool || isDrawingBoxSelection) && !isMeasuring && !cutoutMode;
     svgOverlayRef.current.style.pointerEvents = shouldSVGReceiveClicks ? 'auto' : 'none';
     
     // Update hit-area pointer-events
@@ -1547,7 +1609,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // Track mode changes
     prevIsSelectionModeRef.current = isSelectionMode;
-  }, [isSelectionMode, isCalibrating, annotationTool, isDrawingBoxSelection, hyperlinkMode, updateMarkupPointerEvents]);
+  }, [
+    isSelectionMode,
+    isCalibrating,
+    annotationTool,
+    isDrawingBoxSelection,
+    hyperlinkMode,
+    updateMarkupPointerEvents,
+    isMeasuring,
+    cutoutMode,
+  ]);
 
   // Page visibility handler - ensures overlay is properly initialized when page becomes visible
   const onPageShown = useCallback((pageNum: number, viewport: PageViewport) => {
@@ -2138,27 +2209,28 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Complete continuous linear measurement
   const completeContinuousLinearMeasurement = useCallback(async () => {
-    if (activePoints.length < 2) return;
-    
+    const pts = activePointsRef.current;
+    if (pts.length < 2) return;
+
     // Remove rubber band element with guarded removal
     const currentRubberBand = pageRubberBandRefs.current[currentPage];
     if (currentRubberBand && svgOverlayRef.current && currentRubberBand.parentNode === svgOverlayRef.current) {
       svgOverlayRef.current.removeChild(currentRubberBand);
     }
-    
+
     // Clear page-scoped refs
     pageRubberBandRefs.current[currentPage] = null;
     setRubberBandElement(null);
-    
-    // Complete the measurement with all active points
-    completeMeasurement(activePoints);
-    
+
+    // Complete with ref snapshot — state can lag one click behind double-click completion
+    completeMeasurement(pts);
+
     // Reset continuous drawing state
     setIsContinuousDrawing(false);
     setActivePoints([]);
     setRunningLength(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Refs and setters stable; omit
-  }, [activePoints, currentPage, completeMeasurement]);
+  }, [currentPage, completeMeasurement]);
 
   useEffect(() => {
     createRubberBandElementRef.current = createRubberBandElement;
@@ -2551,42 +2623,29 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (selectedConditionId) {
       const condition = getSelectedCondition();
       if (condition) {
-        // Selecting measurement(s) on the canvas syncs selectedConditionId to that condition.
-        // Keep markup selection mode for any single- or multi-select (e.g. "Select all similar") —
-        // do not clear markups or enter "draw new measurements" mode (that path is for picking a
-        // condition in the sidebar).
-        if (
-          canvasMeasurementSelectionMatchesCondition(
-            selectedMeasurementIds,
-            selectedAnnotationIds,
-            selectedMarkupIds,
-            selectedConditionId,
-            localTakeoffMeasurements,
-            effectiveProjectId || '',
-            file.id || '',
-            currentPage,
-            getPageTakeoffMeasurements
-          )
-        ) {
+        // canvasSelectionMatchesCondition is a useMemo that mirrors the same check;
+        // using it here avoids putting selectedMarkupIds / selectedMeasurementIds in
+        // this effect's dependency array, which previously caused an infinite update
+        // loop (setSelectedMarkupIds([]) creates a new ref → deps change → re-run).
+        if (canvasSelectionMatchesCondition) {
           return;
         }
         // Auto-count conditions use box selection, NOT measurement mode
         // Check this FIRST before enabling measurement mode
         if (condition.type === 'auto-count') {
-          setIsMeasuring(false); // Disable measuring mode - auto-count uses box selection
+          setIsMeasuring(false);
           setIsSelectionMode(false);
-          setSelectedMarkupIds([]);
+          if (selectedMarkupIds.length > 0) setSelectedMarkupIds([]);
           setIsDeselecting(false);
-          setMeasurementType('count'); // Set type but don't enable measuring
-          // Auto-count box selection is handled by visualSearchMode prop and isSelectingSymbol state
-          return; // Exit early - don't enable measurement mode
+          setMeasurementType('count');
+          return;
         }
         
         // All other condition types use measurement mode
         setIsMeasuring(true);
         setIsSelectionMode(false);
-        setSelectedMarkupIds([]);
-        setIsDeselecting(false); // Clear deselection state
+        if (selectedMarkupIds.length > 0) setSelectedMarkupIds([]);
+        setIsDeselecting(false);
         
         // Always use condition.type first - linear conditions with height stay as linear
         // (auto-count already handled above with early return)
@@ -2624,10 +2683,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         // This doesn't trigger renders (just state updates) and respects guard logic
         setIsMeasuring(false);
         setIsSelectionMode(true);
-        setSelectedMarkupIds([]);
-        // DON'T set isDeselecting here - that's only for explicit deselection
-        // DON'T clear selectedConditionId in store - let the UI handle that
-        // This prevents flicker while allowing the UI to show the selection state
+        if (selectedMarkupIds.length > 0) setSelectedMarkupIds([]);
       }
     } else {
       setIsMeasuring(false);
@@ -2656,14 +2712,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     selectedConditionId,
     getSelectedCondition,
     titleblockSelectionMode,
-    selectedMeasurementIds,
-    selectedAnnotationIds,
-    selectedMarkupIds,
-    localTakeoffMeasurements,
-    effectiveProjectId,
-    file.id,
-    currentPage,
-    getPageTakeoffMeasurements,
+    canvasSelectionMatchesCondition,
   ]);
 
   // Space from workspace: leave plan-only markup selection and enable drawing for the already-selected condition.
@@ -2787,13 +2836,17 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     ? 'crosshair'
     : (isCalibrating ? 'crosshair' : (isMeasuring ? 'crosshair' : (isBoxSelectionMode ? 'crosshair' : (hyperlinkMode ? 'crosshair' : (isSelectionMode ? 'pointer' : 'default')))));
   const hasMarkupsForOverlay = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0 || hyperlinkCountForFile > 0;
+  // While measuring or cut-out drawing, clicks must reach the canvas (same handleClick as empty sheet).
+  // Forcing SVG to 'auto' whenever markups exist was blocking new markups on pages that already had takeoffs.
   const svgPointerEvents =
-    hasMarkupsForOverlay ||
-    isSelectionMode ||
-    isCalibrating ||
-    annotationTool ||
-    isDrawingBoxSelection ||
-    hyperlinkMode
+    !isMeasuring &&
+    !cutoutMode &&
+    (hasMarkupsForOverlay ||
+      isSelectionMode ||
+      isCalibrating ||
+      annotationTool ||
+      isDrawingBoxSelection ||
+      hyperlinkMode)
       ? 'auto'
       : 'none';
   const overlayKey = `overlay-${currentPage}-${file.id}`;

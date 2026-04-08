@@ -18,6 +18,7 @@ import { isEditableKeyboardTarget } from '../../utils/keyboardUtils';
 import { getMarkupIdsFromElementsFromPoint } from '../../utils/markupHitTest';
 import {
   clearCanvasConditionSelection,
+  measurementDrawModeForCondition,
   syncStoreConditionFromMeasurementId,
 } from '../../utils/takeoffMeasurementLookup';
 
@@ -105,6 +106,10 @@ export interface UsePDFViewerInteractionsOptions {
   measurementType: 'linear' | 'area' | 'volume' | 'count';
   isContinuousDrawing: boolean;
   setIsContinuousDrawing: React.Dispatch<React.SetStateAction<boolean>>;
+  /** Synced in useLayoutEffect in usePDFViewerMeasurements — use for dblclick completion (state lags behind the 2nd click). */
+  activePointsRef: MutableRefObject<{ x: number; y: number }[]>;
+  currentMeasurementRef: MutableRefObject<{ x: number; y: number }[]>;
+  isContinuousDrawingRef: MutableRefObject<boolean>;
   activePoints: { x: number; y: number }[];
   pageRubberBandRefs: MutableRefObject<Record<number, SVGLineElement | null>>;
   setActivePoints: React.Dispatch<React.SetStateAction<{ x: number; y: number }[]>>;
@@ -116,7 +121,12 @@ export interface UsePDFViewerInteractionsOptions {
   setSelectedMarkupIds: React.Dispatch<React.SetStateAction<string[]>>;
   selectedMeasurementIds: string[];
   selectedAnnotationIds: string[];
+  /** True when plan selection is only measurements and matches the sidebar condition (draw mode stays off until user draws or presses Space). */
+  canvasSelectionMatchesCondition: boolean;
   isSelectionMode: boolean;
+  setIsSelectionMode: React.Dispatch<React.SetStateAction<boolean>>;
+  /** Align measurement tool with the currently selected condition (same logic as PDFViewer condition effect). */
+  syncMeasurementTypeFromSelectedCondition: () => void;
   currentProjectId: string | null;
   file: { id: string };
   currentViewport: PageViewport | null;
@@ -273,6 +283,9 @@ export function usePDFViewerInteractions(
     measurementType,
     isContinuousDrawing,
     setIsContinuousDrawing,
+    activePointsRef,
+    currentMeasurementRef,
+    isContinuousDrawingRef,
     activePoints,
     pageRubberBandRefs,
     setActivePoints,
@@ -284,7 +297,10 @@ export function usePDFViewerInteractions(
     setSelectedMarkupIds,
     selectedMeasurementIds,
     selectedAnnotationIds,
+    canvasSelectionMatchesCondition,
     isSelectionMode,
+    setIsSelectionMode,
+    syncMeasurementTypeFromSelectedCondition,
     currentProjectId,
     file,
     currentViewport,
@@ -1673,14 +1689,30 @@ export function usePDFViewerInteractions(
         cssY = cssY / interactiveScale;
       }
       const currentSelectedConditionId = useConditionStore.getState().selectedConditionId;
+      let effectiveMeasurementType = measurementType;
+      let enteredDrawFromCanvasMatch = false;
       if (visualSearchMode || !!titleblockSelectionMode) {
         if (isSelectingSymbol) return;
         if (visualSearchMode) return;
       }
       if (isSelectionMode && selectedMarkupIds.length > 0 && !isMeasuring && !isCalibrating && !annotationTool) {
-        setSelectedMarkupIds([]);
-        clearCanvasConditionSelection();
-        return;
+        if (canvasSelectionMatchesCondition) {
+          // Plan-only selection matched the sidebar condition — enter draw mode and keep this click
+          // as the first vertex (otherwise we'd clear the condition and block new markups).
+          enteredDrawFromCanvasMatch = true;
+          setSelectedMarkupIds([]);
+          setIsMeasuring(true);
+          setIsSelectionMode(false);
+          syncMeasurementTypeFromSelectedCondition();
+          const drawCond = useConditionStore.getState().getSelectedCondition();
+          if (drawCond && drawCond.type !== 'auto-count') {
+            effectiveMeasurementType = measurementDrawModeForCondition(drawCond);
+          }
+        } else {
+          setSelectedMarkupIds([]);
+          clearCanvasConditionSelection();
+          return;
+        }
       }
       if (isCalibrating) {
         setCalibrationPoints((prev) => {
@@ -1820,13 +1852,13 @@ export function usePDFViewerInteractions(
         baseY = (cssY / viewport.height) * baseViewport.height;
       }
       let pdfCoords = { x: baseX / baseViewport.width, y: baseY / baseViewport.height };
-      if (isOrthoSnapping && isMeasuring && mousePosition) {
+      if (isOrthoSnapping && (isMeasuring || enteredDrawFromCanvasMatch) && mousePosition) {
         pdfCoords = mousePosition;
       } else if (isOrthoSnapping) {
         const referencePoints = cutoutMode ? currentCutout : isContinuousDrawing ? activePoints : currentMeasurement;
         pdfCoords = applyOrthoSnapping(pdfCoords, referencePoints);
       }
-      if (measurementType === 'linear') {
+      if (effectiveMeasurementType === 'linear') {
         if (!isContinuousDrawing) {
           setIsContinuousDrawing(true);
           setActivePoints([pdfCoords]);
@@ -1841,7 +1873,7 @@ export function usePDFViewerInteractions(
         }
       } else {
         setCurrentMeasurement((prev) => [...prev, pdfCoords]);
-        if (measurementType === 'count') completeMeasurementRef.current?.([pdfCoords]);
+        if (effectiveMeasurementType === 'count') completeMeasurementRef.current?.([pdfCoords]);
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Refs and setter stable; omit
@@ -1856,6 +1888,10 @@ export function usePDFViewerInteractions(
       currentViewport,
       isSelectionMode,
       selectedMarkupIds,
+      canvasSelectionMatchesCondition,
+      setIsMeasuring,
+      setIsSelectionMode,
+      syncMeasurementTypeFromSelectedCondition,
       isOrthoSnapping,
       isMeasuring,
       mousePosition,
@@ -1900,31 +1936,34 @@ export function usePDFViewerInteractions(
     (event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
       event.preventDefault();
       event.stopPropagation();
+      const ap = activePointsRef.current;
+      const cm = currentMeasurementRef.current;
+      const icd = isContinuousDrawingRef.current;
+
       if (cutoutMode && cutoutTargetConditionId && currentCutout.length >= 3) {
         completeCutoutRef.current?.(currentCutout);
         return;
       }
       if (isMeasuring) {
-        if (isContinuousDrawing && activePoints.length >= 2) {
+        // Refs hold the latest points — React state in this closure can still be one click behind
+        // when the 2nd click of a double-click updates state and dblclick fires in the same gesture.
+        if (icd && ap.length >= 2) {
           completeContinuousLinearMeasurementRef.current?.();
           return;
         }
-        if (measurementType === 'linear' && !isContinuousDrawing && currentMeasurement.length >= 2) {
-          completeMeasurementRef.current?.(currentMeasurement);
+        if (measurementType === 'linear' && !icd && cm.length >= 2) {
+          completeMeasurementRef.current?.(cm);
           return;
         }
-        if ((measurementType === 'area' || measurementType === 'volume') && currentMeasurement.length >= 3) {
-          completeMeasurementRef.current?.(currentMeasurement);
+        if ((measurementType === 'area' || measurementType === 'volume') && cm.length >= 3) {
+          completeMeasurementRef.current?.(cm);
           return;
         }
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Completion callbacks via refs; omit
     [
-      isContinuousDrawing,
-      activePoints,
       measurementType,
-      currentMeasurement,
       cutoutMode,
       cutoutTargetConditionId,
       currentCutout,
@@ -1985,6 +2024,8 @@ export function usePDFViewerInteractions(
         currentIsSelectionMode ||
         isCalibrating ||
         annotationTool ||
+        isMeasuring ||
+        cutoutMode ||
         (visualSearchMode && isSelectingSymbol) ||
         (!!titleblockSelectionMode && isSelectingSymbol)
       ) {
@@ -2070,12 +2111,19 @@ export function usePDFViewerInteractions(
         }
         e.stopPropagation();
         handleClick(e as React.MouseEvent<HTMLCanvasElement | SVGSVGElement>);
+      } else {
+        // If every OR above was false, SVG onClick used to do nothing while the canvas path still
+        // called handleClick — drawing broke whenever the overlay (not the canvas) received the click.
+        e.stopPropagation();
+        handleClick(e as React.MouseEvent<HTMLCanvasElement | SVGSVGElement>);
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Refs for completion/selection state; omit
     [
       isCalibrating,
       annotationTool,
+      isMeasuring,
+      cutoutMode,
       visualSearchMode,
       isSelectingSymbol,
       titleblockSelectionMode,

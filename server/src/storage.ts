@@ -180,6 +180,58 @@ function hasColumnNotFoundError(e: unknown): boolean {
   return msg.includes('line_thickness') && (msg.includes('does not exist') || msg.includes('undefined column'));
 }
 
+function finiteMeasurementNumber(value: unknown, fallback: number): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function optionalFiniteMeasurementNumber(value: unknown): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/** Snake_case row for Supabase; omits undefined optional keys so PostgREST does not receive bad values. */
+function mapTakeoffMeasurementToDbRow(measurement: StoredTakeoffMeasurement): Record<string, unknown> {
+  const row: Record<string, unknown> = {
+    id: measurement.id,
+    project_id: measurement.projectId,
+    sheet_id: measurement.sheetId,
+    condition_id: measurement.conditionId,
+    type: measurement.type,
+    points: measurement.points,
+    calculated_value: finiteMeasurementNumber(measurement.calculatedValue, 0),
+    unit: measurement.unit,
+    timestamp: measurement.timestamp,
+    pdf_page: Math.max(1, Math.trunc(finiteMeasurementNumber(measurement.pdfPage, 1))),
+    pdf_coordinates: measurement.pdfCoordinates ?? [],
+    condition_color: measurement.conditionColor,
+    condition_name: measurement.conditionName,
+    stack_order: measurement.stackOrder ?? 0
+  };
+
+  if (measurement.description !== undefined) {
+    row.description = measurement.description;
+  }
+  const perimeter = optionalFiniteMeasurementNumber(measurement.perimeterValue);
+  if (perimeter !== undefined) {
+    row.perimeter_value = perimeter;
+  }
+  const area = optionalFiniteMeasurementNumber(measurement.areaValue);
+  if (area !== undefined) {
+    row.area_value = area;
+  }
+  if (measurement.cutouts !== undefined) {
+    row.cutouts = measurement.cutouts;
+  }
+  const net = optionalFiniteMeasurementNumber(measurement.netCalculatedValue);
+  if (net !== undefined) {
+    row.net_calculated_value = net;
+  }
+
+  return row;
+}
+
 export interface StoredTakeoffMeasurement {
   id: string;
   projectId: string;
@@ -576,6 +628,21 @@ class SupabaseStorage {
     }));
   }
 
+  /** Lightweight lookup for validating measurement POST (condition belongs to project). */
+  async getConditionProjectId(conditionId: string): Promise<string | null> {
+    const { data, error } = await supabase
+      .from(TABLES.CONDITIONS)
+      .select('project_id')
+      .eq('id', conditionId)
+      .maybeSingle();
+
+    if (error) {
+      throw new DatabaseError('Failed to look up condition', error, { conditionId });
+    }
+    const row = data as { project_id: string } | null;
+    return row?.project_id ?? null;
+  }
+
   async saveCondition(condition: StoredCondition): Promise<StoredCondition> {
     // Map camelCase to snake_case for database
     const dbCondition: Record<string, unknown> = {
@@ -894,35 +961,30 @@ class SupabaseStorage {
   }
 
   async saveTakeoffMeasurement(measurement: StoredTakeoffMeasurement): Promise<StoredTakeoffMeasurement> {
-    // Map camelCase to snake_case for database
-    const dbMeasurement = {
-      id: measurement.id,
-      project_id: measurement.projectId,
-      sheet_id: measurement.sheetId,
-      condition_id: measurement.conditionId,
-      type: measurement.type,
-      points: measurement.points,
-      calculated_value: measurement.calculatedValue,
-      unit: measurement.unit,
-      timestamp: measurement.timestamp,
-      pdf_page: measurement.pdfPage,
-      pdf_coordinates: measurement.pdfCoordinates,
-      condition_color: measurement.conditionColor,
-      condition_name: measurement.conditionName,
-      perimeter_value: measurement.perimeterValue,
-      area_value: measurement.areaValue,
-      cutouts: measurement.cutouts,
-      net_calculated_value: measurement.netCalculatedValue,
-      stack_order: measurement.stackOrder ?? 0
-    };
-    
-    
-    const { data, error } = await supabase
+    let dbMeasurement = mapTakeoffMeasurementToDbRow(measurement);
+
+    let { data, error } = await supabase
       .from(TABLES.TAKEOFF_MEASUREMENTS)
       .upsert(dbMeasurement)
       .select()
       .single();
-    
+
+    if (error && hasColumnNotFoundError(error) && 'stack_order' in dbMeasurement) {
+      const withoutStack = { ...dbMeasurement };
+      delete withoutStack.stack_order;
+      console.warn(
+        '⚠️ takeoff_measurements.stack_order missing or failed; retrying without stack_order. Run migration: server/migrations/add_stack_order_to_takeoff_measurements.sql'
+      );
+      dbMeasurement = withoutStack;
+      const retry = await supabase
+        .from(TABLES.TAKEOFF_MEASUREMENTS)
+        .upsert(withoutStack)
+        .select()
+        .single();
+      data = retry.data;
+      error = retry.error;
+    }
+
     if (error) {
       console.error('❌ ERROR: Failed to save takeoff measurement:', error);
       console.error('❌ ERROR: Error details:', {
@@ -966,27 +1028,7 @@ class SupabaseStorage {
       return [];
     }
 
-    // Map camelCase to snake_case for database
-    const dbMeasurements = measurements.map(measurement => ({
-      id: measurement.id,
-      project_id: measurement.projectId,
-      sheet_id: measurement.sheetId,
-      condition_id: measurement.conditionId,
-      type: measurement.type,
-      points: measurement.points,
-      calculated_value: measurement.calculatedValue,
-      unit: measurement.unit,
-      timestamp: measurement.timestamp,
-      pdf_page: measurement.pdfPage,
-      pdf_coordinates: measurement.pdfCoordinates,
-      condition_color: measurement.conditionColor,
-      condition_name: measurement.conditionName,
-      perimeter_value: measurement.perimeterValue,
-      area_value: measurement.areaValue,
-      cutouts: measurement.cutouts,
-      net_calculated_value: measurement.netCalculatedValue,
-      stack_order: measurement.stackOrder ?? 0
-    }));
+    const dbMeasurements = measurements.map((m) => mapTakeoffMeasurementToDbRow(m));
 
     // Batch insert in chunks of 100 to avoid overwhelming the database
     const BATCH_SIZE = 100;
