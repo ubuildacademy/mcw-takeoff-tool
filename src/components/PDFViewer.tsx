@@ -2671,16 +2671,24 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           }
         }
       } else {
-        // VALIDATION FIX: Condition ID exists but condition object is missing
-        // This can happen during condition reload or if condition was deleted
-        // Clear measurement mode to prevent stale state and silent click failures
-        console.warn('Condition not found: selectedConditionId exists but condition object missing', {
-          selectedConditionId,
-          conditionsCount: useConditionStore.getState().conditions.length
-        });
-        
-        // Clear measurement state to prevent clicks from failing silently
-        // This doesn't trigger renders (just state updates) and respects guard logic
+        // Stale selection: ID not in store yet, wrong project, or deleted. Clear ID so we don't spam logs.
+        const condState = useConditionStore.getState();
+        const raw = condState.conditions.find((c) => c.id === selectedConditionId);
+        const projId = useProjectStore.getState().currentProjectId;
+        const wrongProject = raw != null && projId != null && raw.projectId !== projId;
+        const missing = raw == null;
+        const shouldClearSelection = wrongProject || (missing && !condState.loadingConditions);
+        if (shouldClearSelection) {
+          setSelectedCondition(null);
+        }
+        if (process.env.NODE_ENV === 'development' && (wrongProject || (missing && !condState.loadingConditions))) {
+          console.warn('Condition not found: selectedConditionId exists but condition object missing', {
+            selectedConditionId,
+            conditionsCount: condState.conditions.length,
+            wrongProject,
+            missing,
+          });
+        }
         setIsMeasuring(false);
         setIsSelectionMode(true);
         if (selectedMarkupIds.length > 0) setSelectedMarkupIds([]);
