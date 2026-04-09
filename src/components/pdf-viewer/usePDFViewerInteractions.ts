@@ -173,15 +173,12 @@ export interface UsePDFViewerInteractionsOptions {
   setMeasurementMoveStart: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
   measurementMoveOriginalPoints: { x: number; y: number }[] | null;
   setMeasurementMoveOriginalPoints: React.Dispatch<React.SetStateAction<{ x: number; y: number }[] | null>>;
-  measurementMoveDelta: { x: number; y: number } | null;
   setMeasurementMoveDelta: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
   measurementDragStart: { x: number; y: number } | null;
   setMeasurementDragStart: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
-  measurementDragBox: { x: number; y: number; width: number; height: number } | null;
   setMeasurementDragBox: React.Dispatch<React.SetStateAction<{ x: number; y: number; width: number; height: number } | null>>;
   cutoutDragStart: { x: number; y: number } | null;
   setCutoutDragStart: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
-  cutoutDragBox: { x: number; y: number; width: number; height: number } | null;
   setCutoutDragBox: React.Dispatch<React.SetStateAction<{ x: number; y: number; width: number; height: number } | null>>;
   annotationMoveId: string | null;
   setAnnotationMoveId: React.Dispatch<React.SetStateAction<string | null>>;
@@ -191,11 +188,9 @@ export interface UsePDFViewerInteractionsOptions {
   setAnnotationMoveStart: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
   annotationMoveOriginalPoints: { x: number; y: number }[] | null;
   setAnnotationMoveOriginalPoints: React.Dispatch<React.SetStateAction<{ x: number; y: number }[] | null>>;
-  annotationMoveDelta: { x: number; y: number } | null;
   setAnnotationMoveDelta: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
   annotationDragStart: { x: number; y: number } | null;
   setAnnotationDragStart: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
-  annotationDragBox: { x: number; y: number; width: number; height: number } | null;
   setAnnotationDragBox: React.Dispatch<React.SetStateAction<{ x: number; y: number; width: number; height: number } | null>>;
   // Cut-out
   cutoutMode: boolean;
@@ -337,7 +332,6 @@ export function usePDFViewerInteractions(
     setMeasurementMoveStart,
     measurementMoveOriginalPoints,
     setMeasurementMoveOriginalPoints,
-    measurementMoveDelta: _measurementMoveDelta,
     setMeasurementMoveDelta,
     measurementDragStart,
     setMeasurementDragStart,
@@ -353,11 +347,9 @@ export function usePDFViewerInteractions(
     setAnnotationMoveStart,
     annotationMoveOriginalPoints,
     setAnnotationMoveOriginalPoints,
-    annotationMoveDelta: _annotationMoveDelta,
     setAnnotationMoveDelta,
     annotationDragStart,
     setAnnotationDragStart,
-    annotationDragBox: _annotationDragBox,
     setAnnotationDragBox,
     cutoutMode,
     currentCutout,

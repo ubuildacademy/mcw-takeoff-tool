@@ -140,7 +140,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     rotation: 0
   });
   const [hyperlinkDrawStart, setHyperlinkDrawStart] = useState<{ x: number; y: number } | null>(null);
-  const [hyperlinkDrawBox, setHyperlinkDrawBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   
   // Use external props when available, fall back to internal state
   const currentPage = externalCurrentPage ?? internalCurrentPage;
@@ -240,6 +239,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const onPageShownRef = useRef<((pageNum: number, viewport: PageViewport) => void) | null>(null);
   const ephemeralRafRef = useRef<number | null>(null);
   const scheduleEphemeralPaintRef = useRef<(() => void) | null>(null);
+  const ephemeralMarkupGroupRef = useRef<SVGGElement | null>(null);
+  const hyperlinkDrawBoxRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  const moveDragRafRef = useRef<number | null>(null);
+  const scheduleMoveDragTransformRef = useRef<(() => void) | null>(null);
   const updateMarkupPointerEventsRef = useRef<((selectionMode: boolean) => void) | null>(null);
   /** Page number last fully rendered; used to allow re-render when user changes page in measuring mode */
   const lastRenderedPageRef = useRef<number | null>(null);
@@ -320,6 +323,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     currentViewport,
     scaleFactor,
     calibrationViewportRef,
+    scheduleMoveDragTransformRef,
+    scheduleEphemeralPaintRef,
   });
   const {
     isMeasuring,
@@ -356,13 +361,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setCurrentCutout,
     isSelectingSymbol,
     setIsSelectingSymbol,
-    selectionBox,
+    selectionBoxRef,
     setSelectionBox,
     selectionStart,
     setSelectionStart,
     annotationDragStart,
     setAnnotationDragStart,
-    annotationDragBox,
+    annotationDragBoxRef,
     setAnnotationDragBox,
     annotationMoveId,
     setAnnotationMoveId,
@@ -372,15 +377,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setAnnotationMoveStart,
     annotationMoveOriginalPoints,
     setAnnotationMoveOriginalPoints,
-    annotationMoveDelta,
+    annotationMoveDeltaRef,
     setAnnotationMoveDelta,
     measurementDragStart,
     setMeasurementDragStart,
-    measurementDragBox,
+    measurementDragBoxRef,
     setMeasurementDragBox,
     cutoutDragStart,
     setCutoutDragStart,
-    cutoutDragBox,
+    cutoutDragBoxRef,
     setCutoutDragBox,
     measurementMoveId,
     setMeasurementMoveId,
@@ -390,7 +395,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setMeasurementMoveStart,
     measurementMoveOriginalPoints,
     setMeasurementMoveOriginalPoints,
-    measurementMoveDelta,
+    measurementMoveDeltaRef,
     setMeasurementMoveDelta,
     selectedMarkupIds,
     setSelectedMarkupIds,
@@ -415,10 +420,17 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     applyOrthoSnapping,
   } = measurementsState;
 
-  const measurementMoveDeltaRef = useRef(measurementMoveDelta);
-  const annotationMoveDeltaRef = useRef(annotationMoveDelta);
-  measurementMoveDeltaRef.current = measurementMoveDelta;
-  annotationMoveDeltaRef.current = annotationMoveDelta;
+  const setHyperlinkDrawBox = useCallback<
+    React.Dispatch<React.SetStateAction<{ x: number; y: number; width: number; height: number } | null>>
+  >(
+    (action) => {
+      const next =
+        typeof action === 'function' ? action(hyperlinkDrawBoxRef.current) : action;
+      hyperlinkDrawBoxRef.current = next;
+      scheduleEphemeralPaintRef.current?.();
+    },
+    []
+  );
 
   // Shared "renders blocked" flags — reused by multiple effects to avoid
   // redundant re-computation.  Two variants: one without isDeselecting (for
@@ -744,15 +756,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setMeasurementMoveStart,
     measurementMoveOriginalPoints,
     setMeasurementMoveOriginalPoints,
-    measurementMoveDelta,
     setMeasurementMoveDelta,
     measurementDragStart,
     setMeasurementDragStart,
-    measurementDragBox,
     setMeasurementDragBox,
     cutoutDragStart,
     setCutoutDragStart,
-    cutoutDragBox,
     setCutoutDragBox,
     annotationMoveId,
     setAnnotationMoveId,
@@ -762,11 +771,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setAnnotationMoveStart,
     annotationMoveOriginalPoints,
     setAnnotationMoveOriginalPoints,
-    annotationMoveDelta,
     setAnnotationMoveDelta,
     annotationDragStart,
     setAnnotationDragStart,
-    annotationDragBox,
     setAnnotationDragBox,
     cutoutMode,
     currentCutout,
@@ -819,7 +826,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const paintEphemeralMarkupLayer = useCallback(() => {
     if (!svgOverlayRef.current || !currentViewport) return;
     const svg = svgOverlayRef.current;
-    const ephemeral = svg.querySelector(`#${SVG_EPHEMERAL_GROUP_ID}`) as SVGGElement | null;
+    let ephemeral = ephemeralMarkupGroupRef.current;
+    if (!ephemeral || !svg.contains(ephemeral)) {
+      ephemeral = svg.querySelector(`#${SVG_EPHEMERAL_GROUP_ID}`) as SVGGElement | null;
+      ephemeralMarkupGroupRef.current = ephemeral;
+    }
     if (!ephemeral) return;
     clearEphemeralMarkupLayer(ephemeral);
     const mousePosition = mousePositionRef.current;
@@ -872,6 +883,33 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       });
     }
 
+    const selectionBoxLive = selectionBoxRef.current;
+    if (isDrawingBoxSelection && selectionBoxLive && pageNum === currentPage) {
+      renderSVGSelectionBox(ephemeralSvg, selectionBoxLive, viewport);
+    }
+    const hyperlinkBoxLive = hyperlinkDrawBoxRef.current;
+    if (hyperlinkMode && hyperlinkBoxLive && pageNum === currentPage) {
+      renderSVGHyperlinkDrawBox(ephemeralSvg, hyperlinkBoxLive, viewport);
+    }
+    const annotationDragLive = annotationDragBoxRef.current;
+    if (
+      annotationDragLive &&
+      ['arrow', 'rectangle', 'circle'].includes(annotationTool ?? '') &&
+      pageNum === currentPage
+    ) {
+      renderSVGAnnotationDragBox(ephemeralSvg, annotationDragLive, viewport, annotationColor);
+    }
+    const measurementDragLive = measurementDragBoxRef.current;
+    if (measurementDragLive && (measurementType === 'area' || measurementType === 'volume') && pageNum === currentPage) {
+      const selectedCondition = getSelectedCondition();
+      const conditionColor = selectedCondition?.color || '#000000';
+      renderSVGAnnotationDragBox(ephemeralSvg, measurementDragLive, viewport, conditionColor);
+    }
+    const cutoutDragLive = cutoutDragBoxRef.current;
+    if (cutoutDragLive && cutoutMode && pageNum === currentPage) {
+      renderSVGAnnotationDragBox(ephemeralSvg, cutoutDragLive, viewport, '#ff0000');
+    }
+
     if (
       mousePosition &&
       (isMeasuring || isCalibrating || annotationTool || isBoxSelectionMode || hyperlinkMode || cutoutMode) &&
@@ -917,6 +955,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     crosshairFullScreen,
     crosshairColor,
     crosshairStrokeWidth,
+    selectionBoxRef,
+    hyperlinkDrawBoxRef,
+    annotationDragBoxRef,
+    measurementDragBoxRef,
+    cutoutDragBoxRef,
+    isDrawingBoxSelection,
   ]);
 
   const scheduleEphemeralPaint = useCallback(() => {
@@ -928,6 +972,28 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   }, [paintEphemeralMarkupLayer]);
 
   scheduleEphemeralPaintRef.current = scheduleEphemeralPaint;
+
+  const scheduleMoveDragTransform = useCallback(() => {
+    if (moveDragRafRef.current != null) return;
+    moveDragRafRef.current = requestAnimationFrame(() => {
+      moveDragRafRef.current = null;
+      const svg = svgOverlayRef.current;
+      const vp = currentViewport;
+      if (!svg || !vp) return;
+      const md = measurementMoveDeltaRef.current;
+      const ad = annotationMoveDeltaRef.current;
+      const mtx = md ? md.x * vp.width : 0;
+      const mty = md ? md.y * vp.height : 0;
+      const mt = `translate(${mtx}, ${mty})`;
+      svg.querySelectorAll(`.${SVG_MOVE_DRAG_MEASUREMENT_WRAP_CLASS}`).forEach((w) => w.setAttribute('transform', mt));
+      const atx = ad ? ad.x * vp.width : 0;
+      const aty = ad ? ad.y * vp.height : 0;
+      const at = `translate(${atx}, ${aty})`;
+      svg.querySelectorAll(`.${SVG_MOVE_DRAG_ANNOTATION_WRAP_CLASS}`).forEach((w) => w.setAttribute('transform', at));
+    });
+  }, [currentViewport]);
+
+  scheduleMoveDragTransformRef.current = scheduleMoveDragTransform;
 
   // Ensure component is mounted before rendering
   useEffect(() => {
@@ -1377,27 +1443,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       renderSVGCurrentCutoutCommitted(committed, viewport, currentCutout);
     }
 
-    if (isDrawingBoxSelection && selectionBox && pageNum === currentPage) {
-      renderSVGSelectionBox(committedSvg, selectionBox, viewport);
-    }
-    if (hyperlinkMode && hyperlinkDrawBox && pageNum === currentPage) {
-      renderSVGHyperlinkDrawBox(committedSvg, hyperlinkDrawBox, viewport);
-    }
-
-    if (annotationDragBox && ['arrow', 'rectangle', 'circle'].includes(annotationTool ?? '') && pageNum === currentPage) {
-      renderSVGAnnotationDragBox(committedSvg, annotationDragBox, viewport, annotationColor);
-    }
-
-    if (measurementDragBox && (measurementType === 'area' || measurementType === 'volume') && pageNum === currentPage) {
-      const selectedCondition = getSelectedCondition();
-      const conditionColor = selectedCondition?.color || '#000000';
-      renderSVGAnnotationDragBox(committedSvg, measurementDragBox, viewport, conditionColor);
-    }
-
-    if (cutoutDragBox && cutoutMode && pageNum === currentPage) {
-      renderSVGAnnotationDragBox(committedSvg, cutoutDragBox, viewport, '#ff0000');
-    }
-
     const annotationIdsMoving =
       annotationMoveIds.length > 0
         ? annotationMoveIds
@@ -1450,28 +1495,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     scheduleEphemeralPaint();
 
   // eslint-disable-next-line react-hooks/exhaustive-deps -- Large render callback; refs and some deps intentionally omitted to avoid cascade
-  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, isSelectionMode, currentPage, isContinuousDrawing, activePoints, localAnnotations, annotationTool, currentAnnotation, annotationDragBox, annotationMoveId, annotationMoveIds, annotationColor, measurementDragBox, cutoutDragBox, measurementMoveId, measurementMoveIds, cutoutMode, currentCutout, isBoxSelectionMode, isDrawingBoxSelection, selectionBox, hyperlinkMode, hyperlinkDrawBox, effectiveProjectId, file.id, getPageTakeoffMeasurements, getSelectedCondition, measurementsLoading, getConditionColor, getConditionLineThickness, crosshairFullScreen, crosshairColor, crosshairStrokeWidth, showMeasurementLabels, showRunningLength, hyperlinkCountForFile, hiddenMarkupConditionIds, scheduleEphemeralPaint]);
-
-  // Move-drag: update SVG transforms only (no full committed rebuild on each mousemove delta)
-  useEffect(() => {
-    const svg = svgOverlayRef.current;
-    if (!svg || !currentViewport) return;
-    const wraps = svg.querySelectorAll(`.${SVG_MOVE_DRAG_MEASUREMENT_WRAP_CLASS}`);
-    const tx = measurementMoveDelta ? measurementMoveDelta.x * currentViewport.width : 0;
-    const ty = measurementMoveDelta ? measurementMoveDelta.y * currentViewport.height : 0;
-    const t = `translate(${tx}, ${ty})`;
-    wraps.forEach((w) => w.setAttribute('transform', t));
-  }, [measurementMoveDelta, currentViewport]);
-
-  useEffect(() => {
-    const svg = svgOverlayRef.current;
-    if (!svg || !currentViewport) return;
-    const wraps = svg.querySelectorAll(`.${SVG_MOVE_DRAG_ANNOTATION_WRAP_CLASS}`);
-    const tx = annotationMoveDelta ? annotationMoveDelta.x * currentViewport.width : 0;
-    const ty = annotationMoveDelta ? annotationMoveDelta.y * currentViewport.height : 0;
-    const t = `translate(${tx}, ${ty})`;
-    wraps.forEach((w) => w.setAttribute('transform', t));
-  }, [annotationMoveDelta, currentViewport]);
+  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, isSelectionMode, currentPage, isContinuousDrawing, activePoints, localAnnotations, annotationTool, currentAnnotation, annotationMoveId, annotationMoveIds, annotationColor, measurementMoveId, measurementMoveIds, cutoutMode, currentCutout, isBoxSelectionMode, isDrawingBoxSelection, hyperlinkMode, effectiveProjectId, file.id, getPageTakeoffMeasurements, getSelectedCondition, measurementsLoading, getConditionColor, getConditionLineThickness, crosshairFullScreen, crosshairColor, crosshairStrokeWidth, showMeasurementLabels, showRunningLength, hyperlinkCountForFile, hiddenMarkupConditionIds, scheduleEphemeralPaint]);
 
   // OPTIMIZED: Update only visual styling of markups when selection changes (no full re-render)
   const updateMarkupSelection = useCallback((newSelectedIds: string[], previousSelectedIds: string[]) => {
@@ -1634,7 +1658,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
       }
     }
-  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, renderMarkupsWithPointerEvents, currentPage, currentViewport, isAnnotating, localAnnotations, annotationTool, annotationDragBox, annotationMoveId, annotationMoveIds, measurementDragBox, cutoutDragBox, cutoutMode, currentCutout, measurementMoveId, measurementMoveIds, isDrawingBoxSelection, selectionBox, currentAnnotation, isContinuousDrawing, activePoints, pdfDocument, measurementsLoading, effectiveProjectId, file.id, getPageTakeoffMeasurements, isSelectionMode, totalPages, conditions, hyperlinkCountForFile, hyperlinkMode, hyperlinkDrawBox, hiddenMarkupConditionIds]);
+  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, renderMarkupsWithPointerEvents, currentPage, currentViewport, isAnnotating, localAnnotations, annotationTool, annotationMoveId, annotationMoveIds, cutoutMode, currentCutout, measurementMoveId, measurementMoveIds, isDrawingBoxSelection, currentAnnotation, isContinuousDrawing, activePoints, pdfDocument, measurementsLoading, effectiveProjectId, file.id, getPageTakeoffMeasurements, isSelectionMode, totalPages, conditions, hyperlinkCountForFile, hyperlinkMode, hiddenMarkupConditionIds]);
 
   // Track previous measurements for comparison (used by other logic)
   const prevLocalTakeoffMeasurementsRef = useRef<Measurement[]>([]);

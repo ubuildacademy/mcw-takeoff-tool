@@ -15,6 +15,10 @@ export interface UsePDFViewerMeasurementsOptions {
     viewportWidth: number;
     viewportHeight: number;
   } | null>;
+  /** PDFViewer assigns rAF-coalesced SVG transform updates; avoids React re-renders on every move-drag mousemove. */
+  scheduleMoveDragTransformRef?: RefObject<(() => void) | null>;
+  /** PDFViewer assigns batched ephemeral-layer repaint for drag rectangles (area/volume, annotation, cutout, visual-search box). */
+  scheduleEphemeralPaintRef?: RefObject<(() => void) | null>;
 }
 
 export interface UsePDFViewerMeasurementsResult {
@@ -60,14 +64,15 @@ export interface UsePDFViewerMeasurementsResult {
   // Visual search state
   isSelectingSymbol: boolean;
   setIsSelectingSymbol: React.Dispatch<React.SetStateAction<boolean>>;
-  selectionBox: SelectionBox | null;
+  /** Visual-search / titleblock drag rect; ref-only (ephemeral layer). */
+  selectionBoxRef: React.MutableRefObject<SelectionBox | null>;
   setSelectionBox: React.Dispatch<React.SetStateAction<SelectionBox | null>>;
   selectionStart: { x: number; y: number } | null;
   setSelectionStart: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
   // Annotation drag-to-draw state (rectangle/circle/arrow)
   annotationDragStart: { x: number; y: number } | null;
   setAnnotationDragStart: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
-  annotationDragBox: { x: number; y: number; width: number; height: number } | null;
+  annotationDragBoxRef: React.MutableRefObject<{ x: number; y: number; width: number; height: number } | null>;
   setAnnotationDragBox: React.Dispatch<React.SetStateAction<{ x: number; y: number; width: number; height: number } | null>>;
   // Annotation move state (drag selected annotation in selection mode; move all selected on drag)
   annotationMoveId: string | null;
@@ -78,17 +83,18 @@ export interface UsePDFViewerMeasurementsResult {
   setAnnotationMoveStart: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
   annotationMoveOriginalPoints: { x: number; y: number }[] | null;
   setAnnotationMoveOriginalPoints: React.Dispatch<React.SetStateAction<{ x: number; y: number }[] | null>>;
-  annotationMoveDelta: { x: number; y: number } | null;
+  /** Normalized drag delta during annotation move; ref-only (no re-render on mousemove). */
+  annotationMoveDeltaRef: React.MutableRefObject<{ x: number; y: number } | null>;
   setAnnotationMoveDelta: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
   // Measurement drag-to-draw state (area/volume)
   measurementDragStart: { x: number; y: number } | null;
   setMeasurementDragStart: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
-  measurementDragBox: { x: number; y: number; width: number; height: number } | null;
+  measurementDragBoxRef: React.MutableRefObject<{ x: number; y: number; width: number; height: number } | null>;
   setMeasurementDragBox: React.Dispatch<React.SetStateAction<{ x: number; y: number; width: number; height: number } | null>>;
   // Cut-out drag-to-draw state (rectangle)
   cutoutDragStart: { x: number; y: number } | null;
   setCutoutDragStart: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
-  cutoutDragBox: { x: number; y: number; width: number; height: number } | null;
+  cutoutDragBoxRef: React.MutableRefObject<{ x: number; y: number; width: number; height: number } | null>;
   setCutoutDragBox: React.Dispatch<React.SetStateAction<{ x: number; y: number; width: number; height: number } | null>>;
   // Measurement move state (drag selected measurement in selection mode; move all selected on drag)
   measurementMoveId: string | null;
@@ -99,7 +105,8 @@ export interface UsePDFViewerMeasurementsResult {
   setMeasurementMoveStart: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
   measurementMoveOriginalPoints: { x: number; y: number }[] | null;
   setMeasurementMoveOriginalPoints: React.Dispatch<React.SetStateAction<{ x: number; y: number }[] | null>>;
-  measurementMoveDelta: { x: number; y: number } | null;
+  /** Normalized drag delta during measurement move; ref-only (no re-render on mousemove). */
+  measurementMoveDeltaRef: React.MutableRefObject<{ x: number; y: number } | null>;
   setMeasurementMoveDelta: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
   // Selection state (markups) — multi-select via Cmd+click
   selectedMarkupIds: string[];
@@ -132,6 +139,8 @@ export function usePDFViewerMeasurements({
   currentViewport,
   scaleFactor,
   calibrationViewportRef,
+  scheduleMoveDragTransformRef,
+  scheduleEphemeralPaintRef,
 }: UsePDFViewerMeasurementsOptions): UsePDFViewerMeasurementsResult {
   // Measurement state
   const [isMeasuring, setIsMeasuring] = useState(false);
@@ -166,34 +175,94 @@ export function usePDFViewerMeasurements({
 
   // Visual search state
   const [isSelectingSymbol, setIsSelectingSymbol] = useState(false);
-  const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
+  const selectionBoxRef = useRef<SelectionBox | null>(null);
+  const setSelectionBox = useCallback<React.Dispatch<React.SetStateAction<SelectionBox | null>>>(
+    (action) => {
+      const next =
+        typeof action === 'function' ? action(selectionBoxRef.current) : action;
+      selectionBoxRef.current = next;
+      scheduleEphemeralPaintRef?.current?.();
+    },
+    [scheduleEphemeralPaintRef]
+  );
   const [selectionStart, setSelectionStart] = useState<{ x: number; y: number } | null>(null);
 
   // Annotation drag-to-draw state (rectangle/circle/arrow)
   const [annotationDragStart, setAnnotationDragStart] = useState<{ x: number; y: number } | null>(null);
-  const [annotationDragBox, setAnnotationDragBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const annotationDragBoxRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  const setAnnotationDragBox = useCallback<
+    React.Dispatch<React.SetStateAction<{ x: number; y: number; width: number; height: number } | null>>
+  >(
+    (action) => {
+      const next =
+        typeof action === 'function' ? action(annotationDragBoxRef.current) : action;
+      annotationDragBoxRef.current = next;
+      scheduleEphemeralPaintRef?.current?.();
+    },
+    [scheduleEphemeralPaintRef]
+  );
 
   // Annotation move state (drag selected annotation in selection mode; move all selected on drag)
   const [annotationMoveId, setAnnotationMoveId] = useState<string | null>(null);
   const [annotationMoveIds, setAnnotationMoveIds] = useState<string[]>([]);
   const [annotationMoveStart, setAnnotationMoveStart] = useState<{ x: number; y: number } | null>(null);
   const [annotationMoveOriginalPoints, setAnnotationMoveOriginalPoints] = useState<{ x: number; y: number }[] | null>(null);
-  const [annotationMoveDelta, setAnnotationMoveDelta] = useState<{ x: number; y: number } | null>(null);
+  const annotationMoveDeltaRef = useRef<{ x: number; y: number } | null>(null);
+  const setAnnotationMoveDelta = useCallback<React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>>(
+    (action) => {
+      const next =
+        typeof action === 'function' ? action(annotationMoveDeltaRef.current) : action;
+      annotationMoveDeltaRef.current = next;
+      scheduleMoveDragTransformRef?.current?.();
+    },
+    [scheduleMoveDragTransformRef]
+  );
 
   // Measurement drag-to-draw state (area/volume)
   const [measurementDragStart, setMeasurementDragStart] = useState<{ x: number; y: number } | null>(null);
-  const [measurementDragBox, setMeasurementDragBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const measurementDragBoxRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  const setMeasurementDragBox = useCallback<
+    React.Dispatch<React.SetStateAction<{ x: number; y: number; width: number; height: number } | null>>
+  >(
+    (action) => {
+      const next =
+        typeof action === 'function' ? action(measurementDragBoxRef.current) : action;
+      measurementDragBoxRef.current = next;
+      scheduleEphemeralPaintRef?.current?.();
+    },
+    [scheduleEphemeralPaintRef]
+  );
 
   // Cut-out drag-to-draw rectangle (same interaction as area/volume box draw)
   const [cutoutDragStart, setCutoutDragStart] = useState<{ x: number; y: number } | null>(null);
-  const [cutoutDragBox, setCutoutDragBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const cutoutDragBoxRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  const setCutoutDragBox = useCallback<
+    React.Dispatch<React.SetStateAction<{ x: number; y: number; width: number; height: number } | null>>
+  >(
+    (action) => {
+      const next =
+        typeof action === 'function' ? action(cutoutDragBoxRef.current) : action;
+      cutoutDragBoxRef.current = next;
+      scheduleEphemeralPaintRef?.current?.();
+    },
+    [scheduleEphemeralPaintRef]
+  );
 
   // Measurement move state (drag selected measurement in selection mode; move all selected on drag)
   const [measurementMoveId, setMeasurementMoveId] = useState<string | null>(null);
   const [measurementMoveIds, setMeasurementMoveIds] = useState<string[]>([]);
   const [measurementMoveStart, setMeasurementMoveStart] = useState<{ x: number; y: number } | null>(null);
   const [measurementMoveOriginalPoints, setMeasurementMoveOriginalPoints] = useState<{ x: number; y: number }[] | null>(null);
-  const [measurementMoveDelta, setMeasurementMoveDelta] = useState<{ x: number; y: number } | null>(null);
+  const measurementMoveDeltaRef = useRef<{ x: number; y: number } | null>(null);
+  const setMeasurementMoveDelta = useCallback<React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>>(
+    (action) => {
+      const next =
+        typeof action === 'function' ? action(measurementMoveDeltaRef.current) : action;
+      measurementMoveDeltaRef.current = next;
+      scheduleMoveDragTransformRef?.current?.();
+    },
+    [scheduleMoveDragTransformRef]
+  );
 
   // Selection state for markups (multi-select with Cmd+click)
   const [selectedMarkupIds, setSelectedMarkupIds] = useState<string[]>([]);
@@ -318,13 +387,13 @@ export function usePDFViewerMeasurements({
     setCurrentCutout,
     isSelectingSymbol,
     setIsSelectingSymbol,
-    selectionBox,
+    selectionBoxRef,
     setSelectionBox,
     selectionStart,
     setSelectionStart,
     annotationDragStart,
     setAnnotationDragStart,
-    annotationDragBox,
+    annotationDragBoxRef,
     setAnnotationDragBox,
     annotationMoveId,
     setAnnotationMoveId,
@@ -334,15 +403,15 @@ export function usePDFViewerMeasurements({
     setAnnotationMoveStart,
     annotationMoveOriginalPoints,
     setAnnotationMoveOriginalPoints,
-    annotationMoveDelta,
+    annotationMoveDeltaRef,
     setAnnotationMoveDelta,
     measurementDragStart,
     setMeasurementDragStart,
-    measurementDragBox,
+    measurementDragBoxRef,
     setMeasurementDragBox,
     cutoutDragStart,
     setCutoutDragStart,
-    cutoutDragBox,
+    cutoutDragBoxRef,
     setCutoutDragBox,
     measurementMoveId,
     setMeasurementMoveId,
@@ -352,7 +421,7 @@ export function usePDFViewerMeasurements({
     setMeasurementMoveStart,
     measurementMoveOriginalPoints,
     setMeasurementMoveOriginalPoints,
-    measurementMoveDelta,
+    measurementMoveDeltaRef,
     setMeasurementMoveDelta,
     selectedMarkupIds,
     setSelectedMarkupIds,
