@@ -20,22 +20,33 @@ import {
   renderSVGHyperlinkDrawBox,
   renderSVGAnnotationDragBox,
   renderSVGHyperlinks,
-  renderSVGCurrentCutout,
+  renderSVGCurrentCutoutCommitted,
+  renderSVGCurrentCutoutEphemeral,
   renderSVGCrosshair,
   renderSVGMeasurement,
   renderSVGAnnotation,
-  renderSVGCalibrationPoints,
+  renderSVGCalibrationPointsCommitted,
+  renderSVGCalibrationPointsEphemeral,
   renderRunningLengthDisplay,
   renderSVGCurrentAnnotation,
-  renderSVGCurrentMeasurement,
+  renderSVGCurrentMeasurementCommitted,
+  renderSVGCurrentMeasurementEphemeral,
 } from './pdf-viewer/pdfViewerRenderers';
+import {
+  ensureMarkupLayerGroups,
+  clearCommittedMarkupLayer,
+  clearEphemeralMarkupLayer,
+  SVG_COMMITTED_GROUP_ID,
+  SVG_EPHEMERAL_GROUP_ID,
+  SVG_MOVE_DRAG_MEASUREMENT_WRAP_CLASS,
+  SVG_MOVE_DRAG_ANNOTATION_WRAP_CLASS,
+} from './pdf-viewer/pdfMarkupLayers';
 import { PDFViewerCanvasOverlay } from './pdf-viewer/PDFViewerCanvasOverlay';
 import { PDFViewerMagnifier } from './pdf-viewer/PDFViewerMagnifier';
 import { PDFViewerDialogs } from './pdf-viewer/PDFViewerDialogs';
 import { PDFViewerStatusView } from './pdf-viewer/PDFViewerStatusView';
 import { MeasurementContextMenu } from './MeasurementContextMenu';
 import { formatFeetAndInches } from '../lib/utils';
-import { shiftTakeoffMeasurementGeometry } from '../utils/measurementGeometry';
 import {
   clippedCutoutsFromIntersection,
   intersectCutoutWithParent,
@@ -206,9 +217,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const renderPDFPageRef = useRef<((pageNum: number) => Promise<void>) | null>(null);
   const [isComponentMounted, setIsComponentMounted] = useState(false);
   const prevIsSelectionModeRef = useRef<boolean>(false);
+  /** Tracks last condition id applied by the "condition selected" effect so we only reset draw mode when the sidebar selection changes, not when Space toggles canvas match. */
+  const prevSelectedConditionIdForModeRef = useRef<string | null>(null);
   // CRITICAL FIX: Ref to always hold current isSelectionMode value for click handlers
   // This ensures the click handler always uses the latest state, even if React hasn't re-rendered
   const isSelectionModeRef = useRef<boolean>(true);
+  /** Same pattern as isSelectionModeRef — blank-click deselect must not see stale isMeasuring before layout effect runs. */
+  const isMeasuringRef = useRef<boolean>(false);
   const prevCalibratingRef = useRef(false);
   const annotationDragJustCompletedRef = useRef(false);
   const annotationMoveJustCompletedRef = useRef(false);
@@ -223,6 +238,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     ((pageNum: number, viewport: PageViewport, page?: PDFPageProxy, forceImmediate?: boolean) => Promise<void>) | null
   >(null);
   const onPageShownRef = useRef<((pageNum: number, viewport: PageViewport) => void) | null>(null);
+  const ephemeralRafRef = useRef<number | null>(null);
+  const scheduleEphemeralPaintRef = useRef<(() => void) | null>(null);
   const updateMarkupPointerEventsRef = useRef<((selectionMode: boolean) => void) | null>(null);
   /** Page number last fully rendered; used to allow re-render when user changes page in measuring mode */
   const lastRenderedPageRef = useRef<number | null>(null);
@@ -333,7 +350,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setTextInputPosition,
     textInputValue,
     setTextInputValue,
-    mousePosition,
+    mousePositionRef,
     setMousePosition,
     currentCutout,
     setCurrentCutout,
@@ -388,7 +405,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setActivePoints,
     rubberBandElement: _rubberBandElement,
     setRubberBandElement,
-    runningLength,
+    runningLengthRef,
     setRunningLength,
     pageRubberBandRefs,
     pageCommittedPolylineRefs,
@@ -397,6 +414,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     calculateRunningLength,
     applyOrthoSnapping,
   } = measurementsState;
+
+  const measurementMoveDeltaRef = useRef(measurementMoveDelta);
+  const annotationMoveDeltaRef = useRef(annotationMoveDelta);
+  measurementMoveDeltaRef.current = measurementMoveDelta;
+  annotationMoveDeltaRef.current = annotationMoveDelta;
 
   // Shared "renders blocked" flags — reused by multiple effects to avoid
   // redundant re-computation.  Two variants: one without isDeselecting (for
@@ -471,6 +493,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // Keep ref in sync with state (runs synchronously during render)
   isSelectionModeRef.current = isSelectionMode;
+  isMeasuringRef.current = isMeasuring;
 
   // Notify parent component of measurement state changes (must be after calibration hook so isCalibrating is defined)
   useEffect(() => {
@@ -760,6 +783,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     cutoutDragJustCompletedRef,
     annotationDragJustCompletedRef,
     isSelectionModeRef,
+    isMeasuringRef,
     completeMeasurementRef,
     annotationColor,
     setTextInputPosition,
@@ -772,7 +796,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     addAnnotation,
     applyOrthoSnapping,
     calculateRunningLength,
-    mousePosition,
+    mousePositionRef,
+    scheduleEphemeralPaintRef,
     pdfDocument,
   });
 
@@ -789,6 +814,120 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     const t = condition?.lineThickness;
     return typeof t === 'number' && t >= 1 && t <= 8 ? t : 2;
   }, [conditions]);
+
+  /** Crosshair, dashed previews, running length — reads `mousePositionRef` / `runningLengthRef` (no React state on mousemove). */
+  const paintEphemeralMarkupLayer = useCallback(() => {
+    if (!svgOverlayRef.current || !currentViewport) return;
+    const svg = svgOverlayRef.current;
+    const ephemeral = svg.querySelector(`#${SVG_EPHEMERAL_GROUP_ID}`) as SVGGElement | null;
+    if (!ephemeral) return;
+    clearEphemeralMarkupLayer(ephemeral);
+    const mousePosition = mousePositionRef.current;
+    const runningLength = runningLengthRef.current;
+    const pageNum = currentPage;
+    const viewport = currentViewport;
+    const ephemeralSvg = ephemeral as unknown as SVGSVGElement;
+
+    if (isMeasuring && pageNum === currentPage) {
+      const hasMeasurementPoints =
+        (measurementType === 'linear' && isContinuousDrawing && activePoints.length > 0) ||
+        (measurementType !== 'linear' && currentMeasurement.length > 0) ||
+        (measurementType === 'linear' && !isContinuousDrawing && currentMeasurement.length > 0);
+      if (hasMeasurementPoints && measurementType !== 'count') {
+        renderSVGCurrentMeasurementEphemeral(ephemeral, viewport, {
+          currentPage,
+          measurementType,
+          isContinuousDrawing,
+          activePoints,
+          pageCommittedPolylineRefs,
+          mousePosition,
+          currentMeasurement,
+          cutoutMode,
+          conditionColor: getSelectedCondition()?.color || '#000000',
+          conditionLineThickness: getSelectedCondition()?.lineThickness,
+        });
+      }
+    }
+
+    if (cutoutMode && currentCutout.length > 0 && pageNum === currentPage) {
+      renderSVGCurrentCutoutEphemeral(ephemeral, viewport, currentCutout, mousePosition);
+    }
+
+    if (isCalibrating && calibrationPoints.length > 0 && pageNum === currentPage) {
+      renderSVGCalibrationPointsEphemeral(ephemeral, {
+        calibrationPoints,
+        viewport,
+        mousePosition,
+        isOrthoSnapping,
+        applyOrthoSnapping,
+      });
+    }
+
+    if (annotationTool && pageNum === currentPage) {
+      renderSVGCurrentAnnotation(ephemeralSvg, viewport, {
+        annotationTool,
+        currentAnnotation,
+        mousePosition,
+        annotationColor,
+      });
+    }
+
+    if (
+      mousePosition &&
+      (isMeasuring || isCalibrating || annotationTool || isBoxSelectionMode || hyperlinkMode || cutoutMode) &&
+      pageNum === currentPage
+    ) {
+      renderSVGCrosshair(ephemeralSvg, mousePosition, viewport, isCalibrating, {
+        fullScreen: crosshairFullScreen,
+        strokeColor: crosshairColor,
+        strokeWidth: crosshairStrokeWidth,
+      });
+    }
+
+    if (showRunningLength && isContinuousDrawing && activePoints.length > 0 && pageNum === currentPage) {
+      renderRunningLengthDisplay(ephemeralSvg, viewport, {
+        runningLength,
+        conditionColor: getSelectedCondition()?.color || '#000000',
+        unit: getSelectedCondition()?.unit || 'ft',
+        lastPoint: activePoints[activePoints.length - 1] ?? { x: 0, y: 0 },
+      });
+    }
+  }, [
+    currentViewport,
+    currentPage,
+    isMeasuring,
+    measurementType,
+    isContinuousDrawing,
+    activePoints,
+    pageCommittedPolylineRefs,
+    currentMeasurement,
+    cutoutMode,
+    currentCutout,
+    isCalibrating,
+    calibrationPoints,
+    isOrthoSnapping,
+    applyOrthoSnapping,
+    annotationTool,
+    currentAnnotation,
+    annotationColor,
+    isBoxSelectionMode,
+    hyperlinkMode,
+    getSelectedCondition,
+    showRunningLength,
+    crosshairFullScreen,
+    crosshairColor,
+    crosshairStrokeWidth,
+  ]);
+
+  const scheduleEphemeralPaint = useCallback(() => {
+    if (ephemeralRafRef.current != null) return;
+    ephemeralRafRef.current = requestAnimationFrame(() => {
+      ephemeralRafRef.current = null;
+      paintEphemeralMarkupLayer();
+    });
+  }, [paintEphemeralMarkupLayer]);
+
+  scheduleEphemeralPaintRef.current = scheduleEphemeralPaint;
 
   // Ensure component is mounted before rendering
   useEffect(() => {
@@ -1084,11 +1223,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       svgOverlay.innerHTML = '';
       return; // Early return - nothing to render
     }
-    
-    // Clear existing annotations completely - this ensures no cross-page contamination
-    // We only reach here if we have markups to render
-    svgOverlay.innerHTML = '';
-    
+
+    const { committed } = ensureMarkupLayerGroups(svgOverlay);
+    const committedSvg = committed as unknown as SVGSVGElement;
+    clearCommittedMarkupLayer(committed);
+
     // CRITICAL: Add hit-area FIRST so it's behind markups in z-order
     // This ensures markups can receive clicks even if hit-area is present
     const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -1103,28 +1242,31 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const shouldCaptureClicks = isCalibrating || annotationTool || isDrawingBoxSelection || hyperlinkMode;
       hitArea.setAttribute('pointer-events', shouldCaptureClicks ? 'all' : 'none');
     }
-    svgOverlay.appendChild(hitArea);
+    committed.appendChild(hitArea);
 
     // Render hyperlinks (clickable regions) - above hit area
     if (pageHyperlinks.length > 0) {
-      renderSVGHyperlinks(svgOverlay, pageHyperlinks, viewport);
+      renderSVGHyperlinks(committedSvg, pageHyperlinks, viewport);
     }
-    
-    // Render measurements for this page (apply move offset when dragging; all selected move together)
-    const measurementIdsMoving = measurementMoveDelta
-      ? (measurementMoveIds.length > 0 ? measurementMoveIds : (measurementMoveId ? [measurementMoveId] : []))
-      : [];
+
+    // Render measurements for this page (move-drag: wrap in <g class="...">; translate updated in effect, not here)
+    const measurementIdsMoving =
+      measurementMoveIds.length > 0
+        ? measurementMoveIds
+        : measurementMoveId
+          ? [measurementMoveId]
+          : [];
     pageMeasurements.forEach((measurement) => {
-      const isMoving = measurementMoveDelta && measurementIdsMoving.includes(measurement.id);
-      const delta = measurementMoveDelta ?? { x: 0, y: 0 };
-      const measurementToRender =
-        isMoving && measurement.pdfCoordinates
-          ? {
-              ...measurement,
-              ...shiftTakeoffMeasurementGeometry(measurement, delta),
-            }
-          : measurement;
-      renderSVGMeasurement(svgOverlay, measurementToRender, viewport, page, {
+      const isMoving = measurementIdsMoving.includes(measurement.id);
+      const targetParent = isMoving
+        ? (() => {
+            const wrap = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            wrap.setAttribute('class', SVG_MOVE_DRAG_MEASUREMENT_WRAP_CLASS);
+            committed.appendChild(wrap);
+            return wrap;
+          })()
+        : committedSvg;
+      renderSVGMeasurement(targetParent as unknown as SVGSVGElement, measurement, viewport, page, {
         rotation: viewState.rotation || 0,
         selectedMarkupIds,
         getConditionColor,
@@ -1151,7 +1293,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       line.setAttribute('stroke-width', '2');
       line.setAttribute('stroke-dasharray', '6,4');
       line.setAttribute('vector-effect', 'non-scaling-stroke');
-      svgOverlay.appendChild(line);
+      committed.appendChild(line);
 
       const midX = (x1 + x2) / 2;
       const midY = (y1 + y2) / 2;
@@ -1164,7 +1306,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       text.setAttribute('text-anchor', 'middle');
       text.setAttribute('vector-effect', 'non-scaling-stroke');
       text.textContent = calibrationValidation.display;
-      svgOverlay.appendChild(text);
+      committed.appendChild(text);
     }
 
     // Draw measurement debug overlay if present
@@ -1179,7 +1321,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       bg.setAttribute('height', '54');
       bg.setAttribute('fill', 'rgba(0,0,0,0.65)');
       bg.setAttribute('rx', '6');
-      svgOverlay.appendChild(bg);
+      committed.appendChild(bg);
       const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       t.setAttribute('x', midX.toString());
       t.setAttribute('y', (midY - 42).toString());
@@ -1188,7 +1330,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       t.setAttribute('font-family', 'Arial');
       t.setAttribute('text-anchor', 'middle');
       t.textContent = `dx=${dxNorm.toFixed(4)} dy=${dyNorm.toFixed(4)} base=(${baseW.toFixed(1)},${baseH.toFixed(1)})`;
-      svgOverlay.appendChild(t);
+      committed.appendChild(t);
       const t2 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       t2.setAttribute('x', midX.toString());
       t2.setAttribute('y', (midY - 26).toString());
@@ -1197,7 +1339,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       t2.setAttribute('font-family', 'Arial');
       t2.setAttribute('text-anchor', 'middle');
       t2.textContent = `px(valid)=${pixelDistanceValidator.toFixed(2)} px(meas)=${pixelDistanceMeasure.toFixed(2)} sf=${scaleFactorUsed.toExponential(6)}`;
-      svgOverlay.appendChild(t2);
+      committed.appendChild(t2);
       const t3 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       t3.setAttribute('x', midX.toString());
       t3.setAttribute('y', (midY - 10).toString());
@@ -1206,138 +1348,137 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       t3.setAttribute('font-family', 'Arial');
       t3.setAttribute('text-anchor', 'middle');
       t3.textContent = `${formatFeetAndInches(distanceValidatorFt)} vs ${formatFeetAndInches(distanceMeasureFt)}`;
-      svgOverlay.appendChild(t3);
+      committed.appendChild(t3);
     }
-    
-    // Draw current measurement being created (only if on the page being rendered)
+
+    // Draw current measurement — committed geometry only (dashed preview + crosshair in paintEphemeralMarkupLayer)
     if (isMeasuring && pageNum === currentPage) {
-      // For linear measurements in continuous mode, check activePoints
-      // For other measurements, check currentMeasurement
-      const hasMeasurementPoints = (measurementType === 'linear' && isContinuousDrawing && activePoints.length > 0) || 
-                                   (measurementType !== 'linear' && currentMeasurement.length > 0) ||
-                                   (measurementType === 'linear' && !isContinuousDrawing && currentMeasurement.length > 0);
-      
-      if (hasMeasurementPoints) {
-        // Always render preview for linear, area, and volume from first point
-        // Only count measurements need to wait for completion
-        if (measurementType !== 'count') {
-          renderSVGCurrentMeasurement(svgOverlay, viewport, {
-            currentPage,
-            measurementType,
-            isContinuousDrawing,
-            activePoints,
-            pageCommittedPolylineRefs,
-            mousePosition,
-            currentMeasurement,
-            cutoutMode,
-            conditionColor: getSelectedCondition()?.color || '#000000',
-            conditionLineThickness: getSelectedCondition()?.lineThickness,
-          });
-        }
+      const hasMeasurementPoints =
+        (measurementType === 'linear' && isContinuousDrawing && activePoints.length > 0) ||
+        (measurementType !== 'linear' && currentMeasurement.length > 0) ||
+        (measurementType === 'linear' && !isContinuousDrawing && currentMeasurement.length > 0);
+
+      if (hasMeasurementPoints && measurementType !== 'count') {
+        renderSVGCurrentMeasurementCommitted(committed, viewport, {
+          currentPage,
+          measurementType,
+          isContinuousDrawing,
+          activePoints,
+          pageCommittedPolylineRefs,
+          currentMeasurement,
+          cutoutMode,
+          conditionColor: getSelectedCondition()?.color || '#000000',
+          conditionLineThickness: getSelectedCondition()?.lineThickness,
+        });
       }
     }
-    
-    // Draw current cut-out being created (only if on the page being rendered)
+
     if (cutoutMode && currentCutout.length > 0 && pageNum === currentPage) {
-      renderSVGCurrentCutout(svgOverlay, viewport, currentCutout, mousePosition);
+      renderSVGCurrentCutoutCommitted(committed, viewport, currentCutout);
     }
-    
-    // Draw visual search or titleblock selection box (only if on the page being rendered)
+
     if (isDrawingBoxSelection && selectionBox && pageNum === currentPage) {
-      renderSVGSelectionBox(svgOverlay, selectionBox, viewport);
+      renderSVGSelectionBox(committedSvg, selectionBox, viewport);
     }
     if (hyperlinkMode && hyperlinkDrawBox && pageNum === currentPage) {
-      renderSVGHyperlinkDrawBox(svgOverlay, hyperlinkDrawBox, viewport);
+      renderSVGHyperlinkDrawBox(committedSvg, hyperlinkDrawBox, viewport);
     }
-    
-    // Draw annotation drag-to-draw box (rectangle/circle/arrow) while dragging
+
     if (annotationDragBox && ['arrow', 'rectangle', 'circle'].includes(annotationTool ?? '') && pageNum === currentPage) {
-      renderSVGAnnotationDragBox(svgOverlay, annotationDragBox, viewport, annotationColor);
+      renderSVGAnnotationDragBox(committedSvg, annotationDragBox, viewport, annotationColor);
     }
-    
-    // Draw measurement drag-to-draw box (area/volume) while dragging
+
     if (measurementDragBox && (measurementType === 'area' || measurementType === 'volume') && pageNum === currentPage) {
       const selectedCondition = getSelectedCondition();
       const conditionColor = selectedCondition?.color || '#000000';
-      renderSVGAnnotationDragBox(svgOverlay, measurementDragBox, viewport, conditionColor);
+      renderSVGAnnotationDragBox(committedSvg, measurementDragBox, viewport, conditionColor);
     }
 
-    // Cut-out rectangle drag (same dashed box UX as area measurement)
     if (cutoutDragBox && cutoutMode && pageNum === currentPage) {
-      renderSVGAnnotationDragBox(svgOverlay, cutoutDragBox, viewport, '#ff0000');
+      renderSVGAnnotationDragBox(committedSvg, cutoutDragBox, viewport, '#ff0000');
     }
-    
-    // Render completed annotations for this page (apply move offset when dragging)
-    localAnnotations.forEach(annotation => {
+
+    const annotationIdsMoving =
+      annotationMoveIds.length > 0
+        ? annotationMoveIds
+        : annotationMoveId
+          ? [annotationMoveId]
+          : [];
+
+    localAnnotations.forEach((annotation) => {
       if (annotation.pageNumber !== pageNum) return;
-      const annotationIdsMoving = annotationMoveDelta
-        ? (annotationMoveIds.length > 0 ? annotationMoveIds : (annotationMoveId ? [annotationMoveId] : []))
-        : [];
-      const isMoving = annotationMoveDelta && annotationIdsMoving.includes(annotation.id);
-      const annDelta = annotationMoveDelta ?? { x: 0, y: 0 };
-      const pointsToRender = isMoving
-        ? annotation.points.map(p => ({ x: p.x + annDelta.x, y: p.y + annDelta.y }))
-        : annotation.points;
-      const annotationToRender = isMoving ? { ...annotation, points: pointsToRender } : annotation;
-      renderSVGAnnotation(svgOverlay, annotationToRender, viewport, {
+      const isMoving = annotationIdsMoving.includes(annotation.id);
+      const targetParent = isMoving
+        ? (() => {
+            const wrap = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            wrap.setAttribute('class', SVG_MOVE_DRAG_ANNOTATION_WRAP_CLASS);
+            committed.appendChild(wrap);
+            return wrap;
+          })()
+        : committedSvg;
+      renderSVGAnnotation(targetParent as unknown as SVGSVGElement, annotation, viewport, {
         rotation: viewState.rotation || 0,
         selectedMarkupIds,
         selectionMode: isSelectionMode,
       });
     });
-    
-    // Draw current annotation being created (only if on the page being rendered)
-    // Show preview even with no points yet (for initial mouse tracking)
-    if (annotationTool && pageNum === currentPage) {
-      renderSVGCurrentAnnotation(svgOverlay, viewport, {
-        annotationTool,
-        currentAnnotation,
-        mousePosition,
-        annotationColor,
-      });
-    }
-    
-    // Draw calibration points (only if on the page being rendered)
+
     if (isCalibrating && calibrationPoints.length > 0 && pageNum === currentPage) {
-      renderSVGCalibrationPoints(svgOverlay, {
+      renderSVGCalibrationPointsCommitted(committed, {
         calibrationPoints,
         viewport,
-        mousePosition,
         isOrthoSnapping,
         applyOrthoSnapping,
       });
     }
-    
-    // Draw crosshair if measuring, calibrating, annotating, or drawing search/titleblock selection box (only if on the page being rendered)
-    if (
-      mousePosition &&
-      (isMeasuring || isCalibrating || annotationTool || isBoxSelectionMode || hyperlinkMode || cutoutMode) &&
-      pageNum === currentPage
-    ) {
-      renderSVGCrosshair(svgOverlay, mousePosition, viewport, isCalibrating, {
-        fullScreen: crosshairFullScreen,
-        strokeColor: crosshairColor,
-        strokeWidth: crosshairStrokeWidth,
-      });
+
+    // Apply move-drag transforms here (refs = latest deltas) so full rebuilds still get correct translate
+    // when renderTakeoffAnnotations' useCallback is not recreated on every mousemove.
+    {
+      const md = measurementMoveDeltaRef.current;
+      const ad = annotationMoveDeltaRef.current;
+      const mtx = md ? md.x * viewport.width : 0;
+      const mty = md ? md.y * viewport.height : 0;
+      const mt = `translate(${mtx}, ${mty})`;
+      committed.querySelectorAll(`.${SVG_MOVE_DRAG_MEASUREMENT_WRAP_CLASS}`).forEach((w) => w.setAttribute('transform', mt));
+      const atx = ad ? ad.x * viewport.width : 0;
+      const aty = ad ? ad.y * viewport.height : 0;
+      const at = `translate(${atx}, ${aty})`;
+      committed.querySelectorAll(`.${SVG_MOVE_DRAG_ANNOTATION_WRAP_CLASS}`).forEach((w) => w.setAttribute('transform', at));
     }
-    
-    // Draw running length display for continuous linear drawing
-    if (showRunningLength && isContinuousDrawing && activePoints.length > 0 && pageNum === currentPage) {
-      renderRunningLengthDisplay(svgOverlay, viewport, {
-        runningLength,
-        conditionColor: getSelectedCondition()?.color || '#000000',
-        unit: getSelectedCondition()?.unit || 'ft',
-        lastPoint: activePoints[activePoints.length - 1] ?? { x: 0, y: 0 },
-      });
-    }
-    
+
+    scheduleEphemeralPaint();
+
   // eslint-disable-next-line react-hooks/exhaustive-deps -- Large render callback; refs and some deps intentionally omitted to avoid cascade
-  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, mousePosition, isSelectionMode, currentPage, isContinuousDrawing, activePoints, runningLength, localAnnotations, annotationTool, currentAnnotation, annotationDragBox, annotationMoveId, annotationMoveIds, annotationMoveDelta, annotationColor, measurementDragBox, cutoutDragBox, measurementMoveId, measurementMoveIds, measurementMoveDelta, cutoutMode, currentCutout, isBoxSelectionMode, isDrawingBoxSelection, selectionBox, hyperlinkMode, hyperlinkDrawBox, effectiveProjectId, file.id, getPageTakeoffMeasurements, getSelectedCondition, measurementsLoading, getConditionColor, getConditionLineThickness, crosshairFullScreen, crosshairColor, crosshairStrokeWidth, showMeasurementLabels, showRunningLength, hyperlinkCountForFile, hiddenMarkupConditionIds]);
+  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, isSelectionMode, currentPage, isContinuousDrawing, activePoints, localAnnotations, annotationTool, currentAnnotation, annotationDragBox, annotationMoveId, annotationMoveIds, annotationColor, measurementDragBox, cutoutDragBox, measurementMoveId, measurementMoveIds, cutoutMode, currentCutout, isBoxSelectionMode, isDrawingBoxSelection, selectionBox, hyperlinkMode, hyperlinkDrawBox, effectiveProjectId, file.id, getPageTakeoffMeasurements, getSelectedCondition, measurementsLoading, getConditionColor, getConditionLineThickness, crosshairFullScreen, crosshairColor, crosshairStrokeWidth, showMeasurementLabels, showRunningLength, hyperlinkCountForFile, hiddenMarkupConditionIds, scheduleEphemeralPaint]);
+
+  // Move-drag: update SVG transforms only (no full committed rebuild on each mousemove delta)
+  useEffect(() => {
+    const svg = svgOverlayRef.current;
+    if (!svg || !currentViewport) return;
+    const wraps = svg.querySelectorAll(`.${SVG_MOVE_DRAG_MEASUREMENT_WRAP_CLASS}`);
+    const tx = measurementMoveDelta ? measurementMoveDelta.x * currentViewport.width : 0;
+    const ty = measurementMoveDelta ? measurementMoveDelta.y * currentViewport.height : 0;
+    const t = `translate(${tx}, ${ty})`;
+    wraps.forEach((w) => w.setAttribute('transform', t));
+  }, [measurementMoveDelta, currentViewport]);
+
+  useEffect(() => {
+    const svg = svgOverlayRef.current;
+    if (!svg || !currentViewport) return;
+    const wraps = svg.querySelectorAll(`.${SVG_MOVE_DRAG_ANNOTATION_WRAP_CLASS}`);
+    const tx = annotationMoveDelta ? annotationMoveDelta.x * currentViewport.width : 0;
+    const ty = annotationMoveDelta ? annotationMoveDelta.y * currentViewport.height : 0;
+    const t = `translate(${tx}, ${ty})`;
+    wraps.forEach((w) => w.setAttribute('transform', t));
+  }, [annotationMoveDelta, currentViewport]);
 
   // OPTIMIZED: Update only visual styling of markups when selection changes (no full re-render)
   const updateMarkupSelection = useCallback((newSelectedIds: string[], previousSelectedIds: string[]) => {
     if (!svgOverlayRef.current) return;
-    const svg = svgOverlayRef.current;
+    const svg =
+      (svgOverlayRef.current.querySelector(`#${SVG_COMMITTED_GROUP_ID}`) as SVGSVGElement | null) ??
+      svgOverlayRef.current;
     const idsToDeselect = previousSelectedIds.filter((id) => !newSelectedIds.includes(id));
     const idsToSelect = newSelectedIds.filter((id) => !previousSelectedIds.includes(id));
 
@@ -1493,7 +1634,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
       }
     }
-  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, mousePosition, renderMarkupsWithPointerEvents, currentPage, currentViewport, isAnnotating, localAnnotations, annotationTool, annotationDragBox, annotationMoveId, annotationMoveIds, annotationMoveDelta, measurementDragBox, cutoutDragBox, cutoutMode, currentCutout, measurementMoveId, measurementMoveIds, measurementMoveDelta, isDrawingBoxSelection, selectionBox, currentAnnotation, isContinuousDrawing, activePoints, pdfDocument, measurementsLoading, effectiveProjectId, file.id, getPageTakeoffMeasurements, isSelectionMode, totalPages, conditions, hyperlinkCountForFile, hyperlinkMode, hyperlinkDrawBox, hiddenMarkupConditionIds]);
+  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, renderMarkupsWithPointerEvents, currentPage, currentViewport, isAnnotating, localAnnotations, annotationTool, annotationDragBox, annotationMoveId, annotationMoveIds, measurementDragBox, cutoutDragBox, cutoutMode, currentCutout, measurementMoveId, measurementMoveIds, isDrawingBoxSelection, selectionBox, currentAnnotation, isContinuousDrawing, activePoints, pdfDocument, measurementsLoading, effectiveProjectId, file.id, getPageTakeoffMeasurements, isSelectionMode, totalPages, conditions, hyperlinkCountForFile, hyperlinkMode, hyperlinkDrawBox, hiddenMarkupConditionIds]);
 
   // Track previous measurements for comparison (used by other logic)
   const prevLocalTakeoffMeasurementsRef = useRef<Measurement[]>([]);
@@ -1634,20 +1775,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     svgOverlay.setAttribute('viewBox', `0 0 ${viewport.width} ${viewport.height}`);
     svgOverlay.setAttribute('overflow', 'visible');
     
-    // Add a transparent hit area for pointer events
-    // CRITICAL FIX: Set hit-area pointer-events based on current mode
-    // When measuring, set to 'none' so clicks pass through to canvas for proper double-click handling
-    // For other modes (selection, calibration, annotation, visual search), set to 'all' to capture clicks
-    const existingHitArea = svgOverlay.querySelector('#hit-area');
-    if (!existingHitArea) {
-      const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-      hitArea.setAttribute('id', 'hit-area');
-      hitArea.setAttribute('width', '100%');
-      hitArea.setAttribute('height', '100%');
-      hitArea.setAttribute('fill', 'transparent');
-      svgOverlay.appendChild(hitArea);
-    }
-    
+    // Hit-area is created inside `#pdf-markup-committed` by renderTakeoffAnnotations (avoids duplicate rects on the SVG root).
+
     // Update hit-area pointer-events based on current mode
     // CRITICAL: In selection mode, hit-area must have pointer-events: 'none' so clicks pass through to markup elements
     // When measuring, hit-area has pointer-events: 'none' so clicks pass through to canvas for double-click support
@@ -1849,25 +1978,25 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Create rubber band element for continuous linear drawing
   const createRubberBandElement = useCallback(() => {
     if (!svgOverlayRef.current || !currentViewport) return;
-    
+
     const svgOverlay = svgOverlayRef.current;
-    
+    const { ephemeral } = ensureMarkupLayerGroups(svgOverlay);
+
     // Ensure SVG has correct dimensions and viewBox
     svgOverlay.setAttribute('width', currentViewport.width.toString());
     svgOverlay.setAttribute('height', currentViewport.height.toString());
     svgOverlay.setAttribute('viewBox', `0 0 ${currentViewport.width} ${currentViewport.height}`);
     svgOverlay.setAttribute('overflow', 'visible');
-    
+
     const selectedCondition = getSelectedCondition();
     const conditionColor = selectedCondition?.color || '#000000';
     const conditionLineThickness = (selectedCondition?.lineThickness != null ? selectedCondition.lineThickness : 2);
 
-    // Remove existing rubber band for this page if it exists
     const existingRubberBand = pageRubberBandRefs.current[currentPage];
-    if (existingRubberBand && existingRubberBand.parentNode === svgOverlay) {
-      svgOverlay.removeChild(existingRubberBand);
+    if (existingRubberBand && ephemeral.contains(existingRubberBand)) {
+      ephemeral.removeChild(existingRubberBand);
     }
-    
+
     const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
     line.setAttribute('stroke', conditionColor);
     line.setAttribute('stroke-width', String(conditionLineThickness));
@@ -1879,14 +2008,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     line.setAttribute('id', `rubber-band-line-${currentPage}`);
     line.setAttribute('vector-effect', 'non-scaling-stroke');
     line.setAttribute('pointer-events', 'none');
-    
-    // Set initial coordinates (will be updated on mouse move)
+
     line.setAttribute('x1', '0');
     line.setAttribute('y1', '0');
     line.setAttribute('x2', '0');
     line.setAttribute('y2', '0');
-    
-    svgOverlay.appendChild(line);
+
+    ephemeral.appendChild(line);
     
     // Store in page-scoped refs
     pageRubberBandRefs.current[currentPage] = line;
@@ -2214,8 +2342,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
     // Remove rubber band element with guarded removal
     const currentRubberBand = pageRubberBandRefs.current[currentPage];
-    if (currentRubberBand && svgOverlayRef.current && currentRubberBand.parentNode === svgOverlayRef.current) {
-      svgOverlayRef.current.removeChild(currentRubberBand);
+    if (currentRubberBand?.parentNode) {
+      currentRubberBand.parentNode.removeChild(currentRubberBand);
     }
 
     // Clear page-scoped refs
@@ -2246,9 +2374,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const cleanupContinuousDrawing = useCallback(() => {
     // Clean up rubber band for current page
     const currentRubberBand = pageRubberBandRefs.current[currentPage];
-    if (currentRubberBand && svgOverlayRef.current && currentRubberBand.parentNode === svgOverlayRef.current) {
+    if (currentRubberBand?.parentNode) {
       try {
-        svgOverlayRef.current.removeChild(currentRubberBand);
+        currentRubberBand.parentNode.removeChild(currentRubberBand);
       } catch (e) {
         console.warn('🎯 Failed to remove rubber band:', e);
       }
@@ -2613,8 +2741,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   }, [pdfDocument, viewState, currentPage, isComponentMounted, isMeasuring, isCalibrating, currentMeasurement, isDeselecting, isInitialRenderComplete, isAnnotating, showTextInput]);
 
 
-  // Set measurement type when condition is selected
-  useEffect(() => {
+  // Set measurement type when condition is selected; draw mode is entered via Space or canvas-match click, not sidebar alone.
+  // useLayoutEffect so measuring/selection flags update before paint (avoids a click on empty canvas seeing stale isMeasuring).
+  useLayoutEffect(() => {
     // Titleblock selection mode takes precedence - disable measuring so box selection works
     if (titleblockSelectionMode) {
       setIsMeasuring(false);
@@ -2628,6 +2757,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         // this effect's dependency array, which previously caused an infinite update
         // loop (setSelectedMarkupIds([]) creates a new ref → deps change → re-run).
         if (canvasSelectionMatchesCondition) {
+          prevSelectedConditionIdForModeRef.current = selectedConditionId;
           return;
         }
         // Auto-count conditions use box selection, NOT measurement mode
@@ -2638,15 +2768,27 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           if (selectedMarkupIds.length > 0) setSelectedMarkupIds([]);
           setIsDeselecting(false);
           setMeasurementType('count');
+          prevSelectedConditionIdForModeRef.current = selectedConditionId;
           return;
         }
-        
-        // All other condition types use measurement mode
-        setIsMeasuring(true);
-        setIsSelectionMode(false);
-        if (selectedMarkupIds.length > 0) setSelectedMarkupIds([]);
+
+        const idChanged = prevSelectedConditionIdForModeRef.current !== selectedConditionId;
+        // Sidebar-only highlight: stay in selection mode (not drawing).
+        // idChanged alone missed re-selecting the same id when prevRef already matched (e.g. canvas sync).
+        // !isMeasuring covers sidebar pick while measuring is false.
+        // (isSelectionMode && isMeasuring) clears invalid stuck state (both true) without affecting Space (selection false while measuring).
+        const shouldResetToSelectionOnly =
+          idChanged ||
+          !isMeasuring ||
+          (isSelectionMode && isMeasuring);
+        if (shouldResetToSelectionOnly) {
+          setIsMeasuring(false);
+          setIsSelectionMode(true);
+          if (selectedMarkupIds.length > 0) setSelectedMarkupIds([]);
+        }
+        prevSelectedConditionIdForModeRef.current = selectedConditionId;
         setIsDeselecting(false);
-        
+
         // Always use condition.type first - linear conditions with height stay as linear
         // (auto-count already handled above with early return)
         if (condition.type === 'count') {
@@ -2694,6 +2836,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         if (selectedMarkupIds.length > 0) setSelectedMarkupIds([]);
       }
     } else {
+      prevSelectedConditionIdForModeRef.current = null;
       setIsMeasuring(false);
       setIsSelectionMode(true);
       setCurrentMeasurement([]);
@@ -2721,9 +2864,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     getSelectedCondition,
     titleblockSelectionMode,
     canvasSelectionMatchesCondition,
+    isMeasuring,
+    isSelectionMode,
   ]);
 
-  // Space from workspace: leave plan-only markup selection and enable drawing for the already-selected condition.
+  // Space from workspace: leave plan-only markup selection and enter draw mode for the selected condition.
   useLayoutEffect(() => {
     if (!onRegisterEnterConditionDrawMode) return;
     const handler = () => {
@@ -2732,10 +2877,21 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       if (!cond || cond.type === 'auto-count') return;
       setSelectedMarkupIds([]);
       setIsDeselecting(false);
+      setIsMeasuring(true);
+      setIsSelectionMode(false);
+      syncMeasurementTypeFromSelectedCondition();
     };
     onRegisterEnterConditionDrawMode(handler);
     return () => onRegisterEnterConditionDrawMode(null);
-  }, [onRegisterEnterConditionDrawMode, titleblockSelectionMode, setSelectedMarkupIds, setIsDeselecting]);
+  }, [
+    onRegisterEnterConditionDrawMode,
+    titleblockSelectionMode,
+    setSelectedMarkupIds,
+    setIsDeselecting,
+    setIsMeasuring,
+    setIsSelectionMode,
+    syncMeasurementTypeFromSelectedCondition,
+  ]);
 
   const prevAnnotationToolRef = useRef<'text' | 'arrow' | 'rectangle' | 'circle' | null>(null);
 
@@ -2927,11 +3083,17 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             onCanvasMouseUp={handleMouseUp as (e: React.MouseEvent<HTMLCanvasElement>) => void}
             onCanvasDoubleClick={handleCanvasDoubleClick}
             onCanvasMouseMove={handleMouseMove as (e: React.MouseEvent<HTMLCanvasElement>) => void}
-            onCanvasMouseLeave={() => setMousePosition(null)}
+            onCanvasMouseLeave={() => {
+              setMousePosition(null);
+              scheduleEphemeralPaint();
+            }}
             onSvgMouseMove={handleMouseMove as (e: React.MouseEvent<SVGSVGElement>) => void}
             onSvgMouseDown={handleMouseDown as (e: React.MouseEvent<SVGSVGElement>) => void}
             onSvgMouseUp={handleMouseUp as (e: React.MouseEvent<SVGSVGElement>) => void}
-            onSvgMouseLeave={() => setMousePosition(null)}
+            onSvgMouseLeave={() => {
+              setMousePosition(null);
+              scheduleEphemeralPaint();
+            }}
             onSvgClick={handleSvgClick}
             onSvgDoubleClick={handleSvgDoubleClick}
             onSvgContextMenu={handleSvgContextMenu}
@@ -2958,7 +3120,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
       <PDFViewerMagnifier
         pdfCanvasRef={pdfCanvasRef}
-        mousePosition={mousePosition}
+        mousePositionRef={mousePositionRef}
         magnifierEnabled={magnifierEnabled}
         magnifierZoom={magnifierZoom}
         isActive={isMeasuring || isCalibrating || !!annotationTool}

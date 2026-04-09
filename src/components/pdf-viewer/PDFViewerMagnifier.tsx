@@ -3,8 +3,8 @@ import React, { useRef, useEffect, type RefObject } from 'react';
 export interface PDFViewerMagnifierProps {
   /** Source canvas to sample from */
   pdfCanvasRef: RefObject<HTMLCanvasElement | null>;
-  /** Mouse position in normalized 0-1 coordinates (relative to PDF viewport) */
-  mousePosition: { x: number; y: number } | null;
+  /** Normalized cursor (0–1); read each frame from ref so parent need not re-render on mousemove */
+  mousePositionRef: RefObject<{ x: number; y: number } | null>;
   /** Whether magnifier is enabled in user preferences */
   magnifierEnabled: boolean;
   /** Zoom level (2, 3, or 4x) */
@@ -24,81 +24,122 @@ const CROSSHAIR_CY = 2 + MAGNIFIER_SIZE / 2;
  */
 export function PDFViewerMagnifier({
   pdfCanvasRef,
-  mousePosition,
+  mousePositionRef,
   magnifierEnabled,
   magnifierZoom,
   isActive,
 }: PDFViewerMagnifierProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const show = magnifierEnabled && isActive && mousePosition !== null;
+  const show = magnifierEnabled && isActive;
 
   useEffect(() => {
     if (!show || !pdfCanvasRef.current || !canvasRef.current) return;
 
-    const sourceCanvas = pdfCanvasRef.current;
-    const destCanvas = canvasRef.current;
-    const ctx = destCanvas.getContext('2d');
-    if (!ctx) return;
+    let raf = 0;
+    let idleTimeout = 0;
+    let cancelled = false;
+    let lastHadMouse = false;
 
-    // Source canvas dimensions (may differ from CSS size due to devicePixelRatio)
-    const sw = sourceCanvas.width;
-    const sh = sourceCanvas.height;
-    const dpr = window.devicePixelRatio || 1;
+    const paintIdleFrame = () => {
+      const destCanvas = canvasRef.current;
+      if (!destCanvas) return;
+      const ctx = destCanvas.getContext('2d');
+      if (!ctx) return;
+      ctx.fillStyle = '#1e293b';
+      ctx.fillRect(0, 0, MAGNIFIER_SIZE + 4, MAGNIFIER_SIZE + 4);
+      ctx.strokeStyle = '#64748b';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(1, 1, MAGNIFIER_SIZE + 2, MAGNIFIER_SIZE + 2);
+    };
 
-    // Source radius: chosen so that the magnifier shows true Nx magnification vs the main view.
-    // Main view displays 1 canvas px = 1/dpr display px. We show 2*sourceRadius canvas px
-    // in MAGNIFIER_SIZE display px. For magnifierZoom x: MAGNIFIER_SIZE / (2*sourceRadius/dpr) = magnifierZoom
-    // => sourceRadius = MAGNIFIER_SIZE * dpr / (2 * magnifierZoom)
-    let sourceRadius = (MAGNIFIER_SIZE * dpr) / (2 * magnifierZoom);
-    sourceRadius = Math.max(10, Math.min(sourceRadius, Math.min(sw, sh) / 2 - 1));
+    const scheduleWhenIdle = () => {
+      idleTimeout = window.setTimeout(() => {
+        idleTimeout = 0;
+        raf = requestAnimationFrame(draw);
+      }, 200);
+    };
 
-    // Center of region to sample: mousePosition is 0-1 normalized to viewport; canvas is proportional
-    const centerX = mousePosition.x * sw;
-    const centerY = mousePosition.y * sh;
+    const draw = () => {
+      if (cancelled) return;
+      const mousePosition = mousePositionRef.current;
+      const sourceCanvas = pdfCanvasRef.current;
+      const destCanvas = canvasRef.current;
+      if (!sourceCanvas || !destCanvas) {
+        scheduleWhenIdle();
+        return;
+      }
 
-    // Bounds of source region (clip to canvas)
-    const srcX = Math.max(0, centerX - sourceRadius);
-    const srcY = Math.max(0, centerY - sourceRadius);
-    const srcW = Math.min(sourceRadius * 2, sw - srcX);
-    const srcH = Math.min(sourceRadius * 2, sh - srcY);
+      if (!mousePosition) {
+        if (lastHadMouse) {
+          lastHadMouse = false;
+          paintIdleFrame();
+        }
+        scheduleWhenIdle();
+        return;
+      }
 
-    if (srcW <= 0 || srcH <= 0) return;
+      lastHadMouse = true;
 
-    // Scale the sampled region to fill the magnifier (maintain aspect ratio)
-    const scale = MAGNIFIER_SIZE / Math.min(srcW, srcH);
-    const drawW = srcW * scale;
-    const drawH = srcH * scale;
+      const ctx = destCanvas.getContext('2d');
+      if (!ctx) {
+        raf = requestAnimationFrame(draw);
+        return;
+      }
 
-    // Center the drawn content on the crosshair so crosshairs align with cursor position
-    const offsetX = CROSSHAIR_CX - drawW / 2;
-    const offsetY = CROSSHAIR_CY - drawH / 2;
+      const sw = sourceCanvas.width;
+      const sh = sourceCanvas.height;
+      const dpr = window.devicePixelRatio || 1;
 
-    ctx.save();
-    ctx.fillStyle = '#1e293b';
-    ctx.fillRect(0, 0, MAGNIFIER_SIZE + 4, MAGNIFIER_SIZE + 4);
-    ctx.strokeStyle = '#64748b';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(1, 1, MAGNIFIER_SIZE + 2, MAGNIFIER_SIZE + 2);
+      let sourceRadius = (MAGNIFIER_SIZE * dpr) / (2 * magnifierZoom);
+      sourceRadius = Math.max(10, Math.min(sourceRadius, Math.min(sw, sh) / 2 - 1));
 
-    ctx.drawImage(
-      sourceCanvas,
-      srcX, srcY, srcW, srcH,
-      offsetX, offsetY, drawW, drawH
-    );
+      const centerX = mousePosition.x * sw;
+      const centerY = mousePosition.y * sh;
 
-    // Crosshair at center (aligned with sampled region center)
-    ctx.strokeStyle = '#22c55e';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(CROSSHAIR_CX - 8, CROSSHAIR_CY);
-    ctx.lineTo(CROSSHAIR_CX + 8, CROSSHAIR_CY);
-    ctx.moveTo(CROSSHAIR_CX, CROSSHAIR_CY - 8);
-    ctx.lineTo(CROSSHAIR_CX, CROSSHAIR_CY + 8);
-    ctx.stroke();
+      const srcX = Math.max(0, centerX - sourceRadius);
+      const srcY = Math.max(0, centerY - sourceRadius);
+      const srcW = Math.min(sourceRadius * 2, sw - srcX);
+      const srcH = Math.min(sourceRadius * 2, sh - srcY);
 
-    ctx.restore();
-  }, [show, mousePosition, magnifierZoom, pdfCanvasRef]);
+      if (srcW > 0 && srcH > 0) {
+        const scale = MAGNIFIER_SIZE / Math.min(srcW, srcH);
+        const drawW = srcW * scale;
+        const drawH = srcH * scale;
+        const offsetX = CROSSHAIR_CX - drawW / 2;
+        const offsetY = CROSSHAIR_CY - drawH / 2;
+
+        ctx.save();
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(0, 0, MAGNIFIER_SIZE + 4, MAGNIFIER_SIZE + 4);
+        ctx.strokeStyle = '#64748b';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(1, 1, MAGNIFIER_SIZE + 2, MAGNIFIER_SIZE + 2);
+
+        ctx.drawImage(sourceCanvas, srcX, srcY, srcW, srcH, offsetX, offsetY, drawW, drawH);
+
+        ctx.strokeStyle = '#22c55e';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(CROSSHAIR_CX - 8, CROSSHAIR_CY);
+        ctx.lineTo(CROSSHAIR_CX + 8, CROSSHAIR_CY);
+        ctx.moveTo(CROSSHAIR_CX, CROSSHAIR_CY - 8);
+        ctx.lineTo(CROSSHAIR_CX, CROSSHAIR_CY + 8);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      raf = requestAnimationFrame(draw);
+    };
+
+    paintIdleFrame();
+    raf = requestAnimationFrame(draw);
+    return () => {
+      cancelled = true;
+      clearTimeout(idleTimeout);
+      cancelAnimationFrame(raf);
+    };
+  }, [show, magnifierZoom, pdfCanvasRef, mousePositionRef]);
 
   if (!show) return null;
 

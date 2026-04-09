@@ -48,9 +48,12 @@ export interface UsePDFViewerMeasurementsResult {
   setTextInputPosition: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
   textInputValue: string;
   setTextInputValue: React.Dispatch<React.SetStateAction<string>>;
-  // Shared UI state
-  mousePosition: { x: number; y: number } | null;
+  /** Normalized cursor position; updated every move without React re-renders. Magnifier / ephemeral paint read this ref. */
+  mousePositionRef: React.MutableRefObject<{ x: number; y: number } | null>;
+  /** Updates `mousePositionRef` (and optional legacy sync). Prefer this over React state for hot paths. */
   setMousePosition: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
+  /** Running length (continuous linear); ref avoids re-rendering PDFViewer on every mousemove. */
+  runningLengthRef: React.MutableRefObject<number>;
   // Cut-out state
   currentCutout: { x: number; y: number }[];
   setCurrentCutout: React.Dispatch<React.SetStateAction<{ x: number; y: number }[]>>;
@@ -114,7 +117,6 @@ export interface UsePDFViewerMeasurementsResult {
   setActivePoints: React.Dispatch<React.SetStateAction<{ x: number; y: number }[]>>;
   rubberBandElement: SVGLineElement | null;
   setRubberBandElement: React.Dispatch<React.SetStateAction<SVGLineElement | null>>;
-  runningLength: number;
   setRunningLength: React.Dispatch<React.SetStateAction<number>>;
   pageRubberBandRefs: React.MutableRefObject<Record<number, SVGLineElement | null>>;
   pageCommittedPolylineRefs: React.MutableRefObject<Record<number, SVGPolylineElement | null>>;
@@ -149,7 +151,15 @@ export function usePDFViewerMeasurements({
   const [showTextInput, setShowTextInput] = useState(false);
   const [textInputPosition, setTextInputPosition] = useState<{ x: number; y: number } | null>(null);
   const [textInputValue, setTextInputValue] = useState('');
-  const [mousePosition, setMousePosition] = useState<{ x: number; y: number } | null>(null);
+  const mousePositionRef = useRef<{ x: number; y: number } | null>(null);
+  const setMousePosition = useCallback<React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>>(
+    (action) => {
+      const next =
+        typeof action === 'function' ? action(mousePositionRef.current) : action;
+      mousePositionRef.current = next;
+    },
+    []
+  );
 
   // Cut-out state
   const [currentCutout, setCurrentCutout] = useState<{ x: number; y: number }[]>([]);
@@ -205,7 +215,11 @@ export function usePDFViewerMeasurements({
     isContinuousDrawingRef.current = isContinuousDrawing;
   }, [isContinuousDrawing]);
   const [rubberBandElement, setRubberBandElement] = useState<SVGLineElement | null>(null);
-  const [runningLength, setRunningLength] = useState<number>(0);
+  const runningLengthRef = useRef(0);
+  const setRunningLength = useCallback<React.Dispatch<React.SetStateAction<number>>>((action) => {
+    const next = typeof action === 'function' ? action(runningLengthRef.current) : action;
+    runningLengthRef.current = next;
+  }, []);
   const pageRubberBandRefs = useRef<Record<number, SVGLineElement | null>>({});
   const pageCommittedPolylineRefs = useRef<Record<number, SVGPolylineElement | null>>({});
 
@@ -298,7 +312,7 @@ export function usePDFViewerMeasurements({
     setTextInputPosition,
     textInputValue,
     setTextInputValue,
-    mousePosition,
+    mousePositionRef,
     setMousePosition,
     currentCutout,
     setCurrentCutout,
@@ -353,7 +367,7 @@ export function usePDFViewerMeasurements({
     setActivePoints,
     rubberBandElement,
     setRubberBandElement,
-    runningLength,
+    runningLengthRef,
     setRunningLength,
     pageRubberBandRefs,
     pageCommittedPolylineRefs,

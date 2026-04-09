@@ -215,6 +215,7 @@ export interface UsePDFViewerInteractionsOptions {
   cutoutDragJustCompletedRef: MutableRefObject<boolean>;
   annotationDragJustCompletedRef: MutableRefObject<boolean>;
   isSelectionModeRef: MutableRefObject<boolean>;
+  isMeasuringRef: MutableRefObject<boolean>;
   completeMeasurementRef: MutableRefObject<(points: { x: number; y: number }[]) => Promise<void>>;
   // Store-derived / callbacks
   annotationColor: string;
@@ -228,7 +229,9 @@ export interface UsePDFViewerInteractionsOptions {
   addAnnotation: (annotation: Omit<import('../../types').Annotation, 'id' | 'timestamp'>) => import('../../types').Annotation;
   applyOrthoSnapping: (pos: { x: number; y: number }, refPoints: { x: number; y: number }[]) => { x: number; y: number };
   calculateRunningLength: (points: { x: number; y: number }[], currentMousePos?: { x: number; y: number }) => number;
-  mousePosition: { x: number; y: number } | null;
+  mousePositionRef: MutableRefObject<{ x: number; y: number } | null>;
+  /** Batched rAF repaint of crosshair / preview (reads mousePositionRef). */
+  scheduleEphemeralPaintRef: MutableRefObject<(() => void) | null>;
   pdfDocument: unknown;
 }
 
@@ -371,6 +374,7 @@ export function usePDFViewerInteractions(
     cutoutDragJustCompletedRef,
     annotationDragJustCompletedRef,
     isSelectionModeRef,
+    isMeasuringRef,
     completeMeasurementRef,
     annotationColor,
     setTextInputPosition,
@@ -383,9 +387,14 @@ export function usePDFViewerInteractions(
     addAnnotation,
     applyOrthoSnapping,
     calculateRunningLength,
-    mousePosition,
+    mousePositionRef,
+    scheduleEphemeralPaintRef,
     pdfDocument,
   } = options;
+
+  const queueEphemeralPaint = useCallback(() => {
+    scheduleEphemeralPaintRef.current?.();
+  }, [scheduleEphemeralPaintRef]);
 
   const copyMarkupsByIds = useMeasurementStore((s) => s.copyMarkupsByIds);
   const copiedMarkups = useMeasurementStore((s) => s.copiedMarkups);
@@ -483,6 +492,7 @@ export function usePDFViewerInteractions(
                 x: mx / normVP.width,
                 y: my / normVP.height,
               });
+              queueEphemeralPaint();
             }
           });
           return;
@@ -518,6 +528,7 @@ export function usePDFViewerInteractions(
       setInternalViewState,
       lastRenderedScaleRef,
       containerRef,
+      queueEphemeralPaint,
     ]
   );
 
@@ -632,6 +643,7 @@ export function usePDFViewerInteractions(
               if (newPoints.length === 0) {
                 setIsCalibrating(false);
                 setMousePosition(null);
+                queueEphemeralPaint();
                 setCalibrationData(null);
               }
               return newPoints;
@@ -639,6 +651,7 @@ export function usePDFViewerInteractions(
           } else {
             setIsCalibrating(false);
             setMousePosition(null);
+            queueEphemeralPaint();
             setCalibrationData(null);
           }
           return;
@@ -650,17 +663,14 @@ export function usePDFViewerInteractions(
             if (newPoints.length === 0) {
               setIsMeasuring(false);
               setMousePosition(null);
+              queueEphemeralPaint();
               setIsContinuousDrawing(false);
               setRunningLength(0);
               const refs = pageRubberBandRefs.current;
               if (refs) {
                 const currentRubberBand = refs[currentPage];
-                if (
-                  currentRubberBand &&
-                  svgOverlayRef.current &&
-                  currentRubberBand.parentNode === svgOverlayRef.current
-                ) {
-                  svgOverlayRef.current.removeChild(currentRubberBand);
+                if (currentRubberBand?.parentNode) {
+                  currentRubberBand.parentNode.removeChild(currentRubberBand);
                 }
                 refs[currentPage] = null;
               }
@@ -675,6 +685,7 @@ export function usePDFViewerInteractions(
             if (newMeasurement.length === 0) {
               setIsMeasuring(false);
               setMousePosition(null);
+              queueEphemeralPaint();
             }
             return newMeasurement;
           });
@@ -722,6 +733,12 @@ export function usePDFViewerInteractions(
               )
             : [];
         await Promise.all(measurementDeletes);
+        // Same as Escape on selection: drop sidebar condition that was only synced from canvas
+        // markup. Otherwise selectedConditionId stays set with no selection and PDFViewer's effect
+        // enters draw mode for that condition (user did not press Space or activate the condition).
+        if (selectedMeasurementIds.length > 0) {
+          clearCanvasConditionSelection();
+        }
         const updatedAnnotations = useAnnotationStore.getState().annotations;
         setLocalAnnotations(updatedAnnotations.filter((a) => a.projectId === currentProjectId && a.sheetId === file.id));
         if (currentViewport) {
@@ -786,6 +803,7 @@ export function usePDFViewerInteractions(
       cutoutDragStart,
       setCutoutDragStart,
       setCutoutDragBox,
+      queueEphemeralPaint,
     ]
   );
 
@@ -1435,6 +1453,7 @@ export function usePDFViewerInteractions(
             x: coords.x / viewport.width,
             y: coords.y / viewport.height,
           });
+          queueEphemeralPaint();
         }
         return;
       }
@@ -1509,6 +1528,7 @@ export function usePDFViewerInteractions(
           pdfCoords = applyOrthoSnapping(pdfCoords, calibrationPoints);
         }
         setMousePosition(pdfCoords);
+        queueEphemeralPaint();
         return;
       }
       if (annotationTool) {
@@ -1521,10 +1541,14 @@ export function usePDFViewerInteractions(
           y: cssY / viewport.height,
         };
         setMousePosition(pdfCoords);
+        queueEphemeralPaint();
         return;
       }
       if (!isMeasuring || !selectedConditionId) {
-        if (mousePosition) setMousePosition(null);
+        if (mousePositionRef.current) {
+          setMousePosition(null);
+          queueEphemeralPaint();
+        }
         return;
       }
       if (!pdfCanvasRef.current) return;
@@ -1553,7 +1577,7 @@ export function usePDFViewerInteractions(
           const currentRubberBand = refs[currentPage];
           if (
             currentRubberBand &&
-            currentRubberBand.parentNode === svgOverlayRef.current &&
+            svgOverlayRef.current.contains(currentRubberBand) &&
             currentViewport
           ) {
             const lastPoint = activePoints[activePoints.length - 1];
@@ -1572,6 +1596,7 @@ export function usePDFViewerInteractions(
           }
         }
       }
+      queueEphemeralPaint();
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- pdfCanvasRef omit; added isOrthoSnapping, cutoutMode, currentCutout
     [
@@ -1589,7 +1614,7 @@ export function usePDFViewerInteractions(
       isMeasuring,
       isOrthoSnapping,
       selectedConditionId,
-      mousePosition,
+      mousePositionRef,
       isContinuousDrawing,
       activePoints,
       currentViewport,
@@ -1623,6 +1648,7 @@ export function usePDFViewerInteractions(
       hyperlinkMode,
       hyperlinkDrawStart,
       setHyperlinkDrawBox,
+      queueEphemeralPaint,
     ]
   );
 
@@ -1737,7 +1763,9 @@ export function usePDFViewerInteractions(
           }
           let pdfCoords = { x: baseX / baseViewport.width, y: baseY / baseViewport.height };
           if (prev.length > 0 && isOrthoSnapping) {
-            pdfCoords = mousePosition ? mousePosition : applyOrthoSnapping(pdfCoords, prev);
+            pdfCoords = mousePositionRef.current
+              ? mousePositionRef.current
+              : applyOrthoSnapping(pdfCoords, prev);
           }
           const newPoints = [...prev, pdfCoords];
           if (newPoints.length === 2) completeCalibration(newPoints);
@@ -1771,8 +1799,8 @@ export function usePDFViewerInteractions(
         }
         let pdfCoords = { x: baseX / baseViewport.width, y: baseY / baseViewport.height };
         // Apply ortho snapping to cutout points (use snapped mouse position when available)
-        if (isOrthoSnapping && mousePosition) {
-          pdfCoords = mousePosition;
+        if (isOrthoSnapping && mousePositionRef.current) {
+          pdfCoords = mousePositionRef.current;
         } else if (isOrthoSnapping) {
           pdfCoords = applyOrthoSnapping(pdfCoords, currentCutout);
         }
@@ -1832,6 +1860,20 @@ export function usePDFViewerInteractions(
       }
       if (!currentSelectedConditionId && !isSelectionMode) return;
       if (isSelectionMode && !currentSelectedConditionId) return;
+      // Sidebar-highlighted condition only: blank click deselects (no draw) until Space toggles draw mode.
+      // Use refs so we don't treat stale isMeasuring from a pre-layout closure as "draw mode".
+      if (
+        isSelectionModeRef.current &&
+        currentSelectedConditionId &&
+        !isMeasuringRef.current &&
+        !isCalibrating &&
+        !annotationTool &&
+        selectedMarkupIds.length === 0 &&
+        !titleblockSelectionMode
+      ) {
+        clearCanvasConditionSelection();
+        return;
+      }
       const baseViewport = pdfPageRef.current?.getViewport({ scale: 1, rotation: 0 }) || viewport;
       const rotation = viewState.rotation || 0;
       let baseX: number, baseY: number;
@@ -1852,8 +1894,8 @@ export function usePDFViewerInteractions(
         baseY = (cssY / viewport.height) * baseViewport.height;
       }
       let pdfCoords = { x: baseX / baseViewport.width, y: baseY / baseViewport.height };
-      if (isOrthoSnapping && (isMeasuring || enteredDrawFromCanvasMatch) && mousePosition) {
-        pdfCoords = mousePosition;
+      if (isOrthoSnapping && (isMeasuring || enteredDrawFromCanvasMatch) && mousePositionRef.current) {
+        pdfCoords = mousePositionRef.current;
       } else if (isOrthoSnapping) {
         const referencePoints = cutoutMode ? currentCutout : isContinuousDrawing ? activePoints : currentMeasurement;
         pdfCoords = applyOrthoSnapping(pdfCoords, referencePoints);
@@ -1894,7 +1936,7 @@ export function usePDFViewerInteractions(
       syncMeasurementTypeFromSelectedCondition,
       isOrthoSnapping,
       isMeasuring,
-      mousePosition,
+      mousePositionRef,
       cutoutMode,
       cutoutTargetConditionId,
       currentCutout,

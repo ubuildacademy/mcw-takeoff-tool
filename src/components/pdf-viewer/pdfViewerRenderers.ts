@@ -176,15 +176,31 @@ export interface Point {
  *  Matches regular area/volume measurement preview behaviour: dashed stroke
  *  polyline following the cursor, with a semi-transparent fill polygon once
  *  three or more points exist (no diagonal closing stroke). */
-export function renderSVGCurrentCutout(
-  svg: SVGSVGElement,
+export function renderSVGCurrentCutoutCommitted(
+  parent: SVGGElement,
+  viewport: { width: number; height: number },
+  currentCutout: Point[]
+): void {
+  if (!viewport || currentCutout.length < 3) return;
+  const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+  const polygonPointString = currentCutout
+    .map((p) => `${p.x * viewport.width},${p.y * viewport.height}`)
+    .join(' ');
+  polygon.setAttribute('points', polygonPointString);
+  polygon.setAttribute('fill', 'rgba(255, 0, 0, 0.15)');
+  polygon.setAttribute('stroke', 'none');
+  polygon.setAttribute('pointer-events', 'none');
+  parent.appendChild(polygon);
+}
+
+export function renderSVGCurrentCutoutEphemeral(
+  parent: SVGGElement,
   viewport: { width: number; height: number },
   currentCutout: Point[],
   mousePosition: Point | null
 ): void {
   if (!viewport || currentCutout.length === 0) return;
 
-  // Dashed polyline showing committed points + mouse position (matches area/volume preview)
   const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
   let pointString = currentCutout
     .map((p) => `${p.x * viewport.width},${p.y * viewport.height}`)
@@ -199,20 +215,18 @@ export function renderSVGCurrentCutout(
   polyline.setAttribute('stroke-dasharray', '5,5');
   polyline.setAttribute('vector-effect', 'non-scaling-stroke');
   polyline.setAttribute('pointer-events', 'none');
-  svg.appendChild(polyline);
+  parent.appendChild(polyline);
+}
 
-  // Semi-transparent fill polygon (no stroke) — same pattern as area/volume preview
-  if (currentCutout.length >= 3) {
-    const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-    const polygonPointString = currentCutout
-      .map((p) => `${p.x * viewport.width},${p.y * viewport.height}`)
-      .join(' ');
-    polygon.setAttribute('points', polygonPointString);
-    polygon.setAttribute('fill', 'rgba(255, 0, 0, 0.15)');
-    polygon.setAttribute('stroke', 'none');
-    polygon.setAttribute('pointer-events', 'none');
-    svg.appendChild(polygon);
-  }
+export function renderSVGCurrentCutout(
+  svg: SVGSVGElement,
+  viewport: { width: number; height: number },
+  currentCutout: Point[],
+  mousePosition: Point | null
+): void {
+  const parent = svg as unknown as SVGGElement;
+  renderSVGCurrentCutoutCommitted(parent, viewport, currentCutout);
+  renderSVGCurrentCutoutEphemeral(parent, viewport, currentCutout, mousePosition);
 }
 
 /** Converts hex color to rgba string. */
@@ -735,9 +749,12 @@ export interface RenderSVGCalibrationPointsOptions {
   applyOrthoSnapping: (point: { x: number; y: number }, refPoints: { x: number; y: number }[]) => { x: number; y: number };
 }
 
-/** Renders calibration points and preview line/distance. */
-export function renderSVGCalibrationPoints(svg: SVGSVGElement, options: RenderSVGCalibrationPointsOptions): void {
-  const { calibrationPoints, viewport, mousePosition, isOrthoSnapping, applyOrthoSnapping } = options;
+/** Fixed calibration points (circles, line between two points). */
+export function renderSVGCalibrationPointsCommitted(
+  parent: SVGGElement,
+  options: Omit<RenderSVGCalibrationPointsOptions, 'mousePosition'>
+): void {
+  const { calibrationPoints, viewport } = options;
   if (!viewport) return;
 
   calibrationPoints.forEach((point, index) => {
@@ -749,7 +766,7 @@ export function renderSVGCalibrationPoints(svg: SVGSVGElement, options: RenderSV
     circle.setAttribute('fill', '#ff0000');
     circle.setAttribute('stroke', '#ffffff');
     circle.setAttribute('stroke-width', '2');
-    svg.appendChild(circle);
+    parent.appendChild(circle);
     const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     text.setAttribute('x', viewportPoint.x.toString());
     text.setAttribute('y', (viewportPoint.y + 4).toString());
@@ -760,8 +777,43 @@ export function renderSVGCalibrationPoints(svg: SVGSVGElement, options: RenderSV
     text.setAttribute('text-anchor', 'middle');
     text.setAttribute('dominant-baseline', 'middle');
     text.textContent = (index + 1).toString();
-    svg.appendChild(text);
+    parent.appendChild(text);
   });
+
+  if (calibrationPoints.length === 2) {
+    const firstPoint = { x: calibrationPoints[0].x * viewport.width, y: calibrationPoints[0].y * viewport.height };
+    const secondPoint = { x: calibrationPoints[1].x * viewport.width, y: calibrationPoints[1].y * viewport.height };
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', firstPoint.x.toString());
+    line.setAttribute('y1', firstPoint.y.toString());
+    line.setAttribute('x2', secondPoint.x.toString());
+    line.setAttribute('y2', secondPoint.y.toString());
+    line.setAttribute('stroke', '#ff0000');
+    line.setAttribute('stroke-width', '3');
+    parent.appendChild(line);
+    const midX = (firstPoint.x + secondPoint.x) / 2;
+    const midY = (firstPoint.y + secondPoint.y) / 2;
+    const distance = calculateDistance(firstPoint, secondPoint);
+    const distanceText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    distanceText.setAttribute('x', midX.toString());
+    distanceText.setAttribute('y', (midY - 10).toString());
+    distanceText.setAttribute('fill', '#ff0000');
+    distanceText.setAttribute('font-size', '14');
+    distanceText.setAttribute('font-family', 'Arial');
+    distanceText.setAttribute('font-weight', 'bold');
+    distanceText.setAttribute('text-anchor', 'middle');
+    distanceText.textContent = `${distance.toFixed(1)} px`;
+    parent.appendChild(distanceText);
+  }
+}
+
+/** Dashed preview from first calibration point to cursor. */
+export function renderSVGCalibrationPointsEphemeral(
+  parent: SVGGElement,
+  options: RenderSVGCalibrationPointsOptions
+): void {
+  const { calibrationPoints, viewport, mousePosition, isOrthoSnapping, applyOrthoSnapping } = options;
+  if (!viewport) return;
 
   if (calibrationPoints.length === 1 && mousePosition) {
     const firstPoint = { x: calibrationPoints[0].x * viewport.width, y: calibrationPoints[0].y * viewport.height };
@@ -776,7 +828,7 @@ export function renderSVGCalibrationPoints(svg: SVGSVGElement, options: RenderSV
     previewLine.setAttribute('stroke-width', '2');
     previewLine.setAttribute('stroke-dasharray', '5,5');
     previewLine.setAttribute('opacity', '0.7');
-    svg.appendChild(previewLine);
+    parent.appendChild(previewLine);
     const midX = (firstPoint.x + snappedViewportPoint.x) / 2;
     const midY = (firstPoint.y + snappedViewportPoint.y) / 2;
     const distance = calculateDistance(firstPoint, snappedViewportPoint);
@@ -789,34 +841,15 @@ export function renderSVGCalibrationPoints(svg: SVGSVGElement, options: RenderSV
     distanceText.setAttribute('font-weight', 'bold');
     distanceText.setAttribute('text-anchor', 'middle');
     distanceText.textContent = `${distance.toFixed(1)} px`;
-    svg.appendChild(distanceText);
+    parent.appendChild(distanceText);
   }
+}
 
-  if (calibrationPoints.length === 2) {
-    const firstPoint = { x: calibrationPoints[0].x * viewport.width, y: calibrationPoints[0].y * viewport.height };
-    const secondPoint = { x: calibrationPoints[1].x * viewport.width, y: calibrationPoints[1].y * viewport.height };
-    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    line.setAttribute('x1', firstPoint.x.toString());
-    line.setAttribute('y1', firstPoint.y.toString());
-    line.setAttribute('x2', secondPoint.x.toString());
-    line.setAttribute('y2', secondPoint.y.toString());
-    line.setAttribute('stroke', '#ff0000');
-    line.setAttribute('stroke-width', '3');
-    svg.appendChild(line);
-    const midX = (firstPoint.x + secondPoint.x) / 2;
-    const midY = (firstPoint.y + secondPoint.y) / 2;
-    const distance = calculateDistance(firstPoint, secondPoint);
-    const distanceText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    distanceText.setAttribute('x', midX.toString());
-    distanceText.setAttribute('y', (midY - 10).toString());
-    distanceText.setAttribute('fill', '#ff0000');
-    distanceText.setAttribute('font-size', '14');
-    distanceText.setAttribute('font-family', 'Arial');
-    distanceText.setAttribute('font-weight', 'bold');
-    distanceText.setAttribute('text-anchor', 'middle');
-    distanceText.textContent = `${distance.toFixed(1)} px`;
-    svg.appendChild(distanceText);
-  }
+/** Renders calibration points and preview line/distance. */
+export function renderSVGCalibrationPoints(svg: SVGSVGElement, options: RenderSVGCalibrationPointsOptions): void {
+  const parent = svg as unknown as SVGGElement;
+  renderSVGCalibrationPointsCommitted(parent, options);
+  renderSVGCalibrationPointsEphemeral(parent, options);
 }
 
 export interface RenderRunningLengthDisplayOptions {
@@ -961,9 +994,111 @@ export interface RenderSVGCurrentMeasurementOptions {
   conditionLineThickness?: number;
 }
 
-/** Renders current measurement being drawn (preview polylines, polygons, count circle). */
-export function renderSVGCurrentMeasurement(
-  svg: SVGSVGElement,
+export type RenderSVGCurrentMeasurementCommittedOptions = Omit<RenderSVGCurrentMeasurementOptions, 'mousePosition'>;
+
+/** Committed geometry only (no cursor-following preview). Pair with `renderSVGCurrentMeasurementEphemeral`. */
+export function renderSVGCurrentMeasurementCommitted(
+  parent: SVGGElement,
+  viewport: PageViewport,
+  options: RenderSVGCurrentMeasurementCommittedOptions
+): void {
+  const {
+    currentPage,
+    measurementType,
+    isContinuousDrawing,
+    activePoints,
+    pageCommittedPolylineRefs,
+    currentMeasurement,
+    cutoutMode,
+    conditionColor,
+    conditionLineThickness = 2,
+  } = options;
+  if (!viewport) return;
+
+  const strokeColor = cutoutMode ? '#ff0000' : conditionColor;
+
+  switch (measurementType) {
+    case 'linear':
+      if (isContinuousDrawing && activePoints.length > 0 && activePoints.length > 1) {
+        const existingPolyline = pageCommittedPolylineRefs.current[currentPage];
+        if (existingPolyline?.parentNode === parent) parent.removeChild(existingPolyline);
+        const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+        const pointString = activePoints.map((p) => `${p.x * viewport.width},${p.y * viewport.height}`).join(' ');
+        polyline.setAttribute('points', pointString);
+        polyline.setAttribute('stroke', strokeColor);
+        polyline.setAttribute('stroke-width', String(conditionLineThickness));
+        polyline.setAttribute('stroke-linecap', 'round');
+        polyline.setAttribute('stroke-linejoin', 'round');
+        polyline.setAttribute('fill', 'none');
+        polyline.setAttribute('vector-effect', 'non-scaling-stroke');
+        polyline.setAttribute('id', `committed-segments-${currentPage}`);
+        parent.appendChild(polyline);
+        pageCommittedPolylineRefs.current[currentPage] = polyline;
+      }
+      break;
+    case 'area':
+      if (currentMeasurement.length >= 3) {
+        const areaPolygonId = `area-polygon-${currentPage}`;
+        const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+        polygon.setAttribute(
+          'points',
+          currentMeasurement.map((p) => `${p.x * viewport.width},${p.y * viewport.height}`).join(' ')
+        );
+        polygon.setAttribute('fill', cutoutMode ? 'none' : conditionColor + '40');
+        polygon.setAttribute('stroke', 'none');
+        polygon.setAttribute('id', areaPolygonId);
+        polygon.setAttribute('pointer-events', 'none');
+        parent.appendChild(polygon);
+      }
+      break;
+    case 'volume':
+      if (currentMeasurement.length >= 3) {
+        const volumePolygonId = `volume-polygon-${currentPage}`;
+        const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+        polygon.setAttribute(
+          'points',
+          currentMeasurement.map((p) => `${p.x * viewport.width},${p.y * viewport.height}`).join(' ')
+        );
+        polygon.setAttribute('fill', cutoutMode ? 'none' : conditionColor + '40');
+        polygon.setAttribute('stroke', 'none');
+        polygon.setAttribute('id', volumePolygonId);
+        polygon.setAttribute('pointer-events', 'none');
+        parent.appendChild(polygon);
+      }
+      break;
+    case 'count':
+      if (currentMeasurement.length >= 1) {
+        const point = { x: currentMeasurement[0].x * viewport.width, y: currentMeasurement[0].y * viewport.height };
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', point.x.toString());
+        circle.setAttribute('cy', point.y.toString());
+        circle.setAttribute('r', '12');
+        circle.setAttribute('fill', conditionColor + '80');
+        circle.setAttribute('stroke', 'white');
+        circle.setAttribute('stroke-width', '3');
+        circle.setAttribute('stroke-dasharray', '5,5');
+        parent.appendChild(circle);
+        const previewText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        previewText.setAttribute('x', point.x.toString());
+        previewText.setAttribute('y', (point.y + 4).toString());
+        previewText.setAttribute('fill', 'white');
+        previewText.setAttribute('font-size', '14');
+        previewText.setAttribute('font-family', 'Arial');
+        previewText.setAttribute('font-weight', 'bold');
+        previewText.setAttribute('text-anchor', 'middle');
+        previewText.setAttribute('dominant-baseline', 'middle');
+        previewText.setAttribute('stroke', 'black');
+        previewText.setAttribute('stroke-width', '0.5');
+        previewText.textContent = '1';
+        parent.appendChild(previewText);
+      }
+      break;
+  }
+}
+
+/** Cursor-following preview (dashed polylines, etc.). Re-rendered often via rAF without rebuilding committed markups. */
+export function renderSVGCurrentMeasurementEphemeral(
+  parent: SVGGElement,
   viewport: PageViewport,
   options: RenderSVGCurrentMeasurementOptions
 ): void {
@@ -972,7 +1107,6 @@ export function renderSVGCurrentMeasurement(
     measurementType,
     isContinuousDrawing,
     activePoints,
-    pageCommittedPolylineRefs,
     mousePosition,
     currentMeasurement,
     cutoutMode,
@@ -983,56 +1117,28 @@ export function renderSVGCurrentMeasurement(
 
   const strokeColor = cutoutMode ? '#ff0000' : conditionColor;
   const previewId = `linear-preview-${currentPage}`;
-  const existingPreview = svg.querySelector(`#${previewId}`);
-  if (existingPreview?.parentNode === svg) svg.removeChild(existingPreview);
-  svg.querySelectorAll('polyline').forEach((polyline) => {
-    const id = polyline.getAttribute('id');
-    if (id?.startsWith('linear-preview-') && id !== previewId && polyline.parentNode === svg) {
-      svg.removeChild(polyline);
-    }
-  });
 
   switch (measurementType) {
     case 'linear':
       if (isContinuousDrawing && activePoints.length > 0) {
-        if (activePoints.length > 1) {
-          const existingPolyline = pageCommittedPolylineRefs.current[currentPage];
-          if (existingPolyline?.parentNode === svg) svg.removeChild(existingPolyline);
-          const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-          const pointString = activePoints.map((p) => `${p.x * viewport.width},${p.y * viewport.height}`).join(' ');
-          polyline.setAttribute('points', pointString);
-          polyline.setAttribute('stroke', strokeColor);
-          polyline.setAttribute('stroke-width', String(conditionLineThickness));
-          polyline.setAttribute('stroke-linecap', 'round');
-          polyline.setAttribute('stroke-linejoin', 'round');
-          polyline.setAttribute('fill', 'none');
-          polyline.setAttribute('vector-effect', 'non-scaling-stroke');
-          polyline.setAttribute('id', `committed-segments-${currentPage}`);
-          svg.appendChild(polyline);
-          pageCommittedPolylineRefs.current[currentPage] = polyline;
+        const previewPolyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+        let pointString = activePoints.map((p) => `${p.x * viewport.width},${p.y * viewport.height}`).join(' ');
+        if (mousePosition) {
+          pointString += ` ${mousePosition.x * viewport.width},${mousePosition.y * viewport.height}`;
         }
-        if (activePoints.length > 0) {
-          const previewPolyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-          let pointString = activePoints.map((p) => `${p.x * viewport.width},${p.y * viewport.height}`).join(' ');
-          if (mousePosition) {
-            pointString += ` ${mousePosition.x * viewport.width},${mousePosition.y * viewport.height}`;
-          }
-          previewPolyline.setAttribute('points', pointString);
-          previewPolyline.setAttribute('stroke', conditionColor);
-          previewPolyline.setAttribute('stroke-width', String(conditionLineThickness));
-          previewPolyline.setAttribute('stroke-linecap', 'round');
-          previewPolyline.setAttribute('stroke-linejoin', 'round');
-          previewPolyline.setAttribute('fill', 'none');
-          previewPolyline.setAttribute('stroke-dasharray', '5,5');
-          previewPolyline.setAttribute('vector-effect', 'non-scaling-stroke');
-          previewPolyline.setAttribute('id', previewId);
-          previewPolyline.setAttribute('pointer-events', 'none');
-          svg.appendChild(previewPolyline);
-        }
+        previewPolyline.setAttribute('points', pointString);
+        previewPolyline.setAttribute('stroke', conditionColor);
+        previewPolyline.setAttribute('stroke-width', String(conditionLineThickness));
+        previewPolyline.setAttribute('stroke-linecap', 'round');
+        previewPolyline.setAttribute('stroke-linejoin', 'round');
+        previewPolyline.setAttribute('fill', 'none');
+        previewPolyline.setAttribute('stroke-dasharray', '5,5');
+        previewPolyline.setAttribute('vector-effect', 'non-scaling-stroke');
+        previewPolyline.setAttribute('id', previewId);
+        previewPolyline.setAttribute('pointer-events', 'none');
+        parent.appendChild(previewPolyline);
       } else if (currentMeasurement.length > 0) {
         const nonContinuousPreviewId = `linear-noncontinuous-preview-${currentPage}`;
-        const existingNonContinuous = svg.querySelector(`#${nonContinuousPreviewId}`);
-        if (existingNonContinuous?.parentNode === svg) svg.removeChild(existingNonContinuous);
         const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
         let pointString = currentMeasurement.map((p) => `${p.x * viewport.width},${p.y * viewport.height}`).join(' ');
         if (mousePosition) {
@@ -1048,17 +1154,12 @@ export function renderSVGCurrentMeasurement(
         polyline.setAttribute('vector-effect', 'non-scaling-stroke');
         polyline.setAttribute('id', nonContinuousPreviewId);
         polyline.setAttribute('pointer-events', 'none');
-        svg.appendChild(polyline);
+        parent.appendChild(polyline);
       }
       break;
     case 'area':
       if (currentMeasurement.length > 0) {
         const areaPreviewId = `area-preview-${currentPage}`;
-        const areaPolygonId = `area-polygon-${currentPage}`;
-        [areaPreviewId, areaPolygonId].forEach((id) => {
-          const el = svg.querySelector(`#${id}`);
-          if (el?.parentNode === svg) svg.removeChild(el);
-        });
         const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
         let pointString = currentMeasurement.map((p) => `${p.x * viewport.width},${p.y * viewport.height}`).join(' ');
         if (mousePosition) {
@@ -1072,29 +1173,12 @@ export function renderSVGCurrentMeasurement(
         polyline.setAttribute('id', areaPreviewId);
         polyline.setAttribute('pointer-events', 'none');
         polyline.setAttribute('vector-effect', 'non-scaling-stroke');
-        svg.appendChild(polyline);
-        if (currentMeasurement.length >= 3) {
-          const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-          polygon.setAttribute(
-            'points',
-            currentMeasurement.map((p) => `${p.x * viewport.width},${p.y * viewport.height}`).join(' ')
-          );
-          polygon.setAttribute('fill', cutoutMode ? 'none' : conditionColor + '40');
-          polygon.setAttribute('stroke', 'none');
-          polygon.setAttribute('id', areaPolygonId);
-          polygon.setAttribute('pointer-events', 'none');
-          svg.appendChild(polygon);
-        }
+        parent.appendChild(polyline);
       }
       break;
     case 'volume':
       if (currentMeasurement.length > 0) {
         const volumePreviewId = `volume-preview-${currentPage}`;
-        const volumePolygonId = `volume-polygon-${currentPage}`;
-        [volumePreviewId, volumePolygonId].forEach((id) => {
-          const el = svg.querySelector(`#${id}`);
-          if (el?.parentNode === svg) svg.removeChild(el);
-        });
         const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
         let pointString = currentMeasurement.map((p) => `${p.x * viewport.width},${p.y * viewport.height}`).join(' ');
         if (mousePosition) {
@@ -1108,47 +1192,21 @@ export function renderSVGCurrentMeasurement(
         polyline.setAttribute('id', volumePreviewId);
         polyline.setAttribute('pointer-events', 'none');
         polyline.setAttribute('vector-effect', 'non-scaling-stroke');
-        svg.appendChild(polyline);
-        if (currentMeasurement.length >= 3) {
-          const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-          polygon.setAttribute(
-            'points',
-            currentMeasurement.map((p) => `${p.x * viewport.width},${p.y * viewport.height}`).join(' ')
-          );
-          polygon.setAttribute('fill', cutoutMode ? 'none' : conditionColor + '40');
-          polygon.setAttribute('stroke', 'none');
-          polygon.setAttribute('id', volumePolygonId);
-          polygon.setAttribute('pointer-events', 'none');
-          svg.appendChild(polygon);
-        }
+        parent.appendChild(polyline);
       }
       break;
-    case 'count':
-      if (currentMeasurement.length >= 1) {
-        const point = { x: currentMeasurement[0].x * viewport.width, y: currentMeasurement[0].y * viewport.height };
-        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        circle.setAttribute('cx', point.x.toString());
-        circle.setAttribute('cy', point.y.toString());
-        circle.setAttribute('r', '12');
-        circle.setAttribute('fill', conditionColor + '80');
-        circle.setAttribute('stroke', 'white');
-        circle.setAttribute('stroke-width', '3');
-        circle.setAttribute('stroke-dasharray', '5,5');
-        svg.appendChild(circle);
-        const previewText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        previewText.setAttribute('x', point.x.toString());
-        previewText.setAttribute('y', (point.y + 4).toString());
-        previewText.setAttribute('fill', 'white');
-        previewText.setAttribute('font-size', '14');
-        previewText.setAttribute('font-family', 'Arial');
-        previewText.setAttribute('font-weight', 'bold');
-        previewText.setAttribute('text-anchor', 'middle');
-        previewText.setAttribute('dominant-baseline', 'middle');
-        previewText.setAttribute('stroke', 'black');
-        previewText.setAttribute('stroke-width', '0.5');
-        previewText.textContent = '1';
-        svg.appendChild(previewText);
-      }
+    default:
       break;
   }
+}
+
+/** @deprecated Prefer committed + ephemeral split. Single-layer fallback (tests / legacy). */
+export function renderSVGCurrentMeasurement(
+  svg: SVGSVGElement,
+  viewport: PageViewport,
+  options: RenderSVGCurrentMeasurementOptions
+): void {
+  const parent = svg as unknown as SVGGElement;
+  renderSVGCurrentMeasurementCommitted(parent, viewport, options);
+  renderSVGCurrentMeasurementEphemeral(parent, viewport, options);
 }

@@ -1,9 +1,68 @@
-import { useState, useEffect, useLayoutEffect } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { useMeasurementStore } from '../../store/slices/measurementSlice';
 import { useAnnotationStore } from '../../store/slices/annotationSlice';
 import type { Annotation } from '../../types';
 import type { Measurement } from '../PDFViewer.types';
 import { takeoffMeasurementToPdfViewerMeasurement } from '../../utils/takeoffMeasurementDisplay';
+
+function sameXY(a: { x: number; y: number }, b: { x: number; y: number }): boolean {
+  return a.x === b.x && a.y === b.y;
+}
+
+function samePointList(
+  a: Array<{ x: number; y: number }>,
+  b: Array<{ x: number; y: number }>
+): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (!sameXY(a[i], b[i])) return false;
+  }
+  return true;
+}
+
+function sameCutout(
+  a: NonNullable<Measurement['cutouts']>[number],
+  b: NonNullable<Measurement['cutouts']>[number]
+): boolean {
+  if (a.id !== b.id) return false;
+  if (a.calculatedValue !== b.calculatedValue) return false;
+  return samePointList(a.points, b.points) && samePointList(a.pdfCoordinates, b.pdfCoordinates);
+}
+
+/** True if PDFViewer would render the same markup for this page (ids, order, geometry, display fields). */
+function measurementEqualForViewer(a: Measurement, b: Measurement): boolean {
+  if (a.id !== b.id) return false;
+  if (a.type !== b.type) return false;
+  if (a.conditionId !== b.conditionId) return false;
+  if (a.conditionColor !== b.conditionColor) return false;
+  if (a.pdfPage !== b.pdfPage) return false;
+  if (a.stackOrder !== b.stackOrder) return false;
+  if (a.calculatedValue !== b.calculatedValue) return false;
+  if (a.netCalculatedValue !== b.netCalculatedValue) return false;
+  if (a.perimeterValue !== b.perimeterValue) return false;
+  if (a.areaValue !== b.areaValue) return false;
+  if (a.color !== b.color) return false;
+  if (!samePointList(a.points, b.points)) return false;
+  if (!samePointList(a.pdfCoordinates, b.pdfCoordinates)) return false;
+  const ac = a.cutouts;
+  const bc = b.cutouts;
+  if ((ac?.length ?? 0) !== (bc?.length ?? 0)) return false;
+  if (ac && bc) {
+    for (let i = 0; i < ac.length; i++) {
+      if (!sameCutout(ac[i], bc[i])) return false;
+    }
+  }
+  return true;
+}
+
+function measurementListEqualForViewer(a: Measurement[] | null, b: Measurement[]): boolean {
+  if (a === null) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (!measurementEqualForViewer(a[i], b[i])) return false;
+  }
+  return true;
+}
 
 export interface UsePDFViewerDataOptions {
   currentProjectId: string | null | undefined;
@@ -30,6 +89,7 @@ export function usePDFViewerData({
 }: UsePDFViewerDataOptions): UsePDFViewerDataResult {
   const [localTakeoffMeasurements, setLocalTakeoffMeasurements] = useState<Measurement[]>([]);
   const [measurementsLoading, setMeasurementsLoading] = useState(false);
+  const lastMirroredViewerMeasurementsRef = useRef<Measurement[] | null>(null);
 
   const storeAnnotations = useAnnotationStore((s) => s.annotations);
   const loadPageTakeoffMeasurements = useMeasurementStore((s) => s.loadPageTakeoffMeasurements);
@@ -50,6 +110,7 @@ export function usePDFViewerData({
 
   // PER-PAGE LOADING: Load measurements for current page when page changes
   useEffect(() => {
+    lastMirroredViewerMeasurementsRef.current = null;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: reset local state when deps change
     setLocalTakeoffMeasurements([]);
     setMeasurementsLoading(true);
@@ -99,6 +160,7 @@ export function usePDFViewerData({
   // REACTIVE UPDATE: mirror store → local before paint so layer/order changes feel instant (useEffect was one frame late).
   useLayoutEffect(() => {
     if (!currentProjectId || !fileId || !currentPage) {
+      lastMirroredViewerMeasurementsRef.current = null;
       // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: clear when deps invalid
       setLocalTakeoffMeasurements([]);
       return;
@@ -109,9 +171,12 @@ export function usePDFViewerData({
       .map((apiMeasurement) => takeoffMeasurementToPdfViewerMeasurement(apiMeasurement))
       .filter((m): m is Measurement => m != null);
 
-    // Always mirror the store for this page. Do not skip updates when ids are unchanged —
-    // coordinates (e.g. after move undo/redo) must refresh local state for the canvas.
-    // Order matches getPageTakeoffMeasurements (sorted by stackOrder); PDFViewer draws in this order.
+    // Skip setState when the derived page list is viewer-equivalent to the last mirror (avoids re-renders on store churn).
+    // Still update when ids, order, coordinates, cutouts, or display fields change.
+    if (measurementListEqualForViewer(lastMirroredViewerMeasurementsRef.current, displayMeasurements)) {
+      return;
+    }
+    lastMirroredViewerMeasurementsRef.current = displayMeasurements;
     setLocalTakeoffMeasurements(displayMeasurements);
   }, [allTakeoffMeasurements, currentProjectId, fileId, currentPage, getPageTakeoffMeasurements]);
 
