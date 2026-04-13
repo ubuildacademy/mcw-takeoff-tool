@@ -176,8 +176,16 @@ function hasColumnNotFoundError(e: unknown): boolean {
   const err = e as { code?: string; message?: string };
   // PostgreSQL 42703 = undefined_column
   if (err.code === '42703') return true;
+  // PostgREST: requested column missing from schema cache
+  if (err.code === 'PGRST204') return true;
   const msg = String(err.message ?? '');
-  return msg.includes('line_thickness') && (msg.includes('does not exist') || msg.includes('undefined column'));
+  if (msg.includes('line_thickness') && (msg.includes('does not exist') || msg.includes('undefined column'))) {
+    return true;
+  }
+  if (msg.includes('Could not find') && msg.includes('column') && msg.includes('schema cache')) {
+    return true;
+  }
+  return false;
 }
 
 function finiteMeasurementNumber(value: unknown, fallback: number): number {
@@ -985,6 +993,22 @@ class SupabaseStorage {
       error = retry.error;
     }
 
+    if (error && hasColumnNotFoundError(error) && 'description' in dbMeasurement) {
+      const withoutDescription = { ...dbMeasurement };
+      delete withoutDescription.description;
+      console.warn(
+        '⚠️ takeoff_measurements.description missing or failed; retrying without description. Run migration: server/migrations/add_description_to_takeoff_measurements.sql'
+      );
+      dbMeasurement = withoutDescription;
+      const retry = await supabase
+        .from(TABLES.TAKEOFF_MEASUREMENTS)
+        .upsert(withoutDescription)
+        .select()
+        .single();
+      data = retry.data;
+      error = retry.error;
+    }
+
     if (error) {
       console.error('❌ ERROR: Failed to save takeoff measurement:', error);
       console.error('❌ ERROR: Error details:', {
@@ -1036,11 +1060,46 @@ class SupabaseStorage {
 
     for (let i = 0; i < dbMeasurements.length; i += BATCH_SIZE) {
       const batch = dbMeasurements.slice(i, i + BATCH_SIZE);
-      
-      const { data, error } = await supabase
+
+      let attemptBatch: Record<string, unknown>[] = batch;
+      let { data, error } = await supabase
         .from(TABLES.TAKEOFF_MEASUREMENTS)
-        .upsert(batch, { onConflict: 'id' })
+        .upsert(attemptBatch, { onConflict: 'id' })
         .select();
+
+      if (error && hasColumnNotFoundError(error) && attemptBatch.some((r) => 'stack_order' in r)) {
+        console.warn(
+          '⚠️ takeoff_measurements.stack_order missing in batch; retrying without stack_order. Run migration: server/migrations/add_stack_order_to_takeoff_measurements.sql'
+        );
+        attemptBatch = attemptBatch.map((row) => {
+          const r = { ...row };
+          delete r.stack_order;
+          return r;
+        });
+        const retry = await supabase
+          .from(TABLES.TAKEOFF_MEASUREMENTS)
+          .upsert(attemptBatch, { onConflict: 'id' })
+          .select();
+        data = retry.data;
+        error = retry.error;
+      }
+
+      if (error && hasColumnNotFoundError(error) && attemptBatch.some((r) => 'description' in r)) {
+        console.warn(
+          '⚠️ takeoff_measurements.description missing in batch; retrying without description. Run migration: server/migrations/add_description_to_takeoff_measurements.sql'
+        );
+        attemptBatch = attemptBatch.map((row) => {
+          const r = { ...row };
+          delete r.description;
+          return r;
+        });
+        const retry = await supabase
+          .from(TABLES.TAKEOFF_MEASUREMENTS)
+          .upsert(attemptBatch, { onConflict: 'id' })
+          .select();
+        data = retry.data;
+        error = retry.error;
+      }
 
       if (error) {
         console.error(`❌ ERROR: Failed to save batch ${i / BATCH_SIZE + 1}:`, error);

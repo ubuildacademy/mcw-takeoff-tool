@@ -119,6 +119,7 @@ export function TakeoffWorkspace() {
   useEffect(() => {
     if (!projectId) return;
     setProjectFiles([]);
+    setFilesLoadedForProjectId(null);
   }, [projectId]);
 
   const onProjectFilesLoaded = useCallback(() => {

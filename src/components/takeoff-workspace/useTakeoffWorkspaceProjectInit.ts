@@ -40,39 +40,42 @@ export function useTakeoffWorkspaceProjectInit({
   loadProjectTakeoffMeasurements,
   setShowProfitMarginDialog,
 }: UseTakeoffWorkspaceProjectInitOptions): void {
-  const loadedProjectIdRef = useRef<string | null>(null);
-
   // Load project files. Tab-based view: tabs drive the view; useTakeoffWorkspaceTabs restores/syncs scale/rotation.
+  //
+  // Important: never call onProjectFilesLoaded before getProjectFiles resolves. React Strict Mode runs this
+  // effect twice in development; a previous pattern (ref + early return) fired "ready" before projectFiles
+  // was set, so loadProjectDocuments ran with [] and the Sheets sidebar stayed empty while the PDF viewer worked.
   useEffect(() => {
     if (!projectId) {
-      loadedProjectIdRef.current = null;
       return;
     }
-    if (loadedProjectIdRef.current === projectId) {
-      onProjectFilesLoaded?.();
-      return;
-    }
-    const currentProjectId: string = projectId;
-    loadedProjectIdRef.current = projectId;
+    const currentProjectId = projectId;
+    let cancelled = false;
 
     async function loadFiles() {
       try {
         const res = await fileService.getProjectFiles(currentProjectId);
+        if (cancelled) return;
         const files = (res.files || []) as ProjectFile[];
         setProjectFiles(files);
 
         // Tab-based view: tabs drive the view. If persisted tabs exist, useTakeoffWorkspaceTabs restores them.
         // If no tabs, user sees "Select a sheet" until they click one. Don't auto-open a file.
       } catch (e: unknown) {
+        if (cancelled) return;
         if (isDev) console.error('Error loading project files:', e);
         setProjectFiles([]);
-        loadedProjectIdRef.current = null;
       } finally {
-        onProjectFilesLoaded?.();
+        if (!cancelled) {
+          onProjectFilesLoaded?.();
+        }
       }
     }
-    loadFiles();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- Run once per projectId; ref guards; omit store setters/getters
+    void loadFiles();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Run once per projectId; omit store setters
   }, [projectId, isDev]);
 
   const initCalibrationsRef = useRef<string | null>(null);
