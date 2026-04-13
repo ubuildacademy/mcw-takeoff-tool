@@ -6,6 +6,8 @@ import type { ProjectFile, Calibration } from '../../types';
 export interface UseTakeoffWorkspaceProjectInitOptions {
   projectId: string | undefined;
   isDev?: boolean;
+  /** Called after the project file list has been fetched (success or failure). */
+  onProjectFilesLoaded?: () => void;
   setProjectFiles: (files: ProjectFile[]) => void;
   setCurrentProject: (projectId: string) => void;
   clearProjectCalibrations: (projectId: string) => void;
@@ -30,6 +32,7 @@ export interface UseTakeoffWorkspaceProjectInitOptions {
 export function useTakeoffWorkspaceProjectInit({
   projectId,
   isDev = false,
+  onProjectFilesLoaded,
   setProjectFiles,
   setCurrentProject,
   clearProjectCalibrations,
@@ -46,6 +49,7 @@ export function useTakeoffWorkspaceProjectInit({
       return;
     }
     if (loadedProjectIdRef.current === projectId) {
+      onProjectFilesLoaded?.();
       return;
     }
     const currentProjectId: string = projectId;
@@ -63,6 +67,8 @@ export function useTakeoffWorkspaceProjectInit({
         if (isDev) console.error('Error loading project files:', e);
         setProjectFiles([]);
         loadedProjectIdRef.current = null;
+      } finally {
+        onProjectFilesLoaded?.();
       }
     }
     loadFiles();

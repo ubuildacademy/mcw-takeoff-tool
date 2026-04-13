@@ -357,7 +357,6 @@ except Exception as e:
 
   /**
    * Get PDF file path (downloads from Supabase Storage if needed)
-   * Matches the pattern used in cvTakeoffService
    */
   private async getPDFFilePath(pdfFileId: string, projectId?: string): Promise<string> {
     try {

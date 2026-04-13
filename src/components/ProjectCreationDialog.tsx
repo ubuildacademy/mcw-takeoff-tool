@@ -4,7 +4,6 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
-import { FileUpload } from './ui/file-upload';
 import {
   Dialog,
   DialogContent,
@@ -23,7 +22,6 @@ import {
 import { 
   Building2 
 } from 'lucide-react';
-import { fileService } from '../services/apiService';
 import { useProjectStore } from '../store/slices/projectSlice';
 import type { Project } from '../types';
 
@@ -64,12 +62,10 @@ export function ProjectCreationDialog({ open, onOpenChange, onCreated }: Project
   
   const [formData, setFormData] = useState<JobFormData>({ ...EMPTY_FORM });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
 
-  // Radix often keeps dialog content mounted when closed; reset so file list cannot desync from upload state.
+  // Radix often keeps dialog content mounted when closed; reset form when closed.
   useEffect(() => {
     if (open) return;
-    setUploadedFiles([]);
     setFormData({ ...EMPTY_FORM });
   }, [open]);
 
@@ -129,20 +125,14 @@ export function ProjectCreationDialog({ open, onOpenChange, onCreated }: Project
         takeoffCount: 0
       };
 
-      // Upload files sequentially to show progress in network panel
-      for (const f of uploadedFiles) {
-        await fileService.uploadPDF(f, project.id);
-      }
-
       onCreated?.(project);
       onOpenChange(false);
 
       // Reset
-      setUploadedFiles([]);
       setFormData({ ...EMPTY_FORM });
     } catch (error) {
       console.error('Error creating job:', error);
-      toast.error('Failed to create project or upload files. Please try again.');
+      toast.error('Failed to create project. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -300,19 +290,6 @@ export function ProjectCreationDialog({ open, onOpenChange, onCreated }: Project
                 onChange={(e) => handleInputChange('contactPhone', e.target.value)}
               />
             </div>
-          </div>
-
-          {/* File Upload */}
-          <div className="space-y-4">
-            <h3 className="text-sm font-medium text-foreground">Project Files</h3>
-            
-            <FileUpload
-              key={String(open)}
-              onFilesListChange={setUploadedFiles}
-              acceptedTypes={['.pdf', '.dwg', '.jpg', '.jpeg', '.png']}
-              maxSize={1024}
-              multiple={true}
-            />
           </div>
 
           <DialogFooter>

@@ -20,7 +20,6 @@ import ollamaRoutes from './routes/ollama';
 import userRoutes from './routes/users';
 import enhancedOcrRoutes from './routes/enhancedOcr';
 import hybridDetectionRoutes from './routes/hybridDetection';
-import cvTakeoffRoutes from './routes/cvTakeoff';
 import ruleValidationRoutes from './routes/ruleValidation';
 import visualSearchRoutes from './routes/visualSearch';
 import settingsRoutes from './routes/settings';
@@ -34,7 +33,6 @@ import { livePreviewService } from './services/livePreviewService';
 import { cleanupExpiredReportDeliveries, cleanupExpiredProjectShares } from './services/reportDeliveryCleanup';
 // Initialize queue service (starts worker)
 import './services/queueService';
-import { supabase } from './supabase';
 import { standardRateLimit, strictRateLimit } from './middleware';
 
 const app = express();
@@ -253,7 +251,6 @@ app.use('/api/ollama', ollamaRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/enhanced-ocr', enhancedOcrRoutes);
 app.use('/api/hybrid-detection', hybridDetectionRoutes);
-app.use('/api/cv-takeoff', cvTakeoffRoutes);
 app.use('/api/rule-validation', ruleValidationRoutes);
 app.use('/api/visual-search', visualSearchRoutes);
 app.use('/api/settings', settingsRoutes);
@@ -265,169 +262,30 @@ app.use('/api/contact', contactRoutes);
 // Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
-// Download model from Supabase if missing (BLOCKING - must complete before server accepts requests)
-async function ensureModelExists() {
-  const STORAGE_BUCKET = 'project-files';
-  const STORAGE_PATH = 'models/floor_plan_cubicasa5k_resnet50.pth';
-  
-  // Determine correct model path - Python looks for it relative to project root
-  // On Railway: __dirname = /app/dist/services (or /app/dist/src)
-  // Python runs from /app and looks for server/models/...
-  // Save to /app/models/ (simpler, always exists) and /tmp/ (backup)
-  
-  // Get project root (/app on Railway)
-  const projectRoot = process.cwd(); // Should be /app on Railway
-  
-  // Primary: Save to /app/models/ (simpler path that always exists)
-  const modelPath = path.join(projectRoot, 'models', 'floor_plan_cubicasa5k_resnet50.pth');
-  
-  // Also try /app/server/models/ for compatibility
-  const serverModelPath = path.join(projectRoot, 'server', 'models', 'floor_plan_cubicasa5k_resnet50.pth');
-  
-  console.log(`🔍 Checking for model at: ${modelPath}`);
-  console.log(`🔍 Project root (cwd): ${projectRoot}`);
-  console.log(`🔍 __dirname: ${__dirname}`);
-  
-  // Check if model exists in any location (check all possible paths)
-  const checkPaths = [
-    modelPath,  // /app/models/floor_plan_cubicasa5k_resnet50.pth
-    serverModelPath,  // /app/server/models/floor_plan_cubicasa5k_resnet50.pth
-    '/tmp/floor_plan_cubicasa5k_resnet50.pth'
-  ];
-  
-  console.log(`🔍 Checking for model in ${checkPaths.length} locations...`);
-  for (const checkPath of checkPaths) {
-    const exists = await fs.pathExists(checkPath);
-    console.log(`   ${exists ? '✓' : '✗'} ${checkPath}`);
-    if (exists) {
-      const stats = await fs.stat(checkPath);
-      if (stats.size > 0) {
-        console.log(`✓ Model file found: ${checkPath} (${(stats.size / (1024 * 1024)).toFixed(2)} MB)`);
-        return true;
-      }
-    }
-  }
-  
-  // Model missing, try to download from Supabase
-  console.log('📥 Model file not found locally, downloading from Supabase Storage...');
-  try {
-    // Ensure models directory exists - create with explicit permissions
-    const modelDir = path.dirname(modelPath);
-    await fs.ensureDir(modelDir);
-    
-    // Verify directory was created and is writable
-    const dirExists = await fs.pathExists(modelDir);
-    console.log(`📁 Model directory: ${modelDir}`);
-    console.log(`📁 Directory exists: ${dirExists}`);
-    if (!dirExists) {
-      throw new Error(`Failed to create model directory: ${modelDir}`);
-    }
-    
-    // Download from Supabase Storage
-    const { data, error } = await supabase.storage
-      .from(STORAGE_BUCKET)
-      .download(STORAGE_PATH);
+const server = app.listen(PORT, '0.0.0.0', () => {
+  logEmailConfigStatus();
+  console.log(`🚀 Takeoff API server running on port ${PORT}`);
+  console.log(`🌐 Server accessible at http://0.0.0.0:${PORT}`);
+  console.log(`📝 NODE_ENV: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`📝 Allowed origins configured: ${isProduction ? 'Production mode' : 'Development mode (all allowed)'}`);
+});
 
-    if (error || !data) {
-      console.log('⚠️  Model download failed:', error?.message || 'Unknown error');
-      console.log('⚠️  System will use ImageNet pre-trained model as fallback');
-      return false;
-    }
+// Long timeouts for heavy requests (OCR, visual search, etc.)
+server.timeout = 180000; // 3 minutes
+server.keepAliveTimeout = 180000;
+server.headersTimeout = 181000;
 
-    // Convert blob to buffer and save
-    const arrayBuffer = await data.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    
-    // Write file with explicit error handling
-    await fs.writeFile(modelPath, buffer, { mode: 0o644 });
-    
-    // CRITICAL: Verify file was actually written and is readable
-    const verifyExists = await fs.pathExists(modelPath);
-    if (!verifyExists) {
-      throw new Error(`Model file was not written to ${modelPath}`);
-    }
-    
-    const verifyStats = await fs.stat(modelPath);
-    if (verifyStats.size !== buffer.length) {
-      throw new Error(`Model file size mismatch: expected ${buffer.length}, got ${verifyStats.size}`);
-    }
-    
-    const fileSizeMB = (buffer.length / (1024 * 1024)).toFixed(2);
-    console.log(`✅ Model downloaded successfully from Supabase Storage!`);
-    console.log(`   Primary location: ${modelPath}`);
-    console.log(`   File size: ${fileSizeMB} MB`);
-    console.log(`   Verified: File exists = ${verifyExists}, Size = ${verifyStats.size} bytes`);
-    
-    // CRITICAL: Also save to /app/server/models/ and /tmp as backups (Python checks all locations)
-    const savePaths = [
-      { path: serverModelPath, name: '/app/server/models/' },
-      { path: '/tmp/floor_plan_cubicasa5k_resnet50.pth', name: '/tmp/' }
-    ];
-    
-    console.log(`📦 Saving model to ${savePaths.length} backup locations...`);
-    for (const { path: savePath, name } of savePaths) {
-      try {
-        await fs.ensureDir(path.dirname(savePath));
-        await fs.writeFile(savePath, buffer, { mode: 0o644 });
-        const verify = await fs.pathExists(savePath);
-        const verifyStats = await fs.stat(savePath);
-        if (verify && verifyStats.size === buffer.length) {
-          console.log(`   ✅ Backup saved to: ${savePath} (${(verifyStats.size / (1024 * 1024)).toFixed(2)} MB)`);
-        } else {
-          console.log(`   ⚠️  Backup verification failed: ${savePath} (exists: ${verify}, size: ${verifyStats.size})`);
-        }
-      } catch (err) {
-        console.log(`   ❌ Failed to save backup to ${name}: ${err}`);
-      }
-    }
-    
-    console.log(`✅ Model saved to all locations. Python should find it at one of:`);
-    console.log(`   1. ${modelPath}`);
-    console.log(`   2. ${serverModelPath}`);
-    console.log(`   3. /tmp/floor_plan_cubicasa5k_resnet50.pth`);
-    
-    return true;
-  } catch (error) {
-    console.error('⚠️  Error downloading model:', error);
-    console.log('⚠️  System will use ImageNet pre-trained model as fallback');
-    return false;
-  }
-}
+livePreviewService.initialize(server);
+console.log(`📡 Live preview service initialized`);
 
-// Start server with Socket.IO (BLOCKING - wait for model download)
-(async () => {
-  // Download model BEFORE starting server (blocking)
-  console.log('🔄 Ensuring model file is available...');
-  await ensureModelExists();
-  
-  const server = app.listen(PORT, '0.0.0.0', () => {
-    logEmailConfigStatus();
-    console.log(`🚀 Takeoff API server running on port ${PORT}`);
-    console.log(`🌐 Server accessible at http://0.0.0.0:${PORT}`);
-    console.log(`📝 NODE_ENV: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`📝 Allowed origins configured: ${isProduction ? 'Production mode' : 'Development mode (all allowed)'}`);
+const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const runCleanup = () => {
+  cleanupExpiredReportDeliveries().then(({ errors }) => {
+    if (errors.length) console.warn('Report cleanup warnings:', errors.join('; '));
   });
-  
-  // Set server timeout to handle long-running CV detection requests (3 minutes)
-  // Railway's gateway timeout is 60s, but we can try to keep the connection alive
-  server.timeout = 180000; // 3 minutes
-  server.keepAliveTimeout = 180000; // 3 minutes
-  server.headersTimeout = 181000; // Slightly longer than keepAliveTimeout
-  
-  // Initialize live preview service
-  livePreviewService.initialize(server);
-  console.log(`📡 Live preview service initialized`);
-
-  // Clean up expired report deliveries and project shares (7-day links): run daily
-  const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
-  const runCleanup = () => {
-    cleanupExpiredReportDeliveries().then(({ errors }) => {
-      if (errors.length) console.warn('Report cleanup warnings:', errors.join('; '));
-    });
-    cleanupExpiredProjectShares().then(({ errors }) => {
-      if (errors.length) console.warn('Project share cleanup warnings:', errors.join('; '));
-    });
-  };
-  setTimeout(runCleanup, 60_000);
-  setInterval(runCleanup, CLEANUP_INTERVAL_MS);
-})();
+  cleanupExpiredProjectShares().then(({ errors }) => {
+    if (errors.length) console.warn('Project share cleanup warnings:', errors.join('; '));
+  });
+};
+setTimeout(runCleanup, 60_000);
+setInterval(runCleanup, CLEANUP_INTERVAL_MS);

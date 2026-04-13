@@ -11,7 +11,7 @@ PORT=4000
 NODE_ENV=development
 FRONTEND_URL=http://localhost:3001
 
-# Redis Configuration (Required for CV Takeoff background processing)
+# Redis Configuration (required for background titleblock extraction queue)
 REDIS_URL=redis://localhost:6379
 # On Railway, add a Redis service and use the REDIS_URL from the service variables
 # Or use Redis Cloud: REDISCLOUD_URL=redis://...

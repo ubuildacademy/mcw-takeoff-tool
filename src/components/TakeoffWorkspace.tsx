@@ -68,7 +68,6 @@ export function TakeoffWorkspace() {
   
   // Dialog states
   const [showProfitMarginDialog, setShowProfitMarginDialog] = useState(false);
-  const [showCVTakeoffAgent, setShowCVTakeoffAgent] = useState(false);
   
   // Cut-out states
   const [cutoutMode, setCutoutMode] = useState(false);
@@ -111,10 +110,25 @@ export function TakeoffWorkspace() {
   const [ocrSearchResults, setOcrSearchResults] = useState<SearchResult[]>([]);
   const [currentSearchQuery, setCurrentSearchQuery] = useState<string>('');
   const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
+  /** Which project the file list fetch completed for (avoids a stale "ready" flag on the first render after switching projects). */
+  const [filesLoadedForProjectId, setFilesLoadedForProjectId] = useState<string | null>(null);
   const [uploading, setUploading] = useState<boolean>(false);
+
+  const projectFilesListReady = Boolean(projectId && filesLoadedForProjectId === projectId);
+
+  useEffect(() => {
+    if (!projectId) return;
+    setProjectFiles([]);
+  }, [projectId]);
+
+  const onProjectFilesLoaded = useCallback(() => {
+    setFilesLoadedForProjectId(projectId ?? null);
+  }, [projectId]);
+
   const { documents, documentsLoading, loadProjectDocuments, setDocuments } = useTakeoffWorkspaceDocuments({
     projectId: projectId ?? undefined,
     projectFiles,
+    projectFilesListReady,
   });
   const [exportStatus, setExportStatus] = useState<{type: 'excel' | 'pdf' | null, progress: number}>({type: null, progress: 0});
 
@@ -155,6 +169,7 @@ export function TakeoffWorkspace() {
   useTakeoffWorkspaceProjectInit({
     projectId: projectId ?? undefined,
     isDev,
+    onProjectFilesLoaded,
     setProjectFiles,
     setCurrentProject,
     clearProjectCalibrations,
@@ -777,7 +792,6 @@ export function TakeoffWorkspace() {
               cutoutTargetConditionId={cutoutTargetConditionId}
               viewerDocumentId={currentPdfFile?.id ?? null}
               currentPage={currentPage}
-              onOpenCVTakeoff={() => setShowCVTakeoffAgent(true)}
             />
           )}
           <SidebarEdgeToggle
@@ -849,6 +863,11 @@ export function TakeoffWorkspace() {
               onHyperlinkContextMenu={handleHyperlinkContextMenu}
               onRegisterEnterConditionDrawMode={handleRegisterEnterConditionDrawMode}
             />
+          ) : !projectFilesListReady ? (
+            <div className="flex flex-col items-center justify-center flex-1 bg-muted/30 gap-3" role="status" aria-live="polite">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+              <p className="text-sm text-muted-foreground">Loading project…</p>
+            </div>
           ) : documentsLoading ? (
             <div className="flex flex-col items-center justify-center flex-1 bg-muted/30 gap-3" role="status" aria-live="polite">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
@@ -871,7 +890,7 @@ export function TakeoffWorkspace() {
           onRightSidebarTabChange={setRightSidebarTab}
           projectId={storeCurrentProject?.id ?? projectId ?? ''}
           documents={documents}
-          documentsLoading={documentsLoading}
+          documentsLoading={!projectFilesListReady || documentsLoading}
           onPageSelect={tabsResult.handlePageSelect}
           onPageOpenInNewTab={tabsResult.handlePageOpenInNewTab}
           selectedDocumentId={selectedDocumentId || undefined}
@@ -907,8 +926,6 @@ export function TakeoffWorkspace() {
 
       <TakeoffWorkspaceDialogs
         projectId={projectId ?? null}
-        currentPdfFileId={currentPdfFile ? currentPdfFile.id : null}
-        currentPage={currentPage ?? null}
         ocrShowDialog={ocr.showOCRDialog}
         ocrDocumentId={ocr.ocrDocumentId}
         ocrDocumentName={ocr.ocrDocumentName}
@@ -939,8 +956,6 @@ export function TakeoffWorkspace() {
         }}
         showProfitMarginDialog={showProfitMarginDialog}
         setShowProfitMarginDialog={setShowProfitMarginDialog}
-        showCVTakeoffAgent={showCVTakeoffAgent}
-        setShowCVTakeoffAgent={setShowCVTakeoffAgent}
       />
 
       <HyperlinkSheetPickerDialog

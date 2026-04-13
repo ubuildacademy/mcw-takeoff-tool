@@ -31,7 +31,7 @@ Tracking doc for refactoring (structure, hooks, components) and broader improvem
 ### Security & architecture
 - **Auth** – Centralized `requireAuth` (and `requireAdmin`, `hasProjectAccess`) in `server/src/middleware/auth.ts`; all API routes use it.
 - **Security** – Client/server use env vars only (no hardcoded credentials); rate limiting in place; input validation (`validateUUIDParam`, `sanitizeBody`); Supabase security fixes applied (RLS, function `search_path`).
-- **Performance** – N+1 queries fixed (batch queries for measurement counts); code splitting (pdfjs chunk, tesseract/exceljs manualChunks, lazy dialogs: AdminPanel, ChatTab, SearchTab, CVTakeoffAgent, CalibrationDialog, ScaleApplicationDialog; dynamic exceljs/jspdf imports in `useTakeoffExport`); Zustand `useShallow` for object/array selectors in TakeoffSidebar and ChatTab; preconnect hints for Supabase injected at build time.
+- **Performance** – N+1 queries fixed (batch queries for measurement counts); code splitting (pdfjs chunk, tesseract/exceljs manualChunks, lazy dialogs: AdminPanel, ChatTab, SearchTab, CalibrationDialog, ScaleApplicationDialog; dynamic exceljs/jspdf imports in `useTakeoffExport`); Zustand `useShallow` for object/array selectors in TakeoffSidebar and ChatTab; preconnect hints for Supabase injected at build time.
 
 ---
 
@@ -51,7 +51,7 @@ Tracking doc for refactoring (structure, hooks, components) and broader improvem
 
 ## Recommended next steps (by priority)
 
-1. **Performance / large-code** *(deferred: app is fast; only CV auto-count is slow, which is expected)*
+1. **Performance / large-code** *(deferred: app is fast; only heavy AI-driven flows such as auto-count are slow, which is expected)*
    - **Profile first:** Use React DevTools Profiler on typical flows (open project, switch pages, add measurements, export). Note top 3 components by render time.
    - **Then:** Add `React.memo` only where the profile shows real cost; prefer fewer state updates over memo everywhere.
    - **Optional refactors (maintainability, not required for perf):**
@@ -80,7 +80,7 @@ Tracking doc for refactoring (structure, hooks, components) and broader improvem
 ### Performance
 
 - **Zustand:** Narrow selectors implemented (see "Store selectors" above). `useShallow` used for selectors returning objects/arrays (`getProjectConditions`, `getProjectTakeoffSummary`) in TakeoffSidebar and ChatTab to avoid unnecessary re-renders.
-- **Code splitting:** Route-level lazy load + Suspense; pdfjs, tesseract, exceljs manualChunks; lazy dialogs and tabs (AdminPanel, ChatTab, SearchTab, CVTakeoffAgent, CalibrationDialog, ScaleApplicationDialog); dynamic exceljs/jspdf imports in `useTakeoffExport`.
+- **Code splitting:** Route-level lazy load + Suspense; pdfjs, tesseract, exceljs manualChunks; lazy dialogs and tabs (AdminPanel, ChatTab, SearchTab, CalibrationDialog, ScaleApplicationDialog); dynamic exceljs/jspdf imports in `useTakeoffExport`.
 - **Preconnect:** Supabase origin injected into `index.html` via Vite plugin for faster auth/API connection.
 - **Heavy children:** Consider `React.memo` only if profiling shows them as hot. Prefer fewer state updates over memo everywhere.
 

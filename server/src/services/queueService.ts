@@ -1,14 +1,13 @@
 /**
  * Queue Service for Background Job Processing
  *
- * Uses BullMQ with Redis for long-running work (CV takeoff, titleblock extraction)
+ * Uses BullMQ with Redis for long-running work (e.g. titleblock extraction)
  * so HTTP requests return immediately and Railway/proxy timeouts do not kill jobs.
  */
 
 import { randomUUID } from 'crypto';
 import { Queue, Worker, Job } from 'bullmq';
 import { Redis } from 'ioredis';
-import { cvTakeoffService } from './cvTakeoffService';
 import { runTitleblockExtraction, type TitleblockConfig } from './titleblockExtractionRunner';
 
 // Redis connection configuration
@@ -31,91 +30,7 @@ const redisConnection = new Redis(redisUrl, {
   },
 });
 
-// Queue for CV takeoff jobs
-export const cvTakeoffQueue = new Queue('cv-takeoff', {
-  connection: redisConnection,
-  defaultJobOptions: {
-    attempts: 3,
-    backoff: {
-      type: 'exponential',
-      delay: 2000,
-    },
-    removeOnComplete: {
-      age: 3600, // Keep completed jobs for 1 hour
-      count: 100, // Keep last 100 completed jobs
-    },
-    removeOnFail: {
-      age: 86400, // Keep failed jobs for 24 hours
-    },
-  },
-});
-
-// Worker to process CV takeoff jobs
-export const cvTakeoffWorker = new Worker(
-  'cv-takeoff',
-  async (job: Job) => {
-    const { documentId, pageNumber, projectId, scaleFactor, options } = job.data;
-    
-    console.log(`🔄 [Queue] Processing CV takeoff job ${job.id} for page ${pageNumber}`);
-    
-    try {
-      // Update job progress
-      await job.updateProgress(10);
-      
-      // Process the page
-      const result = await cvTakeoffService.processPage(
-        documentId,
-        pageNumber,
-        projectId,
-        scaleFactor,
-        options || {
-          detectRooms: true,
-          detectWalls: true,
-          detectDoors: true,
-          detectWindows: true,
-        }
-      );
-      
-      // Update progress to 100%
-      await job.updateProgress(100);
-      
-      console.log(`✅ [Queue] CV takeoff job ${job.id} completed successfully`);
-      console.log(`   Results: ${result.conditionsCreated} conditions, ${result.measurementsCreated} measurements`);
-      
-      return {
-        success: true,
-        result,
-      };
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error(`❌ [Queue] CV takeoff job ${job.id} failed:`, errorMessage);
-      throw error;
-    }
-  },
-  {
-    connection: redisConnection,
-    concurrency: 1, // Process one job at a time to avoid memory issues
-    limiter: {
-      max: 1,
-      duration: 1000, // Max 1 job per second
-    },
-  }
-);
-
-// Event handlers for monitoring
-cvTakeoffWorker.on('completed', (job) => {
-  console.log(`✅ [Queue] Job ${job.id} completed`);
-});
-
-cvTakeoffWorker.on('failed', (job, err) => {
-  console.error(`❌ [Queue] Job ${job?.id} failed:`, err.message);
-});
-
-cvTakeoffWorker.on('error', (err) => {
-  console.error(`❌ [Queue] Worker error:`, err);
-});
-
-/** Titleblock extraction — long-running OCR + LLM; same Redis as CV queue */
+/** Titleblock extraction — long-running OCR + LLM */
 export const titleblockExtractionQueue = new Queue('titleblock-extraction', {
   connection: redisConnection,
   defaultJobOptions: {
@@ -173,9 +88,7 @@ export function generateTitleblockJobId(): string {
 // Graceful shutdown
 async function shutdownQueues(): Promise<void> {
   console.log('🛑 [Queue] Shutting down workers...');
-  await cvTakeoffWorker.close();
   await titleblockExtractionWorker.close();
-  await cvTakeoffQueue.close();
   await titleblockExtractionQueue.close();
   await redisConnection.quit();
 }

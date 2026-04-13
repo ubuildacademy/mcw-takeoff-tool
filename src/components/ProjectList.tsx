@@ -547,7 +547,10 @@ export function ProjectList() {
       <ProjectCreationDialog
         open={showCreate}
         onOpenChange={setShowCreate}
-        onCreated={() => setShowCreate(false)}
+        onCreated={(project) => {
+          setShowCreate(false);
+          navigate(`/project/${project.id}`);
+        }}
       />
 
       {editingProject && (

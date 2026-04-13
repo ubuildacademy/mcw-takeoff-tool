@@ -17,11 +17,9 @@ interface CreateConditionDialogProps {
   onConditionCreated: (condition: TakeoffCondition) => void;
   onConditionSelect?: (condition: TakeoffCondition) => void;
   editingCondition?: TakeoffCondition | null;
-  /** When user chooses CV Takeoff (experimental) and clicks Start, this opens the CV Takeoff dialog. */
-  onOpenCVTakeoff?: () => void;
 }
 
-type ConditionFormType = 'area' | 'volume' | 'linear' | 'count' | 'auto-count' | 'cv-takeoff';
+type ConditionFormType = 'area' | 'volume' | 'linear' | 'count' | 'auto-count';
 
 function getImageSrc(img: string): string {
   return img.startsWith('data:') || img.startsWith('http') ? img : `data:image/png;base64,${img}`;
@@ -34,12 +32,11 @@ function getDefaultUnit(type: string, includeHeight?: boolean): string {
     case 'linear': return includeHeight ? 'SF' : 'LF';
     case 'count': return 'EA';
     case 'auto-count': return 'EA';
-    case 'cv-takeoff': return 'EA';
     default: return '';
   }
 }
 
-export function CreateConditionDialog({ projectId, onClose, onConditionCreated, onConditionSelect, editingCondition, onOpenCVTakeoff }: CreateConditionDialogProps) {
+export function CreateConditionDialog({ projectId, onClose, onConditionCreated, onConditionSelect, editingCondition }: CreateConditionDialogProps) {
   const addCondition = useConditionStore((s) => s.addCondition);
   const updateCondition = useConditionStore((s) => s.updateCondition);
   const conditions = useConditionStore(useShallow((s) => s.conditions));
@@ -107,8 +104,6 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // CV Takeoff is a launcher only — no condition is created from this form
-    if (formData.type === 'cv-takeoff') return;
     setLoading(true);
 
     try {
@@ -281,11 +276,6 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
     });
   };
 
-  const handleStartCVTakeoff = () => {
-    onClose();
-    onOpenCVTakeoff?.();
-  };
-
   const effectiveUnit = formData.unit || getDefaultUnit(formData.type, formData.includeHeight);
 
   return (
@@ -299,7 +289,6 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {formData.type !== 'cv-takeoff' && (
           <div>
             <Label htmlFor="name">Name *</Label>
             <Input
@@ -310,7 +299,6 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
               required
             />
           </div>
-          )}
 
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -325,12 +313,10 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
                   <SelectItem value="linear">Linear</SelectItem>
                   <SelectItem value="count">Count</SelectItem>
                   <SelectItem value="auto-count">Auto-Count</SelectItem>
-                  <SelectItem value="cv-takeoff">CV Takeoff (experimental)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
-            {formData.type !== 'cv-takeoff' && (
             <div>
               <Label htmlFor="unit">Unit *</Label>
               <Select value={effectiveUnit} onValueChange={(value) => {
@@ -381,26 +367,8 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
                 </SelectContent>
               </Select>
             </div>
-            )}
           </div>
 
-          {formData.type === 'cv-takeoff' && (
-            <div className="space-y-4 pt-2">
-              <p className="text-sm text-muted-foreground">
-                Use CV to detect and add conditions from the sheet. This feature is still in development.
-              </p>
-              <Button
-                type="button"
-                onClick={handleStartCVTakeoff}
-                className="w-full bg-green-600 hover:bg-green-700 text-white"
-              >
-                Start CV Takeoff
-              </Button>
-            </div>
-          )}
-
-          {formData.type !== 'cv-takeoff' && (
-          <>
           {(formData.type === 'area' || formData.type === 'volume') && (
             <div>
               <Label htmlFor="includePerimeter" className="flex items-center space-x-2">
@@ -643,8 +611,6 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
               {loading ? (editingCondition ? 'Updating...' : 'Creating...') : (editingCondition ? 'Update Condition' : 'Create Condition')}
             </Button>
           </div>
-          </>
-          )}
         </form>
       </div>
     </div>

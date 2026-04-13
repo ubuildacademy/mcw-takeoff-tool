@@ -1,18 +1,11 @@
-import React, { Suspense, lazy } from 'react';
+import React from 'react';
 import { OCRProcessingDialog } from '../OCRProcessingDialog';
 import { ProfitMarginDialog } from '../ProfitMarginDialog';
 import { AutoCountProgressDialog } from '../AutoCountProgressDialog';
 import type { AutoCountProgress, AutoCountCompletionResult } from './useTakeoffWorkspaceVisualSearch';
 
-/** Lazy-loaded to reduce initial bundle; loads when user opens CV Takeoff Agent dialog */
-const CVTakeoffAgent = lazy(() =>
-  import('../CVTakeoffAgent').then((m) => ({ default: m.CVTakeoffAgent }))
-);
-
 export interface TakeoffWorkspaceDialogsProps {
   projectId: string | null;
-  currentPdfFileId: string | null;
-  currentPage: number | null;
 
   /** OCR dialog */
   ocrShowDialog: boolean;
@@ -34,20 +27,14 @@ export interface TakeoffWorkspaceDialogsProps {
   /** Profit margin dialog */
   showProfitMarginDialog: boolean;
   setShowProfitMarginDialog: (open: boolean) => void;
-
-  /** CV Takeoff Agent */
-  showCVTakeoffAgent: boolean;
-  setShowCVTakeoffAgent: (open: boolean) => void;
 }
 
 /**
- * All workspace dialogs in one place: OCR, Auto-Count progress, Profit Margin, CV Takeoff Agent.
+ * All workspace dialogs in one place: OCR, Auto-Count progress, Profit Margin.
  * Keeps main layout JSX focused on structure; dialog visibility and callbacks stay in parent.
  */
 export function TakeoffWorkspaceDialogs({
   projectId,
-  currentPdfFileId,
-  currentPage,
   ocrShowDialog,
   ocrDocumentId,
   ocrDocumentName,
@@ -63,8 +50,6 @@ export function TakeoffWorkspaceDialogs({
   autoCountOnCancel,
   showProfitMarginDialog,
   setShowProfitMarginDialog,
-  showCVTakeoffAgent,
-  setShowCVTakeoffAgent,
 }: TakeoffWorkspaceDialogsProps): React.ReactElement {
   return (
     <>
@@ -97,18 +82,6 @@ export function TakeoffWorkspaceDialogs({
           onOpenChange={setShowProfitMarginDialog}
           projectId={projectId}
         />
-      )}
-
-      {projectId && (
-        <Suspense fallback={null}>
-          <CVTakeoffAgent
-            isOpen={showCVTakeoffAgent}
-            onClose={() => setShowCVTakeoffAgent(false)}
-            projectId={projectId}
-            documentId={currentPdfFileId}
-            pageNumber={currentPage}
-          />
-        </Suspense>
       )}
     </>
   );

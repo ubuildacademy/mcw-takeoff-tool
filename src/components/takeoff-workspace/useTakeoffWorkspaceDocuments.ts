@@ -8,6 +8,8 @@ import type { PDFDocument, PDFPage, ProjectFile } from '../../types';
 export interface UseTakeoffWorkspaceDocumentsOptions {
   projectId: string | undefined;
   projectFiles: ProjectFile[];
+  /** True after the parent has finished the initial project file list fetch. */
+  projectFilesListReady: boolean;
 }
 
 export interface UseTakeoffWorkspaceDocumentsResult {
@@ -24,23 +26,33 @@ export interface UseTakeoffWorkspaceDocumentsResult {
 export function useTakeoffWorkspaceDocuments({
   projectId,
   projectFiles,
+  projectFilesListReady,
 }: UseTakeoffWorkspaceDocumentsOptions): UseTakeoffWorkspaceDocumentsResult {
   const [documents, setDocuments] = useState<PDFDocument[]>([]);
-  const [documentsLoading, setDocumentsLoading] = useState<boolean>(true);
+  const [documentsLoading, setDocumentsLoading] = useState<boolean>(false);
   const getProjectTakeoffMeasurements = useMeasurementStore((s) => s.getProjectTakeoffMeasurements);
 
   const loadProjectDocuments = useCallback(async (filesOverride?: ProjectFile[]) => {
     if (!projectId) return;
 
+    let files: ProjectFile[];
+    if (filesOverride !== undefined) {
+      files = filesOverride;
+    } else if (projectFiles.length > 0) {
+      files = projectFiles;
+    } else {
+      files = (await fileService.getProjectFiles(projectId)).files || [];
+    }
+    const pdfFiles = files.filter((file: { mimetype?: string }) => file.mimetype === 'application/pdf');
+
+    if (pdfFiles.length === 0) {
+      setDocuments([]);
+      setDocumentsLoading(false);
+      return;
+    }
+
     try {
       setDocumentsLoading(true);
-      const files =
-        (filesOverride && filesOverride.length > 0)
-          ? filesOverride
-          : projectFiles.length > 0
-            ? projectFiles
-            : (await fileService.getProjectFiles(projectId)).files || [];
-      const pdfFiles = files.filter((file: { mimetype?: string }) => file.mimetype === 'application/pdf');
 
       const { ocrApiService } = await import('../../services/apiService');
       let ocrDocumentIds = new Set<string>();
@@ -193,15 +205,17 @@ export function useTakeoffWorkspaceDocuments({
   }, [projectId, projectFiles, getProjectTakeoffMeasurements]);
 
   useEffect(() => {
-    if (projectId) {
-      setDocuments([]);
-      loadProjectDocuments();
-    }
-    // Only re-run when project changes. loadProjectDocuments is recreated when
-    // projectFiles changes; we must not depend on it or we re-fetch repeatedly
-    // and exhaust resources (ERR_INSUFFICIENT_RESOURCES).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!projectId) return;
+    setDocuments([]);
+    setDocumentsLoading(false);
   }, [projectId]);
+
+  useEffect(() => {
+    if (!projectId || !projectFilesListReady) return;
+    void loadProjectDocuments(projectFiles);
+    // Initial document build runs once the file list is known; uploads/OCR call loadProjectDocuments explicitly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- omit projectFiles/loadProjectDocuments to avoid re-fetch loops
+  }, [projectId, projectFilesListReady]);
 
   return {
     documents,

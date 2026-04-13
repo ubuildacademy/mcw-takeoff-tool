@@ -62,7 +62,7 @@ source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-If you hit issues with OpenCV/PyTorch, consider `brew install opencv` (macOS) or conda.
+If you hit issues with OpenCV, consider `brew install opencv` (macOS) or conda.
 
 ### 4. Verify Python scripts
 

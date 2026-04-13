@@ -1,11 +1,5 @@
 opencv-python>=4.8.0
 numpy>=1.24.0,<2.0.0
 pymupdf>=1.23.0
-pytesseract>=0.3.10  # Required for text-first room detection
-Pillow>=10.0.0  # Required for pytesseract
-networkx>=3.0  # Required for wall graph structure (Phase 1)
-torch>=2.0.0  # Deep learning framework (Phase 5) - REQUIRED
-torchvision>=0.15.0  # Deep learning models (Phase 5) - REQUIRED
-segmentation-models-pytorch>=0.3.3  # Pre-trained segmentation models (Phase 5) - REQUIRED
-transformers>=4.30.0  # HuggingFace Transformers (optional, for alternative models)
-
+pytesseract>=0.3.10
+Pillow>=10.0.0
