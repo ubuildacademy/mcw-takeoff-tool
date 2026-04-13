@@ -92,6 +92,7 @@ class AutoCountService {
   };
 
   private pythonScriptPath: string;
+  private extractTemplateClipScriptPath: string;
   private tempDir: string;
   private cachedGlibLibPath: string | null = null;
 
@@ -107,6 +108,9 @@ class AutoCountService {
     this.pythonScriptPath = isCompiled
       ? path.join(baseDir, 'src', 'scripts', 'visual_search.py')
       : path.join(baseDir, 'scripts', 'visual_search.py');
+    this.extractTemplateClipScriptPath = isCompiled
+      ? path.join(baseDir, 'src', 'scripts', 'extract_template_clip.py')
+      : path.join(baseDir, 'scripts', 'extract_template_clip.py');
     
     // Temp directory for images
     const isProduction = process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === 'production';
@@ -182,129 +186,43 @@ class AutoCountService {
     projectId?: string
   ): Promise<SymbolTemplate> {
     try {
-      console.log('🔍 Extracting symbol template from selection box...');
+      console.log('🔍 Extracting symbol template (PyMuPDF clip in PDF space; Meridian-normalized box)...');
       
-      // Download PDF to temp location if needed
       const pdfPath = await this.getPDFFilePath(pdfFileId, projectId);
-      
-      // Convert PDF page to image buffer
-      const imageBuffer = await pythonPdfConverter.convertPageToBuffer(pdfPath, pageNumber, {
-        format: 'png',
-        scale: 2.0,
-        quality: 90
-      });
+      await fs.ensureDir(this.tempDir);
+      const templateImagePath = path.join(this.tempDir, `template_${uuidv4()}.png`);
 
-      if (!imageBuffer) {
-        throw new Error('Failed to convert PDF page to image');
+      const scale = 2.0;
+      const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
+      const command = `${pythonCommand} "${this.extractTemplateClipScriptPath}" "${pdfPath}" ${pageNumber} ${scale} ${selectionBox.x} ${selectionBox.y} ${selectionBox.width} ${selectionBox.height} "${templateImagePath}"`;
+
+      const enhancedPath = this.getEnhancedPath();
+      const enhancedLdPath = await this.getEnhancedLdLibraryPath();
+      const { stdout, stderr } = await execAsync(command, {
+        timeout: 60000,
+        maxBuffer: 10 * 1024 * 1024,
+        env: { ...process.env, PATH: enhancedPath, LD_LIBRARY_PATH: enhancedLdPath }
+      });
+      if (stderr && !stderr.includes('DeprecationWarning')) {
+        console.warn('⚠️ extract_template_clip stderr:', stderr);
       }
 
-      // Save full page image temporarily
-      await fs.ensureDir(this.tempDir);
-      const fullPageImagePath = path.join(this.tempDir, `fullpage_${uuidv4()}.png`);
-      await fs.writeFile(fullPageImagePath, imageBuffer);
+      const result = JSON.parse(stdout.trim()) as { success?: boolean; error?: string };
+      if (!result.success) {
+        throw new Error(result.error || 'Template clip failed');
+      }
 
-      // Crop the selected region using Python/OpenCV
-      const templateImagePath = await this.cropImageRegion(
-        fullPageImagePath,
-        selectionBox,
-        pageNumber
-      );
-
-      // Clean up full page image
-      await fs.remove(fullPageImagePath).catch(() => {});
-
-      // Generate a unique ID for this template
       const templateId = `template_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       
       return {
         id: templateId,
-        imageData: templateImagePath, // File path to template
+        imageData: templateImagePath,
         boundingBox: selectionBox,
         description: `Symbol template extracted from page ${pageNumber}`
       };
     } catch (error) {
       console.error('❌ Failed to extract symbol template:', error);
       throw new Error(`Failed to extract symbol template: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-  }
-
-  /**
-   * Crop an image region using Python/OpenCV
-   */
-  private async cropImageRegion(
-    imagePath: string,
-    selectionBox: { x: number; y: number; width: number; height: number },
-    pageNumber: number
-  ): Promise<string> {
-    try {
-      // Create a simple Python script to crop the image
-      const cropScript = `
-import cv2
-import sys
-import json
-
-image_path = sys.argv[1]
-output_path = sys.argv[2]
-x = float(sys.argv[3])
-y = float(sys.argv[4])
-width = float(sys.argv[5])
-height = float(sys.argv[6])
-
-# Load image
-img = cv2.imread(image_path)
-if img is None:
-    print(json.dumps({"success": False, "error": f"Failed to load image: {image_path}"}))
-    sys.exit(1)
-
-img_height, img_width = img.shape[:2]
-
-# Convert normalized coordinates to pixels
-x_px = int(x * img_width)
-y_px = int(y * img_height)
-w_px = int(width * img_width)
-h_px = int(height * img_height)
-
-# Ensure coordinates are within image bounds
-x_px = max(0, min(x_px, img_width - 1))
-y_px = max(0, min(y_px, img_height - 1))
-w_px = min(w_px, img_width - x_px)
-h_px = min(h_px, img_height - y_px)
-
-# Crop the region
-cropped = img[y_px:y_px+h_px, x_px:x_px+w_px]
-
-# Save cropped image
-cv2.imwrite(output_path, cropped)
-print(json.dumps({"success": True, "output": output_path}))
-`;
-
-      const cropScriptPath = path.join(this.tempDir, `crop_${uuidv4()}.py`);
-      await fs.writeFile(cropScriptPath, cropScript);
-
-      const outputPath = path.join(this.tempDir, `template_${uuidv4()}.png`);
-      
-      const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
-      const command = `${pythonCommand} "${cropScriptPath}" "${imagePath}" "${outputPath}" ${selectionBox.x} ${selectionBox.y} ${selectionBox.width} ${selectionBox.height}`;
-
-      const enhancedPath = this.getEnhancedPath();
-      const enhancedLdPath = await this.getEnhancedLdLibraryPath();
-      const { stdout } = await execAsync(command, {
-        timeout: 10000,
-        env: { ...process.env, PATH: enhancedPath, LD_LIBRARY_PATH: enhancedLdPath }
-      });
-
-      // Clean up script
-      await fs.remove(cropScriptPath).catch(() => {});
-
-      const result = JSON.parse(stdout.trim());
-      if (!result.success) {
-        throw new Error(result.error || 'Crop failed');
-      }
-
-      return outputPath;
-    } catch (error) {
-      console.error('❌ Failed to crop image region:', error);
-      throw new Error(`Failed to crop image region: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
