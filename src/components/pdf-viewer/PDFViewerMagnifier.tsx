@@ -1,10 +1,13 @@
 import React, { useRef, useEffect, type RefObject } from 'react';
+import { baseNormToViewportPixels } from '../../utils/measurementGeometry';
 
 export interface PDFViewerMagnifierProps {
   /** Source canvas to sample from */
   pdfCanvasRef: RefObject<HTMLCanvasElement | null>;
-  /** Normalized cursor (0–1); read each frame from ref so parent need not re-render on mousemove */
+  /** Base-normalized cursor (unrotated PDF 0–1); read each frame from ref so parent need not re-render on mousemove */
   mousePositionRef: RefObject<{ x: number; y: number } | null>;
+  /** Logical viewport (must match canvas layout); used to map base-normalized coords to bitmap pixels when rotated */
+  pdfViewport: { width: number; height: number; rotation?: number } | null;
   /** Whether magnifier is enabled in user preferences */
   magnifierEnabled: boolean;
   /** Zoom level (2, 3, or 4x) */
@@ -25,6 +28,7 @@ const CROSSHAIR_CY = 2 + MAGNIFIER_SIZE / 2;
 export function PDFViewerMagnifier({
   pdfCanvasRef,
   mousePositionRef,
+  pdfViewport,
   magnifierEnabled,
   magnifierZoom,
   isActive,
@@ -94,8 +98,22 @@ export function PDFViewerMagnifier({
       let sourceRadius = (MAGNIFIER_SIZE * dpr) / (2 * magnifierZoom);
       sourceRadius = Math.max(10, Math.min(sourceRadius, Math.min(sw, sh) / 2 - 1));
 
-      const centerX = mousePosition.x * sw;
-      const centerY = mousePosition.y * sh;
+      let centerX: number;
+      let centerY: number;
+      if (pdfViewport && pdfViewport.width > 0 && pdfViewport.height > 0) {
+        const rotation = pdfViewport.rotation ?? 0;
+        const logical = baseNormToViewportPixels(
+          mousePosition.x,
+          mousePosition.y,
+          { width: pdfViewport.width, height: pdfViewport.height },
+          rotation
+        );
+        centerX = logical.x * (sw / pdfViewport.width);
+        centerY = logical.y * (sh / pdfViewport.height);
+      } else {
+        centerX = mousePosition.x * sw;
+        centerY = mousePosition.y * sh;
+      }
 
       const srcX = Math.max(0, centerX - sourceRadius);
       const srcY = Math.max(0, centerY - sourceRadius);
@@ -139,7 +157,7 @@ export function PDFViewerMagnifier({
       clearTimeout(idleTimeout);
       cancelAnimationFrame(raf);
     };
-  }, [show, magnifierZoom, pdfCanvasRef, mousePositionRef]);
+  }, [show, magnifierZoom, pdfCanvasRef, mousePositionRef, pdfViewport]);
 
   if (!show) return null;
 

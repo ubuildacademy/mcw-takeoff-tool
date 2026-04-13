@@ -4,7 +4,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFPageProxy, PageViewport } from 'pdfjs-dist';
 import { useProjectStore } from '../store/slices/projectSlice';
 import { useConditionStore } from '../store/slices/conditionSlice';
-import { useMeasurementStore } from '../store/slices/measurementSlice';
+import { useMeasurementStore, isTakeoffMeasurementCreateAborted } from '../store/slices/measurementSlice';
 import { useAnnotationStore } from '../store/slices/annotationSlice';
 import { useHyperlinkStore } from '../store/slices/hyperlinkSlice';
 import { useUndoStore } from '../store';
@@ -52,6 +52,7 @@ import {
   intersectCutoutWithParent,
   pdfPointsToMultiPolygon,
 } from '../utils/cutoutGeometry';
+import { canvasPixelExtent } from '../utils/measurementGeometry';
 import { toast } from 'sonner';
 import { takeoffMeasurementToPdfViewerMeasurement } from '../utils/takeoffMeasurementDisplay';
 import {
@@ -155,6 +156,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   
   // Track last fully rendered PDF scale to support interactive CSS zoom while blocking renders
   const lastRenderedScaleRef = useRef(1.0);
+  /** Rotation actually rendered on the canvas (see lastRenderedScaleRef). */
+  const lastRenderedRotationRef = useRef(0);
   
   // Helper to apply/remove interactive CSS zoom transforms when renders are blocked.
   // When called from wheel handler while renders are blocked, pass overrideScale so the
@@ -679,6 +682,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     svgOverlayRef,
     containerRef,
     lastRenderedScaleRef,
+    lastRenderedRotationRef,
     viewState,
     currentPage,
     totalPages,
@@ -837,6 +841,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     const runningLength = runningLengthRef.current;
     const pageNum = currentPage;
     const viewport = currentViewport;
+    const { w: pixelW, h: pixelH } = canvasPixelExtent(pdfCanvasRef.current, viewport);
     const ephemeralSvg = ephemeral as unknown as SVGSVGElement;
 
     if (isMeasuring && pageNum === currentPage) {
@@ -856,6 +861,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           cutoutMode,
           conditionColor: getSelectedCondition()?.color || '#000000',
           conditionLineThickness: getSelectedCondition()?.lineThickness,
+          pixelWidth: pixelW,
+          pixelHeight: pixelH,
         });
       }
     }
@@ -1053,6 +1060,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       setPageOutputScales({});
       lastRenderedPageRef.current = null;
       lastRenderedScaleRef.current = 1;
+      lastRenderedRotationRef.current = 0;
       setIsInitialRenderComplete(false);
     }
     
@@ -1226,6 +1234,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // SVG-based takeoff annotation renderer - Page-specific with viewport isolation
   const renderTakeoffAnnotations = useCallback((pageNum: number, viewport: PageViewport, page?: PDFPageProxy) => {
     if (!viewport || !svgOverlayRef.current) return;
+
+    const { w: pixelW, h: pixelH } = canvasPixelExtent(pdfCanvasRef.current, viewport);
     
     const svgOverlay = svgOverlayRef.current;
     
@@ -1339,6 +1349,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         getConditionLineThickness,
         selectionMode: isSelectionMode,
         showLabel: showMeasurementLabels,
+        pixelWidth: pixelW,
+        pixelHeight: pixelH,
       });
     });
 
@@ -1346,10 +1358,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (calibrationValidation && calibrationValidation.page === pageNum && calibrationValidation.points.length === 2) {
       const p1 = calibrationValidation.points[0];
       const p2 = calibrationValidation.points[1];
-      const x1 = p1.x * viewport.width;
-      const y1 = p1.y * viewport.height;
-      const x2 = p2.x * viewport.width;
-      const y2 = p2.y * viewport.height;
+      const x1 = p1.x * pixelW;
+      const y1 = p1.y * pixelH;
+      const x2 = p2.x * pixelW;
+      const y2 = p2.y * pixelH;
       const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
       line.setAttribute('x1', x1.toString());
       line.setAttribute('y1', y1.toString());
@@ -1378,8 +1390,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Draw measurement debug overlay if present
     if (measurementDebug && measurementDebug.page === pageNum) {
       const { mid, dxNorm, dyNorm, baseW, baseH, pixelDistanceValidator, pixelDistanceMeasure, scaleFactorUsed, distanceValidatorFt, distanceMeasureFt } = measurementDebug;
-      const midX = mid.x * viewport.width;
-      const midY = mid.y * viewport.height;
+      const midX = mid.x * pixelW;
+      const midY = mid.y * pixelH;
       const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
       bg.setAttribute('x', (midX - 140).toString());
       bg.setAttribute('y', (midY - 60).toString());
@@ -1435,6 +1447,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           cutoutMode,
           conditionColor: getSelectedCondition()?.color || '#000000',
           conditionLineThickness: getSelectedCondition()?.lineThickness,
+          pixelWidth: pixelW,
+          pixelHeight: pixelH,
         });
       }
     }
@@ -1482,12 +1496,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     {
       const md = measurementMoveDeltaRef.current;
       const ad = annotationMoveDeltaRef.current;
-      const mtx = md ? md.x * viewport.width : 0;
-      const mty = md ? md.y * viewport.height : 0;
+      const mtx = md ? md.x * pixelW : 0;
+      const mty = md ? md.y * pixelH : 0;
       const mt = `translate(${mtx}, ${mty})`;
       committed.querySelectorAll(`.${SVG_MOVE_DRAG_MEASUREMENT_WRAP_CLASS}`).forEach((w) => w.setAttribute('transform', mt));
-      const atx = ad ? ad.x * viewport.width : 0;
-      const aty = ad ? ad.y * viewport.height : 0;
+      const atx = ad ? ad.x * pixelW : 0;
+      const aty = ad ? ad.y * pixelH : 0;
       const at = `translate(${atx}, ${aty})`;
       committed.querySelectorAll(`.${SVG_MOVE_DRAG_ANNOTATION_WRAP_CLASS}`).forEach((w) => w.setAttribute('transform', at));
     }
@@ -1935,6 +1949,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Record the page and scale at which the PDF canvas was actually rendered
       lastRenderedPageRef.current = pageNum;
       lastRenderedScaleRef.current = viewState.scale;
+      lastRenderedRotationRef.current = viewState.rotation;
       
       // Clear any interactive CSS transforms (no longer needed after full render)
       if (pdfCanvasRef.current) {
@@ -2214,6 +2229,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       addTakeoffMeasurement(createPayload).then(savedMeasurementId => {
         useUndoStore.getState().push({ type: 'measurement_add', id: savedMeasurementId, createPayload });
       }).catch(error => {
+        if (isTakeoffMeasurementCreateAborted(error)) return;
         console.error(`Failed to save ${measurementType.toUpperCase()} measurement:`, error);
         // Reset flag on error
         isCompletingMeasurementRef.current = false;
@@ -2497,9 +2513,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           ...prev,
           [currentPage]: freshViewport
         }));
-        
-        // Update lastRenderedScaleRef so baseline scale logic uses correct value
-        lastRenderedScaleRef.current = optimalScale;
+        // lastRenderedScaleRef is updated only when the canvas actually renders at this scale
+        // (see renderPDFPage). Setting it here before React applies `scale` caused a transient
+        // mismatch with viewState and misplaced takeoff coordinates on first fit (new projects).
       }
 
       // Apply the new scale
@@ -2765,7 +2781,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   }, [pdfDocument, viewState, currentPage, isComponentMounted, isMeasuring, isCalibrating, currentMeasurement, isDeselecting, isInitialRenderComplete, isAnnotating, showTextInput]);
 
 
-  // Set measurement type when condition is selected; draw mode is entered via Space or canvas-match click, not sidebar alone.
+  // Set measurement type when condition is selected; sidebar selection enters draw mode (Space still toggles off / re-select).
   // useLayoutEffect so measuring/selection flags update before paint (avoids a click on empty canvas seeing stale isMeasuring).
   useLayoutEffect(() => {
     // Titleblock selection mode takes precedence - disable measuring so box selection works
@@ -2797,17 +2813,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
 
         const idChanged = prevSelectedConditionIdForModeRef.current !== selectedConditionId;
-        // Sidebar-only highlight: stay in selection mode (not drawing).
         // idChanged alone missed re-selecting the same id when prevRef already matched (e.g. canvas sync).
         // !isMeasuring covers sidebar pick while measuring is false.
         // (isSelectionMode && isMeasuring) clears invalid stuck state (both true) without affecting Space (selection false while measuring).
-        const shouldResetToSelectionOnly =
+        const shouldApplySidebarConditionMode =
           idChanged ||
           !isMeasuring ||
           (isSelectionMode && isMeasuring);
-        if (shouldResetToSelectionOnly) {
-          setIsMeasuring(false);
-          setIsSelectionMode(true);
+        if (shouldApplySidebarConditionMode) {
+          setIsMeasuring(true);
+          setIsSelectionMode(false);
           if (selectedMarkupIds.length > 0) setSelectedMarkupIds([]);
         }
         prevSelectedConditionIdForModeRef.current = selectedConditionId;
@@ -3145,6 +3160,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       <PDFViewerMagnifier
         pdfCanvasRef={pdfCanvasRef}
         mousePositionRef={mousePositionRef}
+        pdfViewport={currentViewport}
         magnifierEnabled={magnifierEnabled}
         magnifierZoom={magnifierZoom}
         isActive={isMeasuring || isCalibrating || !!annotationTool}

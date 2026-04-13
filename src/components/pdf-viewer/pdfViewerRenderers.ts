@@ -10,6 +10,10 @@ import type { Measurement, SelectionBox } from '../PDFViewer.types';
 import type { Annotation, SheetHyperlink } from '../../types';
 import { formatFeetAndInches } from '../../lib/utils';
 import { calculateDistance } from '../../utils/commonUtils';
+import { baseNormToViewportPixels } from '../../utils/measurementGeometry';
+
+/** Re-export so existing imports from this module keep working. Prefer `measurementGeometry` for new code. */
+export { baseNormToViewportPixels };
 
 export interface RenderSVGMeasurementOptions {
   rotation: number;
@@ -19,6 +23,9 @@ export interface RenderSVGMeasurementOptions {
   selectionMode: boolean;
   /** When false, value labels (LF, SF, CY, etc.) on completed measurements are hidden. Defaults to true. */
   showLabel?: boolean;
+  /** Laid-out canvas CSS px; when set, used instead of viewport width/height for SVG pixel coords. */
+  pixelWidth?: number;
+  pixelHeight?: number;
 }
 
 /** Ray-casting point-in-polygon test */
@@ -88,21 +95,6 @@ export function renderSVGHyperlinkDrawBox(
   svg.appendChild(rect);
 }
 
-/** Transform normalized (0-1) point to viewport coords accounting for rotation. Same logic as measurements/annotations. */
-function transformHyperlinkPoint(
-  nx: number,
-  ny: number,
-  viewport: { width: number; height: number },
-  rotation: number
-): { x: number; y: number } {
-  const r = rotation || 0;
-  if (r === 0) return { x: nx * viewport.width, y: ny * viewport.height };
-  if (r === 90) return { x: viewport.width * (1 - ny), y: viewport.height * nx };
-  if (r === 180) return { x: viewport.width * (1 - nx), y: viewport.height * (1 - ny) };
-  if (r === 270) return { x: viewport.width * ny, y: viewport.height * (1 - nx) };
-  return { x: nx * viewport.width, y: ny * viewport.height };
-}
-
 /** Renders sheet hyperlinks as clickable rectangles (dashed, thin - distinct from annotations).
  * sourceRect is in normalized 0-1 space (rotation=0); applies same rotation transform as measurements. */
 export function renderSVGHyperlinks(
@@ -115,10 +107,10 @@ export function renderSVGHyperlinks(
   for (const h of hyperlinks) {
     const { x: nx, y: ny, width: nw, height: nh } = h.sourceRect;
     const corners = [
-      transformHyperlinkPoint(nx, ny, viewport, rotation),
-      transformHyperlinkPoint(nx + nw, ny, viewport, rotation),
-      transformHyperlinkPoint(nx + nw, ny + nh, viewport, rotation),
-      transformHyperlinkPoint(nx, ny + nh, viewport, rotation),
+      baseNormToViewportPixels(nx, ny, viewport, rotation),
+      baseNormToViewportPixels(nx + nw, ny, viewport, rotation),
+      baseNormToViewportPixels(nx + nw, ny + nh, viewport, rotation),
+      baseNormToViewportPixels(nx, ny + nh, viewport, rotation),
     ];
     const xs = corners.map((c) => c.x);
     const ys = corners.map((c) => c.y);
@@ -178,13 +170,19 @@ export interface Point {
  *  three or more points exist (no diagonal closing stroke). */
 export function renderSVGCurrentCutoutCommitted(
   parent: SVGGElement,
-  viewport: { width: number; height: number },
+  viewport: { width: number; height: number; rotation?: number },
   currentCutout: Point[]
 ): void {
   if (!viewport || currentCutout.length < 3) return;
+  const rotation = viewport.rotation ?? 0;
+  const vw = viewport.width;
+  const vh = viewport.height;
   const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
   const polygonPointString = currentCutout
-    .map((p) => `${p.x * viewport.width},${p.y * viewport.height}`)
+    .map((p) => {
+      const pt = baseNormToViewportPixels(p.x, p.y, { width: vw, height: vh }, rotation);
+      return `${pt.x},${pt.y}`;
+    })
     .join(' ');
   polygon.setAttribute('points', polygonPointString);
   polygon.setAttribute('fill', 'rgba(255, 0, 0, 0.15)');
@@ -195,18 +193,27 @@ export function renderSVGCurrentCutoutCommitted(
 
 export function renderSVGCurrentCutoutEphemeral(
   parent: SVGGElement,
-  viewport: { width: number; height: number },
+  viewport: { width: number; height: number; rotation?: number },
   currentCutout: Point[],
   mousePosition: Point | null
 ): void {
   if (!viewport || currentCutout.length === 0) return;
+  const rotation = viewport.rotation ?? 0;
+  const vw = viewport.width;
+  const vh = viewport.height;
+  const toPx = (nx: number, ny: number) =>
+    baseNormToViewportPixels(nx, ny, { width: vw, height: vh }, rotation);
 
   const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
   let pointString = currentCutout
-    .map((p) => `${p.x * viewport.width},${p.y * viewport.height}`)
+    .map((p) => {
+      const pt = toPx(p.x, p.y);
+      return `${pt.x},${pt.y}`;
+    })
     .join(' ');
   if (mousePosition) {
-    pointString += ` ${mousePosition.x * viewport.width},${mousePosition.y * viewport.height}`;
+    const m = toPx(mousePosition.x, mousePosition.y);
+    pointString += ` ${m.x},${m.y}`;
   }
   polyline.setAttribute('points', pointString);
   polyline.setAttribute('stroke', '#ff0000');
@@ -244,17 +251,17 @@ export interface CrosshairOptions {
   strokeWidth?: number;
 }
 
-/** Renders crosshair at position (position in normalized 0–1 coordinates). */
+/** Renders crosshair at position (base-normalized unrotated PDF 0–1, same as stored measurements). */
 export function renderSVGCrosshair(
   svg: SVGSVGElement,
   position: Point,
-  viewport: { width: number; height: number },
+  viewport: { width: number; height: number; rotation?: number },
   isCalibrating: boolean = false,
   options?: CrosshairOptions
 ): void {
   if (!position || !viewport) return;
-  const vx = position.x * viewport.width;
-  const vy = position.y * viewport.height;
+  const rotation = viewport.rotation ?? 0;
+  const { x: vx, y: vy } = baseNormToViewportPixels(position.x, position.y, viewport, rotation);
   if (typeof vx !== 'number' || typeof vy !== 'number') return;
 
   const { fullScreen = false, strokeColor: strokeColorHex, strokeWidth: customStrokeWidth } = options ?? {};
@@ -312,32 +319,23 @@ export function renderSVGMeasurement(
   if (measurement.type !== 'count' && points.length < 2) return;
   if (!page) return;
 
-  const { rotation, selectedMarkupIds, getConditionColor, getConditionLineThickness, selectionMode, showLabel = true } = options;
+  const {
+    rotation,
+    selectedMarkupIds,
+    getConditionColor,
+    getConditionLineThickness,
+    selectionMode,
+    showLabel = true,
+    pixelWidth,
+    pixelHeight,
+  } = options;
   const currentViewport = viewport;
-  const _baseViewport = page.getViewport({ scale: 1, rotation: 0 });
+  const vw = pixelWidth ?? currentViewport.width;
+  const vh = pixelHeight ?? currentViewport.height;
 
-  const transformedPoints = points.map((point) => {
-    const normalizedX = point.x;
-    const normalizedY = point.y;
-    let canvasX: number, canvasY: number;
-    if (rotation === 0) {
-      canvasX = normalizedX * currentViewport.width;
-      canvasY = normalizedY * currentViewport.height;
-    } else if (rotation === 90) {
-      canvasX = currentViewport.width * (1 - normalizedY);
-      canvasY = currentViewport.height * normalizedX;
-    } else if (rotation === 180) {
-      canvasX = currentViewport.width * (1 - normalizedX);
-      canvasY = currentViewport.height * (1 - normalizedY);
-    } else if (rotation === 270) {
-      canvasX = currentViewport.width * normalizedY;
-      canvasY = currentViewport.height * (1 - normalizedX);
-    } else {
-      canvasX = normalizedX * currentViewport.width;
-      canvasY = normalizedY * currentViewport.height;
-    }
-    return { x: canvasX, y: canvasY };
-  });
+  const transformedPoints = points.map((point) =>
+    baseNormToViewportPixels(point.x, point.y, { width: vw, height: vh }, rotation)
+  );
 
   const isSelected = selectedMarkupIds.includes(measurement.id);
   const liveColor = getConditionColor(measurement.conditionId, measurement.conditionColor);
@@ -399,7 +397,7 @@ export function renderSVGMeasurement(
           let pathData = `M ${pointString.split(' ')[0]} L ${pointString.split(' ').slice(1).join(' L ')} Z`;
           measurement.cutouts.forEach((cutout) => {
             if (cutout?.points?.length >= 3) {
-              const cutoutPointString = cutout.points.map((p) => `${p.x * currentViewport.width},${p.y * currentViewport.height}`).join(' ');
+              const cutoutPointString = cutout.points.map((p) => `${p.x * vw},${p.y * vh}`).join(' ');
               pathData += ` M ${cutoutPointString.split(' ')[0]} L ${cutoutPointString.split(' ').slice(1).join(' L ')} Z`;
             }
           });
@@ -462,7 +460,7 @@ export function renderSVGMeasurement(
           let pathData = `M ${pointString.split(' ')[0]} L ${pointString.split(' ').slice(1).join(' L ')} Z`;
           measurement.cutouts.forEach((cutout) => {
             if (cutout?.points?.length >= 3) {
-              const cutoutPointString = cutout.points.map((p) => `${p.x * currentViewport.width},${p.y * currentViewport.height}`).join(' ');
+              const cutoutPointString = cutout.points.map((p) => `${p.x * vw},${p.y * vh}`).join(' ');
               pathData += ` M ${cutoutPointString.split(' ')[0]} L ${cutoutPointString.split(' ').slice(1).join(' L ')} Z`;
             }
           });
@@ -566,28 +564,9 @@ export function renderSVGAnnotation(
   const { rotation, selectedMarkupIds, selectionMode } = options;
   const currentViewport = viewport;
 
-  const points = annotation.points.map((p) => {
-    const normalizedX = p.x;
-    const normalizedY = p.y;
-    let canvasX: number, canvasY: number;
-    if (rotation === 0) {
-      canvasX = normalizedX * currentViewport.width;
-      canvasY = normalizedY * currentViewport.height;
-    } else if (rotation === 90) {
-      canvasX = currentViewport.width * (1 - normalizedY);
-      canvasY = currentViewport.height * normalizedX;
-    } else if (rotation === 180) {
-      canvasX = currentViewport.width * (1 - normalizedX);
-      canvasY = currentViewport.height * (1 - normalizedY);
-    } else if (rotation === 270) {
-      canvasX = currentViewport.width * normalizedY;
-      canvasY = currentViewport.height * (1 - normalizedX);
-    } else {
-      canvasX = normalizedX * currentViewport.width;
-      canvasY = normalizedY * currentViewport.height;
-    }
-    return { x: canvasX, y: canvasY };
-  });
+  const points = annotation.points.map((p) =>
+    baseNormToViewportPixels(p.x, p.y, currentViewport, rotation)
+  );
 
   const isSelected = selectedMarkupIds.includes(annotation.id);
   const strokeWidth = isSelected ? '5' : '3';
@@ -743,7 +722,7 @@ export function renderSVGAnnotation(
 
 export interface RenderSVGCalibrationPointsOptions {
   calibrationPoints: { x: number; y: number }[];
-  viewport: { width: number; height: number };
+  viewport: { width: number; height: number; rotation?: number };
   mousePosition: { x: number; y: number } | null;
   isOrthoSnapping: boolean;
   applyOrthoSnapping: (point: { x: number; y: number }, refPoints: { x: number; y: number }[]) => { x: number; y: number };
@@ -756,9 +735,12 @@ export function renderSVGCalibrationPointsCommitted(
 ): void {
   const { calibrationPoints, viewport } = options;
   if (!viewport) return;
+  const rotation = viewport.rotation ?? 0;
+  const toPx = (nx: number, ny: number) =>
+    baseNormToViewportPixels(nx, ny, viewport, rotation);
 
   calibrationPoints.forEach((point, index) => {
-    const viewportPoint = { x: point.x * viewport.width, y: point.y * viewport.height };
+    const viewportPoint = toPx(point.x, point.y);
     const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
     circle.setAttribute('cx', viewportPoint.x.toString());
     circle.setAttribute('cy', viewportPoint.y.toString());
@@ -781,8 +763,8 @@ export function renderSVGCalibrationPointsCommitted(
   });
 
   if (calibrationPoints.length === 2) {
-    const firstPoint = { x: calibrationPoints[0].x * viewport.width, y: calibrationPoints[0].y * viewport.height };
-    const secondPoint = { x: calibrationPoints[1].x * viewport.width, y: calibrationPoints[1].y * viewport.height };
+    const firstPoint = toPx(calibrationPoints[0].x, calibrationPoints[0].y);
+    const secondPoint = toPx(calibrationPoints[1].x, calibrationPoints[1].y);
     const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
     line.setAttribute('x1', firstPoint.x.toString());
     line.setAttribute('y1', firstPoint.y.toString());
@@ -816,9 +798,12 @@ export function renderSVGCalibrationPointsEphemeral(
   if (!viewport) return;
 
   if (calibrationPoints.length === 1 && mousePosition) {
-    const firstPoint = { x: calibrationPoints[0].x * viewport.width, y: calibrationPoints[0].y * viewport.height };
+    const rotation = viewport.rotation ?? 0;
+    const toPx = (nx: number, ny: number) =>
+      baseNormToViewportPixels(nx, ny, viewport, rotation);
+    const firstPoint = toPx(calibrationPoints[0].x, calibrationPoints[0].y);
     const snappedMousePoint = isOrthoSnapping ? applyOrthoSnapping(mousePosition, calibrationPoints) : mousePosition;
-    const snappedViewportPoint = { x: snappedMousePoint.x * viewport.width, y: snappedMousePoint.y * viewport.height };
+    const snappedViewportPoint = toPx(snappedMousePoint.x, snappedMousePoint.y);
     const previewLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
     previewLine.setAttribute('x1', firstPoint.x.toString());
     previewLine.setAttribute('y1', firstPoint.y.toString());
@@ -863,7 +848,7 @@ export interface RenderRunningLengthDisplayOptions {
 /** Renders running length label for continuous linear drawing. */
 export function renderRunningLengthDisplay(
   svg: SVGSVGElement,
-  viewport: { width: number; height: number },
+  viewport: { width: number; height: number; rotation?: number },
   options: RenderRunningLengthDisplayOptions
 ): void {
   const { runningLength, conditionColor, unit, lastPoint } = options;
@@ -874,8 +859,10 @@ export function renderRunningLengthDisplay(
       ? formatFeetAndInches(runningLength)
       : `${runningLength.toFixed(2)} ${unit}`;
 
-  const textX = lastPoint.x * viewport.width + 10;
-  const textY = lastPoint.y * viewport.height - 10;
+  const rotation = viewport.rotation ?? 0;
+  const lp = baseNormToViewportPixels(lastPoint.x, lastPoint.y, viewport, rotation);
+  const textX = lp.x + 10;
+  const textY = lp.y - 10;
   const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
   rect.setAttribute('x', (textX - 5).toString());
   rect.setAttribute('y', (textY - 20).toString());
@@ -913,19 +900,23 @@ export function renderSVGCurrentAnnotation(
   const { annotationTool, currentAnnotation, mousePosition, annotationColor } = options;
   if (!viewport || !annotationTool) return;
 
-  const points = currentAnnotation.map((p) => ({ x: p.x * viewport.width, y: p.y * viewport.height }));
+  const rotation = viewport.rotation ?? 0;
+  const toPx = (nx: number, ny: number) =>
+    baseNormToViewportPixels(nx, ny, { width: viewport.width, height: viewport.height }, rotation);
+  const points = currentAnnotation.map((p) => toPx(p.x, p.y));
 
   if (['arrow', 'rectangle', 'circle'].includes(annotationTool)) {
     if (points.length === 0 && mousePosition) {
+      const m = toPx(mousePosition.x, mousePosition.y);
       const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      dot.setAttribute('cx', (mousePosition.x * viewport.width).toString());
-      dot.setAttribute('cy', (mousePosition.y * viewport.height).toString());
+      dot.setAttribute('cx', m.x.toString());
+      dot.setAttribute('cy', m.y.toString());
       dot.setAttribute('r', '4');
       dot.setAttribute('fill', annotationColor);
       dot.setAttribute('opacity', '0.7');
       svg.appendChild(dot);
     } else if (points.length === 1 && mousePosition) {
-      const endPoint = { x: mousePosition.x * viewport.width, y: mousePosition.y * viewport.height };
+      const endPoint = toPx(mousePosition.x, mousePosition.y);
       const startDot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
       startDot.setAttribute('cx', points[0].x.toString());
       startDot.setAttribute('cy', points[0].y.toString());
@@ -992,6 +983,9 @@ export interface RenderSVGCurrentMeasurementOptions {
   conditionColor: string;
   /** For linear measurements, stroke width in px. Defaults to 2. */
   conditionLineThickness?: number;
+  /** Laid-out canvas CSS px; when set, used instead of viewport width/height for SVG pixel coords. */
+  pixelWidth?: number;
+  pixelHeight?: number;
 }
 
 export type RenderSVGCurrentMeasurementCommittedOptions = Omit<RenderSVGCurrentMeasurementOptions, 'mousePosition'>;
@@ -1012,9 +1006,16 @@ export function renderSVGCurrentMeasurementCommitted(
     cutoutMode,
     conditionColor,
     conditionLineThickness = 2,
+    pixelWidth,
+    pixelHeight,
   } = options;
   if (!viewport) return;
 
+  const vw = pixelWidth ?? viewport.width;
+  const vh = pixelHeight ?? viewport.height;
+  const rotation = viewport.rotation ?? 0;
+  const toPx = (nx: number, ny: number) =>
+    baseNormToViewportPixels(nx, ny, { width: vw, height: vh }, rotation);
   const strokeColor = cutoutMode ? '#ff0000' : conditionColor;
 
   switch (measurementType) {
@@ -1023,7 +1024,12 @@ export function renderSVGCurrentMeasurementCommitted(
         const existingPolyline = pageCommittedPolylineRefs.current[currentPage];
         if (existingPolyline?.parentNode === parent) parent.removeChild(existingPolyline);
         const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-        const pointString = activePoints.map((p) => `${p.x * viewport.width},${p.y * viewport.height}`).join(' ');
+        const pointString = activePoints
+          .map((p) => {
+            const pt = toPx(p.x, p.y);
+            return `${pt.x},${pt.y}`;
+          })
+          .join(' ');
         polyline.setAttribute('points', pointString);
         polyline.setAttribute('stroke', strokeColor);
         polyline.setAttribute('stroke-width', String(conditionLineThickness));
@@ -1042,7 +1048,12 @@ export function renderSVGCurrentMeasurementCommitted(
         const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
         polygon.setAttribute(
           'points',
-          currentMeasurement.map((p) => `${p.x * viewport.width},${p.y * viewport.height}`).join(' ')
+          currentMeasurement
+            .map((p) => {
+              const pt = toPx(p.x, p.y);
+              return `${pt.x},${pt.y}`;
+            })
+            .join(' ')
         );
         polygon.setAttribute('fill', cutoutMode ? 'none' : conditionColor + '40');
         polygon.setAttribute('stroke', 'none');
@@ -1057,7 +1068,12 @@ export function renderSVGCurrentMeasurementCommitted(
         const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
         polygon.setAttribute(
           'points',
-          currentMeasurement.map((p) => `${p.x * viewport.width},${p.y * viewport.height}`).join(' ')
+          currentMeasurement
+            .map((p) => {
+              const pt = toPx(p.x, p.y);
+              return `${pt.x},${pt.y}`;
+            })
+            .join(' ')
         );
         polygon.setAttribute('fill', cutoutMode ? 'none' : conditionColor + '40');
         polygon.setAttribute('stroke', 'none');
@@ -1068,7 +1084,7 @@ export function renderSVGCurrentMeasurementCommitted(
       break;
     case 'count':
       if (currentMeasurement.length >= 1) {
-        const point = { x: currentMeasurement[0].x * viewport.width, y: currentMeasurement[0].y * viewport.height };
+        const point = toPx(currentMeasurement[0].x, currentMeasurement[0].y);
         const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
         circle.setAttribute('cx', point.x.toString());
         circle.setAttribute('cy', point.y.toString());
@@ -1112,9 +1128,16 @@ export function renderSVGCurrentMeasurementEphemeral(
     cutoutMode,
     conditionColor,
     conditionLineThickness = 2,
+    pixelWidth,
+    pixelHeight,
   } = options;
   if (!viewport) return;
 
+  const vw = pixelWidth ?? viewport.width;
+  const vh = pixelHeight ?? viewport.height;
+  const rotation = viewport.rotation ?? 0;
+  const toPx = (nx: number, ny: number) =>
+    baseNormToViewportPixels(nx, ny, { width: vw, height: vh }, rotation);
   const strokeColor = cutoutMode ? '#ff0000' : conditionColor;
   const previewId = `linear-preview-${currentPage}`;
 
@@ -1122,9 +1145,15 @@ export function renderSVGCurrentMeasurementEphemeral(
     case 'linear':
       if (isContinuousDrawing && activePoints.length > 0) {
         const previewPolyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-        let pointString = activePoints.map((p) => `${p.x * viewport.width},${p.y * viewport.height}`).join(' ');
+        let pointString = activePoints
+          .map((p) => {
+            const pt = toPx(p.x, p.y);
+            return `${pt.x},${pt.y}`;
+          })
+          .join(' ');
         if (mousePosition) {
-          pointString += ` ${mousePosition.x * viewport.width},${mousePosition.y * viewport.height}`;
+          const m = toPx(mousePosition.x, mousePosition.y);
+          pointString += ` ${m.x},${m.y}`;
         }
         previewPolyline.setAttribute('points', pointString);
         previewPolyline.setAttribute('stroke', conditionColor);
@@ -1140,9 +1169,15 @@ export function renderSVGCurrentMeasurementEphemeral(
       } else if (currentMeasurement.length > 0) {
         const nonContinuousPreviewId = `linear-noncontinuous-preview-${currentPage}`;
         const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-        let pointString = currentMeasurement.map((p) => `${p.x * viewport.width},${p.y * viewport.height}`).join(' ');
+        let pointString = currentMeasurement
+          .map((p) => {
+            const pt = toPx(p.x, p.y);
+            return `${pt.x},${pt.y}`;
+          })
+          .join(' ');
         if (mousePosition) {
-          pointString += ` ${mousePosition.x * viewport.width},${mousePosition.y * viewport.height}`;
+          const m = toPx(mousePosition.x, mousePosition.y);
+          pointString += ` ${m.x},${m.y}`;
         }
         polyline.setAttribute('points', pointString);
         polyline.setAttribute('stroke', strokeColor);
@@ -1161,9 +1196,15 @@ export function renderSVGCurrentMeasurementEphemeral(
       if (currentMeasurement.length > 0) {
         const areaPreviewId = `area-preview-${currentPage}`;
         const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-        let pointString = currentMeasurement.map((p) => `${p.x * viewport.width},${p.y * viewport.height}`).join(' ');
+        let pointString = currentMeasurement
+          .map((p) => {
+            const pt = toPx(p.x, p.y);
+            return `${pt.x},${pt.y}`;
+          })
+          .join(' ');
         if (mousePosition) {
-          pointString += ` ${mousePosition.x * viewport.width},${mousePosition.y * viewport.height}`;
+          const m = toPx(mousePosition.x, mousePosition.y);
+          pointString += ` ${m.x},${m.y}`;
         }
         polyline.setAttribute('points', pointString);
         polyline.setAttribute('stroke', strokeColor);
@@ -1180,9 +1221,15 @@ export function renderSVGCurrentMeasurementEphemeral(
       if (currentMeasurement.length > 0) {
         const volumePreviewId = `volume-preview-${currentPage}`;
         const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-        let pointString = currentMeasurement.map((p) => `${p.x * viewport.width},${p.y * viewport.height}`).join(' ');
+        let pointString = currentMeasurement
+          .map((p) => {
+            const pt = toPx(p.x, p.y);
+            return `${pt.x},${pt.y}`;
+          })
+          .join(' ');
         if (mousePosition) {
-          pointString += ` ${mousePosition.x * viewport.width},${mousePosition.y * viewport.height}`;
+          const m = toPx(mousePosition.x, mousePosition.y);
+          pointString += ` ${m.x},${m.y}`;
         }
         polyline.setAttribute('points', pointString);
         polyline.setAttribute('stroke', strokeColor);

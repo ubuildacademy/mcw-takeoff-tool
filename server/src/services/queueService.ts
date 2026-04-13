@@ -1,13 +1,15 @@
 /**
  * Queue Service for Background Job Processing
- * 
- * Uses BullMQ with Redis to handle long-running CV takeoff jobs
- * This removes Railway's timeout constraints by processing jobs asynchronously
+ *
+ * Uses BullMQ with Redis for long-running work (CV takeoff, titleblock extraction)
+ * so HTTP requests return immediately and Railway/proxy timeouts do not kill jobs.
  */
 
+import { randomUUID } from 'crypto';
 import { Queue, Worker, Job } from 'bullmq';
 import { Redis } from 'ioredis';
 import { cvTakeoffService } from './cvTakeoffService';
+import { runTitleblockExtraction, type TitleblockConfig } from './titleblockExtractionRunner';
 
 // Redis connection configuration
 // Railway provides REDIS_URL, or we can use a local Redis for development
@@ -113,20 +115,78 @@ cvTakeoffWorker.on('error', (err) => {
   console.error(`❌ [Queue] Worker error:`, err);
 });
 
+/** Titleblock extraction — long-running OCR + LLM; same Redis as CV queue */
+export const titleblockExtractionQueue = new Queue('titleblock-extraction', {
+  connection: redisConnection,
+  defaultJobOptions: {
+    attempts: 2,
+    backoff: { type: 'exponential', delay: 5000 },
+    removeOnComplete: { age: 3600, count: 50 },
+    removeOnFail: { age: 86400 },
+  },
+});
+
+export const titleblockExtractionWorker = new Worker(
+  'titleblock-extraction',
+  async (job: Job) => {
+    const { projectId, documentIds, titleblockConfig } = job.data as {
+      projectId: string;
+      documentIds: string[];
+      titleblockConfig: TitleblockConfig;
+    };
+
+    console.log(`🔄 [Queue] Titleblock extraction job ${job.id} (${documentIds?.length ?? 0} document(s))`);
+
+    await job.updateProgress({ percent: 0, processedPages: 0, totalPages: 0 });
+
+    const result = await runTitleblockExtraction({
+      projectId,
+      documentIds,
+      titleblockConfig,
+      onProgress: (p) => job.updateProgress(p),
+    });
+
+    return result;
+  },
+  {
+    connection: redisConnection,
+    concurrency: 1,
+  }
+);
+
+titleblockExtractionWorker.on('completed', (job) => {
+  console.log(`✅ [Queue] Titleblock job ${job.id} completed`);
+});
+
+titleblockExtractionWorker.on('failed', (job, err) => {
+  console.error(`❌ [Queue] Titleblock job ${job?.id} failed:`, err.message);
+});
+
+titleblockExtractionWorker.on('error', (err) => {
+  console.error(`❌ [Queue] Titleblock worker error:`, err);
+});
+
+export function generateTitleblockJobId(): string {
+  return `tb-${randomUUID()}`;
+}
+
 // Graceful shutdown
-process.on('SIGTERM', async () => {
-  console.log('🛑 [Queue] Shutting down worker...');
+async function shutdownQueues(): Promise<void> {
+  console.log('🛑 [Queue] Shutting down workers...');
   await cvTakeoffWorker.close();
+  await titleblockExtractionWorker.close();
   await cvTakeoffQueue.close();
+  await titleblockExtractionQueue.close();
   await redisConnection.quit();
+}
+
+process.on('SIGTERM', async () => {
+  await shutdownQueues();
   process.exit(0);
 });
 
 process.on('SIGINT', async () => {
-  console.log('🛑 [Queue] Shutting down worker...');
-  await cvTakeoffWorker.close();
-  await cvTakeoffQueue.close();
-  await redisConnection.quit();
+  await shutdownQueues();
   process.exit(0);
 });
 

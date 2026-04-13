@@ -80,7 +80,7 @@ export const useUndoStore = create<UndoState>()((set, get) => ({
           break;
         }
         case 'measurement_add':
-          await measurement.deleteTakeoffMeasurement(entry.id);
+          await measurement.deleteTakeoffMeasurement(entry.id, { awaitServer: true });
           break;
         case 'measurement_update':
           await measurement.updateTakeoffMeasurement(entry.id, entry.previous);
@@ -179,7 +179,7 @@ export const useUndoStore = create<UndoState>()((set, get) => ({
           }
           break;
         case 'measurement_delete':
-          await measurement.deleteTakeoffMeasurement(entry.measurement.id);
+          await measurement.deleteTakeoffMeasurement(entry.measurement.id, { awaitServer: true });
           break;
       }
       return true;

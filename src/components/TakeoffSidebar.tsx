@@ -119,13 +119,14 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
   }, [showExportDropdown]);
 
   const filteredConditions = conditions
-    .filter(
-      (c) =>
-        c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        c.description.toLowerCase().includes(searchQuery.toLowerCase())
-    )
+    .filter((c) => {
+      const name = (c.name ?? '').toLowerCase();
+      const desc = (c.description ?? '').toLowerCase();
+      const q = searchQuery.toLowerCase();
+      return name.includes(q) || desc.includes(q);
+    })
     .sort((a, b) =>
-      a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+      (a.name ?? '').localeCompare(b.name ?? '', undefined, { numeric: true, sensitivity: 'base' })
     );
 
   // Load match thumbnails for auto-count (visual-search) conditions

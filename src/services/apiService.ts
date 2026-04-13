@@ -647,10 +647,15 @@ export const takeoffMeasurementService = {
     return { measurements: transformedMeasurements };
   },
 
-  async createTakeoffMeasurement(measurementData: Omit<TakeoffMeasurement, 'id'> | Partial<TakeoffMeasurement>) {
+  async createTakeoffMeasurement(
+    measurementData: Omit<TakeoffMeasurement, 'id'> | Partial<TakeoffMeasurement>,
+    options?: { signal?: AbortSignal }
+  ) {
     if (import.meta.env.DEV) console.log('🌐 API_CREATE_TAKEOFF_MEASUREMENT: Making API call with data:', measurementData);
     try {
-      const response = await apiClient.post('/takeoff-measurements', measurementData);
+      const response = await apiClient.post('/takeoff-measurements', measurementData, {
+        signal: options?.signal,
+      });
       if (import.meta.env.DEV) console.log('✅ API_CREATE_TAKEOFF_MEASUREMENT: API call successful:', response.data);
       return response.data;
     } catch (error) {
@@ -746,7 +751,7 @@ export const ocrApiService = {
   },
 };
 
-// Titleblock Extraction Service
+// Titleblock Extraction Service (async job: POST returns jobId, then poll until done)
 export const titleblockService = {
   async extractTitleblock(
     projectId: string,
@@ -756,14 +761,52 @@ export const titleblockService = {
       sheetNameField: { x: number; y: number; width: number; height: number };
       templatePageNumber?: number;
     },
-    signal?: AbortSignal
-  ) {
-    const response = await apiClient.post(
+    signal?: AbortSignal,
+    onJobProgress?: (p: {
+      progress: number;
+      processedPages?: number;
+      totalPages?: number;
+    }) => void
+  ): Promise<{ success: boolean; results?: unknown[]; error?: string }> {
+    const enqueue = await apiClient.post(
       '/titleblock/extract',
       { projectId, documentIds, titleblockConfig },
       { signal }
     );
-    return response.data;
+    const { jobId } = enqueue.data as { jobId?: string };
+    if (!jobId) {
+      throw new Error('Server did not return a job id for titleblock extraction');
+    }
+
+    const pollMs = 1500;
+    while (true) {
+      if (signal?.aborted) {
+        throw new DOMException('Aborted', 'AbortError');
+      }
+      const { data } = await apiClient.get<{
+        status: string;
+        progress?: number;
+        processedPages?: number;
+        totalPages?: number;
+        result: { success: boolean; results?: unknown[] } | null;
+        error: string | null;
+      }>(`/titleblock/extract/job/${jobId}`, { signal });
+
+      onJobProgress?.({
+        progress: typeof data.progress === 'number' ? data.progress : 0,
+        processedPages: data.processedPages,
+        totalPages: data.totalPages,
+      });
+
+      if (data.status === 'completed' && data.result) {
+        return data.result as { success: boolean; results?: unknown[] };
+      }
+      if (data.status === 'failed') {
+        throw new Error(data.error || 'Titleblock extraction failed');
+      }
+
+      await new Promise((r) => setTimeout(r, pollMs));
+    }
   },
 };
 

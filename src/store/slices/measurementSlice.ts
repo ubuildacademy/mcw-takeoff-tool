@@ -16,6 +16,26 @@ function samePdfPageKey(a: number | string | undefined, b: number | string | und
   return Number(a) === Number(b);
 }
 
+const PENDING_MEASUREMENT_PREFIX = 'pending-measurement:';
+
+/** True while a measurement is shown optimistically before the create API returns. */
+export function isPendingMeasurementId(id: string): boolean {
+  return id.startsWith(PENDING_MEASUREMENT_PREFIX);
+}
+
+function createPendingMeasurementId(): string {
+  return `${PENDING_MEASUREMENT_PREFIX}${crypto.randomUUID()}`;
+}
+
+/** Create was aborted (user deleted pending markup or navigated away before save finished). */
+export function isTakeoffMeasurementCreateAborted(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const e = error as { code?: string; name?: string };
+  return e.code === 'ERR_CANCELED' || e.name === 'CanceledError' || e.name === 'AbortError';
+}
+
+const pendingCreateAbortById = new Map<string, AbortController>();
+
 interface MeasurementState {
   // State
   takeoffMeasurements: TakeoffMeasurement[];
@@ -37,7 +57,7 @@ interface MeasurementState {
   ) => Promise<void>;
   /** Move this markup to the back-most layer (behind everything else on the page). */
   sendTakeoffMeasurementToBack: (measurementId: string) => Promise<void>;
-  deleteTakeoffMeasurement: (id: string) => Promise<void>;
+  deleteTakeoffMeasurement: (id: string, options?: { awaitServer?: boolean }) => Promise<void>;
   clearProjectMeasurements: (projectId: string) => void;
   /** Clear measurements when switching project (so new project load is clean). */
   clearForProjectSwitch: (newProjectId: string) => void;
@@ -97,13 +117,16 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
       get().updateMarkupsByPage();
     };
     applyStackOrdersLocally();
-    let persistOk = false;
+    const persistable = stackUpdates.filter((u) => !isPendingMeasurementId(u.id));
+    let persistOk = persistable.length === 0;
     try {
-      await takeoffMeasurementService.batchUpdateTakeoffMeasurementStackOrder(stackUpdates);
-      persistOk = true;
+      if (persistable.length > 0) {
+        await takeoffMeasurementService.batchUpdateTakeoffMeasurementStackOrder(persistable);
+        persistOk = true;
+      }
     } catch (error: unknown) {
       console.warn(`${logPrefix}: batch stack-order failed, falling back to sequential PUT`, error);
-      for (const u of stackUpdates) {
+      for (const u of persistable) {
         try {
           const response = await takeoffMeasurementService.updateTakeoffMeasurement(u.id, {
             stackOrder: u.stackOrder,
@@ -157,56 +180,95 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
     },
 
     addTakeoffMeasurement: async (measurementData) => {
-      try {
-        const { takeoffMeasurementService } = await import('../../services/apiService');
-        
-        const condition = useConditionStore.getState().getConditionById(measurementData.conditionId);
-        const pageMeas = get().getPageTakeoffMeasurements(
-          measurementData.projectId,
-          measurementData.sheetId,
-          measurementData.pdfPage
-        );
-        const maxOrder = pageMeas.reduce((acc, x) => Math.max(acc, x.stackOrder ?? 0), -1);
-        const stackOrder = maxOrder + 1;
-        const measurementPayload = {
-          ...measurementData,
-          stackOrder,
-          conditionColor: condition?.color || '#000000',
-          conditionName: condition?.name || 'Unknown',
-          ...(measurementData.type === 'linear' && condition?.lineThickness != null && {
-            conditionLineThickness: condition.lineThickness,
-          }),
+      const { takeoffMeasurementService } = await import('../../services/apiService');
+
+      const condition = useConditionStore.getState().getConditionById(measurementData.conditionId);
+      const pageMeas = get().getPageTakeoffMeasurements(
+        measurementData.projectId,
+        measurementData.sheetId,
+        measurementData.pdfPage
+      );
+      const maxOrder = pageMeas.reduce((acc, x) => Math.max(acc, x.stackOrder ?? 0), -1);
+      const stackOrder = maxOrder + 1;
+      const measurementPayload = {
+        ...measurementData,
+        stackOrder,
+        conditionColor: condition?.color || '#000000',
+        conditionName: condition?.name || 'Unknown',
+        ...(measurementData.type === 'linear' && condition?.lineThickness != null && {
+          conditionLineThickness: condition.lineThickness,
+        }),
+      };
+
+      const optimisticId = createPendingMeasurementId();
+      const optimistic: TakeoffMeasurement = {
+        ...measurementPayload,
+        id: optimisticId,
+        timestamp: new Date().toISOString(),
+      };
+
+      const pageKey = `${measurementPayload.projectId}-${measurementPayload.sheetId}-${measurementPayload.pdfPage}`;
+      set((state) => {
+        const updatedLoadedPages = new Set(state.loadedPages);
+        updatedLoadedPages.add(pageKey);
+        return {
+          takeoffMeasurements: [...state.takeoffMeasurements, optimistic],
+          loadedPages: updatedLoadedPages,
         };
-        
-        const response = await takeoffMeasurementService.createTakeoffMeasurement(measurementPayload);
+      });
+      get().updateMarkupsByPage();
+
+      const ac = new AbortController();
+      pendingCreateAbortById.set(optimisticId, ac);
+
+      try {
+        const response = await takeoffMeasurementService.createTakeoffMeasurement(measurementPayload, {
+          signal: ac.signal,
+        });
+        pendingCreateAbortById.delete(optimisticId);
         if (import.meta.env.DEV) console.log('✅ ADD_TAKEOFF_MEASUREMENT: API response received:', response);
         const measurement = response.measurement || response;
 
-        set(state => {
-          if (import.meta.env.DEV) console.log('💾 ADD_TAKEOFF_MEASUREMENT: Adding measurement to store from backend:', measurement);
-
-          const pageKey = `${measurement.projectId}-${measurement.sheetId}-${measurement.pdfPage}`;
-          const updatedLoadedPages = new Set(state.loadedPages);
-          updatedLoadedPages.add(pageKey);
-          
-          return {
-            takeoffMeasurements: [...state.takeoffMeasurements, measurement],
-            loadedPages: updatedLoadedPages
-          };
-        });
-        
+        set((state) => ({
+          takeoffMeasurements: state.takeoffMeasurements.map((m) =>
+            m.id === optimisticId ? measurement : m
+          ),
+        }));
         get().updateMarkupsByPage();
 
-        if (import.meta.env.DEV) console.log('✅ ADD_TAKEOFF_MEASUREMENT: Measurement created successfully with ID:', measurement.id);
+        if (import.meta.env.DEV) {
+          console.log('✅ ADD_TAKEOFF_MEASUREMENT: Measurement created successfully with ID:', measurement.id);
+        }
         return measurement.id;
       } catch (error: unknown) {
+        pendingCreateAbortById.delete(optimisticId);
+        if (isTakeoffMeasurementCreateAborted(error)) {
+          set((state) => ({
+            takeoffMeasurements: state.takeoffMeasurements.filter((m) => m.id !== optimisticId),
+          }));
+          get().updateMarkupsByPage();
+          throw error;
+        }
         console.error('❌ ADD_TAKEOFF_MEASUREMENT: Failed to create measurement via API:', error);
+        set((state) => ({
+          takeoffMeasurements: state.takeoffMeasurements.filter((m) => m.id !== optimisticId),
+        }));
+        get().updateMarkupsByPage();
         const msg = error instanceof Error ? error.message : String(error);
         throw new Error(`Failed to create takeoff measurement: ${msg}`);
       }
     },
     
     updateTakeoffMeasurement: async (id, updates) => {
+      if (isPendingMeasurementId(id)) {
+        set((state) => ({
+          takeoffMeasurements: state.takeoffMeasurements.map((measurement) =>
+            measurement.id === id ? { ...measurement, ...updates } : measurement
+          ),
+        }));
+        get().updateMarkupsByPage();
+        return;
+      }
       try {
         const { takeoffMeasurementService } = await import('../../services/apiService');
         
@@ -275,23 +337,57 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
       await persistStackOrderUpdates(stackUpdates, 'SEND_TO_BACK');
     },
     
-    deleteTakeoffMeasurement: async (id) => {
-      try {
-        const { takeoffMeasurementService } = await import('../../services/apiService');
-        
-        await takeoffMeasurementService.deleteTakeoffMeasurement(id);
-        console.log('✅ DELETE_TAKEOFF_MEASUREMENT: Measurement deleted successfully from API');
-        
-        set(state => ({
-          takeoffMeasurements: state.takeoffMeasurements.filter(measurement => measurement.id !== id)
+    deleteTakeoffMeasurement: async (id, options) => {
+      if (isPendingMeasurementId(id)) {
+        const ac = pendingCreateAbortById.get(id);
+        pendingCreateAbortById.delete(id);
+        set((state) => ({
+          takeoffMeasurements: state.takeoffMeasurements.filter((measurement) => measurement.id !== id),
         }));
-        
         get().updateMarkupsByPage();
-      } catch (error: unknown) {
-        console.error('❌ DELETE_TAKEOFF_MEASUREMENT: Failed to delete measurement via API:', error);
-        const msg = error instanceof Error ? error.message : String(error);
-        throw new Error(`Failed to delete takeoff measurement: ${msg}`);
+        ac?.abort();
+        return;
       }
+
+      const snapshot = get().takeoffMeasurements.find((m) => m.id === id);
+      if (!snapshot) return;
+
+      set((state) => ({
+        takeoffMeasurements: state.takeoffMeasurements.filter((measurement) => measurement.id !== id),
+      }));
+      get().updateMarkupsByPage();
+
+      const deleteFromServer = async () => {
+        const { takeoffMeasurementService } = await import('../../services/apiService');
+        await takeoffMeasurementService.deleteTakeoffMeasurement(id);
+        if (import.meta.env.DEV) {
+          console.log('✅ DELETE_TAKEOFF_MEASUREMENT: Measurement deleted successfully from API');
+        }
+      };
+
+      const restore = () => {
+        set((state) => ({
+          takeoffMeasurements: [...state.takeoffMeasurements, snapshot],
+        }));
+        get().updateMarkupsByPage();
+      };
+
+      if (options?.awaitServer) {
+        try {
+          await deleteFromServer();
+        } catch (error: unknown) {
+          console.error('❌ DELETE_TAKEOFF_MEASUREMENT: Failed to delete measurement via API:', error);
+          restore();
+          const msg = error instanceof Error ? error.message : String(error);
+          throw new Error(`Failed to delete takeoff measurement: ${msg}`);
+        }
+        return;
+      }
+
+      void deleteFromServer().catch((error: unknown) => {
+        console.error('❌ DELETE_TAKEOFF_MEASUREMENT: Failed to delete measurement via API:', error);
+        restore();
+      });
     },
     
     clearProjectMeasurements: (projectId) => {
@@ -401,6 +497,9 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
       const updatePromises: Promise<void>[] = [];
 
       for (const measurement of measurements) {
+        if (isPendingMeasurementId(measurement.id)) {
+          continue;
+        }
         const points = measurement.pdfCoordinates?.length
           ? measurement.pdfCoordinates
           : measurement.points;
@@ -693,6 +792,9 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
 
         set((state) => {
           const otherProjectMeasurements = state.takeoffMeasurements.filter((m) => m.projectId !== projectId);
+          const pendingForProject = state.takeoffMeasurements.filter(
+            (m) => m.projectId === projectId && isPendingMeasurementId(m.id)
+          );
           const byId = new Map(state.takeoffMeasurements.map((m) => [m.id, m]));
 
           // Prefer store stackOrder when we already have this row: in-flight GETs often return
@@ -705,7 +807,7 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
             return m;
           });
 
-          const allMeasurements = [...otherProjectMeasurements, ...mergedProject];
+          const allMeasurements = [...otherProjectMeasurements, ...mergedProject, ...pendingForProject];
           console.log(`💾 LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Loaded ${projectMeasurements.length} measurements from Supabase for project ${projectId}`, {
             projectMeasurementsCount: projectMeasurements.length,
             totalMeasurementsInStore: allMeasurements.length,

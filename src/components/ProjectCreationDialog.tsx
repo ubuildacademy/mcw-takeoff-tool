@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -45,23 +46,32 @@ interface JobFormData {
   contactPhone: string;
 }
 
+const EMPTY_FORM: JobFormData = {
+  name: '',
+  client: '',
+  location: '',
+  description: '',
+  projectType: '',
+  startDate: '',
+  estimatedValue: '',
+  contactPerson: '',
+  contactEmail: '',
+  contactPhone: '',
+};
+
 export function ProjectCreationDialog({ open, onOpenChange, onCreated }: ProjectCreationDialogProps) {
   const addProject = useProjectStore((s) => s.addProject);
   
-  const [formData, setFormData] = useState<JobFormData>({
-    name: '',
-    client: '',
-    location: '',
-    description: '',
-    projectType: '',
-    startDate: '',
-    estimatedValue: '',
-    contactPerson: '',
-    contactEmail: '',
-    contactPhone: ''
-  });
+  const [formData, setFormData] = useState<JobFormData>({ ...EMPTY_FORM });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+
+  // Radix often keeps dialog content mounted when closed; reset so file list cannot desync from upload state.
+  useEffect(() => {
+    if (open) return;
+    setUploadedFiles([]);
+    setFormData({ ...EMPTY_FORM });
+  }, [open]);
 
   const projectTypes = [
     'Commercial',
@@ -81,10 +91,6 @@ export function ProjectCreationDialog({ open, onOpenChange, onCreated }: Project
       ...prev,
       [field]: value
     }));
-  };
-
-  const handleFileUpload = (file: File) => {
-    setUploadedFiles(prev => [...prev, file]);
   };
 
   const handleSubmit = async (e?: React.FormEvent) => {
@@ -133,12 +139,10 @@ export function ProjectCreationDialog({ open, onOpenChange, onCreated }: Project
 
       // Reset
       setUploadedFiles([]);
-      setFormData({
-        name: '', client: '', location: '', description: '', projectType: '', startDate: '',
-        estimatedValue: '', contactPerson: '', contactEmail: '', contactPhone: ''
-      });
+      setFormData({ ...EMPTY_FORM });
     } catch (error) {
       console.error('Error creating job:', error);
+      toast.error('Failed to create project or upload files. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -303,35 +307,37 @@ export function ProjectCreationDialog({ open, onOpenChange, onCreated }: Project
             <h3 className="text-sm font-medium text-foreground">Project Files</h3>
             
             <FileUpload
-              onFileSelect={handleFileUpload}
+              key={String(open)}
+              onFilesListChange={setUploadedFiles}
               acceptedTypes={['.pdf', '.dwg', '.jpg', '.jpeg', '.png']}
               maxSize={1024}
               multiple={true}
             />
           </div>
-        </form>
 
-        <DialogFooter>
-          {!isFormValid && (
-            <div className="text-sm text-red-600 mr-auto">
-              Please fill in all required fields (Project Name, Client, Location)
-            </div>
-          )}
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={isSubmitting}
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={() => handleSubmit()}
-            disabled={!isFormValid || isSubmitting}
-            className={!isFormValid ? 'opacity-50 cursor-not-allowed' : ''}
-          >
-            {isSubmitting ? 'Creating...' : 'Create Project'}
-          </Button>
-        </DialogFooter>
+          <DialogFooter>
+            {!isFormValid && (
+              <div className="text-sm text-red-600 mr-auto">
+                Please fill in all required fields (Project Name, Client, Location)
+              </div>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={isSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={!isFormValid || isSubmitting}
+              className={!isFormValid ? 'opacity-50 cursor-not-allowed' : ''}
+            >
+              {isSubmitting ? 'Creating...' : 'Create Project'}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

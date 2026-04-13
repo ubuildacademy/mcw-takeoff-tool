@@ -7,12 +7,16 @@ import type { MutableRefObject, RefObject } from 'react';
 import type { PDFPageProxy, PageViewport } from 'pdfjs-dist';
 import { useAnnotationStore } from '../../store/slices/annotationSlice';
 import { useConditionStore } from '../../store/slices/conditionSlice';
-import { useMeasurementStore } from '../../store/slices/measurementSlice';
+import { useMeasurementStore, isTakeoffMeasurementCreateAborted } from '../../store/slices/measurementSlice';
 import { useUndoStore } from '../../store';
 import {
   shiftTakeoffMeasurementGeometry,
-  cssDragRectToPdfQuad,
+  cssDragRectToBasePdfQuad,
+  cssToBaseNormalized,
+  baseNormToViewportPixels,
   MIN_DRAG_RECT_PX,
+  canvasPixelExtent,
+  normalizeRotationDeg,
 } from '../../utils/measurementGeometry';
 import { isEditableKeyboardTarget } from '../../utils/keyboardUtils';
 import { getMarkupIdsFromElementsFromPoint } from '../../utils/markupHitTest';
@@ -23,6 +27,37 @@ import {
 } from '../../utils/takeoffMeasurementLookup';
 
 const PASTE_OFFSET = 0.02;
+
+/**
+ * Maps screen → PDF overlay coordinates when logical zoom (`viewState.scale`) or rotation
+ * differs from the last rasterized canvas (`lastRenderedScaleRef` / `lastRenderedRotationRef`).
+ * During fit-to-window, bulk rotate, or async re-render, those can diverge briefly without a CSS
+ * zoom transform — treat that as "pending render" and use scale 1 + the last-rendered viewport
+ * and rotation so clicks match the bitmap. When Cmd+scroll applies CSS `transform: scale(...)`
+ * while the canvas is not re-rendered, `hasCssZoom` is true and we use the ratio (same as before).
+ *
+ * Coordinate space contracts for stored points and SVG: see `measurementGeometry.ts` module doc.
+ */
+function getCanvasCoordinateSpace(
+  viewStateScale: number,
+  lastRenderedScale: number,
+  canvas: HTMLCanvasElement | null,
+  viewRotation: number,
+  lastRenderedRotation: number
+): { interactiveScale: number; useLastRenderedViewport: boolean; effectiveRotation: number } {
+  const hasCssZoom = Boolean(canvas?.style?.transform);
+  const vs = viewStateScale || 1;
+  const lr = lastRenderedScale || 1;
+  const vr = normalizeRotationDeg(viewRotation);
+  const lrr = normalizeRotationDeg(lastRenderedRotation);
+  const pendingRaster =
+    !hasCssZoom && (Math.abs(vs - lr) > 0.0001 || vr !== lrr);
+  const interactiveScale = pendingRaster ? 1 : vs / lr;
+  const useLastRenderedViewport =
+    pendingRaster || Math.abs(interactiveScale - 1) > 0.0001;
+  const effectiveRotation = pendingRaster ? lrr : vr;
+  return { interactiveScale, useLastRenderedViewport, effectiveRotation };
+}
 
 /**
  * Transform a selection rect from rotated viewport coordinates (0-1) to native PDF page coordinates (0-1).
@@ -79,6 +114,7 @@ export interface UsePDFViewerInteractionsOptions {
   svgOverlayRef: RefObject<SVGSVGElement | null>;
   containerRef: RefObject<HTMLDivElement | null>;
   lastRenderedScaleRef: MutableRefObject<number>;
+  lastRenderedRotationRef: MutableRefObject<number>;
   viewState: { scale: number; rotation: number };
   currentPage: number;
   totalPages: number;
@@ -255,6 +291,7 @@ export function usePDFViewerInteractions(
     svgOverlayRef,
     containerRef,
     lastRenderedScaleRef,
+    lastRenderedRotationRef,
     viewState,
     currentPage,
     totalPages: _totalPages,
@@ -401,14 +438,20 @@ export function usePDFViewerInteractions(
       const rect = pdfCanvasRef.current.getBoundingClientRect();
       let x = ev.clientX - rect.left;
       let y = ev.clientY - rect.top;
-      const interactiveScale = (viewState.scale || 1) / (lastRenderedScaleRef.current || 1);
+      const { interactiveScale } = getCanvasCoordinateSpace(
+        viewState.scale || 1,
+        lastRenderedScaleRef.current || 1,
+        pdfCanvasRef.current,
+        viewState.rotation ?? 0,
+        lastRenderedRotationRef.current ?? 0
+      );
       if (Math.abs(interactiveScale - 1) > 0.0001) {
         x /= interactiveScale;
         y /= interactiveScale;
       }
       return { x, y };
     },
-    [viewState.scale, pdfCanvasRef, lastRenderedScaleRef]
+    [viewState.scale, viewState.rotation, pdfCanvasRef, lastRenderedScaleRef, lastRenderedRotationRef]
   );
 
   const handleWheel = useCallback(
@@ -478,7 +521,7 @@ export function usePDFViewerInteractions(
               }
               const normVP = pdfPageRef.current.getViewport({
                 scale: lastRenderedScaleRef.current || 1,
-                rotation: viewState.rotation,
+                rotation: lastRenderedRotationRef.current ?? 0,
               });
               setMousePosition({
                 x: mx / normVP.width,
@@ -519,6 +562,7 @@ export function usePDFViewerInteractions(
       setMousePosition,
       setInternalViewState,
       lastRenderedScaleRef,
+      lastRenderedRotationRef,
       containerRef,
       queueEphemeralPaint,
     ]
@@ -526,8 +570,9 @@ export function usePDFViewerInteractions(
 
   const handleKeyDown = useCallback(
     async (event: KeyboardEvent) => {
-      const isCopy = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'c';
-      const isPaste = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'v';
+      const keyNorm = (event.key ?? '').toLowerCase();
+      const isCopy = (event.metaKey || event.ctrlKey) && keyNorm === 'c';
+      const isPaste = (event.metaKey || event.ctrlKey) && keyNorm === 'v';
       let handled = false;
 
       if (isCopy && isSelectionMode && selectedMeasurementIds.length > 0 && currentProjectId && file.id) {
@@ -568,7 +613,10 @@ export function usePDFViewerInteractions(
             .then((id) => {
               useUndoStore.getState().push({ type: 'measurement_add', id, createPayload: payload });
             })
-            .catch((err) => console.error('Paste measurement failed:', err));
+            .catch((err) => {
+              if (isTakeoffMeasurementCreateAborted(err)) return;
+              console.error('Paste measurement failed:', err);
+            });
         }
         handled = true;
       }
@@ -577,7 +625,6 @@ export function usePDFViewerInteractions(
 
       // Annotation shortcuts R/T/C/A: only when no condition selected and not typing in input
       const isTyping = isEditableKeyboardTarget(event.target);
-      const key = event.key.toLowerCase();
       if (
         !isTyping &&
         !event.metaKey &&
@@ -585,9 +632,9 @@ export function usePDFViewerInteractions(
         !event.altKey &&
         !selectedConditionId &&
         onAnnotationToolChange &&
-        key in ANNOTATION_SHORTCUTS
+        keyNorm in ANNOTATION_SHORTCUTS
       ) {
-        const tool = ANNOTATION_SHORTCUTS[key as keyof typeof ANNOTATION_SHORTCUTS];
+        const tool = ANNOTATION_SHORTCUTS[keyNorm as keyof typeof ANNOTATION_SHORTCUTS];
         event.preventDefault();
         onAnnotationToolChange(annotationTool === tool ? null : tool);
         return;
@@ -1035,6 +1082,7 @@ export function usePDFViewerInteractions(
           viewport = pdfPageRef.current.getViewport({ scale: viewState.scale, rotation: viewState.rotation });
         }
         if (viewport) {
+          const dp = canvasPixelExtent(pdfCanvasRef.current, viewport);
           const coords = getCssCoordsFromEvent(event);
           if (coords) {
             const width = Math.abs(coords.x - hyperlinkDrawStart.x);
@@ -1043,10 +1091,10 @@ export function usePDFViewerInteractions(
             const y = Math.min(coords.y, hyperlinkDrawStart.y);
             if (width >= 3 && height >= 3 && onHyperlinkRegionDrawn) {
               const normRect = {
-                x: x / viewport.width,
-                y: y / viewport.height,
-                width: width / viewport.width,
-                height: height / viewport.height,
+                x: x / dp.w,
+                y: y / dp.h,
+                width: width / dp.w,
+                height: height / dp.h,
               };
               onHyperlinkRegionDrawn(normRect, file.id, currentPage);
             }
@@ -1065,11 +1113,12 @@ export function usePDFViewerInteractions(
           viewport = pdfPageRef.current.getViewport({ scale: viewState.scale, rotation: viewState.rotation });
         }
         if (viewport) {
+          const dp = canvasPixelExtent(pdfCanvasRef.current, viewport);
           const coords = getCssCoordsFromEvent(event);
           if (coords) {
             const deltaCssX = coords.x - measurementMoveStart.x;
             const deltaCssY = coords.y - measurementMoveStart.y;
-            const deltaPdf = { x: deltaCssX / viewport.width, y: deltaCssY / viewport.height };
+            const deltaPdf = { x: deltaCssX / dp.w, y: deltaCssY / dp.h };
             const idsToMove = measurementMoveIds.length > 0 ? measurementMoveIds : [measurementMoveId];
             for (const id of idsToMove) {
               const m = localTakeoffMeasurements.find((meas) => meas.id === id);
@@ -1114,11 +1163,31 @@ export function usePDFViewerInteractions(
         !cutoutMode &&
         (measurementType === 'area' || measurementType === 'volume')
       ) {
+        const { useLastRenderedViewport: dragUseLR, effectiveRotation: dragEffRot } =
+          getCanvasCoordinateSpace(
+            viewState.scale || 1,
+            lastRenderedScaleRef.current || 1,
+            pdfCanvasRef.current,
+            viewState.rotation ?? 0,
+            lastRenderedRotationRef.current ?? 0
+          );
         let viewport = currentViewport;
         if (!viewport && pdfPageRef.current) {
-          viewport = pdfPageRef.current.getViewport({ scale: viewState.scale, rotation: viewState.rotation });
+          viewport = pdfPageRef.current.getViewport({
+            scale: lastRenderedScaleRef.current || viewState.scale,
+            rotation: dragEffRot,
+          });
+        }
+        if (dragUseLR && pdfPageRef.current) {
+          viewport = pdfPageRef.current.getViewport({
+            scale: lastRenderedScaleRef.current,
+            rotation: dragEffRot,
+          });
         }
         if (viewport) {
+          const dp = canvasPixelExtent(pdfCanvasRef.current, viewport);
+          const baseViewport =
+            pdfPageRef.current?.getViewport({ scale: 1, rotation: 0 }) ?? viewport;
           const coords = getCssCoordsFromEvent(event);
           if (coords) {
             const width = Math.abs(coords.x - measurementDragStart.x);
@@ -1126,7 +1195,9 @@ export function usePDFViewerInteractions(
             const x = Math.min(coords.x, measurementDragStart.x);
             const y = Math.min(coords.y, measurementDragStart.y);
             if (width >= MIN_DRAG_RECT_PX && height >= MIN_DRAG_RECT_PX) {
-              completeMeasurementRef.current(cssDragRectToPdfQuad(viewport, x, y, width, height));
+              completeMeasurementRef.current(
+                cssDragRectToBasePdfQuad(dp, baseViewport, dragEffRot, x, y, width, height)
+              );
               measurementDragJustCompletedRef.current = true;
               event.preventDefault();
               event.stopPropagation();
@@ -1139,11 +1210,31 @@ export function usePDFViewerInteractions(
       }
 
       if (cutoutDragStart && cutoutTargetConditionId) {
+        const { useLastRenderedViewport: cutUseLR, effectiveRotation: cutEffRot } =
+          getCanvasCoordinateSpace(
+            viewState.scale || 1,
+            lastRenderedScaleRef.current || 1,
+            pdfCanvasRef.current,
+            viewState.rotation ?? 0,
+            lastRenderedRotationRef.current ?? 0
+          );
         let viewport = currentViewport;
         if (!viewport && pdfPageRef.current) {
-          viewport = pdfPageRef.current.getViewport({ scale: viewState.scale, rotation: viewState.rotation });
+          viewport = pdfPageRef.current.getViewport({
+            scale: lastRenderedScaleRef.current || viewState.scale,
+            rotation: cutEffRot,
+          });
+        }
+        if (cutUseLR && pdfPageRef.current) {
+          viewport = pdfPageRef.current.getViewport({
+            scale: lastRenderedScaleRef.current,
+            rotation: cutEffRot,
+          });
         }
         if (viewport) {
+          const dp = canvasPixelExtent(pdfCanvasRef.current, viewport);
+          const baseViewport =
+            pdfPageRef.current?.getViewport({ scale: 1, rotation: 0 }) ?? viewport;
           const coords = getCssCoordsFromEvent(event);
           if (coords) {
             const width = Math.abs(coords.x - cutoutDragStart.x);
@@ -1151,7 +1242,9 @@ export function usePDFViewerInteractions(
             const x = Math.min(coords.x, cutoutDragStart.x);
             const y = Math.min(coords.y, cutoutDragStart.y);
             if (width >= MIN_DRAG_RECT_PX && height >= MIN_DRAG_RECT_PX) {
-              void completeCutoutRef.current?.(cssDragRectToPdfQuad(viewport, x, y, width, height));
+              void completeCutoutRef.current?.(
+                cssDragRectToBasePdfQuad(dp, baseViewport, cutEffRot, x, y, width, height)
+              );
               cutoutDragJustCompletedRef.current = true;
               event.preventDefault();
               event.stopPropagation();
@@ -1169,6 +1262,7 @@ export function usePDFViewerInteractions(
           viewport = pdfPageRef.current.getViewport({ scale: viewState.scale, rotation: viewState.rotation });
         }
         if (viewport) {
+          const dp = canvasPixelExtent(pdfCanvasRef.current, viewport);
           const coords = getCssCoordsFromEvent(event);
           if (!coords) {
             setAnnotationMoveId(null);
@@ -1180,7 +1274,7 @@ export function usePDFViewerInteractions(
           }
           const deltaCssX = coords.x - annotationMoveStart.x;
           const deltaCssY = coords.y - annotationMoveStart.y;
-          const deltaPdf = { x: deltaCssX / viewport.width, y: deltaCssY / viewport.height };
+          const deltaPdf = { x: deltaCssX / dp.w, y: deltaCssY / dp.h };
           const idsToMove = annotationMoveIds.length > 0 ? annotationMoveIds : [annotationMoveId];
           for (const id of idsToMove) {
             const a = localAnnotations.find((ann) => ann.id === id);
@@ -1226,6 +1320,7 @@ export function usePDFViewerInteractions(
           viewport = pdfPageRef.current.getViewport({ scale: viewState.scale, rotation: viewState.rotation });
         }
         if (viewport) {
+          const dp = canvasPixelExtent(pdfCanvasRef.current, viewport);
           const coords = getCssCoordsFromEvent(event);
           if (!coords) {
             setAnnotationDragStart(null);
@@ -1239,12 +1334,12 @@ export function usePDFViewerInteractions(
           if (width >= 5 || height >= 5) {
             const p1 =
               annotationTool === 'arrow'
-                ? { x: annotationDragStart.x / viewport.width, y: annotationDragStart.y / viewport.height }
-                : { x: x / viewport.width, y: y / viewport.height };
+                ? { x: annotationDragStart.x / dp.w, y: annotationDragStart.y / dp.h }
+                : { x: x / dp.w, y: y / dp.h };
             const p2 =
               annotationTool === 'arrow'
-                ? { x: coords.x / viewport.width, y: coords.y / viewport.height }
-                : { x: (x + width) / viewport.width, y: (y + height) / viewport.height };
+                ? { x: coords.x / dp.w, y: coords.y / dp.h }
+                : { x: (x + width) / dp.w, y: (y + height) / dp.h };
             if (currentProjectId && file.id) {
               const created = addAnnotation({
                 projectId: currentProjectId,
@@ -1284,6 +1379,7 @@ export function usePDFViewerInteractions(
         setSelectionBox(null);
         return;
       }
+      const dp = canvasPixelExtent(pdfCanvasRef.current, viewport);
       const coords = getCssCoordsFromEvent(event);
       if (!coords) return;
       const width = Math.abs(coords.x - selectionStart.x);
@@ -1298,10 +1394,10 @@ export function usePDFViewerInteractions(
       const finalSelectionBox = { x, y, width, height };
       setSelectionBox(finalSelectionBox);
       let pdfSelectionBox = {
-        x: x / viewport.width,
-        y: y / viewport.height,
-        width: width / viewport.width,
-        height: height / viewport.height,
+        x: x / dp.w,
+        y: y / dp.h,
+        width: width / dp.w,
+        height: height / dp.h,
       };
       // Transform from rotated viewport space to native page space for server extraction
       const rotation = viewState.rotation || 0;
@@ -1388,11 +1484,18 @@ export function usePDFViewerInteractions(
   const handleMouseMove = useCallback(
     (event: React.MouseEvent<HTMLCanvasElement | SVGSVGElement>) => {
       if (!pdfCanvasRef.current) return;
+      const { useLastRenderedViewport: mmUseLR, effectiveRotation } = getCanvasCoordinateSpace(
+        viewState.scale || 1,
+        lastRenderedScaleRef.current || 1,
+        pdfCanvasRef.current,
+        viewState.rotation ?? 0,
+        lastRenderedRotationRef.current ?? 0
+      );
       let viewport = currentViewport;
       if (!viewport && pdfPageRef.current) {
         const newViewport = pdfPageRef.current.getViewport({
           scale: lastRenderedScaleRef.current || viewState.scale,
-          rotation: viewState.rotation,
+          rotation: effectiveRotation,
         });
         viewport = newViewport;
         setPageViewports((prev) => ({ ...prev, [currentPage]: newViewport }));
@@ -1401,15 +1504,18 @@ export function usePDFViewerInteractions(
 
       // CRITICAL: When interactive zoom is active (CSS transforms providing visual zoom),
       // the interactiveScale compensation converts screen coords to old-viewport pixel space.
-      // We MUST use a viewport at lastRenderedScale for normalization so the division gives
-      // correct 0-1 coordinates. Without this, zooming mid-draw produces misplaced markups.
-      const mmInteractiveScale = (viewState.scale || 1) / (lastRenderedScaleRef.current || 1);
-      if (Math.abs(mmInteractiveScale - 1) > 0.0001 && pdfPageRef.current) {
+      // We MUST use a viewport at lastRenderedScale (and last rendered rotation when pending)
+      // for normalization so the division gives correct 0-1 coordinates.
+      if (mmUseLR && pdfPageRef.current) {
         viewport = pdfPageRef.current.getViewport({
           scale: lastRenderedScaleRef.current,
-          rotation: viewState.rotation,
+          rotation: effectiveRotation,
         });
       }
+
+      const dp = canvasPixelExtent(pdfCanvasRef.current, viewport);
+      const baseViewport =
+        pdfPageRef.current?.getViewport({ scale: 1, rotation: 0 }) ?? viewport;
 
       if (isDeselecting) setIsDeselecting(false);
       if (hyperlinkMode && hyperlinkDrawStart) {
@@ -1427,8 +1533,8 @@ export function usePDFViewerInteractions(
         const coords = getCssCoordsFromEvent(event);
         if (coords) {
           setMeasurementMoveDelta({
-            x: (coords.x - measurementMoveStart.x) / viewport.width,
-            y: (coords.y - measurementMoveStart.y) / viewport.height,
+            x: (coords.x - measurementMoveStart.x) / dp.w,
+            y: (coords.y - measurementMoveStart.y) / dp.h,
           });
         }
         return;
@@ -1441,10 +1547,9 @@ export function usePDFViewerInteractions(
           const x = Math.min(coords.x, cutoutDragStart.x);
           const y = Math.min(coords.y, cutoutDragStart.y);
           setCutoutDragBox({ x, y, width, height });
-          setMousePosition({
-            x: coords.x / viewport.width,
-            y: coords.y / viewport.height,
-          });
+          setMousePosition(
+            cssToBaseNormalized(coords.x, coords.y, dp, baseViewport, effectiveRotation)
+          );
           queueEphemeralPaint();
         }
         return;
@@ -1468,8 +1573,8 @@ export function usePDFViewerInteractions(
         const coords = getCssCoordsFromEvent(event);
         if (coords) {
           setAnnotationMoveDelta({
-            x: (coords.x - annotationMoveStart.x) / viewport.width,
-            y: (coords.y - annotationMoveStart.y) / viewport.height,
+            x: (coords.x - annotationMoveStart.x) / dp.w,
+            y: (coords.y - annotationMoveStart.y) / dp.h,
           });
         }
         return;
@@ -1490,10 +1595,16 @@ export function usePDFViewerInteractions(
         const rect = pdfCanvasRef.current.getBoundingClientRect();
         let cssX = event.clientX - rect.left;
         let cssY = event.clientY - rect.top;
-        const interactiveScale = (viewState.scale || 1) / (lastRenderedScaleRef.current || 1);
-        if (Math.abs(interactiveScale - 1) > 0.0001) {
-          cssX = cssX / interactiveScale;
-          cssY = cssY / interactiveScale;
+        const { interactiveScale: selInteractiveScale } = getCanvasCoordinateSpace(
+          viewState.scale || 1,
+          lastRenderedScaleRef.current || 1,
+          pdfCanvasRef.current,
+          viewState.rotation ?? 0,
+          lastRenderedRotationRef.current ?? 0
+        );
+        if (Math.abs(selInteractiveScale - 1) > 0.0001) {
+          cssX = cssX / selInteractiveScale;
+          cssY = cssY / selInteractiveScale;
         }
         const width = Math.abs(cssX - selectionStart.x);
         const height = Math.abs(cssY - selectionStart.y);
@@ -1503,19 +1614,22 @@ export function usePDFViewerInteractions(
         return;
       }
       if (isCalibrating) {
-        if (!pdfCanvasRef.current || !currentViewport) return;
+        if (!pdfCanvasRef.current) return;
         const rect = pdfCanvasRef.current.getBoundingClientRect();
         let cssX = event.clientX - rect.left;
         let cssY = event.clientY - rect.top;
-        const interactiveScale = (viewState.scale || 1) / (lastRenderedScaleRef.current || 1);
-        if (Math.abs(interactiveScale - 1) > 0.0001) {
-          cssX = cssX / interactiveScale;
-          cssY = cssY / interactiveScale;
+        const { interactiveScale: calInteractiveScale } = getCanvasCoordinateSpace(
+          viewState.scale || 1,
+          lastRenderedScaleRef.current || 1,
+          pdfCanvasRef.current,
+          viewState.rotation ?? 0,
+          lastRenderedRotationRef.current ?? 0
+        );
+        if (Math.abs(calInteractiveScale - 1) > 0.0001) {
+          cssX = cssX / calInteractiveScale;
+          cssY = cssY / calInteractiveScale;
         }
-        let pdfCoords = {
-          x: cssX / viewport.width,
-          y: cssY / viewport.height,
-        };
+        let pdfCoords = cssToBaseNormalized(cssX, cssY, dp, baseViewport, effectiveRotation);
         if (calibrationPoints.length > 0 && isOrthoSnapping) {
           pdfCoords = applyOrthoSnapping(pdfCoords, calibrationPoints);
         }
@@ -1528,10 +1642,7 @@ export function usePDFViewerInteractions(
         const rect = pdfCanvasRef.current.getBoundingClientRect();
         const cssX = event.clientX - rect.left;
         const cssY = event.clientY - rect.top;
-        const pdfCoords = {
-          x: cssX / viewport.width,
-          y: cssY / viewport.height,
-        };
+        const pdfCoords = cssToBaseNormalized(cssX, cssY, dp, baseViewport, effectiveRotation);
         setMousePosition(pdfCoords);
         queueEphemeralPaint();
         return;
@@ -1547,15 +1658,18 @@ export function usePDFViewerInteractions(
       const rect = pdfCanvasRef.current.getBoundingClientRect();
       let cssX = event.clientX - rect.left;
       let cssY = event.clientY - rect.top;
-      const interactiveScale = (viewState.scale || 1) / (lastRenderedScaleRef.current || 1);
-      if (Math.abs(interactiveScale - 1) > 0.0001) {
-        cssX = cssX / interactiveScale;
-        cssY = cssY / interactiveScale;
+      const { interactiveScale: measInteractiveScale } = getCanvasCoordinateSpace(
+        viewState.scale || 1,
+        lastRenderedScaleRef.current || 1,
+        pdfCanvasRef.current,
+        viewState.rotation ?? 0,
+        lastRenderedRotationRef.current ?? 0
+      );
+      if (Math.abs(measInteractiveScale - 1) > 0.0001) {
+        cssX = cssX / measInteractiveScale;
+        cssY = cssY / measInteractiveScale;
       }
-      let pdfCoords = {
-        x: cssX / viewport.width,
-        y: cssY / viewport.height,
-      };
+      let pdfCoords = cssToBaseNormalized(cssX, cssY, dp, baseViewport, effectiveRotation);
       if (isOrthoSnapping) {
         const referencePoints = cutoutMode ? currentCutout : isContinuousDrawing ? activePoints : currentMeasurement;
         pdfCoords = applyOrthoSnapping(pdfCoords, referencePoints);
@@ -1573,14 +1687,19 @@ export function usePDFViewerInteractions(
             currentViewport
           ) {
             const lastPoint = activePoints[activePoints.length - 1];
-            const lastPointPixels = {
-              x: lastPoint.x * currentViewport.width,
-              y: lastPoint.y * currentViewport.height,
-            };
-            const currentPointPixels = {
-              x: pdfCoords.x * currentViewport.width,
-              y: pdfCoords.y * currentViewport.height,
-            };
+            const vpPx = { width: dp.w, height: dp.h };
+            const lastPointPixels = baseNormToViewportPixels(
+              lastPoint.x,
+              lastPoint.y,
+              vpPx,
+              effectiveRotation
+            );
+            const currentPointPixels = baseNormToViewportPixels(
+              pdfCoords.x,
+              pdfCoords.y,
+              vpPx,
+              effectiveRotation
+            );
             currentRubberBand.setAttribute('x1', lastPointPixels.x.toString());
             currentRubberBand.setAttribute('y1', lastPointPixels.y.toString());
             currentRubberBand.setAttribute('x2', currentPointPixels.x.toString());
@@ -1631,6 +1750,7 @@ export function usePDFViewerInteractions(
       setRunningLength,
       applyOrthoSnapping,
       lastRenderedScaleRef,
+      lastRenderedRotationRef,
       svgOverlayRef,
       pageRubberBandRefs,
       currentMeasurement,
@@ -1691,21 +1811,34 @@ export function usePDFViewerInteractions(
       const rect = pdfCanvasRef.current.getBoundingClientRect();
       let cssX = event.clientX - rect.left;
       let cssY = event.clientY - rect.top;
-      const interactiveScale = (viewState.scale || 1) / (lastRenderedScaleRef.current || 1);
+      const {
+        interactiveScale: clickInteractiveScale,
+        useLastRenderedViewport: clickUseLR,
+        effectiveRotation,
+      } = getCanvasCoordinateSpace(
+        viewState.scale || 1,
+        lastRenderedScaleRef.current || 1,
+        pdfCanvasRef.current,
+        viewState.rotation ?? 0,
+        lastRenderedRotationRef.current ?? 0
+      );
 
       // CRITICAL: When interactive zoom is active, override viewport to one at lastRenderedScale.
       // The interactiveScale compensation above converts screen coords to old-viewport pixel space,
       // so we MUST normalize by old viewport dimensions to get correct 0-1 coordinates.
-      if (Math.abs(interactiveScale - 1) > 0.0001 && pdfPageRef.current) {
+      // When rotation is pending (bitmap not yet re-rendered), effectiveRotation matches the canvas.
+      if (clickUseLR && pdfPageRef.current) {
         viewport = pdfPageRef.current.getViewport({
           scale: lastRenderedScaleRef.current,
-          rotation: viewState.rotation,
+          rotation: effectiveRotation,
         });
       }
-      if (Math.abs(interactiveScale - 1) > 0.0001) {
-        cssX = cssX / interactiveScale;
-        cssY = cssY / interactiveScale;
+      if (Math.abs(clickInteractiveScale - 1) > 0.0001) {
+        cssX = cssX / clickInteractiveScale;
+        cssY = cssY / clickInteractiveScale;
       }
+      const dp = canvasPixelExtent(pdfCanvasRef.current, viewport);
+      const baseViewport = pdfPageRef.current?.getViewport({ scale: 1, rotation: 0 }) ?? viewport;
       const currentSelectedConditionId = useConditionStore.getState().selectedConditionId;
       let effectiveMeasurementType = measurementType;
       let enteredDrawFromCanvasMatch = false;
@@ -1734,26 +1867,7 @@ export function usePDFViewerInteractions(
       }
       if (isCalibrating) {
         setCalibrationPoints((prev) => {
-          const baseViewport = pdfPageRef.current?.getViewport({ scale: 1, rotation: 0 }) || viewport;
-          const rotation = viewState.rotation || 0;
-          let baseX: number, baseY: number;
-          if (rotation === 0) {
-            baseX = (cssX / viewport.width) * baseViewport.width;
-            baseY = (cssY / viewport.height) * baseViewport.height;
-          } else if (rotation === 90) {
-            baseX = (cssY / viewport.height) * baseViewport.width;
-            baseY = (1 - cssX / viewport.width) * baseViewport.height;
-          } else if (rotation === 180) {
-            baseX = (1 - cssX / viewport.width) * baseViewport.width;
-            baseY = (1 - cssY / viewport.height) * baseViewport.height;
-          } else if (rotation === 270) {
-            baseX = (1 - cssY / viewport.height) * baseViewport.width;
-            baseY = (cssX / viewport.width) * baseViewport.height;
-          } else {
-            baseX = (cssX / viewport.width) * baseViewport.width;
-            baseY = (cssY / viewport.height) * baseViewport.height;
-          }
-          let pdfCoords = { x: baseX / baseViewport.width, y: baseY / baseViewport.height };
+          let pdfCoords = cssToBaseNormalized(cssX, cssY, dp, baseViewport, effectiveRotation);
           if (prev.length > 0 && isOrthoSnapping) {
             pdfCoords = mousePositionRef.current
               ? mousePositionRef.current
@@ -1770,26 +1884,7 @@ export function usePDFViewerInteractions(
           cutoutDragJustCompletedRef.current = false;
           return;
         }
-        const baseViewport = pdfPageRef.current?.getViewport({ scale: 1, rotation: 0 }) || viewport;
-        const rotation = viewState.rotation || 0;
-        let baseX: number, baseY: number;
-        if (rotation === 0) {
-          baseX = (cssX / viewport.width) * baseViewport.width;
-          baseY = (cssY / viewport.height) * baseViewport.height;
-        } else if (rotation === 90) {
-          baseX = (cssY / viewport.height) * baseViewport.width;
-          baseY = (1 - cssX / viewport.width) * baseViewport.height;
-        } else if (rotation === 180) {
-          baseX = (1 - cssX / viewport.width) * baseViewport.width;
-          baseY = (1 - cssY / viewport.height) * baseViewport.height;
-        } else if (rotation === 270) {
-          baseX = (1 - cssY / viewport.height) * baseViewport.width;
-          baseY = (cssX / viewport.width) * baseViewport.height;
-        } else {
-          baseX = (cssX / viewport.width) * baseViewport.width;
-          baseY = (cssY / viewport.height) * baseViewport.height;
-        }
-        let pdfCoords = { x: baseX / baseViewport.width, y: baseY / baseViewport.height };
+        let pdfCoords = cssToBaseNormalized(cssX, cssY, dp, baseViewport, effectiveRotation);
         // Apply ortho snapping to cutout points (use snapped mouse position when available)
         if (isOrthoSnapping && mousePositionRef.current) {
           pdfCoords = mousePositionRef.current;
@@ -1804,26 +1899,7 @@ export function usePDFViewerInteractions(
           annotationDragJustCompletedRef.current = false;
           return;
         }
-        const baseViewport = pdfPageRef.current?.getViewport({ scale: 1, rotation: 0 }) || viewport;
-        const rotation = viewState.rotation || 0;
-        let baseX: number, baseY: number;
-        if (rotation === 0) {
-          baseX = (cssX / viewport.width) * baseViewport.width;
-          baseY = (cssY / viewport.height) * baseViewport.height;
-        } else if (rotation === 90) {
-          baseX = (cssY / viewport.height) * baseViewport.width;
-          baseY = (1 - cssX / viewport.width) * baseViewport.height;
-        } else if (rotation === 180) {
-          baseX = (1 - cssX / viewport.width) * baseViewport.width;
-          baseY = (1 - cssY / viewport.height) * baseViewport.height;
-        } else if (rotation === 270) {
-          baseX = (1 - cssY / viewport.height) * baseViewport.width;
-          baseY = (cssX / viewport.width) * baseViewport.height;
-        } else {
-          baseX = (cssX / viewport.width) * baseViewport.width;
-          baseY = (cssY / viewport.height) * baseViewport.height;
-        }
-        const pdfCoords = { x: baseX / baseViewport.width, y: baseY / baseViewport.height };
+        const pdfCoords = cssToBaseNormalized(cssX, cssY, dp, baseViewport, effectiveRotation);
         if (annotationTool === 'text') {
           setTextInputPosition({ x: cssX, y: cssY });
           setShowTextInput(true);
@@ -1866,26 +1942,7 @@ export function usePDFViewerInteractions(
         clearCanvasConditionSelection();
         return;
       }
-      const baseViewport = pdfPageRef.current?.getViewport({ scale: 1, rotation: 0 }) || viewport;
-      const rotation = viewState.rotation || 0;
-      let baseX: number, baseY: number;
-      if (rotation === 0) {
-        baseX = (cssX / viewport.width) * baseViewport.width;
-        baseY = (cssY / viewport.height) * baseViewport.height;
-      } else if (rotation === 90) {
-        baseX = (cssY / viewport.height) * baseViewport.width;
-        baseY = (1 - cssX / viewport.width) * baseViewport.height;
-      } else if (rotation === 180) {
-        baseX = (1 - cssX / viewport.width) * baseViewport.width;
-        baseY = (1 - cssY / viewport.height) * baseViewport.height;
-      } else if (rotation === 270) {
-        baseX = (1 - cssY / viewport.height) * baseViewport.width;
-        baseY = (cssX / viewport.width) * baseViewport.height;
-      } else {
-        baseX = (cssX / viewport.width) * baseViewport.width;
-        baseY = (cssY / viewport.height) * baseViewport.height;
-      }
-      let pdfCoords = { x: baseX / baseViewport.width, y: baseY / baseViewport.height };
+      let pdfCoords = cssToBaseNormalized(cssX, cssY, dp, baseViewport, effectiveRotation);
       if (isOrthoSnapping && (isMeasuring || enteredDrawFromCanvasMatch) && mousePositionRef.current) {
         pdfCoords = mousePositionRef.current;
       } else if (isOrthoSnapping) {
@@ -1962,6 +2019,7 @@ export function usePDFViewerInteractions(
       setSelectedMarkupIds,
       applyOrthoSnapping,
       lastRenderedScaleRef,
+      lastRenderedRotationRef,
       annotationDragJustCompletedRef,
     ]
   );

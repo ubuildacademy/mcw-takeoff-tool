@@ -1,10 +1,12 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Button } from './button';
 import { Upload, X, FileText, Image, File } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface FileUploadProps {
-  onFileSelect: (file: File) => void;
+  onFileSelect?: (file: File) => void;
+  /** When set, called with the full list whenever selection changes (add/remove). Prefer this over onFileSelect for multi-file flows. */
+  onFilesListChange?: (files: File[]) => void;
   acceptedTypes?: string[];
   maxSize?: number; // in MB
   className?: string;
@@ -13,6 +15,7 @@ interface FileUploadProps {
 
 export function FileUpload({
   onFileSelect,
+  onFilesListChange,
   acceptedTypes = ['.pdf', '.dwg', '.jpg', '.jpeg', '.png'],
   maxSize = 1024,
   className,
@@ -22,6 +25,11 @@ export function FileUpload({
   const inputId = React.useId();
   const [dragActive, setDragActive] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+
+  useEffect(() => {
+    if (!onFilesListChange) return;
+    onFilesListChange(selectedFiles);
+  }, [selectedFiles, onFilesListChange]);
 
   const handleFileSelect = (files: FileList | null) => {
     if (!files) return;
@@ -43,10 +51,14 @@ export function FileUpload({
     if (validFiles.length > 0) {
       if (multiple) {
         setSelectedFiles(prev => [...prev, ...validFiles]);
-        validFiles.forEach(file => onFileSelect(file));
+        if (!onFilesListChange) {
+          validFiles.forEach(file => onFileSelect?.(file));
+        }
       } else {
         setSelectedFiles(validFiles);
-        onFileSelect(validFiles[0]);
+        if (!onFilesListChange) {
+          onFileSelect?.(validFiles[0]);
+        }
       }
     }
   };

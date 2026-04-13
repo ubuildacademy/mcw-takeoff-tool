@@ -16,6 +16,8 @@ export interface PDFViewerInteractionsRefs {
   completeMeasurementRef: RefObject<(points: { x: number; y: number }[]) => Promise<void>>;
   isSelectionModeRef: RefObject<boolean>;
   lastRenderedScaleRef: RefObject<number>;
+  /** Rotation last painted on the canvas; used with lastRenderedScaleRef when viewState.rotation updates before render completes. */
+  lastRenderedRotationRef: RefObject<number>;
 }
 
 export interface PDFViewerInteractionsView {

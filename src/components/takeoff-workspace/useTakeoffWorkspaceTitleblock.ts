@@ -128,38 +128,15 @@ export function useTakeoffWorkspaceTitleblock({
         progress: 0,
       });
 
-      let progressInterval: ReturnType<typeof setInterval> | null = null;
       try {
         if (!projectId) {
           throw new Error('Project ID is missing');
         }
 
-        console.log('[Titleblock] Calling backend extraction API...');
+        console.log('[Titleblock] Calling backend extraction API (queued job)...');
 
         abortControllerRef.current = new AbortController();
         const signal = abortControllerRef.current.signal;
-
-        const startTime = Date.now();
-        const estimatedDuration = totalPages * 2000;
-
-        progressInterval = setInterval(() => {
-          const elapsed = Date.now() - startTime;
-          const estimatedProgress = Math.min(90, Math.round((elapsed / estimatedDuration) * 90));
-          const processedPages = Math.max(1, Math.round((estimatedProgress / 100) * totalPages));
-
-          if (isDev) {
-            console.log('[Titleblock] Progress update:', { elapsed, estimatedProgress, processedPages, totalPages });
-          }
-
-          setTitleblockExtractionStatus((prev) => {
-            if (!prev) return null;
-            return {
-              ...prev,
-              progress: estimatedProgress,
-              processedPages,
-            };
-          });
-        }, 500);
 
         const result = await titleblockService.extractTitleblock(
           projectId,
@@ -169,24 +146,41 @@ export function useTakeoffWorkspaceTitleblock({
             sheetNameField: finalConfig.sheetNameField,
             templatePageNumber: finalConfig.templatePageNumber,
           },
-          signal
+          signal,
+          (p) => {
+            setTitleblockExtractionStatus((prev) => {
+              if (!prev) return null;
+              return {
+                ...prev,
+                progress: Math.min(99, p.progress),
+                processedPages: p.processedPages ?? prev.processedPages,
+                totalPages: p.totalPages ?? prev.totalPages,
+              };
+            });
+          }
         );
-
-        if (progressInterval) {
-          clearInterval(progressInterval);
-        }
 
         console.log('[Titleblock] Backend extraction response:', result);
 
-        if (result.success && result.results) {
-          const totalProcessed = result.results.reduce(
-            (sum: number, r: { sheets?: unknown[] }) => sum + (r.sheets?.length || 0),
+        type ExtractionRow = {
+          documentId: string;
+          sheets?: Array<{ pageNumber: number; sheetNumber: string; sheetName: string }>;
+          diagnostics?: { validCount?: number };
+        };
+        const extractionResult = result as {
+          success: boolean;
+          results?: ExtractionRow[];
+          error?: string;
+        };
+
+        if (extractionResult.success && extractionResult.results) {
+          const totalProcessed = extractionResult.results.reduce(
+            (sum, r) => sum + (r.sheets?.length || 0),
             0
           );
 
-          const totalValid = result.results.reduce(
-            (sum: number, r: { diagnostics?: { validCount?: number } }) =>
-              sum + (r.diagnostics?.validCount ?? 0),
+          const totalValid = extractionResult.results.reduce(
+            (sum, r) => sum + (r.diagnostics?.validCount ?? 0),
             0
           );
           if (totalValid === 0) {
@@ -199,7 +193,7 @@ export function useTakeoffWorkspaceTitleblock({
             console.log('[Titleblock] Extraction completed:', {
               totalProcessed,
               totalPages,
-              results: result.results.map((r: { documentId: string; sheets?: unknown[]; diagnostics?: unknown }) => ({
+              results: extractionResult.results.map((r) => ({
                 documentId: r.documentId,
                 sheetsCount: r.sheets?.length || 0,
                 diagnostics: r.diagnostics,
@@ -216,7 +210,7 @@ export function useTakeoffWorkspaceTitleblock({
 
           // Optimistically merge extraction results into documents so sidebar updates immediately
           const sheetsByDocId = new Map<string, Array<{ pageNumber: number; sheetNumber: string; sheetName: string }>>();
-          for (const r of result.results as Array<{ documentId: string; sheets?: Array<{ pageNumber: number; sheetNumber: string; sheetName: string }> }>) {
+          for (const r of extractionResult.results) {
             if (r.sheets?.length) {
               sheetsByDocId.set(r.documentId, r.sheets);
             }
@@ -245,10 +239,9 @@ export function useTakeoffWorkspaceTitleblock({
             setTitleblockExtractionStatus(null);
           }, 3000);
         } else {
-          throw new Error(result.error || 'Extraction returned unsuccessful result');
+          throw new Error(extractionResult.error || 'Extraction returned unsuccessful result');
         }
       } catch (error) {
-        if (progressInterval) clearInterval(progressInterval);
         const isAborted =
           (error instanceof Error && (error.name === 'AbortError' || error.name === 'CanceledError'));
         if (isAborted) {
@@ -257,7 +250,16 @@ export function useTakeoffWorkspaceTitleblock({
           return;
         }
         console.error('[Titleblock] Extraction failed with error:', error);
-        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errObj = error as Error & { code?: string; isOffline?: boolean };
+        let errorMessage = error instanceof Error ? error.message : String(error);
+        if (
+          errObj.code === 'ERR_NETWORK' ||
+          errObj.isOffline ||
+          errorMessage === 'Network Error'
+        ) {
+          errorMessage =
+            'Could not reach the API (network/CORS). Confirm the backend and Redis are running; titleblock extraction runs as a background job.';
+        }
         console.error('[Titleblock] Error details:', { message: errorMessage });
 
         setTitleblockExtractionStatus({
