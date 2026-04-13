@@ -52,7 +52,11 @@ import {
   intersectCutoutWithParent,
   pdfPointsToMultiPolygon,
 } from '../utils/cutoutGeometry';
-import { canvasPixelExtent } from '../utils/measurementGeometry';
+import {
+  baseNormDeltaToViewportPixels,
+  baseNormToViewportPixels,
+  canvasPixelExtent,
+} from '../utils/measurementGeometry';
 import { toast } from 'sonner';
 import { takeoffMeasurementToPdfViewerMeasurement } from '../utils/takeoffMeasurementDisplay';
 import {
@@ -987,18 +991,18 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const svg = svgOverlayRef.current;
       const vp = currentViewport;
       if (!svg || !vp) return;
+      const { w: pw, h: ph } = canvasPixelExtent(pdfCanvasRef.current, vp);
+      const rotation = vp.rotation ?? 0;
       const md = measurementMoveDeltaRef.current;
       const ad = annotationMoveDeltaRef.current;
-      const mtx = md ? md.x * vp.width : 0;
-      const mty = md ? md.y * vp.height : 0;
-      const mt = `translate(${mtx}, ${mty})`;
+      const mdt = md ? baseNormDeltaToViewportPixels(md.x, md.y, { width: pw, height: ph }, rotation) : { x: 0, y: 0 };
+      const mt = `translate(${mdt.x}, ${mdt.y})`;
       svg.querySelectorAll(`.${SVG_MOVE_DRAG_MEASUREMENT_WRAP_CLASS}`).forEach((w) => w.setAttribute('transform', mt));
-      const atx = ad ? ad.x * vp.width : 0;
-      const aty = ad ? ad.y * vp.height : 0;
-      const at = `translate(${atx}, ${aty})`;
+      const adt = ad ? baseNormDeltaToViewportPixels(ad.x, ad.y, { width: pw, height: ph }, rotation) : { x: 0, y: 0 };
+      const at = `translate(${adt.x}, ${adt.y})`;
       svg.querySelectorAll(`.${SVG_MOVE_DRAG_ANNOTATION_WRAP_CLASS}`).forEach((w) => w.setAttribute('transform', at));
     });
-  }, [currentViewport]);
+  }, [currentViewport, pdfCanvasRef]);
 
   scheduleMoveDragTransformRef.current = scheduleMoveDragTransform;
 
@@ -1358,10 +1362,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (calibrationValidation && calibrationValidation.page === pageNum && calibrationValidation.points.length === 2) {
       const p1 = calibrationValidation.points[0];
       const p2 = calibrationValidation.points[1];
-      const x1 = p1.x * pixelW;
-      const y1 = p1.y * pixelH;
-      const x2 = p2.x * pixelW;
-      const y2 = p2.y * pixelH;
+      const vpPx = { width: pixelW, height: pixelH };
+      const rot = viewState.rotation || 0;
+      const c1 = baseNormToViewportPixels(p1.x, p1.y, vpPx, rot);
+      const c2 = baseNormToViewportPixels(p2.x, p2.y, vpPx, rot);
+      const x1 = c1.x;
+      const y1 = c1.y;
+      const x2 = c2.x;
+      const y2 = c2.y;
       const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
       line.setAttribute('x1', x1.toString());
       line.setAttribute('y1', y1.toString());
@@ -1390,8 +1398,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Draw measurement debug overlay if present
     if (measurementDebug && measurementDebug.page === pageNum) {
       const { mid, dxNorm, dyNorm, baseW, baseH, pixelDistanceValidator, pixelDistanceMeasure, scaleFactorUsed, distanceValidatorFt, distanceMeasureFt } = measurementDebug;
-      const midX = mid.x * pixelW;
-      const midY = mid.y * pixelH;
+      const midPx = baseNormToViewportPixels(mid.x, mid.y, { width: pixelW, height: pixelH }, viewState.rotation || 0);
+      const midX = midPx.x;
+      const midY = midPx.y;
       const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
       bg.setAttribute('x', (midX - 140).toString());
       bg.setAttribute('y', (midY - 60).toString());
@@ -1494,15 +1503,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Apply move-drag transforms here (refs = latest deltas) so full rebuilds still get correct translate
     // when renderTakeoffAnnotations' useCallback is not recreated on every mousemove.
     {
+      const rot = viewport.rotation ?? 0;
       const md = measurementMoveDeltaRef.current;
       const ad = annotationMoveDeltaRef.current;
-      const mtx = md ? md.x * pixelW : 0;
-      const mty = md ? md.y * pixelH : 0;
-      const mt = `translate(${mtx}, ${mty})`;
+      const mdt = md ? baseNormDeltaToViewportPixels(md.x, md.y, { width: pixelW, height: pixelH }, rot) : { x: 0, y: 0 };
+      const mt = `translate(${mdt.x}, ${mdt.y})`;
       committed.querySelectorAll(`.${SVG_MOVE_DRAG_MEASUREMENT_WRAP_CLASS}`).forEach((w) => w.setAttribute('transform', mt));
-      const atx = ad ? ad.x * pixelW : 0;
-      const aty = ad ? ad.y * pixelH : 0;
-      const at = `translate(${atx}, ${aty})`;
+      const adt = ad ? baseNormDeltaToViewportPixels(ad.x, ad.y, { width: pixelW, height: pixelH }, rot) : { x: 0, y: 0 };
+      const at = `translate(${adt.x}, ${adt.y})`;
       committed.querySelectorAll(`.${SVG_MOVE_DRAG_ANNOTATION_WRAP_CLASS}`).forEach((w) => w.setAttribute('transform', at));
     }
 

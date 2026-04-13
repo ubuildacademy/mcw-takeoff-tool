@@ -12,6 +12,7 @@ import { useUndoStore } from '../../store';
 import {
   shiftTakeoffMeasurementGeometry,
   cssDragRectToBasePdfQuad,
+  cssDragRectToBasePdfAabb,
   cssToBaseNormalized,
   baseNormToViewportPixels,
   MIN_DRAG_RECT_PX,
@@ -69,7 +70,7 @@ function transformSelectionRectToNative(
   rotation: number
 ): { x: number; y: number; width: number; height: number } {
   const { x: nx, y: ny, width: nw, height: nh } = rect;
-  const r = rotation % 360;
+  const r = normalizeRotationDeg(rotation);
   if (r === 0) return rect;
 
   // Transform 4 corners to native, then take AABB
@@ -523,10 +524,18 @@ export function usePDFViewerInteractions(
                 scale: lastRenderedScaleRef.current || 1,
                 rotation: lastRenderedRotationRef.current ?? 0,
               });
-              setMousePosition({
-                x: mx / normVP.width,
-                y: my / normVP.height,
-              });
+              const wheelDp = canvasPixelExtent(pdfCanvasRef.current, normVP);
+              const wheelBaseVp =
+                pdfPageRef.current.getViewport({ scale: 1, rotation: 0 });
+              setMousePosition(
+                cssToBaseNormalized(
+                  mx,
+                  my,
+                  wheelDp,
+                  wheelBaseVp,
+                  lastRenderedRotationRef.current ?? 0
+                )
+              );
               queueEphemeralPaint();
             }
           });
@@ -1077,12 +1086,30 @@ export function usePDFViewerInteractions(
       if (!pdfCanvasRef.current) return;
 
       if (hyperlinkMode && hyperlinkDrawStart && event.button === 0) {
+        const { useLastRenderedViewport: hUseLR, effectiveRotation: hEffRot } = getCanvasCoordinateSpace(
+          viewState.scale || 1,
+          lastRenderedScaleRef.current || 1,
+          pdfCanvasRef.current,
+          viewState.rotation ?? 0,
+          lastRenderedRotationRef.current ?? 0
+        );
         let viewport = currentViewport;
         if (!viewport && pdfPageRef.current) {
-          viewport = pdfPageRef.current.getViewport({ scale: viewState.scale, rotation: viewState.rotation });
+          viewport = pdfPageRef.current.getViewport({
+            scale: lastRenderedScaleRef.current || viewState.scale,
+            rotation: hEffRot,
+          });
+        }
+        if (hUseLR && pdfPageRef.current) {
+          viewport = pdfPageRef.current.getViewport({
+            scale: lastRenderedScaleRef.current,
+            rotation: hEffRot,
+          });
         }
         if (viewport) {
           const dp = canvasPixelExtent(pdfCanvasRef.current, viewport);
+          const baseViewport =
+            pdfPageRef.current?.getViewport({ scale: 1, rotation: 0 }) ?? viewport;
           const coords = getCssCoordsFromEvent(event);
           if (coords) {
             const width = Math.abs(coords.x - hyperlinkDrawStart.x);
@@ -1090,12 +1117,7 @@ export function usePDFViewerInteractions(
             const x = Math.min(coords.x, hyperlinkDrawStart.x);
             const y = Math.min(coords.y, hyperlinkDrawStart.y);
             if (width >= 3 && height >= 3 && onHyperlinkRegionDrawn) {
-              const normRect = {
-                x: x / dp.w,
-                y: y / dp.h,
-                width: width / dp.w,
-                height: height / dp.h,
-              };
+              const normRect = cssDragRectToBasePdfAabb(dp, baseViewport, hEffRot, x, y, width, height);
               onHyperlinkRegionDrawn(normRect, file.id, currentPage);
             }
           }
@@ -1108,17 +1130,42 @@ export function usePDFViewerInteractions(
       }
 
       if (measurementMoveId && measurementMoveStart && measurementMoveOriginalPoints) {
+        const { useLastRenderedViewport: moveUseLR, effectiveRotation: moveEffRot } =
+          getCanvasCoordinateSpace(
+            viewState.scale || 1,
+            lastRenderedScaleRef.current || 1,
+            pdfCanvasRef.current,
+            viewState.rotation ?? 0,
+            lastRenderedRotationRef.current ?? 0
+          );
         let viewport = currentViewport;
         if (!viewport && pdfPageRef.current) {
-          viewport = pdfPageRef.current.getViewport({ scale: viewState.scale, rotation: viewState.rotation });
+          viewport = pdfPageRef.current.getViewport({
+            scale: lastRenderedScaleRef.current || viewState.scale,
+            rotation: moveEffRot,
+          });
+        }
+        if (moveUseLR && pdfPageRef.current) {
+          viewport = pdfPageRef.current.getViewport({
+            scale: lastRenderedScaleRef.current,
+            rotation: moveEffRot,
+          });
         }
         if (viewport) {
           const dp = canvasPixelExtent(pdfCanvasRef.current, viewport);
+          const baseViewport =
+            pdfPageRef.current?.getViewport({ scale: 1, rotation: 0 }) ?? viewport;
           const coords = getCssCoordsFromEvent(event);
           if (coords) {
-            const deltaCssX = coords.x - measurementMoveStart.x;
-            const deltaCssY = coords.y - measurementMoveStart.y;
-            const deltaPdf = { x: deltaCssX / dp.w, y: deltaCssY / dp.h };
+            const startBase = cssToBaseNormalized(
+              measurementMoveStart.x,
+              measurementMoveStart.y,
+              dp,
+              baseViewport,
+              moveEffRot
+            );
+            const endBase = cssToBaseNormalized(coords.x, coords.y, dp, baseViewport, moveEffRot);
+            const deltaPdf = { x: endBase.x - startBase.x, y: endBase.y - startBase.y };
             const idsToMove = measurementMoveIds.length > 0 ? measurementMoveIds : [measurementMoveId];
             for (const id of idsToMove) {
               const m = localTakeoffMeasurements.find((meas) => meas.id === id);
@@ -1257,12 +1304,31 @@ export function usePDFViewerInteractions(
       }
 
       if (annotationMoveId && annotationMoveStart && annotationMoveOriginalPoints) {
+        const { useLastRenderedViewport: annMoveUseLR, effectiveRotation: annMoveEffRot } =
+          getCanvasCoordinateSpace(
+            viewState.scale || 1,
+            lastRenderedScaleRef.current || 1,
+            pdfCanvasRef.current,
+            viewState.rotation ?? 0,
+            lastRenderedRotationRef.current ?? 0
+          );
         let viewport = currentViewport;
         if (!viewport && pdfPageRef.current) {
-          viewport = pdfPageRef.current.getViewport({ scale: viewState.scale, rotation: viewState.rotation });
+          viewport = pdfPageRef.current.getViewport({
+            scale: lastRenderedScaleRef.current || viewState.scale,
+            rotation: annMoveEffRot,
+          });
+        }
+        if (annMoveUseLR && pdfPageRef.current) {
+          viewport = pdfPageRef.current.getViewport({
+            scale: lastRenderedScaleRef.current,
+            rotation: annMoveEffRot,
+          });
         }
         if (viewport) {
           const dp = canvasPixelExtent(pdfCanvasRef.current, viewport);
+          const baseViewport =
+            pdfPageRef.current?.getViewport({ scale: 1, rotation: 0 }) ?? viewport;
           const coords = getCssCoordsFromEvent(event);
           if (!coords) {
             setAnnotationMoveId(null);
@@ -1272,9 +1338,15 @@ export function usePDFViewerInteractions(
             setAnnotationMoveDelta(null);
             return;
           }
-          const deltaCssX = coords.x - annotationMoveStart.x;
-          const deltaCssY = coords.y - annotationMoveStart.y;
-          const deltaPdf = { x: deltaCssX / dp.w, y: deltaCssY / dp.h };
+          const startBase = cssToBaseNormalized(
+            annotationMoveStart.x,
+            annotationMoveStart.y,
+            dp,
+            baseViewport,
+            annMoveEffRot
+          );
+          const endBase = cssToBaseNormalized(coords.x, coords.y, dp, baseViewport, annMoveEffRot);
+          const deltaPdf = { x: endBase.x - startBase.x, y: endBase.y - startBase.y };
           const idsToMove = annotationMoveIds.length > 0 ? annotationMoveIds : [annotationMoveId];
           for (const id of idsToMove) {
             const a = localAnnotations.find((ann) => ann.id === id);
@@ -1315,12 +1387,31 @@ export function usePDFViewerInteractions(
       }
 
       if (annotationDragStart && ['arrow', 'rectangle', 'circle'].includes(annotationTool ?? '')) {
+        const { useLastRenderedViewport: annDragUseLR, effectiveRotation: annDragEffRot } =
+          getCanvasCoordinateSpace(
+            viewState.scale || 1,
+            lastRenderedScaleRef.current || 1,
+            pdfCanvasRef.current,
+            viewState.rotation ?? 0,
+            lastRenderedRotationRef.current ?? 0
+          );
         let viewport = currentViewport;
         if (!viewport && pdfPageRef.current) {
-          viewport = pdfPageRef.current.getViewport({ scale: viewState.scale, rotation: viewState.rotation });
+          viewport = pdfPageRef.current.getViewport({
+            scale: lastRenderedScaleRef.current || viewState.scale,
+            rotation: annDragEffRot,
+          });
+        }
+        if (annDragUseLR && pdfPageRef.current) {
+          viewport = pdfPageRef.current.getViewport({
+            scale: lastRenderedScaleRef.current,
+            rotation: annDragEffRot,
+          });
         }
         if (viewport) {
           const dp = canvasPixelExtent(pdfCanvasRef.current, viewport);
+          const baseViewport =
+            pdfPageRef.current?.getViewport({ scale: 1, rotation: 0 }) ?? viewport;
           const coords = getCssCoordsFromEvent(event);
           if (!coords) {
             setAnnotationDragStart(null);
@@ -1334,12 +1425,18 @@ export function usePDFViewerInteractions(
           if (width >= 5 || height >= 5) {
             const p1 =
               annotationTool === 'arrow'
-                ? { x: annotationDragStart.x / dp.w, y: annotationDragStart.y / dp.h }
-                : { x: x / dp.w, y: y / dp.h };
+                ? cssToBaseNormalized(
+                    annotationDragStart.x,
+                    annotationDragStart.y,
+                    dp,
+                    baseViewport,
+                    annDragEffRot
+                  )
+                : cssToBaseNormalized(x, y, dp, baseViewport, annDragEffRot);
             const p2 =
               annotationTool === 'arrow'
-                ? { x: coords.x / dp.w, y: coords.y / dp.h }
-                : { x: (x + width) / dp.w, y: (y + height) / dp.h };
+                ? cssToBaseNormalized(coords.x, coords.y, dp, baseViewport, annDragEffRot)
+                : cssToBaseNormalized(x + width, y + height, dp, baseViewport, annDragEffRot);
             if (currentProjectId && file.id) {
               const created = addAnnotation({
                 projectId: currentProjectId,
@@ -1367,11 +1464,25 @@ export function usePDFViewerInteractions(
       if (!(visualSearchMode || !!titleblockSelectionMode) || !isSelectingSymbol || !selectionStart) {
         return;
       }
+      const { useLastRenderedViewport: selUseLR, effectiveRotation: selEffRot } =
+        getCanvasCoordinateSpace(
+          viewState.scale || 1,
+          lastRenderedScaleRef.current || 1,
+          pdfCanvasRef.current,
+          viewState.rotation ?? 0,
+          lastRenderedRotationRef.current ?? 0
+        );
       let viewport = currentViewport;
       if (!viewport && pdfPageRef.current) {
         viewport = pdfPageRef.current.getViewport({
-          scale: viewState.scale,
-          rotation: viewState.rotation,
+          scale: lastRenderedScaleRef.current || viewState.scale,
+          rotation: selEffRot,
+        });
+      }
+      if (selUseLR && pdfPageRef.current) {
+        viewport = pdfPageRef.current.getViewport({
+          scale: lastRenderedScaleRef.current,
+          rotation: selEffRot,
         });
       }
       if (!viewport) {
@@ -1400,9 +1511,8 @@ export function usePDFViewerInteractions(
         height: height / dp.h,
       };
       // Transform from rotated viewport space to native page space for server extraction
-      const rotation = viewState.rotation || 0;
-      if (rotation !== 0) {
-        pdfSelectionBox = transformSelectionRectToNative(pdfSelectionBox, rotation);
+      if (normalizeRotationDeg(selEffRot) !== 0) {
+        pdfSelectionBox = transformSelectionRectToNative(pdfSelectionBox, selEffRot);
       }
       setSelectionStart(null);
       setIsSelectingSymbol(false);
@@ -1532,9 +1642,17 @@ export function usePDFViewerInteractions(
       if (measurementMoveId && measurementMoveStart && viewport) {
         const coords = getCssCoordsFromEvent(event);
         if (coords) {
+          const startBase = cssToBaseNormalized(
+            measurementMoveStart.x,
+            measurementMoveStart.y,
+            dp,
+            baseViewport,
+            effectiveRotation
+          );
+          const curBase = cssToBaseNormalized(coords.x, coords.y, dp, baseViewport, effectiveRotation);
           setMeasurementMoveDelta({
-            x: (coords.x - measurementMoveStart.x) / dp.w,
-            y: (coords.y - measurementMoveStart.y) / dp.h,
+            x: curBase.x - startBase.x,
+            y: curBase.y - startBase.y,
           });
         }
         return;
@@ -1572,9 +1690,17 @@ export function usePDFViewerInteractions(
       if (annotationMoveId && annotationMoveStart && viewport) {
         const coords = getCssCoordsFromEvent(event);
         if (coords) {
+          const startBase = cssToBaseNormalized(
+            annotationMoveStart.x,
+            annotationMoveStart.y,
+            dp,
+            baseViewport,
+            effectiveRotation
+          );
+          const curBase = cssToBaseNormalized(coords.x, coords.y, dp, baseViewport, effectiveRotation);
           setAnnotationMoveDelta({
-            x: (coords.x - annotationMoveStart.x) / dp.w,
-            y: (coords.y - annotationMoveStart.y) / dp.h,
+            x: curBase.x - startBase.x,
+            y: curBase.y - startBase.y,
           });
         }
         return;

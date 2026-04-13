@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import {
   cssToBaseNormalized,
   baseNormToViewportPixels,
+  baseNormDeltaToViewportPixels,
   normalizeRotationDeg,
+  cssDragRectToBasePdfAabb,
 } from './measurementGeometry';
 
 const basePage = { width: 800, height: 600 };
@@ -48,6 +50,41 @@ describe('measurementGeometry PDF coordinates', () => {
       const pxTop = baseNormToViewportPixels(top.x, top.y, { width: dp.w, height: dp.h }, rotation);
       const pxBottom = baseNormToViewportPixels(bottom.x, bottom.y, { width: dp.w, height: dp.h }, rotation);
       expect(pxBottom.y).toBeGreaterThan(pxTop.y);
+    });
+  });
+
+  describe('baseNormDeltaToViewportPixels (move-drag preview)', () => {
+    const vp = { width: 400, height: 300 };
+
+    it('at 0° matches scale by width/height', () => {
+      expect(baseNormDeltaToViewportPixels(0.1, 0.05, vp, 0)).toEqual({ x: 40, y: 15 });
+    });
+
+    it('at 90° is not (dNx*width, dNy*height); matches T(d)-T(0)', () => {
+      expect(baseNormDeltaToViewportPixels(0.1, 0, vp, 90)).toEqual({ x: 0, y: 30 });
+      expect(baseNormDeltaToViewportPixels(0, 0.1, vp, 90)).toEqual({ x: -40, y: 0 });
+    });
+  });
+
+  describe('cssDragRectToBasePdfAabb', () => {
+    const dp = { w: 400, h: 300 };
+
+    it('at 0° matches axis-aligned CSS rect in base 0–1 space (same as css/dp for x,y,w,h)', () => {
+      const a = cssDragRectToBasePdfAabb(dp, basePage, 0, 40, 60, 100, 80);
+      expect(a.x).toBeCloseTo(40 / 400);
+      expect(a.y).toBeCloseTo(60 / 300);
+      expect(a.width).toBeCloseTo(100 / 400);
+      expect(a.height).toBeCloseTo(80 / 300);
+    });
+
+    it('at 90° is not simple division by dp.w/dp.h', () => {
+      const a = cssDragRectToBasePdfAabb(dp, basePage, 90, 0, 0, 100, 80);
+      const tl = cssToBaseNormalized(0, 0, dp, basePage, 90);
+      const br = cssToBaseNormalized(100, 80, dp, basePage, 90);
+      expect(a.x).toBeCloseTo(Math.min(tl.x, br.x));
+      expect(a.y).toBeCloseTo(Math.min(tl.y, br.y));
+      expect(a.width).toBeCloseTo(Math.abs(br.x - tl.x));
+      expect(a.height).toBeCloseTo(Math.abs(br.y - tl.y));
     });
   });
 });

@@ -138,7 +138,8 @@ export function usePDFViewerCalibration({
         console.error('PDF page is not available for calibration');
         return;
       }
-      const baseViewport = pdfPage.getViewport({ scale: 1, rotation: viewStateRotation });
+      // Points are base-normalized (unrotated PDF 0–1); distances must use rotation=0 page dimensions.
+      const baseViewport = pdfPage.getViewport({ scale: 1, rotation: 0 });
       const dx = (points[1].x - points[0].x) * baseViewport.width;
       const dy = (points[1].y - points[0].y) * baseViewport.height;
       const pixelDistance = Math.sqrt(dx * dx + dy * dy);

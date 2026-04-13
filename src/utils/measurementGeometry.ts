@@ -86,6 +86,21 @@ export function baseNormToViewportPixels(
   return { x: nx * vw, y: ny * vh };
 }
 
+/**
+ * Pixel translation in rotated viewport space when every base-normalized point shifts by (dNx, dNy).
+ * Same for every vertex; use for SVG `translate` during move-drag preview (not `dNx * width`, which is only correct at 0°).
+ */
+export function baseNormDeltaToViewportPixels(
+  dNx: number,
+  dNy: number,
+  vp: { width: number; height: number },
+  rotation: number
+): { x: number; y: number } {
+  const end = baseNormToViewportPixels(dNx, dNy, vp, rotation);
+  const origin = baseNormToViewportPixels(0, 0, vp, rotation);
+  return { x: end.x - origin.x, y: end.y - origin.y };
+}
+
 /** CSS drag rectangle → four corners in base normalized PDF space (0–1). Correct for any display rotation. */
 export function cssDragRectToBasePdfQuad(
   dp: { w: number; h: number },
@@ -102,6 +117,34 @@ export function cssDragRectToBasePdfQuad(
     cssToBaseNormalized(x + width, y + height, dp, baseViewport, rotation),
     cssToBaseNormalized(x, y + height, dp, baseViewport, rotation),
   ];
+}
+
+/**
+ * Axis-aligned bounding box in base normalized space from a CSS drag rect on the rotated canvas.
+ * Use for hyperlinks and anywhere we store `sourceRect` in unrotated PDF 0–1 space.
+ */
+export function cssDragRectToBasePdfAabb(
+  dp: { w: number; h: number },
+  baseViewport: { width: number; height: number },
+  rotation: number,
+  x: number,
+  y: number,
+  width: number,
+  height: number
+): { x: number; y: number; width: number; height: number } {
+  const quad = cssDragRectToBasePdfQuad(dp, baseViewport, rotation, x, y, width, height);
+  const xs = quad.map((p) => p.x);
+  const ys = quad.map((p) => p.y);
+  const xMin = Math.min(...xs);
+  const xMax = Math.max(...xs);
+  const yMin = Math.min(...ys);
+  const yMax = Math.max(...ys);
+  return {
+    x: xMin,
+    y: yMin,
+    width: Math.max(1e-6, xMax - xMin),
+    height: Math.max(1e-6, yMax - yMin),
+  };
 }
 
 /** Shift normalized PDF points by a delta (e.g. when dragging a measurement). */
