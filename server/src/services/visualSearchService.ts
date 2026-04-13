@@ -177,6 +177,36 @@ class AutoCountService {
   }
 
   /**
+   * Rasterize a Meridian-normalized rect (PDF clip in user space) to a PNG via extract_template_clip.py.
+   */
+  private async extractMeridianClipToPng(
+    pdfPath: string,
+    pageNumber: number,
+    selectionBox: { x: number; y: number; width: number; height: number },
+    outputPath: string
+  ): Promise<void> {
+    const scale = 2.0;
+    const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
+    const command = `${pythonCommand} "${this.extractTemplateClipScriptPath}" "${pdfPath}" ${pageNumber} ${scale} ${selectionBox.x} ${selectionBox.y} ${selectionBox.width} ${selectionBox.height} "${outputPath}"`;
+
+    const enhancedPath = this.getEnhancedPath();
+    const enhancedLdPath = await this.getEnhancedLdLibraryPath();
+    const { stdout, stderr } = await execAsync(command, {
+      timeout: 60000,
+      maxBuffer: 10 * 1024 * 1024,
+      env: { ...process.env, PATH: enhancedPath, LD_LIBRARY_PATH: enhancedLdPath }
+    });
+    if (stderr && !stderr.includes('DeprecationWarning')) {
+      console.warn('⚠️ extract_template_clip stderr:', stderr);
+    }
+
+    const result = JSON.parse(stdout.trim()) as { success?: boolean; error?: string };
+    if (!result.success) {
+      throw new Error(result.error || 'PDF clip rasterize failed');
+    }
+  }
+
+  /**
    * Extract a symbol template from a selection box on a PDF page
    */
   async extractSymbolTemplate(
@@ -192,25 +222,7 @@ class AutoCountService {
       await fs.ensureDir(this.tempDir);
       const templateImagePath = path.join(this.tempDir, `template_${uuidv4()}.png`);
 
-      const scale = 2.0;
-      const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
-      const command = `${pythonCommand} "${this.extractTemplateClipScriptPath}" "${pdfPath}" ${pageNumber} ${scale} ${selectionBox.x} ${selectionBox.y} ${selectionBox.width} ${selectionBox.height} "${templateImagePath}"`;
-
-      const enhancedPath = this.getEnhancedPath();
-      const enhancedLdPath = await this.getEnhancedLdLibraryPath();
-      const { stdout, stderr } = await execAsync(command, {
-        timeout: 60000,
-        maxBuffer: 10 * 1024 * 1024,
-        env: { ...process.env, PATH: enhancedPath, LD_LIBRARY_PATH: enhancedLdPath }
-      });
-      if (stderr && !stderr.includes('DeprecationWarning')) {
-        console.warn('⚠️ extract_template_clip stderr:', stderr);
-      }
-
-      const result = JSON.parse(stdout.trim()) as { success?: boolean; error?: string };
-      if (!result.success) {
-        throw new Error(result.error || 'Template clip failed');
-      }
+      await this.extractMeridianClipToPng(pdfPath, pageNumber, selectionBox, templateImagePath);
 
       const templateId = `template_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       
@@ -703,22 +715,9 @@ except Exception as e:
 
         // Get PDF path
         const pdfPath = await this.getPDFFilePath(sheetId, projectId);
-
-        // Convert PDF page to image
-        const imageBuffer = await pythonPdfConverter.convertPageToBuffer(pdfPath, pageNumber, {
-          format: 'png',
-          scale: 2.0,
-          quality: 90
-        });
-
-        if (!imageBuffer) continue;
-
-        // Save page image temporarily
         await fs.ensureDir(this.tempDir);
-        const pageImagePath = path.join(this.tempDir, `page_${uuidv4()}.png`);
-        await fs.writeFile(pageImagePath, imageBuffer);
 
-        // Extract thumbnails for measurements on this page
+        // Extract thumbnails for measurements on this page (same PDF clip as template extraction)
         for (const measurement of pageMeasurements.slice(0, maxThumbnails - thumbnailCount)) {
           if (thumbnailCount >= maxThumbnails) break;
 
@@ -784,7 +783,8 @@ except Exception as e:
           if (!selectionBox || selectionBox.width < 0.01 || selectionBox.height < 0.01) continue;
 
           try {
-            const thumbnailPath = await this.cropImageRegion(pageImagePath, selectionBox, pageNumber);
+            const thumbnailPath = path.join(this.tempDir, `thumb_${uuidv4()}.png`);
+            await this.extractMeridianClipToPng(pdfPath, pageNumber, selectionBox, thumbnailPath);
             const thumbnailBuffer = await fs.readFile(thumbnailPath);
             const thumbnailBase64 = thumbnailBuffer.toString('base64');
             
@@ -802,9 +802,6 @@ except Exception as e:
             console.error(`[VisualSearchService] Failed to extract thumbnail for measurement ${measurement.id}:`, error);
           }
         }
-
-        // Clean up page image
-        await fs.remove(pageImagePath).catch(() => {});
       }
 
       console.log(`[VisualSearchService] Returning ${thumbnails.length} thumbnails for condition ${conditionId}`);
