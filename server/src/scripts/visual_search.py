@@ -104,9 +104,8 @@ def visual_search(image_path, template_path, confidence_threshold=0.7, method='c
         
         match_method = method_map.get(method, cv2.TM_CCOEFF_NORMED)
         
-        # Test multiple rotations: 0°, 90°, 180°, 270°
-        # This allows finding symbols in different orientations
-        rotations = [0, 90, 180, 270]
+        # Only match at 0° by default to avoid false positives from rotational symmetry
+        rotations = [0]
         all_detections = []
         
         for rotation in rotations:

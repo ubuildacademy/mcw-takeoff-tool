@@ -113,7 +113,9 @@ export class AutoCountService {
     options?: Partial<AutoCountOptions>,
     searchScope?: 'current-page' | 'entire-document' | 'entire-project',
     onProgress?: (progress: { current: number; total: number; currentPage?: number; currentDocument?: string }) => void,
-    abortSignal?: AbortSignal
+    abortSignal?: AbortSignal,
+    /** PDF.js getViewport({ scale: 1, rotation: 0 }) — must match server clip + stored coords */
+    basePageSize?: { width: number; height: number }
   ): Promise<{ result: AutoCountResult; measurementsCreated: number }> {
     const headers = { ...(await getAuthHeaders()), Accept: 'text/event-stream' };
 
@@ -128,7 +130,13 @@ export class AutoCountService {
         projectId,
         sheetId,
         options,
-        searchScope: searchScope || 'current-page'
+        searchScope: searchScope || 'current-page',
+        ...(basePageSize &&
+        basePageSize.width > 0 &&
+        basePageSize.height > 0 && {
+          basePageWidth: basePageSize.width,
+          basePageHeight: basePageSize.height
+        })
       };
 
       // Use fetch with POST to initiate the search, but request SSE response

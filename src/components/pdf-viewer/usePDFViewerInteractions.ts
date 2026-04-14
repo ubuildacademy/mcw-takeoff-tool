@@ -151,7 +151,10 @@ export interface UsePDFViewerInteractionsOptions {
     selectionBox: { x: number; y: number; width: number; height: number },
     pageNumber: number
   ) => void;
-  onVisualSearchComplete?: (selectionBox: { x: number; y: number; width: number; height: number }) => void;
+  onVisualSearchComplete?: (
+    selectionBox: { x: number; y: number; width: number; height: number },
+    meta?: { basePageSize: { width: number; height: number } }
+  ) => void;
   // Hyperlink mode
   hyperlinkMode?: boolean;
   hyperlinkDrawStart?: { x: number; y: number } | null;
@@ -1467,23 +1470,22 @@ export function usePDFViewerInteractions(
       }
       const finalSelectionBox = { x, y, width, height };
       setSelectionBox(finalSelectionBox);
-      // Same as hyperlinks: base-normalized PDF rect (rotation=0 user space) for server-side crop + matching
-      const baseViewport =
-        pdfPageRef.current?.getViewport({ scale: 1, rotation: 0 }) ?? viewport;
-      const pdfSelectionBox = cssDragRectToBasePdfAabb(
-        dp,
-        baseViewport,
-        selEffRot,
-        x,
-        y,
-        width,
-        height
-      );
       setSelectionStart(null);
       setIsSelectingSymbol(false);
       if (titleblockSelectionMode && onTitleblockSelectionComplete) {
+        const baseViewport =
+          pdfPageRef.current?.getViewport({ scale: 1, rotation: 0 }) ?? viewport;
+        const pdfSelectionBox = cssDragRectToBasePdfAabb(
+          dp, baseViewport, selEffRot, x, y, width, height
+        );
         onTitleblockSelectionComplete(titleblockSelectionMode, pdfSelectionBox, currentPage);
       } else if (visualSearchMode && onVisualSearchComplete) {
+        const pdfSelectionBox = {
+          x: x / viewport.width,
+          y: y / viewport.height,
+          width: width / viewport.width,
+          height: height / viewport.height,
+        };
         onVisualSearchComplete(pdfSelectionBox);
       }
       event.preventDefault();

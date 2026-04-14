@@ -82,7 +82,7 @@ async function saveTemplateImageToCondition(
 // Extract symbol template from selection box
 router.post('/extract-template', requireAuth, async (req, res) => {
   try {
-    const { pdfFileId, pageNumber, selectionBox } = req.body;
+    const { pdfFileId, pageNumber, selectionBox, basePageWidth, basePageHeight } = req.body;
 
     if (!pdfFileId || !pageNumber || !selectionBox) {
       return res.status(400).json({
@@ -105,10 +105,20 @@ router.post('/extract-template', requireAuth, async (req, res) => {
       return res.status(400).json({ error: selectionError });
     }
 
+    const pdfJsPageSize =
+      typeof basePageWidth === 'number' &&
+      basePageWidth > 0 &&
+      typeof basePageHeight === 'number' &&
+      basePageHeight > 0
+        ? { width: basePageWidth, height: basePageHeight }
+        : undefined;
+
     const template = await autoCountService.extractSymbolTemplate(
       pdfFileId,
       pageNumber,
-      selectionBox
+      selectionBox,
+      undefined,
+      pdfJsPageSize
     );
 
     return res.json({
@@ -237,15 +247,25 @@ router.post('/complete-search', requireAuth, requireProjectAccess, async (req, r
   };
   
   try {
-    const { 
-      conditionId, 
-      pdfFileId, 
-      pageNumber, 
-      selectionBox, 
-      projectId, 
-      sheetId, 
-      options 
+    const {
+      conditionId,
+      pdfFileId,
+      pageNumber,
+      selectionBox,
+      projectId,
+      sheetId,
+      options,
+      basePageWidth,
+      basePageHeight
     } = req.body;
+
+    const pdfJsPageSize =
+      typeof basePageWidth === 'number' &&
+      basePageWidth > 0 &&
+      typeof basePageHeight === 'number' &&
+      basePageHeight > 0
+        ? { width: basePageWidth, height: basePageHeight }
+        : undefined;
 
     if (!conditionId || !pdfFileId || !pageNumber || !selectionBox || !projectId || !sheetId) {
       return res.status(400).json({
@@ -262,9 +282,8 @@ router.post('/complete-search', requireAuth, requireProjectAccess, async (req, r
       return res.status(400).json({ error: selectionError });
     }
 
-    if (process.env.NODE_ENV === 'development') {
-      console.log('🔍 Starting complete auto-count workflow...');
-    }
+    console.log('🔍 [complete-search] selectionBox=', selectionBox, 'pdfJsPageSize=', pdfJsPageSize ?? 'N/A',
+      `page=${pageNumber} scope=${req.body.searchScope || 'current-page'}`);
 
     const conditionResult = await getConditionForCompleteSearch(conditionId);
     if ('error' in conditionResult) {
@@ -281,12 +300,13 @@ router.post('/complete-search', requireAuth, requireProjectAccess, async (req, r
       console.log('📐 Selection box:', selectionBox);
     }
 
-    // Step 1: Extract symbol template (pass projectId for PDF download)
+    // Step 1: Extract symbol template (pass projectId for PDF download; PDF.js base size aligns clip with client)
     const template = await autoCountService.extractSymbolTemplate(
       pdfFileId,
       pageNumber,
       selectionBox,
-      projectId
+      projectId,
+      pdfJsPageSize
     );
 
     await saveTemplateImageToCondition(template, conditionId);
@@ -331,10 +351,13 @@ router.post('/complete-search', requireAuth, requireProjectAccess, async (req, r
         conditionId,
         searchResult.matches,
         projectId,
-        sheetId,
         condition.color,
         condition.name,
-        condition.unit
+        condition.unit,
+        {
+          pdfJsViewport: pdfJsPageSize,
+          primaryPdfFileId: pdfFileId
+        }
       );
     } catch (measurementError) {
       console.error('❌ Error creating measurements:', measurementError);

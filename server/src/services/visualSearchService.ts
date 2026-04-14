@@ -14,6 +14,7 @@ import { promisify } from 'util';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
+import { parseDocumentIdFromSheetId, parsePageNumberFromSheetId } from '../lib/sheetUtils';
 
 const execAsync = promisify(exec);
 
@@ -95,6 +96,8 @@ class AutoCountService {
   private extractTemplateClipScriptPath: string;
   private tempDir: string;
   private cachedGlibLibPath: string | null = null;
+  /** Cache PyMuPDF page.rect width/height (points) per file:page */
+  private pageRectSizeCache = new Map<string, { width: number; height: number }>();
 
   constructor() {
     // Determine script path (works in both source and compiled)
@@ -178,16 +181,31 @@ class AutoCountService {
 
   /**
    * Rasterize a Meridian-normalized rect (PDF clip in user space) to a PNG via extract_template_clip.py.
+   * When `pdfJsPageSize` is set (PDF.js base viewport at scale=1, rotation=0), it matches client-side
+   * cssDragRectToBasePdfAabb even if PyMuPDF page.rect differs slightly.
    */
   private async extractMeridianClipToPng(
     pdfPath: string,
     pageNumber: number,
     selectionBox: { x: number; y: number; width: number; height: number },
-    outputPath: string
+    outputPath: string,
+    pdfJsPageSize?: { width: number; height: number }
   ): Promise<void> {
     const scale = 2.0;
     const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
-    const command = `${pythonCommand} "${this.extractTemplateClipScriptPath}" "${pdfPath}" ${pageNumber} ${scale} ${selectionBox.x} ${selectionBox.y} ${selectionBox.width} ${selectionBox.height} "${outputPath}"`;
+    const hasJs =
+      pdfJsPageSize &&
+      typeof pdfJsPageSize.width === 'number' &&
+      pdfJsPageSize.width > 0 &&
+      typeof pdfJsPageSize.height === 'number' &&
+      pdfJsPageSize.height > 0;
+    const command = hasJs
+      ? `${pythonCommand} "${this.extractTemplateClipScriptPath}" "${pdfPath}" ${pageNumber} ${scale} ${selectionBox.x} ${selectionBox.y} ${selectionBox.width} ${selectionBox.height} ${pdfJsPageSize!.width} ${pdfJsPageSize!.height} "${outputPath}"`
+      : `${pythonCommand} "${this.extractTemplateClipScriptPath}" "${pdfPath}" ${pageNumber} ${scale} ${selectionBox.x} ${selectionBox.y} ${selectionBox.width} ${selectionBox.height} "${outputPath}"`;
+
+    console.log(`📐 [extractMeridianClipToPng] selectionBox=`, selectionBox,
+      `pdfJsPageSize=`, pdfJsPageSize ?? 'N/A',
+      `page=${pageNumber}`);
 
     const enhancedPath = this.getEnhancedPath();
     const enhancedLdPath = await this.getEnhancedLdLibraryPath();
@@ -196,33 +214,62 @@ class AutoCountService {
       maxBuffer: 10 * 1024 * 1024,
       env: { ...process.env, PATH: enhancedPath, LD_LIBRARY_PATH: enhancedLdPath }
     });
-    if (stderr && !stderr.includes('DeprecationWarning')) {
-      console.warn('⚠️ extract_template_clip stderr:', stderr);
+    if (stderr) {
+      const lines = stderr.split('\n').filter(l => l.trim());
+      for (const line of lines) {
+        if (line.includes('[extract_clip]')) {
+          console.log(`📐 ${line.trim()}`);
+        } else if (!line.includes('DeprecationWarning')) {
+          console.warn('⚠️ extract_template_clip stderr:', line);
+        }
+      }
     }
 
-    const result = JSON.parse(stdout.trim()) as { success?: boolean; error?: string };
+    const result = JSON.parse(stdout.trim()) as { success?: boolean; error?: string; width?: number; height?: number };
     if (!result.success) {
       throw new Error(result.error || 'PDF clip rasterize failed');
     }
+    console.log(`📐 [extractMeridianClipToPng] output: ${result.width}×${result.height}px`);
   }
 
   /**
-   * Extract a symbol template from a selection box on a PDF page
+   * Extract a symbol template from a selection box on a PDF page.
+   * Renders the full page as a raster then crops the selected region with OpenCV,
+   * which guarantees the crop matches the same image space used for template matching.
    */
   async extractSymbolTemplate(
     pdfFileId: string,
     pageNumber: number,
     selectionBox: { x: number; y: number; width: number; height: number },
-    projectId?: string
+    projectId?: string,
+    _pdfJsPageSize?: { width: number; height: number }
   ): Promise<SymbolTemplate> {
     try {
-      console.log('🔍 Extracting symbol template (PyMuPDF clip in PDF space; Meridian-normalized box)...');
+      console.log('🔍 Extracting symbol template from selection box...');
       
       const pdfPath = await this.getPDFFilePath(pdfFileId, projectId);
-      await fs.ensureDir(this.tempDir);
-      const templateImagePath = path.join(this.tempDir, `template_${uuidv4()}.png`);
 
-      await this.extractMeridianClipToPng(pdfPath, pageNumber, selectionBox, templateImagePath);
+      const imageBuffer = await pythonPdfConverter.convertPageToBuffer(pdfPath, pageNumber, {
+        format: 'png',
+        scale: 2.0,
+        quality: 90
+      });
+
+      if (!imageBuffer) {
+        throw new Error('Failed to convert PDF page to image');
+      }
+
+      await fs.ensureDir(this.tempDir);
+      const fullPageImagePath = path.join(this.tempDir, `fullpage_${uuidv4()}.png`);
+      await fs.writeFile(fullPageImagePath, imageBuffer);
+
+      const templateImagePath = await this.cropImageRegion(
+        fullPageImagePath,
+        selectionBox,
+        pageNumber
+      );
+
+      await fs.remove(fullPageImagePath).catch(() => {});
 
       const templateId = `template_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       
@@ -235,6 +282,81 @@ class AutoCountService {
     } catch (error) {
       console.error('❌ Failed to extract symbol template:', error);
       throw new Error(`Failed to extract symbol template: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Crop an image region using Python/OpenCV.
+   * selectionBox coordinates are normalized 0-1 fractions of the image dimensions.
+   */
+  private async cropImageRegion(
+    imagePath: string,
+    selectionBox: { x: number; y: number; width: number; height: number },
+    _pageNumber: number
+  ): Promise<string> {
+    try {
+      const cropScript = `
+import cv2
+import sys
+import json
+
+image_path = sys.argv[1]
+output_path = sys.argv[2]
+x = float(sys.argv[3])
+y = float(sys.argv[4])
+width = float(sys.argv[5])
+height = float(sys.argv[6])
+
+img = cv2.imread(image_path)
+if img is None:
+    print(json.dumps({"success": False, "error": f"Failed to load image: {image_path}"}))
+    sys.exit(1)
+
+img_height, img_width = img.shape[:2]
+
+x_px = int(x * img_width)
+y_px = int(y * img_height)
+w_px = int(width * img_width)
+h_px = int(height * img_height)
+
+x_px = max(0, min(x_px, img_width - 1))
+y_px = max(0, min(y_px, img_height - 1))
+w_px = min(w_px, img_width - x_px)
+h_px = min(h_px, img_height - y_px)
+
+cropped = img[y_px:y_px+h_px, x_px:x_px+w_px]
+
+cv2.imwrite(output_path, cropped)
+print(json.dumps({"success": True, "output": output_path}))
+`;
+
+      await fs.ensureDir(this.tempDir);
+      const cropScriptPath = path.join(this.tempDir, `crop_${uuidv4()}.py`);
+      await fs.writeFile(cropScriptPath, cropScript);
+
+      const outputPath = path.join(this.tempDir, `template_${uuidv4()}.png`);
+      
+      const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
+      const command = `${pythonCommand} "${cropScriptPath}" "${imagePath}" "${outputPath}" ${selectionBox.x} ${selectionBox.y} ${selectionBox.width} ${selectionBox.height}`;
+
+      const enhancedPath = this.getEnhancedPath();
+      const enhancedLdPath = await this.getEnhancedLdLibraryPath();
+      const { stdout } = await execAsync(command, {
+        timeout: 10000,
+        env: { ...process.env, PATH: enhancedPath, LD_LIBRARY_PATH: enhancedLdPath }
+      });
+
+      await fs.remove(cropScriptPath).catch(() => {});
+
+      const result = JSON.parse(stdout.trim());
+      if (!result.success) {
+        throw new Error(result.error || 'Crop failed');
+      }
+
+      return outputPath;
+    } catch (error) {
+      console.error('❌ Failed to crop image region:', error);
+      throw new Error(`Failed to crop image region: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
@@ -283,6 +405,146 @@ except Exception as e:
       console.error('❌ Failed to get PDF page count:', error);
       throw new Error(`Failed to get PDF page count: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+  }
+
+  /**
+   * PyMuPDF page.rect size in PDF points (same space as OpenCV search raster normalization).
+   */
+  private async getPdfPageRectSize(pdfPath: string, pageNumber: number): Promise<{ width: number; height: number }> {
+    const cacheKey = `${pdfPath}:${pageNumber}`;
+    const cached = this.pageRectSizeCache.get(cacheKey);
+    if (cached) return cached;
+
+    const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
+    const script = `
+import fitz
+import sys
+import json
+pdf_path = sys.argv[1]
+page_num = int(sys.argv[2])
+try:
+    doc = fitz.open(pdf_path)
+    page = doc[page_num - 1]
+    r = page.rect
+    doc.close()
+    print(json.dumps({"success": True, "width": r.width, "height": r.height}))
+except Exception as e:
+    print(json.dumps({"success": False, "error": str(e)}))
+    sys.exit(1)
+`;
+    await fs.ensureDir(this.tempDir);
+    const scriptPath = path.join(this.tempDir, `page_rect_${uuidv4()}.py`);
+    await fs.writeFile(scriptPath, script);
+
+    const enhancedPath = this.getEnhancedPath();
+    const enhancedLdPath = await this.getEnhancedLdLibraryPath();
+    const command = `${pythonCommand} "${scriptPath}" "${pdfPath}" ${pageNumber}`;
+
+    try {
+      const { stdout } = await execAsync(command, {
+        timeout: 15000,
+        maxBuffer: 1024 * 1024,
+        env: { ...process.env, PATH: enhancedPath, LD_LIBRARY_PATH: enhancedLdPath }
+      });
+      await fs.remove(scriptPath).catch(() => {});
+      const result = JSON.parse(stdout.trim()) as { success?: boolean; width?: number; height?: number; error?: string };
+      if (!result.success || result.width == null || result.height == null) {
+        throw new Error(result.error || 'Failed to read page rect');
+      }
+      const size = { width: result.width, height: result.height };
+      this.pageRectSizeCache.set(cacheKey, size);
+      return size;
+    } catch (error) {
+      await fs.remove(scriptPath).catch(() => {});
+      throw error;
+    }
+  }
+
+  /** Cache for page rotation values */
+  private pageRotationCache = new Map<string, number>();
+
+  /**
+   * Get the built-in /Rotate attribute of a PDF page from PyMuPDF.
+   * Returns 0, 90, 180, or 270.
+   */
+  private async getPageRotation(pdfPath: string, pageNumber: number): Promise<number> {
+    const cacheKey = `${pdfPath}:${pageNumber}:rot`;
+    const cached = this.pageRotationCache.get(cacheKey);
+    if (cached != null) return cached;
+
+    const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
+    const script = `
+import fitz
+import sys
+import json
+pdf_path = sys.argv[1]
+page_num = int(sys.argv[2])
+try:
+    doc = fitz.open(pdf_path)
+    page = doc[page_num - 1]
+    rot = page.rotation
+    doc.close()
+    print(json.dumps({"success": True, "rotation": rot}))
+except Exception as e:
+    print(json.dumps({"success": False, "error": str(e)}))
+    sys.exit(1)
+`;
+    await fs.ensureDir(this.tempDir);
+    const scriptPath = path.join(this.tempDir, `page_rot_${uuidv4()}.py`);
+    await fs.writeFile(scriptPath, script);
+
+    const enhancedPath = this.getEnhancedPath();
+    const enhancedLdPath = await this.getEnhancedLdLibraryPath();
+    const command = `${pythonCommand} "${scriptPath}" "${pdfPath}" ${pageNumber}`;
+
+    try {
+      const { stdout } = await execAsync(command, {
+        timeout: 15000,
+        maxBuffer: 1024 * 1024,
+        env: { ...process.env, PATH: enhancedPath, LD_LIBRARY_PATH: enhancedLdPath }
+      });
+      await fs.remove(scriptPath).catch(() => {});
+      const result = JSON.parse(stdout.trim()) as { success?: boolean; rotation?: number; error?: string };
+      if (!result.success || result.rotation == null) {
+        throw new Error(result.error || 'Failed to read page rotation');
+      }
+      this.pageRotationCache.set(cacheKey, result.rotation);
+      return result.rotation;
+    } catch (error) {
+      await fs.remove(scriptPath).catch(() => {});
+      throw error;
+    }
+  }
+
+  /**
+   * Convert raster/MediaBox-normalized coordinates to base-normalized (visual orientation)
+   * coordinates, accounting for the page's built-in /Rotate attribute.
+   * PyMuPDF's get_pixmap() renders in MediaBox space; PDF.js getViewport({rotation:0})
+   * includes page.rotate. This bridge aligns the two.
+   */
+  private rasterNormToBaseNorm(x: number, y: number, pageRotation: number): { x: number; y: number } {
+    const r = ((pageRotation % 360) + 360) % 360;
+    if (r === 0) return { x, y };
+    if (r === 90) return { x: y, y: 1 - x };
+    if (r === 180) return { x: 1 - x, y: 1 - y };
+    if (r === 270) return { x: 1 - y, y: x };
+    return { x, y };
+  }
+
+  /** OpenCV / PyMuPDF raster norm (0–1) → PDF.js base-normalized (0–1) for the same physical point. */
+  private opencvNormToPdfJsNorm(
+    box: { x: number; y: number; width: number; height: number },
+    pym: { width: number; height: number },
+    pdfJs: { width: number; height: number }
+  ): { x: number; y: number; width: number; height: number } {
+    const sx = pym.width / pdfJs.width;
+    const sy = pym.height / pdfJs.height;
+    return {
+      x: box.x * sx,
+      y: box.y * sy,
+      width: box.width * sx,
+      height: box.height * sy
+    };
   }
 
   /**
@@ -603,21 +865,32 @@ except Exception as e:
     conditionId: string,
     matches: AutoCountMatch[],
     projectId: string,
-    sheetId: string,
     conditionColor: string = '#3B82F6',
     conditionName: string = 'Auto-Count Match',
-    conditionUnit: string = 'EA'
+    conditionUnit: string = 'EA',
+    options?: {
+      /** PDF.js getViewport({ scale: 1, rotation: 0 }) — aligns stored coords with the client */
+      pdfJsViewport?: { width: number; height: number };
+      /** Fallback when match.documentId is missing */
+      primaryPdfFileId?: string;
+    }
   ): Promise<void> {
     try {
       console.log(`📊 Creating ${matches.length} count measurements...`);
-      
+
       for (const match of matches) {
-        // Calculate the center point of the bounding box for the dot
-        const centerX = match.boundingBox.x + (match.boundingBox.width / 2);
-        const centerY = match.boundingBox.y + (match.boundingBox.height / 2);
-        
-        // Store bounding box info in description as JSON for thumbnail extraction
-        // Format: {bbox: {x, y, width, height}} where coordinates are normalized (0-1)
+        const documentId = match.documentId || options?.primaryPdfFileId;
+        if (!documentId) {
+          throw new Error('Auto-count match missing document id');
+        }
+
+        const pdfPath = await this.getPDFFilePath(documentId, projectId);
+        const pageRot = await this.getPageRotation(pdfPath, match.pageNumber);
+
+        const rasterCenterX = match.boundingBox.x + (match.boundingBox.width / 2);
+        const rasterCenterY = match.boundingBox.y + (match.boundingBox.height / 2);
+        const { x: centerX, y: centerY } = this.rasterNormToBaseNorm(rasterCenterX, rasterCenterY, pageRot);
+
         const bboxInfo = match.pdfCoordinates ? {
           bbox: {
             x: match.pdfCoordinates.x,
@@ -632,11 +905,15 @@ except Exception as e:
             height: match.boundingBox.height
           }
         } : null;
-        
+
+        const pdfCenterX = (match.pdfCoordinates?.x || 0) + ((match.pdfCoordinates?.width || 0) / 2);
+        const pdfCenterY = (match.pdfCoordinates?.y || 0) + ((match.pdfCoordinates?.height || 0) / 2);
+        const { x: basePdfCx, y: basePdfCy } = this.rasterNormToBaseNorm(pdfCenterX, pdfCenterY, pageRot);
+
         const measurement = {
           id: uuidv4(),
           projectId,
-          sheetId,
+          sheetId: documentId,
           conditionId,
           type: 'count' as const,
           points: [{ x: centerX, y: centerY }],
@@ -644,20 +921,15 @@ except Exception as e:
           unit: conditionUnit,
           timestamp: new Date().toISOString(),
           pdfPage: match.pageNumber,
-          pdfCoordinates: [
-            { 
-              x: (match.pdfCoordinates?.x || 0) + ((match.pdfCoordinates?.width || 0) / 2), 
-              y: (match.pdfCoordinates?.y || 0) + ((match.pdfCoordinates?.height || 0) / 2) 
-            }
-          ],
+          pdfCoordinates: [{ x: basePdfCx, y: basePdfCy }],
           description: bboxInfo ? JSON.stringify(bboxInfo) : 'Auto-Count Match',
           conditionColor: conditionColor,
           conditionName: conditionName
         };
-        
+
         await storage.saveTakeoffMeasurement(measurement);
       }
-      
+
       console.log(`✅ Created ${matches.length} count measurements`);
     } catch (error) {
       console.error('❌ Failed to create count measurements:', error);
@@ -688,10 +960,10 @@ except Exception as e:
         return [];
       }
 
-      // Group measurements by sheet and page
+      // Group by sheet (sheetId is already `${documentId}-${pageNumber}` — do not append pdfPage again)
       const measurementsByPage = new Map<string, typeof conditionMeasurements>();
       for (const measurement of conditionMeasurements) {
-        const key = `${measurement.sheetId}-${measurement.pdfPage}`;
+        const key = measurement.sheetId;
         if (!measurementsByPage.has(key)) {
           measurementsByPage.set(key, []);
         }
@@ -702,19 +974,18 @@ except Exception as e:
       let thumbnailCount = 0;
 
       // Process each page
-      for (const [key, pageMeasurements] of measurementsByPage) {
+      for (const [compositeSheetId, pageMeasurements] of measurementsByPage) {
         if (thumbnailCount >= maxThumbnails) break;
 
-        const [sheetId, pageNumberStr] = key.split('-');
-        const pageNumber = parseInt(pageNumberStr, 10);
+        const documentId = parseDocumentIdFromSheetId(compositeSheetId);
+        const pageNumber = parsePageNumberFromSheetId(compositeSheetId);
+        if (!Number.isFinite(pageNumber) || pageNumber < 1) continue;
 
-        // Get PDF file
         const files = await storage.getFilesByProject(projectId);
-        const file = files.find(f => f.id === sheetId);
+        const file = files.find(f => f.id === documentId);
         if (!file || file.mimetype !== 'application/pdf') continue;
 
-        // Get PDF path
-        const pdfPath = await this.getPDFFilePath(sheetId, projectId);
+        const pdfPath = await this.getPDFFilePath(documentId, projectId);
         await fs.ensureDir(this.tempDir);
 
         // Extract thumbnails for measurements on this page (same PDF clip as template extraction)
@@ -724,16 +995,31 @@ except Exception as e:
           // Try to get bounding box from description (stored as JSON)
           let selectionBox: { x: number; y: number; width: number; height: number } | null = null;
           
+          let pdfJsPageSize: { width: number; height: number } | undefined;
           if (measurement.description) {
             try {
-              const descData = JSON.parse(measurement.description);
+              const descData = JSON.parse(measurement.description) as {
+                normalizedBbox?: { x: number; y: number; width: number; height: number };
+                baseViewport?: { width: number; height: number };
+              };
               if (descData.normalizedBbox) {
-                // Use the normalized bounding box (0-1 scale)
                 selectionBox = {
                   x: descData.normalizedBbox.x,
                   y: descData.normalizedBbox.y,
                   width: descData.normalizedBbox.width,
                   height: descData.normalizedBbox.height
+                };
+              }
+              if (
+                descData.baseViewport &&
+                typeof descData.baseViewport.width === 'number' &&
+                descData.baseViewport.width > 0 &&
+                typeof descData.baseViewport.height === 'number' &&
+                descData.baseViewport.height > 0
+              ) {
+                pdfJsPageSize = {
+                  width: descData.baseViewport.width,
+                  height: descData.baseViewport.height
                 };
               }
             } catch (e) {
@@ -784,7 +1070,7 @@ except Exception as e:
 
           try {
             const thumbnailPath = path.join(this.tempDir, `thumb_${uuidv4()}.png`);
-            await this.extractMeridianClipToPng(pdfPath, pageNumber, selectionBox, thumbnailPath);
+            await this.extractMeridianClipToPng(pdfPath, pageNumber, selectionBox, thumbnailPath, pdfJsPageSize);
             const thumbnailBuffer = await fs.readFile(thumbnailPath);
             const thumbnailBase64 = thumbnailBuffer.toString('base64');
             

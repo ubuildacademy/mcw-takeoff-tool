@@ -219,8 +219,6 @@ export function TakeoffSidebarConditionList({
               {(() => {
                 const measurements = getConditionTakeoffMeasurements(projectId, condition.id);
                 const pageMeasurements = filterMeasurementsForCurrentPage(measurements, viewerDocumentId, currentPage);
-                const thumbnails = matchThumbnails[condition.id] || [];
-                const isLoadingThumbnails = loadingThumbnails.has(condition.id);
                 return (
               <>
               <div className="flex items-start justify-between mb-1">
@@ -322,52 +320,10 @@ export function TakeoffSidebarConditionList({
               >
                 {condition.description}
               </p>
-              {(condition.type as string) === 'visual-search' && (
-                <>
-                  {condition.searchImage ? (
-                    <div className="mb-3">
-                      <div className="text-xs text-gray-500 mb-1">Search Image:</div>
-                      <div className="border border-gray-200 rounded-lg p-2 bg-gray-50 flex items-center justify-center min-h-[80px]">
-                        <img
-                          src={getImageSrc(condition.searchImage)}
-                          alt="Search template"
-                          className="max-w-full max-h-32 object-contain rounded"
-                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                        />
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="mb-2 text-xs text-gray-400 italic">No search image set</div>
-                  )}
-                  {pageMeasurements.length > 0 && (
-                      <div className="mb-3">
-                        <div className="text-xs text-gray-500 mb-1">Found Items ({pageMeasurements.length}):</div>
-                        {isLoadingThumbnails ? (
-                          <div className="text-xs text-gray-400 italic">Loading previews...</div>
-                        ) : thumbnails.length > 0 ? (
-                          <div className="grid grid-cols-3 gap-1">
-                            {thumbnails.map((thumb, idx) => (
-                              <div
-                                key={thumb.measurementId || idx}
-                                className="border border-gray-200 rounded p-1 bg-gray-50 aspect-square flex items-center justify-center overflow-hidden"
-                              >
-                                <img
-                                  src={thumb.thumbnail}
-                                  alt={`Match ${idx + 1}`}
-                                  className="w-full h-full object-contain rounded"
-                                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                                />
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="text-xs text-gray-400 italic">
-                            {pageMeasurements.length} match{pageMeasurements.length !== 1 ? 'es' : ''} found
-                          </div>
-                        )}
-                      </div>
-                  )}
-                </>
+              {condition.type === 'auto-count' && pageMeasurements.length > 0 && (
+                <div className="text-xs text-gray-500 mb-1">
+                  {pageMeasurements.length} match{pageMeasurements.length !== 1 ? 'es' : ''} on this page
+                </div>
               )}
               <div className="flex items-center gap-3 text-xs">
                 <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: condition.color }} />

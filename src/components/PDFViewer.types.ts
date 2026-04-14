@@ -66,7 +66,10 @@ export interface PDFViewerProps {
   onPDFRendered?: () => void;
   visualSearchMode?: boolean;
   visualSearchCondition?: unknown;
-  onVisualSearchComplete?: (selectionBox: SelectionBox) => void;
+  onVisualSearchComplete?: (
+    selectionBox: SelectionBox,
+    meta?: { basePageSize: { width: number; height: number } }
+  ) => void;
   titleblockSelectionMode?: 'sheetNumber' | 'sheetName' | null;
   onTitleblockSelectionComplete?: (field: 'sheetNumber' | 'sheetName', selectionBox: SelectionBox, pageNumber: number) => void;
   /** Hyperlink mode: draw rect to create link */

@@ -51,7 +51,10 @@ export interface UseTakeoffWorkspaceVisualSearchResult {
   autoCountCompletionResult: AutoCountCompletionResult | null;
   setAutoCountCompletionResult: (value: AutoCountCompletionResult | null) => void;
   autoCountAbortControllerRef: React.MutableRefObject<AbortController | null>;
-  handleVisualSearchComplete: (selectionBox: SelectionBox) => Promise<void>;
+  handleVisualSearchComplete: (
+    selectionBox: SelectionBox,
+    meta?: { basePageSize: { width: number; height: number } }
+  ) => Promise<void>;
 }
 
 export function useTakeoffWorkspaceVisualSearch({
@@ -90,7 +93,10 @@ export function useTakeoffWorkspaceVisualSearch({
   );
 
   const handleVisualSearchComplete = useCallback(
-    async (box: SelectionBox) => {
+    async (
+      box: SelectionBox,
+      meta?: { basePageSize: { width: number; height: number } }
+    ) => {
       setVisualSearchLoading(true);
 
       if (!visualSearchCondition) {
@@ -162,7 +168,8 @@ export function useTakeoffWorkspaceVisualSearch({
             searchOptions,
             searchScope as 'current-page' | 'entire-document' | 'entire-project',
             onProgress,
-            abortController.signal
+            abortController.signal,
+            meta?.basePageSize
           );
         } finally {
           autoCountAbortControllerRef.current = null;

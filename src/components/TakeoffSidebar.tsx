@@ -127,15 +127,16 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
       (a.name ?? '').localeCompare(b.name ?? '', undefined, { numeric: true, sensitivity: 'base' })
     );
 
-  // Load match thumbnails for auto-count (visual-search) conditions
+  // Load match thumbnails for auto-count conditions (DB type is auto-count; legacy was visual-search)
   useEffect(() => {
     if (!projectId) return;
 
     const loadThumbnails = async () => {
       const visualSearchConditions = filteredConditions.filter(
-        c => (c.type as string) === 'visual-search' && 
-        !loadingThumbnails.has(c.id) &&
-        !matchThumbnails[c.id]
+        (c) =>
+          c.type === 'auto-count' &&
+          !loadingThumbnails.has(c.id) &&
+          !matchThumbnails[c.id]
       );
 
       // Load thumbnails for each condition
