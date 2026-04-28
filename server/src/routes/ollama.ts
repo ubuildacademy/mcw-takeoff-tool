@@ -83,7 +83,7 @@ router.post('/chat', requireAuth, aiChatBurstRateLimit, async (req, res) => {
       : null;
     const lastUserText = typeof lastUser?.content === 'string' ? lastUser.content : '';
     const guard = evaluateAiChatGuardrails(lastUserText);
-    if (!guard.allowed) {
+    if ('reason' in guard) {
       return res.status(422).json({ error: guard.reason });
     }
 
@@ -101,7 +101,7 @@ router.post('/chat', requireAuth, aiChatBurstRateLimit, async (req, res) => {
     res.setHeader('X-AI-Daily-Remaining', quota.remaining);
     res.setHeader('X-AI-Daily-Reset', quota.resetAtEpochSeconds);
 
-    if (!quota.allowed) {
+    if ('retryAfterSeconds' in quota) {
       res.setHeader('Retry-After', quota.retryAfterSeconds);
       return res.status(429).json({
         error: 'Daily AI chat limit reached. Please try again later.',
