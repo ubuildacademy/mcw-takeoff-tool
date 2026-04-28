@@ -65,7 +65,11 @@ router.get('/models', async (req, res) => {
 });
 
 // Chat endpoint
-router.post('/chat', requireAuth, aiChatBurstRateLimit, async (req, res) => {
+router.post('/chat', requireAuth, (req, res, next) => {
+  // Admins should not be rate-limited by the app; rely on upstream Ollama limits.
+  if (req.user?.role === 'admin') return next();
+  return aiChatBurstRateLimit(req, res, next);
+}, async (req, res) => {
   try {
     const { model, messages, stream, options } = req.body;
 
@@ -87,26 +91,28 @@ router.post('/chat', requireAuth, aiChatBurstRateLimit, async (req, res) => {
       return res.status(422).json({ error: guard.reason });
     }
 
-    // Daily quota (request-count). Admins get a higher limit by default.
+    // Daily quota (request-count). Admins bypass app-enforced limits entirely.
     const user = req.user!;
     const isAdmin = user.role === 'admin';
-    const dailyLimit = isAdmin ? 200 : 40;
-    const quota = await checkAndIncrementAiChatDailyQuota({
-      userId: user.id,
-      limitPerDay: dailyLimit,
-      bypass: false,
-    });
-
-    res.setHeader('X-AI-Daily-Limit', quota.limit);
-    res.setHeader('X-AI-Daily-Remaining', quota.remaining);
-    res.setHeader('X-AI-Daily-Reset', quota.resetAtEpochSeconds);
-
-    if ('retryAfterSeconds' in quota) {
-      res.setHeader('Retry-After', quota.retryAfterSeconds);
-      return res.status(429).json({
-        error: 'Daily AI chat limit reached. Please try again later.',
-        retryAfter: quota.retryAfterSeconds,
+    if (!isAdmin) {
+      const dailyLimit = 40;
+      const quota = await checkAndIncrementAiChatDailyQuota({
+        userId: user.id,
+        limitPerDay: dailyLimit,
+        bypass: false,
       });
+
+      res.setHeader('X-AI-Daily-Limit', quota.limit);
+      res.setHeader('X-AI-Daily-Remaining', quota.remaining);
+      res.setHeader('X-AI-Daily-Reset', quota.resetAtEpochSeconds);
+
+      if ('retryAfterSeconds' in quota) {
+        res.setHeader('Retry-After', quota.retryAfterSeconds);
+        return res.status(429).json({
+          error: 'Daily AI chat limit reached. Please try again later.',
+          retryAfter: quota.retryAfterSeconds,
+        });
+      }
     }
 
     if (stream) {

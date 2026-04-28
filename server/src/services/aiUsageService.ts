@@ -4,6 +4,9 @@ export type AiDailyQuotaResult =
   | { allowed: true; limit: number; remaining: number; resetAtEpochSeconds: number }
   | { allowed: false; limit: number; remaining: 0; resetAtEpochSeconds: number; retryAfterSeconds: number };
 
+type FallbackEntry = { count: number; resetAtEpochSeconds: number };
+const fallbackStore = new Map<string, FallbackEntry>();
+
 function startOfTodayUtcDate(): string {
   const now = new Date();
   const yyyy = now.getUTCFullYear();
@@ -44,14 +47,35 @@ export async function checkAndIncrementAiChatDailyQuota(params: {
   });
 
   if (error) {
-    // Fail closed to protect usage limits if quota infrastructure breaks.
-    // Return a 429-friendly response to avoid burning upstream usage unexpectedly.
+    // If the DB/RPC isn't deployed yet (or transiently unavailable), fall back to an
+    // in-memory daily counter so we don't hard-block legit users immediately.
+    const key = `${userId}:${day}`;
+    const existing = fallbackStore.get(key);
+    const entry =
+      existing && existing.resetAtEpochSeconds === resetAtEpochSeconds
+        ? existing
+        : { count: 0, resetAtEpochSeconds };
+
+    entry.count += 1;
+    fallbackStore.set(key, entry);
+
+    const remaining = Math.max(0, limitPerDay - entry.count);
+    if (entry.count > limitPerDay) {
+      const nowEpochSeconds = Math.floor(Date.now() / 1000);
+      return {
+        allowed: false,
+        limit: limitPerDay,
+        remaining: 0,
+        resetAtEpochSeconds,
+        retryAfterSeconds: Math.max(1, resetAtEpochSeconds - nowEpochSeconds),
+      };
+    }
+
     return {
-      allowed: false,
+      allowed: true,
       limit: limitPerDay,
-      remaining: 0,
+      remaining,
       resetAtEpochSeconds,
-      retryAfterSeconds: Math.max(1, resetAtEpochSeconds - Math.floor(Date.now() / 1000)),
     };
   }
 
