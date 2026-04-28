@@ -21,7 +21,20 @@ const LoginPage: React.FC = () => {
     setError('');
 
     try {
-      const { error } = await authHelpers.signInViaProxy(email, password);
+      // Prefer direct Supabase auth (ensures we're authenticating against the same project
+      // as the rest of the frontend). Fall back to proxy only for network/CORS issues.
+      const direct = await authHelpers.signIn(email, password);
+      let error = direct.error as unknown;
+
+      const isLikelyNetworkOrCors =
+        !!direct.error &&
+        typeof (direct.error as any)?.message === 'string' &&
+        /(failed to fetch|network|cors|fetch)/i.test((direct.error as any).message);
+
+      if (direct.error && isLikelyNetworkOrCors) {
+        const proxy = await authHelpers.signInViaProxy(email, password);
+        error = proxy.error as unknown;
+      }
 
       if (error) {
         setError((error as { message?: string })?.message ?? 'An error occurred');

@@ -105,6 +105,30 @@ export const apiClient = axios.create({
   },
 });
 
+function makeRequestId(): string {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+}
+
+// Attach a correlation id so server logs/errors can be traced end-to-end.
+apiClient.interceptors.request.use((config) => {
+  if (!config.headers) {
+    // Axios types allow multiple header shapes; keep this assignment explicit.
+    config.headers = {} as any;
+  }
+  const headers = config.headers as any;
+  const existing =
+    headers['X-Request-Id'] ??
+    headers['x-request-id'];
+  if (!existing) {
+    headers['X-Request-Id'] = makeRequestId();
+  }
+  return config;
+});
+
 // Attach session token to all API requests; refresh if missing or expired so 401s are avoided.
 // If no session yet (e.g. Supabase still restoring from storage), wait briefly and retry once.
 apiClient.interceptors.request.use(
@@ -127,6 +151,27 @@ apiClient.interceptors.request.use(
     return config;
   },
   (error) => Promise.reject(error)
+);
+
+// Surface request ids from server responses in dev for faster debugging.
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (import.meta.env.DEV) {
+      const requestIdFromHeader = error?.response?.headers?.['x-request-id'];
+      const requestIdFromBody = error?.response?.data?.error?.requestId;
+      const requestId = requestIdFromBody || requestIdFromHeader;
+      if (requestId) {
+        console.warn('[api] request failed', {
+          url: error?.config?.url,
+          method: error?.config?.method,
+          status: error?.response?.status,
+          requestId,
+        });
+      }
+    }
+    return Promise.reject(error);
+  }
 );
 
 // On 401: retry once after refreshing session; then handle other errors

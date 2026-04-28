@@ -5,7 +5,7 @@ import fs from 'fs-extra';
 import { v4 as uuidv4 } from 'uuid';
 import { storage, StoredFileMeta } from '../storage';
 import { supabase, TABLES } from '../supabase';
-import { requireAuth, isAdmin, hasProjectAccess, validateUUIDParam } from '../middleware';
+import { requireAuth, isAdmin, hasProjectAccess, validateUUIDParam, isValidUUIDAnyVersion } from '../middleware';
 import { triggerOCRForDocument } from './ocr';
 
 const router = express.Router();
@@ -76,15 +76,19 @@ const handleUpload = async (req: express.Request, res: express.Response, next: e
 
 router.post('/upload', requireAuth, handleUpload, async (req, res) => {
   try {
-    console.log('=== FILE UPLOAD REQUEST ===');
-    console.log('Request body:', req.body);
-    console.log('Request file:', req.file);
-    console.log('File mimetype:', req.file?.mimetype);
-    console.log('File originalname:', req.file?.originalname);
-    console.log('File size:', req.file?.size);
+    const isProd = process.env.NODE_ENV === 'production';
+    const requestId = (req as any).requestId as string | undefined;
+    if (!isProd) {
+      console.log('[Upload] start', {
+        requestId,
+        hasFile: !!req.file,
+        mimetype: req.file?.mimetype,
+        originalname: req.file?.originalname,
+        size: req.file?.size,
+      });
+    }
     
     if (!req.file) {
-      console.log('ERROR: No file uploaded');
       return res.status(400).json({ error: 'No file uploaded' });
     }
     
@@ -103,18 +107,18 @@ router.post('/upload', requireAuth, handleUpload, async (req, res) => {
     }
     
     const projectId = (req.body.projectId as string) || 'default';
-    console.log('Project ID:', projectId);
+    if (projectId !== 'default' && !isValidUUIDAnyVersion(projectId)) {
+      return res.status(400).json({ error: 'Invalid projectId' });
+    }
     
     // Read file into buffer
     const fileBuffer = fs.readFileSync(req.file.path);
     
     // Additional PDF validation
     if (req.file.mimetype === 'application/pdf') {
-      console.log('PDF file detected, checking structure...');
       const header = fileBuffer.toString('ascii', 0, 10);
       
       if (!header.startsWith('%PDF')) {
-        console.log('ERROR: Invalid PDF header - file may be corrupted');
         // Clean up temp file
         fs.removeSync(req.file.path);
         return res.status(400).json({ 
@@ -127,7 +131,6 @@ router.post('/upload', requireAuth, handleUpload, async (req, res) => {
           }
         });
       }
-      console.log('PDF header validation passed');
     }
 
     // Generate unique filename for Supabase Storage
@@ -135,7 +138,7 @@ router.post('/upload', requireAuth, handleUpload, async (req, res) => {
     const fileExtension = path.extname(req.file.originalname);
     const storagePath = `${projectId}/${fileId}${fileExtension}`;
     
-    console.log('Uploading to Supabase Storage:', storagePath);
+    if (!isProd) console.log('[Upload] storage upload', { requestId, storagePath });
     
     // Upload to Supabase Storage bucket (assuming bucket name is 'project-files')
     const { data: uploadData, error: uploadError } = await supabase.storage
@@ -170,7 +173,7 @@ router.post('/upload', requireAuth, handleUpload, async (req, res) => {
       });
     }
     
-    console.log('File uploaded to Supabase Storage successfully');
+    if (!isProd) console.log('[Upload] storage upload ok', { requestId });
 
     const fileMeta: StoredFileMeta = {
       id: fileId,
@@ -183,12 +186,11 @@ router.post('/upload', requireAuth, handleUpload, async (req, res) => {
       uploadedAt: new Date().toISOString()
     };
     
-    console.log('File metadata created:', fileMeta);
+    if (!isProd) console.log('[Upload] file meta created', { requestId, fileId, projectId, size: fileMeta.size, mimetype: fileMeta.mimetype });
 
     const savedFile = await storage.saveFile(fileMeta);
     
-    console.log('File saved to storage successfully');
-    console.log('File saved:', savedFile);
+    if (!isProd) console.log('[Upload] saved file record', { requestId, fileId: savedFile.id });
 
     // Server-side OCR so every upload gets text search / AI, even if the browser skips the client kick.
     if (savedFile.mimetype === 'application/pdf' && projectId && projectId !== 'default') {

@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFPageProxy, PageViewport } from 'pdfjs-dist';
 import { useProjectStore } from '../store/slices/projectSlice';
 import { useConditionStore } from '../store/slices/conditionSlice';
@@ -65,9 +64,6 @@ import {
   measurementDrawModeForCondition,
 } from '../utils/takeoffMeasurementLookup';
 import { setRestoreScrollPosition, setGetCurrentScrollPosition, setTriggerCalibration, setTriggerFitToWindow } from '../lib/windowBridge';
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
-pdfjsLib.GlobalWorkerOptions.workerPort = null;
 
 /** Normalized offset for pasted markups (~2% of page) so pasted markup is visible next to original */
 const _PASTE_OFFSET = 0.02;
@@ -1923,7 +1919,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       });
       
       // Calculate outputScale for crisp rendering
-      const outputScale = window.devicePixelRatio || 1;
+      const outputScale = Math.min(window.devicePixelRatio || 1, 2);
       
       // Update canvas and SVG dimensions with page-specific data
       updateCanvasDimensions(pageNum, viewport, outputScale, page);
@@ -2655,7 +2651,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         
         // Set viewport and page ref immediately so overlay can draw
         pdfPageRef.current = page;
-        const outputScale = window.devicePixelRatio || 1;
+        const outputScale = Math.min(window.devicePixelRatio || 1, 2);
         
         // Update canvas/SVG dimensions and viewport state
         if (pdfCanvasRef.current && svgOverlayRef.current) {
@@ -2720,7 +2716,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         if (cancelled || currentPageRef.current !== pageToFetch) return;
         
         pdfPageRef.current = page;
-        const outputScale = window.devicePixelRatio || 1;
+        const outputScale = Math.min(window.devicePixelRatio || 1, 2);
         
         if (svgOverlayRef.current) {
           svgOverlayRef.current.setAttribute('width', viewport.width.toString());

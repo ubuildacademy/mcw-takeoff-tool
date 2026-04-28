@@ -65,6 +65,26 @@ export interface OllamaStreamResponse {
   eval_duration?: number;
 }
 
+export type OllamaQuotaInfo = {
+  dailyLimit?: number;
+  dailyRemaining?: number;
+  dailyResetEpochSeconds?: number;
+};
+
+class OllamaHttpError extends Error {
+  status: number;
+  retryAfterSeconds?: number;
+  quota?: OllamaQuotaInfo;
+
+  constructor(message: string, params: { status: number; retryAfterSeconds?: number; quota?: OllamaQuotaInfo }) {
+    super(message);
+    this.name = 'OllamaHttpError';
+    this.status = params.status;
+    this.retryAfterSeconds = params.retryAfterSeconds;
+    this.quota = params.quota;
+  }
+}
+
 class OllamaService {
   private apiKey: string;
   private defaultModel: string = 'gpt-oss:120b'; // Default to largest GPT-OSS model available
@@ -73,6 +93,8 @@ class OllamaService {
   private retryDelay: number = 1000; // Used by chatStream retries
   /** Last error message from server (e.g. "Ollama API key not configured") for UI display */
   private lastErrorMessage: string | null = null;
+  /** Last seen quota headers for UI display */
+  private lastQuotaInfo: OllamaQuotaInfo | null = null;
 
   constructor() {
     this.apiKey = import.meta.env.VITE_OLLAMA_API_KEY || '';
@@ -126,6 +148,10 @@ class OllamaService {
   /** Server error message when unavailable (e.g. "Ollama API key not configured") for UI */
   getLastErrorMessage(): string | null {
     return this.lastErrorMessage;
+  }
+
+  getLastQuotaInfo(): OllamaQuotaInfo | null {
+    return this.lastQuotaInfo;
   }
 
   private delay(ms: number): Promise<void> {
@@ -201,8 +227,35 @@ class OllamaService {
           })
         });
 
+        const quotaFromHeaders: OllamaQuotaInfo = {
+          dailyLimit: Number(response.headers.get('X-AI-Daily-Limit') || undefined),
+          dailyRemaining: Number(response.headers.get('X-AI-Daily-Remaining') || undefined),
+          dailyResetEpochSeconds: Number(response.headers.get('X-AI-Daily-Reset') || undefined),
+        };
+        // Normalize NaN to undefined
+        for (const k of Object.keys(quotaFromHeaders) as Array<keyof OllamaQuotaInfo>) {
+          if (quotaFromHeaders[k] != null && !Number.isFinite(quotaFromHeaders[k])) {
+            delete quotaFromHeaders[k];
+          }
+        }
+        this.lastQuotaInfo = quotaFromHeaders;
+
         if (!response.ok) {
-          throw new Error(`Ollama API error: ${response.statusText}`);
+          let body: any = null;
+          try {
+            body = await response.json();
+          } catch {
+            // ignore
+          }
+          const retryAfterHeader = response.headers.get('Retry-After');
+          const retryAfterSeconds =
+            (body && typeof body.retryAfter === 'number' ? body.retryAfter : undefined) ??
+            (retryAfterHeader ? Number(retryAfterHeader) : undefined);
+          const message =
+            (body && typeof body.error === 'string' ? body.error : null) ||
+            `Ollama API error (${response.status})`;
+          this.lastErrorMessage = message;
+          throw new OllamaHttpError(message, { status: response.status, retryAfterSeconds, quota: quotaFromHeaders });
         }
 
         const reader = response.body?.getReader();
@@ -270,6 +323,11 @@ class OllamaService {
         console.error(`Error in streaming chat (attempt ${retryCount + 1}/${maxStreamRetries + 1}):`, error);
         this.isConnected = false;
         this.connectionRetries++;
+
+        // Do not retry on explicit quota/rate limit blocks.
+        if (error instanceof OllamaHttpError && (error.status === 429 || error.status === 422)) {
+          throw error;
+        }
 
         if (retryCount < maxStreamRetries) {
           console.warn('Retrying streaming chat...');

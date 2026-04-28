@@ -19,11 +19,7 @@ import { toast } from 'sonner';
 import { useSheetSidebarFilter, useSheetSidebarSheetEditing, SheetSidebarHeader, SheetSidebarDialogs } from './sheet-sidebar';
 import { fileService, sheetService } from '../services/apiService';
 import { useMeasurementStore } from '../store/slices/measurementSlice';
-import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFDocument, SearchResult } from '../types';
-
-// Configure PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
 // PDFPage and PDFDocument interfaces imported from shared types
 

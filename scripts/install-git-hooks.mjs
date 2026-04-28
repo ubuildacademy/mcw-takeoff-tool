@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Installs Git hooks from scripts/githooks/ into .git/hooks/ so CI/Vercel
- * failures are caught before push. Runs on npm install (prepare script).
+ * Installs Git hooks from scripts/githooks/ into .git/hooks/.
+ * Runs on npm install (prepare script).
  */
-import { chmod, copyFile, mkdir, access } from 'fs/promises';
+import { chmod, copyFile, mkdir, access, readdir } from 'fs/promises';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -25,15 +25,31 @@ async function main() {
   if (!(await exists(join(repoRoot, '.git')))) {
     return; // not a git repo (e.g. npm pack)
   }
-  const prePushSrc = join(hooksSrc, 'pre-push');
-  if (!(await exists(prePushSrc))) {
+
+  await mkdir(hooksDest, { recursive: true });
+
+  if (!(await exists(hooksSrc))) {
     return;
   }
-  await mkdir(hooksDest, { recursive: true });
-  const prePushDest = join(hooksDest, 'pre-push');
-  await copyFile(prePushSrc, prePushDest);
-  await chmod(prePushDest, 0o755);
-  console.log('Git hooks installed (pre-push: typecheck + build).');
+
+  const entries = await readdir(hooksSrc, { withFileTypes: true });
+  const hookFiles = entries
+    .filter((e) => e.isFile())
+    .map((e) => e.name)
+    .filter((name) => !name.startsWith('.'));
+
+  if (hookFiles.length === 0) {
+    return;
+  }
+
+  for (const name of hookFiles) {
+    const src = join(hooksSrc, name);
+    const dest = join(hooksDest, name);
+    await copyFile(src, dest);
+    await chmod(dest, 0o755);
+  }
+
+  console.log(`Git hooks installed: ${hookFiles.join(', ')}`);
 }
 
 main().catch((err) => {

@@ -1,9 +1,5 @@
 import Tesseract from 'tesseract.js';
-import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFDocumentProxy, PDFPageProxy, PageViewport } from 'pdfjs-dist';
-
-// Configure PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
 /** Verbose OCR tracing; silent in production builds. */
 function ocrDevLog(...args: unknown[]): void {
@@ -55,6 +51,25 @@ class OCRService {
   private isInitialized = false;
   private processingQueue: Map<string, Promise<DocumentOCRData>> = new Map();
   private completedOCR: Map<string, DocumentOCRData> = new Map();
+
+  private async canvasToImageInput(canvas: HTMLCanvasElement): Promise<Blob | string> {
+    const blob: Blob | null = await new Promise((resolve) =>
+      canvas.toBlob(resolve, 'image/png')
+    );
+    if (blob) return blob;
+    // Fallback (older browsers / rare failures) — keep behavior compatible.
+    return canvas.toDataURL('image/png', 1.0);
+  }
+
+  private getCappedScale(page: PDFPageProxy, desiredScale: number): number {
+    // Rough pixel budget to avoid huge canvases (memory spikes / main-thread stalls).
+    const maxPixels = 12_000_000; // ~12MP
+    const base = page.getViewport({ scale: 1.0 });
+    const desiredPixels = base.width * base.height * desiredScale * desiredScale;
+    if (desiredPixels <= maxPixels) return desiredScale;
+    const capped = Math.sqrt(maxPixels / (base.width * base.height));
+    return Math.max(1.0, Math.min(desiredScale, capped));
+  }
 
   // Initialize Tesseract worker (lazy initialization)
   private async initializeWorker(): Promise<void> {
@@ -119,11 +134,11 @@ class OCRService {
         throw new Error('Invalid canvas: width or height is 0');
       }
       
-      // Convert canvas to high-quality image data
-      const imageData = canvas.toDataURL('image/png', 1.0);
+      // Convert canvas to an image input without huge base64 strings
+      const imageInput = await this.canvasToImageInput(canvas);
       
       // Validate image data
-      if (!imageData || imageData.length < 100) {
+      if (!imageInput || (typeof imageInput === 'string' && imageInput.length < 100)) {
         throw new Error('Invalid image data generated from canvas');
       }
       
@@ -145,7 +160,7 @@ class OCRService {
       });
 
       // Perform OCR recognition
-      const { data } = await this.worker.recognize(imageData);
+      const { data } = await this.worker.recognize(imageInput);
       
       const processingTime = Date.now() - startTime;
       
@@ -208,6 +223,9 @@ class OCRService {
       // Load PDF document with comprehensive error handling
       ocrDevLog(`📥 Loading PDF from: ${pdfUrl}`);
       
+      const { getPdfjs } = await import('../lib/pdfjs');
+      const pdfjsLib = await getPdfjs();
+
       const pdf = await pdfjsLib.getDocument({
         url: pdfUrl,
         httpHeaders: {
@@ -367,7 +385,8 @@ class OCRService {
 
   // Process full page with high resolution
   private async processFullPage(page: PDFPageProxy, pageNumber: number): Promise<OCRResult> {
-    const viewport = page.getViewport({ scale: 4.0 }); // Very high resolution
+    const scale = this.getCappedScale(page, 4.0);
+    const viewport = page.getViewport({ scale });
     
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d');
@@ -401,7 +420,8 @@ class OCRService {
 
   // Process page in quadrants for better text detection
   private async processPageQuadrants(page: PDFPageProxy, pageNumber: number): Promise<OCRResult> {
-    const baseViewport = page.getViewport({ scale: 6.0 }); // Even higher resolution for quadrants
+    const scale = this.getCappedScale(page, 6.0);
+    const baseViewport = page.getViewport({ scale });
     const quadrantWidth = baseViewport.width / 2;
     const quadrantHeight = baseViewport.height / 2;
     
@@ -454,7 +474,7 @@ class OCRService {
   ): Promise<OCRResult> {
     // Create a high-resolution viewport for this quadrant
     const quadrantViewport = page.getViewport({ 
-      scale: 6.0,
+      scale: baseViewport.scale,
       offsetX: offsetX,
       offsetY: offsetY
     });
@@ -499,7 +519,7 @@ class OCRService {
 
     try {
       // Convert to high-quality image
-      const imageData = canvas.toDataURL('image/png', 1.0);
+      const imageInput = await this.canvasToImageInput(canvas);
       
       // Set specialized parameters for architectural drawings
       await this.worker.setParameters({
@@ -515,7 +535,7 @@ class OCRService {
         textord_min_linesize: '2.5',
       });
 
-      const { data } = await this.worker.recognize(imageData);
+      const { data } = await this.worker.recognize(imageInput);
       
       ocrDevLog(`📄 Quadrant ${quadrantNumber || 'full'} OCR result:`, {
         hasText: !!data.text,

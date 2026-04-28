@@ -17,7 +17,8 @@ export {
   generousRateLimit,
   uploadRateLimit,
   sendReportRateLimit,
-  shareProjectRateLimit
+  shareProjectRateLimit,
+  aiChatBurstRateLimit
 } from './rateLimit';
 
 // Validation middleware

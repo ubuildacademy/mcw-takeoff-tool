@@ -111,65 +111,109 @@ export const supabaseService = {
       user_name: undefined
     }));
 
-    // Attach takeoff/condition counts and computed total value per project (from conditions + measurements)
-    const projectsWithCounts = await Promise.all(
-      baseProjects.map(async (project) => {
-        try {
-          const [conditionsDataRes, measurementsDataRes] = await Promise.all([
-            supabase
-              .from('takeoff_conditions')
-              .select('id, material_cost, equipment_cost, waste_factor')
-              .eq('project_id', project.id),
-            supabase
-              .from('takeoff_measurements')
-              .select('condition_id, calculated_value, net_calculated_value')
-              .eq('project_id', project.id)
-          ]);
-          const conditions = (conditionsDataRes.data ?? []) as Array<{ id: string; material_cost: number | null; equipment_cost?: number | null; waste_factor?: number }>;
-          const measurements = (measurementsDataRes.data ?? []) as Array<{ condition_id: string; calculated_value: number; net_calculated_value: number | null }>;
-          const conditionCount = conditions.length;
-          const takeoffCount = measurements.length;
+    // Batch-fetch conditions + measurements to avoid N+1 queries (scales with projects list size)
+    const projectIds = baseProjects.map((p) => p.id);
+    if (projectIds.length === 0) return [];
 
-          // Compute project total cost (same formula as measurementSlice getProjectCostBreakdown)
-          const profitMarginPercent = (project as { profit_margin_percent?: number }).profit_margin_percent ?? 15;
-          let subtotal = 0;
-          for (const cond of conditions) {
-            const materialCostPerUnit = cond.material_cost ?? 0;
-            const equipmentCost = cond.equipment_cost ?? 0;
-            const wasteFactor = cond.waste_factor ?? 0;
-            const conditionMeasurements = measurements.filter((m) => m.condition_id === cond.id);
-            const quantity = conditionMeasurements.reduce((sum, m) => {
-              const value = m.net_calculated_value != null ? m.net_calculated_value : m.calculated_value;
-              return sum + (value ?? 0);
-            }, 0);
-            const adjustedQuantity = quantity * (1 + wasteFactor / 100);
-            const materialCost = adjustedQuantity * materialCostPerUnit;
-            const wasteCost = (adjustedQuantity - quantity) * materialCostPerUnit;
-            subtotal += materialCost + equipmentCost + wasteCost;
-          }
-          const profitMarginAmount = subtotal * (profitMarginPercent / 100);
-          const totalCost = Math.round((subtotal + profitMarginAmount) * 100) / 100;
+    const [conditionsDataRes, measurementsDataRes] = await Promise.all([
+      supabase
+        .from('takeoff_conditions')
+        .select('project_id, id, material_cost, equipment_cost, waste_factor')
+        .in('project_id', projectIds),
+      supabase
+        .from('takeoff_measurements')
+        .select('project_id, condition_id, calculated_value, net_calculated_value')
+        .in('project_id', projectIds),
+    ]);
 
-          return {
-            ...project,
-            takeoff_count: undefined,
-            takeoffCount: takeoffCount || 0,
-            conditionCount: conditionCount || 0,
-            totalValue: totalCost,
-            profitMarginPercent: profitMarginPercent
-          } as ProjectWithCounts;
-        } catch (e) {
-          console.warn('Failed to load counts/total for project', project.id, e);
-          return {
-            ...project,
-            takeoffCount: 0,
-            conditionCount: 0,
-            totalValue: 0,
-            profitMarginPercent: (project as { profit_margin_percent?: number }).profit_margin_percent ?? 15
-          } as ProjectWithCounts;
+    if (conditionsDataRes.error) {
+      console.warn('Error fetching project conditions (batched):', conditionsDataRes.error);
+    }
+    if (measurementsDataRes.error) {
+      console.warn('Error fetching project measurements (batched):', measurementsDataRes.error);
+    }
+
+    type ConditionRow = {
+      project_id: string;
+      id: string;
+      material_cost: number | null;
+      equipment_cost: number | null;
+      waste_factor: number | null;
+    };
+    const conditionsByProject = new Map<string, ConditionRow[]>();
+    for (const row of (conditionsDataRes.data ?? []) as ConditionRow[]) {
+      const list = conditionsByProject.get(row.project_id) ?? [];
+      list.push(row);
+      conditionsByProject.set(row.project_id, list);
+    }
+
+    type MeasurementRow = {
+      project_id: string;
+      condition_id: string;
+      calculated_value: number;
+      net_calculated_value: number | null;
+    };
+    const measurementsByProject = new Map<string, MeasurementRow[]>();
+    for (const row of (measurementsDataRes.data ?? []) as MeasurementRow[]) {
+      const list = measurementsByProject.get(row.project_id) ?? [];
+      list.push(row);
+      measurementsByProject.set(row.project_id, list);
+    }
+
+    const projectsWithCounts = baseProjects.map((project) => {
+      try {
+        const conditions = conditionsByProject.get(project.id) ?? [];
+        const measurements = measurementsByProject.get(project.id) ?? [];
+        const conditionCount = conditions.length;
+        const takeoffCount = measurements.length;
+
+        // Index measurements by condition_id to avoid repeated filters
+        const measurementsByCondition = new Map<string, MeasurementRow[]>();
+        for (const m of measurements) {
+          const list = measurementsByCondition.get(m.condition_id) ?? [];
+          list.push(m);
+          measurementsByCondition.set(m.condition_id, list);
         }
-      })
-    );
+
+        // Compute project total cost (same formula as measurementSlice getProjectCostBreakdown)
+        const profitMarginPercent = (project as { profit_margin_percent?: number }).profit_margin_percent ?? 15;
+        let subtotal = 0;
+        for (const cond of conditions) {
+          const materialCostPerUnit = cond.material_cost ?? 0;
+          const equipmentCost = cond.equipment_cost ?? 0;
+          const wasteFactor = cond.waste_factor ?? 0;
+          const conditionMeasurements = measurementsByCondition.get(cond.id) ?? [];
+          const quantity = conditionMeasurements.reduce((sum, m) => {
+            const value = m.net_calculated_value != null ? m.net_calculated_value : m.calculated_value;
+            return sum + (value ?? 0);
+          }, 0);
+          const adjustedQuantity = quantity * (1 + wasteFactor / 100);
+          const materialCost = adjustedQuantity * materialCostPerUnit;
+          const wasteCost = (adjustedQuantity - quantity) * materialCostPerUnit;
+          subtotal += materialCost + equipmentCost + wasteCost;
+        }
+        const profitMarginAmount = subtotal * (profitMarginPercent / 100);
+        const totalCost = Math.round((subtotal + profitMarginAmount) * 100) / 100;
+
+        return {
+          ...project,
+          takeoff_count: undefined,
+          takeoffCount: takeoffCount || 0,
+          conditionCount: conditionCount || 0,
+          totalValue: totalCost,
+          profitMarginPercent: profitMarginPercent,
+        } as ProjectWithCounts;
+      } catch (e) {
+        console.warn('Failed to compute counts/total for project', project.id, e);
+        return {
+          ...project,
+          takeoffCount: 0,
+          conditionCount: 0,
+          totalValue: 0,
+          profitMarginPercent: (project as { profit_margin_percent?: number }).profit_margin_percent ?? 15,
+        } as ProjectWithCounts;
+      }
+    });
 
     return projectsWithCounts;
   },

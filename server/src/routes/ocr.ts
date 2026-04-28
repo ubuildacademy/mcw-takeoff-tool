@@ -172,10 +172,14 @@ router.get('/search/:documentId', requireAuth, validateUUIDParam('documentId'), 
       // Search OCR results using the simple OCR service
       const searchResults = await simpleOcrService.searchOCRResults(projectId, documentId, trimmedQuery);
       
-      console.log(`🔍 Raw search results from database:`, searchResults.map((r: { page_number?: number; text_content?: string | null }) => ({
-        page_number: r.page_number,
-        text_preview: (typeof r.text_content === 'string' ? r.text_content : '').substring(0, 50),
-      })));
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('OCR search: db results', {
+          projectId,
+          documentId,
+          query: trimmedQuery,
+          count: searchResults.length,
+        });
+      }
 
     // Format results for frontend
     const formattedResults = searchResults.map((result: { page_number?: number; text_content?: string | null; confidence_score?: number; processing_method?: string; processing_time_ms?: number }) => {

@@ -15,6 +15,18 @@ build/
 .env.development.local
 .env.test.local
 .env.production.local
+server/.env
+
+# Common secret artifacts (never commit)
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+**/credentials*.json
+**/*secret*.json
+**/*private*.json
 
 # IDE files
 .vscode/
@@ -27,6 +39,10 @@ build/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Generated PDF.js assets (copied from node_modules by scripts/copy-pdf-worker.mjs)
+public/pdf.worker.min.mjs
+public/cmaps/
 
 # Logs
 logs

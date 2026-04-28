@@ -143,11 +143,20 @@ export function logEmailConfigStatus(): void {
 }
 
 const logInvitationFallback = (data: InvitationEmailData) => {
+  const redactInviteUrl = (inviteUrl: string): string => {
+    try {
+      const u = new URL(inviteUrl);
+      // Never log bearer-style tokens; keep only host + path for troubleshooting.
+      return `${u.origin}${u.pathname}`;
+    } catch {
+      return '(redacted)';
+    }
+  };
   console.log('📧 INVITATION EMAIL (Email not configured - not sent):');
   console.log('=====================================');
   console.log(`To: ${data.email}`);
   console.log(`Role: ${data.role}`);
-  console.log(`Invite URL: ${data.inviteUrl}`);
+  console.log(`Invite URL: ${redactInviteUrl(data.inviteUrl)} (token redacted)`);
   console.log(`Invited by: ${data.invitedBy}`);
   console.log(`Expires: ${data.expiresAt}`);
   console.log('=====================================');

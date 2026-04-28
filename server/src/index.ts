@@ -1,6 +1,7 @@
 /** Meridian Takeoff API server */
 import dotenv from 'dotenv';
 import path from 'path';
+import crypto from 'crypto';
 
 // Load .env from server directory so the key is always found (not dependent on process.cwd())
 dotenv.config({ path: path.join(__dirname, '..', '.env') });
@@ -41,37 +42,6 @@ const PORT = parseInt(process.env.PORT || '4000', 10);
 // CORS configuration - define before middleware
 const isProduction = process.env.NODE_ENV === 'production';
 
-// CRITICAL: Handle OPTIONS FIRST - before any other middleware is registered
-// Express processes middleware in order, so this MUST be first to catch preflight
-// Railway's Caddy edge intercepts OPTIONS, so this needs to be extremely early
-app.use((req, res, next) => {
-  if (req.method === 'OPTIONS') {
-    // Only log in development to reduce production log noise
-    if (!isProduction) {
-      console.log('🚨 OPTIONS PREFLIGHT CAUGHT:', req.path, 'Origin:', req.headers.origin || 'none');
-    }
-    // Set CORS headers immediately - allow all origins temporarily for testing
-    const origin = req.headers.origin;
-    
-    // Always set CORS headers for OPTIONS to allow preflight
-    if (origin) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-    } else {
-      res.setHeader('Access-Control-Allow-Origin', '*');
-    }
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-    res.setHeader(
-      'Access-Control-Allow-Headers',
-      'Content-Type, Authorization, X-Requested-With, Cache-Control, Pragma'
-    );
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Max-Age', '86400');
-    
-    return res.status(204).end(); // Use end() instead of send() for OPTIONS
-  }
-  next();
-});
-
 // CORS configuration - allow Vercel deployments
 const allowedOrigins = isProduction
   ? [
@@ -86,10 +56,46 @@ const allowedOrigins = isProduction
     ]
   : true; // Allow all origins in development
 
-// Note: OPTIONS requests are already handled above, so this middleware
-// only processes non-OPTIONS requests
+function isOriginAllowed(origin: string | undefined): boolean {
+  if (!origin) return false; // no Origin header (non-browser request); don't emit CORS headers
+  if (!isProduction) return true;
+  if (typeof allowedOrigins === 'boolean') return allowedOrigins;
+  return allowedOrigins.some((allowed) => {
+    if (typeof allowed === 'string') return allowed === origin;
+    if (allowed instanceof RegExp) return allowed.test(origin);
+    return false;
+  });
+}
+
+// CRITICAL: Handle OPTIONS FIRST - before any other middleware is registered.
+// Express processes middleware in order, so this MUST be early to catch preflight.
+// Railway/Caddy edge may intercept OPTIONS, so we keep this handler but ensure it
+// enforces the same allowlist as the main cors() middleware.
 app.use((req, res, next) => {
-  next();
+  if (req.method !== 'OPTIONS') return next();
+
+  const origin = req.headers.origin;
+  const ok = isOriginAllowed(origin);
+
+  if (!isProduction) {
+    console.log('OPTIONS preflight:', req.path, 'Origin:', origin || 'none', 'Allowed:', ok);
+  }
+
+  if (!ok) {
+    return res.status(403).end();
+  }
+
+  // Never use "*" with credentials: reflect the validated origin.
+  res.setHeader('Access-Control-Allow-Origin', origin as string);
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization, X-Requested-With, X-Request-Id, Cache-Control, Pragma'
+  );
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  return res.status(204).end();
 });
 
 // Configure helmet based on environment
@@ -103,7 +109,13 @@ if (isProduction) {
   }));
 }
 
-app.use(compression());
+// Compression can buffer streaming responses (e.g. AI chat). Disable it for those routes.
+app.use(compression({
+  filter: (req, res) => {
+    if (req.path === '/api/ollama/chat') return false;
+    return compression.filter(req, res);
+  }
+}));
 
 
 // CORS configuration with explicit OPTIONS handling
@@ -111,7 +123,7 @@ app.use(cors({
   origin: allowedOrigins,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Cache-Control', 'Pragma'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Request-Id', 'Cache-Control', 'Pragma'],
   preflightContinue: false,
   optionsSuccessStatus: 204,
 }));
@@ -119,6 +131,19 @@ app.use(cors({
 // Large files should be handled via Supabase Storage directly, not through JSON
 app.use(express.json({ limit: '50mb' })); // Reduced from 5gb for free tier
 app.use(express.urlencoded({ extended: true, limit: '50mb' })); // Reduced from 5gb for free tier
+
+// Request correlation (do not log Authorization headers anywhere)
+app.use((req, res, next) => {
+  const existing = req.headers['x-request-id'];
+  const requestId =
+    typeof existing === 'string' && existing.trim().length > 0
+      ? existing.trim()
+      : crypto.randomUUID();
+
+  (req as any).requestId = requestId;
+  res.setHeader('X-Request-Id', requestId);
+  next();
+});
 
 fs.ensureDirSync(path.join(__dirname, '../uploads'));
 fs.ensureDirSync(path.join(__dirname, '../data'));
@@ -189,11 +214,14 @@ if (!isProduction) {
       res.setHeader('Access-Control-Allow-Credentials', 'true');
       return res.status(204).send();
     }
-    console.log('🔍 Debug endpoint hit:', req.method, req.path, req.headers);
+    const headers = { ...req.headers } as Record<string, unknown>;
+    if (headers.authorization) headers.authorization = '[REDACTED]';
+    if (headers.cookie) headers.cookie = '[REDACTED]';
+    console.log('🔍 Debug endpoint hit:', req.method, req.path, headers);
     res.json({
       method: req.method,
       path: req.path,
-      headers: req.headers,
+      headers,
       timestamp: new Date().toISOString()
     });
   });
@@ -261,6 +289,54 @@ app.use('/api/contact', contactRoutes);
 
 // Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
+// API 404 handler (keeps frontend SPA routing separate)
+app.use('/api', (req, res) => {
+  res.status(404).json({
+    error: {
+      code: 'NOT_FOUND',
+      message: `Unknown API route: ${req.method} ${req.path}`,
+      requestId: (req as any).requestId,
+    },
+  });
+});
+
+// Centralized error handler (must be last)
+app.use((err: any, req: any, res: any, _next: any) => {
+  const requestId = req?.requestId;
+  const status = typeof err?.status === 'number' ? err.status : typeof err?.statusCode === 'number' ? err.statusCode : 500;
+  const code = typeof err?.code === 'string' ? err.code : status >= 500 ? 'INTERNAL_SERVER_ERROR' : 'REQUEST_FAILED';
+  const message =
+    status >= 500
+      ? 'An unexpected error occurred.'
+      : typeof err?.message === 'string'
+        ? err.message
+        : 'Request failed.';
+
+  // Keep logs minimal; never include Authorization header / raw tokens.
+  if (status >= 500) {
+    console.error('API error:', {
+      requestId,
+      status,
+      code,
+      path: req?.path,
+      method: req?.method,
+      message: typeof err?.message === 'string' ? err.message : String(err),
+    });
+  } else if (!isProduction) {
+    console.warn('API request error:', {
+      requestId,
+      status,
+      code,
+      path: req?.path,
+      method: req?.method,
+      message,
+    });
+  }
+
+  if (res.headersSent) return;
+  res.status(status).json({ error: { code, message, requestId } });
+});
 
 const server = app.listen(PORT, '0.0.0.0', () => {
   logEmailConfigStatus();

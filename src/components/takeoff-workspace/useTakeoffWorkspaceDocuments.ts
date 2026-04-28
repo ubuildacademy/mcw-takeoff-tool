@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
-import * as pdfjsLib from 'pdfjs-dist';
 import { authHelpers } from '../../lib/supabase';
+import { getPdfjs } from '../../lib/pdfjs';
 import { fileService } from '../../services/apiService';
 import { useMeasurementStore } from '../../store/slices/measurementSlice';
 import type { PDFDocument, PDFPage, ProjectFile } from '../../types';
@@ -43,9 +43,21 @@ export function useTakeoffWorkspaceDocuments({
     } else {
       files = (await fileService.getProjectFiles(projectId)).files || [];
     }
-    const pdfFiles = files.filter((file: { mimetype?: string }) => file.mimetype === 'application/pdf');
+    const pdfFiles = files.filter((file: ProjectFile & { filename?: string; originalName?: string }) => {
+      const mt = typeof file.mimetype === 'string' ? file.mimetype.toLowerCase() : '';
+      if (mt === 'application/pdf' || mt.includes('pdf')) return true;
+      const name = (file.originalName ?? file.filename ?? '').toLowerCase();
+      return name.endsWith('.pdf');
+    });
 
     if (pdfFiles.length === 0) {
+      if (import.meta.env.DEV && files.length > 0) {
+        console.warn('No PDF files found for project; check file mimetypes/filenames.', {
+          projectId,
+          totalFiles: files.length,
+          sample: files.slice(0, 3).map((f) => ({ id: f.id, mimetype: f.mimetype, originalName: (f as any).originalName, filename: (f as any).filename })),
+        });
+      }
       setDocuments([]);
       setDocumentsLoading(false);
       return;
@@ -77,6 +89,7 @@ export function useTakeoffWorkspaceDocuments({
               httpHeaders['Authorization'] = `Bearer ${session.access_token}`;
             }
 
+            const pdfjsLib = await getPdfjs();
             const pdf = await pdfjsLib.getDocument({ url: pdfUrl, httpHeaders }).promise;
             const totalPages = pdf.numPages;
 

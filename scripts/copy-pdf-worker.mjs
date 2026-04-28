@@ -11,6 +11,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
 const src = path.join(root, 'node_modules', 'pdfjs-dist', 'build', 'pdf.worker.min.mjs');
 const dest = path.join(root, 'public', 'pdf.worker.min.mjs');
+const cmapsSrc = path.join(root, 'node_modules', 'pdfjs-dist', 'cmaps');
+const cmapsDest = path.join(root, 'public', 'cmaps');
 
 if (!fs.existsSync(src)) {
   console.error('copy-pdf-worker: pdfjs-dist worker not found at', src);
@@ -19,3 +21,14 @@ if (!fs.existsSync(src)) {
 
 fs.copyFileSync(src, dest);
 console.log('copy-pdf-worker: copied pdf.worker.min.mjs to public/');
+
+// Copy CMAPs locally so PDF rendering does not depend on unpkg (and stays version-matched).
+if (!fs.existsSync(cmapsSrc)) {
+  console.error('copy-pdf-worker: pdfjs-dist cmaps not found at', cmapsSrc);
+  process.exit(1);
+}
+
+fs.rmSync(cmapsDest, { recursive: true, force: true });
+fs.mkdirSync(cmapsDest, { recursive: true });
+fs.cpSync(cmapsSrc, cmapsDest, { recursive: true });
+console.log('copy-pdf-worker: copied cmaps to public/cmaps/');

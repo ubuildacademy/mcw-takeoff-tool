@@ -1228,20 +1228,35 @@ export function useTakeoffExport({
       onExportStatusUpdate?.('pdf', 25);
       const summaryPdfBytes = new Uint8Array(pdf.output('arraybuffer'));
 
-      const getConditionTakeoffMeasurementsFromStore = useMeasurementStore.getState().getConditionTakeoffMeasurements;
+      const hiddenIdsForPdf = getHiddenMarkupConditionIdsSet(projectId);
+      const projectMeasurementsForPdf = useMeasurementStore
+        .getState()
+        .getProjectTakeoffMeasurements(projectId)
+        .filter((m) => !hiddenIdsForPdf.has(m.conditionId));
+
+      const measurementsByPageKey = new Map<string, TakeoffMeasurement[]>();
+      for (const m of projectMeasurementsForPdf) {
+        const key = `${m.sheetId}-${m.pdfPage}`;
+        const list = measurementsByPageKey.get(key) ?? [];
+        list.push(m);
+        measurementsByPageKey.set(key, list);
+      }
+
       const storeAnnotations = useAnnotationStore.getState().annotations;
+      const annotationsByPageKey = new Map<string, typeof storeAnnotations>();
+      for (const a of storeAnnotations) {
+        if (a.projectId !== projectId) continue;
+        const key = `${a.sheetId}-${a.pageNumber}`;
+        const list = annotationsByPageKey.get(key) ?? [];
+        list.push(a);
+        annotationsByPageKey.set(key, list);
+      }
+
       const pagesForExport = Array.from(pagesWithMeasurements.values())
         .map((pageInfo) => {
           const pageKey = `${pageInfo.sheetId}-${pageInfo.pageNumber}`;
-          const pageMeasurements: TakeoffMeasurement[] = [];
-          conditionIds.forEach((conditionId) => {
-            const conditionMeasurements = getConditionTakeoffMeasurementsFromStore(projectId, conditionId);
-            const pageSpecific = conditionMeasurements.filter((m) => m.sheetId === pageInfo.sheetId && m.pdfPage === pageInfo.pageNumber);
-            pageMeasurements.push(...pageSpecific);
-          });
-          const pageAnnotations = storeAnnotations.filter(
-            (a) => a.projectId === projectId && a.sheetId === pageInfo.sheetId && a.pageNumber === pageInfo.pageNumber
-          );
+          const pageMeasurements = measurementsByPageKey.get(pageKey) ?? [];
+          const pageAnnotations = annotationsByPageKey.get(pageKey) ?? [];
           return {
             pageNumber: pageInfo.pageNumber,
             sheetName: pageInfo.sheetName,

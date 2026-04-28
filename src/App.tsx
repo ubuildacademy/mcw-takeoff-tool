@@ -1,6 +1,6 @@
 import { useEffect, lazy, Suspense } from 'react';
 import { Toaster } from 'sonner';
-import { BrowserRouter as Router, Routes, Route, Navigate, useParams } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useParams, Link } from 'react-router-dom';
 import AuthGuard from './components/AuthGuard';
 import ErrorBoundary from './components/ErrorBoundary';
 import { useProjectStore } from './store/slices/projectSlice';
@@ -25,6 +25,34 @@ const SharedProjectSignupPage = lazy(() => import('./components/SharedProjectSig
 function JobRedirect() {
   const { projectId } = useParams<{ projectId: string }>();
   return <Navigate to={`/project/${projectId}`} replace />;
+}
+
+function NotFoundPage() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background text-foreground px-6">
+      <div className="w-full max-w-lg text-center">
+        <div className="text-6xl font-semibold tracking-tight">404</div>
+        <div className="mt-2 text-xl font-medium">Page not found</div>
+        <p className="mt-3 text-muted-foreground">
+          The page you’re looking for doesn’t exist (or the link is outdated).
+        </p>
+        <div className="mt-6 flex flex-col sm:flex-row gap-3 justify-center">
+          <Link
+            to="/app"
+            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-primary-foreground hover:opacity-90"
+          >
+            Go to app
+          </Link>
+          <Link
+            to="/"
+            className="inline-flex items-center justify-center rounded-md border border-border bg-background px-4 py-2 text-foreground hover:bg-accent"
+          >
+            Back to home
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function App() {
@@ -93,6 +121,7 @@ function App() {
             path="/job/:projectId" 
             element={<JobRedirect />} 
           />
+          <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </Suspense>
     </Router>

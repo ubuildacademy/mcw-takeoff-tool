@@ -20,10 +20,10 @@ import { settingsService } from '../services/apiService';
 
 // Fallback when /api/ollama/models fails (https://ollama.com/search?c=cloud)
 const FALLBACK_OLLAMA_MODELS: OllamaModel[] = [
-  { name: 'qwen3-coder:480b-cloud', size: 0, digest: '', modified_at: '' },
-  { name: 'gpt-oss:120b-cloud', size: 0, digest: '', modified_at: '' },
-  { name: 'gpt-oss:20b-cloud', size: 0, digest: '', modified_at: '' },
-  { name: 'deepseek-v3.1:671b-cloud', size: 0, digest: '', modified_at: '' },
+  { name: 'gpt-oss:120b', size: 0, digest: '', modified_at: '' },
+  { name: 'gpt-oss:20b', size: 0, digest: '', modified_at: '' },
+  { name: 'deepseek-v3.1:671b', size: 0, digest: '', modified_at: '' },
+  { name: 'qwen3-coder:480b', size: 0, digest: '', modified_at: '' },
 ];
 
 interface AdminPanelProps {
@@ -36,8 +36,8 @@ export function AdminPanel({ isOpen, onClose, projectId: _projectId }: AdminPane
   const [activeTab, setActiveTab] = useState<'ai-prompt' | 'ai-settings' | 'user-management'>('user-management');
   const [isLoading, setIsLoading] = useState(false);
   const [availableModels, setAvailableModels] = useState<OllamaModel[]>([]);
-  const [selectedModel, setSelectedModel] = useState<string>('gpt-oss:120b-cloud');
-  const [fallbackModel, setFallbackModel] = useState<string>('llama3.1:8b');
+  const [selectedModel, setSelectedModel] = useState<string>('gpt-oss:120b');
+  const [fallbackModel, setFallbackModel] = useState<string>('gpt-oss:20b');
   // Titleblock extraction prompts (separate for sheet number and sheet name)
   const [sheetNumberPrompt, setSheetNumberPrompt] = useState<string>('');
   const [sheetNamePrompt, setSheetNamePrompt] = useState<string>('');
@@ -296,21 +296,33 @@ When answering questions:
 
       try {
         const models = await ollamaService.getModels();
-        setAvailableModels(models.length > 0 ? models : FALLBACK_OLLAMA_MODELS);
+        // Defensive: only show cloud-offering list (server already requests ?c=cloud).
+        const cloudModels = (models || []).filter((m) => m && typeof m.name === 'string' && m.name.trim().length > 0);
+        setAvailableModels(cloudModels.length > 0 ? cloudModels : FALLBACK_OLLAMA_MODELS);
       } catch {
         setAvailableModels(FALLBACK_OLLAMA_MODELS);
       }
+
+      const normalizeLegacyModelName = (name: string | null): string | null => {
+        if (!name) return null;
+        // Older configs used a "-cloud" suffix; Ollama cloud model ids no longer use that.
+        return name.endsWith('-cloud') ? name.replace(/-cloud$/, '') : name;
+      };
 
       if (hasSession) {
         try {
           const settings = await settingsService.getSettings();
           if (settings?.settings) {
             if (settings.settings['ai-selected-model']) {
-              setSelectedModel(settings.settings['ai-selected-model']);
-              ollamaService.setDefaultModel(settings.settings['ai-selected-model']);
+              const normalized = normalizeLegacyModelName(settings.settings['ai-selected-model']);
+              if (normalized) {
+                setSelectedModel(normalized);
+                ollamaService.setDefaultModel(normalized);
+              }
             }
             if (settings.settings['ai-fallback-model']) {
-              setFallbackModel(settings.settings['ai-fallback-model']);
+              const normalized = normalizeLegacyModelName(settings.settings['ai-fallback-model']);
+              if (normalized) setFallbackModel(normalized);
             }
             return;
           }
@@ -323,15 +335,15 @@ When answering questions:
       }
       
       // Fallback to localStorage
-      const savedModel = localStorage.getItem('ai-selected-model');
-      const savedFallback = localStorage.getItem('ai-fallback-model');
+      const savedModel = normalizeLegacyModelName(localStorage.getItem('ai-selected-model'));
+      const savedFallback = normalizeLegacyModelName(localStorage.getItem('ai-fallback-model'));
       
       if (savedModel) {
         setSelectedModel(savedModel);
         ollamaService.setDefaultModel(savedModel);
       } else {
         const currentDefault = ollamaService.getDefaultModel();
-        setSelectedModel(currentDefault);
+        setSelectedModel(normalizeLegacyModelName(currentDefault) ?? currentDefault);
       }
       
       if (savedFallback) {
@@ -674,7 +686,7 @@ When answering questions:
                           >
                             {availableModels.map((model) => (
                               <option key={model.name} value={model.name}>
-                                {model.name} ({model.size ? `${(model.size / 1024 / 1024 / 1024).toFixed(1)}GB` : 'cloud'})
+                                {model.name} (cloud{model.size ? `, ${(model.size / 1024 / 1024 / 1024).toFixed(1)}GB` : ''})
                               </option>
                             ))}
                           </select>
@@ -689,7 +701,7 @@ When answering questions:
                           >
                             {availableModels.map((model) => (
                               <option key={model.name} value={model.name}>
-                                {model.name} ({model.size ? `${(model.size / 1024 / 1024 / 1024).toFixed(1)}GB` : 'cloud'})
+                                {model.name} (cloud{model.size ? `, ${(model.size / 1024 / 1024 / 1024).toFixed(1)}GB` : ''})
                               </option>
                             ))}
                           </select>
@@ -863,9 +875,9 @@ When answering questions:
                       <Button 
                         className="bg-red-600 hover:bg-red-700"
                         onClick={() => {
-                          setSelectedModel('gpt-oss:120b-cloud');
-                          setFallbackModel('llama3.1:8b');
-                          ollamaService.setDefaultModel('gpt-oss:120b-cloud');
+                          setSelectedModel('gpt-oss:120b');
+                          setFallbackModel('gpt-oss:20b');
+                          ollamaService.setDefaultModel('gpt-oss:120b');
                           toast.success('Settings reset to defaults!');
                         }}
                       >

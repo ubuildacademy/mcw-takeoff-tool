@@ -1,10 +1,7 @@
 import { PDFDocument, rgb, StandardFonts, type PDFPage, type PDFFont } from 'pdf-lib';
-import * as pdfjsLib from 'pdfjs-dist';
 import type { TakeoffMeasurement, Annotation, TakeoffCondition } from '../types';
 import { formatFeetAndInches } from '../lib/utils';
-
-// Configure PDF.js worker for viewport calculations
-pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+import { getPdfjs } from '../lib/pdfjs';
 
 // Render sheets at a slightly higher resolution so zooming is less blurry,
 // while preserving the physical PDF page size by downscaling the embedded image.
@@ -32,7 +29,7 @@ function parseHexRgb(
   return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
 }
 
-/** Floating legend on a rendered sheet page (bottom-right), only for rows on this page. */
+/** Floating legend on a rendered sheet page (bottom-center), only for rows on this page. */
 function drawPageLegendOverlay(
   page: PDFPage,
   items: Array<{ condition: TakeoffCondition; total: number }>,
@@ -44,14 +41,15 @@ function drawPageLegendOverlay(
   const sorted = [...items].sort((a, b) => a.condition.name.localeCompare(b.condition.name));
   const { width: pageWidth } = page.getSize();
 
-  const fontSize = 10.5;
-  const titleSize = 12;
-  const padding = 10;
-  const lineHeight = 15;
-  const swatch = 5.5;
-  const gapAfterSwatch = 6;
-  const edgeMargin = 10;
-  const titleBodyGap = 7;
+  // Make the on-page legend easier to read in print/PDF viewers.
+  const fontSize = 13;
+  const titleSize = 15;
+  const padding = 14;
+  const lineHeight = 19;
+  const swatch = 8.5;
+  const gapAfterSwatch = 8;
+  const edgeMargin = 14;
+  const titleBodyGap = 9;
 
   const truncate = (s: string, maxLen: number) => (s.length > maxLen ? `${s.slice(0, maxLen - 3)}...` : s);
 
@@ -72,7 +70,7 @@ function drawPageLegendOverlay(
   );
   const boxHeight = padding + titleSize + titleBodyGap + lines.length * lineHeight + padding;
 
-  const boxLeft = pageWidth - edgeMargin - boxWidth;
+  const boxLeft = Math.max(edgeMargin, (pageWidth - boxWidth) / 2);
   const boxBottom = edgeMargin;
 
   page.drawRectangle({
@@ -439,6 +437,7 @@ async function renderPageWithMarkupsToCanvas(
   scale: number = 2.0
 ): Promise<{ imageData: Uint8Array; width: number; height: number }> {
   // Load PDF with pdf.js
+  const pdfjsLib = await getPdfjs();
   const pdfJsDoc = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
   const pdfJsPage = await pdfJsDoc.getPage(pageNumber);
   

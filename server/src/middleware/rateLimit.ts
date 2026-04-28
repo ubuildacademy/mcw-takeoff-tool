@@ -143,3 +143,14 @@ export const shareProjectRateLimit = rateLimit({
   message: 'Too many project shares sent for this project. Please try again in an hour.',
   keyGenerator: (req) => `share-project:${req.params.id || 'unknown'}:${req.user?.id || 'anonymous'}`
 });
+
+/**
+ * AI chat burst limiter (per-user).
+ * NOTE: Daily quota is enforced separately with persistence.
+ */
+export const aiChatBurstRateLimit = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  maxRequests: 6,
+  message: 'Too many AI chat requests, please slow down.',
+  keyGenerator: (req) => `ai-chat:${req.user?.id || 'anonymous'}`
+});

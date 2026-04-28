@@ -16,10 +16,6 @@ import { useUndoStore } from '../store';
 import type { TakeoffCondition, Sheet, ProjectFile, PDFDocument, SearchResult } from '../types';
 import { toast } from 'sonner';
 import { triggerCalibration, triggerFitToWindow, getCurrentScrollPosition } from '../lib/windowBridge';
-import * as pdfjsLib from 'pdfjs-dist';
-
-// Configure PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 import { fileService } from '../services/apiService';
 import { SidebarEdgeToggle } from './takeoff-workspace/SidebarEdgeToggle';
 import { TakeoffWorkspaceHeader } from './takeoff-workspace/TakeoffWorkspaceHeader';

@@ -1,0 +1,37 @@
+#!/bin/sh
+#
+# Pre-commit hook: basic secret scanning for staged changes.
+# This is intentionally lightweight (no external dependencies).
+#
+set -e
+
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+# Exclude this hook from scanning itself (otherwise the detection patterns match these lines).
+diff="$(git diff --cached --unified=0 --no-color -- . ':(exclude)scripts/githooks/pre-commit')"
+
+if [ -z "$diff" ]; then
+  exit 0
+fi
+
+fail() {
+  echo ""
+  echo "❌ Commit blocked: potential secret detected in staged changes."
+  echo "   Remove the secret from the diff, rotate the credential if needed,"
+  echo "   and use environment variables (never commit real keys)."
+  echo ""
+  exit 1
+}
+
+# Private key blocks
+echo "$diff" | grep -E "^\+.*BEGIN (RSA|EC|OPENSSH) PRIVATE KEY" >/dev/null 2>&1 && fail
+echo "$diff" | grep -E "^\+.*BEGIN PRIVATE KEY" >/dev/null 2>&1 && fail
+
+# Common env var secrets accidentally committed
+echo "$diff" | grep -E "^\+.*(SUPABASE_SERVICE_ROLE_KEY|GRAPH_CLIENT_SECRET|OLLAMA_API_KEY|OPENAI_API_KEY|ANTHROPIC_API_KEY)[[:space:]]*=" >/dev/null 2>&1 && fail
+
+# JWT/service keys pasted inline (crude but useful)
+echo "$diff" | grep -E "^\+.*(eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})" >/dev/null 2>&1 && fail
+
+exit 0
+

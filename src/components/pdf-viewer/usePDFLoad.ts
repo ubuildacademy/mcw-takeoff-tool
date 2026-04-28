@@ -1,9 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
-import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { ProjectFile } from '../../types';
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
 /** Stable identity for file so we only reload when the logical file changes, not on object reference churn */
 function getFileKey(file: PDFLoadFile): string | null {
@@ -63,11 +60,16 @@ export function usePDFLoad(
 
     const loadPDF = async () => {
       let pdfUrl: string | undefined;
+      let objectUrlToRevoke: string | null = null;
       try {
+        const { getPdfjs } = await import('../../lib/pdfjs');
+        const pdfjsLib = await getPdfjs();
+
         if (typeof file === 'string') {
           pdfUrl = file;
         } else if (file instanceof File) {
-          pdfUrl = URL.createObjectURL(file);
+          objectUrlToRevoke = URL.createObjectURL(file);
+          pdfUrl = objectUrlToRevoke;
         } else if (file && typeof file === 'object' && 'id' in file && file.id) {
           const { getApiBaseUrl } = await import('../../lib/apiConfig');
           const API_BASE_URL = getApiBaseUrl();
@@ -89,7 +91,7 @@ export function usePDFLoad(
           disableAutoFetch: false,
           disableStream: false,
           disableRange: false,
-          cMapUrl: 'https://unpkg.com/pdfjs-dist@3.11.174/cmaps/',
+          cMapUrl: '/cmaps/',
           cMapPacked: true,
           maxImageSize: 1024 * 1024,
           isEvalSupported: false,
@@ -111,6 +113,9 @@ export function usePDFLoad(
         setError('Failed to load PDF file');
       } finally {
         setIsLoading(false);
+        if (objectUrlToRevoke) {
+          URL.revokeObjectURL(objectUrlToRevoke);
+        }
       }
     };
 

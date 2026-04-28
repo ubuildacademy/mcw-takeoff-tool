@@ -1,6 +1,8 @@
 import express from 'express';
 import axios from 'axios';
-import { requireAuth } from '../middleware';
+import { aiChatBurstRateLimit, requireAuth } from '../middleware';
+import { checkAndIncrementAiChatDailyQuota } from '../services/aiUsageService';
+import { evaluateAiChatGuardrails } from '../services/aiGuardrails';
 
 const router = express.Router();
 
@@ -19,7 +21,9 @@ router.get('/models', async (req, res) => {
       return res.status(400).json({ error: 'Ollama API key not configured' });
     }
 
-    const url = `${OLLAMA_CLOUD_API}/api/tags`;
+    // IMPORTANT: filter to cloud-only offerings so the UI doesn't show local-only registry models.
+    // This matches the model list shown on https://ollama.com/search?c=cloud
+    const url = `${OLLAMA_CLOUD_API}/api/tags?c=cloud`;
     const response = await axios.get(url, {
       headers: {
         'Authorization': `Bearer ${OLLAMA_API_KEY}`,
@@ -61,7 +65,7 @@ router.get('/models', async (req, res) => {
 });
 
 // Chat endpoint
-router.post('/chat', requireAuth, async (req, res) => {
+router.post('/chat', requireAuth, aiChatBurstRateLimit, async (req, res) => {
   try {
     const { model, messages, stream, options } = req.body;
 
@@ -73,15 +77,51 @@ router.post('/chat', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields: model and messages' });
     }
 
+    // Guardrails: restrict obvious off-domain usage before consuming upstream quota.
+    const lastUser = Array.isArray(messages)
+      ? [...messages].reverse().find((m: any) => m && m.role === 'user' && typeof m.content === 'string')
+      : null;
+    const lastUserText = typeof lastUser?.content === 'string' ? lastUser.content : '';
+    const guard = evaluateAiChatGuardrails(lastUserText);
+    if (!guard.allowed) {
+      return res.status(422).json({ error: guard.reason });
+    }
+
+    // Daily quota (request-count). Admins get a higher limit by default.
+    const user = req.user!;
+    const isAdmin = user.role === 'admin';
+    const dailyLimit = isAdmin ? 200 : 40;
+    const quota = await checkAndIncrementAiChatDailyQuota({
+      userId: user.id,
+      limitPerDay: dailyLimit,
+      bypass: false,
+    });
+
+    res.setHeader('X-AI-Daily-Limit', quota.limit);
+    res.setHeader('X-AI-Daily-Remaining', quota.remaining);
+    res.setHeader('X-AI-Daily-Reset', quota.resetAtEpochSeconds);
+
+    if (!quota.allowed) {
+      res.setHeader('Retry-After', quota.retryAfterSeconds);
+      return res.status(429).json({
+        error: 'Daily AI chat limit reached. Please try again later.',
+        retryAfter: quota.retryAfterSeconds,
+      });
+    }
+
     if (stream) {
       // Handle streaming response
-      res.writeHead(200, {
-        'Content-Type': 'text/plain',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Cache-Control'
-      });
+      res.status(200);
+      // Important: avoid res.writeHead() here so we don't clobber headers set by cors().
+      // Ollama streams newline-delimited JSON (NDJSON).
+      res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      // Some proxies buffer streaming responses unless explicitly disabled.
+      res.setHeader('X-Accel-Buffering', 'no');
+      // Explicitly opt out of compression for this streaming response.
+      res.setHeader('Content-Encoding', 'identity');
+      res.flushHeaders?.();
 
       try {
         const response = await axios.post(
@@ -102,7 +142,19 @@ router.post('/chat', requireAuth, async (req, res) => {
           }
         );
 
+        // If the client disconnects, stop reading from upstream.
+        const abortController = new AbortController();
+        req.on('close', () => {
+          abortController.abort();
+          try {
+            response.data?.destroy?.();
+          } catch {
+            // ignore
+          }
+        });
+
         response.data.on('data', (chunk: Buffer) => {
+          // Ensure immediate flush of streamed chunks
           res.write(chunk);
         });
 

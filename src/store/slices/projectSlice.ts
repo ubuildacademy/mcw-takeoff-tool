@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Project } from '../../types';
+import { authHelpers } from '../../lib/supabase';
 
 interface ProjectState {
   // State
@@ -52,7 +53,6 @@ export const useProjectStore = create<ProjectState>()(
           console.warn('Failed to create project via API, creating locally:', error instanceof Error ? error.message : String(error));
           
           // Include current user so project shows under correct owner (avoids "Unknown Owner")
-          const { authHelpers } = await import('../../lib/supabase');
           const user = await authHelpers.getCurrentUser();
           
           const id = Date.now().toString();
