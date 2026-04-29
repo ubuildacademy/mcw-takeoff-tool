@@ -16,6 +16,10 @@ function samePdfPageKey(a: number | string | undefined, b: number | string | und
   return Number(a) === Number(b);
 }
 
+function supportsWasteFactor(type: string): boolean {
+  return type !== 'count' && type !== 'auto-count';
+}
+
 const PENDING_MEASUREMENT_PREFIX = 'pending-measurement:';
 
 /** True while a measurement is shown optimistically before the create API returns. */
@@ -679,7 +683,8 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
         return sum + (value || 0);
       }, 0);
       
-      const adjustedQuantity = quantity * (1 + (condition.wasteFactor || 0) / 100);
+      const wasteFactor = supportsWasteFactor(condition.type) ? (condition.wasteFactor || 0) : 0;
+      const adjustedQuantity = quantity * (1 + wasteFactor / 100);
       
       const materialCostPerUnit = condition.materialCost || 0;
       const equipmentCost = condition.equipmentCost || 0;

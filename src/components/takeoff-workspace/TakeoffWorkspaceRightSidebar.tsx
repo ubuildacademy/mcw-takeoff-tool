@@ -23,6 +23,7 @@ export function TakeoffWorkspaceRightSidebar({
   documents,
   documentsLoading,
   onPageSelect,
+  onSearchResultSelect,
   onPageOpenInNewTab,
   selectedDocumentId,
   selectedPageNumber,
@@ -115,6 +116,7 @@ export function TakeoffWorkspaceRightSidebar({
                 projectId={projectId}
                 documents={documents}
                 onPageSelect={onPageSelect}
+                onSearchResultSelect={onSearchResultSelect}
                 selectedDocumentId={selectedDocumentId}
                 selectedPageNumber={selectedPageNumber}
                 onReloadDocuments={onReloadDocuments}

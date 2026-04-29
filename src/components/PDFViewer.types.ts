@@ -50,6 +50,11 @@ export interface PDFViewerProps {
   ) => void;
   searchResults?: SearchResult[];
   currentSearchQuery?: string;
+  ocrHighlightRequest?: {
+    documentId: string;
+    pageNumber: number;
+    query: string;
+  } | null;
   cutoutMode?: boolean;
   cutoutTargetConditionId?: string | null;
   onCutoutModeChange?: (conditionId: string | null) => void;

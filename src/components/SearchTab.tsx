@@ -35,6 +35,7 @@ interface SearchTabProps {
   projectId: string;
   documents: PDFDocument[];
   onPageSelect: (documentId: string, pageNumber: number) => void;
+  onSearchResultSelect?: (documentId: string, pageNumber: number, query: string) => void;
   selectedDocumentId?: string;
   selectedPageNumber?: number;
   /** Refresh document list after queuing OCR (optional). */
@@ -47,6 +48,7 @@ export function SearchTab({
   projectId, 
   documents, 
   onPageSelect,
+  onSearchResultSelect,
   selectedDocumentId,
   selectedPageNumber,
   onReloadDocuments,
@@ -350,6 +352,11 @@ export function SearchTab({
                     const isExpanded = expandedResults.has(resultKey);
                     const isSelected = selectedDocumentId === documentId && selectedPageNumber === result.pageNumber;
 
+                    const handleResultNavigation = () => {
+                      onSearchResultSelect?.(documentId, result.pageNumber, searchQuery.trim());
+                      onPageSelect(documentId, result.pageNumber);
+                    };
+
                     return (
                       <div
                         key={resultKey}
@@ -358,7 +365,7 @@ export function SearchTab({
                             ? 'bg-primary/10 border-l-4 border-primary shadow-sm'
                             : 'hover:bg-accent/30 hover:shadow-sm'
                         }`}
-                        onClick={() => onPageSelect(documentId, result.pageNumber)}
+                        onClick={handleResultNavigation}
                         title={`Click to go to page ${result.pageNumber}`}
                       >
                         <div className="flex items-start gap-3">
@@ -425,7 +432,7 @@ export function SearchTab({
                               size="sm"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                onPageSelect(documentId, result.pageNumber);
+                                handleResultNavigation();
                               }}
                               className="h-6 w-6 p-0"
                               title="Go to page"

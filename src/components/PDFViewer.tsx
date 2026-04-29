@@ -64,6 +64,7 @@ import {
   measurementDrawModeForCondition,
 } from '../utils/takeoffMeasurementLookup';
 import { setRestoreScrollPosition, setGetCurrentScrollPosition, setTriggerCalibration, setTriggerFitToWindow } from '../lib/windowBridge';
+import { ocrApiService } from '../services/apiService';
 
 /** Normalized offset for pasted markups (~2% of page) so pasted markup is visible next to original */
 const _PASTE_OFFSET = 0.02;
@@ -96,6 +97,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   onCalibrationComplete,
   searchResults: _searchResults = [],
   currentSearchQuery: _currentSearchQuery = '',
+  ocrHighlightRequest = null,
   cutoutMode = false,
   cutoutTargetConditionId = null,
   onCutoutModeChange,
@@ -153,6 +155,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   // PDF loading state
   const [isPDFLoading, setIsPDFLoading] = useState(false);
+  const [ocrHighlightBoxes, setOcrHighlightBoxes] = useState<
+    Array<{
+      index: number;
+      text: string;
+      confidence: number;
+      bbox: { x: number; y: number; width: number; height: number };
+      source: 'pdfjs' | 'tesseract';
+      ocrRotationDeg?: number;
+    }>
+  >([]);
   
   // Track last fully rendered PDF scale to support interactive CSS zoom while blocking renders
   const lastRenderedScaleRef = useRef(1.0);
@@ -240,6 +252,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     ((pageNum: number, viewport: PageViewport, page?: PDFPageProxy, forceImmediate?: boolean) => Promise<void>) | null
   >(null);
   const onPageShownRef = useRef<((pageNum: number, viewport: PageViewport) => void) | null>(null);
+
   const ephemeralRafRef = useRef<number | null>(null);
   const scheduleEphemeralPaintRef = useRef<(() => void) | null>(null);
   const ephemeralMarkupGroupRef = useRef<SVGGElement | null>(null);
@@ -281,6 +294,45 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const showRunningLength = useUserPreferencesStore((s) => s.showRunningLength);
   const magnifierEnabled = useUserPreferencesStore((s) => s.magnifierEnabled);
   const magnifierZoom = useUserPreferencesStore((s) => s.magnifierZoom);
+
+  useEffect(() => {
+    if (!effectiveProjectId || !file?.id || !ocrHighlightRequest) {
+      setOcrHighlightBoxes([]);
+      return;
+    }
+
+    const query = ocrHighlightRequest.query?.trim() ?? '';
+    const sameDocument = ocrHighlightRequest.documentId === file.id;
+    const samePage = ocrHighlightRequest.pageNumber === currentPage;
+    if (!sameDocument || !samePage || query.length === 0) {
+      setOcrHighlightBoxes([]);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await ocrApiService.getDocumentWordBoxes(
+          file.id,
+          effectiveProjectId,
+          currentPage,
+          query
+        );
+        if (!cancelled) {
+          setOcrHighlightBoxes(Array.isArray(response.boxes) ? response.boxes : []);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Failed to load OCR highlight boxes:', error);
+          setOcrHighlightBoxes([]);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ocrHighlightRequest, currentPage, effectiveProjectId, file?.id]);
 
   // Scale calibration (state and handlers from hook) - after currentViewport so hook can use it
   const calibration = usePDFViewerCalibration({
@@ -1277,7 +1329,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     const hasAnnotations = localAnnotations.filter(a => a.pageNumber === pageNum).length > 0;
     const pageHyperlinks = useHyperlinkStore.getState().getPageHyperlinks(effectiveProjectId || '', file.id || '', pageNum);
     const hasHyperlinks = pageHyperlinks.length > 0;
-    const hasAnyMarkups = hasLocalMeasurements || hasAnnotations || hasHyperlinks;
+    const hasOcrHighlights = ocrHighlightBoxes.length > 0;
+    const hasAnyMarkups = hasLocalMeasurements || hasAnnotations || hasHyperlinks || hasOcrHighlights;
     
     // Check if we're in any interactive mode that requires rendering crosshairs/previews
     const hasActivePoints = isContinuousDrawing && activePoints.length > 0;
@@ -1319,6 +1372,37 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       hitArea.setAttribute('pointer-events', shouldCaptureClicks ? 'all' : 'none');
     }
     committed.appendChild(hitArea);
+
+    // OCR highlight boxes (above hit area, below interactive markups)
+    if (ocrHighlightBoxes.length > 0) {
+      const rot = viewState.rotation || 0;
+      for (const box of ocrHighlightBoxes) {
+        const corners = [
+          baseNormToViewportPixels(box.bbox.x, box.bbox.y, { width: pixelW, height: pixelH }, rot),
+          baseNormToViewportPixels(box.bbox.x + box.bbox.width, box.bbox.y, { width: pixelW, height: pixelH }, rot),
+          baseNormToViewportPixels(box.bbox.x + box.bbox.width, box.bbox.y + box.bbox.height, { width: pixelW, height: pixelH }, rot),
+          baseNormToViewportPixels(box.bbox.x, box.bbox.y + box.bbox.height, { width: pixelW, height: pixelH }, rot),
+        ];
+        const xs = corners.map((c) => c.x);
+        const ys = corners.map((c) => c.y);
+        const xMin = Math.min(...xs);
+        const xMax = Math.max(...xs);
+        const yMin = Math.min(...ys);
+        const yMax = Math.max(...ys);
+        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttribute('x', xMin.toString());
+        rect.setAttribute('y', yMin.toString());
+        rect.setAttribute('width', Math.max(0, xMax - xMin).toString());
+        rect.setAttribute('height', Math.max(0, yMax - yMin).toString());
+        rect.setAttribute('fill', 'rgba(250, 204, 21, 0.35)');
+        rect.setAttribute('stroke', 'rgba(202, 138, 4, 0.7)');
+        rect.setAttribute('stroke-width', '1');
+        rect.setAttribute('vector-effect', 'non-scaling-stroke');
+        rect.setAttribute('pointer-events', 'none');
+        rect.setAttribute('data-ocr-highlight', 'true');
+        committed.appendChild(rect);
+      }
+    }
 
     // Render hyperlinks (clickable regions) - above hit area
     if (pageHyperlinks.length > 0) {
@@ -1513,7 +1597,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     scheduleEphemeralPaint();
 
   // eslint-disable-next-line react-hooks/exhaustive-deps -- Large render callback; refs and some deps intentionally omitted to avoid cascade
-  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, isSelectionMode, currentPage, isContinuousDrawing, activePoints, localAnnotations, annotationTool, currentAnnotation, annotationMoveId, annotationMoveIds, annotationColor, measurementMoveId, measurementMoveIds, cutoutMode, currentCutout, isBoxSelectionMode, isDrawingBoxSelection, hyperlinkMode, effectiveProjectId, file.id, getPageTakeoffMeasurements, getSelectedCondition, measurementsLoading, getConditionColor, getConditionLineThickness, crosshairFullScreen, crosshairColor, crosshairStrokeWidth, showMeasurementLabels, showRunningLength, hyperlinkCountForFile, hiddenMarkupConditionIds, scheduleEphemeralPaint]);
+  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, isSelectionMode, currentPage, isContinuousDrawing, activePoints, localAnnotations, annotationTool, currentAnnotation, annotationMoveId, annotationMoveIds, annotationColor, measurementMoveId, measurementMoveIds, cutoutMode, currentCutout, isBoxSelectionMode, isDrawingBoxSelection, hyperlinkMode, effectiveProjectId, file.id, getPageTakeoffMeasurements, getSelectedCondition, measurementsLoading, getConditionColor, getConditionLineThickness, crosshairFullScreen, crosshairColor, crosshairStrokeWidth, showMeasurementLabels, showRunningLength, hyperlinkCountForFile, hiddenMarkupConditionIds, ocrHighlightBoxes, scheduleEphemeralPaint]);
 
   // OPTIMIZED: Update only visual styling of markups when selection changes (no full re-render)
   const updateMarkupSelection = useCallback((newSelectedIds: string[], previousSelectedIds: string[]) => {
@@ -1651,7 +1735,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const hasLocalMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0;
       const hasStoreMarkups = storeMeasurements.length > 0;
       // Include sheet hyperlinks for this file; otherwise we clear the overlay and break PDF/overlay sync
-      const hasMarkups = hasLocalMarkups || hasStoreMarkups || hyperlinkCountForFile > 0;
+      const hasOcrHighlights = ocrHighlightBoxes.length > 0;
+      const hasMarkups = hasLocalMarkups || hasStoreMarkups || hyperlinkCountForFile > 0 || hasOcrHighlights;
       const shouldRender = hasMarkups || isInteractiveMode;
       
       if (shouldRender) {
@@ -1676,7 +1761,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         }
       }
     }
-  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, renderMarkupsWithPointerEvents, currentPage, currentViewport, isAnnotating, localAnnotations, annotationTool, annotationMoveId, annotationMoveIds, cutoutMode, currentCutout, measurementMoveId, measurementMoveIds, isDrawingBoxSelection, currentAnnotation, isContinuousDrawing, activePoints, pdfDocument, measurementsLoading, effectiveProjectId, file.id, getPageTakeoffMeasurements, isSelectionMode, totalPages, conditions, hyperlinkCountForFile, hyperlinkMode, hiddenMarkupConditionIds]);
+  }, [localTakeoffMeasurements, currentMeasurement, isMeasuring, isCalibrating, calibrationPoints, renderMarkupsWithPointerEvents, currentPage, currentViewport, isAnnotating, localAnnotations, annotationTool, annotationMoveId, annotationMoveIds, cutoutMode, currentCutout, measurementMoveId, measurementMoveIds, isDrawingBoxSelection, currentAnnotation, isContinuousDrawing, activePoints, pdfDocument, measurementsLoading, effectiveProjectId, file.id, getPageTakeoffMeasurements, isSelectionMode, totalPages, conditions, hyperlinkCountForFile, hyperlinkMode, hiddenMarkupConditionIds, ocrHighlightBoxes]);
 
   // Track previous measurements for comparison (used by other logic)
   const prevLocalTakeoffMeasurementsRef = useRef<Measurement[]>([]);
@@ -1747,22 +1832,22 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     // When blocked, CSS transforms handle visual zoom but we still re-render markups so they remain
     // visible (coordinates use targetScale/lastRenderedScale viewport - correct for the underlaid canvas).
-    const hasMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0 || hyperlinkCountForFile > 0;
+    const hasMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0 || hyperlinkCountForFile > 0 || ocrHighlightBoxes.length > 0;
     if (hasMarkups) {
       renderMarkupsWithPointerEvents(currentPage, freshViewport, pdfPageRef.current ?? undefined);
     }
-  }, [pdfDocument, viewState.scale, viewState.rotation, currentPage, localTakeoffMeasurements, localAnnotations, renderMarkupsWithPointerEvents, rendersBlocked, hyperlinkCountForFile]);
+  }, [pdfDocument, viewState.scale, viewState.rotation, currentPage, localTakeoffMeasurements, localAnnotations, renderMarkupsWithPointerEvents, rendersBlocked, hyperlinkCountForFile, ocrHighlightBoxes]);
 
   // Re-render overlay when user display preferences change (e.g. toggling measurement labels)
   // The preferences are captured in renderTakeoffAnnotations via ref, but nothing in the
   // main render effect's dep array changes when a preference toggles, so we need this.
   useEffect(() => {
-    const hasMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0 || hyperlinkCountForFile > 0;
+    const hasMarkups = localTakeoffMeasurements.length > 0 || localAnnotations.length > 0 || hyperlinkCountForFile > 0 || ocrHighlightBoxes.length > 0;
     if (pdfDocument && currentViewport && hasMarkups) {
       renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current ?? undefined);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Only re-render when display prefs change
-  }, [showMeasurementLabels, showRunningLength, hyperlinkCountForFile]);
+  }, [showMeasurementLabels, showRunningLength, hyperlinkCountForFile, ocrHighlightBoxes]);
 
   // SIMPLIFIED: Update pointer-events when mode changes (no re-rendering needed)
   // This handles SVG element, hit-area, and individual markup elements
@@ -1846,12 +1931,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       currentMeasurements.length > 0 ||
       localTakeoffMeasurements.length > 0 ||
       hasAnnotationsOnPage ||
-      pageHyperlinks.length > 0;
+      pageHyperlinks.length > 0 ||
+      ocrHighlightBoxes.length > 0;
     const isInteractiveMode = isMeasuring || isCalibrating || isAnnotating || isDrawingBoxSelection;
     if (hasMarkups || isInteractiveMode) {
       renderMarkupsWithPointerEvents(pageNum, viewport, pdfPageRef.current ?? undefined, isSelectionMode);
     }
-  }, [renderMarkupsWithPointerEvents, localTakeoffMeasurements, localAnnotations, effectiveProjectId, file.id, isSelectionMode, isCalibrating, isMeasuring, isAnnotating, isDrawingBoxSelection, annotationTool, hyperlinkMode]);
+  }, [renderMarkupsWithPointerEvents, localTakeoffMeasurements, localAnnotations, effectiveProjectId, file.id, isSelectionMode, isCalibrating, isMeasuring, isAnnotating, isDrawingBoxSelection, annotationTool, hyperlinkMode, ocrHighlightBoxes]);
 
   useEffect(() => {
     onPageShownRef.current = onPageShown;

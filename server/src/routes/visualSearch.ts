@@ -203,7 +203,15 @@ router.post('/complete-search', requireAuth, requireProjectAccess, async (req, r
     });
   }
   
-  const sendProgress = (progress: { current: number; total: number; currentPage?: number; currentDocument?: string }) => {
+  const sendProgress = (progress: {
+    current: number;
+    total: number;
+    currentPage?: number;
+    currentDocument?: string;
+    pagesTotal?: number;
+    stage?: 'preparing' | 'extracting-template' | 'searching' | 'creating-measurements' | 'finalizing';
+    stageLabel?: string;
+  }) => {
     if (wantsSSE) {
       res.write(`data: ${JSON.stringify({ type: 'progress', ...progress })}\n\n`);
     }
@@ -301,6 +309,17 @@ router.post('/complete-search', requireAuth, requireProjectAccess, async (req, r
     }
 
     // Step 1: Extract symbol template (pass projectId for PDF download; PDF.js base size aligns clip with client)
+    if (wantsSSE) {
+      sendProgress({
+        current: 5,
+        total: 100,
+        currentPage: pageNumber,
+        pagesTotal: 1,
+        stage: 'extracting-template',
+        stageLabel: 'Extracting symbol template'
+      });
+    }
+
     const template = await autoCountService.extractSymbolTemplate(
       pdfFileId,
       pageNumber,
@@ -320,8 +339,36 @@ router.post('/complete-search', requireAuth, requireProjectAccess, async (req, r
     
     // Send initial progress update
     if (wantsSSE) {
-      sendProgress({ current: 0, total: 1, currentPage: pageNumber });
+      sendProgress({
+        current: 15,
+        total: 100,
+        currentPage: pageNumber,
+        pagesTotal: 1,
+        stage: 'searching',
+        stageLabel: 'Scanning pages for matches'
+      });
     }
+
+    const mapSearchProgressToOverall = (progress: {
+      current: number;
+      total: number;
+      currentPage?: number;
+      currentDocument?: string;
+    }) => {
+      const safeTotal = Math.max(progress.total, 1);
+      const ratio = Math.max(0, Math.min(1, progress.current / safeTotal));
+      // Allocate 15%..85% to scanning pages.
+      const overall = 15 + Math.round(ratio * 70);
+      sendProgress({
+        current: overall,
+        total: 100,
+        currentPage: progress.currentPage,
+        currentDocument: progress.currentDocument,
+        pagesTotal: progress.total,
+        stage: 'searching',
+        stageLabel: 'Scanning pages for matches'
+      });
+    };
     
     const searchResult = await autoCountService.searchForSymbols(
       conditionId,
@@ -331,7 +378,7 @@ router.post('/complete-search', requireAuth, requireProjectAccess, async (req, r
       pageNumber,
       projectId,
       searchScope as 'current-page' | 'entire-document' | 'entire-project',
-      sendProgress // Pass the SSE progress function
+      mapSearchProgressToOverall // Map search sub-progress into overall progress
     );
 
     // Step 3: Create count measurements with condition's color and name
@@ -339,10 +386,15 @@ router.post('/complete-search', requireAuth, requireProjectAccess, async (req, r
       console.log(`📝 Step 3: Creating ${searchResult.matches.length} count measurements...`);
     }
     if (wantsSSE) {
-      sendProgress({ 
-        current: searchResult.totalMatches, 
-        total: searchResult.totalMatches,
-        currentPage: pageNumber 
+      sendProgress({
+        current: 86,
+        total: 100,
+        currentPage: pageNumber,
+        pagesTotal: searchResult.matches.length > 0 ? undefined : 0,
+        stage: 'creating-measurements',
+        stageLabel: searchResult.matches.length > 0
+          ? `Creating ${searchResult.matches.length} measurements`
+          : 'No matches found'
       });
     }
     
@@ -357,6 +409,21 @@ router.post('/complete-search', requireAuth, requireProjectAccess, async (req, r
         {
           pdfJsViewport: pdfJsPageSize,
           primaryPdfFileId: pdfFileId
+        },
+        (measurementProgress) => {
+          if (!wantsSSE) return;
+          const safeTotal = Math.max(measurementProgress.total, 1);
+          const ratio = Math.max(0, Math.min(1, measurementProgress.current / safeTotal));
+          // Allocate 86%..98% to measurement creation.
+          const overall = 86 + Math.round(ratio * 12);
+          sendProgress({
+            current: overall,
+            total: 100,
+            currentPage: pageNumber,
+            pagesTotal: undefined,
+            stage: 'creating-measurements',
+            stageLabel: `Creating measurements (${measurementProgress.current}/${measurementProgress.total})`
+          });
         }
       );
     } catch (measurementError) {
@@ -381,6 +448,14 @@ router.post('/complete-search', requireAuth, requireProjectAccess, async (req, r
 
     // Send completion via SSE or regular JSON
     if (wantsSSE) {
+      sendProgress({
+        current: 99,
+        total: 100,
+        currentPage: pageNumber,
+        pagesTotal: undefined,
+        stage: 'finalizing',
+        stageLabel: 'Finalizing results'
+      });
       if (process.env.NODE_ENV === 'development') {
         console.log('📤 About to send complete message via SSE...');
       }

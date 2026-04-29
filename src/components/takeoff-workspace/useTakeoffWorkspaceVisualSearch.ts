@@ -15,6 +15,9 @@ export interface AutoCountProgress {
   total: number;
   currentPage?: number;
   currentDocument?: string;
+  pagesTotal?: number;
+  stage?: 'preparing' | 'extracting-template' | 'searching' | 'creating-measurements' | 'finalizing';
+  stageLabel?: string;
 }
 
 export interface AutoCountCompletionResult {
@@ -146,7 +149,12 @@ export function useTakeoffWorkspaceVisualSearch({
         autoCountAbortControllerRef.current = abortController;
 
         setShowAutoCountProgress(true);
-        setAutoCountProgress({ current: 0, total: 1 });
+        setAutoCountProgress({
+          current: 0,
+          total: 100,
+          stage: 'preparing',
+          stageLabel: 'Preparing auto-count'
+        });
         setIsCancellingAutoCount(false);
         setAutoCountCompletionResult(null);
 

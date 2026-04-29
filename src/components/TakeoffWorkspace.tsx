@@ -105,6 +105,11 @@ export function TakeoffWorkspace() {
   const [rightSidebarTab, setRightSidebarTab] = useState<'documents' | 'search' | 'ai-chat'>('documents');
   const [ocrSearchResults, setOcrSearchResults] = useState<SearchResult[]>([]);
   const [currentSearchQuery, setCurrentSearchQuery] = useState<string>('');
+  const [ocrHighlightRequest, setOcrHighlightRequest] = useState<{
+    documentId: string;
+    pageNumber: number;
+    query: string;
+  } | null>(null);
   const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
   /** Which project the file list fetch completed for (avoids a stale "ready" flag on the first render after switching projects). */
   const [filesLoadedForProjectId, setFilesLoadedForProjectId] = useState<string | null>(null);
@@ -384,6 +389,16 @@ export function TakeoffWorkspace() {
   const handleOcrSearchResults = useCallback((results: SearchResult[], query: string) => {
     setOcrSearchResults(results);
     setCurrentSearchQuery(query);
+  }, []);
+
+  const handleSearchResultSelect = useCallback((documentId: string, pageNumber: number, query: string) => {
+    const trimmed = query.trim();
+    setCurrentSearchQuery(trimmed);
+    setOcrHighlightRequest({
+      documentId,
+      pageNumber,
+      query: trimmed,
+    });
   }, []);
 
   // CRITICAL: Wrapped in useCallback to prevent re-render loops in SheetSidebar
@@ -837,6 +852,7 @@ export function TakeoffWorkspace() {
               onCalibrationComplete={handleCalibrationComplete}
               searchResults={ocrSearchResults}
               currentSearchQuery={currentSearchQuery}
+              ocrHighlightRequest={ocrHighlightRequest}
               cutoutMode={cutoutMode}
               cutoutTargetConditionId={cutoutTargetConditionId}
               onCutoutModeChange={handleCutoutMode}
@@ -889,6 +905,7 @@ export function TakeoffWorkspace() {
           documents={documents}
           documentsLoading={!projectFilesListReady || documentsLoading}
           onPageSelect={tabsResult.handlePageSelect}
+          onSearchResultSelect={handleSearchResultSelect}
           onPageOpenInNewTab={tabsResult.handlePageOpenInNewTab}
           selectedDocumentId={selectedDocumentId || undefined}
           selectedPageNumber={selectedPageNumber || undefined}

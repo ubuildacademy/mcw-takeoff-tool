@@ -20,6 +20,16 @@ interface TesseractLoggerMessage {
 interface TesseractRecognizeData {
   text?: string;
   confidence?: number;
+  words?: Array<{
+    text?: string;
+    confidence?: number;
+    bbox?: {
+      x0?: number;
+      y0?: number;
+      x1?: number;
+      y1?: number;
+    };
+  }>;
 }
 
 /** Worker config with optional path overrides (omit for CDN) */
@@ -36,6 +46,21 @@ export interface OCRResult {
   text: string;
   confidence: number;
   processingTime: number;
+  wordBoxes: OCRWordBox[];
+}
+
+export interface OCRWordBox {
+  index: number;
+  text: string;
+  confidence: number;
+  bbox: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  source: 'tesseract' | 'pdfjs';
+  ocrRotationDeg: number;
 }
 
 export interface DocumentOCRData {
@@ -71,6 +96,140 @@ class OCRService {
     return Math.max(1.0, Math.min(desiredScale, capped));
   }
 
+  private preprocessCanvasForOCR(canvas: HTMLCanvasElement): HTMLCanvasElement {
+    const pixelCount = canvas.width * canvas.height;
+    // Skip heavy preprocessing for very large pages to keep OCR responsive.
+    if (pixelCount > 16_000_000) return canvas;
+
+    const processed = document.createElement('canvas');
+    processed.width = canvas.width;
+    processed.height = canvas.height;
+    const ctx = processed.getContext('2d');
+    if (!ctx) return canvas;
+
+    ctx.drawImage(canvas, 0, 0);
+    const imageData = ctx.getImageData(0, 0, processed.width, processed.height);
+    const data = imageData.data;
+
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      // Grayscale + contrast stretch + gentle clipping for noisy blueprint backgrounds.
+      let gray = 0.299 * r + 0.587 * g + 0.114 * b;
+      gray = (gray - 128) * 1.25 + 128;
+      if (gray > 210) gray = 255;
+      if (gray < 35) gray = 0;
+      const clamped = Math.max(0, Math.min(255, gray));
+      data[i] = clamped;
+      data[i + 1] = clamped;
+      data[i + 2] = clamped;
+    }
+
+    ctx.putImageData(imageData, 0, 0);
+    return processed;
+  }
+
+  private clamp01(value: number): number {
+    if (!Number.isFinite(value)) return 0;
+    if (value < 0) return 0;
+    if (value > 1) return 1;
+    return value;
+  }
+
+  private viewportNormPointToBaseNorm(
+    point: { x: number; y: number },
+    rotationDeg: number
+  ): { x: number; y: number } {
+    const r = ((rotationDeg % 360) + 360) % 360;
+    if (r === 0) return { x: point.x, y: point.y };
+    if (r === 90) return { x: point.y, y: 1 - point.x };
+    if (r === 180) return { x: 1 - point.x, y: 1 - point.y };
+    if (r === 270) return { x: 1 - point.y, y: point.x };
+    return { x: point.x, y: point.y };
+  }
+
+  private viewportNormRectToBaseNorm(
+    rect: { x: number; y: number; width: number; height: number },
+    rotationDeg: number
+  ): { x: number; y: number; width: number; height: number } {
+    const corners = [
+      { x: rect.x, y: rect.y },
+      { x: rect.x + rect.width, y: rect.y },
+      { x: rect.x + rect.width, y: rect.y + rect.height },
+      { x: rect.x, y: rect.y + rect.height },
+    ].map((point) => this.viewportNormPointToBaseNorm(point, rotationDeg));
+    const xs = corners.map((point) => this.clamp01(point.x));
+    const ys = corners.map((point) => this.clamp01(point.y));
+    const xMin = Math.min(...xs);
+    const yMin = Math.min(...ys);
+    const xMax = Math.max(...xs);
+    const yMax = Math.max(...ys);
+    return {
+      x: xMin,
+      y: yMin,
+      width: this.clamp01(xMax - xMin),
+      height: this.clamp01(yMax - yMin),
+    };
+  }
+
+  private extractWordBoxes(
+    data: TesseractRecognizeData,
+    context: {
+      canvasWidth: number;
+      canvasHeight: number;
+      rotationDeg: number;
+      fullPageViewport?: { offsetX: number; offsetY: number; width: number; height: number; fullWidth: number; fullHeight: number };
+    }
+  ): OCRWordBox[] {
+    const words = Array.isArray(data.words) ? data.words : [];
+    if (words.length === 0 || context.canvasWidth <= 0 || context.canvasHeight <= 0) {
+      return [];
+    }
+
+    const boxes: OCRWordBox[] = [];
+    for (let i = 0; i < words.length; i++) {
+      const word = words[i];
+      const text = typeof word.text === 'string' ? word.text.trim() : '';
+      if (!text) continue;
+
+      const x0 = Number(word.bbox?.x0);
+      const y0 = Number(word.bbox?.y0);
+      const x1 = Number(word.bbox?.x1);
+      const y1 = Number(word.bbox?.y1);
+      if (![x0, y0, x1, y1].every((value) => Number.isFinite(value))) continue;
+
+      const normRectInCanvas = {
+        x: this.clamp01(x0 / context.canvasWidth),
+        y: this.clamp01(y0 / context.canvasHeight),
+        width: this.clamp01((x1 - x0) / context.canvasWidth),
+        height: this.clamp01((y1 - y0) / context.canvasHeight),
+      };
+      if (normRectInCanvas.width <= 0 || normRectInCanvas.height <= 0) continue;
+
+      const viewportNormRect = context.fullPageViewport
+        ? {
+            x: this.clamp01((context.fullPageViewport.offsetX + normRectInCanvas.x * context.fullPageViewport.width) / context.fullPageViewport.fullWidth),
+            y: this.clamp01((context.fullPageViewport.offsetY + normRectInCanvas.y * context.fullPageViewport.height) / context.fullPageViewport.fullHeight),
+            width: this.clamp01((normRectInCanvas.width * context.fullPageViewport.width) / context.fullPageViewport.fullWidth),
+            height: this.clamp01((normRectInCanvas.height * context.fullPageViewport.height) / context.fullPageViewport.fullHeight),
+          }
+        : normRectInCanvas;
+
+      const baseNormRect = this.viewportNormRectToBaseNorm(viewportNormRect, context.rotationDeg);
+      boxes.push({
+        index: boxes.length,
+        text,
+        confidence: typeof word.confidence === 'number' ? word.confidence : 0,
+        bbox: baseNormRect,
+        source: 'tesseract',
+        ocrRotationDeg: ((context.rotationDeg % 360) + 360) % 360,
+      });
+    }
+
+    return boxes;
+  }
+
   // Initialize Tesseract worker (lazy initialization)
   private async initializeWorker(): Promise<void> {
     if (this.isInitialized && this.worker) return;
@@ -89,8 +248,7 @@ class OCRService {
         langPath: '/tesseract/lang-data/',
         corePath: '/tesseract/',
         // Optimize for architectural drawings and technical text
-        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:!?()[]{}\'"-+=/\\@#$%^&*|<>~` ',
-        tessedit_pageseg_mode: Tesseract.PSM.AUTO_OSD, // Better for mixed text/graphics
+        tessedit_pageseg_mode: Tesseract.PSM.SPARSE_TEXT_OSD, // Better for mixed text/graphics on plan sheets
         preserve_interword_spaces: '1',
         tessedit_ocr_engine_mode: Tesseract.OEM.LSTM_ONLY, // Use LSTM for better accuracy
         tessedit_create_hocr: '0', // Disable HOCR output
@@ -119,7 +277,11 @@ class OCRService {
   // Process a single PDF page
   private async processPage(
     canvas: HTMLCanvasElement, 
-    pageNumber: number
+    pageNumber: number,
+    context?: {
+      rotationDeg?: number;
+      fullPageViewport?: { offsetX: number; offsetY: number; width: number; height: number; fullWidth: number; fullHeight: number };
+    }
   ): Promise<OCRResult> {
     if (!this.worker) {
       throw new Error('OCR worker not initialized');
@@ -135,7 +297,8 @@ class OCRService {
       }
       
       // Convert canvas to an image input without huge base64 strings
-      const imageInput = await this.canvasToImageInput(canvas);
+      const preprocessedCanvas = this.preprocessCanvasForOCR(canvas);
+      const imageInput = await this.canvasToImageInput(preprocessedCanvas);
       
       // Validate image data
       if (!imageInput || (typeof imageInput === 'string' && imageInput.length < 100)) {
@@ -144,9 +307,8 @@ class OCRService {
       
       // Set optimized parameters for architectural drawings
       await this.worker.setParameters({
-        tessedit_pageseg_mode: Tesseract.PSM.AUTO_OSD, // Auto orientation and script detection
+        tessedit_pageseg_mode: Tesseract.PSM.SPARSE_TEXT_OSD, // Better for sparse technical text
         tessedit_ocr_engine_mode: Tesseract.OEM.LSTM_ONLY, // Use LSTM for better accuracy
-        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:!?()[]{}\'"-+=/\\@#$%^&*|<>~` ',
         preserve_interword_spaces: '1',
         // Optimize for small text in drawings
         tessedit_min_char_height: '6',
@@ -171,7 +333,12 @@ class OCRService {
         textPreview: data.text?.substring(0, 100) + '...'
       });
 
-      return this.createOCRResult(data, pageNumber, processingTime);
+      return this.createOCRResult(data, pageNumber, processingTime, {
+        canvasWidth: canvas.width,
+        canvasHeight: canvas.height,
+        rotationDeg: context?.rotationDeg ?? 0,
+        fullPageViewport: context?.fullPageViewport,
+      });
 
     } catch (error) {
       console.error(`❌ OCR failed for page ${pageNumber}:`, error);
@@ -342,6 +509,7 @@ class OCRService {
             text: '',
             confidence: 0,
             processingTime: 0,
+            wordBoxes: [],
           };
         }
         
@@ -356,6 +524,7 @@ class OCRService {
       text: '',
       confidence: 0,
       processingTime: 0,
+      wordBoxes: [],
     };
   }
 
@@ -405,7 +574,9 @@ class OCRService {
         }).promise;
       }
 
-      const result = await this.processPage(canvas, pageNumber);
+      const result = await this.processPage(canvas, pageNumber, {
+        rotationDeg: viewport.rotation ?? 0,
+      });
       
       // Clean up canvas resources
       this.cleanupPageResources(canvas);
@@ -502,14 +673,28 @@ class OCRService {
       throw new Error('Failed to get canvas context for quadrant rendering');
     }
 
-    return this.processPageWithSpecializedSettings(canvas, pageNumber, quadrantNumber);
+    return this.processPageWithSpecializedSettings(canvas, pageNumber, quadrantNumber, {
+      rotationDeg: baseViewport.rotation ?? 0,
+      fullPageViewport: {
+        offsetX,
+        offsetY,
+        width,
+        height,
+        fullWidth: baseViewport.width,
+        fullHeight: baseViewport.height,
+      },
+    });
   }
 
   // Process canvas with specialized settings for architectural drawings
   private async processPageWithSpecializedSettings(
     canvas: HTMLCanvasElement,
     pageNumber: number,
-    quadrantNumber?: number
+    quadrantNumber?: number,
+    context?: {
+      rotationDeg?: number;
+      fullPageViewport?: { offsetX: number; offsetY: number; width: number; height: number; fullWidth: number; fullHeight: number };
+    }
   ): Promise<OCRResult> {
     if (!this.worker) {
       throw new Error('OCR worker not initialized');
@@ -519,13 +704,13 @@ class OCRService {
 
     try {
       // Convert to high-quality image
-      const imageInput = await this.canvasToImageInput(canvas);
+      const preprocessedCanvas = this.preprocessCanvasForOCR(canvas);
+      const imageInput = await this.canvasToImageInput(preprocessedCanvas);
       
       // Set specialized parameters for architectural drawings
       await this.worker.setParameters({
-        tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK, // Treat as single text block
+        tessedit_pageseg_mode: Tesseract.PSM.SPARSE_TEXT, // Better for fragmented text in quadrants
         tessedit_ocr_engine_mode: Tesseract.OEM.LSTM_ONLY,
-        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:!?()[]{}\'"-+=/\\@#$%^&*|<>~` ',
         preserve_interword_spaces: '1',
         // Optimize for small text
         tessedit_min_char_height: '8',
@@ -544,7 +729,12 @@ class OCRService {
         textPreview: data.text?.substring(0, 200) + '...'
       });
 
-      return this.createOCRResult(data, pageNumber, Date.now() - startTime);
+      return this.createOCRResult(data, pageNumber, Date.now() - startTime, {
+        canvasWidth: canvas.width,
+        canvasHeight: canvas.height,
+        rotationDeg: context?.rotationDeg ?? 0,
+        fullPageViewport: context?.fullPageViewport,
+      });
     } catch (error) {
       console.error(`Error processing quadrant ${quadrantNumber}:`, error);
       throw error;
@@ -559,6 +749,7 @@ class OCRService {
         text: '',
         confidence: 0,
         processingTime: 0,
+        wordBoxes: [],
       };
     }
 
@@ -573,6 +764,7 @@ class OCRService {
 
     // Calculate total processing time
     const totalProcessingTime = quadrantResults.reduce((sum, result) => sum + result.processingTime, 0);
+    const mergedWordBoxes = quadrantResults.flatMap((result) => result.wordBoxes || []);
 
     ocrDevLog(`✅ Combined ${quadrantResults.length} quadrants:`, {
       textLength: combinedText.length,
@@ -585,6 +777,7 @@ class OCRService {
       text: combinedText,
       confidence: avgConfidence,
       processingTime: totalProcessingTime,
+      wordBoxes: mergedWordBoxes,
     };
   }
 
@@ -876,13 +1069,20 @@ class OCRService {
   private createOCRResult(
     data: TesseractRecognizeData,
     pageNumber: number,
-    processingTime: number
+    processingTime: number,
+    context: {
+      canvasWidth: number;
+      canvasHeight: number;
+      rotationDeg: number;
+      fullPageViewport?: { offsetX: number; offsetY: number; width: number; height: number; fullWidth: number; fullHeight: number };
+    }
   ): OCRResult {
     return {
       pageNumber,
       text: data.text ?? '',
       confidence: data.confidence ?? 0,
       processingTime,
+      wordBoxes: this.extractWordBoxes(data, context),
     };
   }
 
@@ -964,7 +1164,7 @@ class OCRService {
   // Public method to process a canvas directly (for titleblock extraction)
   async processCanvas(canvas: HTMLCanvasElement, pageNumber: number = 1): Promise<OCRResult> {
     await this.initializeWorker();
-    return await this.processPage(canvas, pageNumber);
+    return await this.processPage(canvas, pageNumber, { rotationDeg: 0 });
   }
 }
 

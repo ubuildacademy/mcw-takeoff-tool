@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 import { Button } from './ui/button';
 import { Progress } from './ui/progress';
@@ -19,6 +20,9 @@ interface AutoCountProgressDialogProps {
     total: number;
     currentPage?: number;
     currentDocument?: string;
+    pagesTotal?: number;
+    stage?: 'preparing' | 'extracting-template' | 'searching' | 'creating-measurements' | 'finalizing';
+    stageLabel?: string;
   } | null;
   conditionName: string;
   searchScope: 'current-page' | 'entire-document' | 'entire-project';
@@ -36,8 +40,8 @@ export function AutoCountProgressDialog({
   isCancelling = false,
   completionResult = null
 }: AutoCountProgressDialogProps) {
-  const progressPercent = progress 
-    ? Math.round((progress.current / progress.total) * 100)
+  const rawProgressPercent = progress 
+    ? Math.round((progress.current / Math.max(progress.total, 1)) * 100)
     : 0;
 
   const scopeLabels = {
@@ -47,7 +51,64 @@ export function AutoCountProgressDialog({
   };
 
   const isComplete = completionResult !== null;
-  const isSearching = progress && progress.current < progress.total && !isComplete;
+  const isSearching = !!progress && !isComplete && !isCancelling;
+  const [displayProgressPercent, setDisplayProgressPercent] = useState(0);
+  const [searchStartedAt, setSearchStartedAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setDisplayProgressPercent(0);
+      setSearchStartedAt(null);
+      return;
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !isSearching) return;
+    if (searchStartedAt == null) {
+      setSearchStartedAt(Date.now());
+    }
+  }, [isOpen, isSearching, searchStartedAt]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    if (isComplete) {
+      setDisplayProgressPercent(100);
+      return;
+    }
+
+    if (!progress) {
+      setDisplayProgressPercent(0);
+      return;
+    }
+
+    const backendTargetPercent = Math.max(0, Math.min(100, rawProgressPercent));
+    const timer = window.setInterval(() => {
+      setDisplayProgressPercent((prev) => {
+        const elapsedMs = searchStartedAt ? Date.now() - searchStartedAt : 0;
+        // Fallback when SSE progress is sparse/buffered: keep visible movement.
+        // This approaches ~97% over time, but real backend progress always wins.
+        const fallbackTargetPercent = Math.min(97, Math.round((1 - Math.exp(-elapsedMs / 7000)) * 97));
+        const targetPercent = Math.max(backendTargetPercent, fallbackTargetPercent);
+        if (targetPercent <= prev) return prev;
+        const remaining = targetPercent - prev;
+        const step = Math.max(2, Math.ceil(remaining * 0.28));
+        return Math.min(prev + step, targetPercent);
+      });
+    }, 100);
+
+    return () => window.clearInterval(timer);
+  }, [isOpen, isComplete, progress, rawProgressPercent, searchStartedAt]);
+
+  const pageProgressLabel = progress
+    ? progress.currentPage && (progress.pagesTotal ?? 0) > 0
+      ? `Processing page ${progress.currentPage} of ${progress.pagesTotal}`
+      : progress.currentPage
+        ? `Processing page ${progress.currentPage}`
+        : 'Preparing pages to search'
+    : '';
+  const stageLabel = progress?.stageLabel || 'Processing auto-count';
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && !isCancelling && !isSearching && onClose()}>
@@ -84,7 +145,11 @@ export function AutoCountProgressDialog({
               {progress && (
                 <>
                   <span>•</span>
-                  <span>{progress.total} {progress.total === 1 ? 'page' : 'pages'} to search</span>
+                  <span>
+                    {(progress.pagesTotal ?? 0) > 0
+                      ? `${progress.pagesTotal} ${progress.pagesTotal === 1 ? 'page' : 'pages'} to search`
+                      : 'Preparing page count'}
+                  </span>
                 </>
               )}
             </div>
@@ -95,15 +160,16 @@ export function AutoCountProgressDialog({
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium">Search Progress</span>
-                <span className="text-sm text-gray-600">{progressPercent}%</span>
+                <span className="text-sm text-gray-600">{displayProgressPercent}%</span>
               </div>
-              <Progress value={progressPercent} className="w-full h-2" />
+              <Progress value={displayProgressPercent} className="w-full h-2" />
+              <div className="text-sm text-indigo-700 font-medium">{stageLabel}</div>
               
               <div className="space-y-2">
                 <div className="flex items-center gap-2 text-sm text-gray-600">
                   <Clock className="w-4 h-4" />
                   <span>
-                    Processing page {progress.current} of {progress.total}
+                    {pageProgressLabel}
                     {progress.currentDocument && ` in "${progress.currentDocument}"`}
                   </span>
                 </div>

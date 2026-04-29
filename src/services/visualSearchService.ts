@@ -112,7 +112,15 @@ export class AutoCountService {
     sheetId: string,
     options?: Partial<AutoCountOptions>,
     searchScope?: 'current-page' | 'entire-document' | 'entire-project',
-    onProgress?: (progress: { current: number; total: number; currentPage?: number; currentDocument?: string }) => void,
+    onProgress?: (progress: {
+      current: number;
+      total: number;
+      currentPage?: number;
+      currentDocument?: string;
+      pagesTotal?: number;
+      stage?: 'preparing' | 'extracting-template' | 'searching' | 'creating-measurements' | 'finalizing';
+      stageLabel?: string;
+    }) => void,
     abortSignal?: AbortSignal,
     /** PDF.js getViewport({ scale: 1, rotation: 0 }) — must match server clip + stored coords */
     basePageSize?: { width: number; height: number }
@@ -232,7 +240,10 @@ export class AutoCountService {
                             current: data.current,
                             total: data.total,
                             currentPage: data.currentPage,
-                            currentDocument: data.currentDocument
+                            currentDocument: data.currentDocument,
+                            pagesTotal: data.pagesTotal,
+                            stage: data.stage,
+                            stageLabel: data.stageLabel
                           });
                         }
                       } else if (data.type === 'complete') {

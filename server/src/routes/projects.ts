@@ -6,7 +6,7 @@ import path from 'path';
 import { storage, StoredProject } from '../storage';
 import { supabase, TABLES } from '../supabase';
 import { triggerOCRForDocument } from './ocr';
-import { simpleOcrService } from '../services/simpleOcrService';
+import { simpleOcrService, type OCRWordBox } from '../services/simpleOcrService';
 import { 
   requireAuth, 
   requireProjectAccess,
@@ -77,7 +77,7 @@ async function buildProjectBackup(
       ? supabase.from(TABLES.SHEETS).select('*').in('document_id', fileIds).order('page_number', { ascending: true })
       : Promise.resolve<{ data: unknown[] }>({ data: [] }),
     fileIds.length > 0
-      ? supabase.from('ocr_results').select('document_id, page_number, text_content, confidence_score, processing_time_ms, processing_method').eq('project_id', id).in('document_id', fileIds).order('page_number')
+      ? supabase.from('ocr_results').select('document_id, page_number, text_content, confidence_score, processing_time_ms, processing_method, word_boxes').eq('project_id', id).in('document_id', fileIds).order('page_number')
       : Promise.resolve<{ data: unknown[] }>({ data: [] }),
   ]);
 
@@ -89,6 +89,7 @@ async function buildProjectBackup(
     confidence: r.confidence_score || 0,
     processingTime: r.processing_time_ms || 0,
     method: r.processing_method || 'direct_extraction',
+    wordBoxes: Array.isArray(r.word_boxes) ? r.word_boxes : [],
   }));
 
   const allSheets = Array.isArray(sheetsRes.data) ? sheetsRes.data : [];
@@ -385,11 +386,32 @@ export async function performImportFromBackup(
   }
 
   const migratedOcrDocumentIds = new Set<string>();
-  const backupOcrResults = backup.ocrResults as Array<{ documentId: string; pageNumber: number; text: string; confidence: number; processingTime: number; method: string }> | undefined;
+  const backupOcrResults = backup.ocrResults as Array<{ documentId: string; pageNumber: number; text: string; confidence: number; processingTime: number; method: string; wordBoxes?: unknown[] }> | undefined;
   if (Array.isArray(backupOcrResults) && backupOcrResults.length > 0) {
-    const byDocument = new Map<string, Array<{ pageNumber: number; text: string; confidence: number; processingTime: number; method: 'direct_extraction' | 'tesseract' }>>();
+    const byDocument = new Map<string, Array<{ pageNumber: number; text: string; confidence: number; processingTime: number; method: 'direct_extraction' | 'tesseract'; wordBoxes?: OCRWordBox[] }>>();
     for (const r of backupOcrResults) {
       if (!r?.documentId) continue;
+      const wordBoxes: OCRWordBox[] = Array.isArray(r.wordBoxes)
+        ? r.wordBoxes
+            .map((candidate: unknown, index: number): OCRWordBox | null => {
+              if (!candidate || typeof candidate !== 'object') return null;
+              const box = candidate as Record<string, unknown>;
+              const bbox = box.bbox as Record<string, unknown> | undefined;
+              return {
+                index: typeof box.index === 'number' ? box.index : index,
+                text: typeof box.text === 'string' ? box.text : '',
+                confidence: typeof box.confidence === 'number' ? box.confidence : 0,
+                bbox: {
+                  x: typeof bbox?.x === 'number' ? bbox.x : 0,
+                  y: typeof bbox?.y === 'number' ? bbox.y : 0,
+                  width: typeof bbox?.width === 'number' ? bbox.width : 0,
+                  height: typeof bbox?.height === 'number' ? bbox.height : 0,
+                },
+                source: box.source === 'pdfjs' ? 'pdfjs' : 'tesseract',
+              };
+            })
+            .filter((box): box is OCRWordBox => box != null)
+        : [];
       const list = byDocument.get(r.documentId) ?? [];
       list.push({
         pageNumber: r.pageNumber,
@@ -397,6 +419,7 @@ export async function performImportFromBackup(
         confidence: r.confidence,
         processingTime: r.processingTime,
         method: (r.method === 'tesseract' ? 'tesseract' : 'direct_extraction') as 'direct_extraction' | 'tesseract',
+        wordBoxes,
       });
       byDocument.set(r.documentId, list);
     }

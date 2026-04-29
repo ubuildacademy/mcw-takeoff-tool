@@ -740,11 +740,14 @@ except Exception as e:
         const searchPageNum = pageNumber || 1;
         
         if (onProgress) {
-          onProgress({ current: 1, total: 1, currentPage: searchPageNum });
+          onProgress({ current: 0, total: 1, currentPage: searchPageNum });
         }
         
         const pageMatches = await this.searchPage(pdfPath, searchPageNum, template, opts, pdfFileId);
         allMatches.push(...pageMatches);
+        if (onProgress) {
+          onProgress({ current: 1, total: 1, currentPage: searchPageNum });
+        }
       } else if (searchScope === 'entire-document') {
         // Search all pages in the current document
         const pdfPath = await this.getPDFFilePath(pdfFileId, projectId);
@@ -758,16 +761,15 @@ except Exception as e:
         }
         
         for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-          if (onProgress) {
-            onProgress({ current: pageNum, total: totalPages, currentPage: pageNum });
-          }
-          
           try {
             const pageMatches = await this.searchPage(pdfPath, pageNum, template, opts, pdfFileId);
             allMatches.push(...pageMatches);
           } catch (pageError) {
             console.warn(`⚠️ Failed to search page ${pageNum}, continuing...`, pageError);
             // Continue with other pages
+          }
+          if (onProgress) {
+            onProgress({ current: pageNum, total: totalPages, currentPage: pageNum });
           }
         }
       } else if (searchScope === 'entire-project') {
@@ -809,8 +811,14 @@ except Exception as e:
             console.log(`📄 Searching ${pageCount} pages in document ${file.originalName || file.id}`);
             
             for (let pageNum = 1; pageNum <= pageCount; pageNum++) {
+              try {
+                const pageMatches = await this.searchPage(pdfPath, pageNum, template, opts, file.id);
+                allMatches.push(...pageMatches);
+              } catch (pageError) {
+                console.warn(`⚠️ Failed to search page ${pageNum} of document ${file.id}, continuing...`, pageError);
+                // Continue with other pages
+              }
               processedPages++;
-              
               if (onProgress) {
                 onProgress({ 
                   current: processedPages, 
@@ -818,14 +826,6 @@ except Exception as e:
                   currentPage: pageNum,
                   currentDocument: file.originalName || file.id
                 });
-              }
-              
-              try {
-                const pageMatches = await this.searchPage(pdfPath, pageNum, template, opts, file.id);
-                allMatches.push(...pageMatches);
-              } catch (pageError) {
-                console.warn(`⚠️ Failed to search page ${pageNum} of document ${file.id}, continuing...`, pageError);
-                // Continue with other pages
               }
             }
           } catch (fileError) {
@@ -873,12 +873,18 @@ except Exception as e:
       pdfJsViewport?: { width: number; height: number };
       /** Fallback when match.documentId is missing */
       primaryPdfFileId?: string;
-    }
+    },
+    onProgress?: (progress: { current: number; total: number }) => void
   ): Promise<void> {
     try {
       console.log(`📊 Creating ${matches.length} count measurements...`);
 
-      for (const match of matches) {
+      const totalMatches = matches.length;
+      for (let i = 0; i < totalMatches; i++) {
+        const match = matches[i];
+        if (onProgress) {
+          onProgress({ current: i, total: totalMatches });
+        }
         const documentId = match.documentId || options?.primaryPdfFileId;
         if (!documentId) {
           throw new Error('Auto-count match missing document id');
@@ -928,6 +934,10 @@ except Exception as e:
         };
 
         await storage.saveTakeoffMeasurement(measurement);
+      }
+
+      if (onProgress) {
+        onProgress({ current: totalMatches, total: totalMatches });
       }
 
       console.log(`✅ Created ${matches.length} count measurements`);

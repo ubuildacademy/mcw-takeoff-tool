@@ -93,7 +93,9 @@ export function usePDFLoad(
           disableRange: false,
           cMapUrl: '/cmaps/',
           cMapPacked: true,
-          maxImageSize: 1024 * 1024,
+          // Keep large embedded raster images (e.g. cover renderings/photos) visible.
+          // A low cap here causes PDF.js to omit those images while still rendering text.
+          maxImageSize: -1,
           isEvalSupported: false,
           verbosity: 0, // Suppress font recovery warnings (e.g. "TT: undefined function")
         }).promise;

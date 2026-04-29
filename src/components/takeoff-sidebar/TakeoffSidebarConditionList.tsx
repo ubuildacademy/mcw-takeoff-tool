@@ -43,6 +43,10 @@ function getImageSrc(img: string): string {
   return img.startsWith('data:') || img.startsWith('http') ? img : `data:image/png;base64,${img}`;
 }
 
+function supportsWasteFactor(type: TakeoffCondition['type']): boolean {
+  return type !== 'count' && type !== 'auto-count';
+}
+
 /** Measurements for the active viewer sheet + page only (standard takeoff sidebar: page totals, not project-wide). */
 function filterMeasurementsForCurrentPage<T extends { sheetId: string; pdfPage: number | string }>(
   measurements: T[],
@@ -327,7 +331,7 @@ export function TakeoffSidebarConditionList({
               )}
               <div className="flex items-center gap-3 text-xs">
                 <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: condition.color }} />
-                {condition.type !== 'count' && <span>Waste: {condition.wasteFactor}%</span>}
+                {supportsWasteFactor(condition.type) && <span>Waste: {condition.wasteFactor}%</span>}
                 <div className="font-medium text-blue-600">
                   {formatConditionValue(condition, measurements, viewerDocumentId, currentPage)}
                 </div>

@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs-extra';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../supabase';
-import { simpleOcrService, type SimpleOCRResult } from '../services/simpleOcrService';
+import { simpleOcrService, type OCRWordBox, type SimpleOCRResult } from '../services/simpleOcrService';
 import { requireAuth, hasProjectAccess, isAdmin, validateUUIDParam, isValidUUID } from '../middleware';
 
 const router = express.Router();
@@ -231,6 +231,45 @@ router.get('/search/:documentId', requireAuth, validateUUIDParam('documentId'), 
   }
 });
 
+// Get OCR word boxes for a specific page (optionally filtered by query)
+router.get('/word-boxes/:documentId', requireAuth, validateUUIDParam('documentId'), async (req, res) => {
+  const { documentId } = req.params;
+  const projectId = firstQueryString(req.query.projectId);
+  const pageNumberRaw = firstQueryString(req.query.pageNumber);
+  const query = firstQueryString(req.query.query);
+
+  if (!projectId) {
+    return res.status(400).json({ error: 'Project ID is required' });
+  }
+  if (!pageNumberRaw) {
+    return res.status(400).json({ error: 'Page number is required' });
+  }
+  const pageNumber = Number.parseInt(pageNumberRaw, 10);
+  if (!Number.isFinite(pageNumber) || pageNumber < 1) {
+    return res.status(400).json({ error: 'Page number must be a positive integer' });
+  }
+
+  const userIsAdmin = await isAdmin(req.user!.id);
+  if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+    return res.status(404).json({ error: 'Project not found or access denied' });
+  }
+
+  try {
+    const boxes = await simpleOcrService.getWordBoxesForPage(projectId, documentId, pageNumber, query);
+    res.json({
+      documentId,
+      projectId,
+      pageNumber,
+      query: query?.trim() || '',
+      boxes,
+      total: boxes.length,
+    });
+  } catch (error) {
+    console.error('Error getting OCR word boxes:', error);
+    res.status(500).json({ error: 'Failed to get OCR word boxes' });
+  }
+});
+
 // Get OCR results for a document
 router.get('/results/:documentId', requireAuth, validateUUIDParam('documentId'), async (req, res) => {
   const { documentId } = req.params;
@@ -343,12 +382,33 @@ router.post('/client-results/:documentId', requireAuth, validateUUIDParam('docum
 
     const serverResults: SimpleOCRResult[] = results.map((result: Record<string, unknown>) => {
       const pageNumber = typeof result.pageNumber === 'number' ? result.pageNumber : Number(result.pageNumber);
+      const rawWordBoxes = Array.isArray(result.wordBoxes) ? result.wordBoxes : [];
+      const wordBoxes: OCRWordBox[] = rawWordBoxes
+        .map((entry: unknown, index: number): OCRWordBox | null => {
+          if (!entry || typeof entry !== 'object') return null;
+          const candidate = entry as Record<string, unknown>;
+          const bboxCandidate = candidate.bbox as Record<string, unknown> | undefined;
+          const x = typeof bboxCandidate?.x === 'number' ? bboxCandidate.x : 0;
+          const y = typeof bboxCandidate?.y === 'number' ? bboxCandidate.y : 0;
+          const width = typeof bboxCandidate?.width === 'number' ? bboxCandidate.width : 0;
+          const height = typeof bboxCandidate?.height === 'number' ? bboxCandidate.height : 0;
+          return {
+            index: typeof candidate.index === 'number' ? candidate.index : index,
+            text: typeof candidate.text === 'string' ? candidate.text : '',
+            confidence: typeof candidate.confidence === 'number' ? candidate.confidence : 0,
+            bbox: { x, y, width, height },
+            source: candidate.source === 'pdfjs' ? 'pdfjs' : 'tesseract',
+          };
+        })
+        .filter((box): box is OCRWordBox => box != null);
+
       return {
         pageNumber: Number.isFinite(pageNumber) ? pageNumber : 0,
         text: typeof result.text === 'string' ? result.text : '',
         confidence: typeof result.confidence === 'number' ? result.confidence : 0,
         processingTime: typeof result.processingTime === 'number' ? result.processingTime : 0,
         method: 'tesseract' as const,
+        wordBoxes,
       };
     });
 

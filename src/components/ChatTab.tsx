@@ -342,7 +342,9 @@ When answering questions:
       context += `\n=== TAKEOFF CONDITIONS ===\n`;
       conditions.forEach(condition => {
         context += `- ${condition.name} (${condition.type}): ${condition.unit}`;
-        if (condition.wasteFactor > 0) context += `, ${condition.wasteFactor}% waste`;
+        if (condition.type !== 'count' && condition.type !== 'auto-count' && condition.wasteFactor > 0) {
+          context += `, ${condition.wasteFactor}% waste`;
+        }
         if (condition.laborCost) context += `, $${condition.laborCost} labor cost`;
         if (condition.materialCost) context += `, $${condition.materialCost} material cost`;
         if (condition.description) context += ` - ${condition.description}`;

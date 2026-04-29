@@ -786,6 +786,32 @@ export const ocrApiService = {
     return response.data;
   },
 
+  async getDocumentWordBoxes(documentId: string, projectId: string, pageNumber: number, query?: string) {
+    const params = new URLSearchParams({
+      projectId,
+      pageNumber: String(pageNumber),
+    });
+    if (query && query.trim().length > 0) {
+      params.set('query', query.trim());
+    }
+    const response = await apiClient.get(`/ocr/word-boxes/${documentId}?${params.toString()}`);
+    return response.data as {
+      documentId: string;
+      projectId: string;
+      pageNumber: number;
+      query: string;
+      boxes: Array<{
+        index: number;
+        text: string;
+        confidence: number;
+        bbox: { x: number; y: number; width: number; height: number };
+        source: 'pdfjs' | 'tesseract';
+        ocrRotationDeg?: number;
+      }>;
+      total: number;
+    };
+  },
+
   async submitClientResults(documentId: string, projectId: string, results: unknown[], jobId?: string) {
     const response = await apiClient.post(`/ocr/client-results/${documentId}`, {
       projectId,

@@ -21,6 +21,10 @@ interface CreateConditionDialogProps {
 
 type ConditionFormType = 'area' | 'volume' | 'linear' | 'count' | 'auto-count';
 
+function isCountLikeCondition(type: ConditionFormType): boolean {
+  return type === 'count' || type === 'auto-count';
+}
+
 function getImageSrc(img: string): string {
   return img.startsWith('data:') || img.startsWith('http') ? img : `data:image/png;base64,${img}`;
 }
@@ -171,7 +175,9 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
         name: formData.name,
         type: formData.type,
         unit: effectiveUnit,
-        wasteFactor: formData.wasteFactor ? parseFloat(formData.wasteFactor) : 0,
+        wasteFactor: isCountLikeCondition(formData.type)
+          ? 0
+          : (formData.wasteFactor ? parseFloat(formData.wasteFactor) : 0),
         color: formData.color,
         description: formData.description,
         materialCost: formData.materialCost && formData.materialCost.trim() !== '' ? parseFloat(formData.materialCost) : undefined,
@@ -262,8 +268,8 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
         ...prev,
         type: value as ConditionFormType,
         unit: defaultUnit,
-        // Set waste factor to 0 for count conditions since they don't have waste
-        wasteFactor: value === 'count' ? '0' : prev.wasteFactor,
+        // Count-like conditions do not support waste factor
+        wasteFactor: value === 'count' || value === 'auto-count' ? '0' : prev.wasteFactor,
         // Reset type-specific fields when type changes
         includeHeight: false,
         height: '',
@@ -455,7 +461,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
           )}
 
           <div className="grid grid-cols-2 gap-4">
-            {formData.type !== 'count' && (
+            {!isCountLikeCondition(formData.type) && (
               <div>
                 <Label htmlFor="wasteFactor">Waste Factor (%)</Label>
                 <Input
@@ -471,7 +477,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
               </div>
             )}
 
-            <div className={formData.type === 'count' ? 'col-span-2' : ''}>
+            <div className={isCountLikeCondition(formData.type) ? 'col-span-2' : ''}>
               <Label htmlFor="color">Color</Label>
               <Input
                 id="color"

@@ -72,6 +72,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
   const ensureConditionsLoaded = useConditionStore((s) => s.ensureConditionsLoaded);
   const getProjectCostBreakdown = useMeasurementStore((s) => s.getProjectCostBreakdown);
   const _getConditionCostBreakdown = useMeasurementStore((s) => s.getConditionCostBreakdown);
+  const supportsWasteFactor = (type: TakeoffCondition['type']) => type !== 'count' && type !== 'auto-count';
 
   const { getQuantityReportData, getCostAnalysisData: _getCostAnalysisData, exportToExcel, exportToPDF, generateExcelBuffer, generatePDFBuffer } = useTakeoffExport({
     projectId,
@@ -677,7 +678,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                               <span className="text-slate-600">Quantity</span>
                               <div className="text-right">
                                 <span className="font-medium">{condition.quantity.toFixed(2)} {condition.condition.unit}</span>
-                                {condition.condition.wasteFactor > 0 && (
+                                {supportsWasteFactor(condition.condition.type) && condition.condition.wasteFactor > 0 && (
                                   <div className="text-xs text-slate-500">
                                     + {condition.condition.wasteFactor}% waste = {condition.adjustedQuantity.toFixed(2)} {condition.condition.unit}
                                   </div>

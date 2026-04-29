@@ -6,6 +6,14 @@ export interface OCRResult {
   confidence: number;
   processingTime: number;
   method: 'direct_extraction' | 'tesseract';
+  wordBoxes?: Array<{
+    index: number;
+    text: string;
+    confidence: number;
+    bbox: { x: number; y: number; width: number; height: number };
+    source: 'pdfjs' | 'tesseract';
+    ocrRotationDeg?: number;
+  }>;
 }
 
 export interface DocumentOCRData {
@@ -170,6 +178,7 @@ class ServerOCRService {
         confidence: page.confidence,
         processingTime: page.processingTime,
         method: 'tesseract' as const,
+        wordBoxes: page.wordBoxes,
       }));
       
       // Send results back to server
@@ -188,6 +197,7 @@ class ServerOCRService {
           confidence: page.confidence,
           processingTime: page.processingTime,
           method: 'tesseract' as const,
+          wordBoxes: page.wordBoxes,
         })),
         processedAt: ocrResult.processedAt
       };
@@ -260,6 +270,7 @@ class ServerOCRService {
         confidence?: number;
         processingTime?: number;
         method?: string;
+        wordBoxes?: OCRResult['wordBoxes'];
       };
       let safeResults: OcrResultRow[] = [];
       try {
@@ -302,6 +313,7 @@ class ServerOCRService {
         confidence: r.confidence ?? 0,
         processingTime: r.processingTime ?? 0,
         method: (r.method === 'tesseract' ? 'tesseract' : 'direct_extraction') as OCRResult['method'],
+        wordBoxes: Array.isArray(r.wordBoxes) ? r.wordBoxes : [],
       }));
 
       return {
