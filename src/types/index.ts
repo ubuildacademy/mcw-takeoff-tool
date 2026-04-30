@@ -225,6 +225,8 @@ export interface ProjectCostBreakdown {
     totalCost: number;
     conditionsWithCosts: number;
     totalConditions: number;
+    /** Measurements whose condition is missing locally (not included in dollar totals). */
+    excludedMeasurementsFromCost?: { count: number };
   };
 }
 

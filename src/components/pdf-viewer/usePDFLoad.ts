@@ -55,6 +55,8 @@ export function usePDFLoad(
       return;
     }
 
+    let cancelled = false;
+
     setIsLoading(true);
     setError(null);
 
@@ -100,6 +102,8 @@ export function usePDFLoad(
           verbosity: 0, // Suppress font recovery warnings (e.g. "TT: undefined function")
         }).promise;
 
+        if (cancelled) return;
+
         setPdfDocument(pdf);
 
         if (externalTotalPages === undefined) {
@@ -111,17 +115,24 @@ export function usePDFLoad(
 
         onPDFLoaded?.(pdf.numPages);
       } catch (err: unknown) {
+        if (cancelled) return;
         console.error('Error loading PDF:', err);
         setError('Failed to load PDF file');
       } finally {
-        setIsLoading(false);
         if (objectUrlToRevoke) {
           URL.revokeObjectURL(objectUrlToRevoke);
+        }
+        if (!cancelled) {
+          setIsLoading(false);
         }
       }
     };
 
     loadPDF();
+
+    return () => {
+      cancelled = true;
+    };
     // Depend on stable file identity (fileKey) so we don't reload when parent passes
     // a new object reference for the same document (e.g. after project init re-renders).
     // eslint-disable-next-line react-hooks/exhaustive-deps

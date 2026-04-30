@@ -19,6 +19,7 @@ import { toast } from 'sonner';
 import { useSheetSidebarFilter, useSheetSidebarSheetEditing, SheetSidebarHeader, SheetSidebarDialogs } from './sheet-sidebar';
 import { fileService, sheetService } from '../services/apiService';
 import { useMeasurementStore } from '../store/slices/measurementSlice';
+import { parseDocumentIdFromSheetId } from '../lib/sheetUtils';
 import type { PDFDocument, SearchResult } from '../types';
 
 // PDFPage and PDFDocument interfaces imported from shared types
@@ -160,32 +161,32 @@ export function SheetSidebar({
   // Update hasTakeoffs property based on actual takeoff measurements
   const updateHasTakeoffs = useCallback((docs: PDFDocument[]) => {
     const takeoffMeasurements = getProjectTakeoffMeasurements(projectId);
-    
-    return docs.map(doc => ({
+    const countByDocPage = new Map<string, number>();
+    for (const m of takeoffMeasurements) {
+      if (m.projectId !== projectId) continue;
+      const docId = parseDocumentIdFromSheetId(m.sheetId);
+      const k = `${docId}:${m.pdfPage}`;
+      countByDocPage.set(k, (countByDocPage.get(k) ?? 0) + 1);
+    }
+
+    return docs.map((doc) => ({
       ...doc,
       // Preserve isExpanded and other document-level properties
       isExpanded: doc.isExpanded,
       ocrEnabled: doc.ocrEnabled,
       // CRITICAL FIX: Filter out null/undefined pages before mapping to prevent TypeError
       pages: (Array.isArray(doc.pages) ? doc.pages : [])
-        .filter(page => page != null && page.pageNumber != null)
-        .map(page => {
-          const _pageKey = `${projectId}-${doc.id}-${page.pageNumber}`;
-          const hasMeasurements = takeoffMeasurements.some(measurement => 
-            measurement.sheetId === doc.id && measurement.pdfPage === page.pageNumber
-          );
-          const measurementCount = takeoffMeasurements.filter(measurement => 
-            measurement.sheetId === doc.id && measurement.pdfPage === page.pageNumber
-          ).length;
-        
-        return {
-          ...page,
-          hasTakeoffs: hasMeasurements,
-          takeoffCount: measurementCount
-        };
-      })
+        .filter((page) => page != null && page.pageNumber != null)
+        .map((page) => {
+          const measurementCount = countByDocPage.get(`${doc.id}:${page.pageNumber}`) ?? 0;
+          return {
+            ...page,
+            hasTakeoffs: measurementCount > 0,
+            takeoffCount: measurementCount,
+          };
+        }),
     }));
-  }, [projectId, getProjectTakeoffMeasurements]); // Include getProjectTakeoffMeasurements to ensure fresh data
+  }, [projectId, getProjectTakeoffMeasurements]);
 
   // CRITICAL FIX: Removed independent document loading to prevent race conditions
   // TakeoffWorkspace is now the single source of truth for document loading
@@ -417,7 +418,7 @@ export function SheetSidebar({
               if (document.totalPages === 1) {
                 const page = document.pages[0];
                 return (
-                  <div key={document.id} className="border rounded-lg">
+                  <div key={document.id} className="border rounded-lg [content-visibility:auto]">
                     {/* Document Header */}
                     <div
                       className="p-3 cursor-pointer hover:bg-accent/50 transition-colors"
@@ -509,7 +510,7 @@ export function SheetSidebar({
 
                     {/* Page Content */}
                     <div
-                      className={`border-t p-3 cursor-pointer transition-colors ${
+                      className={`border-t p-3 cursor-pointer transition-colors [content-visibility:auto] [contain-intrinsic-size:auto_92px] ${
                         selectedDocumentId === document.id && selectedPageNumber === page.pageNumber
                           ? 'bg-primary/10 border-l-4 border-primary'
                           : 'hover:bg-accent/30'
@@ -697,7 +698,7 @@ export function SheetSidebar({
               
               // Multi-page PDFs: show with expandable structure
               return (
-                <div key={document.id} className="border rounded-lg">
+                <div key={document.id} className="border rounded-lg [content-visibility:auto]">
                   {/* Document Header */}
                   <div
                     className="p-3 cursor-pointer hover:bg-accent/50 transition-colors"
@@ -803,7 +804,7 @@ export function SheetSidebar({
                       .map((page) => (
                       <div
                         key={page.pageNumber}
-                        className={`p-3 cursor-pointer transition-colors ${
+                        className={`p-3 cursor-pointer transition-colors [content-visibility:auto] [contain-intrinsic-size:auto_92px] ${
                           selectedDocumentId === document.id && selectedPageNumber === page.pageNumber
                             ? 'bg-primary/10 border-l-4 border-primary'
                             : 'hover:bg-accent/30'

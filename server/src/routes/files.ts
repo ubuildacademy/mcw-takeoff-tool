@@ -106,11 +106,23 @@ router.post('/upload', requireAuth, handleUpload, async (req, res) => {
       });
     }
     
-    const projectId = (req.body.projectId as string) || 'default';
-    if (projectId !== 'default' && !isValidUUIDAnyVersion(projectId)) {
-      return res.status(400).json({ error: 'Invalid projectId' });
+    const rawProjectId = req.body?.projectId;
+    const projectId = typeof rawProjectId === 'string' ? rawProjectId.trim() : '';
+    if (!isValidUUIDAnyVersion(projectId)) {
+      fs.removeSync(req.file.path);
+      return res.status(400).json({
+        error: 'Invalid or missing projectId',
+        message: 'A valid project UUID is required to upload files.',
+      });
     }
-    
+
+    const userId = req.user!.id;
+    const userIsAdmin = await isAdmin(userId);
+    if (!userIsAdmin && !(await hasProjectAccess(userId, projectId, userIsAdmin))) {
+      fs.removeSync(req.file.path);
+      return res.status(404).json({ error: 'Project not found or access denied' });
+    }
+
     // Read file into buffer
     const fileBuffer = fs.readFileSync(req.file.path);
     
@@ -193,7 +205,7 @@ router.post('/upload', requireAuth, handleUpload, async (req, res) => {
     if (!isProd) console.log('[Upload] saved file record', { requestId, fileId: savedFile.id });
 
     // Server-side OCR so every upload gets text search / AI, even if the browser skips the client kick.
-    if (savedFile.mimetype === 'application/pdf' && projectId && projectId !== 'default') {
+    if (savedFile.mimetype === 'application/pdf') {
       void triggerOCRForDocument(projectId, savedFile.id).catch((err) => {
         console.error('OCR trigger after upload failed:', err);
       });
@@ -233,15 +245,17 @@ router.get('/', requireAuth, async (req, res) => {
 router.get('/:fileId', requireAuth, validateUUIDParam('fileId'), async (req, res) => {
   const startTime = Date.now();
   const { fileId } = req.params;
-  
-  console.log('🔍 [FILE REQUEST] Starting file fetch:', {
-    fileId,
-    method: req.method,
-    path: req.path,
-    userId: req.user!.id,
-    timestamp: new Date().toISOString()
-  });
-  
+  const isProdFiles = process.env.NODE_ENV === 'production';
+
+  if (!isProdFiles) {
+    console.log('[FILE REQUEST] start', {
+      fileId,
+      method: req.method,
+      path: req.path,
+      userId: req.user!.id,
+    });
+  }
+
   try {
     const user = req.user!;
     
@@ -266,7 +280,9 @@ router.get('/:fileId', requireAuth, validateUUIDParam('fileId'), async (req, res
       return res.status(404).json({ error: 'File not found' });
     }
     
-    console.log('✅ File found:', { id: fileData.id, projectId: fileData.project_id, path: fileData.path });
+    if (!isProdFiles) {
+      console.log('[FILE REQUEST] row found', { id: fileData.id, projectId: fileData.project_id });
+    }
     
     // Map to StoredFileMeta format
     const meta: StoredFileMeta = {
@@ -299,9 +315,10 @@ router.get('/:fileId', requireAuth, validateUUIDParam('fileId'), async (req, res
       return res.status(404).json({ error: 'File not found or access denied' });
     }
     
-    // Get file from Supabase Storage
-    console.log('Fetching file from Supabase Storage:', meta.path);
-    
+    if (!isProdFiles) {
+      console.log('[FILE REQUEST] storage download', { path: meta.path });
+    }
+
     try {
       // Use createReadStream for better memory efficiency on Railway free tier
       // This streams the file instead of loading it all into memory
@@ -328,20 +345,20 @@ router.get('/:fileId', requireAuth, validateUUIDParam('fileId'), async (req, res
       const arrayBuffer = await data.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
       
-      // Log file size for debugging
-      const fileSizeMB = (buffer.length / (1024 * 1024)).toFixed(2);
-      const elapsedMs = Date.now() - startTime;
-      console.log(`📄 [FILE REQUEST] Sending PDF file: ${meta.originalName} (${fileSizeMB} MB) - took ${elapsedMs}ms`);
-      
-      // Check if file is too large for free tier (warn but still try)
-      // Only warn in development to reduce production log noise
-      if (buffer.length > 50 * 1024 * 1024 && process.env.NODE_ENV !== 'production') { // 50MB
-        console.warn(`⚠️ [FILE REQUEST] Large file detected (${fileSizeMB} MB) - may cause issues on Railway free tier`);
+      if (!isProdFiles) {
+        const fileSizeMB = (buffer.length / (1024 * 1024)).toFixed(2);
+        const elapsedMs = Date.now() - startTime;
+        console.log(`[FILE REQUEST] sending ${meta.originalName} (${fileSizeMB} MB) ${elapsedMs}ms`);
+        if (buffer.length > 50 * 1024 * 1024) {
+          console.warn(`[FILE REQUEST] large file (${fileSizeMB} MB) — may stress low-memory hosts`);
+        }
       }
-      
+
       res.setHeader('Content-Length', buffer.length);
       res.send(buffer);
-      console.log(`✅ [FILE REQUEST] File sent successfully: ${fileId} (${elapsedMs}ms total)`);
+      if (!isProdFiles) {
+        console.log(`[FILE REQUEST] ok fileId=${fileId} ${Date.now() - startTime}ms`);
+      }
       return;
     } catch (error: any) {
       // Enhanced error handling for Railway free tier issues

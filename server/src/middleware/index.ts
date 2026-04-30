@@ -18,8 +18,15 @@ export {
   uploadRateLimit,
   sendReportRateLimit,
   shareProjectRateLimit,
-  aiChatBurstRateLimit
+  aiChatBurstRateLimit,
+  imageInferenceBurstRateLimit
 } from './rateLimit';
+
+export {
+  stripDataUrlBase64,
+  validateInlineImagePayload,
+  validateBodyImageField
+} from './imageInferencePayload';
 
 // Validation middleware
 export {

@@ -168,8 +168,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
     };
 
     loadThumbnails();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, conditions, searchQuery, takeoffSummary]);
+  }, [projectId, conditions, searchQuery, takeoffSummary, getConditionTakeoffMeasurements]);
 
 
   const toggleConditionExpansion = (conditionId: string) => {
@@ -473,8 +472,25 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                           <span className="font-medium">{costBreakdown.summary.conditionsWithCosts}</span>
                         </div>
                       </div>
+                      {costBreakdown.summary.excludedMeasurementsFromCost &&
+                        costBreakdown.summary.excludedMeasurementsFromCost.count > 0 && (
+                          <p className="text-xs text-amber-900 mt-3 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                            {costBreakdown.summary.excludedMeasurementsFromCost.count} measurement(s) are not
+                            included in this summary (missing condition for this project). Totals may be
+                            understated.
+                          </p>
+                        )}
                     </div>
                   )}
+                  {(costBreakdown.summary.excludedMeasurementsFromCost?.count ?? 0) > 0 &&
+                    costBreakdown.summary.totalCost <= 0 && (
+                      <div className="rounded-lg p-4 border border-amber-200 bg-amber-50">
+                        <p className="text-xs text-amber-900">
+                          {costBreakdown.summary.excludedMeasurementsFromCost?.count ?? 0} measurement(s) are not
+                          included in cost summaries (missing condition for this project).
+                        </p>
+                      </div>
+                    )}
                   
                   {/* Quantity Reports */}
                   <div className="space-y-3">
@@ -627,6 +643,13 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                         </div>
                       </div>
                     </div>
+                    {summary.excludedMeasurementsFromCost &&
+                      summary.excludedMeasurementsFromCost.count > 0 && (
+                        <p className="text-xs text-amber-900 mt-3 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                          {summary.excludedMeasurementsFromCost.count} measurement(s) are not included in dollar
+                          totals (missing matching condition locally).
+                        </p>
+                      )}
                   </div>
 
 

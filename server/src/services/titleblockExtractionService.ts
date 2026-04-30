@@ -579,7 +579,13 @@ except Exception as e:
       });
 
       // Clean up temp script
-      await fs.remove(tempScriptPath).catch(() => {});
+      // Clean up temp script (best-effort; warn on failure)
+      try {
+        await fs.remove(tempScriptPath);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn('[titleblockExtractionService] failed to remove temp script', { path: tempScriptPath, message });
+      }
 
       // Always log Python stderr (region_rect, orientation transform, OCR fallback, etc.)
       if (execResult.stderr && execResult.stderr.trim()) {

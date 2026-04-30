@@ -64,6 +64,9 @@ function filterCostBreakdownForExport(
       totalCost,
       conditionsWithCosts,
       totalConditions: conditions.length,
+      ...(breakdown.summary.excludedMeasurementsFromCost != null && {
+        excludedMeasurementsFromCost: breakdown.summary.excludedMeasurementsFromCost,
+      }),
     },
   };
 }
@@ -755,6 +758,15 @@ export function useTakeoffExport({
         ['Last Modified', formatDate(currentProject?.lastModified)],
         ['Report Date', new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })],
         ['Generated Time', new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })],
+        ...(costBreakdown.summary.excludedMeasurementsFromCost &&
+        costBreakdown.summary.excludedMeasurementsFromCost.count > 0
+          ? ([
+              [
+                'Cost coverage note',
+                `${costBreakdown.summary.excludedMeasurementsFromCost.count} measurement(s) not included in dollar totals (no matching condition in this project).`,
+              ],
+            ] as [string, string][])
+          : []),
       ];
 
       projectInfo.forEach(([label, value], index) => {
@@ -1141,10 +1153,26 @@ export function useTakeoffExport({
           pdf.text(`Equipment Cost: $${costBreakdown.summary.totalEquipmentCost.toFixed(2)}`, 20, 125);
           pdf.text(`Waste Factor Cost: $${costBreakdown.summary.totalWasteCost.toFixed(2)}`, 20, 135);
           pdf.text(`Profit Margin: ${costBreakdown.summary.profitMarginPercent}% ($${costBreakdown.summary.profitMarginAmount.toFixed(2)})`, 20, 155);
+          const excl = costBreakdown.summary.excludedMeasurementsFromCost;
+          if (excl && excl.count > 0) {
+            pdf.setFontSize(8);
+            pdf.setFont('helvetica', 'italic');
+            pdf.text(
+              `Note: ${excl.count} measurement(s) not included in cost totals (missing condition).`,
+              20,
+              163
+            );
+          }
         }
       }
 
-      let legendY = costBreakdown.summary.totalCost > 0 ? 170 : 90;
+      const costExcl = costBreakdown.summary.excludedMeasurementsFromCost;
+      let legendY =
+        costBreakdown.summary.totalCost > 0
+          ? costExcl && costExcl.count > 0
+            ? 178
+            : 170
+          : 90;
       pdf.setFontSize(14);
       pdf.setFont('helvetica', 'bold');
       pdf.text('Conditions Legend', 20, legendY);

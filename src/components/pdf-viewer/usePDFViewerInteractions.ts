@@ -4,6 +4,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import type { MutableRefObject, RefObject } from 'react';
+import axios from 'axios';
 import type { PDFPageProxy, PageViewport } from 'pdfjs-dist';
 import { useAnnotationStore } from '../../store/slices/annotationSlice';
 import { useConditionStore } from '../../store/slices/conditionSlice';
@@ -21,6 +22,7 @@ import {
 } from '../../utils/measurementGeometry';
 import { isEditableKeyboardTarget } from '../../utils/keyboardUtils';
 import { getMarkupIdsFromElementsFromPoint } from '../../utils/markupHitTest';
+import { toast } from 'sonner';
 import {
   clearCanvasConditionSelection,
   measurementDrawModeForCondition,
@@ -28,6 +30,17 @@ import {
 } from '../../utils/takeoffMeasurementLookup';
 
 const PASTE_OFFSET = 0.02;
+
+function formatMeasurementMoveSaveError(reason: unknown): string {
+  if (axios.isAxiosError(reason)) {
+    const d = reason.response?.data as { error?: string } | undefined;
+    if (typeof d?.error === 'string' && d.error.length > 0) return d.error;
+    const status = reason.response?.status;
+    if (status != null) return `HTTP ${status}${reason.message ? `: ${reason.message}` : ''}`;
+    return reason.message || 'Network error';
+  }
+  return reason instanceof Error ? reason.message : String(reason);
+}
 
 /**
  * Maps screen → PDF overlay coordinates when logical zoom (`viewState.scale`) or rotation
@@ -231,6 +244,13 @@ export interface UsePDFViewerInteractionsOptions {
   /** Batched rAF repaint of crosshair / preview (reads mousePositionRef). */
   scheduleEphemeralPaintRef: MutableRefObject<(() => void) | null>;
   pdfDocument: unknown;
+  /**
+   * Set true while persisting moved measurements so usePDFViewerData does not overwrite optimistic
+   * local geometry with partially-updated store snapshots (parallel Zustand updates + mirror).
+   */
+  measurementMoveCommitInProgressRef?: MutableRefObject<boolean>;
+  /** Call when move-save commits finish (releases mirror guard) so the viewer can flush store→local. */
+  onMeasurementMoveCommitEnded?: () => void;
 }
 
 export interface UsePDFViewerInteractionsResult {
@@ -386,6 +406,8 @@ export function usePDFViewerInteractions(
     mousePositionRef,
     scheduleEphemeralPaintRef,
     pdfDocument,
+    measurementMoveCommitInProgressRef,
+    onMeasurementMoveCommitEnded,
   } = options;
 
   const queueEphemeralPaint = useCallback(() => {
@@ -1133,34 +1155,104 @@ export function usePDFViewerInteractions(
             const endBase = cssToBaseNormalized(coords.x, coords.y, dp, baseViewport, moveEffRot);
             const deltaPdf = { x: endBase.x - startBase.x, y: endBase.y - startBase.y };
             const idsToMove = measurementMoveIds.length > 0 ? measurementMoveIds : [measurementMoveId];
+            const undoEntries: {
+              id: string;
+              previous: Partial<import('../../types').TakeoffMeasurement>;
+              next: Partial<import('../../types').TakeoffMeasurement>;
+            }[] = [];
+            const saveOps: { id: string; next: Partial<import('../../types').TakeoffMeasurement> }[] = [];
+
             for (const id of idsToMove) {
               const m = localTakeoffMeasurements.find((meas) => meas.id === id);
               if (m && m.pdfCoordinates?.length) {
                 const shifted = shiftTakeoffMeasurementGeometry(m, deltaPdf);
                 const previous = {
-                  pdfCoordinates: m.pdfCoordinates,
-                  points: m.points,
+                  pdfCoordinates: m.pdfCoordinates.map((p) => ({ ...p })),
+                  points: m.points.map((p) => ({ ...p })),
                   ...(m.cutouts != null && { cutouts: m.cutouts }),
                 };
                 const next = {
-                  pdfCoordinates: shifted.pdfCoordinates,
-                  points: shifted.points,
+                  pdfCoordinates: shifted.pdfCoordinates.map((p) => ({ ...p })),
+                  points: shifted.points.map((p) => ({ ...p })),
                   ...(shifted.cutouts != null && { cutouts: shifted.cutouts }),
                 };
-                updateTakeoffMeasurement(id, next).then(() => {
-                  useUndoStore.getState().push({ type: 'measurement_update', id, previous, next });
-                }).catch(() => {});
+                undoEntries.push({ id, previous, next });
+                saveOps.push({ id, next });
               }
             }
+
             setLocalTakeoffMeasurements((prev) =>
               prev.map((m) => {
                 if (!idsToMove.includes(m.id) || !m.pdfCoordinates?.length) return m;
                 return { ...m, ...shiftTakeoffMeasurementGeometry(m, deltaPdf) };
               })
             );
+
+            /**
+             * End move-drag UX before awaiting persistence. If we kept measurementMoveId + deltaRef
+             * active while coords were already committed, SVG would wrap updated geometry with the old
+             * translate — double-applied delta and a visible flicker until mouseup handlers finished.
+             */
             measurementMoveJustCompletedRef.current = true;
             event.preventDefault();
             event.stopPropagation();
+            setMeasurementMoveId(null);
+            setMeasurementMoveIds([]);
+            setMeasurementMoveStart(null);
+            setMeasurementMoveOriginalPoints(null);
+            setMeasurementMoveDelta(null);
+
+            const commitMirrorGuard = measurementMoveCommitInProgressRef;
+            try {
+              if (commitMirrorGuard) commitMirrorGuard.current = true;
+
+              if (saveOps.length > 0) {
+                /** Sequential saves avoid Zustand lost updates when parallel set() merges race. */
+                let firstReject: unknown;
+                for (const { id, next } of saveOps) {
+                  try {
+                    await updateTakeoffMeasurement(id, next);
+                  } catch (e) {
+                    firstReject = e;
+                    break;
+                  }
+                }
+
+                if (firstReject !== undefined) {
+                  toast.error('Could not save moved measurement(s). Positions were restored from last saved.', {
+                    description: formatMeasurementMoveSaveError(firstReject),
+                  });
+                  const storeMs = useMeasurementStore.getState().takeoffMeasurements;
+                  setLocalTakeoffMeasurements((prev) =>
+                    prev.map((meas) => {
+                      if (!idsToMove.includes(meas.id)) return meas;
+                      const fromStore = storeMs.find((x) => x.id === meas.id);
+                      return fromStore ?? meas;
+                    })
+                  );
+                } else if (undoEntries.length > 0) {
+                  const storeMs = useMeasurementStore.getState().takeoffMeasurements;
+                  setLocalTakeoffMeasurements((prev) =>
+                    prev.map((meas) => {
+                      if (!idsToMove.includes(meas.id)) return meas;
+                      const fromStore = storeMs.find((x) => x.id === meas.id);
+                      return fromStore ?? meas;
+                    })
+                  );
+                  useUndoStore.getState().push({
+                    type: 'measurement_update_batch',
+                    entries: undoEntries.map((e) => ({
+                      id: e.id,
+                      previous: e.previous,
+                      next: e.next,
+                    })),
+                  });
+                }
+              }
+            } finally {
+              if (commitMirrorGuard) commitMirrorGuard.current = false;
+              onMeasurementMoveCommitEnded?.();
+            }
           }
         }
         setMeasurementMoveId(null);
@@ -1505,6 +1597,8 @@ export function usePDFViewerInteractions(
       currentViewport,
       viewState,
       updateTakeoffMeasurement,
+      measurementMoveCommitInProgressRef,
+      onMeasurementMoveCommitEnded,
       setLocalTakeoffMeasurements,
       localTakeoffMeasurements,
       annotationMoveId,

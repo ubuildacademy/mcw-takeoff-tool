@@ -64,10 +64,10 @@ async function buildProjectBackup(
   }
 
   const [conditions, files, measurements, calibrations] = await Promise.all([
-    storage.getConditionsByProject(id).catch(() => []),
-    storage.getFilesByProject(id).catch(() => []),
-    storage.getTakeoffMeasurementsByProject(id).catch(() => []),
-    storage.getCalibrationsByProject(id).catch(() => []),
+    storage.getConditionsByProject(id),
+    storage.getFilesByProject(id),
+    storage.getTakeoffMeasurementsByProject(id),
+    storage.getCalibrationsByProject(id),
   ]);
 
   const fileIds = files.map((f) => f.id);
@@ -445,7 +445,9 @@ export async function performImportFromBackup(
 
   const pdfsNeedingOcr = [...importedPdfIds].filter((id) => !migratedOcrDocumentIds.has(id));
   for (const documentId of pdfsNeedingOcr) {
-    triggerOCRForDocument(newProjectId, documentId).catch(() => {});
+    triggerOCRForDocument(newProjectId, documentId).catch((err) => {
+      console.error('[import] OCR trigger failed', { newProjectId, documentId, err });
+    });
   }
   if (pdfsNeedingOcr.length > 0) {
     console.log(`📄 Import: OCR triggered for ${pdfsNeedingOcr.length} PDF(s) missing OCR data`);
@@ -574,10 +576,9 @@ router.get('/:id', requireAuth, validateUUIDParam('id'), async (req, res) => {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
     
-    // Calculate takeoff count for this project
+    // Takeoff count only (avoid loading full measurement rows for large projects)
     try {
-      const measurements = await storage.getTakeoffMeasurementsByProject(project.id);
-      const takeoffCount = measurements.length;
+      const takeoffCount = await storage.countTakeoffMeasurementsByProject(project.id);
       
       const projectWithCounts = {
         ...project,
@@ -601,11 +602,8 @@ router.get('/:id', requireAuth, validateUUIDParam('id'), async (req, res) => {
   }
 });
 
-router.get('/:id/conditions', (req, res) => {
-  const { id } = req.params;
-  
-  // This endpoint is deprecated - use /api/conditions/project/:projectId instead
-  // Keeping for backward compatibility but returning empty array
+router.get('/:id/conditions', requireAuth, validateUUIDParam('id'), (_req, res) => {
+  // Deprecated — use /api/conditions/project/:projectId instead
   return res.json({ conditions: [] });
 });
 

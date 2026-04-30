@@ -107,6 +107,16 @@ router.get('/status/:jobId', requireAuth, validateUUIDParam('jobId'), async (req
       return res.status(404).json({ error: 'Job not found' });
     }
 
+    const userIsAdmin = await isAdmin(req.user!.id);
+    const projectId = job.project_id as string;
+    if (
+      projectId &&
+      !userIsAdmin &&
+      !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))
+    ) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+
     res.json({
       jobId: job.id,
       status: job.status,

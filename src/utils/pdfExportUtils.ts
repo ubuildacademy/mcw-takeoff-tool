@@ -1,7 +1,6 @@
 import { PDFDocument, rgb, StandardFonts, type PDFPage, type PDFFont } from 'pdf-lib';
 import type { TakeoffMeasurement, Annotation, TakeoffCondition } from '../types';
 import { formatFeetAndInches } from '../lib/utils';
-import { getPdfjs } from '../lib/pdfjs';
 
 // Render sheets at a slightly higher resolution so zooming is less blurry,
 // while preserving the physical PDF page size by downscaling the embedded image.
@@ -436,7 +435,7 @@ async function renderPageWithMarkupsToCanvas(
   documentRotation: number,
   scale: number = 2.0
 ): Promise<{ imageData: Uint8Array; width: number; height: number }> {
-  // Load PDF with pdf.js
+  const { getPdfjs } = await import('../lib/pdfjs');
   const pdfjsLib = await getPdfjs();
   const pdfJsDoc = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
   const pdfJsPage = await pdfJsDoc.getPage(pageNumber);

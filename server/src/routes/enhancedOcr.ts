@@ -6,7 +6,7 @@
 
 import { Router } from 'express';
 import { enhancedOcrService } from '../services/enhancedOcrService';
-import { requireAuth } from '../middleware';
+import { requireAuth, imageInferenceBurstRateLimit, validateBodyImageField } from '../middleware';
 
 const router = Router();
 
@@ -14,7 +14,7 @@ const router = Router();
  * POST /api/enhanced-ocr/analyze
  * Perform enhanced OCR analysis on an image
  */
-router.post('/analyze', requireAuth, async (req, res) => {
+router.post('/analyze', requireAuth, imageInferenceBurstRateLimit, validateBodyImageField('imageData'), async (req, res) => {
   try {
     const { imageData } = req.body;
 

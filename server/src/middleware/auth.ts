@@ -76,7 +76,14 @@ export async function isAdmin(userId: string): Promise<boolean> {
 }
 
 /**
- * Check if user has access to a specific project
+ * Whether `userId` may access data belonging to `projectId`.
+ *
+ * Today this means **ownership**: `takeoff_projects.user_id` must match `userId`
+ * (admins bypass via `userIsAdmin`).
+ *
+ * **Shared projects** in this app are copied on import into a new project owned by the
+ * importer — there is no multi-user membership row here yet. If you add collaborators,
+ * extend this function and keep route checks consistent.
  */
 export async function hasProjectAccess(userId: string, projectId: string, userIsAdmin: boolean): Promise<boolean> {
   if (userIsAdmin) {

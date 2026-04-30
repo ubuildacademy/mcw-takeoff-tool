@@ -146,7 +146,14 @@ apiClient.interceptors.request.use(
         delete config.headers['Content-Type'];
       }
     } catch (err) {
-      if (import.meta.env.DEV) console.error('Error getting session for API request:', err);
+      console.error('[api] Error getting session for API request:', err);
+      try {
+        const method = typeof config.method === 'string' ? config.method.toUpperCase() : 'GET';
+        const url = typeof config.url === 'string' ? config.url : '';
+        if (url) console.error('[api] Request context:', method, url);
+      } catch {
+        /* ignore */
+      }
     }
     return config;
   },
@@ -576,6 +583,24 @@ export const sheetService = {
   async getSheet(sheetId: string) {
     const response = await apiClient.get(`/sheets/${sheetId}`);
     return response.data;
+  },
+
+  /** Sidebar: one POST for many sheet ids instead of N GETs when opening a project. */
+  async batchSheetMetadata(projectId: string, sheetIds: string[]) {
+    const response = await apiClient.post(`/sheets/batch-metadata`, { projectId, sheetIds });
+    return response.data as {
+      sheetsById?: Record<
+        string,
+        {
+          id?: string;
+          sheetName?: string;
+          sheetNumber?: string;
+          hasTakeoffs?: boolean;
+          takeoffCount?: number;
+          isVisible?: boolean;
+        }
+      >;
+    };
   },
 
   async updateSheet(sheetId: string, updates: Record<string, unknown>) {

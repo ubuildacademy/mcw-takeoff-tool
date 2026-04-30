@@ -598,6 +598,59 @@ class SupabaseStorage {
     }));
   }
 
+  /** Single condition by id (for routes that must not scan all conditions). */
+  async getConditionById(conditionId: string): Promise<StoredCondition | null> {
+    const { data, error } = await supabase
+      .from(TABLES.CONDITIONS)
+      .select('*')
+      .eq('id', conditionId)
+      .maybeSingle();
+
+    if (error) {
+      throw new DatabaseError('Failed to fetch condition', error, { conditionId });
+    }
+    const item = data as ConditionRow | null;
+    if (!item) return null;
+
+    return {
+      id: item.id,
+      projectId: item.project_id,
+      name: item.name,
+      type: item.type as StoredCondition['type'],
+      unit: item.unit,
+      wasteFactor: item.waste_factor,
+      color: item.color,
+      description: item.description,
+      laborCost: item.labor_cost,
+      materialCost: item.material_cost,
+      equipmentCost: item.equipment_cost,
+      includePerimeter: item.include_perimeter ?? false,
+      depth: item.depth,
+      includeHeight: item.include_height ?? false,
+      height: item.height,
+      searchImage: item.search_image,
+      searchImageId: item.search_image_id,
+      searchThreshold: item.search_threshold,
+      searchScope: (item.search_scope as StoredCondition['searchScope']) ?? undefined,
+      ...(item.line_thickness != null && { lineThickness: item.line_thickness }),
+      createdAt: item.created_at ?? '',
+      ...(item.ai_generated !== undefined && { aiGenerated: item.ai_generated }),
+    };
+  }
+
+  /** Count measurements for one condition (O(1) query; avoids loading all measurements). */
+  async countMeasurementsForCondition(conditionId: string): Promise<number> {
+    const { count, error } = await supabase
+      .from(TABLES.TAKEOFF_MEASUREMENTS)
+      .select('*', { count: 'exact', head: true })
+      .eq('condition_id', conditionId);
+
+    if (error) {
+      throw new DatabaseError('Failed to count measurements for condition', error, { conditionId });
+    }
+    return count ?? 0;
+  }
+
   async getConditionsByProject(projectId: string): Promise<StoredCondition[]> {
     const { data, error } = await supabase
       .from(TABLES.CONDITIONS)
@@ -826,6 +879,78 @@ class SupabaseStorage {
     }));
   }
 
+  async getTakeoffMeasurementById(id: string): Promise<StoredTakeoffMeasurement | null> {
+    const { data, error } = await supabase
+      .from(TABLES.TAKEOFF_MEASUREMENTS)
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (error) {
+      throw new DatabaseError('Failed to fetch takeoff measurement', error, { id });
+    }
+    if (!data) return null;
+
+    const item = data as TakeoffMeasurementRow;
+    return {
+      id: item.id,
+      projectId: item.project_id,
+      sheetId: item.sheet_id,
+      conditionId: item.condition_id,
+      type: item.type as StoredTakeoffMeasurement['type'],
+      points: (item.points as StoredTakeoffMeasurement['points']) ?? [],
+      calculatedValue: item.calculated_value,
+      unit: item.unit,
+      timestamp: item.timestamp,
+      pdfPage: item.pdf_page,
+      pdfCoordinates: (item.pdf_coordinates as StoredTakeoffMeasurement['pdfCoordinates']) ?? [],
+      conditionColor: item.condition_color,
+      conditionName: item.condition_name,
+      perimeterValue: item.perimeter_value,
+      areaValue: item.area_value,
+      cutouts: item.cutouts as StoredTakeoffMeasurement['cutouts'],
+      netCalculatedValue: item.net_calculated_value,
+      stackOrder: item.stack_order ?? 0,
+    };
+  }
+
+  async getTakeoffMeasurementsByCondition(conditionId: string): Promise<StoredTakeoffMeasurement[]> {
+    const { data, error } = await supabase
+      .from(TABLES.TAKEOFF_MEASUREMENTS)
+      .select('*')
+      .eq('condition_id', conditionId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      throw new DatabaseError(
+        'Failed to fetch takeoff measurements by condition',
+        error,
+        { conditionId }
+      );
+    }
+
+    return (data || []).map((item: TakeoffMeasurementRow): StoredTakeoffMeasurement => ({
+      id: item.id,
+      projectId: item.project_id,
+      sheetId: item.sheet_id,
+      conditionId: item.condition_id,
+      type: item.type as StoredTakeoffMeasurement['type'],
+      points: (item.points as StoredTakeoffMeasurement['points']) ?? [],
+      calculatedValue: item.calculated_value,
+      unit: item.unit,
+      timestamp: item.timestamp,
+      pdfPage: item.pdf_page,
+      pdfCoordinates: (item.pdf_coordinates as StoredTakeoffMeasurement['pdfCoordinates']) ?? [],
+      conditionColor: item.condition_color,
+      conditionName: item.condition_name,
+      perimeterValue: item.perimeter_value,
+      areaValue: item.area_value,
+      cutouts: item.cutouts as StoredTakeoffMeasurement['cutouts'],
+      netCalculatedValue: item.net_calculated_value,
+      stackOrder: item.stack_order ?? 0,
+    }));
+  }
+
   async getTakeoffMeasurementsByIds(ids: string[]): Promise<StoredTakeoffMeasurement[]> {
     if (ids.length === 0) return [];
     const unique = [...new Set(ids)];
@@ -863,6 +988,19 @@ class SupabaseStorage {
       out.push(...(data || []).map(mapRow));
     }
     return out;
+  }
+
+  /** Count-only query for dashboards / single-project metadata (avoids loading every row). */
+  async countTakeoffMeasurementsByProject(projectId: string): Promise<number> {
+    const { count, error } = await supabase
+      .from(TABLES.TAKEOFF_MEASUREMENTS)
+      .select('*', { count: 'exact', head: true })
+      .eq('project_id', projectId);
+
+    if (error) {
+      throw new DatabaseError('Failed to count takeoff measurements by project', error, { projectId });
+    }
+    return count ?? 0;
   }
 
   async getTakeoffMeasurementsByProject(projectId: string): Promise<StoredTakeoffMeasurement[]> {
@@ -1158,31 +1296,69 @@ class SupabaseStorage {
     }
   }
 
-  /** Update stack_order for many rows in one server request (client calls once; DB runs parallel updates). */
+  /** Update stack_order for many rows in one or few HTTP round trips (upsert-on-conflict). */
   async batchUpdateTakeoffMeasurementStackOrders(
     updates: { id: string; stackOrder: number }[]
   ): Promise<void> {
     if (updates.length === 0) return;
-    const results = await Promise.all(
-      updates.map(async ({ id, stackOrder }) => {
-        const { data, error } = await supabase
-          .from(TABLES.TAKEOFF_MEASUREMENTS)
-          .update({ stack_order: stackOrder })
-          .eq('id', id)
-          .select('id');
-        return { id, data, error };
-      })
-    );
-    for (const { id, data, error } of results) {
-      if (error) {
-        throw new DatabaseError('Failed to batch update takeoff measurement stack order', error);
-      }
-      if (!data?.length) {
+
+    const byId = new Map<string, number>();
+    for (const u of updates) {
+      byId.set(u.id, u.stackOrder);
+    }
+
+    const ids = [...byId.keys()];
+    const found = new Set<string>();
+    const ID_CHUNK = 150;
+    for (let offset = 0; offset < ids.length; offset += ID_CHUNK) {
+      const slice = ids.slice(offset, offset + ID_CHUNK);
+      const { data: existingRows, error: selectError } = await supabase
+        .from(TABLES.TAKEOFF_MEASUREMENTS)
+        .select('id')
+        .in('id', slice);
+
+      if (selectError) {
         throw new DatabaseError(
-          `stack_order update affected 0 rows for id=${id} (check RLS / stack_order column)`,
-          undefined,
-          { measurementId: id }
+          'Failed to validate measurement ids for stack order batch',
+          selectError,
+          { count: slice.length },
         );
+      }
+      for (const row of existingRows ?? []) {
+        found.add((row as { id: string }).id);
+      }
+    }
+
+    if (found.size !== byId.size) {
+      throw new DatabaseError(
+        'stack_order batch update referenced missing measurements',
+        undefined,
+        {
+          measurementId: ids.find((id) => !found.has(id)),
+        }
+      );
+    }
+
+    type StackRow = { id: string; stack_order: number };
+    const rows: StackRow[] = ids.map((id) => ({ id, stack_order: byId.get(id)! }));
+    const CHUNK = 120;
+
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const chunk = rows.slice(i, i + CHUNK);
+
+      const { error } = await supabase.from(TABLES.TAKEOFF_MEASUREMENTS).upsert(chunk, { onConflict: 'id' });
+
+      if (error && hasColumnNotFoundError(error)) {
+        throw new DatabaseError(
+          'takeoff_measurements.stack_order missing; run migration server/migrations/add_stack_order_to_takeoff_measurements.sql',
+          error
+        );
+      }
+
+      if (error) {
+        throw new DatabaseError('Failed to batch update takeoff measurement stack orders', error, {
+          chunkOffset: i,
+        });
       }
     }
   }
@@ -1288,6 +1464,48 @@ class SupabaseStorage {
       }
       throw error;
     }
+  }
+
+  /** Bulk fetch persisted sheet rows by primary key (`documentId-pageNumber`). */
+  async getSheetsByIds(ids: string[]): Promise<StoredSheet[]> {
+    if (ids.length === 0) return [];
+    const unique = [...new Set(ids)];
+    const CHUNK = 120;
+    const out: StoredSheet[] = [];
+
+    for (let i = 0; i < unique.length; i += CHUNK) {
+      const chunk = unique.slice(i, i + CHUNK);
+      const { data, error } = await supabase
+        .from(TABLES.SHEETS)
+        .select('*')
+        .in('id', chunk);
+
+      if (error) {
+        throw new DatabaseError('Failed to fetch sheets by ids', error, {
+          chunkSize: chunk.length,
+        });
+      }
+
+      const mapped =
+        data?.map((item: SheetRow): StoredSheet => ({
+          id: item.id,
+          documentId: item.document_id,
+          pageNumber: item.page_number,
+          sheetNumber: item.sheet_number,
+          sheetName: item.sheet_name,
+          extractedText: item.extracted_text,
+          hasTakeoffs: item.has_takeoffs,
+          takeoffCount: item.takeoff_count,
+          isVisible: item.is_visible,
+          ocrProcessed: item.ocr_processed,
+          titleblockConfig: item.titleblock_config as StoredSheet['titleblockConfig'],
+          createdAt: item.created_at,
+          updatedAt: item.updated_at,
+        })) ?? [];
+      out.push(...mapped);
+    }
+
+    return out;
   }
 
   async saveSheet(sheet: StoredSheet): Promise<StoredSheet> {

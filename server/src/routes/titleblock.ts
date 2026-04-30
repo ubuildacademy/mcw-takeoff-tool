@@ -80,7 +80,7 @@ router.get('/extract/job/:jobId', requireAuth, async (req, res) => {
 
     const userIsAdmin = await isAdmin(req.user!.id);
     if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
-      return res.status(403).json({ error: 'Access denied' });
+      return res.status(404).json({ error: 'Job not found' });
     }
 
     const state = await job.getState();

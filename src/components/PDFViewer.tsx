@@ -62,6 +62,7 @@ import {
   canvasMeasurementSelectionMatchesCondition,
   findTakeoffMeasurementOnPage,
   measurementDrawModeForCondition,
+  samePdfPageKey,
 } from '../utils/takeoffMeasurementLookup';
 import { setRestoreScrollPosition, setGetCurrentScrollPosition, setTriggerCalibration, setTriggerFitToWindow } from '../lib/windowBridge';
 import { ocrApiService } from '../services/apiService';
@@ -218,6 +219,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     distanceValidatorFt: number;
     distanceMeasureFt: number;
   } | null>(null);
+  const measurementDebugClearTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   // Ref for Cmd+scroll zoom: always call latest handleWheel so we can register document listener once
   const handleWheelRef = useRef<((e: WheelEvent) => void) | null>(null);
@@ -242,6 +244,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const annotationDragJustCompletedRef = useRef(false);
   const annotationMoveJustCompletedRef = useRef(false);
   const measurementMoveJustCompletedRef = useRef(false);
+  /** True while dragging commit is persisting measurements; blocks store→local mirror (usePDFViewerData). */
+  const measurementMoveCommitInProgressRef = useRef(false);
+  /** Bump after move-save commits so mirrored measurements re-sync when the guard drops without further store churn. */
+  const [measurementMirrorFlushEpoch, setMeasurementMirrorFlushEpoch] = useState(0);
+  const bumpMeasurementMirrorFlush = useCallback(() => {
+    setMeasurementMirrorFlushEpoch((n) => n + 1);
+  }, []);
   const measurementDragJustCompletedRef = useRef(false);
   const cutoutDragJustCompletedRef = useRef(false);
   const completeMeasurementRef = useRef<(points: { x: number; y: number }[]) => Promise<void>>(() => Promise.resolve());
@@ -294,6 +303,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const showRunningLength = useUserPreferencesStore((s) => s.showRunningLength);
   const magnifierEnabled = useUserPreferencesStore((s) => s.magnifierEnabled);
   const magnifierZoom = useUserPreferencesStore((s) => s.magnifierZoom);
+
+  useEffect(() => {
+    return () => {
+      if (measurementDebugClearTimeoutRef.current != null) {
+        clearTimeout(measurementDebugClearTimeoutRef.current);
+        measurementDebugClearTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!effectiveProjectId || !file?.id || !ocrHighlightRequest) {
@@ -506,6 +524,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     fileId: file.id,
     currentPage,
     setLocalAnnotations,
+    measurementCommitInProgressRef: measurementMoveCommitInProgressRef,
+    measurementMirrorFlushEpoch,
   });
 
   const [measurementContextMenu, setMeasurementContextMenu] = useState<{
@@ -841,6 +861,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     completeCutoutRef,
     completeContinuousLinearMeasurementRef,
     measurementMoveJustCompletedRef,
+    measurementMoveCommitInProgressRef,
+    onMeasurementMoveCommitEnded: bumpMeasurementMirrorFlush,
     annotationMoveJustCompletedRef,
     measurementDragJustCompletedRef,
     cutoutDragJustCompletedRef,
@@ -1310,7 +1332,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Filter by page BEFORE iterating to prevent any cross-page contamination
     // Use local measurements if available, otherwise fall back to store measurements
     let pageMeasurements = localTakeoffMeasurements.filter(
-      (measurement) => measurement.pdfPage === pageNum
+      (measurement) => samePdfPageKey(measurement.pdfPage, pageNum)
     );
     
     // If local measurements are empty but store has measurements, convert store measurements to display format
@@ -1475,8 +1497,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       committed.appendChild(text);
     }
 
-    // Draw measurement debug overlay if present
-    if (measurementDebug && measurementDebug.page === pageNum) {
+    // Draw measurement debug overlay if present (dev only)
+    if (import.meta.env.DEV && measurementDebug && measurementDebug.page === pageNum) {
       const { mid, dxNorm, dyNorm, baseW, baseH, pixelDistanceValidator, pixelDistanceMeasure, scaleFactorUsed, distanceValidatorFt, distanceMeasureFt } = measurementDebug;
       const midPx = baseNormToViewportPixels(mid.x, mid.y, { width: pixelW, height: pixelH }, viewState.rotation || 0);
       const midX = midPx.x;
@@ -1923,7 +1945,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Always re-render overlay when we have markups OR we're in interactive mode (measuring, calibrating, etc.)
     // so crosshairs and preview appear on every page after a full render
     const currentMeasurements = useMeasurementStore.getState().takeoffMeasurements.filter(
-      (m) => m.projectId === effectiveProjectId && m.sheetId === file.id && m.pdfPage === pageNum
+      (m) =>
+        m.projectId === effectiveProjectId &&
+        m.sheetId === file.id &&
+        samePdfPageKey(m.pdfPage, pageNum)
     );
     const hasAnnotationsOnPage = localAnnotations.filter((a) => a.pageNumber === pageNum).length > 0;
     const pageHyperlinks = useHyperlinkStore.getState().getPageHyperlinks(effectiveProjectId || '', file.id || '', pageNum);
@@ -2055,7 +2080,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // (when in measuring/calibrating/annotating mode there are no measurements yet, but we need the overlay)
       try {
         const currentMeasurements = useMeasurementStore.getState().takeoffMeasurements.filter(
-          (m) => m.projectId === effectiveProjectId && m.sheetId === file.id && m.pdfPage === pageNum
+          (m) =>
+        m.projectId === effectiveProjectId &&
+        m.sheetId === file.id &&
+        samePdfPageKey(m.pdfPage, pageNum)
         );
         const hasAnnotationsOnPage = localAnnotations.filter((a) => a.pageNumber === pageNum).length > 0;
         const pageHyperlinks = useHyperlinkStore.getState().getPageHyperlinks(effectiveProjectId || '', file.id || '', pageNum);
@@ -2069,7 +2097,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         if (hasMarkups || isInteractiveMode) {
           renderMarkupsWithPointerEvents(pageNum, viewport, page, currentSelectionMode);
         }
-      } catch { /* render error ignored */ }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error('[PDFViewer] renderMarkupsWithPointerEvents failed after page render', {
+          pageNum,
+          sheetId: file.id,
+          projectId: effectiveProjectId,
+          message,
+        });
+      }
       
       // Removed verbose logging - was causing console spam
       
@@ -2205,8 +2241,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       viewportHeight: (calibBase?.viewportHeight) || currentViewport.height
     };
     
-    // TEMP DEBUG: Compare validator path vs measurement path on the same span
-    if (points.length === 2 && calibBase) {
+    // Dev-only overlay: compares validator vs measurement pixel path on linear spans (see measurementDebug state).
+    if (import.meta.env.DEV && points.length === 2 && calibBase) {
       const dxNorm = points[1].x - points[0].x;
       const dyNorm = points[1].y - points[0].y;
       const pixelDistanceValidator = Math.hypot(dxNorm * calibBase.viewportWidth, dyNorm * calibBase.viewportHeight);
@@ -2216,6 +2252,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       const distanceValidatorFt = pixelDistanceValidator * scaleInfo.scaleFactor;
       const distanceMeasureFt = pixelDistanceMeasure * scaleInfo.scaleFactor;
       const mid = { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 };
+      if (measurementDebugClearTimeoutRef.current != null) {
+        clearTimeout(measurementDebugClearTimeoutRef.current);
+      }
       setMeasurementDebug({
         page: currentPage,
         mid,
@@ -2228,8 +2267,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         distanceValidatorFt,
         distanceMeasureFt
       });
-      // Auto clear after a few seconds
-      setTimeout(() => setMeasurementDebug(null), 4000);
+      measurementDebugClearTimeoutRef.current = setTimeout(() => {
+        measurementDebugClearTimeoutRef.current = null;
+        setMeasurementDebug(null);
+      }, 4000);
     }
     
     let measurementResult;
@@ -2428,6 +2469,24 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
 
     try {
+      const results = await Promise.allSettled(
+        planned.map((p) => updateTakeoffMeasurement(p.measurement.id, p.updated))
+      );
+      const allOk = results.every((r) => r.status === 'fulfilled');
+      if (!allOk) {
+        toast.error('Could not save cut-out. Restored measurements from last saved.');
+        const storeMs = useMeasurementStore.getState().takeoffMeasurements;
+        setLocalTakeoffMeasurements((prevMeasurements) =>
+          prevMeasurements.map((m) => {
+            const touched = planned.some((p) => p.measurement.id === m.id);
+            if (!touched) return m;
+            const fromStore = storeMs.find((x) => x.id === m.id);
+            return fromStore ?? m;
+          })
+        );
+        return;
+      }
+
       useUndoStore.getState().push({
         type: 'measurement_update_batch',
         entries: planned.map((p) => ({
@@ -2436,9 +2495,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           next: { cutouts: p.updated.cutouts, netCalculatedValue: p.updated.netCalculatedValue },
         })),
       });
-      for (const p of planned) {
-        await updateTakeoffMeasurement(p.measurement.id, p.updated);
-      }
 
       setLocalTakeoffMeasurements((prevMeasurements) => {
         const byId = new Map(prevMeasurements.map((m) => [m.id, m]));
@@ -2461,6 +2517,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       });
     } catch (error) {
       console.error('❌ Failed to add cut-out:', error);
+      toast.error('Could not save cut-out. Try again.');
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- Ref and setters stable; omit
   }, [cutoutTargetConditionId, effectiveProjectId, file.id, currentPage, scaleFactor, viewState.scale, currentViewport, getSelectedCondition, onCutoutModeChange]);

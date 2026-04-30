@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { authHelpers } from '../../lib/supabase';
-import { getPdfjs } from '../../lib/pdfjs';
+import { parseDocumentIdFromSheetId } from '../../lib/sheetUtils';
 import { fileService } from '../../services/apiService';
 import { useMeasurementStore } from '../../store/slices/measurementSlice';
 import type { PDFDocument, PDFPage, ProjectFile } from '../../types';
@@ -19,6 +19,67 @@ export interface UseTakeoffWorkspaceDocumentsResult {
   setDocuments: React.Dispatch<React.SetStateAction<PDFDocument[]>>;
 }
 
+/** Partial API sheet row reused for sidebar pages. */
+type BatchSheetPayload = {
+  sheetName?: string;
+  sheetNumber?: string;
+  hasTakeoffs?: boolean;
+  takeoffCount?: number;
+  isVisible?: boolean;
+};
+
+/** Build one page sidebar entry using optional batch-loaded sheet metadata. */
+function pageFromSheetData(pageNumber: number, sheet: BatchSheetPayload | undefined): PDFPage {
+  if (sheet) {
+    return {
+      pageNumber,
+      hasTakeoffs: sheet.hasTakeoffs ?? false,
+      takeoffCount: sheet.takeoffCount ?? 0,
+      isVisible: sheet.isVisible !== false,
+      sheetName: sheet.sheetName,
+      sheetNumber: sheet.sheetNumber,
+      ocrProcessed: false,
+    };
+  }
+  return {
+    ocrProcessed: false,
+    pageNumber,
+    hasTakeoffs: false,
+    takeoffCount: 0,
+    isVisible: true,
+  };
+}
+
+/** Max simultaneous PDF opens when reading page counts for the sidebar (not used by the in-viewer loader). */
+const PDF_METADATA_OPEN_CONCURRENCY = 6;
+
+async function allSettledWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<PromiseSettledResult<R>[]> {
+  const results = new Array<PromiseSettledResult<R>>(items.length);
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (true) {
+      const i = nextIndex++;
+      if (i >= items.length) return;
+      const item = items[i]!;
+      try {
+        const value = await fn(item, i);
+        results[i] = { status: 'fulfilled', value };
+      } catch (reason) {
+        results[i] = { status: 'rejected', reason };
+      }
+    }
+  }
+
+  const n = items.length === 0 ? 0 : Math.min(Math.max(1, concurrency), items.length);
+  await Promise.all(Array.from({ length: n }, () => worker()));
+  return results;
+}
+
 /**
  * Loads and caches project documents (PDF metadata + sheet data) for the takeoff workspace.
  * Does not own projectFiles; parent fetches those and passes them in.
@@ -32,8 +93,21 @@ export function useTakeoffWorkspaceDocuments({
   const [documentsLoading, setDocumentsLoading] = useState<boolean>(false);
   const getProjectTakeoffMeasurements = useMeasurementStore((s) => s.getProjectTakeoffMeasurements);
 
+  const projectIdRef = useRef(projectId);
+  projectIdRef.current = projectId;
+
+  /** Bumps when `projectId` changes or a new `loadProjectDocuments` run starts; stale async work must not call setState. */
+  const documentLoadGenerationRef = useRef(0);
+
   const loadProjectDocuments = useCallback(async (filesOverride?: ProjectFile[]) => {
-    if (!projectId) return;
+    const scopedProjectId = projectIdRef.current;
+    if (!scopedProjectId) return;
+
+    const loadGenerationAtStart = ++documentLoadGenerationRef.current;
+    const applyIfCurrent = (): boolean =>
+      documentLoadGenerationRef.current === loadGenerationAtStart &&
+      projectIdRef.current === scopedProjectId;
+
 
     let files: ProjectFile[];
     if (filesOverride !== undefined) {
@@ -41,7 +115,7 @@ export function useTakeoffWorkspaceDocuments({
     } else if (projectFiles.length > 0) {
       files = projectFiles;
     } else {
-      files = (await fileService.getProjectFiles(projectId)).files || [];
+      files = (await fileService.getProjectFiles(scopedProjectId)).files || [];
     }
     const pdfFiles = files.filter((file: ProjectFile & { filename?: string; originalName?: string }) => {
       const mt = typeof file.mimetype === 'string' ? file.mimetype.toLowerCase() : '';
@@ -53,154 +127,136 @@ export function useTakeoffWorkspaceDocuments({
     if (pdfFiles.length === 0) {
       if (import.meta.env.DEV && files.length > 0) {
         console.warn('No PDF files found for project; check file mimetypes/filenames.', {
-          projectId,
+          projectId: scopedProjectId,
           totalFiles: files.length,
-          sample: files.slice(0, 3).map((f) => ({ id: f.id, mimetype: f.mimetype, originalName: (f as any).originalName, filename: (f as any).filename })),
+          sample: files.slice(0, 3).map((f) => ({
+            id: f.id,
+            mimetype: f.mimetype,
+            originalName: (f as any).originalName,
+            filename: (f as any).filename,
+          })),
         });
       }
+      if (!applyIfCurrent()) return;
       setDocuments([]);
       setDocumentsLoading(false);
       return;
     }
 
     try {
+      if (!applyIfCurrent()) return;
       setDocumentsLoading(true);
 
       const { ocrApiService } = await import('../../services/apiService');
-      let ocrDocumentIds = new Set<string>();
-      try {
-        const { documentIds } = await ocrApiService.getProjectDocumentIdsWithOcr(projectId);
-        if (Array.isArray(documentIds)) {
-          ocrDocumentIds = new Set(documentIds);
-        }
-      } catch (e) {
-        console.warn('Could not load OCR document list for project; OCR flags may be incomplete:', e);
-      }
+      const ocrIdsPromise = ocrApiService
+        .getProjectDocumentIdsWithOcr(scopedProjectId)
+        .then((res) =>
+          Array.isArray(res.documentIds) ? new Set<string>(res.documentIds) : new Set<string>(),
+        )
+        .catch((e) => {
+          console.warn(
+            'Could not load OCR document list for project; OCR flags may be incomplete:',
+            e,
+          );
+          return new Set<string>();
+        });
 
-      const documentResults = await Promise.allSettled(
-        pdfFiles.map(async (file: ProjectFile & { originalName?: string }) => {
-          try {
-            const { getApiBaseUrl } = await import('../../lib/apiConfig');
-            const API_BASE_URL = getApiBaseUrl();
-            const pdfUrl = `${API_BASE_URL}/files/${file.id}`;
-            const session = await authHelpers.getValidSession();
-            const httpHeaders: Record<string, string> = { Accept: 'application/pdf' };
-            if (session?.access_token) {
-              httpHeaders['Authorization'] = `Bearer ${session.access_token}`;
-            }
+      const { getApiBaseUrl } = await import('../../lib/apiConfig');
+      const { getPdfjs } = await import('../../lib/pdfjs');
+      const pdfjsLib = await getPdfjs();
+      const session = await authHelpers.getValidSession();
+      const API_BASE_URL = getApiBaseUrl();
 
-            const pdfjsLib = await getPdfjs();
-            const pdf = await pdfjsLib.getDocument({ url: pdfUrl, httpHeaders }).promise;
-            const totalPages = pdf.numPages;
-
-            const { sheetService } = await import('../../services/apiService');
-            const pageResults = await Promise.allSettled(
-              Array.from({ length: totalPages }, async (_, index) => {
-                const pageNumber = index + 1;
-                const sheetId = `${file.id}-${pageNumber}`;
-                try {
-                  const sheetData = await sheetService.getSheet(sheetId);
-                  if (sheetData?.sheet) {
-                    return {
-                      pageNumber,
-                      hasTakeoffs: sheetData.sheet.hasTakeoffs ?? false,
-                      takeoffCount: sheetData.sheet.takeoffCount ?? 0,
-                      isVisible: sheetData.sheet.isVisible !== false,
-                      sheetName: sheetData.sheet.sheetName,
-                      sheetNumber: sheetData.sheet.sheetNumber,
-                      ocrProcessed: false,
-                    };
-                  }
-                } catch {
-                  // Sheet doesn't exist yet - use defaults
-                }
-                return {
-                  ocrProcessed: false,
-                  pageNumber,
-                  hasTakeoffs: false,
-                  takeoffCount: 0,
-                  isVisible: true,
-                };
-              })
-            );
-
-            const pages = pageResults
-              .map((result, index) =>
-                result.status === 'fulfilled' && result.value != null
-                  ? result.value
-                  : {
-                      ocrProcessed: false,
-                      pageNumber: index + 1,
-                      hasTakeoffs: false,
-                      takeoffCount: 0,
-                      isVisible: true,
-                    }
-              )
-              .filter((page): page is PDFPage => page != null && page.pageNumber != null);
-
-            const hasOCRData = ocrDocumentIds.has(file.id);
-
-            return {
-              id: file.id,
-              name: (file.originalName ?? 'Unknown').replace(/\.pdf$/i, ''),
-              totalPages,
-              pages,
-              isExpanded: false,
-              ocrEnabled: hasOCRData,
-            };
-          } catch (error) {
-            console.error(`Error loading PDF ${file.originalName}:`, error);
-            return {
-              id: file.id,
-              name: (file.originalName ?? 'Unknown').replace(/\.pdf$/i, ''),
-              totalPages: 1,
-              pages: [
-                {
-                  pageNumber: 1,
-                  hasTakeoffs: false,
-                  takeoffCount: 0,
-                  isVisible: true,
-                  ocrProcessed: false,
-                },
-              ],
-              isExpanded: false,
-              ocrEnabled: ocrDocumentIds.has(file.id),
-            };
+      const pdfLoadResults = await allSettledWithConcurrency(
+        pdfFiles,
+        PDF_METADATA_OPEN_CONCURRENCY,
+        async (file: ProjectFile & { originalName?: string }) => {
+          const pdfUrl = `${API_BASE_URL}/files/${file.id}`;
+          const httpHeaders: Record<string, string> = { Accept: 'application/pdf' };
+          if (session?.access_token) {
+            httpHeaders['Authorization'] = `Bearer ${session.access_token}`;
           }
-        })
+          const pdf = await pdfjsLib.getDocument({ url: pdfUrl, httpHeaders }).promise;
+          return pdf.numPages;
+        },
       );
 
-      const loadedDocuments: PDFDocument[] = documentResults
-        .map((result, index) => {
-          if (result.status === 'fulfilled') return result.value;
-          const file = pdfFiles[index] as ProjectFile | undefined;
-          const fid = file?.id;
-          return {
-            id: fid ?? `error-${index}`,
-            name: (file?.originalName ?? 'Unknown').replace(/\.pdf$/i, ''),
-            totalPages: 1,
-            pages: [
-              {
-                pageNumber: 1,
-                hasTakeoffs: false,
-                takeoffCount: 0,
-                isVisible: true,
-                ocrProcessed: false,
-              },
-            ],
-            isExpanded: false,
-            ocrEnabled: typeof fid === 'string' && ocrDocumentIds.has(fid),
-          };
-        })
-        .filter((doc): doc is PDFDocument => doc != null);
+      const allSheetIds: string[] = [];
+      pdfLoadResults.forEach((result, idx) => {
+        if (result.status !== 'fulfilled') return;
+        const file = pdfFiles[idx];
+        const totalPages = result.value;
+        for (let p = 1; p <= totalPages; p++) {
+          allSheetIds.push(`${file.id}-${p}`);
+        }
+      });
 
-      const takeoffMeasurements = getProjectTakeoffMeasurements(projectId);
+      let sheetsById: Record<string, BatchSheetPayload> | undefined;
+      try {
+        if (allSheetIds.length > 0) {
+          const { sheetService } = await import('../../services/apiService');
+          const batch = await sheetService.batchSheetMetadata(scopedProjectId, allSheetIds);
+          sheetsById = batch.sheetsById;
+        }
+      } catch (e) {
+        console.warn(
+          'Batch sheet metadata failed; sidebar uses defaults until next load or edits.',
+          e,
+        );
+      }
+
+      const ocrResolved = await ocrIdsPromise.catch(() => new Set<string>());
+
+      const loadedDocuments: PDFDocument[] = [];
+
+      for (let index = 0; index < pdfFiles.length; index++) {
+        const file = pdfFiles[index] as ProjectFile & { originalName?: string };
+        const pdfRes = pdfLoadResults[index];
+
+        if (pdfRes.status === 'fulfilled') {
+          const totalPages = pdfRes.value;
+          const pages: PDFPage[] = [];
+          for (let pageNumber = 1; pageNumber <= totalPages; pageNumber++) {
+            const sheetId = `${file.id}-${pageNumber}`;
+            const sheet = sheetsById?.[sheetId];
+            pages.push(pageFromSheetData(pageNumber, sheet));
+          }
+          loadedDocuments.push({
+            id: file.id,
+            name: (file.originalName ?? 'Unknown').replace(/\.pdf$/i, ''),
+            totalPages,
+            pages,
+            isExpanded: false,
+            ocrEnabled: ocrResolved.has(file.id),
+          });
+        } else {
+          console.error(`Error loading PDF ${file.originalName}:`, pdfRes.reason);
+          const ocrForError = await ocrIdsPromise.catch(() => new Set<string>());
+          loadedDocuments.push({
+            id: file.id,
+            name: (file.originalName ?? 'Unknown').replace(/\.pdf$/i, ''),
+            totalPages: 1,
+            pages: [pageFromSheetData(1, undefined)],
+            isExpanded: false,
+            ocrEnabled: ocrForError.has(file.id),
+          });
+        }
+      }
+
+      if (!applyIfCurrent()) return;
+
+      const takeoffMeasurements = getProjectTakeoffMeasurements(scopedProjectId);
+      const measurementCountByDocPage = new Map<string, number>();
+      for (const m of takeoffMeasurements) {
+        const docId = parseDocumentIdFromSheetId(m.sheetId);
+        const k = `${docId}:${m.pdfPage}`;
+        measurementCountByDocPage.set(k, (measurementCountByDocPage.get(k) ?? 0) + 1);
+      }
       const documentsWithTakeoffCounts = loadedDocuments.map((doc) => ({
         ...doc,
         pages: doc.pages.map((page) => {
-          const measurementCount = takeoffMeasurements.filter(
-            (m) => m.sheetId === doc.id && m.pdfPage === page.pageNumber
-          ).length;
+          const measurementCount =
+            measurementCountByDocPage.get(`${doc.id}:${page.pageNumber}`) ?? 0;
           return {
             ...page,
             hasTakeoffs: measurementCount > 0,
@@ -209,15 +265,19 @@ export function useTakeoffWorkspaceDocuments({
         }),
       }));
 
+      if (!applyIfCurrent()) return;
       setDocuments(documentsWithTakeoffCounts);
     } catch (error) {
       console.error('Error loading project documents:', error);
     } finally {
-      setDocumentsLoading(false);
+      if (applyIfCurrent()) {
+        setDocumentsLoading(false);
+      }
     }
   }, [projectId, projectFiles, getProjectTakeoffMeasurements]);
 
   useEffect(() => {
+    documentLoadGenerationRef.current += 1;
     if (!projectId) return;
     setDocuments([]);
     setDocumentsLoading(false);

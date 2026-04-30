@@ -18,6 +18,37 @@ import { parseDocumentIdFromSheetId, parsePageNumberFromSheetId } from '../lib/s
 
 const execAsync = promisify(exec);
 
+/** Bounded parallelism for scanning many PDF pages (entire-document / entire-project scopes). */
+const PAGE_SEARCH_CONCURRENCY = 4;
+
+async function runWithConcurrency<T>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<void>,
+): Promise<void> {
+  if (items.length === 0) return;
+  const limit = Math.min(Math.max(1, concurrency), items.length);
+  let nextIndex = 0;
+  async function runner(): Promise<void> {
+    while (true) {
+      const i = nextIndex++;
+      if (i >= items.length) return;
+      await worker(items[i]!, i);
+    }
+  }
+  await Promise.all(Array.from({ length: limit }, () => runner()));
+}
+
+/** Best-effort temp removal; warns on failure for ops/debug without failing callers. */
+async function removeVisualSearchTemp(filePath: string): Promise<void> {
+  try {
+    await fs.remove(filePath);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn('[visualSearchService] failed to remove temp file', { path: filePath, message });
+  }
+}
+
 export interface AutoCountMatch {
   id: string;
   confidence: number;
@@ -269,7 +300,7 @@ class AutoCountService {
         pageNumber
       );
 
-      await fs.remove(fullPageImagePath).catch(() => {});
+      await removeVisualSearchTemp(fullPageImagePath);
 
       const templateId = `template_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       
@@ -346,7 +377,7 @@ print(json.dumps({"success": True, "output": output_path}))
         env: { ...process.env, PATH: enhancedPath, LD_LIBRARY_PATH: enhancedLdPath }
       });
 
-      await fs.remove(cropScriptPath).catch(() => {});
+      await removeVisualSearchTemp(cropScriptPath);
 
       const result = JSON.parse(stdout.trim());
       if (!result.success) {
@@ -393,7 +424,7 @@ except Exception as e:
         env: { ...process.env, PATH: enhancedPath, LD_LIBRARY_PATH: enhancedLdPath }
       });
       
-      await fs.remove(scriptPath).catch(() => {});
+      await removeVisualSearchTemp(scriptPath);
       
       const result = JSON.parse(stdout.trim());
       if (!result.success) {
@@ -446,7 +477,7 @@ except Exception as e:
         maxBuffer: 1024 * 1024,
         env: { ...process.env, PATH: enhancedPath, LD_LIBRARY_PATH: enhancedLdPath }
       });
-      await fs.remove(scriptPath).catch(() => {});
+      await removeVisualSearchTemp(scriptPath);
       const result = JSON.parse(stdout.trim()) as { success?: boolean; width?: number; height?: number; error?: string };
       if (!result.success || result.width == null || result.height == null) {
         throw new Error(result.error || 'Failed to read page rect');
@@ -455,7 +486,7 @@ except Exception as e:
       this.pageRectSizeCache.set(cacheKey, size);
       return size;
     } catch (error) {
-      await fs.remove(scriptPath).catch(() => {});
+      await removeVisualSearchTemp(scriptPath);
       throw error;
     }
   }
@@ -503,7 +534,7 @@ except Exception as e:
         maxBuffer: 1024 * 1024,
         env: { ...process.env, PATH: enhancedPath, LD_LIBRARY_PATH: enhancedLdPath }
       });
-      await fs.remove(scriptPath).catch(() => {});
+      await removeVisualSearchTemp(scriptPath);
       const result = JSON.parse(stdout.trim()) as { success?: boolean; rotation?: number; error?: string };
       if (!result.success || result.rotation == null) {
         throw new Error(result.error || 'Failed to read page rotation');
@@ -511,7 +542,7 @@ except Exception as e:
       this.pageRotationCache.set(cacheKey, result.rotation);
       return result.rotation;
     } catch (error) {
-      await fs.remove(scriptPath).catch(() => {});
+      await removeVisualSearchTemp(scriptPath);
       throw error;
     }
   }
@@ -652,12 +683,12 @@ except Exception as e:
         stderr = execResult.stderr;
       } catch (execError: any) {
         // Clean up temp file
-        await fs.remove(fullPageImagePath).catch(() => {});
+        await removeVisualSearchTemp(fullPageImagePath);
         throw new Error(`Auto-count failed: ${execError instanceof Error ? execError.message : 'Unknown error'}`);
       }
 
       // Clean up temp file
-      await fs.remove(fullPageImagePath).catch(() => {});
+      await removeVisualSearchTemp(fullPageImagePath);
 
       if (stderr && !stderr.includes('DeprecationWarning')) {
         console.warn('⚠️ Python script warnings:', stderr);
@@ -760,18 +791,20 @@ except Exception as e:
           onProgress({ current: 0, total: totalPages });
         }
         
-        for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+        const pageNumbers = Array.from({ length: totalPages }, (_, idx) => idx + 1);
+        let completedPages = 0;
+        await runWithConcurrency(pageNumbers, PAGE_SEARCH_CONCURRENCY, async (pageNum) => {
           try {
             const pageMatches = await this.searchPage(pdfPath, pageNum, template, opts, pdfFileId);
             allMatches.push(...pageMatches);
           } catch (pageError) {
             console.warn(`⚠️ Failed to search page ${pageNum}, continuing...`, pageError);
-            // Continue with other pages
           }
+          completedPages++;
           if (onProgress) {
-            onProgress({ current: pageNum, total: totalPages, currentPage: pageNum });
+            onProgress({ current: completedPages, total: totalPages, currentPage: pageNum });
           }
-        }
+        });
       } else if (searchScope === 'entire-project') {
         // Search all pages in all documents in the project
         if (!projectId) {
@@ -784,14 +817,29 @@ except Exception as e:
         console.log(`📚 Searching ${pdfFiles.length} documents in project ${projectId}`);
         
         let totalPages = 0;
-        let processedPages = 0;
-        
-        // First, count total pages for progress tracking
+
+        type PageTask = {
+          pdfPath: string;
+          pageNum: number;
+          documentId: string;
+          documentLabel: string;
+        };
+        const pageTasks: PageTask[] = [];
+
         for (const file of pdfFiles) {
           try {
             const pdfPath = await this.getPDFFilePath(file.id, projectId);
             const pageCount = await this.getPDFPageCount(pdfPath);
             totalPages += pageCount;
+            console.log(`📄 Scheduling ${pageCount} pages for document ${file.originalName || file.id}`);
+            for (let pageNum = 1; pageNum <= pageCount; pageNum++) {
+              pageTasks.push({
+                pdfPath,
+                pageNum,
+                documentId: file.id,
+                documentLabel: file.originalName || file.id,
+              });
+            }
           } catch (error) {
             console.warn(`⚠️ Failed to get page count for document ${file.id}, skipping...`, error);
           }
@@ -802,37 +850,27 @@ except Exception as e:
           onProgress({ current: 0, total: totalPages });
         }
         
-        // Now search all pages
-        for (const file of pdfFiles) {
+        let processedPages = 0;
+        await runWithConcurrency(pageTasks, PAGE_SEARCH_CONCURRENCY, async (task) => {
           try {
-            const pdfPath = await this.getPDFFilePath(file.id, projectId);
-            const pageCount = await this.getPDFPageCount(pdfPath);
-            
-            console.log(`📄 Searching ${pageCount} pages in document ${file.originalName || file.id}`);
-            
-            for (let pageNum = 1; pageNum <= pageCount; pageNum++) {
-              try {
-                const pageMatches = await this.searchPage(pdfPath, pageNum, template, opts, file.id);
-                allMatches.push(...pageMatches);
-              } catch (pageError) {
-                console.warn(`⚠️ Failed to search page ${pageNum} of document ${file.id}, continuing...`, pageError);
-                // Continue with other pages
-              }
-              processedPages++;
-              if (onProgress) {
-                onProgress({ 
-                  current: processedPages, 
-                  total: totalPages, 
-                  currentPage: pageNum,
-                  currentDocument: file.originalName || file.id
-                });
-              }
-            }
-          } catch (fileError) {
-            console.warn(`⚠️ Failed to process document ${file.id}, skipping...`, fileError);
-            // Continue with other documents
+            const pageMatches = await this.searchPage(task.pdfPath, task.pageNum, template, opts, task.documentId);
+            allMatches.push(...pageMatches);
+          } catch (pageError) {
+            console.warn(
+              `⚠️ Failed to search page ${task.pageNum} of document ${task.documentId}, continuing...`,
+              pageError,
+            );
           }
-        }
+          processedPages++;
+          if (onProgress) {
+            onProgress({
+              current: processedPages,
+              total: totalPages,
+              currentPage: task.pageNum,
+              currentDocument: task.documentLabel,
+            });
+          }
+        });
       }
 
       // Sort by confidence and limit to maxMatches
@@ -960,8 +998,7 @@ except Exception as e:
     try {
       console.log(`[VisualSearchService] Extracting thumbnails for condition ${conditionId}, project ${projectId}`);
       // Get all measurements for this condition
-      const measurements = await storage.getTakeoffMeasurements();
-      const conditionMeasurements = measurements.filter(m => m.conditionId === conditionId);
+      const conditionMeasurements = await storage.getTakeoffMeasurementsByCondition(conditionId);
       
       console.log(`[VisualSearchService] Found ${conditionMeasurements.length} measurements for condition ${conditionId}`);
       
@@ -983,6 +1020,8 @@ except Exception as e:
       const thumbnails: Array<{ measurementId: string; thumbnail: string }> = [];
       let thumbnailCount = 0;
 
+      const projectFiles = await storage.getFilesByProject(projectId);
+
       // Process each page
       for (const [compositeSheetId, pageMeasurements] of measurementsByPage) {
         if (thumbnailCount >= maxThumbnails) break;
@@ -991,8 +1030,7 @@ except Exception as e:
         const pageNumber = parsePageNumberFromSheetId(compositeSheetId);
         if (!Number.isFinite(pageNumber) || pageNumber < 1) continue;
 
-        const files = await storage.getFilesByProject(projectId);
-        const file = files.find(f => f.id === documentId);
+        const file = projectFiles.find((f) => f.id === documentId);
         if (!file || file.mimetype !== 'application/pdf') continue;
 
         const pdfPath = await this.getPDFFilePath(documentId, projectId);
@@ -1093,7 +1131,7 @@ except Exception as e:
             console.log(`[VisualSearchService] Extracted thumbnail ${thumbnailCount}/${maxThumbnails} for measurement ${measurement.id}`);
             
             // Clean up thumbnail file
-            await fs.remove(thumbnailPath).catch(() => {});
+            await removeVisualSearchTemp(thumbnailPath);
           } catch (error) {
             console.error(`[VisualSearchService] Failed to extract thumbnail for measurement ${measurement.id}:`, error);
           }

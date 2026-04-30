@@ -154,3 +154,20 @@ export const aiChatBurstRateLimit = rateLimit({
   message: 'Too many AI chat requests, please slow down.',
   keyGenerator: (req) => `ai-chat:${req.user?.id || 'anonymous'}`
 });
+
+const imageInferenceBurstPerMinute = (): number => {
+  const raw = Number.parseInt(process.env.IMAGE_INFERENCE_BURST_PER_MINUTE ?? '40', 10);
+  if (!Number.isFinite(raw) || raw < 5) return 40;
+  return Math.min(raw, 200);
+};
+
+/**
+ * Extra per-user throttle for OCR/vision-heavy POSTs (beyond global /api write limit).
+ * Use after {@link requireAuth} so keys include `req.user.id`.
+ */
+export const imageInferenceBurstRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  maxRequests: imageInferenceBurstPerMinute(),
+  message: 'Too many image analysis requests. Please wait a moment and try again.',
+  keyGenerator: (req) => `image-infer:${req.user?.id || defaultKeyGenerator(req)}`,
+});

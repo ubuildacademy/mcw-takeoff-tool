@@ -6,10 +6,10 @@
 
 import { Router } from 'express';
 import { autoCountService, type AutoCountResult } from '../services/visualSearchService';
-import { storage } from '../storage';
+import { storage, type StoredCondition } from '../storage';
 import fs from 'fs-extra';
 import path from 'path';
-import { requireAuth, requireProjectAccess, hasProjectAccess, isAdmin, validateUUIDParam } from '../middleware';
+import { requireAuth, requireProjectAccess, hasProjectAccess, isAdmin, validateUUIDParam, imageInferenceBurstRateLimit } from '../middleware';
 
 const router = Router();
 
@@ -26,21 +26,26 @@ function validateSelectionBox(selectionBox: { x: number; y: number; width: numbe
   return null;
 }
 
-/** Resolve condition and ensure it can run auto-count (no existing measurements). */
-async function getConditionForCompleteSearch(conditionId: string): Promise<
-  { condition: Awaited<ReturnType<typeof storage.getConditions>>[number] } | { error: string; status?: number }
+/** Resolve condition for auto-count complete-search using scoped queries (not full-table scans). */
+async function getConditionForCompleteSearch(
+  conditionId: string,
+  projectId: string
+): Promise<
+  { condition: StoredCondition } | { error: string; status?: number }
 > {
-  const measurements = await storage.getTakeoffMeasurements();
-  const existingMeasurements = measurements.filter(m => m.conditionId === conditionId);
-  if (existingMeasurements.length > 0) {
+  const measurementCount = await storage.countMeasurementsForCondition(conditionId);
+  if (measurementCount > 0) {
     return {
-      error: 'This condition already has measurements. Please delete the condition and recreate it to run a new search.',
-      status: 400
+      error:
+        'This condition already has measurements. Please delete the condition and recreate it to run a new search.',
+      status: 400,
     };
   }
-  const conditions = await storage.getConditions();
-  const condition = conditions.find(c => c.id === conditionId);
+  const condition = await storage.getConditionById(conditionId);
   if (!condition) {
+    return { error: 'Condition not found', status: 404 };
+  }
+  if (condition.projectId !== projectId) {
     return { error: 'Condition not found', status: 404 };
   }
   return { condition };
@@ -65,8 +70,7 @@ async function saveTemplateImageToCondition(
       base64Image = template.imageData;
     }
     if (!base64Image) return;
-    const conditions = await storage.getConditions();
-    const existingCondition = conditions.find(c => c.id === conditionId);
+    const existingCondition = await storage.getConditionById(conditionId);
     if (existingCondition) {
       await storage.saveCondition({
         ...existingCondition,
@@ -80,7 +84,7 @@ async function saveTemplateImageToCondition(
 }
 
 // Extract symbol template from selection box
-router.post('/extract-template', requireAuth, async (req, res) => {
+router.post('/extract-template', requireAuth, imageInferenceBurstRateLimit, async (req, res) => {
   try {
     const { pdfFileId, pageNumber, selectionBox, basePageWidth, basePageHeight } = req.body;
 
@@ -117,7 +121,7 @@ router.post('/extract-template', requireAuth, async (req, res) => {
       pdfFileId,
       pageNumber,
       selectionBox,
-      undefined,
+      file.projectId,
       pdfJsPageSize
     );
 
@@ -132,7 +136,7 @@ router.post('/extract-template', requireAuth, async (req, res) => {
 });
 
 // Search for symbols matching a template
-router.post('/search-symbols', requireAuth, async (req, res) => {
+router.post('/search-symbols', requireAuth, imageInferenceBurstRateLimit, async (req, res) => {
   try {
     const { conditionId, pdfFileId, template, options, pageNumber } = req.body;
 
@@ -142,9 +146,7 @@ router.post('/search-symbols', requireAuth, async (req, res) => {
       });
     }
 
-    // Verify user has access to the project that owns the condition
-    const conditions = await storage.getConditions();
-    const condition = conditions.find(c => c.id === conditionId);
+    const condition = await storage.getConditionById(conditionId);
     if (!condition) {
       return res.status(404).json({ error: 'Condition not found' });
     }
@@ -172,7 +174,7 @@ router.post('/search-symbols', requireAuth, async (req, res) => {
 });
 
 // Complete auto-count workflow with Server-Sent Events for real-time progress
-router.post('/complete-search', requireAuth, requireProjectAccess, async (req, res) => {
+router.post('/complete-search', requireAuth, imageInferenceBurstRateLimit, requireProjectAccess, async (req, res) => {
   // Check if client wants SSE (via Accept header or query param)
   const wantsSSE = req.headers.accept?.includes('text/event-stream') || req.query.sse === 'true';
   
@@ -188,7 +190,9 @@ router.post('/complete-search', requireAuth, requireProjectAccess, async (req, r
     
     // Handle client disconnect
     req.on('close', () => {
-      console.log('⚠️ Client disconnected from SSE stream (connection closed by client)');
+      if (process.env.NODE_ENV === 'development') {
+        console.log('⚠️ Client disconnected from SSE stream (connection closed by client)');
+      }
       // Don't call res.end() here - it may already be closed
     });
     
@@ -199,7 +203,9 @@ router.post('/complete-search', requireAuth, requireProjectAccess, async (req, r
     
     // Handle response finish
     res.on('finish', () => {
-      console.log('✅ SSE response stream finished');
+      if (process.env.NODE_ENV === 'development') {
+        console.log('✅ SSE response stream finished');
+      }
     });
   }
   
@@ -290,10 +296,12 @@ router.post('/complete-search', requireAuth, requireProjectAccess, async (req, r
       return res.status(400).json({ error: selectionError });
     }
 
-    console.log('🔍 [complete-search] selectionBox=', selectionBox, 'pdfJsPageSize=', pdfJsPageSize ?? 'N/A',
-      `page=${pageNumber} scope=${req.body.searchScope || 'current-page'}`);
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🔍 [complete-search] selectionBox=', selectionBox, 'pdfJsPageSize=', pdfJsPageSize ?? 'N/A',
+        `page=${pageNumber} scope=${req.body.searchScope || 'current-page'}`);
+    }
 
-    const conditionResult = await getConditionForCompleteSearch(conditionId);
+    const conditionResult = await getConditionForCompleteSearch(conditionId, projectId);
     if ('error' in conditionResult) {
       if (wantsSSE) {
         sendError(conditionResult.error);
@@ -510,9 +518,7 @@ router.get('/results/:conditionId', requireAuth, validateUUIDParam('conditionId'
   try {
     const { conditionId } = req.params;
 
-    // Verify user has access to the project that owns the condition
-    const conditions = await storage.getConditions();
-    const condition = conditions.find(c => c.id === conditionId);
+    const condition = await storage.getConditionById(conditionId);
     if (!condition) {
       return res.status(404).json({ error: 'Condition not found' });
     }
@@ -521,9 +527,7 @@ router.get('/results/:conditionId', requireAuth, validateUUIDParam('conditionId'
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
 
-    // Get measurements for this condition
-    const measurements = await storage.getTakeoffMeasurements();
-    const conditionMeasurements = measurements.filter(m => m.conditionId === conditionId);
+    const conditionMeasurements = await storage.getTakeoffMeasurementsByCondition(conditionId);
 
     return res.json({
       success: true,
@@ -551,6 +555,11 @@ router.get('/thumbnails/:conditionId', requireAuth, validateUUIDParam('condition
     const userIsAdmin = req.user ? await isAdmin(req.user.id) : false;
     if (!req.user || !(await hasProjectAccess(req.user.id, projectId, userIsAdmin))) {
       return res.status(404).json({ error: 'Project not found or access denied' });
+    }
+
+    const condition = await storage.getConditionById(conditionId);
+    if (!condition || condition.projectId !== projectId) {
+      return res.status(404).json({ error: 'Condition not found or access denied' });
     }
 
     const thumbnails = await autoCountService.extractMatchThumbnails(

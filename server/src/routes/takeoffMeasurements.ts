@@ -295,9 +295,8 @@ router.put('/:id', requireAuth, validateUUIDParam('id'), async (req, res) => {
     const userIsAdmin = req.user?.role === 'admin';
     const updates = req.body;
     
-    const measurements = await storage.getTakeoffMeasurements();
-    const existingMeasurement = measurements.find(m => m.id === id);
-    
+    const existingMeasurement = await storage.getTakeoffMeasurementById(id);
+
     if (!existingMeasurement) {
       return res.status(404).json({ error: 'Takeoff measurement not found' });
     }
@@ -338,10 +337,8 @@ router.delete('/:id', requireAuth, validateUUIDParam('id'), async (req, res) => 
     const userId = req.user?.id;
     const userIsAdmin = req.user?.role === 'admin';
     
-    // Get measurement to check project access
-    const measurements = await storage.getTakeoffMeasurements();
-    const measurement = measurements.find(m => m.id === id);
-    
+    const measurement = await storage.getTakeoffMeasurementById(id);
+
     if (!measurement) {
       return res.status(404).json({ error: 'Takeoff measurement not found' });
     }

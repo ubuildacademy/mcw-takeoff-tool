@@ -1,6 +1,11 @@
 import { useConditionStore } from '../store/slices/conditionSlice';
 import type { TakeoffCondition, TakeoffMeasurement } from '../types';
 
+/** API/legacy rows may use string or number for pdf_page; keep page filtering consistent with the measurement store. */
+export function samePdfPageKey(a: number | string | undefined, b: number | string | undefined): boolean {
+  return Number(a) === Number(b);
+}
+
 /** Tool mode for placing takeoff measurements; matches PDFViewer condition-selection logic. */
 export type MeasurementDrawMode = 'linear' | 'area' | 'volume' | 'count';
 

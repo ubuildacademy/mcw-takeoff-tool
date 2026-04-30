@@ -20,9 +20,15 @@ router.post('/', async (req: Request, res: Response) => {
       });
     }
 
+    const emailTrimmed = email.trim();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(emailTrimmed)) {
+      return res.status(400).json({ error: 'Please provide a valid email address.' });
+    }
+
     const textContent = [
       `Name: ${name.trim()}`,
-      `Email: ${email.trim()}`,
+      `Email: ${emailTrimmed}`,
       company?.trim() ? `Company: ${company.trim()}` : null,
       '',
       'Message:',
@@ -33,7 +39,7 @@ router.post('/', async (req: Request, res: Response) => {
 
     const htmlContent = `
       <p><strong>Name:</strong> ${escapeHtml(name.trim())}</p>
-      <p><strong>Email:</strong> ${escapeHtml(email.trim())}</p>
+      <p><strong>Email:</strong> ${escapeHtml(emailTrimmed)}</p>
       ${company?.trim() ? `<p><strong>Company:</strong> ${escapeHtml(company.trim())}</p>` : ''}
       <p><strong>Message:</strong></p>
       <pre style="white-space: pre-wrap; background: #f4f4f4; padding: 12px; border-radius: 6px;">${escapeHtml(message.trim())}</pre>

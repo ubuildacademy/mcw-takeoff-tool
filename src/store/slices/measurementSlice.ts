@@ -1,6 +1,8 @@
 import { create } from 'zustand';
+import { toast } from 'sonner';
 import type { TakeoffMeasurement, ConditionCostBreakdown, ProjectCostBreakdown } from '../../types';
 import { MeasurementCalculator } from '../../utils/measurementCalculation';
+import { samePdfPageKey } from '../../utils/takeoffMeasurementLookup';
 import { useConditionStore } from './conditionSlice';
 import { useProjectStore } from './projectSlice';
 
@@ -9,11 +11,6 @@ export function compareMeasurementsByStackOrder(a: TakeoffMeasurement, b: Takeof
   const ob = b.stackOrder ?? 0;
   if (oa !== ob) return oa - ob;
   return a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id);
-}
-
-/** API/legacy rows may use string or number for pdf_page; keep page grouping consistent for z-order. */
-function samePdfPageKey(a: number | string | undefined, b: number | string | undefined): boolean {
-  return Number(a) === Number(b);
 }
 
 function supportsWasteFactor(type: string): boolean {
@@ -290,14 +287,7 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
         get().updateMarkupsByPage();
       } catch (error: unknown) {
         console.error('❌ UPDATE_TAKEOFF_MEASUREMENT: Failed to update measurement via API:', error);
-        // Fallback to local update if API fails
-        set(state => ({
-          takeoffMeasurements: state.takeoffMeasurements.map(measurement =>
-            measurement.id === id ? { ...measurement, ...updates } : measurement
-          )
-        }));
-        
-        get().updateMarkupsByPage();
+        throw error instanceof Error ? error : new Error(String(error));
       }
     },
 
@@ -582,14 +572,20 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
           ...(netCalculatedValue !== undefined && { netCalculatedValue })
         };
 
-        updatePromises.push(
-          updateTakeoffMeasurement(measurement.id, updates).catch(err => {
-            console.error(`📐 RECALC_AFTER_CALIBRATION: Failed to update measurement ${measurement.id}`, err);
-          })
+        updatePromises.push(updateTakeoffMeasurement(measurement.id, updates));
+      }
+
+      const settled = await Promise.allSettled(updatePromises);
+      const rejected = settled.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+      for (const r of rejected) {
+        console.error('📐 RECALC_AFTER_CALIBRATION: Measurement update failed', r.reason);
+      }
+      if (rejected.length > 0) {
+        toast.error(
+          `Could not sync ${rejected.length} measurement(s) after calibration. Check connection and retry.`
         );
       }
 
-      await Promise.all(updatePromises);
       get().updateMarkupsByPage();
 
       if (import.meta.env.DEV) {
@@ -709,7 +705,13 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
     getProjectCostBreakdown: (projectId) => {
       const conditions = useConditionStore.getState().getProjectConditions(projectId);
       const currentProject = useProjectStore.getState().getCurrentProject();
-      
+      const conditionIdSet = new Set(conditions.map((c) => c.id));
+      const excludedMeasurementsFromCost = {
+        count: get().takeoffMeasurements.filter(
+          (m) => m.projectId === projectId && !conditionIdSet.has(m.conditionId)
+        ).length,
+      };
+
       const conditionBreakdowns: ConditionCostBreakdown[] = conditions
         .map(condition => get().getConditionCostBreakdown(condition.id))
         .filter((b): b is NonNullable<typeof b> => b != null);
@@ -746,7 +748,8 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
           profitMarginAmount,
           totalCost,
           conditionsWithCosts,
-          totalConditions: conditions.length
+          totalConditions: conditions.length,
+          ...(excludedMeasurementsFromCost.count > 0 && { excludedMeasurementsFromCost }),
         }
       };
     },

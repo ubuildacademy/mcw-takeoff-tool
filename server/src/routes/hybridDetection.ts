@@ -7,7 +7,7 @@
 import { Router } from 'express';
 import { hybridDetectionService } from '../services/hybridDetectionService';
 import { yoloDetectionService } from '../services/yoloDetectionService';
-import { requireAuth } from '../middleware';
+import { requireAuth, imageInferenceBurstRateLimit, validateBodyImageField } from '../middleware';
 
 const router = Router();
 
@@ -15,7 +15,7 @@ const router = Router();
  * POST /api/hybrid-detection/detect
  * Perform hybrid detection on an image
  */
-router.post('/detect', requireAuth, async (req, res) => {
+router.post('/detect', requireAuth, imageInferenceBurstRateLimit, validateBodyImageField('imageData'), async (req, res) => {
   try {
     const { imageData, scope, options } = req.body;
 
@@ -69,7 +69,7 @@ router.get('/status', requireAuth, async (req, res) => {
  * POST /api/hybrid-detection/yolo-only
  * Perform YOLOv8 detection only (for testing)
  */
-router.post('/yolo-only', requireAuth, async (req, res) => {
+router.post('/yolo-only', requireAuth, imageInferenceBurstRateLimit, validateBodyImageField('imageData'), async (req, res) => {
   try {
     const { imageData } = req.body;
 

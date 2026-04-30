@@ -59,13 +59,12 @@ router.get('/:id', requireAuth, validateUUIDParam('id'), async (req, res) => {
     const userId = req.user?.id;
     const userIsAdmin = req.user?.role === 'admin';
     
-    const conditions = await storage.getConditions();
-    const condition = conditions.find(c => c.id === id);
-    
+    const condition = await storage.getConditionById(id);
+
     if (!condition) {
       return res.status(404).json({ error: 'Condition not found' });
     }
-    
+
     // Verify user has access to the project this condition belongs to
     const hasAccess = await hasProjectAccess(userId!, condition.projectId, userIsAdmin);
     if (!hasAccess) {
@@ -330,8 +329,7 @@ router.put('/:id', requireAuth, validateUUIDParam('id'), sanitizeBody('name', 'd
       });
     }
 
-    const conditions = await storage.getConditions();
-    const existingCondition = conditions.find(c => c.id === id);
+    const existingCondition = await storage.getConditionById(id);
     
     if (!existingCondition) {
       return res.status(404).json({ error: 'Condition not found' });
@@ -447,9 +445,7 @@ router.delete('/:id', requireAuth, validateUUIDParam('id'), async (req, res) => 
     const userId = req.user?.id;
     const userIsAdmin = req.user?.role === 'admin';
     
-    // Get condition to check project access
-    const conditions = await storage.getConditions();
-    const condition = conditions.find(c => c.id === id);
+    const condition = await storage.getConditionById(id);
     
     if (!condition) {
       return res.status(404).json({ error: 'Condition not found' });
@@ -476,8 +472,7 @@ router.post('/:id/duplicate', requireAuth, validateUUIDParam('id'), async (req, 
     const userId = req.user?.id;
     const userIsAdmin = req.user?.role === 'admin';
     
-    const conditions = await storage.getConditions();
-    const originalCondition = conditions.find(c => c.id === id);
+    const originalCondition = await storage.getConditionById(id);
     
     if (!originalCondition) {
       return res.status(404).json({ error: 'Condition not found' });

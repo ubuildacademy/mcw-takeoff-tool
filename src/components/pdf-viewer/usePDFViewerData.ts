@@ -1,4 +1,10 @@
-import { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  type MutableRefObject,
+} from 'react';
 import { useMeasurementStore } from '../../store/slices/measurementSlice';
 import { useAnnotationStore } from '../../store/slices/annotationSlice';
 import type { Annotation } from '../../types';
@@ -69,6 +75,13 @@ export interface UsePDFViewerDataOptions {
   fileId: string;
   currentPage: number;
   setLocalAnnotations: (annotations: Annotation[]) => void;
+  /**
+   * While true, skips mirroring the global measurement store onto page-local state.
+   * Used when the viewer has optimistic geometry during a multi-save move commit.
+   */
+  measurementCommitInProgressRef?: MutableRefObject<boolean>;
+  /** Increment after move-save ends so mirror runs once the guard clears even if store identity is unchanged. */
+  measurementMirrorFlushEpoch?: number;
 }
 
 export interface UsePDFViewerDataResult {
@@ -86,6 +99,8 @@ export function usePDFViewerData({
   fileId,
   currentPage,
   setLocalAnnotations,
+  measurementCommitInProgressRef,
+  measurementMirrorFlushEpoch = 0,
 }: UsePDFViewerDataOptions): UsePDFViewerDataResult {
   const [localTakeoffMeasurements, setLocalTakeoffMeasurements] = useState<Measurement[]>([]);
   const [measurementsLoading, setMeasurementsLoading] = useState(false);
@@ -166,6 +181,10 @@ export function usePDFViewerData({
       return;
     }
 
+    if (measurementCommitInProgressRef?.current) {
+      return;
+    }
+
     const pageMeasurements = getPageTakeoffMeasurements(currentProjectId, fileId, currentPage);
     const displayMeasurements = pageMeasurements
       .map((apiMeasurement) => takeoffMeasurementToPdfViewerMeasurement(apiMeasurement))
@@ -178,7 +197,15 @@ export function usePDFViewerData({
     }
     lastMirroredViewerMeasurementsRef.current = displayMeasurements;
     setLocalTakeoffMeasurements(displayMeasurements);
-  }, [allTakeoffMeasurements, currentProjectId, fileId, currentPage, getPageTakeoffMeasurements]);
+  }, [
+    allTakeoffMeasurements,
+    currentProjectId,
+    fileId,
+    currentPage,
+    getPageTakeoffMeasurements,
+    measurementCommitInProgressRef,
+    measurementMirrorFlushEpoch,
+  ]);
 
   return {
     localTakeoffMeasurements,

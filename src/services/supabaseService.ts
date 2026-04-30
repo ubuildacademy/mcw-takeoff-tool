@@ -175,7 +175,7 @@ export const supabaseService = {
           measurementsByCondition.set(m.condition_id, list);
         }
 
-        // Compute project total cost (same formula as measurementSlice getProjectCostBreakdown)
+        // Compute project total cost (matches measurementSlice getProjectCostBreakdown; measurements without a matching condition are omitted)
         const profitMarginPercent = (project as { profit_margin_percent?: number }).profit_margin_percent ?? 15;
         let subtotal = 0;
         for (const cond of conditions) {
