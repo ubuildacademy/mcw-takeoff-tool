@@ -2,6 +2,12 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Input } from './ui/input';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu';
 import { 
   FileText, 
   Trash2,
@@ -96,9 +102,6 @@ export function SheetSidebar({
   const [localLoading, setLocalLoading] = useState(true);
   const loading = documentsLoading !== undefined ? documentsLoading : localLoading;
   
-  // Page menu state (for gear icon on pages)
-  const [openPageMenu, setOpenPageMenu] = useState<string | null>(null);
-  
   // Bulk actions menu state (for gear icon in header)
   const [openBulkActionsMenu, setOpenBulkActionsMenu] = useState(false);
   
@@ -106,9 +109,6 @@ export function SheetSidebar({
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [renamingPage, setRenamingPage] = useState<{documentId: string, pageNumber: number, currentName: string} | null>(null);
   const [renameInput, setRenameInput] = useState('');
-  
-  // Document menu dropdown state
-  const [openDocumentMenu, setOpenDocumentMenu] = useState<string | null>(null);
 
   // Page context menu state for "Open in new tab"
   const [pageContextMenu, setPageContextMenu] = useState<{
@@ -121,15 +121,9 @@ export function SheetSidebar({
   // Ref to track if we're currently updating documents to prevent infinite loops
   const _isUpdatingDocuments = useRef(false);
 
-  // Close dropdowns when clicking outside
+  // Close custom overlays when clicking outside (Radix document/page menus use portals)
   useEffect(() => {
     const handleClickOutside = (_event: MouseEvent) => {
-      if (openDocumentMenu) {
-        setOpenDocumentMenu(null);
-      }
-      if (openPageMenu) {
-        setOpenPageMenu(null);
-      }
       if (openBulkActionsMenu) {
         setOpenBulkActionsMenu(false);
       }
@@ -138,11 +132,11 @@ export function SheetSidebar({
       }
     };
 
-    if (openDocumentMenu || openPageMenu || openBulkActionsMenu || pageContextMenu) {
+    if (openBulkActionsMenu || pageContextMenu) {
       document.addEventListener('click', handleClickOutside);
       return () => document.removeEventListener('click', handleClickOutside);
     }
-  }, [openDocumentMenu, openPageMenu, openBulkActionsMenu, pageContextMenu]);
+  }, [openBulkActionsMenu, pageContextMenu]);
 
   const getProjectTakeoffMeasurements = useMeasurementStore((s) => s.getProjectTakeoffMeasurements);
 
@@ -431,80 +425,69 @@ export function SheetSidebar({
                             1 page
                           </Badge>
                         </div>
-                        <div className="relative">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setOpenDocumentMenu(openDocumentMenu === document.id ? null : document.id);
-                            }}
-                            className="h-6 w-6 p-0"
-                            title="Document Options"
-                          >
-                            <Settings className="w-3 h-3" />
-                          </Button>
-                          
-                          {openDocumentMenu === document.id && (
-                            <div className="absolute right-0 top-full mt-1 w-56 bg-white border rounded-lg shadow-lg z-50 py-1">
-                              {/* Extract Titleblock Info option */}
-                              <button
-                                className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 text-blue-600 flex items-center gap-2"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  if (onExtractTitleblockForDocument) {
-                                    onExtractTitleblockForDocument(document.id);
-                                  }
-                                  setOpenDocumentMenu(null);
-                                }}
-                              >
-                                <Tag className="w-4 h-4" />
-                                Extract Titleblock Info
-                              </button>
-                              {onRotateAllSheetsInDocument && (
-                                <>
-                                  <button
-                                    className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      onRotateAllSheetsInDocument(document.id, 'clockwise');
-                                      setOpenDocumentMenu(null);
-                                    }}
-                                  >
-                                    <RotateCw className="w-4 h-4" />
-                                    Rotate all sheets 90° clockwise
-                                  </button>
-                                  <button
-                                    className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      onRotateAllSheetsInDocument(document.id, 'counterclockwise');
-                                      setOpenDocumentMenu(null);
-                                    }}
-                                  >
-                                    <RotateCcw className="w-4 h-4" />
-                                    Rotate all sheets 90° counter-clockwise
-                                  </button>
-                                </>
-                              )}
-                              <button
-                                className="w-full px-3 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center gap-2"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  handleDeleteDocument(document.id);
-                                  setOpenDocumentMenu(null);
-                                }}
-                              >
-                                <Trash2 className="w-4 h-4" />
-                                Delete Document
-                              </button>
-                            </div>
-                          )}
-                        </div>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                              }}
+                              className="h-6 w-6 p-0"
+                              title="Document Options"
+                            >
+                              <Settings className="w-3 h-3" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-56">
+                            <DropdownMenuItem
+                              className="cursor-pointer gap-2 text-blue-600 focus:bg-blue-50 focus:text-blue-600"
+                              onSelect={(e) => {
+                                e.preventDefault();
+                                if (onExtractTitleblockForDocument) {
+                                  onExtractTitleblockForDocument(document.id);
+                                }
+                              }}
+                            >
+                              <Tag className="w-4 h-4 shrink-0" />
+                              Extract Titleblock Info
+                            </DropdownMenuItem>
+                            {onRotateAllSheetsInDocument && (
+                              <>
+                                <DropdownMenuItem
+                                  className="cursor-pointer gap-2"
+                                  onSelect={(e) => {
+                                    e.preventDefault();
+                                    onRotateAllSheetsInDocument(document.id, 'clockwise');
+                                  }}
+                                >
+                                  <RotateCw className="w-4 h-4 shrink-0" />
+                                  Rotate all sheets 90° clockwise
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  className="cursor-pointer gap-2"
+                                  onSelect={(e) => {
+                                    e.preventDefault();
+                                    onRotateAllSheetsInDocument(document.id, 'counterclockwise');
+                                  }}
+                                >
+                                  <RotateCcw className="w-4 h-4 shrink-0" />
+                                  Rotate all sheets 90° counter-clockwise
+                                </DropdownMenuItem>
+                              </>
+                            )}
+                            <DropdownMenuItem
+                              className="cursor-pointer gap-2 text-red-600 focus:bg-red-50 focus:text-red-600"
+                              onSelect={(e) => {
+                                e.preventDefault();
+                                handleDeleteDocument(document.id);
+                              }}
+                            >
+                              <Trash2 className="w-4 h-4 shrink-0" />
+                              Delete Document
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                     </div>
 
@@ -658,38 +641,33 @@ export function SheetSidebar({
                             )}
                           </div>
                         </div>
-                        <div className="relative">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              const menuKey = `${document.id}-${page.pageNumber}`;
-                              setOpenPageMenu(openPageMenu === menuKey ? null : menuKey);
-                            }}
-                            className="h-6 w-6 p-0"
-                            title="Page Options"
-                          >
-                            <Settings className="w-3 h-3" />
-                          </Button>
-                          
-                          {openPageMenu === `${document.id}-${page.pageNumber}` && (
-                            <div className="absolute right-0 top-full mt-1 w-48 bg-white border rounded-lg shadow-lg z-50 py-1">
-                              <button
-                                className="w-full px-3 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center gap-2"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  handleDeletePage(document.id);
-                                  setOpenPageMenu(null);
-                                }}
-                              >
-                                <Trash2 className="w-4 h-4" />
-                                Delete
-                              </button>
-                            </div>
-                          )}
-                        </div>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                              }}
+                              className="h-6 w-6 p-0"
+                              title="Page Options"
+                            >
+                              <Settings className="w-3 h-3" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-48">
+                            <DropdownMenuItem
+                              className="cursor-pointer gap-2 text-red-600 focus:bg-red-50 focus:text-red-600"
+                              onSelect={(e) => {
+                                e.preventDefault();
+                                handleDeletePage(document.id);
+                              }}
+                            >
+                              <Trash2 className="w-4 h-4 shrink-0" />
+                              Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                     </div>
                   </div>
@@ -719,80 +697,69 @@ export function SheetSidebar({
                           {document.totalPages} pages
                         </Badge>
                       </div>
-                      <div className="relative">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setOpenDocumentMenu(openDocumentMenu === document.id ? null : document.id);
-                          }}
-                          className="h-6 w-6 p-0"
-                          title="Document Options"
-                        >
-                          <Settings className="w-3 h-3" />
-                        </Button>
-                        
-                        {openDocumentMenu === document.id && (
-                          <div className="absolute right-0 top-full mt-1 w-56 bg-white border rounded-lg shadow-lg z-50 py-1">
-                            {/* Extract Titleblock Info option */}
-                            <button
-                              className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 text-blue-600 flex items-center gap-2"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                if (onExtractTitleblockForDocument) {
-                                  onExtractTitleblockForDocument(document.id);
-                                }
-                                setOpenDocumentMenu(null);
-                              }}
-                            >
-                              <Tag className="w-4 h-4" />
-                              Extract Titleblock Info
-                            </button>
-                            {onRotateAllSheetsInDocument && (
-                              <>
-                                <button
-                                  className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    onRotateAllSheetsInDocument(document.id, 'clockwise');
-                                    setOpenDocumentMenu(null);
-                                  }}
-                                >
-                                  <RotateCw className="w-4 h-4" />
-                                  Rotate all sheets 90° clockwise
-                                </button>
-                                <button
-                                  className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    onRotateAllSheetsInDocument(document.id, 'counterclockwise');
-                                    setOpenDocumentMenu(null);
-                                  }}
-                                >
-                                  <RotateCcw className="w-4 h-4" />
-                                  Rotate all sheets 90° counter-clockwise
-                                </button>
-                              </>
-                            )}
-                            <button
-                              className="w-full px-3 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center gap-2"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                handleDeleteDocument(document.id);
-                                setOpenDocumentMenu(null);
-                              }}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                              Delete Document
-                            </button>
-                          </div>
-                        )}
-                      </div>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                            }}
+                            className="h-6 w-6 p-0"
+                            title="Document Options"
+                          >
+                            <Settings className="w-3 h-3" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-56">
+                          <DropdownMenuItem
+                            className="cursor-pointer gap-2 text-blue-600 focus:bg-blue-50 focus:text-blue-600"
+                            onSelect={(e) => {
+                              e.preventDefault();
+                              if (onExtractTitleblockForDocument) {
+                                onExtractTitleblockForDocument(document.id);
+                              }
+                            }}
+                          >
+                            <Tag className="w-4 h-4 shrink-0" />
+                            Extract Titleblock Info
+                          </DropdownMenuItem>
+                          {onRotateAllSheetsInDocument && (
+                            <>
+                              <DropdownMenuItem
+                                className="cursor-pointer gap-2"
+                                onSelect={(e) => {
+                                  e.preventDefault();
+                                  onRotateAllSheetsInDocument(document.id, 'clockwise');
+                                }}
+                              >
+                                <RotateCw className="w-4 h-4 shrink-0" />
+                                Rotate all sheets 90° clockwise
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                className="cursor-pointer gap-2"
+                                onSelect={(e) => {
+                                  e.preventDefault();
+                                  onRotateAllSheetsInDocument(document.id, 'counterclockwise');
+                                }}
+                              >
+                                <RotateCcw className="w-4 h-4 shrink-0" />
+                                Rotate all sheets 90° counter-clockwise
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                          <DropdownMenuItem
+                            className="cursor-pointer gap-2 text-red-600 focus:bg-red-50 focus:text-red-600"
+                            onSelect={(e) => {
+                              e.preventDefault();
+                              handleDeleteDocument(document.id);
+                            }}
+                          >
+                            <Trash2 className="w-4 h-4 shrink-0" />
+                            Delete Document
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   </div>
 
@@ -956,44 +923,37 @@ export function SheetSidebar({
                           </div>
                           
                           {/* Page Gear Icon */}
-                          <div className="relative">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                const menuKey = `${document.id}-${page.pageNumber}`;
-                                setOpenPageMenu(openPageMenu === menuKey ? null : menuKey);
-                              }}
-                              className="h-6 w-6 p-0"
-                              title="Page Options"
-                            >
-                              <Settings className="w-3 h-3" />
-                            </Button>
-                            
-                            {openPageMenu === `${document.id}-${page.pageNumber}` && (
-                              <div className="absolute right-0 top-full mt-1 w-48 bg-white border rounded-lg shadow-lg z-50 py-1">
-                                <button
-                                  className="w-full px-3 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center gap-2"
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    if (document.totalPages === 1) {
-                                      handleDeletePage(document.id);
-                                    } else {
-                                      // For multi-page documents, we'd need a different delete handler
-                                      // For now, just show a message
-                                      toast.info('To delete a page from a multi-page document, please delete the entire document.');
-                                    }
-                                    setOpenPageMenu(null);
-                                  }}
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                  Delete
-                                </button>
-                              </div>
-                            )}
-                          </div>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                }}
+                                className="h-6 w-6 p-0"
+                                title="Page Options"
+                              >
+                                <Settings className="w-3 h-3" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-48">
+                              <DropdownMenuItem
+                                className="cursor-pointer gap-2 text-red-600 focus:bg-red-50 focus:text-red-600"
+                                onSelect={(e) => {
+                                  e.preventDefault();
+                                  if (document.totalPages === 1) {
+                                    handleDeletePage(document.id);
+                                  } else {
+                                    toast.info('To delete a page from a multi-page document, please delete the entire document.');
+                                  }
+                                }}
+                              >
+                                <Trash2 className="w-4 h-4 shrink-0" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
                       </div>
                     ))}
