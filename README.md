@@ -5,7 +5,7 @@ Professional construction takeoff software built with React, TypeScript, and mod
 ## Features
 
 - **Project management** – Create, edit, delete, and organize construction projects
-- **PDF upload & processing** – Upload drawings with OCR
+- **PDF upload & processing** – Upload drawings with OCR (including word-level geometry for search and tooling)
 - **Takeoff tools** – Area, linear, volume, and count measurements with cutout support
 - **Conditions** – Custom takeoff conditions, cost rates, waste factors
 - **Scale calibration** – Real-world scale calibration on drawings

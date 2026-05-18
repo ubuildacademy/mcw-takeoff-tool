@@ -37,7 +37,8 @@ We use **@testing-library/react**’s `renderHook` to test hooks: it renders the
 
 ## Where tests live
 
-- **Co-located:** Next to the code, e.g. `useTakeoffExport.ts` and `useTakeoffExport.test.ts` in the same folder.
-- **Or** in a top-level `src/__tests__/` or `tests/` folder if you prefer to keep tests in one place.
+- **Co-located:** Next to the code (e.g. `useTakeoffExport.ts` beside `useTakeoffExport.test.ts`, or `src/utils/*.test.ts`).
+- **Feature modules:** e.g. `src/services/batchHyperlink/*.test.ts` for hyperlink/sheet-index logic.
+- **Or** a top-level `src/__tests__/` folder if you prefer a single test root.
 
-We’ll start with one hook test as a template; you can copy the pattern for other hooks.
+Run `npm run test` after changes to core geometry, export, or batch-hyperlink helpers; add tests when fixing subtle parsing or merge behavior.

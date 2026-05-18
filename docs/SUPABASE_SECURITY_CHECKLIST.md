@@ -12,7 +12,7 @@ Use this after running the SQL migration for function search_path and RLS. These
 
 **Steps:**
 
-1. In [Supabase Dashboard](https://supabase.com/dashboard), open your project (**MCW Takeoff**).
+1. In [Supabase Dashboard](https://supabase.com/dashboard), open **your Meridian Takeoff project**.
 2. Go to **Authentication** → **Providers** → **Email** (or **Auth** → **Providers**).
 3. Find **“Leaked password protection”** (or “Check for compromised passwords”).
 4. **Enable** it and save.

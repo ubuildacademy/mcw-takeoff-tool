@@ -9,7 +9,7 @@ A concise walkthrough of the app **as implemented today**: where things live, wh
 After you **sign in**, you land on the **project dashboard** (`/app`).
 
 - **New Project** — Create a job and optionally attach PDFs immediately.
-- **Open Existing** — Import a shared/backup project when that flow is available.
+- **Open Existing** — Opens the **restore-from-backup** flow (same dialog as backing up projects: pick a Meridian backup/export file and import it into your account).
 - **Profile** — Account details, password, sign out (see quick reference doc).
 - Your projects appear as **cards**; open one to enter the takeoff workspace.
 
@@ -56,13 +56,13 @@ Use this panel to define **what** you are measuring, see **quantities**, and see
 
 ### Tabs at the top of this panel
 
-1. **Conditions** — Your takeoff **line items** (linear, area, volume, count, visual/auto-count flows where enabled).
+1. **Conditions** — Your takeoff **line items** (linear, area, volume, count, **auto-count** via **visual search** on symbols when you use that condition type).
 2. **Reports** — **Quantity** rollups by condition and sheet/page; **export** actions live here.
 3. **Costs** — **Money** rollups when conditions include cost fields; **Profit Margin** shortcut to project-level margin settings.
 
 ### Conditions tab
 
-- **+** — **Create condition**. The dialog lets you set type, units, color, waste, costs, and other fields depending on type (including experimental **CV / auto-count** entry points when offered).
+- **+** — **Create condition**. The dialog lets you set type, units, color, waste, costs, and other fields depending on type (**auto-count / visual search** is a distinct condition type when you need template-based counting).
 - **Search** box — Filters conditions by **name** or **description**.
 - **Click** a condition to **select** it for drawing on the plan; **click again** to clear selection.
 - **Totals on each card** are scoped to the **active sheet tab** and **current page** in the viewer (so numbers track what you see).

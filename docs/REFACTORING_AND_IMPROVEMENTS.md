@@ -15,10 +15,12 @@ Tracking doc for refactoring (structure, hooks, components) and broader improvem
 - **Store selectors** – Narrow selectors implemented: TakeoffSidebar uses `getProjectConditions(projectId)`, `getProjectTakeoffSummary(projectId)`; SheetSidebar uses `getProjectTakeoffMeasurements(projectId).length` for hasTakeoffs effect; TakeoffWorkspace uses `getCalibration(projectId, sheetId, currentPage)`. Reduces unnecessary re-renders.
 
 ### Component refactoring
-- **TakeoffWorkspace** – Reduced from ~2,500 to ~775 lines via hooks + UI extractions.
-- **TakeoffSidebar** – Reduced from ~2,456 to ~737 lines: export/report logic in `useTakeoffExport` (~1,100 lines); condition list in `TakeoffSidebarConditionList`.
-- **PDFViewer** – Reduced from ~4,735 to ~2,495 lines: SVG renderers in `pdfViewerRenderers.ts` (~1,026 lines); interactions in `usePDFViewerInteractions` (~1,608 lines); calibration in `usePDFViewerCalibration`; measurements/annotations in `usePDFViewerMeasurements`; data loading in `usePDFViewerData`; canvas/overlay in `PDFViewerCanvasOverlay`; dialogs in `PDFViewerDialogs`; status in `PDFViewerStatusView`.
-- **SheetSidebar** – Reduced from ~2,323 to ~1,823 lines: filter in `useSheetSidebarFilter`; header in `SheetSidebarHeader`; sheet editing in `useSheetSidebarSheetEditing`; dialogs in `SheetSidebarDialogs`.
+Major extractions are **done** (hooks, `src/components/pdf-viewer/` subtree, takeoff sidebar modules). The **historical** “before → after” line counts below are from that milestone; modules have grown again with new capability—see **Current state** for today’s approximate hotspots.
+
+- **TakeoffWorkspace** — Previously reduced from ~2,500 lines to ~775 via hooks + UI extractions (orchestration only in the workspace component).
+- **TakeoffSidebar** — Previously reduced from ~2,456 lines to ~737 lines: export/report logic in **`src/components/takeoff-sidebar/useTakeoffExport.ts`**; condition list in `TakeoffSidebarConditionList`.
+- **PDFViewer** — Previously reduced from a ~4,700-line monolith; SVG/markup helpers in **`src/components/pdf-viewer/pdfViewerRenderers.ts`**; interactions in **`src/components/pdf-viewer/usePDFViewerInteractions.ts`**; plus dedicated hooks for calibration, measurements, data, overlay, dialogs, status.
+- **SheetSidebar** — Filter/header/editing/dialog logic extracted into hooks and subcomponents (`useSheetSidebarFilter`, `SheetSidebarHeader`, etc.).
 - **Store** – Split into slices (`projectSlice`, `conditionSlice`, `measurementSlice`, `calibrationSlice`, `annotationSlice`, `documentViewSlice`, `undoSlice`); `useTakeoffStore.ts` is a thin re-export (~24 lines).
 
 ### Code quality
@@ -33,39 +35,48 @@ Tracking doc for refactoring (structure, hooks, components) and broader improvem
 - **Security** – Client/server use env vars only (no hardcoded credentials); rate limiting in place; input validation (`validateUUIDParam`, `sanitizeBody`); Supabase security fixes applied (RLS, function `search_path`).
 - **Performance** – N+1 queries fixed (batch queries for measurement counts); code splitting (pdfjs chunk, tesseract/exceljs manualChunks, lazy dialogs: AdminPanel, ChatTab, SearchTab, CalibrationDialog, ScaleApplicationDialog; dynamic exceljs/jspdf imports in `useTakeoffExport`); Zustand `useShallow` for object/array selectors in TakeoffSidebar and ChatTab; preconnect hints for Supabase injected at build time.
 
+### OCR & location-aware extraction
+- **Higher-quality OCR pipeline** – Iterated on server-side extraction and processing so text is more reliable on construction drawings.
+- **Word boxes + page placement** – OCR results persist **word-level geometry** (and related metadata) tied to **document + page**, so downstream features can resolve text **in PDF space**, not only as a flat string.
+- **Consumers** – Location-aware OCR supports search/chat, tooling that walks text by region, and future/batch hyperlinking that reasons about **where** a reference sits on the sheet (not just **what** the string says).
+
 ---
 
 ## Current state
 
-**Heaviest modules (line counts):**
-- PDFViewer.tsx: ~2,495 (orchestrates hooks + canvas/overlay)
-- usePDFViewerInteractions.ts: ~1,608 (wheel, keyboard, mouse, selection)
-- SheetSidebar.tsx: ~1,810 (document list + OCR/labeling)
-- AdminPanel.tsx: ~1,378 (tabs: overview, AI prompts, user management)
-- useTakeoffExport.ts: ~1,100 (Excel/PDF build; dynamic-imports heavy libs)
-- pdfViewerRenderers.ts: ~1,026 (pure SVG render functions)
+**Heaviest modules (approximate line counts — refresh with `wc -l` when this feels stale):**
+- `PDFViewer.tsx` (~3,330 — orchestrates hooks + canvas/overlay)
+- `usePDFViewerInteractions.ts` (`src/components/pdf-viewer/` — wheel, keyboard, mouse, selection; ~2,450 lines)
+- `SheetSidebar.tsx` (~1,010 — document list + OCR/labeling)
+- `AdminPanel.tsx` (~1,040 — tabs: overview, AI prompts, user management)
+- `useTakeoffExport.ts` (`src/components/takeoff-sidebar/` — Excel/PDF build; ~1,380 lines)
+- `pdfViewerRenderers.ts` (`src/components/pdf-viewer/` — SVG render helpers; ~1,260 lines)
 
-**What's done:** Toast system, route-level code splitting, narrow store selectors, CI/CD, major component refactors, type safety improvements, accessibility basics, security hardening.
+**What's done:** Toast system, route-level code splitting, narrow store selectors, CI/CD, major component refactors, type safety improvements, accessibility basics, security hardening, **location-aware OCR (word boxes + page linkage)**.
+
+**In progress (not stable yet)** – **Batch sheet hyperlinks:** client pipeline under `src/services/batchHyperlink/` plus server/visual-search helpers; substantial progress but **end-to-end behavior still incorrect** — treat as active debugging until linking matches expectations on real sets.
 
 ---
 
 ## Recommended next steps (by priority)
 
-1. **Performance / large-code** *(deferred: app is fast; only heavy AI-driven flows such as auto-count are slow, which is expected)*
+1. **Batch sheet hyperlinks** – Finish correctness pass: validate sheet-index building, occurrence merge, OCR/word-box alignment with viewer rotation/zoom, and server callout/hyperlink pass against representative projects. Expand automated tests around edge cases once behavior is nailed down.
+
+2. **Performance / large-code** *(deferred: app is fast; only heavy AI-driven flows such as auto-count are slow, which is expected)*
    - **Profile first:** Use React DevTools Profiler on typical flows (open project, switch pages, add measurements, export). Note top 3 components by render time.
    - **Then:** Add `React.memo` only where the profile shows real cost; prefer fewer state updates over memo everywhere.
    - **Optional refactors (maintainability, not required for perf):**
-     - **usePDFViewerInteractions** (~1,608 lines): Split by concern (e.g. `usePDFViewerWheel`, `usePDFViewerKeyboard`, `usePDFViewerMouse`, `usePDFViewerSelection`) only if refactoring that area.
+     - **usePDFViewerInteractions** (`src/components/pdf-viewer/usePDFViewerInteractions.ts`, large file): Split by concern (e.g. wheel, keyboard, mouse, selection) only if refactoring that area.
      - **SheetSidebar list:** Extract `SheetSidebarDocumentList` / `SheetSidebarPageRow` to shrink SheetSidebar.tsx further; logic already in hooks/dialogs.
      - **AdminPanel:** Consider splitting by tab if it becomes hard to work in.
 
-2. **Type safety** – Continue reducing `any` where still noted (error handling, filter/result types). Server TS strictness: enable `noImplicitAny`, `strictNullChecks`, `strictFunctionTypes` incrementally in `server/tsconfig.json`.
+3. **Type safety** – Continue reducing `any` where still noted (error handling, filter/result types). Server TS strictness: enable `noImplicitAny`, `strictNullChecks`, `strictFunctionTypes` incrementally in `server/tsconfig.json`.
 
-3. **Accessibility** – Remaining: optional focus trap in custom modals; keyboard navigation in critical flows.
+4. **Accessibility** – Remaining: optional focus trap in custom modals; keyboard navigation in critical flows.
 
-4. **Other improvements (as needed)**
+5. **Other improvements (as needed)**
    - **E2E:** Configure Playwright and add at least one smoke test (e.g. login → open project → view PDF).
-   - **API pagination:** Add `limit`/`offset` or cursor to `GET /api/projects` and conditions for scale.
+   - **API list pagination (optional scale-up):** Batched/count fixes are in place for hot paths (e.g. measurement counts across projects). `GET /api/projects` still returns **all** rows for the user/admin scope, and conditions for a project are still a **full list** — no `limit`/`offset`/cursor query params wired in `server/src/routes/projects.ts` / `conditions.ts` as of last doc refresh. Add explicit list pagination **if** dashboards or admins regularly hit hundreds+ of projects and payloads become painful.
    - **Lint:** Gradually fix or disable remaining warnings and lower `--max-warnings` in `package.json`.
 
 ---
@@ -102,4 +113,4 @@ Tracking doc for refactoring (structure, hooks, components) and broader improvem
 - **CI/CD:** GitHub Actions runs typecheck (blocking), lint, test on push/PR to `main`. Optional: E2E job and security/dependency checks.
 - **E2E:** Playwright/E2E removed for now; manual testing preferred. Can add again later if desired.
 - **Backend TS strictness:** `server/tsconfig.json` has `noImplicitAny: false`, `strictNullChecks: false`, `strictFunctionTypes: false`. Enabling incrementally would improve type safety.
-- **API pagination:** `GET /api/projects` and `GET /api/conditions` return full lists with no pagination. Add `limit`/`offset` or cursor-based pagination for scale.
+- **API list pagination:** Not implemented on project/condition **list** endpoints (full payload per request). Other batching (e.g. chunked IDs, aggregated counts) reduces N+1 and memory spikes elsewhere; add cursor/`limit` to list routes only when warranted by data size.

@@ -1,6 +1,10 @@
-# Titleblock Extraction Pipeline - Debug Guide
+# Titleblock extraction pipeline — debug notes
 
-## Current Pipeline Flow
+**Purpose:** Understand how titleblock extraction flows through the app and server. The **Potential issues** section collects **debugging hypotheses**, not a guaranteed list of open bugs—confirm against current `titleblock` routes and `titleblock_extraction.py` before assuming any item still applies.
+
+---
+
+## Current pipeline flow
 
 ### 1. **User Selection (Frontend)**
 - User draws box around sheet number field → stored in `pendingTitleblockConfig.sheetNumberField`

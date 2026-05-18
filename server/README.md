@@ -5,16 +5,16 @@
 Create a `.env` file in the `server` directory with the following variables:
 
 ```bash
-SUPABASE_URL=https://mxjyytwfhmoonkduvybr.supabase.co
+SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
 PORT=4000
 NODE_ENV=development
 FRONTEND_URL=http://localhost:3001
 
-# Redis Configuration (required for background titleblock extraction queue)
+# Redis (background titleblock extraction queue). Defaults try localhost — set explicitly on Railway with a Redis add-on URL.
 REDIS_URL=redis://localhost:6379
-# On Railway, add a Redis service and use the REDIS_URL from the service variables
-# Or use Redis Cloud: REDISCLOUD_URL=redis://...
+# Alternative name some hosts use:
+# REDISCLOUD_URL=redis://...
 
 # Ollama API Configuration (Optional - for AI features)
 OLLAMA_BASE_URL=https://ollama.com
@@ -25,16 +25,15 @@ GRAPH_CLIENT_ID=your_azure_app_client_id
 GRAPH_TENANT_ID=your_azure_tenant_id
 GRAPH_CLIENT_SECRET=your_azure_client_secret
 GRAPH_SENDER_EMAIL=noreply@yourdomain.com
-# Where contact form submissions are sent (default: jparido@mcwcompanies.com)
-CONTACT_EMAIL=jparido@mcwcompanies.com
-FRONTEND_URL=http://localhost:3001
+# Inbound address for contact form notifications
+CONTACT_EMAIL=you@yourdomain.com
 ```
 
 **Ollama API Configuration (Optional):**
 - `OLLAMA_BASE_URL`: Ollama API base URL (defaults to `https://ollama.com`)
-- `OLLAMA_API_KEY`: Your Ollama API key for AI features (chat, analysis, etc.)
-  - Required for: AI Takeoff, Chat features, Sheet analysis
-  - Get your API key from: https://ollama.com/account/api-keys
+- `OLLAMA_API_KEY`: Your Ollama API key when using hosted Ollama APIs
+  - Used for: in-app **AI Chat**, and other server features that call Ollama
+  - Get API keys from your Ollama/hosting provider when applicable
 
 
 ### Getting Your Supabase Service Role Key
