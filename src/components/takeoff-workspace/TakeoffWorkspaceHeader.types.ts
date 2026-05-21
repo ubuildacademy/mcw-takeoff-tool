@@ -3,6 +3,8 @@
  */
 
 import type { ProjectFile, Sheet, TakeoffCondition, PDFDocument, SearchResult } from '../../types';
+import type { BatchHyperlinkPreflightResult } from '../../services/batchHyperlink/batchHyperlinkPreflight';
+import type { DocumentOCRData } from '../../services/serverOcrService';
 
 export interface TitleblockExtractionStatus {
   status: 'idle' | 'processing' | 'completed' | 'failed';
@@ -51,6 +53,16 @@ export interface TakeoffWorkspaceHeaderProps {
   onRedo: () => void;
   onAddHyperlink?: () => void;
   onClearHyperlinks?: () => void;
+  onPreflightAutoHyperlink?: (opts: { scope: 'project' | 'current' }) => Promise<BatchHyperlinkPreflightResult>;
+  onExecuteAutoHyperlink?: (opts: {
+    scope: 'project' | 'current';
+    ocrByDocumentId: Map<string, DocumentOCRData>;
+    runPymupdfFor?: BatchHyperlinkPreflightResult['documentsNeedingPymupdf'];
+    runBubbleOcrFor?: BatchHyperlinkPreflightResult['documentsNeedingBubbleOcr'];
+  }) => Promise<void>;
+  onClearBatchHyperlinks?: () => void;
+  autoHyperlinkAvailable?: boolean;
+  currentDocumentId?: string | null;
 }
 
 export interface TakeoffWorkspaceStatusBarProps {

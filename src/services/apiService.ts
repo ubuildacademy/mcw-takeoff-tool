@@ -105,6 +105,12 @@ export const apiClient = axios.create({
   },
 });
 
+/**
+ * Pages per `/visual-search/callout-hyperlink-pass` request — keep each HTTP round short
+ * (Python + Tesseract is serial per page at CALLOUT_PASS_CONCURRENCY=1).
+ */
+const CALLOUT_HYPERLINK_PASS_PAGE_CHUNK = 4;
+
 function makeRequestId(): string {
   try {
     return crypto.randomUUID();
@@ -830,7 +836,7 @@ export const ocrApiService = {
         text: string;
         confidence: number;
         bbox: { x: number; y: number; width: number; height: number };
-        source: 'pdfjs' | 'tesseract';
+        source: 'pdfjs' | 'tesseract' | 'pymupdf' | 'bubble_ocr';
         ocrRotationDeg?: number;
       }>;
       total: number;
@@ -844,6 +850,109 @@ export const ocrApiService = {
       jobId
     });
     return response.data;
+  },
+
+  /**
+   * Auto-hyperlink pre-step: ask the server to re-extract text from a document with PyMuPDF
+   * (MuPDF) and merge the resulting word boxes into the document's stored OCR rows under
+   * `source: 'pymupdf'`. This catches callout-bubble glyphs that PDF.js silently drops, and
+   * is fast enough (seconds-per-document) to run inline before each Auto-hyperlink run.
+   */
+  async runPymupdfExtract(documentId: string, projectId: string) {
+    const response = await apiClient.post(`/ocr/pymupdf-extract/${documentId}`, {
+      projectId,
+    }, {
+      // Large multi-page PDFs can take 30-60s; bump above the default 30s.
+      timeout: 15 * 60 * 1000,
+    });
+    return response.data as {
+      documentId: string;
+      totalPages: number;
+      pagesExtracted: number;
+      pagesWithText: number;
+    };
+  },
+
+  /**
+   * Auto-hyperlink pre-step (second half): ask the server to detect circular callout bubbles
+   * on each page (OpenCV `HoughCircles`) and OCR each tiny crop. Most architectural detail
+   * bubbles are drawn as vector paths, so neither PDF.js nor PyMuPDF can read them — but a
+   * targeted Tesseract pass on the 100×100-px crop is fast enough (~1-2 s/page) to run inline
+   * before each Auto-hyperlink run. Survivors are merged into stored OCR rows as
+   * `source: 'tesseract'`.
+   */
+  async runBubbleOcrExtract(documentId: string, projectId: string) {
+    const response = await apiClient.post(`/ocr/bubble-ocr-extract/${documentId}`, {
+      projectId,
+    }, {
+      // Sized for an 80-page set at ~2 s/page worst case + render overhead.
+      timeout: 15 * 60 * 1000,
+    });
+    return response.data as {
+      documentId: string;
+      totalPages: number;
+      calloutsFound: number;
+      pagesWithCallouts: number;
+    };
+  },
+};
+
+export const visualSearchApiService = {
+  async runCalloutHyperlinkPass(params: {
+    projectId: string;
+    documentId: string;
+    pageNumbers: number[];
+    confidenceThreshold?: number;
+    roiScale?: number;
+  }): Promise<{
+    success: boolean;
+    results: Array<{
+      pageNumber: number;
+      wordBoxes: Array<{
+        text: string;
+        bbox: { x: number; y: number; width: number; height: number };
+        confidence?: number;
+      }>;
+      templateRegionsMatched: number;
+    }>;
+  }> {
+    const pageNumbers = [...new Set(params.pageNumbers)]
+      .filter((n) => Number.isFinite(n) && n > 0)
+      .sort((a, b) => a - b);
+    if (pageNumbers.length === 0) {
+      return { success: true, results: [] };
+    }
+
+    type Row = {
+      pageNumber: number;
+      wordBoxes: Array<{
+        text: string;
+        bbox: { x: number; y: number; width: number; height: number };
+        confidence?: number;
+      }>;
+      templateRegionsMatched: number;
+    };
+
+    const results: Row[] = [];
+    const { pageNumbers: _pn, ...rest } = params;
+
+    for (let i = 0; i < pageNumbers.length; i += CALLOUT_HYPERLINK_PASS_PAGE_CHUNK) {
+      const chunk = pageNumbers.slice(i, i + CALLOUT_HYPERLINK_PASS_PAGE_CHUNK);
+      const { data } = await apiClient.post<{
+        success?: boolean;
+        results?: Row[];
+        error?: string;
+      }>('/visual-search/callout-hyperlink-pass', { ...rest, pageNumbers: chunk }, { timeout: 900000 });
+
+      if (!data?.success || !Array.isArray(data.results)) {
+        throw new Error(
+          typeof data?.error === 'string' ? data.error : 'Callout hyperlink pass failed'
+        );
+      }
+      results.push(...data.results);
+    }
+
+    return { success: true, results };
   },
 };
 

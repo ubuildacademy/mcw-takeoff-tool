@@ -139,6 +139,10 @@ export interface SheetHyperlink {
   /** Optional external URL (use when targetSheetId is empty) */
   targetUrl?: string;
   timestamp: string;
+  /** Manual vs batch auto-hyperlink; omit/undefined treated as manual for legacy data */
+  origin?: 'manual' | 'batch';
+  /** Set for `origin === 'batch'`: normalized sheet id from OCR detection (debug / tooling). */
+  detectedSheetRef?: string;
 }
 
 export interface SearchResult {

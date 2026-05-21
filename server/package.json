@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "nodemon src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "generate:callout-templates": "python3 src/scripts/generate_default_callout_templates.py"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",

@@ -346,10 +346,10 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`📝 Allowed origins configured: ${isProduction ? 'Production mode' : 'Development mode (all allowed)'}`);
 });
 
-// Long timeouts for heavy requests (OCR, visual search, etc.)
-server.timeout = 180000; // 3 minutes
-server.keepAliveTimeout = 180000;
-server.headersTimeout = 181000;
+// Large enough for callout-hyperlink-pass (chunked client + heavy Python per page).
+server.timeout = 900000; // 15 minutes
+server.keepAliveTimeout = 900000;
+server.headersTimeout = 901000;
 
 livePreviewService.initialize(server);
 console.log(`📡 Live preview service initialized`);

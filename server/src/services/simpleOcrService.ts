@@ -9,12 +9,14 @@ export interface OCRBoundingBox {
   height: number;
 }
 
+export type OCRWordBoxSource = 'pdfjs' | 'tesseract' | 'pymupdf' | 'bubble_ocr';
+
 export interface OCRWordBox {
   index: number;
   text: string;
   confidence: number;
   bbox: OCRBoundingBox;
-  source: 'pdfjs' | 'tesseract';
+  source: OCRWordBoxSource;
 }
 
 export interface SimpleOCRResult {
@@ -32,6 +34,76 @@ export interface SimpleDocumentOCRData {
   totalPages: number;
   results: SimpleOCRResult[];
   processedAt: string;
+}
+
+/** IoU between two normalized (0..1) rects. */
+function bboxIoU(a: OCRBoundingBox, b: OCRBoundingBox): number {
+  const ax2 = a.x + a.width;
+  const ay2 = a.y + a.height;
+  const bx2 = b.x + b.width;
+  const by2 = b.y + b.height;
+  const interX = Math.max(0, Math.min(ax2, bx2) - Math.max(a.x, b.x));
+  const interY = Math.max(0, Math.min(ay2, by2) - Math.max(a.y, b.y));
+  const inter = interX * interY;
+  if (inter <= 0) return 0;
+  const areaA = a.width * a.height;
+  const areaB = b.width * b.height;
+  const union = areaA + areaB - inter;
+  return union <= 0 ? 0 : inter / union;
+}
+
+function normalizeBoxText(text: string): string {
+  return (text || '').replace(/\s+/g, '').toLowerCase();
+}
+
+function isSentinelBox(box: OCRWordBox): boolean {
+  return !box || !box.text || box.text.trim().length === 0;
+}
+
+/**
+ * Append incoming boxes to existing ones, dropping incoming boxes that look like duplicates of
+ * existing boxes (same normalized text + IoU >= 0.5). Re-numbers the merged list so consumers
+ * (e.g. `getWordBoxesForPage`) keep a contiguous index sequence.
+ *
+ * Empty-text "sentinel" boxes are used by the bubble-OCR pass to mark a page as processed even
+ * when no callouts were detected. We dedupe sentinels by `source` only (since their IoU is
+ * either 0 or undefined) so re-running bubble OCR on an already-processed page doesn't pile up
+ * duplicate markers.
+ */
+export function mergeWordBoxesPreservingExisting(
+  existing: OCRWordBox[],
+  incoming: OCRWordBox[]
+): OCRWordBox[] {
+  const merged: OCRWordBox[] = [];
+  let nextIndex = 0;
+  for (const box of existing) {
+    if (!box || !box.bbox) continue;
+    merged.push({ ...box, index: nextIndex++ });
+  }
+  for (const candidate of incoming) {
+    if (!candidate || !candidate.bbox) continue;
+    if (isSentinelBox(candidate)) {
+      const alreadyHasSentinel = merged.some(
+        (existingBox) =>
+          existingBox.source === candidate.source && isSentinelBox(existingBox)
+      );
+      if (alreadyHasSentinel) continue;
+      merged.push({ ...candidate, index: nextIndex++ });
+      continue;
+    }
+    const candidateText = normalizeBoxText(candidate.text);
+    let isDuplicate = false;
+    for (const existingBox of merged) {
+      if (normalizeBoxText(existingBox.text) !== candidateText) continue;
+      if (bboxIoU(existingBox.bbox, candidate.bbox) >= 0.5) {
+        isDuplicate = true;
+        break;
+      }
+    }
+    if (isDuplicate) continue;
+    merged.push({ ...candidate, index: nextIndex++ });
+  }
+  return merged;
 }
 
 class SimpleOCRService {
@@ -340,6 +412,111 @@ class SimpleOCRService {
     }
   }
 
+  /**
+   * Merge a single page's word boxes / text into the existing OCR row for that page,
+   * preserving any PDF.js-derived word boxes that already exist. Used by Auto-hyperlink
+   * pre-steps (PyMuPDF text re-extract, or Tesseract for raster pages) so we keep
+   * accurate title-block text from direct extraction AND add the new method's text
+   * (e.g. inside callout bubbles) without duplicating word boxes.
+   *
+   * `method` controls the processing_method column on the persisted row -- it lets
+   * downstream code distinguish a vector re-read ('pymupdf') from a raster pass
+   * ('tesseract') so the preflight knows whether a doc still needs PyMuPDF.
+   */
+  async mergeWordBoxesForPage(
+    projectId: string,
+    documentId: string,
+    page: {
+      pageNumber: number;
+      text: string;
+      confidence: number;
+      processingTime: number;
+      wordBoxes: OCRWordBox[];
+    },
+    method: 'tesseract' | 'pymupdf' | 'bubble_ocr'
+  ): Promise<void> {
+    if (!page || !Number.isFinite(page.pageNumber) || page.pageNumber < 1) {
+      console.warn('mergeWordBoxesForPage: invalid page payload');
+      return;
+    }
+
+    const incomingBoxes = Array.isArray(page.wordBoxes) ? page.wordBoxes : [];
+    const incomingText = typeof page.text === 'string' ? page.text : '';
+
+    // `ocr_results.processing_method` has a CHECK constraint that predates the
+    // PyMuPDF and bubble-OCR sources. Map them to the existing allowed labels:
+    //   - 'pymupdf' is direct vector text extraction (via MuPDF) ➜ 'direct_extraction'
+    //   - 'bubble_ocr' is region-targeted Tesseract OCR on cropped callout shapes ➜ 'tesseract'
+    // The precise signal lives on each word box (`source`), which is what the
+    // Auto-hyperlink preflight reads to decide whether a doc still needs each pass.
+    const persistedMethod: string =
+      method === 'pymupdf' ? 'direct_extraction'
+      : method === 'bubble_ocr' ? 'tesseract'
+      : method;
+
+    const { data: existing, error: fetchError } = await supabase
+      .from('ocr_results')
+      .select('id, text_content, word_boxes, confidence_score, processing_method, processing_time_ms')
+      .eq('project_id', projectId)
+      .eq('document_id', documentId)
+      .eq('page_number', page.pageNumber)
+      .maybeSingle();
+
+    if (fetchError) {
+      console.error('❌ mergeWordBoxesForPage: failed to fetch existing row', fetchError);
+      throw fetchError;
+    }
+
+    if (!existing) {
+      // No prior row for this page — insert fresh with the supplied method.
+      const { error: insertError } = await supabase.from('ocr_results').insert({
+        project_id: projectId,
+        document_id: documentId,
+        page_number: page.pageNumber,
+        text_content: incomingText,
+        confidence_score: typeof page.confidence === 'number' ? page.confidence : 0,
+        processing_method: persistedMethod,
+        processing_time_ms: typeof page.processingTime === 'number' ? page.processingTime : 0,
+        word_boxes: incomingBoxes,
+      });
+      if (insertError) {
+        console.error('❌ mergeWordBoxesForPage: insert failed', insertError);
+        throw insertError;
+      }
+      return;
+    }
+
+    const existingBoxesRaw = Array.isArray(existing.word_boxes) ? (existing.word_boxes as OCRWordBox[]) : [];
+    const mergedBoxes = mergeWordBoxesPreservingExisting(existingBoxesRaw, incomingBoxes);
+    const existingText = typeof existing.text_content === 'string' ? existing.text_content : '';
+    const combinedText = existingText.trim().length > 0 && incomingText.trim().length > 0
+      ? `${existingText}\n\n${incomingText}`
+      : (incomingText.trim().length > 0 ? incomingText : existingText);
+    const existingConf = typeof existing.confidence_score === 'number' ? existing.confidence_score : 0;
+    const incomingConf = typeof page.confidence === 'number' ? page.confidence : 0;
+    const combinedConf = existingConf > 0 && incomingConf > 0
+      ? Math.round((existingConf + incomingConf) / 2)
+      : Math.max(existingConf, incomingConf);
+    const existingTimeMs = typeof existing.processing_time_ms === 'number' ? existing.processing_time_ms : 0;
+    const incomingTimeMs = typeof page.processingTime === 'number' ? page.processingTime : 0;
+
+    const { error: updateError } = await supabase
+      .from('ocr_results')
+      .update({
+        text_content: combinedText,
+        confidence_score: combinedConf,
+        processing_method: persistedMethod,
+        processing_time_ms: existingTimeMs + incomingTimeMs,
+        word_boxes: mergedBoxes,
+      })
+      .eq('id', existing.id);
+
+    if (updateError) {
+      console.error('❌ mergeWordBoxesForPage: update failed', updateError);
+      throw updateError;
+    }
+  }
+
   // Save OCR results to database
   async saveOCRResults(projectId: string, documentId: string, results: SimpleOCRResult[]): Promise<void> {
     try {
@@ -577,6 +754,10 @@ class SimpleOCRService {
         .filter(row => row != null && row.page_number != null)
         .map(row => {
           const methodRaw = row.processing_method as string | undefined;
+          // Persisted rows may be 'tesseract', 'pymupdf', or 'direct_extraction'.
+          // Treat 'pymupdf' as a direct-extraction variant in the SimpleOCRResult
+          // method enum since downstream code only branches on tesseract vs.
+          // direct; word-box source field is the precise signal.
           const method: 'direct_extraction' | 'tesseract' =
             methodRaw === 'tesseract' ? 'tesseract' : 'direct_extraction';
           return {

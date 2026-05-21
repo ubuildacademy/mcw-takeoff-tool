@@ -10,6 +10,8 @@ interface HyperlinkState {
   updateHyperlink: (id: string, updates: Partial<Pick<SheetHyperlink, 'targetSheetId' | 'targetPageNumber' | 'targetUrl' | 'sourceRect'>>) => void;
   deleteHyperlink: (id: string) => void;
   clearAllHyperlinks: () => void;
+  /** Removes links with origin === 'batch' for this project; returns count removed. */
+  clearBatchHyperlinksForProject: (projectId: string) => number;
   getPageHyperlinks: (projectId: string, sheetId: string, pageNumber: number) => SheetHyperlink[];
   getHyperlinkById: (id: string) => SheetHyperlink | undefined;
 }
@@ -22,6 +24,7 @@ export const useHyperlinkStore = create<HyperlinkState>()(
       addHyperlink: (data) => {
         const hyperlink: SheetHyperlink = {
           ...data,
+          origin: data.origin ?? 'manual',
           id: `hyperlink-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
           timestamp: new Date().toISOString(),
         };
@@ -52,6 +55,18 @@ export const useHyperlinkStore = create<HyperlinkState>()(
 
       clearAllHyperlinks: () => {
         set({ hyperlinks: [] });
+      },
+
+      clearBatchHyperlinksForProject: (projectId) => {
+        let removed = 0;
+        set((state) => ({
+          hyperlinks: state.hyperlinks.filter((h) => {
+            if (h.projectId !== projectId || h.origin !== 'batch') return true;
+            removed += 1;
+            return false;
+          }),
+        }));
+        return removed;
       },
 
       getPageHyperlinks: (projectId, sheetId, pageNumber) => {

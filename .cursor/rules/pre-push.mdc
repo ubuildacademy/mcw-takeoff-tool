@@ -15,4 +15,12 @@ Before **any** `git commit` or `git push`, you MUST:
 
 2. Ensure the pre-push hook is installed (via `npm install`). The hook blocks broken pushes automatically, but running `ci:local` first catches issues before the commit.
 
+3. **HTTPS push failures in agent/non-interactive shells:** If `git push origin …` fails with `could not read Username for 'https://github.com'`, HTTPS has no usable credentials in that environment **even when SSH works.** Push over SSH explicitly, for example:
+
+   ```bash
+   git push git@github.com:ubuildacademy/mcw-takeoff-tool.git HEAD:main
+   ```
+
+   Replace branch names as needed. Locally, using `origin` as `git@github.com:ubuildacademy/mcw-takeoff-tool.git` avoids this class of failure for routine pushes.
+
 Reference: `docs/DEPLOY_CHECKLIST.md`

@@ -64,6 +64,11 @@ export function TakeoffWorkspaceHeader({
   onRedo,
   onAddHyperlink,
   onClearHyperlinks,
+  onPreflightAutoHyperlink,
+  onExecuteAutoHyperlink,
+  onClearBatchHyperlinks,
+  autoHyperlinkAvailable,
+  currentDocumentId,
 }: TakeoffWorkspaceHeaderProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -322,6 +327,11 @@ export function TakeoffWorkspaceHeader({
         onOpenChange={setSettingsOpen}
         onAddHyperlink={onAddHyperlink}
         onClearHyperlinks={onClearHyperlinks}
+        onPreflightAutoHyperlink={onPreflightAutoHyperlink}
+        onExecuteAutoHyperlink={onExecuteAutoHyperlink}
+        onClearBatchHyperlinks={onClearBatchHyperlinks}
+        autoHyperlinkAvailable={autoHyperlinkAvailable}
+        currentDocumentId={currentDocumentId ?? null}
       />
     </div>
   );

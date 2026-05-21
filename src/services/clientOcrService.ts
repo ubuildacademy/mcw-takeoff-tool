@@ -59,7 +59,7 @@ export interface OCRWordBox {
     width: number;
     height: number;
   };
-  source: 'tesseract' | 'pdfjs';
+  source: 'tesseract' | 'pdfjs' | 'pymupdf' | 'bubble_ocr';
   ocrRotationDeg: number;
 }
 
@@ -1162,9 +1162,13 @@ class OCRService {
   }
 
   // Public method to process a canvas directly (for titleblock extraction)
-  async processCanvas(canvas: HTMLCanvasElement, pageNumber: number = 1): Promise<OCRResult> {
+  async processCanvas(
+    canvas: HTMLCanvasElement,
+    pageNumber: number = 1,
+    options?: { rotationDeg?: number }
+  ): Promise<OCRResult> {
     await this.initializeWorker();
-    return await this.processPage(canvas, pageNumber, { rotationDeg: 0 });
+    return await this.processPage(canvas, pageNumber, { rotationDeg: options?.rotationDeg ?? 0 });
   }
 }
 

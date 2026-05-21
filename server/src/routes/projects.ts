@@ -407,7 +407,14 @@ export async function performImportFromBackup(
                   width: typeof bbox?.width === 'number' ? bbox.width : 0,
                   height: typeof bbox?.height === 'number' ? bbox.height : 0,
                 },
-                source: box.source === 'pdfjs' ? 'pdfjs' : 'tesseract',
+                source:
+                  box.source === 'pdfjs'
+                    ? 'pdfjs'
+                    : box.source === 'pymupdf'
+                      ? 'pymupdf'
+                      : box.source === 'bubble_ocr'
+                        ? 'bubble_ocr'
+                        : 'tesseract',
               };
             })
             .filter((box): box is OCRWordBox => box != null)

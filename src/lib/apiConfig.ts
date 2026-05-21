@@ -33,7 +33,15 @@ export function getApiBaseUrl(): string {
     return '/api';
   }
 
-  // Priority 4: Development fallback
+  // Priority 4: Development — prefer same-origin `/api` so requests go through the Vite proxy
+  // (long-running routes get one place to configure timeouts; avoids some :4000 direct quirks).
+  if (import.meta.env.DEV && typeof window !== 'undefined') {
+    const h = window.location.hostname;
+    if (h === 'localhost' || h === '127.0.0.1') {
+      return '/api';
+    }
+  }
+
   return 'http://localhost:4000/api';
 }
 
@@ -42,18 +50,19 @@ export function getApiBaseUrl(): string {
  */
 export function getServerBaseUrl(): string {
   const apiUrl = getApiBaseUrl();
-  
-  // If it's an explicit URL, remove /api suffix
+
   if (apiUrl.startsWith('http')) {
     return apiUrl.replace(/\/api$/, '');
   }
-  
-  // If it's relative (/api), use same origin
+
   if (typeof window !== 'undefined') {
+    // Vite dev uses relative `/api` but Socket.IO is still served from the API port.
+    if (import.meta.env.DEV && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+      return `http://${window.location.hostname}:4000`;
+    }
     return window.location.origin;
   }
-  
-  // Development fallback
+
   return 'http://localhost:4000';
 }
 

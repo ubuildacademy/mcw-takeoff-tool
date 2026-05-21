@@ -20,6 +20,8 @@ const execAsync = promisify(exec);
 
 /** Bounded parallelism for scanning many PDF pages (entire-document / entire-project scopes). */
 const PAGE_SEARCH_CONCURRENCY = 4;
+/** Callout pass runs heavy Python (OpenCV + Tesseract); keep low to avoid memory spikes and flakey race conditions. */
+const CALLOUT_PASS_CONCURRENCY = 1;
 
 async function runWithConcurrency<T>(
   items: readonly T[],
@@ -46,6 +48,42 @@ async function removeVisualSearchTemp(filePath: string): Promise<void> {
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn('[visualSearchService] failed to remove temp file', { path: filePath, message });
+  }
+}
+
+type CalloutPassScriptJson = {
+  success?: boolean;
+  wordBoxes?: Array<{ text: string; bbox: { x: number; y: number; width: number; height: number }; confidence?: number }>;
+  templateMatches?: number;
+  error?: string;
+};
+
+/** `callout_hyperlink_pass.py` must emit JSON on stdout; tolerate stray prefix lines (warnings). */
+function parseCalloutHyperlinkPassJson(stdout: string, stderr: string): CalloutPassScriptJson {
+  const t = stdout.trim();
+  const tryParse = (s: string) => JSON.parse(s) as CalloutPassScriptJson;
+  try {
+    return tryParse(t);
+  } catch {
+    const lineStarts = [...t.matchAll(/\n\{/g)].map((m) => m.index! + 1);
+    for (const idx of lineStarts.reverse()) {
+      try {
+        return tryParse(t.slice(idx));
+      } catch {
+        /* try next */
+      }
+    }
+    const lastObj = t.lastIndexOf('{');
+    if (lastObj >= 0) {
+      try {
+        return tryParse(t.slice(lastObj));
+      } catch {
+        /* fall through */
+      }
+    }
+    console.warn('[calloutHyperlinkPass] stdout not JSON. stderr (head):', (stderr || '').slice(0, 600));
+    console.warn('[calloutHyperlinkPass] stdout (head):', t.slice(0, 600));
+    throw new Error('callout_hyperlink_pass.py did not print valid JSON');
   }
 }
 
@@ -77,6 +115,18 @@ export interface AutoCountResult {
   searchImageId?: string;
   processingTime?: number;
   threshold?: number;
+}
+
+/** Normalized word box from bundled callout template pass + ROI Tesseract. */
+export interface CalloutPassWordBox {
+  text: string;
+  bbox: { x: number; y: number; width: number; height: number };
+  confidence?: number;
+}
+
+export interface CalloutPassPageYield {
+  wordBoxes: CalloutPassWordBox[];
+  templateRegionsMatched: number;
 }
 
 export interface SymbolTemplate {
@@ -125,6 +175,7 @@ class AutoCountService {
 
   private pythonScriptPath: string;
   private extractTemplateClipScriptPath: string;
+  private calloutHyperlinkPassScriptPath: string;
   private tempDir: string;
   private cachedGlibLibPath: string | null = null;
   /** Cache PyMuPDF page.rect width/height (points) per file:page */
@@ -145,7 +196,10 @@ class AutoCountService {
     this.extractTemplateClipScriptPath = isCompiled
       ? path.join(baseDir, 'src', 'scripts', 'extract_template_clip.py')
       : path.join(baseDir, 'scripts', 'extract_template_clip.py');
-    
+    this.calloutHyperlinkPassScriptPath = isCompiled
+      ? path.join(baseDir, 'src', 'scripts', 'callout_hyperlink_pass.py')
+      : path.join(baseDir, 'scripts', 'callout_hyperlink_pass.py');
+
     // Temp directory for images
     const isProduction = process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === 'production';
     this.tempDir = isProduction ? '/tmp/visual-search' : path.join(baseDir, 'temp', 'visual-search');
@@ -576,6 +630,86 @@ except Exception as e:
       width: box.width * sx,
       height: box.height * sy
     };
+  }
+
+  /**
+   * Optional directory of extra callout template PNGs (merged with built-in synthetics + geometry in Python).
+   */
+  resolveBundledCalloutTemplateDir(): string {
+    const isCompiled = __dirname.includes('dist');
+    const baseDir = isCompiled ? path.join(__dirname, '..', '..') : path.join(__dirname, '..');
+    return isCompiled
+      ? path.join(baseDir, 'src', 'assets', 'callout-templates')
+      : path.join(baseDir, 'assets', 'callout-templates');
+  }
+
+  /**
+   * Run template match + ROI OCR on selected pages; returns supplemental word boxes per page (normalized 0–1).
+   */
+  async runCalloutHyperlinkPassForDocument(
+    pdfFileId: string,
+    projectId: string,
+    pageNumbers: number[],
+    options?: { confidenceThreshold?: number; roiScale?: number }
+  ): Promise<Map<number, CalloutPassPageYield>> {
+    const out = new Map<number, CalloutPassPageYield>();
+    const templateDir = this.resolveBundledCalloutTemplateDir();
+
+    const pdfPath = await this.getPDFFilePath(pdfFileId, projectId);
+    const confidence = options?.confidenceThreshold ?? 0.46;
+    const roiScale = options?.roiScale ?? 1.78;
+    const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
+    const enhancedPath = this.getEnhancedPath();
+    const enhancedLdPath = await this.getEnhancedLdLibraryPath();
+
+    await runWithConcurrency(pageNumbers, CALLOUT_PASS_CONCURRENCY, async (pageNum) => {
+      let fullPageImagePath: string | null = null;
+      try {
+        const imageBuffer = await pythonPdfConverter.convertPageToBuffer(pdfPath, pageNum, {
+          format: 'png',
+          scale: 2.25,
+          quality: 90,
+        });
+        if (!imageBuffer) return;
+
+        await fs.ensureDir(this.tempDir);
+        fullPageImagePath = path.join(this.tempDir, `callout_pass_${uuidv4()}.png`);
+        await fs.writeFile(fullPageImagePath, imageBuffer);
+
+        const cmd = `${pythonCommand} "${this.calloutHyperlinkPassScriptPath}" "${fullPageImagePath}" "${templateDir}" ${confidence} ${roiScale}`;
+        const execResult = await execAsync(cmd, {
+          timeout: 180000,
+          maxBuffer: 15 * 1024 * 1024,
+          env: { ...process.env, PATH: enhancedPath, LD_LIBRARY_PATH: enhancedLdPath },
+        });
+        let parsed: CalloutPassScriptJson;
+        try {
+          parsed = parseCalloutHyperlinkPassJson(execResult.stdout, execResult.stderr ?? '');
+        } catch (parseErr) {
+          console.warn(`[calloutHyperlinkPass] page ${pageNum} parse error:`, parseErr);
+          return;
+        }
+        if (!parsed.success) {
+          console.warn(`[calloutHyperlinkPass] page ${pageNum}:`, parsed.error || 'unknown');
+          return;
+        }
+        const boxes = (parsed.wordBoxes ?? []).map((w) => ({
+          text: w.text,
+          bbox: w.bbox,
+          confidence: w.confidence,
+        }));
+        out.set(pageNum, {
+          wordBoxes: boxes,
+          templateRegionsMatched: typeof parsed.templateMatches === 'number' ? parsed.templateMatches : 0,
+        });
+      } catch (err) {
+        console.warn(`[calloutHyperlinkPass] page ${pageNum} failed:`, err);
+      } finally {
+        if (fullPageImagePath) await removeVisualSearchTemp(fullPageImagePath);
+      }
+    });
+
+    return out;
   }
 
   /**

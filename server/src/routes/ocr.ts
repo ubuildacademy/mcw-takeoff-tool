@@ -4,6 +4,8 @@ import fs from 'fs-extra';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../supabase';
 import { simpleOcrService, type OCRWordBox, type SimpleOCRResult } from '../services/simpleOcrService';
+import { pymupdfTextExtractor } from '../services/pymupdfTextExtractor';
+import { bubbleOcrExtractor } from '../services/bubbleOcrExtractor';
 import { requireAuth, hasProjectAccess, isAdmin, validateUUIDParam, isValidUUID } from '../middleware';
 
 const router = express.Router();
@@ -402,12 +404,21 @@ router.post('/client-results/:documentId', requireAuth, validateUUIDParam('docum
           const y = typeof bboxCandidate?.y === 'number' ? bboxCandidate.y : 0;
           const width = typeof bboxCandidate?.width === 'number' ? bboxCandidate.width : 0;
           const height = typeof bboxCandidate?.height === 'number' ? bboxCandidate.height : 0;
+          const sourceRaw = candidate.source;
+          const source =
+            sourceRaw === 'pdfjs'
+              ? 'pdfjs'
+              : sourceRaw === 'pymupdf'
+                ? 'pymupdf'
+                : sourceRaw === 'bubble_ocr'
+                  ? 'bubble_ocr'
+                  : 'tesseract';
           return {
             index: typeof candidate.index === 'number' ? candidate.index : index,
             text: typeof candidate.text === 'string' ? candidate.text : '',
             confidence: typeof candidate.confidence === 'number' ? candidate.confidence : 0,
             bbox: { x, y, width, height },
-            source: candidate.source === 'pdfjs' ? 'pdfjs' : 'tesseract',
+            source,
           };
         })
         .filter((box): box is OCRWordBox => box != null);
@@ -451,6 +462,278 @@ router.post('/client-results/:documentId', requireAuth, validateUUIDParam('docum
     });
   }
 });
+
+/**
+ * Auto-hyperlink pre-step: re-extract per-word text from a PDF using PyMuPDF (MuPDF) and merge
+ * the results into the document's stored OCR rows under `source: 'pymupdf'`.
+ *
+ * Why: PDF.js' `getTextContent` silently drops glyphs in Type 3 fonts and form XObjects with
+ * malformed ToUnicode CMaps, which is exactly how callout-bubble text in vector architectural
+ * PDFs gets hidden. MuPDF is far more permissive and typically extracts those glyphs cleanly --
+ * no rasterization or OCR required. This makes the auto-hyperlink step seconds-per-document
+ * instead of the 7-20 minutes the old client-side Tesseract pre-step was costing us.
+ *
+ * Existing PDF.js word boxes are preserved (see `mergeWordBoxesPreservingExisting`); we only
+ * add new boxes for words PDF.js missed.
+ */
+router.post(
+  '/pymupdf-extract/:documentId',
+  requireAuth,
+  validateUUIDParam('documentId'),
+  async (req, res) => {
+    // The 15-min global server timeout is plenty for a single document, but bump
+    // the socket timeout just in case a huge PDF takes a while.
+    req.setTimeout(15 * 60 * 1000);
+    res.setTimeout(15 * 60 * 1000);
+
+    const { documentId } = req.params;
+    const { projectId } = req.body ?? {};
+
+    if (!projectId) {
+      return res.status(400).json({ error: 'Project ID is required' });
+    }
+
+    const userIsAdmin = await isAdmin(req.user!.id);
+    if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+      return res.status(404).json({ error: 'Project not found or access denied' });
+    }
+
+    const { data: documentData, error: documentError } = await supabase
+      .from('takeoff_files')
+      .select('filename, path')
+      .eq('id', documentId)
+      .eq('project_id', projectId)
+      .single();
+
+    if (documentError || !documentData?.path) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    const { data: fileData, error: downloadError } = await supabase.storage
+      .from('project-files')
+      .download(documentData.path);
+
+    if (downloadError || !fileData) {
+      console.error('pymupdf-extract: failed to download PDF', downloadError);
+      return res.status(500).json({ error: 'Failed to download PDF for extraction' });
+    }
+
+    const tempDir = path.join(process.cwd(), 'server', 'temp', 'pdf-processing');
+    await fs.ensureDir(tempDir);
+    const tempPath = path.join(tempDir, `${documentId}-pymupdf-${uuidv4()}.pdf`);
+    await fs.writeFile(tempPath, Buffer.from(await fileData.arrayBuffer()));
+
+    try {
+      const extraction = await pymupdfTextExtractor.extractAllPages(tempPath);
+      let pagesWithText = 0;
+      for (const page of extraction.pages) {
+        const wordBoxes: OCRWordBox[] = (page.words || [])
+          .map((word, idx): OCRWordBox | null => {
+            const w = word?.width ?? 0;
+            const h = word?.height ?? 0;
+            if (w <= 0 || h <= 0) return null;
+            const text = typeof word.text === 'string' ? word.text.trim() : '';
+            if (!text) return null;
+            return {
+              index: idx,
+              text,
+              // PyMuPDF gives us exact glyph positions, not a probability. Tag with
+              // 100 so the same downstream code that already trusts pdfjs boxes
+              // treats these as authoritative too.
+              confidence: 100,
+              bbox: { x: word.x, y: word.y, width: w, height: h },
+              source: 'pymupdf',
+            };
+          })
+          .filter((b): b is OCRWordBox => b != null);
+
+        if (wordBoxes.length > 0) pagesWithText += 1;
+
+        await simpleOcrService.mergeWordBoxesForPage(
+          projectId,
+          documentId,
+          {
+            pageNumber: page.pageNumber,
+            text: typeof page.text === 'string' ? page.text : '',
+            // Same rationale as confidence above: this is direct text, not OCR.
+            confidence: wordBoxes.length > 0 ? 100 : 0,
+            processingTime: 0,
+            wordBoxes,
+          },
+          'pymupdf',
+        );
+      }
+
+      res.json({
+        documentId,
+        totalPages: extraction.totalPages,
+        pagesExtracted: extraction.pages.length,
+        pagesWithText,
+      });
+    } catch (error) {
+      console.error('pymupdf-extract failed:', error);
+      res.status(500).json({
+        error: 'PyMuPDF extraction failed',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    } finally {
+      try {
+        await fs.remove(tempPath);
+      } catch (cleanupErr) {
+        console.warn('pymupdf-extract: failed to remove temp PDF', cleanupErr);
+      }
+    }
+  },
+);
+
+/**
+ * Auto-hyperlink pre-step (second half): run region-targeted OCR over circular
+ * callout bubbles. Most architectural PDFs draw round detail-callout bubbles
+ * as vector paths (stroked line segments forming the glyphs), so PDF.js and
+ * MuPDF both miss the text inside them. This route detects each bubble with
+ * OpenCV's HoughCircles, runs Tesseract on the small crop, validates the OCR
+ * against sheet-ref regexes, and merges the survivors into ocr_results as
+ * tesseract-sourced word boxes.
+ *
+ * Empirically ~1-2s/page on an 8-core laptop; an 80-page set lands ~1-3 min.
+ */
+router.post(
+  '/bubble-ocr-extract/:documentId',
+  requireAuth,
+  validateUUIDParam('documentId'),
+  async (req, res) => {
+    req.setTimeout(15 * 60 * 1000);
+    res.setTimeout(15 * 60 * 1000);
+
+    const { documentId } = req.params;
+    const { projectId } = req.body ?? {};
+
+    if (!projectId) {
+      return res.status(400).json({ error: 'Project ID is required' });
+    }
+
+    const userIsAdmin = await isAdmin(req.user!.id);
+    if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+      return res.status(404).json({ error: 'Project not found or access denied' });
+    }
+
+    const { data: documentData, error: documentError } = await supabase
+      .from('takeoff_files')
+      .select('filename, path')
+      .eq('id', documentId)
+      .eq('project_id', projectId)
+      .single();
+
+    if (documentError || !documentData?.path) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    const { data: fileData, error: downloadError } = await supabase.storage
+      .from('project-files')
+      .download(documentData.path);
+
+    if (downloadError || !fileData) {
+      console.error('bubble-ocr-extract: failed to download PDF', downloadError);
+      return res.status(500).json({ error: 'Failed to download PDF for bubble OCR' });
+    }
+
+    const tempDir = path.join(process.cwd(), 'server', 'temp', 'pdf-processing');
+    await fs.ensureDir(tempDir);
+    const tempPath = path.join(tempDir, `${documentId}-bubble-${uuidv4()}.pdf`);
+    await fs.writeFile(tempPath, Buffer.from(await fileData.arrayBuffer()));
+
+    try {
+      const extraction = await bubbleOcrExtractor.extractAllPages(tempPath);
+      let pagesWithCallouts = 0;
+      let pagesMarked = 0;
+      // Group merges per page so we hit `mergeWordBoxesForPage` once per page
+      // (the merge dedupes against existing PDF.js/PyMuPDF boxes for us).
+      //
+      // IMPORTANT: even when a page has zero detected bubbles we still need to
+      // *mark* it as bubble-OCR'd so the Auto-hyperlink preflight knows not to
+      // re-run this pass on subsequent runs. We do that by writing an empty
+      // sentinel word box (text: '', zero-sized bbox, source: 'bubble_ocr')
+      // when there are no real callouts. Empty-text boxes are filtered out of
+      // detection downstream, so they have no effect on results — they only
+      // serve as a "we ran this" marker.
+      for (const page of extraction.pages) {
+        const bubbles = page.bubbles || [];
+        const hasBubbles = bubbles.length > 0;
+        if (hasBubbles) pagesWithCallouts += 1;
+
+        const wordBoxes: OCRWordBox[] = bubbles
+          .map((bubble, idx): OCRWordBox | null => {
+            const w = bubble?.width ?? 0;
+            const h = bubble?.height ?? 0;
+            if (w <= 0 || h <= 0) return null;
+            const text = typeof bubble.text === 'string' ? bubble.text.trim() : '';
+            if (!text) return null;
+            return {
+              index: idx,
+              text,
+              confidence:
+                typeof bubble.confidence === 'number' ? bubble.confidence : 0,
+              bbox: { x: bubble.x, y: bubble.y, width: w, height: h },
+              source: 'bubble_ocr',
+            };
+          })
+          .filter((b): b is OCRWordBox => b != null);
+
+        if (wordBoxes.length === 0) {
+          // Sentinel marker so the preflight knows we processed this page.
+          wordBoxes.push({
+            index: 0,
+            text: '',
+            confidence: 0,
+            bbox: { x: 0, y: 0, width: 0, height: 0 },
+            source: 'bubble_ocr',
+          });
+        }
+
+        await simpleOcrService.mergeWordBoxesForPage(
+          projectId,
+          documentId,
+          {
+            pageNumber: page.pageNumber,
+            // Don't dump bubble text into text_content — it would pollute
+            // the title-block text search results. Word boxes are enough
+            // for the detection layer.
+            text: '',
+            confidence: 0,
+            processingTime: 0,
+            wordBoxes,
+          },
+          'bubble_ocr',
+        );
+        pagesMarked += 1;
+      }
+
+      console.log(
+        `🫧 Bubble OCR: ${extraction.totalPages} pages, ${extraction.calloutsFound} callouts on ${pagesWithCallouts} page(s); marked ${pagesMarked} page(s) as bubble-OCR processed`
+      );
+
+      res.json({
+        documentId,
+        totalPages: extraction.totalPages,
+        calloutsFound: extraction.calloutsFound,
+        pagesWithCallouts,
+        pagesMarked,
+      });
+    } catch (error) {
+      console.error('bubble-ocr-extract failed:', error);
+      res.status(500).json({
+        error: 'Bubble OCR pass failed',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    } finally {
+      try {
+        await fs.remove(tempPath);
+      } catch (cleanupErr) {
+        console.warn('bubble-ocr-extract: failed to remove temp PDF', cleanupErr);
+      }
+    }
+  },
+);
 
 // Background OCR processing function using OCR service
 async function processDocumentOCR(documentPath: string, jobId: string, documentId: string, projectId: string) {

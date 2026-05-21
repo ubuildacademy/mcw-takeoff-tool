@@ -578,4 +578,59 @@ router.get('/thumbnails/:conditionId', requireAuth, validateUUIDParam('condition
   }
 });
 
+/** Supplemental word boxes from bundled callout templates + ROI Tesseract (batch hyperlinks). */
+router.post('/callout-hyperlink-pass', requireAuth, imageInferenceBurstRateLimit, async (req, res) => {
+  try {
+    req.socket.setTimeout(900000);
+    const { projectId, documentId, pageNumbers, confidenceThreshold, roiScale } = req.body ?? {};
+
+    if (!projectId || typeof projectId !== 'string') {
+      return res.status(400).json({ error: 'projectId is required' });
+    }
+    if (!documentId || typeof documentId !== 'string') {
+      return res.status(400).json({ error: 'documentId is required' });
+    }
+    if (!Array.isArray(pageNumbers) || pageNumbers.length === 0) {
+      return res.status(400).json({ error: 'pageNumbers must be a non-empty array' });
+    }
+
+    const userIsAdmin = req.user ? await isAdmin(req.user.id) : false;
+    if (!req.user || !(await hasProjectAccess(req.user.id, projectId, userIsAdmin))) {
+      return res.status(404).json({ error: 'Project not found or access denied' });
+    }
+
+    const file = await storage.getFile(documentId);
+    if (!file || file.projectId !== projectId || file.mimetype !== 'application/pdf') {
+      return res.status(404).json({ error: 'PDF not found in this project' });
+    }
+
+    const pages = pageNumbers
+      .map((n: unknown) => (typeof n === 'number' ? n : parseInt(String(n), 10)))
+      .filter((n: number) => Number.isFinite(n) && n > 0);
+
+    if (pages.length === 0) {
+      return res.status(400).json({ error: 'No valid page numbers' });
+    }
+
+    const map = await autoCountService.runCalloutHyperlinkPassForDocument(documentId, projectId, pages, {
+      confidenceThreshold: typeof confidenceThreshold === 'number' ? confidenceThreshold : undefined,
+      roiScale: typeof roiScale === 'number' ? roiScale : undefined,
+    });
+
+    const results = [...map.entries()].map(([pageNumber, payload]) => ({
+      pageNumber,
+      wordBoxes: payload.wordBoxes,
+      templateRegionsMatched: payload.templateRegionsMatched,
+    }));
+
+    return res.json({
+      success: true,
+      results,
+    });
+  } catch (error) {
+    console.error('Error in callout-hyperlink-pass:', error);
+    return res.status(500).json({ error: 'Callout hyperlink pass failed' });
+  }
+});
+
 export default router;

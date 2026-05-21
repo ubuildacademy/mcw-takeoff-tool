@@ -14,7 +14,14 @@ import { useHyperlinkStore } from '../store/slices/hyperlinkSlice';
 import { useDocumentViewStore } from '../store/slices/documentViewSlice';
 import { useUndoStore } from '../store';
 import type { TakeoffCondition, Sheet, ProjectFile, PDFDocument, SearchResult } from '../types';
+import type { DocumentOCRData } from '../services/serverOcrService';
 import { toast } from 'sonner';
+import { applyBatchHyperlinkResults, runBatchHyperlinks } from '../services/batchHyperlink/runBatchHyperlinks';
+import { runBatchHyperlinkPreflight } from '../services/batchHyperlink/batchHyperlinkPreflight';
+import { formatAutoHyperlinkToast } from '../services/batchHyperlink/formatAutoHyperlinkToast';
+import { runPymupdfExtractForDocument } from '../services/batchHyperlink/runPymupdfExtractForDocument';
+import { runBubbleOcrForDocument } from '../services/batchHyperlink/runBubbleOcrForDocument';
+import { fetchStoredOcrForDocument } from '../services/batchHyperlink/fetchStoredOcrForDocument';
 import { triggerCalibration, triggerFitToWindow, getCurrentScrollPosition } from '../lib/windowBridge';
 import { fileService } from '../services/apiService';
 import { SidebarEdgeToggle } from './takeoff-workspace/SidebarEdgeToggle';
@@ -651,6 +658,152 @@ export function TakeoffWorkspace() {
     toast.success('All hyperlinks cleared');
   }, []);
 
+  const handleClearBatchHyperlinks = useCallback(() => {
+    if (!projectId) return;
+    const n = useHyperlinkStore.getState().clearBatchHyperlinksForProject(projectId);
+    toast.success(n > 0 ? `Removed ${n} auto-hyperlink${n === 1 ? '' : 's'}` : 'No auto-hyperlinks to remove');
+  }, [projectId]);
+
+  const handlePreflightAutoHyperlink = useCallback(
+    async (opts: { scope: 'project' | 'current' }) => {
+      if (!projectId) throw new Error('No project');
+      return runBatchHyperlinkPreflight({
+        projectId,
+        documents,
+        scope: opts.scope,
+        currentDocumentId: currentPdfFile?.id ?? null,
+      });
+    },
+    [projectId, documents, currentPdfFile?.id]
+  );
+
+  const handleExecuteAutoHyperlink = useCallback(
+    async (opts: {
+      scope: 'project' | 'current';
+      ocrByDocumentId: Map<string, DocumentOCRData>;
+      runPymupdfFor?: Array<{ id: string; name: string; totalPages: number; hasNoStoredOcr: boolean }>;
+      runBubbleOcrFor?: Array<{ id: string; name: string; totalPages: number; hasNoStoredOcr: boolean }>;
+    }) => {
+      if (!projectId) return;
+      try {
+        // Pre-step A: re-extract text with PyMuPDF (MuPDF) for any document whose stored OCR is
+        // missing PyMuPDF-sourced word boxes. PDF.js silently drops glyphs in Type-3 fonts and
+        // form XObjects with broken ToUnicode CMaps (which is exactly how callout-bubble text
+        // in architectural PDFs disappears); PyMuPDF reads those reliably and finishes in
+        // seconds per document.
+        //
+        // Pre-step B: region-targeted bubble OCR. HoughCircles detects every round callout
+        // shape, Tesseract OCRs the small crop, and survivors are merged as
+        // `source: 'bubble_ocr'`. This recovers detail-callout bubbles whose glyphs are stroked
+        // vector paths (very common on plan-view sheets) and that no direct text engine can
+        // read. The bubble pass tracks its own coverage so it keeps running on subsequent
+        // Auto-hyperlink invocations until each doc is marked done (sentinel word box).
+        const ocrMap = new Map(opts.ocrByDocumentId);
+        const pymupdfTargets = opts.runPymupdfFor ?? [];
+        const bubbleOcrTargets = opts.runBubbleOcrFor ?? [];
+        let pymupdfPagesExtracted = 0;
+        let pymupdfDocsRan = 0;
+        let bubbleOcrDocsRan = 0;
+        let bubbleOcrCalloutsFound = 0;
+        const touchedDocIds = new Set<string>();
+
+        for (const target of pymupdfTargets) {
+          touchedDocIds.add(target.id);
+          try {
+            const result = await runPymupdfExtractForDocument({
+              documentId: target.id,
+              projectId,
+            });
+            pymupdfDocsRan += 1;
+            pymupdfPagesExtracted += result.pagesExtracted;
+          } catch (err) {
+            console.error(`[auto-hyperlink] PyMuPDF extract failed for ${target.name}:`, err);
+            toast.error(
+              `Re-extracting text from ${target.name} failed; continuing with saved text only.`,
+            );
+          }
+        }
+
+        for (const target of bubbleOcrTargets) {
+          touchedDocIds.add(target.id);
+          try {
+            const bubbleResult = await runBubbleOcrForDocument({
+              documentId: target.id,
+              projectId,
+            });
+            bubbleOcrDocsRan += 1;
+            bubbleOcrCalloutsFound += bubbleResult.calloutsFound;
+          } catch (err) {
+            console.error(`[auto-hyperlink] Bubble OCR failed for ${target.name}:`, err);
+            toast.error(
+              `Scanning bubbles in ${target.name} failed; continuing with text-only matches.`,
+            );
+          }
+        }
+
+        // Refresh stored OCR for every doc touched by either pre-pass so detection sees the
+        // newly merged word boxes in a single map entry.
+        for (const docId of touchedDocIds) {
+          const refreshed = await fetchStoredOcrForDocument(docId, projectId);
+          if (refreshed) ocrMap.set(docId, refreshed);
+        }
+
+        const run = await runBatchHyperlinks({
+          projectId,
+          documents,
+          mode: 'loose',
+          scope: opts.scope,
+          currentDocumentId: currentPdfFile?.id ?? null,
+          ocrByDocumentId: ocrMap,
+        });
+        applyBatchHyperlinkResults(run.created, projectId, useHyperlinkStore.getState());
+        // Diag: see which refs are failing so we can fix detection / index mismatches.
+        const SHEET_SHAPE = /^[A-Z]{1,3}\d{1,3}(\.\d+)?$/;
+        const sheetShapedNoTarget = run.topNoTargetRefs.filter(([r]) => SHEET_SHAPE.test(r));
+        const sheetIndexKeys = documents.flatMap((d) =>
+          (d.pages ?? []).map((p) => ({ doc: d.id, page: p.pageNumber, sheet: p.sheetNumber }))
+        );
+        const diag = {
+          created: run.createdCount,
+          skippedNoTarget: run.skippedNoTarget,
+          skippedAmbiguous: run.skippedAmbiguousTarget,
+          skippedSelfLink: run.skippedSelfLink,
+          sheetShapedNoTarget: sheetShapedNoTarget.map(([r, d, p, c]) => ({ ref: r, doc: d, page: p, count: c })),
+          topNoTargetAll: run.topNoTargetRefs.map(([r, d, p, c]) => ({ ref: r, doc: d, page: p, count: c })),
+          topAmbiguous: run.topAmbiguousRefs.map(([r, d, p, c]) => ({ ref: r, doc: d, page: p, count: c })),
+          ambiguousKeysInIndex: run.ambiguousKeysInIndex,
+          sheetIndexA9: sheetIndexKeys.filter((k) => typeof k.sheet === 'string' && /^A9/i.test(k.sheet)),
+          sheetIndexAll: sheetIndexKeys,
+          /** What actually got linked (use this to separate skipped-no-target noise from overlay hits). */
+          createdLinks: run.created.map((h) => ({
+            ref: h.detectedSheetRef,
+            sourceRect: h.sourceRect,
+            targetSheetId: h.targetSheetId,
+            targetPageNumber: h.targetPageNumber,
+          })),
+        };
+        (window as unknown as { __autoHyperlinkDiag?: typeof diag }).__autoHyperlinkDiag = diag;
+        console.log(
+          '[auto-hyperlink] diagnostic dump stored on window.__autoHyperlinkDiag. ' +
+            'Run: copy(JSON.stringify(window.__autoHyperlinkDiag, null, 2)) to copy to clipboard.'
+        );
+        console.log(diag);
+        const { title, description } = formatAutoHyperlinkToast(run, {
+          pymupdfDocsRan,
+          pymupdfPagesExtracted,
+          bubbleOcrDocsRan,
+          bubbleOcrCalloutsFound,
+        });
+        toast.success(title, description ? { description } : undefined);
+      } catch (e) {
+        console.error(e);
+        toast.error(e instanceof Error ? e.message : 'Auto-hyperlink failed');
+        throw e;
+      }
+    },
+    [projectId, documents, currentPdfFile?.id]
+  );
+
   const [hyperlinkPickerOpen, setHyperlinkPickerOpen] = useState(false);
   const [hyperlinkContextMenu, setHyperlinkContextMenu] = useState<{
     hyperlinkId: string;
@@ -784,6 +937,11 @@ export function TakeoffWorkspace() {
         onRedo={() => redo()}
         onAddHyperlink={handleAddHyperlink}
         onClearHyperlinks={handleClearHyperlinks}
+        onPreflightAutoHyperlink={handlePreflightAutoHyperlink}
+        onExecuteAutoHyperlink={handleExecuteAutoHyperlink}
+        onClearBatchHyperlinks={handleClearBatchHyperlinks}
+        autoHyperlinkAvailable={Boolean(projectId && documents.length > 0)}
+        currentDocumentId={currentPdfFile?.id ?? null}
       />
 
       {/* Main Content Area - Fixed height container */}

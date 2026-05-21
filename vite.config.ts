@@ -121,9 +121,11 @@ export default defineConfig(({ mode }) => ({
       '/api': {
         target: 'http://localhost:4000',
         changeOrigin: true,
-        secure: false
-      }
-    }
+        secure: false,
+        timeout: 900000,
+        proxyTimeout: 900000,
+      },
+    },
   },
   preview: {
     port: 3001,

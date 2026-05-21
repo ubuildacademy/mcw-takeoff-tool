@@ -162,7 +162,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       text: string;
       confidence: number;
       bbox: { x: number; y: number; width: number; height: number };
-      source: 'pdfjs' | 'tesseract';
+      source: 'pdfjs' | 'tesseract' | 'pymupdf' | 'bubble_ocr';
       ocrRotationDeg?: number;
     }>
   >([]);
