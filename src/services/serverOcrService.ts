@@ -1,4 +1,5 @@
 import { ocrApiService } from './apiService';
+import { devLog } from '../lib/devLog';
 
 export interface OCRResult {
   pageNumber: number;
@@ -22,16 +23,6 @@ export interface DocumentOCRData {
   totalPages: number;
   results: OCRResult[];
   processedAt: string;
-}
-
-export interface SearchResult {
-  documentId: string;
-  pageNumber: number;
-  matches: Array<{
-    text: string;
-    context: string;
-    confidence: number;
-  }>;
 }
 
 class ServerOCRService {
@@ -82,7 +73,7 @@ class ServerOCRService {
         throw new Error('No job ID returned from server');
       }
 
-      console.log(`📋 OCR job started with ID: ${jobId}`);
+      devLog(`📋 OCR job started with ID: ${jobId}`);
 
       // Poll for completion
       return await this.pollForCompletion(jobId, documentId, projectId);
@@ -106,7 +97,7 @@ class ServerOCRService {
         if (statusResponse.status === 'completed') {
           // Check if server found no embedded text (image-based PDF)
           if (statusResponse.error === 'No searchable text found in PDF') {
-            console.log('📸 Server found no embedded text, triggering client-side image-based OCR fallback...');
+            devLog('📸 Server found no embedded text, triggering client-side image-based OCR fallback...');
             
             // Fetch results to check if we got any
             const resultsResponse = await ocrApiService.getDocumentResults(documentId, projectId);
@@ -153,7 +144,7 @@ class ServerOCRService {
    */
   private async triggerClientSideOCR(documentId: string, projectId: string, jobId: string): Promise<DocumentOCRData> {
     try {
-      console.log('🖼️ Starting client-side image-based OCR for document:', documentId);
+      devLog('🖼️ Starting client-side image-based OCR for document:', documentId);
       
       // Get PDF URL from Supabase
       const { supabaseService } = await import('./supabaseService');
@@ -163,13 +154,13 @@ class ServerOCRService {
         throw new Error('Failed to get PDF URL for client-side OCR');
       }
       
-      console.log('📄 PDF URL obtained, starting Tesseract.js OCR...');
+      devLog('📄 PDF URL obtained, starting Tesseract.js OCR...');
       
       // Use existing client-side OCR service
       const { clientOcrService } = await import('./clientOcrService');
       const ocrResult = await clientOcrService.processDocument(documentId, pdfUrl);
       
-      console.log(`✅ Client-side OCR completed: ${ocrResult.pages.length} pages processed`);
+      devLog(`✅ Client-side OCR completed: ${ocrResult.pages.length} pages processed`);
       
       // Convert client OCR results to server format (persist normalized word bboxes)
       const serverResults = ocrResult.pages.map((page) => ({
@@ -184,7 +175,7 @@ class ServerOCRService {
       // Send results back to server
       await ocrApiService.submitClientResults(documentId, projectId, serverResults, jobId);
       
-      console.log('✅ Client-side OCR results submitted to server');
+      devLog('✅ Client-side OCR results submitted to server');
       
       // Return formatted results matching DocumentOCRData interface
       return {
@@ -206,47 +197,6 @@ class ServerOCRService {
       console.error('❌ Client-side OCR fallback failed:', error);
       throw new Error(`Client-side OCR failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  }
-
-  // Search for text across all processed documents
-  async searchText(query: string, projectId: string, documentId?: string): Promise<SearchResult[]> {
-    const searchQuery = query.toLowerCase().trim();
-    if (searchQuery.length < 2) return [];
-
-    // Searching OCR data
-
-    try {
-      if (documentId) {
-        // Search specific document
-        const searchResponse = await ocrApiService.searchDocument(documentId, query, projectId);
-        return this.formatSearchResults(searchResponse, documentId);
-      } else {
-        // Search all documents (would need to implement this on server)
-        console.warn('⚠️ Searching all documents not yet implemented');
-        return [];
-      }
-    } catch (error) {
-      console.error('❌ OCR search error:', error);
-      return [];
-    }
-  }
-
-  private formatSearchResults(searchResponse: { results?: Array<{ pageNumber?: number; matches?: Array<{ snippet?: string; confidence?: number }> }> }, documentId: string): SearchResult[] {
-    if (!searchResponse.results || searchResponse.results.length === 0) {
-      return [];
-    }
-
-    return searchResponse.results
-      .filter((result): result is NonNullable<typeof result> & { pageNumber: number } => result != null && result.pageNumber != null)
-      .map((result) => ({
-        documentId,
-        pageNumber: result.pageNumber,
-        matches: (result.matches || []).filter((m): m is NonNullable<typeof m> => m != null).map((match) => ({
-          text: match.snippet ?? '',
-          context: match.snippet ?? '',
-          confidence: typeof match.confidence === 'number' ? match.confidence : 0
-        }))
-      }));
   }
 
   // Get OCR data for a document
@@ -349,7 +299,7 @@ class ServerOCRService {
   async cleanup(): Promise<void> {
     this.processingJobs.clear();
     this.completedOCR.clear();
-    console.log('🧹 Server OCR service cleaned up');
+    devLog('🧹 Server OCR service cleaned up');
   }
 }
 

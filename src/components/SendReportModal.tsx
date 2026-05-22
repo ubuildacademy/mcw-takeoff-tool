@@ -14,25 +14,9 @@ import {
 import { Mail, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { projectService } from '../services/apiService';
-
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-/** When total report size exceeds this, use Supabase link delivery instead of attachments. Must match server REPORT_DELIVERY.ATTACHMENT_LIMIT_BYTES. */
-const EMAIL_ATTACHMENT_LIMIT_BYTES = 25 * 1024 * 1024;
-
-function parseRecipients(input: string): string[] {
-  return input
-    .split(/[,;\s]+/)
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-function validateEmails(emails: string[]): { valid: string[]; invalid: string[] } {
-  const valid: string[] = [];
-  const invalid: string[] = [];
-  emails.forEach((e) => (EMAIL_REGEX.test(e) ? valid.push(e) : invalid.push(e)));
-  return { valid, invalid };
-}
+import { EMAIL_ATTACHMENT_LIMIT_BYTES } from '../constants/deliveryLimits';
+import { parseRecipients, validateEmails, MAX_EMAIL_RECIPIENTS } from '../utils/emailRecipients';
+import { extractErrorMessage } from '../utils/commonUtils';
 
 async function doSendReport(
   projectId: string,
@@ -92,8 +76,8 @@ export function SendReportModal({
       toast.error('Please enter at least one email address');
       return;
     }
-    if (parsed.length > 10) {
-      toast.error('Maximum 10 recipients allowed');
+    if (parsed.length > MAX_EMAIL_RECIPIENTS) {
+      toast.error(`Maximum ${MAX_EMAIL_RECIPIENTS} recipients allowed`);
       return;
     }
     const { valid, invalid } = validateEmails(parsed);
@@ -140,10 +124,7 @@ export function SendReportModal({
       onClose();
     } catch (error) {
       console.error('Send report error:', error);
-      const message =
-        (error as { response?: { data?: { error?: string } } })?.response?.data?.error ||
-        (error instanceof Error ? error.message : 'Failed to send report. Please try again.');
-      toast.error(message);
+      toast.error(extractErrorMessage(error, 'Failed to send report. Please try again.'));
     } finally {
       setSending(false);
     }

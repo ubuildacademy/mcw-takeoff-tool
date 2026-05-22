@@ -19,9 +19,6 @@ import takeoffMeasurementRoutes from './routes/takeoffMeasurements';
 import { ocrRoutes } from './routes/ocr';
 import ollamaRoutes from './routes/ollama';
 import userRoutes from './routes/users';
-import enhancedOcrRoutes from './routes/enhancedOcr';
-import hybridDetectionRoutes from './routes/hybridDetection';
-import ruleValidationRoutes from './routes/ruleValidation';
 import visualSearchRoutes from './routes/visualSearch';
 import settingsRoutes from './routes/settings';
 import titleblockRoutes from './routes/titleblock';
@@ -30,7 +27,6 @@ import authRoutes from './routes/auth';
 import sharedImportRoutes from './routes/sharedImport';
 import contactRoutes from './routes/contact';
 import { logEmailConfigStatus } from './services/emailService';
-import { livePreviewService } from './services/livePreviewService';
 import { cleanupExpiredReportDeliveries, cleanupExpiredProjectShares } from './services/reportDeliveryCleanup';
 // Initialize queue service (starts worker)
 import './services/queueService';
@@ -277,9 +273,6 @@ app.use('/api/takeoff-measurements', takeoffMeasurementRoutes);
 app.use('/api/ocr', ocrRoutes);
 app.use('/api/ollama', ollamaRoutes);
 app.use('/api/users', userRoutes);
-app.use('/api/enhanced-ocr', enhancedOcrRoutes);
-app.use('/api/hybrid-detection', hybridDetectionRoutes);
-app.use('/api/rule-validation', ruleValidationRoutes);
 app.use('/api/visual-search', visualSearchRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/titleblock', titleblockRoutes);
@@ -350,9 +343,6 @@ const server = app.listen(PORT, '0.0.0.0', () => {
 server.timeout = 900000; // 15 minutes
 server.keepAliveTimeout = 900000;
 server.headersTimeout = 901000;
-
-livePreviewService.initialize(server);
-console.log(`📡 Live preview service initialized`);
 
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const runCleanup = () => {

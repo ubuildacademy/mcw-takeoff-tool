@@ -7,6 +7,7 @@ import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { toast } from 'sonner';
 import { getApiBaseUrl } from '../lib/apiConfig';
+import { extractErrorMessage } from '../utils/commonUtils';
 
 const ContactPage: React.FC = () => {
   const navigate = useNavigate();
@@ -57,8 +58,8 @@ const ContactPage: React.FC = () => {
       }
       toast.success("Thanks for reaching out! We'll be in touch soon.");
       setFormData({ name: '', email: '', company: '', subject: '', message: '' });
-    } catch {
-      toast.error('Something went wrong. Please try again.');
+    } catch (error) {
+      toast.error(extractErrorMessage(error, 'Something went wrong. Please try again.'));
     } finally {
       setIsSubmitting(false);
     }

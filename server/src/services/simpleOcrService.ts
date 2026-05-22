@@ -897,23 +897,6 @@ class SimpleOCRService {
   }
 
   /**
-   * Analyze image data (placeholder for compatibility)
-   */
-  async analyzeImage(imageData: string): Promise<{
-    success: boolean;
-    text: string;
-    words?: any[];
-  }> {
-    // This is a placeholder implementation
-    // In a real implementation, this would process the image data
-    return {
-      success: false,
-      text: '',
-      words: []
-    };
-  }
-
-  /**
    * Check if the service is available
    */
   async isAvailable(): Promise<boolean> {

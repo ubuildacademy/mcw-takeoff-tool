@@ -20,6 +20,14 @@ REDIS_URL=redis://localhost:6379
 OLLAMA_BASE_URL=https://ollama.com
 OLLAMA_API_KEY=your_ollama_api_key_here
 
+# Upload / delivery limits (optional — defaults shown)
+# SUPABASE_MAX_FILE_SIZE=1073741824
+# ALLOWED_ORIGINS=https://your-app.vercel.app
+
+# Image inference rate limits (visual search / callout pass)
+# IMAGE_INFERENCE_MAX_PAYLOAD_CHARS=
+# IMAGE_INFERENCE_BURST_PER_MINUTE=
+
 # Email (Microsoft Graph - invitation emails, contact form)
 GRAPH_CLIENT_ID=your_azure_app_client_id
 GRAPH_TENANT_ID=your_azure_tenant_id

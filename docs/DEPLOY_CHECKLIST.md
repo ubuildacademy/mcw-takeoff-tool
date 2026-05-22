@@ -28,7 +28,7 @@ Same checks as the hook, on demand:
 npm run ci:local
 ```
 
-This runs typecheck then build. Run it before pushing if you want to double-check, or if you temporarily disabled the hook.
+This runs typecheck, build, lint, and test. Run it before pushing if you want to double-check, or if you temporarily disabled the hook.
 
 ## 3. Commit any new files that are imported
 
@@ -47,4 +47,4 @@ If you remove or rename an **export** (e.g. `SelectionBox` from `PDFViewer.types
 
 ---
 
-**Summary:** Rely on the pre-push hook so typecheck + build run before every push. Commit new imported files, and don’t remove exports that are still used. That keeps CI, Vercel, and Railway from failing on bad commits.
+**Summary:** Rely on the pre-push hook so typecheck, build, lint, and test run before every push. Commit new imported files, and don’t remove exports that are still used. That keeps CI, Vercel, and Railway from failing on bad commits.

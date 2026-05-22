@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
+import { devLog } from '../lib/devLog';
 import {
   Plus,
   Calculator,
@@ -22,6 +23,7 @@ import type { TakeoffCondition, PDFDocument } from '../types';
 import { CreateConditionDialog } from './CreateConditionDialog';
 import { SendReportModal } from './SendReportModal';
 import { formatFeetAndInches } from '../lib/utils';
+import { extractErrorMessage } from '../utils/commonUtils';
 import { useTakeoffExport, TakeoffSidebarConditionList } from './takeoff-sidebar';
 import { supabase } from '../lib/supabase';
 
@@ -144,12 +146,12 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
       for (const condition of visualSearchConditions) {
         const measurements = getConditionTakeoffMeasurements(projectId, condition.id);
         if (measurements.length > 0) {
-          console.log(`[TakeoffSidebar] Loading thumbnails for condition ${condition.id} with ${measurements.length} measurements`);
+          devLog(`[TakeoffSidebar] Loading thumbnails for condition ${condition.id} with ${measurements.length} measurements`);
           setLoadingThumbnails(prev => new Set(prev).add(condition.id));
           try {
             const { autoCountService } = await import('../services/visualSearchService');
             const thumbnails = await autoCountService.getMatchThumbnails(condition.id, projectId, 6);
-            console.log(`[TakeoffSidebar] Loaded ${thumbnails.length} thumbnails for condition ${condition.id}`, thumbnails);
+            devLog(`[TakeoffSidebar] Loaded ${thumbnails.length} thumbnails for condition ${condition.id}`, thumbnails);
             setMatchThumbnails(prev => ({
               ...prev,
               [condition.id]: thumbnails
@@ -363,7 +365,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                         await exportToExcel();
                       } catch (error) {
                         console.error('Excel export error:', error);
-                        toast.error('Error exporting Excel file. Please try again.');
+                        toast.error(extractErrorMessage(error, 'Error exporting Excel file. Please try again.'));
                       }
                     }}
                   >
@@ -380,7 +382,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                         await exportToPDF();
                       } catch (error) {
                         console.error('PDF export error:', error);
-                        toast.error('Error exporting PDF file. Please try again.');
+                        toast.error(extractErrorMessage(error, 'Error exporting PDF file. Please try again.'));
                       }
                     }}
                   >

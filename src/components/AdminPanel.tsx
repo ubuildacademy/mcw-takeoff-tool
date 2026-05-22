@@ -17,6 +17,7 @@ import { toast } from 'sonner';
 import { ollamaService, type OllamaModel } from '../services/ollamaService';
 import { authHelpers, supabase, UserMetadata, UserInvitation } from '../lib/supabase';
 import { settingsService } from '../services/apiService';
+import { extractErrorMessage } from '../utils/commonUtils';
 
 // Fallback when /api/ollama/models fails (https://ollama.com/search?c=cloud)
 const FALLBACK_OLLAMA_MODELS: OllamaModel[] = [
@@ -135,7 +136,7 @@ When answering questions:
       toast.success('Sheet number prompt saved successfully!');
     } catch (error) {
       console.error('Error saving sheet number prompt:', error);
-      toast.error('Failed to save sheet number prompt');
+      toast.error(extractErrorMessage(error, 'Failed to save sheet number prompt'));
     } finally {
       setIsLoading(false);
     }
@@ -167,7 +168,7 @@ When answering questions:
       toast.success('Sheet name prompt saved successfully!');
     } catch (error) {
       console.error('Error saving sheet name prompt:', error);
-      toast.error('Failed to save sheet name prompt');
+      toast.error(extractErrorMessage(error, 'Failed to save sheet name prompt'));
     } finally {
       setIsLoading(false);
     }
@@ -256,7 +257,7 @@ When answering questions:
       toast.success('Chat assistant prompt saved successfully!');
     } catch (error) {
       console.error('Error saving chat prompt:', error);
-      toast.error('Failed to save chat prompt');
+      toast.error(extractErrorMessage(error, 'Failed to save chat prompt'));
     } finally {
       setIsLoading(false);
     }
@@ -416,11 +417,7 @@ When answering questions:
       }
     } catch (error: unknown) {
       console.error('Error sending invitation:', error);
-      const err = error as Record<string, unknown>;
-      const data = (err?.response as Record<string, unknown> | undefined)?.data as Record<string, unknown> | undefined;
-      let errorMessage = typeof data?.error === 'string' ? data.error : (typeof err?.message === 'string' ? err.message : 'Failed to send invitation');
-      if (typeof data?.details === 'string') errorMessage += ` (${data.details})`;
-      toast.error(`Failed to create invitation: ${errorMessage}`);
+      toast.error(`Failed to create invitation: ${extractErrorMessage(error, 'Failed to send invitation')}`);
     } finally {
       setIsInviting(false);
     }
@@ -434,7 +431,7 @@ When answering questions:
       await loadInvitations();
     } catch (error) {
       console.error('Error deleting invitation:', error);
-      toast.error('Failed to delete invitation');
+      toast.error(extractErrorMessage(error, 'Failed to delete invitation'));
     }
   };
 
@@ -447,7 +444,7 @@ When answering questions:
       toast.success(`User role updated to ${newRole} successfully!`);
     } catch (error) {
       console.error('Error updating user role:', error);
-      toast.error('Failed to update user role');
+      toast.error(extractErrorMessage(error, 'Failed to update user role'));
     }
   };
 
@@ -460,7 +457,7 @@ When answering questions:
       toast.success('User deleted successfully!');
     } catch (error) {
       console.error('Error deleting user:', error);
-      toast.error('Failed to delete user');
+      toast.error(extractErrorMessage(error, 'Failed to delete user'));
     }
   };
 
@@ -845,7 +842,7 @@ When answering questions:
                             toast.success('AI settings saved successfully!');
                           } catch (error) {
                             console.error('Error saving AI settings:', error);
-                            toast.error('Failed to save AI settings');
+                            toast.error(extractErrorMessage(error, 'Failed to save AI settings'));
                           } finally {
                             setIsLoading(false);
                           }
@@ -864,8 +861,8 @@ When answering questions:
                             } else {
                               toast.error('Ollama connection failed. Make sure Ollama is running.');
                             }
-                          } catch {
-                            toast.error('Connection test failed. Check console for details.');
+                          } catch (error) {
+                            toast.error(extractErrorMessage(error, 'Connection test failed. Check console for details.'));
                           }
                         }}
                       >

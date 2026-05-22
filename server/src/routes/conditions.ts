@@ -2,6 +2,7 @@ import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { storage } from '../storage';
 import { supabase, TABLES } from '../supabase';
+import { devLog } from '../lib/devLog';
 import { 
   requireAuth, 
   requireProjectAccess,
@@ -133,7 +134,7 @@ router.post('/', requireAuth, sanitizeBody('name', 'description'), async (req, r
     // Validate depth for volume conditions
     let validatedDepth = depth;
     if (type === 'volume') {
-      console.log('🔍 Validating depth for volume condition:', { depth, depthType: typeof depth });
+      devLog('🔍 Validating depth for volume condition:', { depth, depthType: typeof depth });
       
       // Handle depth - it should already be a number from frontend, but handle string case
       let depthValue: number;
@@ -162,7 +163,7 @@ router.post('/', requireAuth, sanitizeBody('name', 'description'), async (req, r
         });
       }
       
-      console.log('✅ Depth validation passed:', depthValue);
+      devLog('✅ Depth validation passed:', depthValue);
       // Use the numeric value
       validatedDepth = depthValue;
     }
@@ -170,7 +171,7 @@ router.post('/', requireAuth, sanitizeBody('name', 'description'), async (req, r
     // Validate height for linear conditions with height enabled
     let validatedHeight = height;
     if (type === 'linear' && includeHeight) {
-      console.log('🔍 Validating height for linear condition:', { height, heightType: typeof height });
+      devLog('🔍 Validating height for linear condition:', { height, heightType: typeof height });
       
       // Handle height - it should already be a number from frontend, but handle string case
       let heightValue: number;
@@ -199,7 +200,7 @@ router.post('/', requireAuth, sanitizeBody('name', 'description'), async (req, r
         });
       }
       
-      console.log('✅ Height validation passed:', heightValue);
+      devLog('✅ Height validation passed:', heightValue);
       // Use the numeric value
       validatedHeight = heightValue;
     }
@@ -249,12 +250,12 @@ router.post('/', requireAuth, sanitizeBody('name', 'description'), async (req, r
       createdAt: now
     };
     
-    console.log('Creating condition with data:', JSON.stringify(newCondition, null, 2));
-    console.log('Depth value being saved:', { depth: newCondition.depth, depthType: typeof newCondition.depth });
+    devLog('Creating condition with data:', JSON.stringify(newCondition, null, 2));
+    devLog('Depth value being saved:', { depth: newCondition.depth, depthType: typeof newCondition.depth });
     
     try {
       const savedCondition = await storage.saveCondition(newCondition);
-      console.log('Successfully created condition:', savedCondition.id);
+      devLog('Successfully created condition:', savedCondition.id);
       
       return res.status(201).json({ 
         success: true, 

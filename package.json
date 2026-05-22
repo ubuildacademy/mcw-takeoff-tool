@@ -29,7 +29,6 @@
     "react-dom": "^18.2.0",
     "react-remove-scroll-bar": "^2.3.7",
     "react-router-dom": "^6.20.0",
-    "socket.io-client": "^4.8.1",
     "sonner": "^2.0.7",
     "tailwind-merge": "^2.0.0",
     "tailwindcss": "^3.3.0",
@@ -56,7 +55,7 @@
   },
   "scripts": {
     "prepare": "node scripts/install-git-hooks.mjs",
-    "ci:local": "npm run typecheck && npm run build",
+    "ci:local": "npm run typecheck && npm run build && npm run lint && npm run test",
     "dev": "vite",
     "dev:fixed": "bash -c 'lsof -ti:3001 | xargs kill -9 2>/dev/null || true' && vite",
     "copy-pdf-worker": "node scripts/copy-pdf-worker.mjs",

@@ -11,7 +11,7 @@ Before **any** `git commit` or `git push`, you MUST:
    ```bash
    npm run ci:local
    ```
-   This runs `typecheck` + `build`. If either fails, do not commit or push.
+   This runs `typecheck`, `build`, `lint`, and `test`. If any step fails, do not commit or push.
 
 2. Ensure the pre-push hook is installed (via `npm install`). The hook blocks broken pushes automatically, but running `ci:local` first catches issues before the commit.
 

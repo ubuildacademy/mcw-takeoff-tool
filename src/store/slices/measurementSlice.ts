@@ -5,6 +5,7 @@ import { MeasurementCalculator } from '../../utils/measurementCalculation';
 import { samePdfPageKey } from '../../utils/takeoffMeasurementLookup';
 import { useConditionStore } from './conditionSlice';
 import { useProjectStore } from './projectSlice';
+import { devLog, devWarn } from '../../lib/devLog';
 
 export function compareMeasurementsByStackOrder(a: TakeoffMeasurement, b: TakeoffMeasurement): number {
   const oa = a.stackOrder ?? 0;
@@ -227,7 +228,7 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
           signal: ac.signal,
         });
         pendingCreateAbortById.delete(optimisticId);
-        if (import.meta.env.DEV) console.log('✅ ADD_TAKEOFF_MEASUREMENT: API response received:', response);
+        devLog('✅ ADD_TAKEOFF_MEASUREMENT: API response received:', response);
         const measurement = response.measurement || response;
 
         set((state) => ({
@@ -237,9 +238,7 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
         }));
         get().updateMarkupsByPage();
 
-        if (import.meta.env.DEV) {
-          console.log('✅ ADD_TAKEOFF_MEASUREMENT: Measurement created successfully with ID:', measurement.id);
-        }
+        devLog('✅ ADD_TAKEOFF_MEASUREMENT: Measurement created successfully with ID:', measurement.id);
         return measurement.id;
       } catch (error: unknown) {
         pendingCreateAbortById.delete(optimisticId);
@@ -273,9 +272,9 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
       try {
         const { takeoffMeasurementService } = await import('../../services/apiService');
         
-        console.log('🔄 UPDATE_TAKEOFF_MEASUREMENT: Updating measurement via API:', { id, updates });
+        devLog('🔄 UPDATE_TAKEOFF_MEASUREMENT: Updating measurement via API:', { id, updates });
         const response = await takeoffMeasurementService.updateTakeoffMeasurement(id, updates);
-        console.log('✅ UPDATE_TAKEOFF_MEASUREMENT: API update successful:', response);
+        devLog('✅ UPDATE_TAKEOFF_MEASUREMENT: API update successful:', response);
         const updatedMeasurement = response.measurement || response;
         
         set(state => ({
@@ -354,9 +353,7 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
       const deleteFromServer = async () => {
         const { takeoffMeasurementService } = await import('../../services/apiService');
         await takeoffMeasurementService.deleteTakeoffMeasurement(id);
-        if (import.meta.env.DEV) {
-          console.log('✅ DELETE_TAKEOFF_MEASUREMENT: Measurement deleted successfully from API');
-        }
+        devLog('✅ DELETE_TAKEOFF_MEASUREMENT: Measurement deleted successfully from API');
       };
 
       const restore = () => {
@@ -451,12 +448,10 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
       viewportHeight
     ) => {
       if (viewportWidth == null || viewportHeight == null || viewportWidth <= 0 || viewportHeight <= 0) {
-        if (import.meta.env.DEV) {
-          console.warn('📐 RECALC_AFTER_CALIBRATION: Skipping recalculation - viewport dimensions required', {
-            viewportWidth,
-            viewportHeight
-          });
-        }
+        devWarn('📐 RECALC_AFTER_CALIBRATION: Skipping recalculation - viewport dimensions required', {
+          viewportWidth,
+          viewportHeight,
+        });
         return;
       }
 
@@ -466,13 +461,11 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
           : get().getSheetTakeoffMeasurements(projectId, sheetId);
 
       if (measurements.length === 0) {
-        if (import.meta.env.DEV) {
-          console.log('📐 RECALC_AFTER_CALIBRATION: No measurements to recalculate', {
-            projectId,
-            sheetId,
-            pageNumber
-          });
-        }
+        devLog('📐 RECALC_AFTER_CALIBRATION: No measurements to recalculate', {
+          projectId,
+          sheetId,
+          pageNumber,
+        });
         return;
       }
 
@@ -588,14 +581,12 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
 
       get().updateMarkupsByPage();
 
-      if (import.meta.env.DEV) {
-        console.log('📐 RECALC_AFTER_CALIBRATION: Recalculated measurements', {
-          projectId,
-          sheetId,
-          pageNumber,
-          count: measurements.length
-        });
-      }
+      devLog('📐 RECALC_AFTER_CALIBRATION: Recalculated measurements', {
+        projectId,
+        sheetId,
+        pageNumber,
+        count: measurements.length,
+      });
     },
 
     // Getters
@@ -761,17 +752,17 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
       
       // RACE CONDITION PREVENTION: If already loading for this project, skip
       if (state.loadingMeasurements && state.loadingMeasurementsProjectId === projectId) {
-        console.log('⏭️ LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Already loading measurements for project', projectId, '- skipping duplicate request');
+        devLog('⏭️ LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Already loading measurements for project', projectId, '- skipping duplicate request');
         return;
       }
       
       // RACE CONDITION PREVENTION: If project changed while we were about to load, abort
       if (projectStore.currentProjectId !== projectId) {
-        console.log('⏭️ LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Project changed from', projectId, 'to', projectStore.currentProjectId, '- aborting load');
+        devLog('⏭️ LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Project changed from', projectId, 'to', projectStore.currentProjectId, '- aborting load');
         return;
       }
       
-      console.log('🔄 LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Starting to load measurements for project:', projectId);
+      devLog('🔄 LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Starting to load measurements for project:', projectId);
       
       set({ 
         loadingMeasurements: true,
@@ -781,14 +772,14 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
       try {
         const { takeoffMeasurementService } = await import('../../services/apiService');
         
-        console.log('🔄 LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Calling API to get project measurements from Supabase...');
+        devLog('🔄 LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Calling API to get project measurements from Supabase...');
         const measurementsResponse = await takeoffMeasurementService.getProjectTakeoffMeasurements(projectId);
-        console.log('✅ LOAD_PROJECT_TAKEOFF_MEASUREMENTS: API response received:', measurementsResponse);
+        devLog('✅ LOAD_PROJECT_TAKEOFF_MEASUREMENTS: API response received:', measurementsResponse);
         
         // RACE CONDITION PREVENTION: Double-check project hasn't changed during async operation
         const currentProjectStore = useProjectStore.getState();
         if (currentProjectStore.currentProjectId !== projectId) {
-          console.log('⏭️ LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Project changed during load from', projectId, 'to', currentProjectStore.currentProjectId, '- discarding results');
+          devLog('⏭️ LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Project changed during load from', projectId, 'to', currentProjectStore.currentProjectId, '- discarding results');
           set({ 
             loadingMeasurements: false,
             loadingMeasurementsProjectId: null
@@ -816,7 +807,7 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
           });
 
           const allMeasurements = [...otherProjectMeasurements, ...mergedProject, ...pendingForProject];
-          console.log(`💾 LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Loaded ${projectMeasurements.length} measurements from Supabase for project ${projectId}`, {
+          devLog(`💾 LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Loaded ${projectMeasurements.length} measurements from Supabase for project ${projectId}`, {
             projectMeasurementsCount: projectMeasurements.length,
             totalMeasurementsInStore: allMeasurements.length,
             source: 'Supabase',
@@ -830,7 +821,7 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
         
         get().updateMarkupsByPage();
         
-        console.log(`✅ LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Project measurements loaded from Supabase for ${projectId}:`, projectMeasurements.length);
+        devLog(`✅ LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Project measurements loaded from Supabase for ${projectId}:`, projectMeasurements.length);
       } catch (error) {
         console.error(`❌ LOAD_PROJECT_TAKEOFF_MEASUREMENTS: Failed to load measurements for project ${projectId} from Supabase:`, error);
         

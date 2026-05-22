@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Project } from '../../types';
 import { authHelpers } from '../../lib/supabase';
+import { devLog } from '../../lib/devLog';
 
 interface ProjectState {
   // State
@@ -160,7 +161,7 @@ export const useProjectStore = create<ProjectState>()(
           }));
           
           set({ projects });
-          console.log('Projects loaded:', projects.length);
+          devLog('Projects loaded:', projects.length);
         } catch (error: unknown) {
           console.error('Failed to load projects from Supabase:', error);
           set({ projects: [] });

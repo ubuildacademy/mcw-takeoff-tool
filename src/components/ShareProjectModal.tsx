@@ -17,23 +17,8 @@ import {
 import { Share2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { projectService } from '../services/apiService';
-
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-function parseRecipients(input: string): string[] {
-  const parsed = input
-    .split(/[,;\s]+/)
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
-  return [...new Set(parsed)]; // Deduplicate
-}
-
-function validateEmails(emails: string[]): { valid: string[]; invalid: string[] } {
-  const valid: string[] = [];
-  const invalid: string[] = [];
-  emails.forEach((e) => (EMAIL_REGEX.test(e) ? valid.push(e) : invalid.push(e)));
-  return { valid, invalid };
-}
+import { parseRecipients, validateEmails, MAX_EMAIL_RECIPIENTS } from '../utils/emailRecipients';
+import { extractErrorMessage } from '../utils/commonUtils';
 
 export interface ShareProjectModalProps {
   projectId: string;
@@ -58,8 +43,8 @@ export function ShareProjectModal({
       toast.error('Please enter at least one email address');
       return;
     }
-    if (parsed.length > 10) {
-      toast.error('Maximum 10 recipients allowed');
+    if (parsed.length > MAX_EMAIL_RECIPIENTS) {
+      toast.error(`Maximum ${MAX_EMAIL_RECIPIENTS} recipients allowed`);
       return;
     }
     const { valid, invalid } = validateEmails(parsed);
@@ -97,10 +82,7 @@ export function ShareProjectModal({
       onClose();
     } catch (error) {
       console.error('Share project error:', error);
-      const errMsg =
-        (error as { response?: { data?: { error?: string } } })?.response?.data?.error ||
-        (error instanceof Error ? error.message : 'Failed to share project. Please try again.');
-      toast.error(errMsg);
+      toast.error(extractErrorMessage(error, 'Failed to share project. Please try again.'));
     } finally {
       setSending(false);
     }

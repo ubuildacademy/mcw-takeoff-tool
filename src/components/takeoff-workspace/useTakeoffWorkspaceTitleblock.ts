@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { titleblockService } from '../../services/apiService';
+import { devLog } from '../../lib/devLog';
 import type { PDFDocument, ProjectFile } from '../../types';
 import type { TitleblockExtractionStatus } from './TakeoffWorkspaceHeader.types';
 
@@ -62,7 +63,7 @@ export function useTakeoffWorkspaceTitleblock({
 
   const handleTitleblockSelectionComplete = useCallback(
     async (field: TitleblockField, selectionBox: NormalizedBox, pageNumber: number) => {
-      console.log('[Titleblock] Selection complete:', { field, selectionBox, pageNumber, hasContext: !!titleblockSelectionContext });
+      devLog('[Titleblock] Selection complete:', { field, selectionBox, pageNumber, hasContext: !!titleblockSelectionContext });
 
       if (!titleblockSelectionContext) {
         console.error('[Titleblock] No selection context available - extraction cannot proceed');
@@ -78,15 +79,15 @@ export function useTakeoffWorkspaceTitleblock({
         templatePageNumber: pageNumber,
       };
       setPendingTitleblockConfig(nextConfig);
-      console.log('[Titleblock] Updated config:', nextConfig);
+      devLog('[Titleblock] Updated config:', nextConfig);
 
       if (field === 'sheetNumber') {
-        console.log('[Titleblock] Sheet number selected, prompting for sheet name');
+        devLog('[Titleblock] Sheet number selected, prompting for sheet name');
         setTitleblockSelectionMode('sheetName');
         return;
       }
 
-      console.log('[Titleblock] Sheet name selected, starting extraction');
+      devLog('[Titleblock] Sheet name selected, starting extraction');
       setTitleblockSelectionMode(null);
 
       const finalConfig = {
@@ -108,7 +109,7 @@ export function useTakeoffWorkspaceTitleblock({
           ? [titleblockSelectionContext.documentId]
           : documents.map((d) => d.id);
 
-      console.log('[Titleblock] Starting extraction:', {
+      devLog('[Titleblock] Starting extraction:', {
         projectId,
         documentIds: targetDocumentIds,
         config: finalConfig,
@@ -133,7 +134,7 @@ export function useTakeoffWorkspaceTitleblock({
           throw new Error('Project ID is missing');
         }
 
-        console.log('[Titleblock] Calling backend extraction API (queued job)...');
+        devLog('[Titleblock] Calling backend extraction API (queued job)...');
 
         abortControllerRef.current = new AbortController();
         const signal = abortControllerRef.current.signal;
@@ -160,7 +161,7 @@ export function useTakeoffWorkspaceTitleblock({
           }
         );
 
-        console.log('[Titleblock] Backend extraction response:', result);
+        devLog('[Titleblock] Backend extraction response:', result);
 
         type ExtractionRow = {
           documentId: string;
@@ -190,7 +191,7 @@ export function useTakeoffWorkspaceTitleblock({
           }
 
           if (isDev) {
-            console.log('[Titleblock] Extraction completed:', {
+            devLog('[Titleblock] Extraction completed:', {
               totalProcessed,
               totalPages,
               results: extractionResult.results.map((r) => ({
@@ -232,7 +233,7 @@ export function useTakeoffWorkspaceTitleblock({
           );
 
           // Reload documents from server to ensure full sync (hasTakeoffs, etc.)
-          console.log('[Titleblock] Reloading documents from server...');
+          devLog('[Titleblock] Reloading documents from server...');
           await loadProjectDocuments();
 
           setTimeout(() => {
@@ -245,7 +246,7 @@ export function useTakeoffWorkspaceTitleblock({
         const isAborted =
           (error instanceof Error && (error.name === 'AbortError' || error.name === 'CanceledError'));
         if (isAborted) {
-          if (isDev) console.log('[Titleblock] Extraction cancelled by user');
+          if (isDev) devLog('[Titleblock] Extraction cancelled by user');
           setTitleblockExtractionStatus(null);
           return;
         }
@@ -275,7 +276,7 @@ export function useTakeoffWorkspaceTitleblock({
         }, 5000);
       } finally {
         abortControllerRef.current = null;
-        console.log('[Titleblock] Clearing selection context');
+        devLog('[Titleblock] Clearing selection context');
         setTitleblockSelectionContext(null);
         setPendingTitleblockConfig(null);
       }
@@ -311,7 +312,7 @@ export function useTakeoffWorkspaceTitleblock({
       setTitleblockSelectionMode('sheetNumber');
 
       if (isDev) {
-        console.log('[Titleblock] Starting per-document titleblock selection', { documentId, pageNumber: firstPage });
+        devLog('[Titleblock] Starting per-document titleblock selection', { documentId, pageNumber: firstPage });
       }
     },
     [documents, projectFiles, handlePageSelect, isDev]
@@ -336,7 +337,7 @@ export function useTakeoffWorkspaceTitleblock({
     setTitleblockSelectionMode('sheetNumber');
 
     if (isDev) {
-      console.log('[Titleblock] Starting bulk titleblock selection (reference document)', {
+      devLog('[Titleblock] Starting bulk titleblock selection (reference document)', {
         documentId: referenceDocument.id,
         pageNumber: firstPage,
         totalDocuments: documents.length,

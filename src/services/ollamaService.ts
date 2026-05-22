@@ -342,25 +342,6 @@ class OllamaService {
     }
   }
 
-  // Generate embeddings for text (useful for document similarity)
-  // Note: Server may not have /embeddings route; will 404 if not implemented
-  async generateEmbedding(model: string, prompt: string): Promise<number[]> {
-    const { apiClient } = await import('./apiService');
-    try {
-      const { data } = await apiClient.post('/ollama/embeddings', { model, prompt });
-      this.isConnected = true;
-      this.connectionRetries = 0;
-      return data.embedding || [];
-    } catch (error) {
-      console.error('Error generating embedding:', error);
-      this.isConnected = false;
-      this.connectionRetries++;
-      throw error;
-    }
-  }
-
-  // Note: pullModel is not needed for cloud models - they're available instantly
-
   // Set default model
   setDefaultModel(model: string): void {
     this.defaultModel = model;

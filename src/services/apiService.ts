@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { supabase, authHelpers } from '../lib/supabase';
 import { getApiBaseUrl } from '../lib/apiConfig';
+import { devLog } from '../lib/devLog';
 import type { Project, TakeoffCondition, TakeoffMeasurement } from '../types';
 
 const API_BASE_URL = getApiBaseUrl();
@@ -387,10 +388,10 @@ export const conditionService = {
   },
 
   async getProjectConditions(projectId: string) {
-    console.log('🌐 API_GET_PROJECT_CONDITIONS: Making API call for project:', projectId);
+    devLog('🌐 API_GET_PROJECT_CONDITIONS: Making API call for project:', projectId);
     try {
       const response = await apiClient.get(`/conditions/project/${projectId}`);
-      if (import.meta.env.DEV) console.log('✅ API_GET_PROJECT_CONDITIONS: API call successful:', response.data);
+      devLog('✅ API_GET_PROJECT_CONDITIONS: API call successful:', response.data);
       
       // Backend now returns camelCase fields, so just return as-is
       // Transform field names from snake_case to camelCase (backward compatibility)

@@ -24,6 +24,7 @@ import { runBubbleOcrForDocument } from '../services/batchHyperlink/runBubbleOcr
 import { fetchStoredOcrForDocument } from '../services/batchHyperlink/fetchStoredOcrForDocument';
 import { triggerCalibration, triggerFitToWindow, getCurrentScrollPosition } from '../lib/windowBridge';
 import { fileService } from '../services/apiService';
+import { MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL_MB } from '../constants/deliveryLimits';
 import { SidebarEdgeToggle } from './takeoff-workspace/SidebarEdgeToggle';
 import { TakeoffWorkspaceHeader } from './takeoff-workspace/TakeoffWorkspaceHeader';
 import { TakeoffWorkspaceStatusBar } from './takeoff-workspace/TakeoffWorkspaceStatusBar';
@@ -166,6 +167,19 @@ export function TakeoffWorkspace() {
   const currentPdfFile = tabsResult.currentPdfFile;
   const currentPage = tabsResult.currentPage;
   const sheetId = tabsResult.sheetId;
+
+  // Show sidebar page count immediately; PDFViewer refines via onPDFLoaded when the file opens.
+  useEffect(() => {
+    if (!currentPdfFile?.id) {
+      setTotalPages(0);
+      return;
+    }
+    const doc = documents.find((d) => d.id === currentPdfFile.id);
+    const cached = Math.max(doc?.totalPages ?? 0, doc?.pages?.length ?? 0);
+    if (cached > 0) {
+      setTotalPages(cached);
+    }
+  }, [currentPdfFile?.id, documents]);
 
   // Derive scale/rotation from store so they stay in sync when switching tabs (no useEffect timing issues)
   const scale = useDocumentViewStore((s) =>
@@ -572,19 +586,16 @@ export function TakeoffWorkspace() {
         return;
       }
 
-      // Check file sizes before uploading (1GB = 1024 * 1024 * 1024 bytes)
-      const maxSizeMB = 1024;
-      const maxSizeBytes = maxSizeMB * 1024 * 1024;
       const invalidFiles: string[] = [];
 
       Array.from(files).forEach((file) => {
-        if (file.size > maxSizeBytes) {
+        if (file.size > MAX_UPLOAD_BYTES) {
           invalidFiles.push(`${file.name} (${(file.size / (1024 * 1024)).toFixed(2)}MB)`);
         }
       });
 
       if (invalidFiles.length > 0) {
-        toast.error(`Some files are too large! Maximum size is ${maxSizeMB}MB (1GB). Large files: ${invalidFiles.join(', ')}. Please contact your admin to increase the Supabase Storage file size limit.`);
+        toast.error(`Some files are too large! Maximum size is ${MAX_UPLOAD_LABEL_MB}MB (1GB). Large files: ${invalidFiles.join(', ')}. Please contact your admin to increase the Supabase Storage file size limit.`);
         return;
       }
 
@@ -757,37 +768,38 @@ export function TakeoffWorkspace() {
           ocrByDocumentId: ocrMap,
         });
         applyBatchHyperlinkResults(run.created, projectId, useHyperlinkStore.getState());
-        // Diag: see which refs are failing so we can fix detection / index mismatches.
-        const SHEET_SHAPE = /^[A-Z]{1,3}\d{1,3}(\.\d+)?$/;
-        const sheetShapedNoTarget = run.topNoTargetRefs.filter(([r]) => SHEET_SHAPE.test(r));
-        const sheetIndexKeys = documents.flatMap((d) =>
-          (d.pages ?? []).map((p) => ({ doc: d.id, page: p.pageNumber, sheet: p.sheetNumber }))
-        );
-        const diag = {
-          created: run.createdCount,
-          skippedNoTarget: run.skippedNoTarget,
-          skippedAmbiguous: run.skippedAmbiguousTarget,
-          skippedSelfLink: run.skippedSelfLink,
-          sheetShapedNoTarget: sheetShapedNoTarget.map(([r, d, p, c]) => ({ ref: r, doc: d, page: p, count: c })),
-          topNoTargetAll: run.topNoTargetRefs.map(([r, d, p, c]) => ({ ref: r, doc: d, page: p, count: c })),
-          topAmbiguous: run.topAmbiguousRefs.map(([r, d, p, c]) => ({ ref: r, doc: d, page: p, count: c })),
-          ambiguousKeysInIndex: run.ambiguousKeysInIndex,
-          sheetIndexA9: sheetIndexKeys.filter((k) => typeof k.sheet === 'string' && /^A9/i.test(k.sheet)),
-          sheetIndexAll: sheetIndexKeys,
-          /** What actually got linked (use this to separate skipped-no-target noise from overlay hits). */
-          createdLinks: run.created.map((h) => ({
-            ref: h.detectedSheetRef,
-            sourceRect: h.sourceRect,
-            targetSheetId: h.targetSheetId,
-            targetPageNumber: h.targetPageNumber,
-          })),
-        };
-        (window as unknown as { __autoHyperlinkDiag?: typeof diag }).__autoHyperlinkDiag = diag;
-        console.log(
-          '[auto-hyperlink] diagnostic dump stored on window.__autoHyperlinkDiag. ' +
-            'Run: copy(JSON.stringify(window.__autoHyperlinkDiag, null, 2)) to copy to clipboard.'
-        );
-        console.log(diag);
+        if (import.meta.env.DEV) {
+          // Diag: see which refs are failing so we can fix detection / index mismatches.
+          const SHEET_SHAPE = /^[A-Z]{1,3}\d{1,3}(\.\d+)?$/;
+          const sheetShapedNoTarget = run.topNoTargetRefs.filter(([r]) => SHEET_SHAPE.test(r));
+          const sheetIndexKeys = documents.flatMap((d) =>
+            (d.pages ?? []).map((p) => ({ doc: d.id, page: p.pageNumber, sheet: p.sheetNumber }))
+          );
+          const diag = {
+            created: run.createdCount,
+            skippedNoTarget: run.skippedNoTarget,
+            skippedAmbiguous: run.skippedAmbiguousTarget,
+            skippedSelfLink: run.skippedSelfLink,
+            sheetShapedNoTarget: sheetShapedNoTarget.map(([r, d, p, c]) => ({ ref: r, doc: d, page: p, count: c })),
+            topNoTargetAll: run.topNoTargetRefs.map(([r, d, p, c]) => ({ ref: r, doc: d, page: p, count: c })),
+            topAmbiguous: run.topAmbiguousRefs.map(([r, d, p, c]) => ({ ref: r, doc: d, page: p, count: c })),
+            ambiguousKeysInIndex: run.ambiguousKeysInIndex,
+            sheetIndexA9: sheetIndexKeys.filter((k) => typeof k.sheet === 'string' && /^A9/i.test(k.sheet)),
+            sheetIndexAll: sheetIndexKeys,
+            createdLinks: run.created.map((h) => ({
+              ref: h.detectedSheetRef,
+              sourceRect: h.sourceRect,
+              targetSheetId: h.targetSheetId,
+              targetPageNumber: h.targetPageNumber,
+            })),
+          };
+          (window as unknown as { __autoHyperlinkDiag?: typeof diag }).__autoHyperlinkDiag = diag;
+          console.log(
+            '[auto-hyperlink] diagnostic dump stored on window.__autoHyperlinkDiag. ' +
+              'Run: copy(JSON.stringify(window.__autoHyperlinkDiag, null, 2)) to copy to clipboard.'
+          );
+          console.log(diag);
+        }
         const { title, description } = formatAutoHyperlinkToast(run, {
           pymupdfDocsRan,
           pymupdfPagesExtracted,

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { Calibration } from '../../types';
+import { devLog } from '../../lib/devLog';
 
 interface CalibrationState {
   // State
@@ -40,7 +41,7 @@ export const useCalibrationStore = create<CalibrationState>()(
     
     // Actions
     setCalibration: (projectId, sheetId, scaleFactor, unit, pageNumber, viewportWidth, viewportHeight, rotation) => {
-      console.log('💾 SET_CALIBRATION: Setting calibration', { projectId, sheetId, scaleFactor, unit, pageNumber, viewportWidth, viewportHeight, rotation });
+      devLog('💾 SET_CALIBRATION: Setting calibration', { projectId, sheetId, scaleFactor, unit, pageNumber, viewportWidth, viewportHeight, rotation });
       set(state => {
         const existingIndex = state.calibrations.findIndex(
           c => c.projectId === projectId && 
@@ -48,7 +49,7 @@ export const useCalibrationStore = create<CalibrationState>()(
                (c.pageNumber ?? null) === (pageNumber ?? null)
         );
         
-        console.log('💾 SET_CALIBRATION: Existing calibration index', { existingIndex, totalCalibrations: state.calibrations.length, pageNumber });
+        devLog('💾 SET_CALIBRATION: Existing calibration index', { existingIndex, totalCalibrations: state.calibrations.length, pageNumber });
         
         if (existingIndex >= 0) {
           const updatedCalibrations = [...state.calibrations];
@@ -63,7 +64,7 @@ export const useCalibrationStore = create<CalibrationState>()(
             rotation: rotation ?? null,
             calibratedAt: new Date().toISOString() 
           };
-          console.log('💾 SET_CALIBRATION: Updated existing calibration', updatedCalibrations[existingIndex]);
+          devLog('💾 SET_CALIBRATION: Updated existing calibration', updatedCalibrations[existingIndex]);
           return { calibrations: updatedCalibrations };
         } else {
           const newCalibration = { 
@@ -77,7 +78,7 @@ export const useCalibrationStore = create<CalibrationState>()(
             rotation: rotation ?? null,
             calibratedAt: new Date().toISOString() 
           };
-          console.log('💾 SET_CALIBRATION: Added new calibration', newCalibration);
+          devLog('💾 SET_CALIBRATION: Added new calibration', newCalibration);
           return {
             calibrations: [...state.calibrations, newCalibration]
           };
@@ -90,7 +91,7 @@ export const useCalibrationStore = create<CalibrationState>()(
         const filteredCalibrations = state.calibrations.filter(
           c => c.projectId !== projectId
         );
-        console.log(`🗑️ CLEAR_PROJECT_CALIBRATIONS: Removed ${state.calibrations.length - filteredCalibrations.length} calibration(s) for project ${projectId}`);
+        devLog(`🗑️ CLEAR_PROJECT_CALIBRATIONS: Removed ${state.calibrations.length - filteredCalibrations.length} calibration(s) for project ${projectId}`);
         return { calibrations: filteredCalibrations };
       });
     },

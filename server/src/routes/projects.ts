@@ -18,11 +18,14 @@ import {
 } from '../middleware';
 import { emailService } from '../services/emailService';
 import { REPORT_DELIVERY, PROJECT_SHARE } from '../config/reportDelivery';
+import { DEFAULT_MAX_UPLOAD_BYTES, MAX_EMAIL_RECIPIENTS } from '../config/deliveryLimits';
 
 // Configure multer for file uploads
 const upload = multer({ 
   storage: multer.memoryStorage(),
-  limits: { fileSize: 1024 * 1024 * 1024 } // 1GB limit
+  limits: {
+    fileSize: parseInt(process.env.SUPABASE_MAX_FILE_SIZE || String(DEFAULT_MAX_UPLOAD_BYTES), 10),
+  },
 });
 
 // Multer for send-report: 30MB max per file (link delivery may receive large reports)
@@ -610,8 +613,9 @@ router.get('/:id', requireAuth, validateUUIDParam('id'), async (req, res) => {
 });
 
 router.get('/:id/conditions', requireAuth, validateUUIDParam('id'), (_req, res) => {
-  // Deprecated — use /api/conditions/project/:projectId instead
-  return res.json({ conditions: [] });
+  return res.status(410).json({
+    error: 'Deprecated endpoint. Use GET /api/conditions/project/:projectId instead.',
+  });
 });
 
 // Update a project - requires auth and project access
@@ -719,8 +723,8 @@ router.post(
         return res.status(400).json({ error: 'recipients is required' });
       }
       const recipients: string[] = Array.isArray(recipientsRaw) ? recipientsRaw : [recipientsRaw];
-      if (recipients.length === 0 || recipients.length > 10) {
-        return res.status(400).json({ error: 'recipients must be 1–10 email addresses' });
+      if (recipients.length === 0 || recipients.length > MAX_EMAIL_RECIPIENTS) {
+        return res.status(400).json({ error: `recipients must be 1–${MAX_EMAIL_RECIPIENTS} email addresses` });
       }
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       const validRecipients = [...new Set(
@@ -949,8 +953,8 @@ router.post(
         return res.status(400).json({ error: 'recipients must be a valid JSON array of email addresses' });
       }
 
-      if (!Array.isArray(recipients) || recipients.length === 0 || recipients.length > 10) {
-        return res.status(400).json({ error: 'recipients must be an array of 1-10 email addresses' });
+      if (!Array.isArray(recipients) || recipients.length === 0 || recipients.length > MAX_EMAIL_RECIPIENTS) {
+        return res.status(400).json({ error: `recipients must be an array of 1-${MAX_EMAIL_RECIPIENTS} email addresses` });
       }
 
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

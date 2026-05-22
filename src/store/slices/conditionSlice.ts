@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import type { TakeoffCondition } from '../../types';
 import { useProjectStore } from './projectSlice';
 import { supabase } from '../../lib/supabase';
+import { devLog } from '../../lib/devLog';
 
 interface ConditionState {
   // State
@@ -48,17 +49,17 @@ export const useConditionStore = create<ConditionState>()(
 
       // Actions
       addCondition: async (conditionData, options) => {
-        console.log('🔄 ADD_CONDITION: Starting to create condition:', conditionData);
+        devLog('🔄 ADD_CONDITION: Starting to create condition:', conditionData);
         try {
           const { conditionService } = await import('../../services/apiService');
           
-          console.log('🔄 ADD_CONDITION: Calling API to create condition...');
+          devLog('🔄 ADD_CONDITION: Calling API to create condition...');
           const response = await conditionService.createCondition(conditionData);
-          console.log('✅ ADD_CONDITION: API response received:', response);
+          devLog('✅ ADD_CONDITION: API response received:', response);
           const condition = response.condition || response;
           
           set(state => {
-            console.log('💾 ADD_CONDITION: Adding condition to store from backend:', condition);
+            devLog('💾 ADD_CONDITION: Adding condition to store from backend:', condition);
             const afterId = options?.insertAfterId;
             const insertAt =
               afterId != null ? state.conditions.findIndex((c) => c.id === afterId) : -1;
@@ -73,7 +74,7 @@ export const useConditionStore = create<ConditionState>()(
             return { conditions: nextConditions };
           });
           
-          console.log('✅ ADD_CONDITION: Condition created successfully with ID:', condition.id);
+          devLog('✅ ADD_CONDITION: Condition created successfully with ID:', condition.id);
           return condition.id;
         } catch (error: unknown) {
           console.error('❌ ADD_CONDITION: Failed to create condition via API:', error);
@@ -153,7 +154,7 @@ export const useConditionStore = create<ConditionState>()(
           if (currentProjectId) {
             await useMeasurementStore.getState().loadProjectTakeoffMeasurements(currentProjectId);
           }
-          console.log(`✅ DELETE_CONDITION: Deleted condition ${id}`);
+          devLog(`✅ DELETE_CONDITION: Deleted condition ${id}`);
         } catch (error) {
           console.error('Failed to delete condition:', error);
           throw error;
@@ -161,13 +162,11 @@ export const useConditionStore = create<ConditionState>()(
       },
       
       setSelectedCondition: (id) => {
-        if (process.env.NODE_ENV === 'development') {
-          console.log('🏪 STORE_SET_SELECTED_CONDITION:', {
-            newId: id,
-            previousId: get().selectedConditionId,
-            timestamp: new Date().toISOString()
-          });
-        }
+        devLog('🏪 STORE_SET_SELECTED_CONDITION:', {
+          newId: id,
+          previousId: get().selectedConditionId,
+          timestamp: new Date().toISOString(),
+        });
         set({ selectedConditionId: id });
       },
       
@@ -208,7 +207,7 @@ export const useConditionStore = create<ConditionState>()(
         const state = get();
         
         if (state.loadingConditions) {
-          console.log('🔄 LOAD_PROJECT_CONDITIONS: Already loading conditions, skipping duplicate request');
+          devLog('🔄 LOAD_PROJECT_CONDITIONS: Already loading conditions, skipping duplicate request');
           return;
         }
         
@@ -219,7 +218,7 @@ export const useConditionStore = create<ConditionState>()(
           return;
         }
         
-        console.log('🔄 LOAD_PROJECT_CONDITIONS: Starting to load conditions for project:', projectId);
+        devLog('🔄 LOAD_PROJECT_CONDITIONS: Starting to load conditions for project:', projectId);
         
         set({ loadingConditions: true });
         
@@ -234,15 +233,15 @@ export const useConditionStore = create<ConditionState>()(
         try {
           const { conditionService } = await import('../../services/apiService');
           
-          console.log('🔄 LOAD_PROJECT_CONDITIONS: Calling API to get project conditions...');
+          devLog('🔄 LOAD_PROJECT_CONDITIONS: Calling API to get project conditions...');
           const conditionsResponse = await conditionService.getProjectConditions(projectId);
-          console.log('✅ LOAD_PROJECT_CONDITIONS: API response received:', conditionsResponse);
+          devLog('✅ LOAD_PROJECT_CONDITIONS: API response received:', conditionsResponse);
           const projectConditions = conditionsResponse.conditions || [];
           
           set(state => {
             const existingConditions = state.conditions.filter(c => c.projectId !== projectId);
             const allConditions = [...existingConditions, ...projectConditions];
-            console.log(`💾 LOAD_PROJECT_CONDITIONS: Merging conditions for project ${projectId}:`, {
+            devLog(`💾 LOAD_PROJECT_CONDITIONS: Merging conditions for project ${projectId}:`, {
               existingCount: existingConditions.length,
               projectConditionsCount: projectConditions.length,
               totalCount: allConditions.length
@@ -254,7 +253,7 @@ export const useConditionStore = create<ConditionState>()(
           });
           
           clearTimeout(loadingTimeout);
-          console.log(`✅ LOAD_PROJECT_CONDITIONS: Project conditions loaded for ${projectId}:`, projectConditions.length);
+          devLog(`✅ LOAD_PROJECT_CONDITIONS: Project conditions loaded for ${projectId}:`, projectConditions.length);
         } catch (error) {
           console.error(`❌ LOAD_PROJECT_CONDITIONS: Failed to load conditions for project ${projectId}:`, error);
           set({ loadingConditions: false });
@@ -263,7 +262,7 @@ export const useConditionStore = create<ConditionState>()(
       },
 
       refreshProjectConditions: async (projectId: string) => {
-        console.log('🔄 REFRESH_PROJECT_CONDITIONS: Force refreshing conditions for project:', projectId);
+        devLog('🔄 REFRESH_PROJECT_CONDITIONS: Force refreshing conditions for project:', projectId);
         set({ loadingConditions: false });
         await get().loadProjectConditions(projectId);
       },
@@ -272,7 +271,7 @@ export const useConditionStore = create<ConditionState>()(
         const state = get();
         const existingProjectConditions = state.conditions.filter(c => c.projectId === projectId);
         
-        console.log(`🔄 ENSURE_CONDITIONS_LOADED: Loading conditions for project ${projectId} from API (found ${existingProjectConditions.length} in local storage)`);
+        devLog(`🔄 ENSURE_CONDITIONS_LOADED: Loading conditions for project ${projectId} from API (found ${existingProjectConditions.length} in local storage)`);
         await get().loadProjectConditions(projectId);
       },
 
