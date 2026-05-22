@@ -39,6 +39,19 @@ describe('formatAutoHyperlinkToast', () => {
     expect(description).toMatch(/A4\.51/);
   });
 
+  it('lists example unmatched refs when available', () => {
+    const { description } = formatAutoHyperlinkToast(
+      baseRun({
+        createdCount: 0,
+        skippedNoTarget: 8,
+        topNoTargetRefs: [['A9.31', 'doc1', 2, 5], ['G0.01', 'doc1', 4, 2]],
+      })
+    );
+    expect(description).toMatch(/Examples:/);
+    expect(description).toMatch(/A9\.31 \(×5\)/);
+    expect(description).toMatch(/G0\.01/);
+  });
+
   it('notes zero links', () => {
     const { title } = formatAutoHyperlinkToast(baseRun({ createdCount: 0 }));
     expect(title).toMatch(/no new links/i);

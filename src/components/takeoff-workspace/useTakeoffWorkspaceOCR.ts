@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { ocrApiService } from '../../services/apiService';
-import type { ProjectFile } from '../../types';
+import type { PDFDocument, ProjectFile } from '../../types';
 import type { OcrJobEntry } from './TakeoffWorkspaceHeader.types';
 
 export type OcrJobsMap = Map<
@@ -11,7 +11,7 @@ export type OcrJobsMap = Map<
 export interface UseTakeoffWorkspaceOCROptions {
   projectId: string | undefined;
   projectFiles: ProjectFile[];
-  loadProjectDocuments: () => Promise<void>;
+  loadProjectDocuments: () => Promise<PDFDocument[] | undefined>;
 }
 
 export interface UseTakeoffWorkspaceOCRResult {

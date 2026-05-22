@@ -1,5 +1,6 @@
 import { supabase, TABLES } from './supabase';
 import { DatabaseError, isNotFoundError } from './errors';
+import { devLog } from './lib/devLog';
 
 export interface StoredProject {
   id: string;
@@ -804,7 +805,7 @@ class SupabaseStorage {
   }
 
   async deleteCondition(id: string): Promise<void> {
-    console.log(`🔄 DELETE_CONDITION: Starting deletion of condition ${id}`);
+    devLog(`🔄 DELETE_CONDITION: Starting deletion of condition ${id}`);
     
     // First, check how many measurements exist for this condition
     const { data: existingMeasurements, error: countError } = await supabase
@@ -815,7 +816,7 @@ class SupabaseStorage {
     if (countError) {
       console.error('Error counting condition measurements:', countError);
     } else {
-      console.log(`📊 DELETE_CONDITION: Found ${existingMeasurements?.length || 0} measurements for condition ${id}`);
+      devLog(`📊 DELETE_CONDITION: Found ${existingMeasurements?.length || 0} measurements for condition ${id}`);
     }
     
     // First, delete all measurements associated with this condition
@@ -829,7 +830,7 @@ class SupabaseStorage {
       throw measurementsError;
     }
     
-    console.log(`✅ DELETE_CONDITION: Deleted measurements for condition ${id}`);
+    devLog(`✅ DELETE_CONDITION: Deleted measurements for condition ${id}`);
     
     // Then delete the condition itself
     const { error } = await supabase
@@ -842,7 +843,7 @@ class SupabaseStorage {
       throw error;
     }
     
-    console.log(`✅ DELETE_CONDITION: Deleted condition ${id} and all associated measurements`);
+    devLog(`✅ DELETE_CONDITION: Deleted condition ${id} and all associated measurements`);
   }
 
   // Takeoff Measurements

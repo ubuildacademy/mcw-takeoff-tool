@@ -17,6 +17,7 @@ import {
   shareProjectRateLimit
 } from '../middleware';
 import { emailService } from '../services/emailService';
+import { mapWithConcurrency } from '../lib/mapWithConcurrency';
 import { REPORT_DELIVERY, PROJECT_SHARE } from '../config/reportDelivery';
 import { DEFAULT_MAX_UPLOAD_BYTES, MAX_EMAIL_RECIPIENTS } from '../config/deliveryLimits';
 
@@ -112,25 +113,23 @@ async function buildProjectBackup(
     updatedAt: s.updated_at,
   }));
 
-  const filesWithData = await Promise.all(
-    files.map(async (file) => {
-      if (!file.path) {
-        return { ...file, fileData: null, fileDataError: 'No storage path' };
-      }
-      const { data: fileData, error: downloadError } = await supabase.storage
-        .from('project-files')
-        .download(file.path);
-      if (downloadError || !fileData) {
-        return { ...file, fileData: null, fileDataError: downloadError?.message || 'File not found' };
-      }
-      const buffer = Buffer.from(await fileData.arrayBuffer());
-      return {
-        ...file,
-        fileData: buffer.toString('base64'),
-        fileDataMimeType: file.mimetype,
-      };
-    })
-  );
+  const filesWithData = await mapWithConcurrency(files, 3, async (file) => {
+    if (!file.path) {
+      return { ...file, fileData: null, fileDataError: 'No storage path' };
+    }
+    const { data: fileData, error: downloadError } = await supabase.storage
+      .from('project-files')
+      .download(file.path);
+    if (downloadError || !fileData) {
+      return { ...file, fileData: null, fileDataError: downloadError?.message || 'File not found' };
+    }
+    const buffer = Buffer.from(await fileData.arrayBuffer());
+    return {
+      ...file,
+      fileData: buffer.toString('base64'),
+      fileDataMimeType: file.mimetype,
+    };
+  });
 
   const filesWithDataCount = filesWithData.filter((f) => (f as Record<string, unknown>).fileData !== null).length;
   return {
@@ -228,7 +227,7 @@ export async function performImportFromBackup(
   const files = (backup.files as Array<Record<string, unknown>>) || [];
   for (const file of files) {
     const originalFileId = (file.id as string) || '';
-    const { id: _fId, fileData, fileDataMimeType, fileDataError, ...fileMeta } = file;
+    const { id: _fId, fileData, fileDataMimeType, fileDataError: _fileDataError, ...fileMeta } = file;
     const newFileId = uuidv4();
     fileIdMapping[originalFileId] = newFileId;
     const mime = (fileDataMimeType || fileMeta.mimetype || 'application/pdf') as string;

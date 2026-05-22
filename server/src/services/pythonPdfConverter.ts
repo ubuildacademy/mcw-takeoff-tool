@@ -9,6 +9,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs-extra';
 import * as path from 'path';
+import { devLog, devWarn } from '../lib/devLog';
 
 const execAsync = promisify(exec);
 
@@ -166,8 +167,8 @@ class PythonPdfConverter {
         scale = 2.0
       } = options;
 
-      console.log(`📄 Converting PDF page ${pageNumber} using PyMuPDF: ${pdfPath} (${pdfStats.size} bytes)`);
-      console.log(`   Options: format=${format}, scale=${scale}, quality=${quality}`);
+      devLog(`📄 Converting PDF page ${pageNumber} using PyMuPDF: ${pdfPath} (${pdfStats.size} bytes)`);
+      devLog(`   Options: format=${format}, scale=${scale}, quality=${quality}`);
 
       // Check availability
       const availability = await this.checkAvailability();
@@ -184,7 +185,7 @@ class PythonPdfConverter {
       const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
       const command = `${pythonCommand} "${this.pythonScriptPath}" "${pdfPath}" ${pageNumber} ${scale} ${format} ${quality}`;
 
-      console.log(`🔧 Executing: ${command}`);
+      devLog(`🔧 Executing: ${command}`);
 
       // Execute Python script
       const enhancedPath = this.getEnhancedPath();
@@ -217,7 +218,7 @@ class PythonPdfConverter {
       }
 
       if (stderr && !stderr.includes('DeprecationWarning')) {
-        console.warn('⚠️ Python script warnings:', stderr);
+        devWarn('⚠️ Python script warnings:', stderr);
       }
 
       // Parse JSON result
@@ -245,7 +246,7 @@ class PythonPdfConverter {
         throw new Error('Decoded image buffer is empty');
       }
 
-      console.log(`✅ PDF conversion successful: ${imageBuffer.length} bytes, ${result.imageWidth}x${result.imageHeight}px (scale ${result.imageScale}), PDF base: ${result.pdfWidth}x${result.pdfHeight}pt, format=${result.format}`);
+      devLog(`✅ PDF conversion successful: ${imageBuffer.length} bytes, ${result.imageWidth}x${result.imageHeight}px (scale ${result.imageScale}), PDF base: ${result.pdfWidth}x${result.pdfHeight}pt, format=${result.format}`);
 
       return result;
     } catch (error) {

@@ -2,6 +2,7 @@
 // Supports: (1) Supabase Edge Function SMTP, (2) Direct SMTP via nodemailer
 
 import nodemailer from 'nodemailer';
+import { devLog } from '../lib/devLog';
 
 export interface InvitationEmailData {
   email: string;
@@ -125,14 +126,14 @@ export function logEmailConfigStatus(): void {
   const smtp = getTransporter();
 
   if (graph) {
-    console.log('📧 Email: Microsoft Graph (direct) – sender:', process.env.GRAPH_SENDER_EMAIL);
+    devLog('📧 Email: Microsoft Graph (direct) – sender:', process.env.GRAPH_SENDER_EMAIL);
   } else if (useEdge) {
-    console.log('📧 Email: Supabase Edge Function –', process.env.USE_GRAPH_EMAIL === 'true' ? 'Graph' : 'SMTP');
+    devLog('📧 Email: Supabase Edge Function –', process.env.USE_GRAPH_EMAIL === 'true' ? 'Graph' : 'SMTP');
   } else if (smtp) {
-    console.log('📧 Email: Direct SMTP –', process.env.SMTP_HOST);
+    devLog('📧 Email: Direct SMTP –', process.env.SMTP_HOST);
   } else {
-    console.log('📧 Email: Not configured – invitations will not be sent');
-    console.log('   Graph vars present:', {
+    devLog('📧 Email: Not configured – invitations will not be sent');
+    devLog('   Graph vars present:', {
       GRAPH_CLIENT_ID: !!process.env.GRAPH_CLIENT_ID,
       GRAPH_TENANT_ID: !!process.env.GRAPH_TENANT_ID,
       GRAPH_CLIENT_SECRET: !!process.env.GRAPH_CLIENT_SECRET,
@@ -152,18 +153,18 @@ const logInvitationFallback = (data: InvitationEmailData) => {
       return '(redacted)';
     }
   };
-  console.log('📧 INVITATION EMAIL (Email not configured - not sent):');
-  console.log('=====================================');
-  console.log(`To: ${data.email}`);
-  console.log(`Role: ${data.role}`);
-  console.log(`Invite URL: ${redactInviteUrl(data.inviteUrl)} (token redacted)`);
-  console.log(`Invited by: ${data.invitedBy}`);
-  console.log(`Expires: ${data.expiresAt}`);
-  console.log('=====================================');
-  console.log('⚠️  Configure either:');
-  console.log('   (A) Direct Graph: GRAPH_CLIENT_ID, GRAPH_TENANT_ID, GRAPH_CLIENT_SECRET, GRAPH_SENDER_EMAIL in server .env');
-  console.log('   (B) Edge Function: deploy send-email-graph, set secrets, USE_SUPABASE_EDGE_EMAIL=true, USE_GRAPH_EMAIL=true');
-  console.log('   (C) Direct SMTP: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD');
+  devLog('📧 INVITATION EMAIL (Email not configured - not sent):');
+  devLog('=====================================');
+  devLog(`To: ${data.email}`);
+  devLog(`Role: ${data.role}`);
+  devLog(`Invite URL: ${redactInviteUrl(data.inviteUrl)} (token redacted)`);
+  devLog(`Invited by: ${data.invitedBy}`);
+  devLog(`Expires: ${data.expiresAt}`);
+  devLog('=====================================');
+  devLog('⚠️  Configure either:');
+  devLog('   (A) Direct Graph: GRAPH_CLIENT_ID, GRAPH_TENANT_ID, GRAPH_CLIENT_SECRET, GRAPH_SENDER_EMAIL in server .env');
+  devLog('   (B) Edge Function: deploy send-email-graph, set secrets, USE_SUPABASE_EDGE_EMAIL=true, USE_GRAPH_EMAIL=true');
+  devLog('   (C) Direct SMTP: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD');
 };
 
 export const emailService = {

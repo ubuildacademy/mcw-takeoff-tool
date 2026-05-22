@@ -15,7 +15,7 @@ export interface UseTakeoffWorkspaceDocumentsOptions {
 export interface UseTakeoffWorkspaceDocumentsResult {
   documents: PDFDocument[];
   documentsLoading: boolean;
-  loadProjectDocuments: (filesOverride?: ProjectFile[]) => Promise<void>;
+  loadProjectDocuments: (filesOverride?: ProjectFile[]) => Promise<PDFDocument[] | undefined>;
   setDocuments: React.Dispatch<React.SetStateAction<PDFDocument[]>>;
 }
 
@@ -99,9 +99,9 @@ export function useTakeoffWorkspaceDocuments({
   /** Bumps when `projectId` changes or a new `loadProjectDocuments` run starts; stale async work must not call setState. */
   const documentLoadGenerationRef = useRef(0);
 
-  const loadProjectDocuments = useCallback(async (filesOverride?: ProjectFile[]) => {
+  const loadProjectDocuments = useCallback(async (filesOverride?: ProjectFile[]): Promise<PDFDocument[] | undefined> => {
     const scopedProjectId = projectIdRef.current;
-    if (!scopedProjectId) return;
+    if (!scopedProjectId) return undefined;
 
     const loadGenerationAtStart = ++documentLoadGenerationRef.current;
     const applyIfCurrent = (): boolean =>
@@ -137,14 +137,14 @@ export function useTakeoffWorkspaceDocuments({
           })),
         });
       }
-      if (!applyIfCurrent()) return;
+      if (!applyIfCurrent()) return undefined;
       setDocuments([]);
       setDocumentsLoading(false);
-      return;
+      return [];
     }
 
     try {
-      if (!applyIfCurrent()) return;
+      if (!applyIfCurrent()) return undefined;
       setDocumentsLoading(true);
 
       const { ocrApiService } = await import('../../services/apiService');
@@ -265,10 +265,12 @@ export function useTakeoffWorkspaceDocuments({
         }),
       }));
 
-      if (!applyIfCurrent()) return;
+      if (!applyIfCurrent()) return undefined;
       setDocuments(documentsWithTakeoffCounts);
+      return documentsWithTakeoffCounts;
     } catch (error) {
       console.error('Error loading project documents:', error);
+      return undefined;
     } finally {
       if (applyIfCurrent()) {
         setDocumentsLoading(false);

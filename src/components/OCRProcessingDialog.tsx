@@ -11,6 +11,7 @@ import {
   Clock
 } from 'lucide-react';
 import type { OCRResult } from '../types';
+import { devLog, devWarn } from '../lib/devLog';
 
 // OCRResult interface imported from shared types
 
@@ -58,7 +59,7 @@ export function OCRProcessingDialog({
       const { serverOcrService } = await import('../services/serverOcrService');
       
       // Start OCR processing for the document
-      console.log('🔄 Starting OCR processing for document:', documentId);
+      devLog('🔄 Starting OCR processing for document:', documentId);
       setProgress(5);
       setStatusMessage('Initializing OCR processing...');
       
@@ -88,7 +89,7 @@ export function OCRProcessingDialog({
             }
           }
         } catch (error) {
-          console.log('Progress check error:', error);
+          devWarn('Progress check error:', error);
         }
       }, 1000); // Check every second
       
@@ -97,7 +98,7 @@ export function OCRProcessingDialog({
       // Clear the progress interval
       clearInterval(progressInterval);
       
-      console.log('✅ OCR processing completed successfully');
+      devLog('✅ OCR processing completed successfully');
       
       // Create results for each page
       const processingResults: OCRResult[] = pageNumbers.map(pageNumber => ({

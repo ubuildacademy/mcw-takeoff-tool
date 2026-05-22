@@ -25,9 +25,11 @@ export interface ToolsDialogProps {
   onClearHyperlinks?: () => void;
   /** Step 1: load stored OCR and return preflight stats (single fetch). */
   onPreflightAutoHyperlink?: (opts: { scope: 'project' | 'current' }) => Promise<BatchHyperlinkPreflightResult>;
-  /** Step 2: run detection using OCR map from preflight (no second fetch). Single relaxed mode for everyday use. */
+  /** Step 2: run detection using OCR map from preflight (no second fetch). */
   onExecuteAutoHyperlink?: (opts: {
     scope: 'project' | 'current';
+    /** strict = SEE/MATCH cues required; loose = broader callout detection (default). */
+    mode: 'strict' | 'loose';
     ocrByDocumentId: Map<string, DocumentOCRData>;
     /**
      * Documents to run a PyMuPDF (MuPDF) text re-extract pass on before detection. PyMuPDF
@@ -116,6 +118,7 @@ export function ToolsDialog({
 
   const showAutoHyperlink = isAutoHyperlinkUiEnabled() && Boolean(onPreflightAutoHyperlink && onExecuteAutoHyperlink);
   const [autoScope, setAutoScope] = useState<'project' | 'current'>('project');
+  const [autoMode, setAutoMode] = useState<'strict' | 'loose'>('loose');
   const [preflightLoading, setPreflightLoading] = useState(false);
   const [preflightOpen, setPreflightOpen] = useState(false);
   const [preflightResult, setPreflightResult] = useState<BatchHyperlinkPreflightResult | null>(null);
@@ -303,6 +306,31 @@ export function ToolsDialog({
                         </label>
                       </div>
                     </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-sm font-normal">Detection mode</Label>
+                      <div className="flex flex-col gap-2">
+                        <label className="flex items-center gap-2 text-sm cursor-pointer">
+                          <input
+                            type="radio"
+                            name="auto-hyperlink-mode"
+                            checked={autoMode === 'loose'}
+                            onChange={() => setAutoMode('loose')}
+                            className="accent-primary"
+                          />
+                          Loose (recommended) — finds more callouts
+                        </label>
+                        <label className="flex items-center gap-2 text-sm cursor-pointer">
+                          <input
+                            type="radio"
+                            name="auto-hyperlink-mode"
+                            checked={autoMode === 'strict'}
+                            onChange={() => setAutoMode('strict')}
+                            className="accent-primary"
+                          />
+                          Strict — only near SEE / DET / REF cues
+                        </label>
+                      </div>
+                    </div>
                   </div>
                   <Button
                     variant="outline"
@@ -472,6 +500,7 @@ export function ToolsDialog({
                       : undefined;
                   await onExecuteAutoHyperlink({
                     scope: autoScope,
+                    mode: autoMode,
                     ocrByDocumentId: preflightResult.ocrByDocumentId,
                     runPymupdfFor,
                     runBubbleOcrFor,

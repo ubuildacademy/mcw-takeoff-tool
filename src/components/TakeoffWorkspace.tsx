@@ -678,24 +678,27 @@ export function TakeoffWorkspace() {
   const handlePreflightAutoHyperlink = useCallback(
     async (opts: { scope: 'project' | 'current' }) => {
       if (!projectId) throw new Error('No project');
+      const freshDocs = (await loadProjectDocuments()) ?? documents;
       return runBatchHyperlinkPreflight({
         projectId,
-        documents,
+        documents: freshDocs,
         scope: opts.scope,
         currentDocumentId: currentPdfFile?.id ?? null,
       });
     },
-    [projectId, documents, currentPdfFile?.id]
+    [projectId, documents, loadProjectDocuments, currentPdfFile?.id]
   );
 
   const handleExecuteAutoHyperlink = useCallback(
     async (opts: {
       scope: 'project' | 'current';
+      mode: 'strict' | 'loose';
       ocrByDocumentId: Map<string, DocumentOCRData>;
       runPymupdfFor?: Array<{ id: string; name: string; totalPages: number; hasNoStoredOcr: boolean }>;
       runBubbleOcrFor?: Array<{ id: string; name: string; totalPages: number; hasNoStoredOcr: boolean }>;
     }) => {
       if (!projectId) return;
+      const freshDocs = (await loadProjectDocuments()) ?? documents;
       try {
         // Pre-step A: re-extract text with PyMuPDF (MuPDF) for any document whose stored OCR is
         // missing PyMuPDF-sourced word boxes. PDF.js silently drops glyphs in Type-3 fonts and
@@ -761,8 +764,8 @@ export function TakeoffWorkspace() {
 
         const run = await runBatchHyperlinks({
           projectId,
-          documents,
-          mode: 'loose',
+          documents: freshDocs,
+          mode: opts.mode,
           scope: opts.scope,
           currentDocumentId: currentPdfFile?.id ?? null,
           ocrByDocumentId: ocrMap,
@@ -772,7 +775,7 @@ export function TakeoffWorkspace() {
           // Diag: see which refs are failing so we can fix detection / index mismatches.
           const SHEET_SHAPE = /^[A-Z]{1,3}\d{1,3}(\.\d+)?$/;
           const sheetShapedNoTarget = run.topNoTargetRefs.filter(([r]) => SHEET_SHAPE.test(r));
-          const sheetIndexKeys = documents.flatMap((d) =>
+          const sheetIndexKeys = freshDocs.flatMap((d) =>
             (d.pages ?? []).map((p) => ({ doc: d.id, page: p.pageNumber, sheet: p.sheetNumber }))
           );
           const diag = {
@@ -813,7 +816,7 @@ export function TakeoffWorkspace() {
         throw e;
       }
     },
-    [projectId, documents, currentPdfFile?.id]
+    [projectId, documents, loadProjectDocuments, currentPdfFile?.id]
   );
 
   const [hyperlinkPickerOpen, setHyperlinkPickerOpen] = useState(false);

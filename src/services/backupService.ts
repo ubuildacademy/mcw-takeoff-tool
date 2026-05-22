@@ -4,6 +4,7 @@ import { getApiBaseUrl } from '../lib/apiConfig';
 import { useAnnotationStore } from '../store/slices/annotationSlice';
 import { useDocumentViewStore } from '../store/slices/documentViewSlice';
 import { useHyperlinkStore } from '../store/slices/hyperlinkSlice';
+import { devLog } from '../lib/devLog';
 
 async function getAuthHeaders(): Promise<HeadersInit> {
   const session = await authHelpers.getValidSession();
@@ -49,7 +50,7 @@ export class BackupService {
    */
   static async exportProject(projectId: string): Promise<void> {
     try {
-      console.log('🔄 BACKUP: Starting project export for:', projectId);
+      devLog('🔄 BACKUP: Starting project export for:', projectId);
 
       const response = await fetch(`${getApiBaseUrl()}/projects/${projectId}/export`, {
         headers: await getAuthHeaders()
@@ -95,7 +96,7 @@ export class BackupService {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
 
-      console.log('✅ BACKUP: Project exported successfully', {
+      devLog('✅ BACKUP: Project exported successfully', {
         projectName: backup.project.name,
         metadata: backup.metadata
       });
@@ -118,7 +119,7 @@ export class BackupService {
     hyperlinks?: Array<Record<string, unknown>>;
   }> {
     try {
-      console.log('🔄 BACKUP: Starting project import for file:', file.name);
+      devLog('🔄 BACKUP: Starting project import for file:', file.name);
 
       const formData = new FormData();
       formData.append('file', file);
@@ -141,7 +142,7 @@ export class BackupService {
       }
 
       const result = await response.json();
-      console.log('✅ BACKUP: Project imported successfully');
+      devLog('✅ BACKUP: Project imported successfully');
       return {
         project: result.project,
         annotations: result.annotations,

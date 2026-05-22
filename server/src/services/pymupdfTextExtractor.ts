@@ -12,6 +12,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs-extra';
 import * as path from 'path';
+import { devLog, devWarn } from '../lib/devLog';
 
 const execAsync = promisify(exec);
 
@@ -99,7 +100,7 @@ class PyMuPdfTextExtractor {
     const enhancedPath = this.getEnhancedPath();
     const command = `${pythonCommand} "${this.pythonScriptPath}" "${pdfPath}"`;
 
-    console.log(`📝 Running PyMuPDF text extraction: ${command}`);
+    devLog(`📝 Running PyMuPDF text extraction: ${command}`);
     const start = Date.now();
 
     let stdout: string;
@@ -129,7 +130,7 @@ class PyMuPdfTextExtractor {
     }
 
     if (stderr && !stderr.includes('DeprecationWarning')) {
-      console.warn('⚠️ PyMuPDF script stderr:', stderr.slice(0, 1000));
+      devWarn('⚠️ PyMuPDF script stderr:', stderr.slice(0, 1000));
     }
 
     let parsed: PyMuPdfScriptOutput;
@@ -155,7 +156,7 @@ class PyMuPdfTextExtractor {
     const totalPages = parsed.totalPages ?? pages.length;
     const elapsed = Date.now() - start;
     const wordCount = pages.reduce((sum, p) => sum + (p.words?.length || 0), 0);
-    console.log(
+    devLog(
       `✅ PyMuPDF extracted ${wordCount} words across ${totalPages} pages in ${elapsed}ms`,
     );
 

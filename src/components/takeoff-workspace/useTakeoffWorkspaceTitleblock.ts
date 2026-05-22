@@ -29,7 +29,7 @@ export interface UseTakeoffWorkspaceTitleblockOptions {
   projectId: string | undefined;
   documents: PDFDocument[];
   projectFiles: ProjectFile[];
-  loadProjectDocuments: () => Promise<void>;
+  loadProjectDocuments: () => Promise<PDFDocument[] | undefined>;
   setDocuments: React.Dispatch<React.SetStateAction<PDFDocument[]>>;
   handlePageSelect: (documentId: string, pageNumber: number) => void;
   isDev?: boolean;

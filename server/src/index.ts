@@ -27,6 +27,7 @@ import authRoutes from './routes/auth';
 import sharedImportRoutes from './routes/sharedImport';
 import contactRoutes from './routes/contact';
 import { logEmailConfigStatus } from './services/emailService';
+import { devLog } from './lib/devLog';
 import { cleanupExpiredReportDeliveries, cleanupExpiredProjectShares } from './services/reportDeliveryCleanup';
 // Initialize queue service (starts worker)
 import './services/queueService';
@@ -195,7 +196,7 @@ app.all('/api/health', (req, res) => {
     }
     return res.status(403).send();
   }
-  console.log('✅ Health check hit');
+  devLog('✅ Health check hit');
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 

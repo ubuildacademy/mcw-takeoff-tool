@@ -15,6 +15,7 @@ import * as fs from 'fs-extra';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { parseDocumentIdFromSheetId, parsePageNumberFromSheetId } from '../lib/sheetUtils';
+import { devLog, devWarn } from '../lib/devLog';
 
 const execAsync = promisify(exec);
 
@@ -47,7 +48,7 @@ async function removeVisualSearchTemp(filePath: string): Promise<void> {
     await fs.remove(filePath);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    console.warn('[visualSearchService] failed to remove temp file', { path: filePath, message });
+    devWarn('[visualSearchService] failed to remove temp file', { path: filePath, message });
   }
 }
 
@@ -81,8 +82,8 @@ function parseCalloutHyperlinkPassJson(stdout: string, stderr: string): CalloutP
         /* fall through */
       }
     }
-    console.warn('[calloutHyperlinkPass] stdout not JSON. stderr (head):', (stderr || '').slice(0, 600));
-    console.warn('[calloutHyperlinkPass] stdout (head):', t.slice(0, 600));
+    devWarn('[calloutHyperlinkPass] stdout not JSON. stderr (head):', (stderr || '').slice(0, 600));
+    devWarn('[calloutHyperlinkPass] stdout (head):', t.slice(0, 600));
     throw new Error('callout_hyperlink_pass.py did not print valid JSON');
   }
 }
@@ -237,11 +238,11 @@ class AutoCountService {
       const glibPath = stdout.trim();
       if (glibPath) {
         this.cachedGlibLibPath = glibPath;
-        console.log(`✅ Found glib libraries at: ${glibPath}`);
+        devLog(`✅ Found glib libraries at: ${glibPath}`);
         return glibPath;
       }
     } catch (error) {
-      console.warn(`⚠️ Could not find glib libraries: ${error}`);
+      devWarn(`⚠️ Could not find glib libraries: ${error}`);
     }
 
     this.cachedGlibLibPath = '';
@@ -288,7 +289,7 @@ class AutoCountService {
       ? `${pythonCommand} "${this.extractTemplateClipScriptPath}" "${pdfPath}" ${pageNumber} ${scale} ${selectionBox.x} ${selectionBox.y} ${selectionBox.width} ${selectionBox.height} ${pdfJsPageSize!.width} ${pdfJsPageSize!.height} "${outputPath}"`
       : `${pythonCommand} "${this.extractTemplateClipScriptPath}" "${pdfPath}" ${pageNumber} ${scale} ${selectionBox.x} ${selectionBox.y} ${selectionBox.width} ${selectionBox.height} "${outputPath}"`;
 
-    console.log(`📐 [extractMeridianClipToPng] selectionBox=`, selectionBox,
+    devLog(`📐 [extractMeridianClipToPng] selectionBox=`, selectionBox,
       `pdfJsPageSize=`, pdfJsPageSize ?? 'N/A',
       `page=${pageNumber}`);
 
@@ -303,9 +304,9 @@ class AutoCountService {
       const lines = stderr.split('\n').filter(l => l.trim());
       for (const line of lines) {
         if (line.includes('[extract_clip]')) {
-          console.log(`📐 ${line.trim()}`);
+          devLog(`📐 ${line.trim()}`);
         } else if (!line.includes('DeprecationWarning')) {
-          console.warn('⚠️ extract_template_clip stderr:', line);
+          devWarn('⚠️ extract_template_clip stderr:', line);
         }
       }
     }
@@ -314,7 +315,7 @@ class AutoCountService {
     if (!result.success) {
       throw new Error(result.error || 'PDF clip rasterize failed');
     }
-    console.log(`📐 [extractMeridianClipToPng] output: ${result.width}×${result.height}px`);
+    devLog(`📐 [extractMeridianClipToPng] output: ${result.width}×${result.height}px`);
   }
 
   /**
@@ -330,7 +331,7 @@ class AutoCountService {
     _pdfJsPageSize?: { width: number; height: number }
   ): Promise<SymbolTemplate> {
     try {
-      console.log('🔍 Extracting symbol template from selection box...');
+      devLog('🔍 Extracting symbol template from selection box...');
       
       const pdfPath = await this.getPDFFilePath(pdfFileId, projectId);
 
@@ -686,11 +687,11 @@ except Exception as e:
         try {
           parsed = parseCalloutHyperlinkPassJson(execResult.stdout, execResult.stderr ?? '');
         } catch (parseErr) {
-          console.warn(`[calloutHyperlinkPass] page ${pageNum} parse error:`, parseErr);
+          devWarn(`[calloutHyperlinkPass] page ${pageNum} parse error:`, parseErr);
           return;
         }
         if (!parsed.success) {
-          console.warn(`[calloutHyperlinkPass] page ${pageNum}:`, parsed.error || 'unknown');
+          devWarn(`[calloutHyperlinkPass] page ${pageNum}:`, parsed.error || 'unknown');
           return;
         }
         const boxes = (parsed.wordBoxes ?? []).map((w) => ({
@@ -703,7 +704,7 @@ except Exception as e:
           templateRegionsMatched: typeof parsed.templateMatches === 'number' ? parsed.templateMatches : 0,
         });
       } catch (err) {
-        console.warn(`[calloutHyperlinkPass] page ${pageNum} failed:`, err);
+        devWarn(`[calloutHyperlinkPass] page ${pageNum} failed:`, err);
       } finally {
         if (fullPageImagePath) await removeVisualSearchTemp(fullPageImagePath);
       }
@@ -778,7 +779,7 @@ except Exception as e:
     documentId?: string
   ): Promise<AutoCountMatch[]> {
     try {
-      console.log(`🔍 Searching page ${pageNumber} for symbols matching template ${template.id}...`);
+      devLog(`🔍 Searching page ${pageNumber} for symbols matching template ${template.id}...`);
       
       // Convert PDF page to image
       const imageBuffer = await pythonPdfConverter.convertPageToBuffer(pdfPath, pageNumber, {
@@ -800,7 +801,7 @@ except Exception as e:
       const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
       const command = `${pythonCommand} "${this.pythonScriptPath}" "${fullPageImagePath}" "${template.imageData}" ${options.confidenceThreshold}`;
 
-      console.log(`🔧 Executing auto-count: ${command}`);
+      devLog(`🔧 Executing auto-count: ${command}`);
 
       const enhancedPath = this.getEnhancedPath();
       const enhancedLdPath = await this.getEnhancedLdLibraryPath();
@@ -825,7 +826,7 @@ except Exception as e:
       await removeVisualSearchTemp(fullPageImagePath);
 
       if (stderr && !stderr.includes('DeprecationWarning')) {
-        console.warn('⚠️ Python script warnings:', stderr);
+        devWarn('⚠️ Python script warnings:', stderr);
       }
 
       // Parse JSON result
@@ -897,7 +898,7 @@ except Exception as e:
     const allMatches: AutoCountMatch[] = [];
 
     try {
-      console.log(`🔍 Starting auto-count search with scope: ${searchScope}`);
+      devLog(`🔍 Starting auto-count search with scope: ${searchScope}`);
       
       if (searchScope === 'current-page') {
         // Search only the current page
@@ -918,7 +919,7 @@ except Exception as e:
         const pdfPath = await this.getPDFFilePath(pdfFileId, projectId);
         const totalPages = await this.getPDFPageCount(pdfPath);
         
-        console.log(`📄 Searching ${totalPages} pages in document ${pdfFileId}`);
+        devLog(`📄 Searching ${totalPages} pages in document ${pdfFileId}`);
         
         // Send initial progress with total pages
         if (onProgress && totalPages > 0) {
@@ -932,7 +933,7 @@ except Exception as e:
             const pageMatches = await this.searchPage(pdfPath, pageNum, template, opts, pdfFileId);
             allMatches.push(...pageMatches);
           } catch (pageError) {
-            console.warn(`⚠️ Failed to search page ${pageNum}, continuing...`, pageError);
+            devWarn(`⚠️ Failed to search page ${pageNum}, continuing...`, pageError);
           }
           completedPages++;
           if (onProgress) {
@@ -948,7 +949,7 @@ except Exception as e:
         const files = await storage.getFilesByProject(projectId);
         const pdfFiles = files.filter(f => f.mimetype === 'application/pdf');
         
-        console.log(`📚 Searching ${pdfFiles.length} documents in project ${projectId}`);
+        devLog(`📚 Searching ${pdfFiles.length} documents in project ${projectId}`);
         
         let totalPages = 0;
 
@@ -965,7 +966,7 @@ except Exception as e:
             const pdfPath = await this.getPDFFilePath(file.id, projectId);
             const pageCount = await this.getPDFPageCount(pdfPath);
             totalPages += pageCount;
-            console.log(`📄 Scheduling ${pageCount} pages for document ${file.originalName || file.id}`);
+            devLog(`📄 Scheduling ${pageCount} pages for document ${file.originalName || file.id}`);
             for (let pageNum = 1; pageNum <= pageCount; pageNum++) {
               pageTasks.push({
                 pdfPath,
@@ -975,7 +976,7 @@ except Exception as e:
               });
             }
           } catch (error) {
-            console.warn(`⚠️ Failed to get page count for document ${file.id}, skipping...`, error);
+            devWarn(`⚠️ Failed to get page count for document ${file.id}, skipping...`, error);
           }
         }
         
@@ -990,7 +991,7 @@ except Exception as e:
             const pageMatches = await this.searchPage(task.pdfPath, task.pageNum, template, opts, task.documentId);
             allMatches.push(...pageMatches);
           } catch (pageError) {
-            console.warn(
+            devWarn(
               `⚠️ Failed to search page ${task.pageNum} of document ${task.documentId}, continuing...`,
               pageError,
             );
@@ -1013,7 +1014,7 @@ except Exception as e:
 
       const processingTime = Date.now() - startTime;
       
-      console.log(`✅ Auto-count complete: ${limitedMatches.length} matches found (from ${allMatches.length} total) in ${processingTime}ms`);
+      devLog(`✅ Auto-count complete: ${limitedMatches.length} matches found (from ${allMatches.length} total) in ${processingTime}ms`);
 
       return {
         conditionId,
@@ -1049,7 +1050,7 @@ except Exception as e:
     onProgress?: (progress: { current: number; total: number }) => void
   ): Promise<void> {
     try {
-      console.log(`📊 Creating ${matches.length} count measurements...`);
+      devLog(`📊 Creating ${matches.length} count measurements...`);
 
       const totalMatches = matches.length;
       for (let i = 0; i < totalMatches; i++) {
@@ -1112,7 +1113,7 @@ except Exception as e:
         onProgress({ current: totalMatches, total: totalMatches });
       }
 
-      console.log(`✅ Created ${matches.length} count measurements`);
+      devLog(`✅ Created ${matches.length} count measurements`);
     } catch (error) {
       console.error('❌ Failed to create count measurements:', error);
       // Preserve the actual error message for debugging
@@ -1130,14 +1131,14 @@ except Exception as e:
     maxThumbnails: number = 6
   ): Promise<Array<{ measurementId: string; thumbnail: string }>> {
     try {
-      console.log(`[VisualSearchService] Extracting thumbnails for condition ${conditionId}, project ${projectId}`);
+      devLog(`[VisualSearchService] Extracting thumbnails for condition ${conditionId}, project ${projectId}`);
       // Get all measurements for this condition
       const conditionMeasurements = await storage.getTakeoffMeasurementsByCondition(conditionId);
       
-      console.log(`[VisualSearchService] Found ${conditionMeasurements.length} measurements for condition ${conditionId}`);
+      devLog(`[VisualSearchService] Found ${conditionMeasurements.length} measurements for condition ${conditionId}`);
       
       if (conditionMeasurements.length === 0) {
-        console.log(`[VisualSearchService] No measurements found, returning empty array`);
+        devLog(`[VisualSearchService] No measurements found, returning empty array`);
         return [];
       }
 
@@ -1262,7 +1263,7 @@ except Exception as e:
             });
             
             thumbnailCount++;
-            console.log(`[VisualSearchService] Extracted thumbnail ${thumbnailCount}/${maxThumbnails} for measurement ${measurement.id}`);
+            devLog(`[VisualSearchService] Extracted thumbnail ${thumbnailCount}/${maxThumbnails} for measurement ${measurement.id}`);
             
             // Clean up thumbnail file
             await removeVisualSearchTemp(thumbnailPath);
@@ -1272,7 +1273,7 @@ except Exception as e:
         }
       }
 
-      console.log(`[VisualSearchService] Returning ${thumbnails.length} thumbnails for condition ${conditionId}`);
+      devLog(`[VisualSearchService] Returning ${thumbnails.length} thumbnails for condition ${conditionId}`);
       return thumbnails;
     } catch (error) {
       console.error('❌ Failed to extract match thumbnails:', error);

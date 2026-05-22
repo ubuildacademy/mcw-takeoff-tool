@@ -7,6 +7,7 @@ import { simpleOcrService, type OCRWordBox, type SimpleOCRResult } from '../serv
 import { pymupdfTextExtractor } from '../services/pymupdfTextExtractor';
 import { bubbleOcrExtractor } from '../services/bubbleOcrExtractor';
 import { requireAuth, hasProjectAccess, isAdmin, validateUUIDParam, isValidUUID } from '../middleware';
+import { devLog, devWarn } from '../lib/devLog';
 
 const router = express.Router();
 
@@ -185,7 +186,7 @@ router.get('/search/:documentId', requireAuth, validateUUIDParam('documentId'), 
       const searchResults = await simpleOcrService.searchOCRResults(projectId, documentId, trimmedQuery);
       
       if (process.env.NODE_ENV !== 'production') {
-        console.log('OCR search: db results', {
+        devLog('OCR search: db results', {
           projectId,
           documentId,
           query: trimmedQuery,
@@ -229,7 +230,7 @@ router.get('/search/:documentId', requireAuth, validateUUIDParam('documentId'), 
       )
       .sort((a, b) => b.totalMatches - a.totalMatches);
 
-    console.log(`📊 Formatted results being sent to frontend:`, formattedResults.map(r => ({ pageNumber: r.pageNumber, totalMatches: r.totalMatches })));
+    devLog(`📊 Formatted results being sent to frontend:`, formattedResults.map(r => ({ pageNumber: r.pageNumber, totalMatches: r.totalMatches })));
 
     res.json({
       query: trimmedQuery,
@@ -301,7 +302,7 @@ router.get('/results/:documentId', requireAuth, validateUUIDParam('documentId'),
     // Only log in development to reduce production log noise
     const isDev = process.env.NODE_ENV !== 'production';
     if (isDev) {
-      console.log(`🔍 Backend: Getting OCR results for document ${documentId} in project ${projectId}`);
+      devLog(`🔍 Backend: Getting OCR results for document ${documentId} in project ${projectId}`);
     }
     
     const results = await simpleOcrService.getDocumentOCRResults(projectId, documentId);
@@ -321,7 +322,7 @@ router.get('/results/:documentId', requireAuth, validateUUIDParam('documentId'),
           textPreview: r.text?.substring(0, 100) + '...'
         }));
       
-      console.log(`📊 Backend: OCR results retrieved:`, {
+      devLog(`📊 Backend: OCR results retrieved:`, {
         documentId,
         projectId,
         resultsCount: safeResults.length,
@@ -357,7 +358,7 @@ router.delete('/results/:documentId', requireAuth, validateUUIDParam('documentId
   }
 
   try {
-    console.log(`🗑️ Clearing OCR results for document: ${documentId}`);
+    devLog(`🗑️ Clearing OCR results for document: ${documentId}`);
     await simpleOcrService.clearDocumentResults(projectId, documentId);
     
     res.json({
@@ -390,7 +391,7 @@ router.post('/client-results/:documentId', requireAuth, validateUUIDParam('docum
   }
 
   try {
-    console.log(`📥 Receiving client-side OCR results for document: ${documentId} (${results.length} pages)`);
+    devLog(`📥 Receiving client-side OCR results for document: ${documentId} (${results.length} pages)`);
 
     const serverResults: SimpleOCRResult[] = results.map((result: Record<string, unknown>) => {
       const pageNumber = typeof result.pageNumber === 'number' ? result.pageNumber : Number(result.pageNumber);
@@ -447,7 +448,7 @@ router.post('/client-results/:documentId', requireAuth, validateUUIDParam('docum
       });
     }
 
-    console.log(`✅ Client-side OCR results saved: ${results.length} pages`);
+    devLog(`✅ Client-side OCR results saved: ${results.length} pages`);
 
     res.json({
       success: true,
@@ -580,7 +581,7 @@ router.post(
       try {
         await fs.remove(tempPath);
       } catch (cleanupErr) {
-        console.warn('pymupdf-extract: failed to remove temp PDF', cleanupErr);
+        devWarn('pymupdf-extract: failed to remove temp PDF', cleanupErr);
       }
     }
   },
@@ -708,7 +709,7 @@ router.post(
         pagesMarked += 1;
       }
 
-      console.log(
+      devLog(
         `🫧 Bubble OCR: ${extraction.totalPages} pages, ${extraction.calloutsFound} callouts on ${pagesWithCallouts} page(s); marked ${pagesMarked} page(s) as bubble-OCR processed`
       );
 
@@ -729,7 +730,7 @@ router.post(
       try {
         await fs.remove(tempPath);
       } catch (cleanupErr) {
-        console.warn('bubble-ocr-extract: failed to remove temp PDF', cleanupErr);
+        devWarn('bubble-ocr-extract: failed to remove temp PDF', cleanupErr);
       }
     }
   },
@@ -738,12 +739,12 @@ router.post(
 // Background OCR processing function using OCR service
 async function processDocumentOCR(documentPath: string, jobId: string, documentId: string, projectId: string) {
   try {
-    console.log(`🚀 Starting OCR processing for document: ${documentId}`);
+    devLog(`🚀 Starting OCR processing for document: ${documentId}`);
     
     // Use the simple OCR service to process the document
     const result = await simpleOcrService.processDocument(documentPath, projectId, documentId, jobId);
     
-    console.log(`✅ OCR processing completed for ${documentId}: ${result.results.length} pages processed`);
+    devLog(`✅ OCR processing completed for ${documentId}: ${result.results.length} pages processed`);
     
   } catch (error) {
     console.error('❌ OCR processing failed:', error);
@@ -770,7 +771,7 @@ async function processDocumentOCR(documentPath: string, jobId: string, documentI
 export async function triggerOCRForDocument(projectId: string, documentId: string): Promise<void> {
   try {
     const jobId = await startOCRJob(projectId, documentId);
-    if (jobId) console.log(`📄 OCR triggered for document ${documentId}`);
+    if (jobId) devLog(`📄 OCR triggered for document ${documentId}`);
   } catch (error) {
     console.error(`OCR trigger failed for ${documentId}:`, error);
   }

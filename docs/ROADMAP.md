@@ -10,7 +10,7 @@ Living list of **larger features**, **quality improvements**, and **outstanding 
 
 | Item | Notes |
 |------|--------|
-| **Batch sheet hyperlinks** | Pipeline in `src/services/batchHyperlink/` + server/visual-search helpers. Recent PyMuPDF/bubble OCR work landed; still needs a **correctness pass** on real project sets (sheet index, occurrence merge, OCR/word-box alignment with viewer rotation, server callout pass). Expand tests once behavior is stable. |
+| **Batch sheet hyperlinks** | Strict/loose mode in Tools UI; sheet sidebar refresh before preflight/run; toast shows example unmatched refs. Still validate on real project sets (OCR/word-box alignment with rotation). |
 
 ---
 
@@ -42,17 +42,10 @@ Living list of **larger features**, **quality improvements**, and **outstanding 
 
 ## Hygiene (quick wins)
 
-Lower effort; tackle in batches.
-
 | Item | Notes |
 |------|--------|
-| **Production log gating** | Use `server/src/lib/devLog.ts` in OCR/storage/health paths; gate client logs with `import.meta.env.DEV`. |
-| **Lint server code** | `.eslintrc.cjs` ignores `server/`; extend lint or add a server config. |
-| **Server validation tests** | Vitest coverage for `server/src/middleware/validation.ts` (pure helpers). |
-| **Backup export concurrency** | Cap parallel file downloads in `server/src/routes/projects.ts` export (avoid OOM on large projects). |
-| **`isAdmin` cache** | Short TTL in-memory cache; dedupe `requireAuth` + `requireAdmin` DB lookups. |
-| **Remove `@types/pdfjs-dist`** | pdfjs 5 ships types; drop stale v2 typings from root `package.json`. |
-| **Lower ESLint `--max-warnings`** | Reduce gradually in `package.json` as warnings are fixed. |
+| **Lower ESLint `--max-warnings`** | Reduce gradually in `package.json` as warnings are fixed (frontend ~36, server ~136). |
+| **More production log gating** | Visual search / PDF conversion / PyMuPDF paths gated; email startup logs still verbose. |
 
 ---
 
@@ -60,8 +53,16 @@ Lower effort; tackle in batches.
 
 | Item | When |
 |------|------|
+| Server ESLint (`lint:server` in CI via `npm run lint`) | 2026-05 |
+| Auto-hyperlink strict/loose mode in Tools UI | 2026-05 |
+| Auto-hyperlink refresh sheet index + unmatched-ref toast hints | 2026-05 |
+| Production log gating (visual search, PDF conversion, PyMuPDF) | 2026-05 |
+| Production log gating (OCR routes, storage deletes, health, backup/OCR client) | 2026-05 |
+| Backup export concurrency cap (3 parallel file downloads) | 2026-05 |
+| `isAdmin` 60s cache + `requireAdmin` reuses `req.user` | 2026-05 |
+| Server validation Vitest tests | 2026-05 |
+| Removed stale `@types/pdfjs-dist` | 2026-05 |
 | Ollama `/models` requires auth | 2026-05 |
 | Removed public `/uploads` static serving | 2026-05 |
 | Contact form single rate-limit; `CONTACT_EMAIL` required in prod | 2026-05 |
 | Server `tsc` build in CI and `ci:local` | 2026-05 |
-| Major refactors (PDF viewer hooks, store slices, toasts, CI, auth middleware) | Pre-2026 backlog |

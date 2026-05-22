@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { supabase, TABLES } from '../supabase';
+import { devLog, devWarn } from '../lib/devLog';
 
 // Extend Express Request type to include user
 declare global {
@@ -21,9 +22,7 @@ export async function getAuthenticatedUser(req: Request) {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    if (process.env.NODE_ENV !== 'production') {
-      console.warn('[Auth] No Bearer token in request to:', req.method, req.path);
-    }
+    devWarn('[Auth] No Bearer token in request to:', req.method, req.path);
     return null;
   }
 
@@ -33,30 +32,31 @@ export async function getAuthenticatedUser(req: Request) {
     const { data: { user }, error } = await supabase.auth.getUser(token);
 
     if (error || !user) {
-      if (process.env.NODE_ENV !== 'production') {
-        const msg = error?.message ?? 'No user';
-        console.warn('[Auth] getUser failed for', req.method, req.path, ':', msg);
-      }
+      devWarn('[Auth] getUser failed for', req.method, req.path, ':', error?.message ?? 'No user');
       return null;
     }
 
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('[Auth] ✓ Authenticated user:', user.id, 'for', req.method, req.path);
-    }
+    devLog('[Auth] ✓ Authenticated user:', user.id, 'for', req.method, req.path);
 
     return user;
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') {
-      console.error('[Auth] Error verifying token for', req.method, req.path, ':', err instanceof Error ? err.message : err);
-    }
+    devWarn('[Auth] Error verifying token for', req.method, req.path, ':', err instanceof Error ? err.message : err);
     return null;
   }
 }
 
 /**
- * Check if a user has admin role
+ * Check if a user has admin role (cached briefly to reduce DB lookups).
  */
+const ADMIN_CACHE_TTL_MS = 60_000;
+const adminRoleCache = new Map<string, { isAdmin: boolean; expiresAt: number }>();
+
 export async function isAdmin(userId: string): Promise<boolean> {
+  const cached = adminRoleCache.get(userId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.isAdmin;
+  }
+
   try {
     const { data, error } = await supabase
       .from('user_metadata')
@@ -65,10 +65,13 @@ export async function isAdmin(userId: string): Promise<boolean> {
       .single();
     
     if (error || !data) {
+      adminRoleCache.set(userId, { isAdmin: false, expiresAt: Date.now() + ADMIN_CACHE_TTL_MS });
       return false;
     }
     
-    return data.role === 'admin';
+    const result = data.role === 'admin';
+    adminRoleCache.set(userId, { isAdmin: result, expiresAt: Date.now() + ADMIN_CACHE_TTL_MS });
+    return result;
   } catch (error) {
     console.error('Error checking admin status:', error);
     return false;
@@ -142,6 +145,11 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
 export function requireAdmin(req: Request, res: Response, next: NextFunction) {
   (async () => {
     try {
+      if (req.user) {
+        if (req.user.role === 'admin') return next();
+        return res.status(403).json({ error: 'Forbidden - admin access required' });
+      }
+
       const user = await getAuthenticatedUser(req);
       
       if (!user) {

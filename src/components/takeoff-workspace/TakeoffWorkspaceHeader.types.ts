@@ -56,6 +56,7 @@ export interface TakeoffWorkspaceHeaderProps {
   onPreflightAutoHyperlink?: (opts: { scope: 'project' | 'current' }) => Promise<BatchHyperlinkPreflightResult>;
   onExecuteAutoHyperlink?: (opts: {
     scope: 'project' | 'current';
+    mode: 'strict' | 'loose';
     ocrByDocumentId: Map<string, DocumentOCRData>;
     runPymupdfFor?: BatchHyperlinkPreflightResult['documentsNeedingPymupdf'];
     runBubbleOcrFor?: BatchHyperlinkPreflightResult['documentsNeedingBubbleOcr'];

@@ -45,8 +45,15 @@ export function formatAutoHyperlinkToast(
   }
 
   if (run.skippedNoTarget > 0) {
+    const refHint =
+      run.topNoTargetRefs.length > 0
+        ? ` Examples: ${run.topNoTargetRefs
+            .slice(0, 5)
+            .map(([ref, , , count]) => `${ref}${count > 1 ? ` (×${count})` : ''}`)
+            .join(', ')}.`
+        : '';
     parts.push(
-      `${run.skippedNoTarget} sheet callout${run.skippedNoTarget === 1 ? '' : 's'} didn’t match any tab in your sidebar (check that the referenced sheets are uploaded and that the title block sheet numbers match the callouts).`
+      `${run.skippedNoTarget} sheet callout${run.skippedNoTarget === 1 ? '' : 's'} didn’t match any tab in your sidebar (check that the referenced sheets are uploaded and that the title block sheet numbers match the callouts).${refHint}`
     );
   }
   if (run.skippedSelfLink > 0) {

@@ -14,6 +14,7 @@
 import { spawn } from 'child_process';
 import * as fs from 'fs-extra';
 import * as path from 'path';
+import { devLog } from '../lib/devLog';
 
 export interface BubbleOcrCallout {
   /** OCR text from the bubble crop (already filtered to match a sheet-ref shape). */
@@ -108,7 +109,7 @@ class BubbleOcrExtractor {
     const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
     const enhancedPath = this.getEnhancedPath();
 
-    console.log(
+    devLog(
       `🫧 Running bubble OCR pass: ${pythonCommand} ${this.pythonScriptPath} ${pdfPath}`
     );
     const start = Date.now();
@@ -147,7 +148,7 @@ class BubbleOcrExtractor {
       parsed.calloutsFound ??
       pages.reduce((sum, p) => sum + (p.bubbles?.length || 0), 0);
     const elapsed = Date.now() - start;
-    console.log(
+    devLog(
       `✅ Bubble OCR found ${calloutsFound} callouts across ${totalPages} pages in ${elapsed}ms`
     );
 
@@ -215,7 +216,7 @@ class BubbleOcrExtractor {
           if (!line) continue;
           // Forward script progress straight to the server log; the user can
           // tail this terminal during an Auto-hyperlink run and see live N/M.
-          console.log(`🫧 ${line}`);
+          devLog(`🫧 ${line}`);
           stderrTail.push(line);
           if (stderrTail.length > STDERR_TAIL_LINES) stderrTail.shift();
         }
@@ -237,7 +238,7 @@ class BubbleOcrExtractor {
         // Flush any trailing stderr line that didn't end in newline.
         const trailing = stderrLineBuf.trim();
         if (trailing) {
-          console.log(`🫧 ${trailing}`);
+          devLog(`🫧 ${trailing}`);
           stderrTail.push(trailing);
           if (stderrTail.length > STDERR_TAIL_LINES) stderrTail.shift();
         }
