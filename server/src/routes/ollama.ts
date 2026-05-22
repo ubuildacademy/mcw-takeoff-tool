@@ -15,7 +15,7 @@ const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY;
 const OLLAMA_CLOUD_API = 'https://ollama.com';
 
 // Models endpoint hits Ollama Cloud (ollama.com/api/tags) only. API response is the source of truth.
-router.get('/models', async (req, res) => {
+router.get('/models', requireAuth, async (req, res) => {
   try {
     if (!OLLAMA_API_KEY) {
       return res.status(400).json({ error: 'Ollama API key not configured' });

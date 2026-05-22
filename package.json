@@ -55,7 +55,8 @@
   },
   "scripts": {
     "prepare": "node scripts/install-git-hooks.mjs",
-    "ci:local": "npm run typecheck && npm run build && npm run lint && npm run test",
+    "ci:local": "npm run typecheck && npm run build && npm run lint && npm run test && npm run build:server",
+    "build:server": "npm run build --prefix server",
     "dev": "vite",
     "dev:fixed": "bash -c 'lsof -ti:3001 | xargs kill -9 2>/dev/null || true' && vite",
     "copy-pdf-worker": "node scripts/copy-pdf-worker.mjs",

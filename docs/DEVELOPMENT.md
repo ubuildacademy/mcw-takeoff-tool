@@ -138,6 +138,6 @@ Open **http://localhost:3001**
 ## Docs
 
 - **README.md** – Overview and quick start
-- **docs/REFACTORING_AND_IMPROVEMENTS.md** – Refactoring log and next steps
+- **docs/ROADMAP.md** – Backlog and planned improvements
 - **docs/TESTING.md** – Tests
 - **docs/SUPABASE_SECURITY_CHECKLIST.md** – Supabase security (migrations, Auth)

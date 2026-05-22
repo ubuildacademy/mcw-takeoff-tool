@@ -250,16 +250,13 @@ app.use('/api/users/invite', strictRateLimit);
 
 // Standard rate limit for validate-invite (public endpoint, 100/min)
 app.use('/api/auth/validate-invite', standardRateLimit);
-// Contact form is public - rate limit to prevent abuse
-app.use('/api/contact', standardRateLimit);
-
 // Standard rate limiting for write operations (POST/PUT/DELETE) on non-auth routes
 app.use('/api', (req, res, next) => {
   // Skip rate limiting for GET requests (read operations)
   if (req.method === 'GET') {
     return next();
   }
-  // Apply standard rate limit to write operations
+  // Apply standard rate limit to write operations (includes public POST /api/contact)
   return standardRateLimit(req, res, next);
 });
 
@@ -279,9 +276,6 @@ app.use('/api/titleblock', titleblockRoutes);
 app.use('/api/calibrations', calibrationRoutes);
 app.use('/api/shared-import', sharedImportRoutes);
 app.use('/api/contact', contactRoutes);
-
-// Serve uploaded files
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // API 404 handler (keeps frontend SPA routing separate)
 app.use('/api', (req, res) => {
@@ -330,6 +324,11 @@ app.use((err: any, req: any, res: any, _next: any) => {
   if (res.headersSent) return;
   res.status(status).json({ error: { code, message, requestId } });
 });
+
+if (isProduction && !process.env.CONTACT_EMAIL?.trim()) {
+  console.error('CONTACT_EMAIL must be set in production (contact form recipient).');
+  process.exit(1);
+}
 
 const server = app.listen(PORT, '0.0.0.0', () => {
   logEmailConfigStatus();

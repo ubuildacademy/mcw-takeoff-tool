@@ -63,7 +63,7 @@ Node.js 18+, Python 3.8+ (for backend scripts), npm, and a Supabase project.
 │   ├── types/         # TypeScript types
 │   └── utils/         # Helpers
 ├── server/            # Express API, Python scripts (PDF/OCR)
-├── docs/              # DEVELOPMENT.md, TESTING.md, REFACTORING_AND_IMPROVEMENTS.md
+├── docs/              # DEVELOPMENT.md, TESTING.md, ROADMAP.md
 └── scripts/           # dev-setup.sh, start-dev.sh
 ```
 
@@ -76,7 +76,7 @@ Node.js 18+, Python 3.8+ (for backend scripts), npm, and a Supabase project.
 
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) – Local setup and troubleshooting
 - [docs/TESTING.md](docs/TESTING.md) – Tests
-- [docs/REFACTORING_AND_IMPROVEMENTS.md](docs/REFACTORING_AND_IMPROVEMENTS.md) – Refactoring log and next steps
+- [docs/ROADMAP.md](docs/ROADMAP.md) – Backlog and planned improvements
 
 ## License
 

@@ -8,7 +8,10 @@ import { emailService } from '../services/emailService';
 const router = Router();
 
 const CONTACT_RECIPIENT =
-  process.env.CONTACT_EMAIL || 'jparido@mcwcompanies.com';
+  process.env.CONTACT_EMAIL?.trim() ||
+  (process.env.NODE_ENV === 'production'
+    ? ''
+    : 'jparido@mcwcompanies.com');
 
 router.post('/', async (req: Request, res: Response) => {
   try {
