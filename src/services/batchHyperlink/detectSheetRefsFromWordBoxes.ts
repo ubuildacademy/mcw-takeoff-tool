@@ -1,10 +1,11 @@
 import { normalizeSheetNumberForMatch } from './buildSheetIndex';
 
-/** Word box compatible with persisted OCR (pdf.js / tesseract). */
+/** Word box compatible with persisted OCR (pdf.js / tesseract / pymupdf / bubble / callout pass). */
 export interface BatchOcrWordBox {
   text: string;
   bbox: { x: number; y: number; width: number; height: number };
   confidence?: number;
+  source?: 'pdfjs' | 'tesseract' | 'pymupdf' | 'bubble_ocr' | 'callout_pass';
 }
 
 const Y_CLUSTER_TOL = 0.018;
@@ -213,18 +214,68 @@ function passesLooseNoiseGate(normalizedRef: string): boolean {
 }
 
 /** Reject rectangles that cover implausibly much of the page (sliding-window junk). */
-function sourceRectLooksLikeCalloutBox(r: { width: number; height: number }): boolean {
+function sourceRectLooksLikeCalloutBox(
+  r: { width: number; height: number },
+  options?: { relaxed?: boolean }
+): boolean {
   const area = r.width * r.height;
   if (area < 1e-7) return false;
-  if (area > 0.085) return false;
+  if (area > (options?.relaxed ? 0.12 : 0.085)) return false;
   const ar = r.width / Math.max(r.height, 1e-9);
   if (ar > 38 || ar < 1 / 38) return false;
   // Wide/tall unions from unrelated words still pass area+AR; cap longest edge (~1/4 page).
   const maxSide = Math.max(r.width, r.height);
-  if (maxSide > 0.22) return false;
+  if (maxSide > (options?.relaxed ? 0.28 : 0.22)) return false;
   const minSide = Math.min(r.width, r.height);
   if (minSide < 0.002) return false;
   return true;
+}
+
+/** Max center-to-center span (page fraction) for words contributing to one match. */
+const MAX_WORD_CENTER_SPAN_LOOSE = 0.11;
+const MAX_WORD_CENTER_SPAN_STRICT = 0.15;
+
+function wordsSpatiallyCoherent(words: BatchOcrWordBox[], indices: number[], strict: boolean): boolean {
+  if (indices.length <= 1) return true;
+  const centers = indices
+    .map((wi) => words[wi])
+    .filter((w): w is BatchOcrWordBox => Boolean(w?.bbox))
+    .map((w) => ({ x: lineCenterX(w), y: lineCenterY(w) }));
+  if (centers.length <= 1) return true;
+  const minX = Math.min(...centers.map((c) => c.x));
+  const maxX = Math.max(...centers.map((c) => c.x));
+  const minY = Math.min(...centers.map((c) => c.y));
+  const maxY = Math.max(...centers.map((c) => c.y));
+  const span = Math.max(maxX - minX, maxY - minY);
+  return span <= (strict ? MAX_WORD_CENTER_SPAN_STRICT : MAX_WORD_CENTER_SPAN_LOOSE);
+}
+
+/** At least one contributing word (or their tight join) must substantiate the sheet ref. */
+function occurrenceSubstantiatedByWords(
+  words: BatchOcrWordBox[],
+  indices: number[],
+  normalizedRef: string
+): boolean {
+  for (const wi of indices) {
+    const t = words[wi]?.text ?? '';
+    const norm = normalizeSheetNumberForMatch(t);
+    if (!norm) continue;
+    if (norm === normalizedRef) return true;
+    if (normalizedRef.includes('.') && norm.includes('.')) {
+      if (norm === normalizedRef || norm.endsWith(normalizedRef) || normalizedRef.endsWith(norm)) {
+        return true;
+      }
+    }
+  }
+  if (indices.length <= 4) {
+    const slice = indices.map((wi) => words[wi]).filter((w): w is BatchOcrWordBox => Boolean(w));
+    const tight = buildTightString(slice);
+    const tightUpper = tight.text.toUpperCase();
+    if (tightUpper.includes(normalizedRef)) return true;
+    const tightNorm = normalizeSheetNumberForMatch(tight.text);
+    if (tightNorm === normalizedRef) return true;
+  }
+  return false;
 }
 
 /**
@@ -251,6 +302,11 @@ function applyPatternsToContiguousSlices(
   }
 }
 
+interface ApplyPatternsOptions {
+  /** Bubble / callout OCR crops — skip callout-box size gate, allow taller ROIs. */
+  trustIsolatedBox?: boolean;
+}
+
 function applyPatterns(
   upperText: string,
   charToWord: number[],
@@ -258,10 +314,13 @@ function applyPatterns(
   strict: boolean,
   cueLineText: string | undefined,
   seen: Set<string>,
-  out: SheetRefOccurrence[]
+  out: SheetRefOccurrence[],
+  options?: ApplyPatternsOptions
 ): void {
   if (strict && cueLineText != null && !STRICT_CUE_RE.test(cueLineText)) return;
   if (!upperText.trim()) return;
+
+  const trustIsolatedBox = options?.trustIsolatedBox === true;
 
   for (const spec of REF_PATTERN_SPECS) {
     const re = new RegExp(spec.re.source, spec.re.flags.includes('g') ? spec.re.flags : `${spec.re.flags}g`);
@@ -278,7 +337,10 @@ function applyPatterns(
       const wordIndices = wordIndicesForRange(charToWord, start, end);
       const sourceRect = unionSourceRect(words, wordIndices);
       if (!sourceRect) continue;
-      if (!strict && !sourceRectLooksLikeCalloutBox(sourceRect)) continue;
+      if (!trustIsolatedBox && !sourceRectLooksLikeCalloutBox(sourceRect)) continue;
+      if (trustIsolatedBox && !sourceRectLooksLikeCalloutBox(sourceRect, { relaxed: true })) continue;
+      if (!trustIsolatedBox && !wordsSpatiallyCoherent(words, wordIndices, strict)) continue;
+      if (!trustIsolatedBox && !occurrenceSubstantiatedByWords(words, wordIndices, normalizedRef)) continue;
 
       const dedupeKey = `${normalizedRef}|${sourceRect.x.toFixed(4)}|${sourceRect.y.toFixed(4)}|${sourceRect.width.toFixed(4)}|${sourceRect.height.toFixed(4)}`;
       if (seen.has(dedupeKey)) continue;
@@ -338,6 +400,38 @@ export function detectSheetRefsFromWordBoxes(
       .filter((t) => t.length > 0)
       .join(' ');
     applyPatternsToContiguousSlices(colY, strict, maxSliceWords, columnCue || undefined, seen, out);
+  }
+
+  return out;
+}
+
+/**
+ * Per-box detection for bubble / callout OCR crops. Skips line/column grouping so
+ * supplemental ROIs link at the crop hotspot instead of drifting to unrelated page text.
+ */
+export function detectSheetRefsFromIsolatedBoxes(
+  wordBoxes: BatchOcrWordBox[],
+  options: { mode: 'strict' | 'loose' }
+): SheetRefOccurrence[] {
+  const out: SheetRefOccurrence[] = [];
+  const seen = new Set<string>();
+  const strict = options.mode === 'strict';
+
+  for (const box of wordBoxes) {
+    const text = (box.text ?? '').trim();
+    if (!text || !box.bbox || typeof box.bbox.x !== 'number') continue;
+    const words = [box];
+    const spaced = buildSpacedLineString(words);
+    applyPatterns(
+      spaced.text.toUpperCase(),
+      spaced.charToWord,
+      words,
+      strict,
+      text,
+      seen,
+      out,
+      { trustIsolatedBox: true }
+    );
   }
 
   return out;

@@ -1,7 +1,7 @@
 import type { PDFDocument } from '../../types';
 import type { SheetHyperlink } from '../../types';
 import { buildSheetIndexFromDocuments, resolveTargetForSource, getTargetsWithNearMiss } from './buildSheetIndex';
-import { detectSheetRefsFromWordBoxes, type BatchOcrWordBox } from './detectSheetRefsFromWordBoxes';
+import { detectSheetRefsFromWordBoxes, detectSheetRefsFromIsolatedBoxes, type BatchOcrWordBox } from './detectSheetRefsFromWordBoxes';
 import { mergeSheetRefOccurrences } from './mergeSheetRefOccurrences';
 import type { DocumentOCRData } from '../serverOcrService';
 import { fetchStoredOcrForDocument } from './fetchStoredOcrForDocument';
@@ -22,6 +22,12 @@ export interface RunBatchHyperlinksOptions {
    * When set, merged after stored-OCR detection (IoU dedupe). Key: `${documentId}\\0${pageNumber}`.
    */
   visualWordBoxesByPageKey?: Map<string, BatchOcrWordBox[]>;
+}
+
+const SUPPLEMENTAL_WORD_SOURCES = new Set(['bubble_ocr', 'callout_pass']);
+
+function isSupplementalWordBox(source: string | undefined): boolean {
+  return source != null && SUPPLEMENTAL_WORD_SOURCES.has(source);
 }
 
 /** Diagnostic sample of a skipped occurrence — `[normalizedRef, sourceDocId, sourcePage, count]`. */
@@ -122,8 +128,9 @@ export async function runBatchHyperlinks(options: RunBatchHyperlinksOptions): Pr
           text: typeof w.text === 'string' ? w.text : '',
           bbox: w.bbox,
           confidence: typeof w.confidence === 'number' ? w.confidence : undefined,
+          source: w.source,
         }))
-        .filter((w) => w.bbox && typeof w.bbox.x === 'number');
+        .filter((w) => w.bbox && typeof w.bbox.x === 'number' && w.text.trim().length > 0);
 
       const pageKey = `${doc.id}\0${pageNum}`;
       const visualExtra = visualWordBoxesByPageKey?.get(pageKey) ?? [];
@@ -132,11 +139,19 @@ export async function runBatchHyperlinks(options: RunBatchHyperlinksOptions): Pr
         result.visualCalloutWordBoxCount += visualExtra.length;
       }
 
-      const refsStored = detectSheetRefsFromWordBoxes(words, { mode });
-      const refsVisual =
-        visualExtra.length > 0 ? detectSheetRefsFromWordBoxes(visualExtra, { mode }) : [];
+      const regularWords = words.filter((w) => !isSupplementalWordBox(w.source));
+      const supplementalWords = [
+        ...words.filter((w) => isSupplementalWordBox(w.source)),
+        ...visualExtra.map((w) => ({ ...w, source: w.source ?? ('callout_pass' as const) })),
+      ];
+
+      const refsStored = detectSheetRefsFromWordBoxes(regularWords, { mode });
+      const refsSupplemental =
+        supplementalWords.length > 0
+          ? detectSheetRefsFromIsolatedBoxes(supplementalWords, { mode })
+          : [];
       // Higher IoU than default: keep bubble hits unless they nearly duplicate stored OCR boxes (same ref, same footprint).
-      const refs = mergeSheetRefOccurrences(refsStored, refsVisual, { iouThreshold: 0.62 });
+      const refs = mergeSheetRefOccurrences(refsStored, refsSupplemental, { iouThreshold: 0.62 });
 
       for (const occ of refs) {
         let candidates = sheetIndex.getTargets(occ.normalizedRef);

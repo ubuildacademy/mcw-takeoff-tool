@@ -205,4 +205,51 @@ describe('runBatchHyperlinks', () => {
     expect(run.createdCount).toBe(1);
     expect(run.created[0]!.targetPageNumber).toBe(2);
   });
+
+  it('uses isolated detection for bubble_ocr word boxes at the crop hotspot', async () => {
+    const documents: PDFDocument[] = [
+      {
+        id: 'd1',
+        name: 'Set',
+        totalPages: 2,
+        isExpanded: false,
+        ocrEnabled: true,
+        pages: [pageMeta('A9.01', 1), pageMeta('A9.31', 2)],
+      },
+    ];
+    const ocr: DocumentOCRData = {
+      documentId: 'd1',
+      projectId: 'p1',
+      totalPages: 2,
+      processedAt: new Date().toISOString(),
+      results: [
+        {
+          pageNumber: 1,
+          text: '',
+          confidence: 1,
+          processingTime: 0,
+          method: 'direct_extraction' as const,
+          wordBoxes: [
+            {
+              index: 0,
+              text: '15 A9.31',
+              confidence: 80,
+              bbox: { x: 0.62, y: 0.41, width: 0.04, height: 0.06 },
+              source: 'bubble_ocr' as const,
+            },
+          ],
+        },
+      ],
+    };
+    const run = await runBatchHyperlinks({
+      projectId: 'p1',
+      documents,
+      mode: 'loose',
+      scope: 'project',
+      ocrByDocumentId: new Map([['d1', ocr]]),
+    });
+    expect(run.createdCount).toBe(1);
+    expect(run.created[0]!.sourceRect.y).toBeCloseTo(0.41, 2);
+    expect(run.created[0]!.targetPageNumber).toBe(2);
+  });
 });

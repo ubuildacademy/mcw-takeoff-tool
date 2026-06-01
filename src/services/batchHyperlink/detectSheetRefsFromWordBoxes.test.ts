@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectSheetRefsFromWordBoxes } from './detectSheetRefsFromWordBoxes';
+import { detectSheetRefsFromWordBoxes, detectSheetRefsFromIsolatedBoxes } from './detectSheetRefsFromWordBoxes';
 
 function w(text: string, x: number, y: number): { text: string; bbox: { x: number; y: number; width: number; height: number } } {
   return {
@@ -86,5 +86,23 @@ describe('detectSheetRefsFromWordBoxes', () => {
     const words = [w('SEE', 0.05, 0.5), w('V786', 0.1, 0.5)];
     const refs = detectSheetRefsFromWordBoxes(words, { mode: 'strict' });
     expect(refs.some((r) => r.normalizedRef === 'V786')).toBe(true);
+  });
+
+  it('loose mode rejects sheet refs forged from horizontally scattered line words', () => {
+    const words = [
+      { text: 'A4', bbox: { x: 0.05, y: 0.5, width: 0.03, height: 0.02 } },
+      { text: 'JUNK', bbox: { x: 0.35, y: 0.5, width: 0.05, height: 0.02 } },
+      { text: '.02', bbox: { x: 0.75, y: 0.5, width: 0.04, height: 0.02 } },
+    ];
+    const refs = detectSheetRefsFromWordBoxes(words, { mode: 'loose' });
+    expect(refs.some((r) => r.normalizedRef === 'A4.02')).toBe(false);
+  });
+
+  it('isolated boxes link at the crop bbox (bubble OCR style)', () => {
+    const words = [{ text: '15 A9.22', bbox: { x: 0.6, y: 0.41, width: 0.04, height: 0.06 } }];
+    const refs = detectSheetRefsFromIsolatedBoxes(words, { mode: 'loose' });
+    expect(refs).toHaveLength(1);
+    expect(refs[0]!.normalizedRef).toBe('A9.22');
+    expect(refs[0]!.sourceRect.x).toBeCloseTo(0.6, 2);
   });
 });

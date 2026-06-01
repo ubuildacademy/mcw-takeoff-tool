@@ -9,6 +9,10 @@ export interface FormatAutoHyperlinkToastExtras {
   bubbleOcrDocsRan?: number;
   /** How many round callout bubbles bubble OCR recovered (sheet-ref filtered). */
   bubbleOcrCalloutsFound?: number;
+  /** Pages where the template callout pass found at least one sheet ref. */
+  calloutPassPagesMatched?: number;
+  /** Word boxes from the template callout pass (split-circle / cloud shapes). */
+  calloutPassWordBoxCount?: number;
 }
 
 /** Short title + optional detail for Sonner. */
@@ -41,6 +45,14 @@ export function formatAutoHyperlinkToast(
   if (bubbleDocs > 0) {
     parts.push(
       `Bubble OCR scanned ${bubbleDocs} PDF${bubbleDocs === 1 ? '' : 's'} and found ${bubbleCallouts} round callout${bubbleCallouts === 1 ? '' : 's'} drawn as vector paths.`
+    );
+  }
+
+  const calloutPages = extras.calloutPassPagesMatched ?? 0;
+  const calloutBoxes = extras.calloutPassWordBoxCount ?? 0;
+  if (calloutPages > 0) {
+    parts.push(
+      `Template scan read ${calloutBoxes} split-circle or cloud callout${calloutBoxes === 1 ? '' : 's'} on ${calloutPages} page${calloutPages === 1 ? '' : 's'}.`
     );
   }
 

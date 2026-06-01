@@ -10,7 +10,7 @@ Living list of **larger features**, **quality improvements**, and **outstanding 
 
 | Item | Notes |
 |------|--------|
-| **Batch sheet hyperlinks** | Strict/loose mode in Tools UI; sheet sidebar refresh before preflight/run; toast shows example unmatched refs. Still validate on real project sets (OCR/word-box alignment with rotation). |
+| **Batch sheet hyperlinks** | Template callout pass wired on re-scan / current-doc scope; tighter spatial validation reduces blank-space false positives; bubble/callout crops use isolated-box linking. Validate on real project sets (OCR/word-box alignment with rotation). |
 
 ---
 

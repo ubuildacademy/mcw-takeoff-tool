@@ -456,7 +456,8 @@ export function ToolsDialog({
                         ? '1 PDF'
                         : `${preflightResult.documentsNeedingBubbleOcr.length} PDFs`}
                       , since they're usually drawn as line art instead of text
-                      (~1–2&nbsp;seconds per page).
+                      (~1–2&nbsp;seconds per page). With re-scan we also template-match split-circle
+                      and cloud callout shapes.
                     </>
                   )}
                 </p>

@@ -21,6 +21,8 @@ import { runBatchHyperlinkPreflight } from '../services/batchHyperlink/batchHype
 import { formatAutoHyperlinkToast } from '../services/batchHyperlink/formatAutoHyperlinkToast';
 import { runPymupdfExtractForDocument } from '../services/batchHyperlink/runPymupdfExtractForDocument';
 import { runBubbleOcrForDocument } from '../services/batchHyperlink/runBubbleOcrForDocument';
+import { buildCalloutPassWordBoxes } from '../services/batchHyperlink/buildCalloutPassWordBoxes';
+import type { BatchOcrWordBox } from '../services/batchHyperlink/detectSheetRefsFromWordBoxes';
 import { fetchStoredOcrForDocument } from '../services/batchHyperlink/fetchStoredOcrForDocument';
 import { triggerCalibration, triggerFitToWindow, getCurrentScrollPosition } from '../lib/windowBridge';
 import { fileService } from '../services/apiService';
@@ -719,6 +721,8 @@ export function TakeoffWorkspace() {
         let pymupdfDocsRan = 0;
         let bubbleOcrDocsRan = 0;
         let bubbleOcrCalloutsFound = 0;
+        let calloutPassPagesMatched = 0;
+        let calloutPassWordBoxCount = 0;
         const touchedDocIds = new Set<string>();
 
         for (const target of pymupdfTargets) {
@@ -762,6 +766,30 @@ export function TakeoffWorkspace() {
           if (refreshed) ocrMap.set(docId, refreshed);
         }
 
+        const shouldRunCalloutPass =
+          opts.scope === 'current' ||
+          pymupdfTargets.length > 0 ||
+          bubbleOcrTargets.length > 0;
+        let visualWordBoxesByPageKey: Map<string, BatchOcrWordBox[]> | undefined;
+        if (shouldRunCalloutPass) {
+          try {
+            const callout = await buildCalloutPassWordBoxes({
+              projectId,
+              documents: freshDocs,
+              scope: opts.scope,
+              currentDocumentId: currentPdfFile?.id ?? null,
+            });
+            visualWordBoxesByPageKey = callout.visualWordBoxesByPageKey;
+            calloutPassPagesMatched = callout.calloutPagesMatched;
+            calloutPassWordBoxCount = callout.calloutWordBoxCount;
+          } catch (err) {
+            console.error('[auto-hyperlink] Callout template pass failed:', err);
+            toast.error(
+              'Scanning split-circle and cloud callouts failed; continuing with text-only matches.',
+            );
+          }
+        }
+
         const run = await runBatchHyperlinks({
           projectId,
           documents: freshDocs,
@@ -769,6 +797,7 @@ export function TakeoffWorkspace() {
           scope: opts.scope,
           currentDocumentId: currentPdfFile?.id ?? null,
           ocrByDocumentId: ocrMap,
+          visualWordBoxesByPageKey,
         });
         applyBatchHyperlinkResults(run.created, projectId, useHyperlinkStore.getState());
         if (import.meta.env.DEV) {
@@ -808,6 +837,8 @@ export function TakeoffWorkspace() {
           pymupdfPagesExtracted,
           bubbleOcrDocsRan,
           bubbleOcrCalloutsFound,
+          calloutPassPagesMatched,
+          calloutPassWordBoxCount,
         });
         toast.success(title, description ? { description } : undefined);
       } catch (e) {
