@@ -1,6 +1,8 @@
 # Meridian Takeoff — User guide (workspace & features)
 
-A concise walkthrough of the app **as implemented today**: where things live, what they do, and how the pieces fit together. For keyboard shortcuts and the Tools/Profile dialogs, see [QUICKSTART_AND_HOTKEYS.md](./QUICKSTART_AND_HOTKEYS.md).
+A concise walkthrough of the app **as implemented today**: where things live, what they do, and how the pieces fit together. For keyboard shortcuts and the Tools/Profile dialogs, see the [Quick start & shortcuts guide](/help/shortcuts).
+
+**In the app:** click the **?** icon in the workspace toolbar (or press **?** on your keyboard) for common questions without leaving your project.
 
 ---
 
@@ -198,6 +200,7 @@ A **project-scoped chat** that uses a **local or hosted LLM** via **Ollama** (co
 | **View** (smaller screens) or inline zoom | Zoom %, **Reset view**, **Rotate** CW/CCW. |
 | **Calibrate Scale** / **Recalibrate** | Set real-world scale from a known dimension (dialog + two clicks on the PDF). |
 | **Annotate** | Non-takeoff markup: text, arrow, rectangle, circle, color, **clear annotations**. |
+| **Help** (?) | **Common questions**, links to these guides, and context tips. Press **?** on the keyboard to toggle. |
 | **Tools** (wrench) | **Preferences** (crosshair, labels, magnifier, ortho default, hyperlinks). |
 | **Ortho** badge | Visible when ortho snapping is on while measuring or calibrating. |
 | **Green dot** | “All changes saved” indicator. |
@@ -214,6 +217,9 @@ A **project-scoped chat** that uses a **local or hosted LLM** via **Ollama** (co
 
 ## 8. Related documentation
 
-- **[QUICKSTART_AND_HOTKEYS.md](./QUICKSTART_AND_HOTKEYS.md)** — Shortcuts, Space/Escape, Profile, Tools dialog.
+- **[Quick start & shortcuts](/help/shortcuts)** — Shortcuts, Space/Escape, Profile, Tools dialog.
+- **[Help home](/help)** — Search all guides and FAQs; print or download PDF copies.
+
+Administrators can edit the in-app **FAQ** (questions in the **?** help menu) from **Admin → Help & FAQ** without redeploying the app. Full guides are updated in this documentation folder when features change.
 
 *This guide is meant to match the current Meridian Takeoff UI. If your deployment hides or changes features (e.g. Ollama endpoints), some labels or availability may differ.*

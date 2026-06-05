@@ -1,0 +1,45 @@
+/* Help guide print / save-as-PDF styles */
+@media print {
+  body.help-guide-printing * {
+    visibility: hidden;
+  }
+
+  body.help-guide-printing #help-guide-print-root,
+  body.help-guide-printing #help-guide-print-root * {
+    visibility: visible;
+  }
+
+  body.help-guide-printing #help-guide-print-root {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 0.5in;
+    background: white;
+    color: black;
+  }
+
+  body.help-guide-printing .help-no-print,
+  body.help-guide-printing .help-guide-header {
+    display: none !important;
+  }
+
+  #help-guide-print-root a {
+    color: inherit;
+    text-decoration: underline;
+  }
+
+  #help-guide-print-root pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+    border: 1px solid #ccc;
+  }
+
+  #help-guide-print-root table {
+    page-break-inside: avoid;
+  }
+
+  #help-guide-print-root h2 {
+    page-break-after: avoid;
+  }
+}

@@ -226,7 +226,7 @@ const ContactPage: React.FC = () => {
             <div>
               <h4 className="font-semibold mb-4">Support</h4>
               <ul className="space-y-2 text-slate-400">
-                <li><Link to="/contact" className="hover:text-white">Help Center</Link></li>
+                <li><Link to="/help" className="hover:text-white">Help Center</Link></li>
                 <li><Link to="/contact" className="hover:text-white">Contact Us</Link></li>
               </ul>
             </div>

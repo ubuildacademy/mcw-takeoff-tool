@@ -976,6 +976,7 @@ export function TakeoffWorkspace() {
         isOrthoSnapping={isOrthoSnapping}
         isMeasuring={isMeasuring}
         isCalibrating={isCalibrating}
+        hasSelectedCondition={Boolean(selectedCondition)}
         measurementType={measurementType}
         canUndo={canUndo}
         canRedo={canRedo}

@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
+import { HelpTopicTrigger } from './help/HelpTopicTrigger';
 
 interface CalibrationDialogProps {
   isOpen: boolean;
@@ -50,8 +51,9 @@ const CalibrationDialog: React.FC<CalibrationDialogProps> = ({
         <DialogDescription id="calibration-dialog-description" className="sr-only">
           Enter a known distance on the drawing to calibrate the scale.
         </DialogDescription>
-        <DialogHeader>
+        <DialogHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
           <DialogTitle>Calibrate Scale</DialogTitle>
+          <HelpTopicTrigger topicId="calibrate" />
         </DialogHeader>
         
         <div className="space-y-4">

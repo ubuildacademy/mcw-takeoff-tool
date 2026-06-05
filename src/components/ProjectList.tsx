@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, lazy, Suspense } from 'react';
+import { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -24,6 +24,8 @@ import { ProjectSettingsDialog } from './ProjectSettingsDialog';
 import { BackupDialog } from './BackupDialog';
 import { ShareProjectModal } from './ShareProjectModal';
 import UserProfile from './UserProfile';
+import { HelpMenu } from './help/HelpMenu';
+import { HelpWelcomeBanner } from './help/HelpWelcomeBanner';
 import { useProjectStore } from '../store/slices/projectSlice';
 import { useMeasurementStore } from '../store/slices/measurementSlice';
 import { authHelpers } from '../lib/supabase';
@@ -225,6 +227,7 @@ export function ProjectList() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
   const [loading, setLoading] = useState<boolean>(true);
+  const hasCompletedInitialLoadRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -260,7 +263,9 @@ export function ProjectList() {
   useEffect(() => {
     let mounted = true;
     async function load() {
-      setLoading(true);
+      if (!hasCompletedInitialLoadRef.current) {
+        setLoading(true);
+      }
       setError(null);
       try {
         // Wait for authentication to complete before loading projects
@@ -290,7 +295,10 @@ export function ProjectList() {
         console.error('Error loading projects:', e);
         setError(e instanceof Error ? e.message : 'Could not load projects');
       } finally {
-        if (mounted) setLoading(false);
+        if (mounted) {
+          hasCompletedInitialLoadRef.current = true;
+          setLoading(false);
+        }
       }
     }
     load();
@@ -367,7 +375,7 @@ export function ProjectList() {
     }
   };
 
-  if (loading) {
+  if (loading && !hasCompletedInitialLoadRef.current) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
@@ -394,6 +402,7 @@ export function ProjectList() {
               <h1 className="text-3xl font-bold text-foreground tracking-tight">Meridian Takeoff</h1>
             </div>
             <div className="flex items-center gap-3">
+              <HelpMenu surface="dashboard" variant="outline" />
               <Button variant="outline" size="lg" onClick={() => setShowUserProfile(true)}>
                 <User className="w-5 h-5 mr-2" />
                 Profile
@@ -414,6 +423,8 @@ export function ProjectList() {
               </Button>
             </div>
           </div>
+
+          <HelpWelcomeBanner />
 
           {/* Search and Filters */}
           <div className="flex items-center gap-4">

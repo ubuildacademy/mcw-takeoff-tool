@@ -5,6 +5,7 @@
  */
 
 import type { Project, TakeoffCondition, Annotation } from '../types';
+import { devLog } from '../lib/devLog';
 import { useProjectStore } from './slices/projectSlice';
 import { useConditionStore } from './slices/conditionSlice';
 import { useAnnotationStore } from './slices/annotationSlice';
@@ -55,7 +56,7 @@ export function runStoreMigration(): void {
     }
 
     localStorage.removeItem(LEGACY_STORAGE_KEY);
-    console.log('[store] Migrated persisted data from takeoff-store to slice stores.');
+    devLog('[store] Migrated persisted data from takeoff-store to slice stores.');
   } catch (e) {
     console.warn('[store] Migration from takeoff-store failed:', e);
   }

@@ -1,4 +1,11 @@
 import React from 'react';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '../ui/dialog';
 
 export interface ExportProgressOverlayProps {
   /** When type is null, overlay is not rendered */
@@ -13,31 +20,54 @@ export interface ExportProgressOverlayProps {
  * Renders nothing when exportStatus.type is null.
  */
 export function ExportProgressOverlay({ exportStatus }: ExportProgressOverlayProps): React.ReactNode {
-  if (!exportStatus.type) {
+  const exportType = exportStatus.type;
+  if (!exportType) {
     return null;
   }
 
+  const title = `Exporting ${exportType.toUpperCase()} Report`;
+  const progressLabel = `${exportStatus.progress}% complete`;
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" role="presentation">
-      <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl" role="dialog" aria-modal="true" aria-labelledby="dialog-export-progress-title" aria-busy="true">
-        <div className="flex items-center gap-4 mb-4">
-          <div className="animate-spin w-8 h-8 border-3 border-blue-500 border-t-transparent rounded-full" aria-hidden="true" />
-          <div>
-            <h3 id="dialog-export-progress-title" className="text-lg font-semibold text-gray-900">
-              Exporting {exportStatus.type.toUpperCase()} Report
-            </h3>
-            <p className="text-sm text-gray-600">
-              Please wait while we process your data...
-            </p>
+    <Dialog open onOpenChange={() => { /* non-dismissible while exporting */ }}>
+      <DialogContent
+        showCloseButton={false}
+        className="sm:max-w-md"
+        aria-busy="true"
+        onEscapeKeyDown={(e) => e.preventDefault()}
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
+      >
+        <DialogHeader>
+          <div className="flex items-center gap-4">
+            <div
+              className="animate-spin w-8 h-8 border-[3px] border-blue-500 border-t-transparent rounded-full shrink-0"
+              aria-hidden="true"
+            />
+            <div>
+              <DialogTitle>{title}</DialogTitle>
+              <DialogDescription>
+                Please wait while we process your data.
+              </DialogDescription>
+            </div>
           </div>
-        </div>
+        </DialogHeader>
 
         <div className="space-y-2">
-          <div className="flex justify-between text-sm text-gray-600">
+          <div className="flex justify-between text-sm text-muted-foreground">
             <span>Progress</span>
-            <span>{exportStatus.progress}%</span>
+            <span aria-live="polite" aria-atomic="true">
+              {progressLabel}
+            </span>
           </div>
-          <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden">
+          <div
+            className="w-full h-3 bg-muted rounded-full overflow-hidden"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={exportStatus.progress}
+            aria-label="Export progress"
+          >
             <div
               className="h-full bg-blue-500 transition-all duration-500 ease-out rounded-full"
               style={{ width: `${exportStatus.progress}%` }}
@@ -45,11 +75,11 @@ export function ExportProgressOverlay({ exportStatus }: ExportProgressOverlayPro
           </div>
         </div>
 
-        {exportStatus.type === 'pdf' && (
-          <div className="mt-4 text-xs text-gray-500">
+        {exportType === 'pdf' && (
+          <div className="text-xs text-muted-foreground">
             {exportStatus.progress > 20 ? (
               <>
-                <p>📄 Capturing PDF pages with measurements...</p>
+                <p>Capturing PDF pages with measurements…</p>
                 <p>This may take a moment for large projects.</p>
               </>
             ) : (
@@ -60,7 +90,7 @@ export function ExportProgressOverlay({ exportStatus }: ExportProgressOverlayPro
             )}
           </div>
         )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

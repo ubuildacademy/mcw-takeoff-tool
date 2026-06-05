@@ -1246,14 +1246,3 @@ export function renderSVGCurrentMeasurementEphemeral(
       break;
   }
 }
-
-/** @deprecated Prefer committed + ephemeral split. Single-layer fallback (tests / legacy). */
-export function renderSVGCurrentMeasurement(
-  svg: SVGSVGElement,
-  viewport: PageViewport,
-  options: RenderSVGCurrentMeasurementOptions
-): void {
-  const parent = svg as unknown as SVGGElement;
-  renderSVGCurrentMeasurementCommitted(parent, viewport, options);
-  renderSVGCurrentMeasurementEphemeral(parent, viewport, options);
-}

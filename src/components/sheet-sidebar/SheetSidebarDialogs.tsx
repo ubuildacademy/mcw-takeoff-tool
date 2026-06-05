@@ -1,6 +1,8 @@
 import React from 'react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
+import { Label } from '../ui/label';
+import { BaseDialog } from '../ui/base-dialog';
 import type { SheetSidebarDialogsProps } from './SheetSidebarDialogs.types';
 
 /**
@@ -15,43 +17,46 @@ export function SheetSidebarDialogs({
   onRenameSave,
   isRenameSaveDisabled,
 }: SheetSidebarDialogsProps): React.ReactElement {
+  const open = showRenameDialog && renamingPage != null;
+
   return (
-    <>
-      {showRenameDialog && renamingPage && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" role="presentation" onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); onRenameCancel(); } }}>
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4" role="dialog" aria-modal="true" aria-labelledby="dialog-rename-page-title">
-            <h3 id="dialog-rename-page-title" className="text-lg font-semibold mb-4">Rename Page</h3>
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="sheet-page-rename" className="text-sm font-medium text-gray-700 mb-2 block">Page Name</label>
-                <Input
-                  id="sheet-page-rename"
-                  name="sheet-page-rename"
-                  value={renameInput}
-                  onChange={(e) => onRenameInputChange(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      onRenameSave();
-                    } else if (e.key === 'Escape') {
-                      onRenameCancel();
-                    }
-                  }}
-                  autoFocus
-                  placeholder="Enter page name"
-                />
-              </div>
-              <div className="flex gap-2 justify-end">
-                <Button variant="outline" onClick={onRenameCancel}>
-                  Cancel
-                </Button>
-                <Button onClick={onRenameSave} disabled={isRenameSaveDisabled}>
-                  Save
-                </Button>
-              </div>
-            </div>
-          </div>
+    <BaseDialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onRenameCancel();
+      }}
+      title="Rename Page"
+      description="Change the display name for this sheet page."
+      maxWidth="sm"
+      footer={
+        <div className="flex gap-2 justify-end w-full">
+          <Button variant="outline" onClick={onRenameCancel}>
+            Cancel
+          </Button>
+          <Button onClick={onRenameSave} disabled={isRenameSaveDisabled}>
+            Save
+          </Button>
         </div>
-      )}
-    </>
+      }
+    >
+      <div>
+        <Label htmlFor="sheet-page-rename" className="mb-2 block">
+          Page Name
+        </Label>
+        <Input
+          id="sheet-page-rename"
+          name="sheet-page-rename"
+          value={renameInput}
+          onChange={(e) => onRenameInputChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !isRenameSaveDisabled) {
+              onRenameSave();
+            }
+          }}
+          autoFocus
+          placeholder="Enter page name"
+        />
+      </div>
+    </BaseDialog>
   );
 }

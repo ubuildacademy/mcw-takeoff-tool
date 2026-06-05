@@ -7,6 +7,7 @@ import {
   RefreshCw,
   Settings,
   Brain,
+  BookOpen,
   CheckCircle,
   Users,
   UserPlus,
@@ -18,6 +19,7 @@ import { ollamaService, type OllamaModel } from '../services/ollamaService';
 import { authHelpers, supabase, UserMetadata, UserInvitation } from '../lib/supabase';
 import { settingsService } from '../services/apiService';
 import { extractErrorMessage } from '../utils/commonUtils';
+import { AdminHelpFaqTab } from './help/AdminHelpFaqTab';
 
 // Fallback when /api/ollama/models fails (https://ollama.com/search?c=cloud)
 const FALLBACK_OLLAMA_MODELS: OllamaModel[] = [
@@ -34,7 +36,9 @@ interface AdminPanelProps {
 }
 
 export function AdminPanel({ isOpen, onClose, projectId: _projectId }: AdminPanelProps) {
-  const [activeTab, setActiveTab] = useState<'ai-prompt' | 'ai-settings' | 'user-management'>('user-management');
+  const [activeTab, setActiveTab] = useState<
+    'ai-prompt' | 'ai-settings' | 'user-management' | 'help-faq'
+  >('user-management');
   const [isLoading, setIsLoading] = useState(false);
   const [availableModels, setAvailableModels] = useState<OllamaModel[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>('gpt-oss:120b');
@@ -463,8 +467,9 @@ When answering questions:
 
   const tabs = [
     { id: 'user-management', label: 'User Management', icon: Users },
+    { id: 'help-faq', label: 'Help & FAQ', icon: BookOpen },
     { id: 'ai-prompt', label: 'AI Prompt Editor', icon: Brain },
-    { id: 'ai-settings', label: 'AI Settings', icon: Brain }
+    { id: 'ai-settings', label: 'AI Settings', icon: Brain },
   ];
 
   if (!isOpen) return null;
@@ -514,6 +519,8 @@ When answering questions:
 
             {/* Main Content */}
             <div className="flex-1 overflow-y-auto">
+              {activeTab === 'help-faq' && <AdminHelpFaqTab />}
+
               {activeTab === 'ai-prompt' && (
                 <div className="p-6">
                   <div className="mb-6">

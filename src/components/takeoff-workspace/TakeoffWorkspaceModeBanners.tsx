@@ -1,5 +1,6 @@
 import React from 'react';
 import type { TakeoffCondition } from '../../types';
+import { HelpTopicTrigger } from '../help/HelpTopicTrigger';
 import type { TitleblockField } from './useTakeoffWorkspaceTitleblock';
 
 export interface TakeoffWorkspaceModeBannersProps {
@@ -36,8 +37,9 @@ export function TakeoffWorkspaceModeBanners({
               Auto Count Mode: {visualSearchCondition?.name ?? 'Condition'}
             </span>
           </div>
-          <div className="text-xs text-indigo-700">
-            Draw a box around a symbol to automatically find and count similar items
+          <div className="flex items-center gap-2 text-xs text-indigo-700">
+            <span>Draw a box around a symbol to automatically find and count similar items</span>
+            <HelpTopicTrigger topicId="auto-count" tone="on-banner" />
           </div>
         </div>
       )}
@@ -50,8 +52,9 @@ export function TakeoffWorkspaceModeBanners({
               {titleblockSelectionMode === 'sheetNumber' ? 'sheet number' : 'sheet name'} field
             </span>
           </div>
-          <div className="text-xs text-blue-800">
-            This configuration will be used to extract sheet titles and numbers automatically.
+          <div className="flex items-center gap-2 text-xs text-blue-800">
+            <span>This configuration will be used to extract sheet titles and numbers automatically.</span>
+            <HelpTopicTrigger topicId="titleblock" tone="on-banner" />
           </div>
         </div>
       )}

@@ -30,13 +30,17 @@ export function BaseDialog({
   children,
   footer,
   maxWidth = 'lg',
-  showCloseButton: _showCloseButton = true,
+  showCloseButton = true,
   className = ''
 }: BaseDialogProps) {
   const descriptionId = 'base-dialog-description';
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={`${maxWidthClasses[maxWidth]} max-h-[90vh] overflow-y-auto ${className}`} aria-describedby={descriptionId}>
+      <DialogContent
+        showCloseButton={showCloseButton}
+        className={`${maxWidthClasses[maxWidth]} max-h-[90vh] overflow-y-auto ${className}`}
+        aria-describedby={descriptionId}
+      >
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription id={descriptionId} className={description ? '' : 'sr-only'}>

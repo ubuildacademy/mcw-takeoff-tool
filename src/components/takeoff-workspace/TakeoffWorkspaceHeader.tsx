@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Button } from '../ui/button';
 import { Separator } from '../ui/separator';
 import {
@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import type { TakeoffWorkspaceHeaderProps } from './TakeoffWorkspaceHeader.types';
 import { ToolsDialog } from '../ToolsDialog';
+import { HelpMenu } from '../help/HelpMenu';
 import { PDF_VIEWER_MIN_SCALE, PDF_VIEWER_MAX_SCALE } from '../pdf-viewer/usePDFViewerInteractions';
 
 const ZOOM_STEP = 0.1;
@@ -57,6 +58,7 @@ export function TakeoffWorkspaceHeader({
   isOrthoSnapping,
   isMeasuring,
   isCalibrating,
+  hasSelectedCondition = false,
   measurementType: _measurementType,
   canUndo,
   canRedo,
@@ -71,6 +73,16 @@ export function TakeoffWorkspaceHeader({
   currentDocumentId,
 }: TakeoffWorkspaceHeaderProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const helpWorkspaceState = useMemo(
+    () => ({
+      hasOpenPdf: Boolean(currentPdfFile),
+      isCalibrating,
+      isMeasuring,
+      hasSelectedCondition,
+    }),
+    [currentPdfFile, isCalibrating, isMeasuring, hasSelectedCondition]
+  );
 
   const handleZoomOut = () =>
     onScaleChange(Math.max(PDF_VIEWER_MIN_SCALE, scale - ZOOM_STEP));
@@ -296,8 +308,9 @@ export function TakeoffWorkspaceHeader({
         </DropdownMenu>
       </div>
 
-      {/* Right - Settings, Ortho badge, Saved status */}
+      {/* Right - Help, Settings, Ortho badge, Saved status */}
       <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+        <HelpMenu surface="workspace" workspaceState={helpWorkspaceState} />
         <Button
           variant="ghost"
           size="icon"

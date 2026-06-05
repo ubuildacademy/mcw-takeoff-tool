@@ -5,6 +5,7 @@ import AuthGuard from './components/AuthGuard';
 import ErrorBoundary from './components/ErrorBoundary';
 import { useProjectStore } from './store/slices/projectSlice';
 import { runStoreMigration } from './store/migrateStores';
+import { HelpFaqProvider } from './context/HelpFaqProvider';
 
 // Route-level code splitting: heavy app routes load on demand
 const ProjectList = lazy(() => import('./components/ProjectList').then(m => ({ default: m.ProjectList })));
@@ -20,6 +21,12 @@ const ResetPasswordPage = lazy(() => import('./components/ResetPasswordPage'));
 const ForgotPasswordPage = lazy(() => import('./components/ForgotPasswordPage'));
 const SharedProjectImportPage = lazy(() => import('./components/SharedProjectImportPage').then(m => ({ default: m.SharedProjectImportPage })));
 const SharedProjectSignupPage = lazy(() => import('./components/SharedProjectSignupPage').then(m => ({ default: m.SharedProjectSignupPage })));
+const HelpGuidePage = lazy(() =>
+  import('./components/help/HelpGuidePage').then((m) => ({ default: m.HelpGuidePage }))
+);
+const HelpIndexPage = lazy(() =>
+  import('./components/help/HelpIndexPage').then((m) => ({ default: m.HelpIndexPage }))
+);
 
 // Component to handle redirect from old /job/ routes to new /project/ routes
 function JobRedirect() {
@@ -83,6 +90,7 @@ function App() {
         v7_relativeSplatPath: true
       }}
     >
+      <HelpFaqProvider>
       <Suspense fallback={
         <div className="min-h-screen flex items-center justify-center bg-background text-muted-foreground animate-pulse">Loading…</div>
       }>
@@ -91,6 +99,8 @@ function App() {
           <Route path="/features" element={<FeaturesPage />} />
           <Route path="/pricing" element={<PricingPage />} />
           <Route path="/contact" element={<ContactPage />} />
+          <Route path="/help" element={<HelpIndexPage />} />
+          <Route path="/help/:slug" element={<HelpGuidePage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/shared/import/:token" element={<SharedProjectImportPage />} />
@@ -124,6 +134,7 @@ function App() {
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </Suspense>
+      </HelpFaqProvider>
     </Router>
     </>
   );

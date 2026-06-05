@@ -26,6 +26,7 @@ import calibrationRoutes from './routes/calibrations';
 import authRoutes from './routes/auth';
 import sharedImportRoutes from './routes/sharedImport';
 import contactRoutes from './routes/contact';
+import helpRoutes from './routes/help';
 import { logEmailConfigStatus } from './services/emailService';
 import { devLog } from './lib/devLog';
 import { cleanupExpiredReportDeliveries, cleanupExpiredProjectShares } from './services/reportDeliveryCleanup';
@@ -75,7 +76,7 @@ app.use((req, res, next) => {
   const ok = isOriginAllowed(origin);
 
   if (!isProduction) {
-    console.log('OPTIONS preflight:', req.path, 'Origin:', origin || 'none', 'Allowed:', ok);
+    devLog('OPTIONS preflight:', req.path, 'Origin:', origin || 'none', 'Allowed:', ok);
   }
 
   if (!ok) {
@@ -214,7 +215,7 @@ if (!isProduction) {
     const headers = { ...req.headers } as Record<string, unknown>;
     if (headers.authorization) headers.authorization = '[REDACTED]';
     if (headers.cookie) headers.cookie = '[REDACTED]';
-    console.log('🔍 Debug endpoint hit:', req.method, req.path, headers);
+    devLog('🔍 Debug endpoint hit:', req.method, req.path, headers);
     res.json({
       method: req.method,
       path: req.path,
@@ -277,6 +278,7 @@ app.use('/api/titleblock', titleblockRoutes);
 app.use('/api/calibrations', calibrationRoutes);
 app.use('/api/shared-import', sharedImportRoutes);
 app.use('/api/contact', contactRoutes);
+app.use('/api/help', helpRoutes);
 
 // API 404 handler (keeps frontend SPA routing separate)
 app.use('/api', (req, res) => {
@@ -333,10 +335,10 @@ if (isProduction && !process.env.CONTACT_EMAIL?.trim()) {
 
 const server = app.listen(PORT, '0.0.0.0', () => {
   logEmailConfigStatus();
-  console.log(`🚀 Takeoff API server running on port ${PORT}`);
-  console.log(`🌐 Server accessible at http://0.0.0.0:${PORT}`);
-  console.log(`📝 NODE_ENV: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`📝 Allowed origins configured: ${isProduction ? 'Production mode' : 'Development mode (all allowed)'}`);
+  devLog(`🚀 Takeoff API server running on port ${PORT}`);
+  devLog(`🌐 Server accessible at http://0.0.0.0:${PORT}`);
+  devLog(`📝 NODE_ENV: ${process.env.NODE_ENV || 'development'}`);
+  devLog(`📝 Allowed origins configured: ${isProduction ? 'Production mode' : 'Development mode (all allowed)'}`);
 });
 
 // Large enough for callout-hyperlink-pass (chunked client + heavy Python per page).

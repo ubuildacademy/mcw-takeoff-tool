@@ -346,7 +346,7 @@ const PricingPage: React.FC = () => {
             <div>
               <h4 className="font-semibold mb-4">Support</h4>
               <ul className="space-y-2 text-slate-400">
-                <li><a href="#" className="hover:text-white">Help Center</a></li>
+                <li><a href="/help" className="hover:text-white">Help Center</a></li>
                 <li><a href="#" className="hover:text-white">Contact Us</a></li>
                 <li><a href="#" className="hover:text-white">Training</a></li>
               </ul>

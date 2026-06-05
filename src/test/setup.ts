@@ -4,6 +4,16 @@ import '@testing-library/jest-dom/vitest';
 // import `src/lib/supabase.ts` don't throw during evaluation.
 import { vi } from 'vitest';
 
+vi.mock('../services/helpService', () => ({
+  fetchHelpFaq: vi.fn(async () => ({ customized: false, faq: null })),
+  clearHelpFaqCache: vi.fn(),
+  helpService: {
+    fetchHelpFaq: vi.fn(async () => ({ customized: false, faq: null })),
+    saveHelpFaq: vi.fn(),
+    resetHelpFaq: vi.fn(),
+  },
+}));
+
 vi.mock('../lib/supabase', () => {
   const auth = {
     getUser: vi.fn(async () => ({ data: { user: null }, error: null })),

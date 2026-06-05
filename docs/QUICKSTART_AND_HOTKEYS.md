@@ -2,6 +2,8 @@
 
 Use this sheet to get productive quickly. Shortcuts that use **Cmd** apply on macOS; use **Ctrl** on Windows and Linux the same way.
 
+**In the app:** open **Help** from the project dashboard or press **?** in the takeoff workspace for a quick FAQ and links to these guides.
+
 ---
 
 ## Get started in a few steps
@@ -20,7 +22,7 @@ After calibration, measurements use your scale. If you rotate a page after calib
 - **Left:** **Takeoff** — **Conditions**, **Reports**, and **Costs** (create/select line items, quantities, pricing).
 - **Right (optional panel, open with the edge chevron):** **Documents**, **Search** (OCR full-text), and **AI Chat**.
 
-For a full walkthrough of every panel and tab, see **[WORKSPACE_GUIDE.md](./WORKSPACE_GUIDE.md)**.
+For a full walkthrough of every panel and tab, see the **[Workspace guide](/help/workspace)**.
 
 ---
 

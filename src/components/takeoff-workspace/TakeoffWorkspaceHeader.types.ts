@@ -46,6 +46,8 @@ export interface TakeoffWorkspaceHeaderProps {
   isOrthoSnapping: boolean;
   isMeasuring: boolean;
   isCalibrating: boolean;
+  /** Whether a takeoff condition is selected (for contextual help tips). */
+  hasSelectedCondition?: boolean;
   measurementType: string;
   canUndo: boolean;
   canRedo: boolean;

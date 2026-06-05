@@ -117,6 +117,10 @@ export default defineConfig(({ mode }) => ({
     port: 3001,
     strictPort: true,
     open: true,
+    watch: {
+      // Markdown guides are bundled via ?raw; ignoring docs avoids iCloud/sync churn reloading the app.
+      ignored: ['**/docs/**'],
+    },
     proxy: {
       '/api': {
         target: 'http://localhost:4000',
