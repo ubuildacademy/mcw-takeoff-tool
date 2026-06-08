@@ -218,7 +218,7 @@ A **project-scoped chat** that uses a **local or hosted LLM** via **Ollama** (co
 ## 8. Related documentation
 
 - **[Quick start & shortcuts](/help/shortcuts)** — Shortcuts, Space/Escape, Profile, Tools dialog.
-- **[Help home](/help)** — Search all guides and FAQs; print or download PDF copies.
+- **[Help home](/help)** — Search all guides and FAQs; print or save guides as PDF.
 
 Administrators can edit the in-app **FAQ** (questions in the **?** help menu) from **Admin → Help & FAQ** without redeploying the app. Full guides are updated in this documentation folder when features change.
 

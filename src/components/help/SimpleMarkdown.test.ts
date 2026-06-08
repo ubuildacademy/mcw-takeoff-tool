@@ -1,7 +1,22 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 import { parseMarkdownBlocks } from './SimpleMarkdown';
 
 describe('parseMarkdownBlocks', () => {
+  it('parses h4 headings without stalling', () => {
+    const md = '### Section\n\n#### Titleblock extraction\n\nBody text.';
+    const blocks = parseMarkdownBlocks(md);
+    expect(blocks.some((block) => block.type === 'h4' && block.text === 'Titleblock extraction')).toBe(true);
+  });
+
+  it('parses the full workspace guide', () => {
+    const md = readFileSync(join(process.cwd(), 'docs/WORKSPACE_GUIDE.md'), 'utf8');
+    const blocks = parseMarkdownBlocks(md);
+    expect(blocks.length).toBeGreaterThan(20);
+    expect(blocks.some((block) => block.type === 'h4' && block.text === 'Titleblock extraction')).toBe(true);
+  });
+
   it('parses markdown tables', () => {
     const md = `| Action | Shortcut |
 |--------|----------|

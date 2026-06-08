@@ -5,7 +5,7 @@ import { slugifyHeading } from './slugify';
 import { HELP_STICKY_TOP_CLASS } from './helpConstants';
 
 export type MarkdownBlock =
-  | { type: 'h1' | 'h2' | 'h3'; text: string }
+  | { type: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'; text: string }
   | { type: 'p'; text: string }
   | { type: 'ul'; items: string[] }
   | { type: 'ol'; items: string[] }
@@ -62,11 +62,11 @@ export function parseMarkdownBlocks(markdown: string): Block[] {
       continue;
     }
 
-    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    const heading = line.match(/^(#{1,6})\s+(.+)$/);
     if (heading) {
-      const level = heading[1].length;
-      const type = level === 1 ? 'h1' : level === 2 ? 'h2' : 'h3';
-      blocks.push({ type, text: heading[2].trim() });
+      const level = heading[1].length as 1 | 2 | 3 | 4 | 5 | 6;
+      const types = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as const;
+      blocks.push({ type: types[level - 1], text: heading[2].trim() });
       i += 1;
       continue;
     }
@@ -125,7 +125,12 @@ export function parseMarkdownBlocks(markdown: string): Block[] {
       paraLines.push(lines[i]);
       i += 1;
     }
-    blocks.push({ type: 'p', text: paraLines.join(' ').trim() });
+    if (paraLines.length > 0) {
+      blocks.push({ type: 'p', text: paraLines.join(' ').trim() });
+    } else {
+      // Unrecognized line (e.g. malformed heading) — skip to avoid stalling the parser.
+      i += 1;
+    }
   }
 
   return blocks;
@@ -242,6 +247,34 @@ export function SimpleMarkdown({
               >
                 {renderInline(block.text)}
               </h3>
+            );
+          }
+          case 'h4': {
+            const id = slugifyHeading(block.text);
+            return (
+              <h4
+                key={index}
+                id={id}
+                className={cn('text-sm font-semibold mt-3', HELP_STICKY_TOP_CLASS)}
+              >
+                {renderInline(block.text)}
+              </h4>
+            );
+          }
+          case 'h5': {
+            const id = slugifyHeading(block.text);
+            return (
+              <h5 key={index} id={id} className="text-sm font-medium mt-2">
+                {renderInline(block.text)}
+              </h5>
+            );
+          }
+          case 'h6': {
+            const id = slugifyHeading(block.text);
+            return (
+              <h6 key={index} id={id} className="text-xs font-medium mt-2 uppercase tracking-wide text-muted-foreground">
+                {renderInline(block.text)}
+              </h6>
             );
           }
           case 'p':
