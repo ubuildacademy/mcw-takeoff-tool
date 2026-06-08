@@ -21,23 +21,7 @@ The takeoff workspace URL is `/project/<projectId>`.
 
 ## 2. Workspace layout (three columns)
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  Top bar: Back to Projects · Undo/Redo · Page & view · Calibrate · Annotate · Tools │
-├──────────────┬──────────────────────────────────────────────┬───────────────┤
-│              │  PDF sheet tabs (one tab per open sheet)      │               │
-│   TAKEOFF    │  [Optional mode banners: Auto Count / Titleblock]            │
-│   (left)     ├──────────────────────────────────────────────┤   RIGHT       │
-│              │                                               │   SIDEBAR     │
-│  Conditions  │            PDF viewer (plan)                  │  (optional)   │
-│  Reports     │                                               │               │
-│  Costs       │                                               │  Documents |  │
-│              │                                               │  Search |     │
-│              │                                               │  AI Chat      │
-├──────────────┴──────────────────────────────────────────────┴───────────────┤
-│  Status bar: sheet · project · active condition · OCR / export / measure hints │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+{{workspace-layout}}
 
 | Zone | What it is |
 |------|------------|

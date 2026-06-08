@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { slugifyHeading } from './slugify';
 import { HELP_STICKY_TOP_CLASS } from './helpConstants';
+import { WorkspaceLayoutIllustration } from './WorkspaceLayoutIllustration';
 
 export type MarkdownBlock =
   | { type: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'; text: string }
@@ -11,7 +12,13 @@ export type MarkdownBlock =
   | { type: 'ol'; items: string[] }
   | { type: 'pre'; text: string }
   | { type: 'hr' }
-  | { type: 'table'; header: string[]; rows: string[][] };
+  | { type: 'table'; header: string[]; rows: string[][] }
+  | { type: 'img'; alt: string; src: string }
+  | { type: 'embed'; id: string };
+
+const EMBED_COMPONENTS: Record<string, () => ReactNode> = {
+  'workspace-layout': () => <WorkspaceLayoutIllustration />,
+};
 
 type Block = MarkdownBlock;
 
@@ -59,6 +66,20 @@ export function parseMarkdownBlocks(markdown: string): Block[] {
       }
       if (i < lines.length) i += 1;
       blocks.push({ type: 'pre', text: codeLines.join('\n') });
+      continue;
+    }
+
+    const embed = line.trim().match(/^\{\{([\w-]+)\}\}$/);
+    if (embed) {
+      blocks.push({ type: 'embed', id: embed[1] });
+      i += 1;
+      continue;
+    }
+
+    const image = line.trim().match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+    if (image) {
+      blocks.push({ type: 'img', alt: image[1], src: image[2] });
+      i += 1;
       continue;
     }
 
@@ -120,7 +141,9 @@ export function parseMarkdownBlocks(markdown: string): Block[] {
       !lines[i].match(/^\d+\.\s+/) &&
       !lines[i].startsWith('```') &&
       lines[i].trim() !== '---' &&
-      !isTableRow(lines[i])
+      !isTableRow(lines[i]) &&
+      !lines[i].trim().match(/^\{\{[\w-]+\}\}$/) &&
+      !lines[i].trim().match(/^!\[[^\]]*\]\([^)]+\)$/)
     ) {
       paraLines.push(lines[i]);
       i += 1;
@@ -334,6 +357,24 @@ export function SimpleMarkdown({
                 </table>
               </div>
             );
+          case 'img':
+            return (
+              <figure key={index} className="my-6">
+                <img
+                  src={block.src}
+                  alt={block.alt}
+                  className="w-full rounded-lg border border-border shadow-sm"
+                  loading="lazy"
+                />
+                {block.alt ? (
+                  <figcaption className="mt-2 text-center text-xs text-muted-foreground">{block.alt}</figcaption>
+                ) : null}
+              </figure>
+            );
+          case 'embed': {
+            const render = EMBED_COMPONENTS[block.id];
+            return render ? <div key={index}>{render()}</div> : null;
+          }
           default:
             return null;
         }
