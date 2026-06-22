@@ -21,6 +21,7 @@ After calibration, measurements use your scale. If you rotate a page after calib
 
 - **Left:** **Takeoff** — **Conditions**, **Reports**, and **Costs** (create/select line items, quantities, pricing).
 - **Right (optional panel, open with the edge chevron):** **Documents**, **Search** (OCR full-text), and **AI Chat**.
+- **Top:** grouped command bar for project navigation, undo/redo, page navigation, view controls, calibration, annotations, help, tools, and saved status.
 
 For a full walkthrough of every panel and tab, see the **[Workspace guide](/help/workspace)**.
 
@@ -33,7 +34,7 @@ Settings are split between **your account** (on the project list) and **takeoff 
 ### User Profile (account)
 
 - **Where to open it:** After you sign in, on the **project dashboard** (the page that lists your projects), use the **Profile** button in the **top-right** of the header (next to **New Project** and related actions).
-- **From inside a project:** Use **Back to Projects** in the takeoff toolbar (top left) to return to the dashboard, then click **Profile**.
+- **From inside a project:** Use **Back to Projects** in the top command bar (top left) to return to the dashboard, then click **Profile**.
 
 **What you can do there**
 
@@ -45,11 +46,12 @@ Settings are split between **your account** (on the project list) and **takeoff 
 
 ### Tools (preferences while taking off)
 
-- **Where to open it:** With a project open in the **takeoff workspace**, look at the **top toolbar** on the **right**. Click the **wrench** icon (**Tools**). This opens the **Tools** dialog (“Preferences and tools for takeoff and navigation”).
+- **Where to open it:** With a project open in the **takeoff workspace**, look at the **top command bar** on the **right**. Click the **wrench** icon (**Tools**). This opens the **Tools** dialog (“Preferences and tools for takeoff and navigation”).
 - **What’s inside**
 
 **Preferences** (saved in your browser for this device — they persist between visits):
 
+- **Appearance** — Choose **System**, **Light**, or **Dark** mode. Dark mode changes the app chrome and panels while keeping PDF sheets readable.
 - **Crosshairs** — Shown when drawing takeoff, calibrating, or annotating: optional **full-screen crosshairs**, **color**, and **line thickness**.
 - **Enable ortho snapping by default** — New measure/calibrate sessions start with horizontal/vertical snapping on when this is checked; you can still toggle snapping while working (see **Control** in the shortcuts table below).
 - **Show labels on completed measurements** — Values (e.g. length, area) on finished measurements.
@@ -142,15 +144,22 @@ On **iPad** and other touch devices, use these gestures on the PDF canvas. For l
 | Action | Touch control |
 |--------|----------------|
 | **Pan** | One-finger drag (when not drawing) |
-| **Zoom** | Two-finger pinch |
+| **Zoom** | Two-finger pinch (silently ignored if drawing — keeps the active measurement safe) |
 | **Place point** | Tap (or Apple Pencil) while measuring / calibrating / annotating |
+| **Draw a region / shape** | Drag while in cutout, hyperlink, or annotation-shape mode |
+| **Select a markup** | Tap it (in selection mode, not drawing) |
+| **Move a markup** | Tap to select, then drag to new position |
 | **Finish** measurement | **Double-tap**, or **Finish** on the floating toolbar (tablet only) |
-| **Context menu** on markup | **Long-press** (~½ second) on the measurement |
+| **Context menu** on markup | **Long-press** (~½ second) on the markup |
 | **Open markup context menu** (desktop) | Right-click |
 
 ### Floating toolbar (tablet only)
 
-While **measuring** or **calibrating** on a narrow screen (<1024px), a bottom toolbar offers **Undo**, **Cancel**, and **Finish** — the touch equivalents of Cmd/Ctrl+Z, Escape, and double-click. It is hidden on desktop and on wide iPad landscape with a keyboard.
+While any drawing mode is active on a narrow screen (<1024 px), a bottom toolbar offers **Undo**, **Cancel**, and (for multi-point measurements) **Finish** — the touch equivalents of Cmd/Ctrl+Z, Escape, and double-click.
+
+**Modes that show the toolbar:** measuring, calibrating, annotation tools (text, arrow, rectangle, circle), cutout drawing, hyperlink region drawing.
+
+The toolbar is hidden on desktop and on wide iPad landscape (with an attached keyboard).
 
 ### Touch ↔ keyboard mapping
 
@@ -163,7 +172,7 @@ While **measuring** or **calibrating** on a narrow screen (<1024px), a bottom to
 | **Right-click** markup | **Long-press** markup |
 | **Cmd/Ctrl** + scroll — zoom | **Pinch** |
 | **Middle-mouse drag** — pan | **One-finger drag** (idle mode) |
-| **H** — hyperlink mode | Use **Tools** → Add hyperlink (no single-letter keys on touch keyboard without hardware keyboard) |
+| **H** — hyperlink mode | **Tools** (wrench) → **Add hyperlink**, or attach a keyboard and press H |
 
 With an **external keyboard**, desktop shortcuts apply. Touch gestures still work on the canvas at the same time.
 
@@ -181,6 +190,7 @@ With an **external keyboard**, desktop shortcuts apply. Touch gestures still wor
 
 - If a shortcut “does nothing,” click the PDF or a neutral area so focus is not inside an input, then try again.
 - On **iPad**, use the **floating toolbar** or gestures above when no keyboard is attached.
+- Condition card action icons remain visible in the left sidebar/drawer; tap the eye, scissors, copy, pencil, or trash icons for condition-specific actions.
 - Use **Escape** (or **Cancel** on tablet) to step back one point at a time instead of canceling the entire operation when possible.
 - Keep **calibration** on a clear, known dimension for best accuracy.
 

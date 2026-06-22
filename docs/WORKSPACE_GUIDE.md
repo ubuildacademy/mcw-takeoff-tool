@@ -2,7 +2,7 @@
 
 A concise walkthrough of the app **as implemented today**: where things live, what they do, and how the pieces fit together. For keyboard shortcuts and the Tools/Profile dialogs, see the [Quick start & shortcuts guide](/help/shortcuts).
 
-**In the app:** click the **?** icon in the workspace toolbar (or press **?** on your keyboard) for common questions without leaving your project.
+**In the app:** click the **?** icon in the top command bar (or press **?** on your keyboard) for common questions without leaving your project.
 
 ---
 
@@ -65,17 +65,20 @@ Use this panel to define **what** you are measuring, see **quantities**, and see
 - **Click** a condition to **select** it for drawing on the plan; **click again** to clear selection.
 - **Totals on each card** are scoped to the **active sheet tab** and **current page** in the viewer (so numbers track what you see).
 
-**Row actions** (icons on each condition)
+**Condition card controls**
+
+Each condition card is compact so large projects can show many line items. The colored rail identifies the condition color, the unit pill shows the measurement unit, and the total on the card is scoped to the active sheet/page. Quick action icons are grouped in the card action row so they stay easy to scan and tap without opening another menu.
 
 | Icon | Purpose |
 |------|---------|
-| **Eye** | **Hide/show** that condition’s markups on the drawing. |
+| **Type icon** (area, linear, count, etc.) | Shows the condition type. |
+| **Eye** | **Hide/show** that condition's markups on the drawing. |
 | **Scissors** | **Cutout** mode ( **area** / **volume** only ): subtract a region from existing measurements. |
 | **Copy** | **Duplicate** the condition. |
 | **Pencil** | **Edit** the condition. |
 | **Trash** | **Delete** the condition (confirmed). |
 
-**Visual / auto-count** style conditions may show **search imagery** and **match thumbnails** when applicable.
+**Visual / auto-count** style conditions may show **search imagery** and compact **match thumbnails** when applicable.
 
 ### Reports tab
 
@@ -182,35 +185,38 @@ A **project-scoped chat** that uses a **local or hosted LLM** via **Ollama** (co
 **Desktop**
 
 - **Pan**: middle-mouse drag (see [shortcuts guide](/help/shortcuts)).
-- **Zoom**: Cmd/Ctrl + scroll wheel; also **View** menu / zoom buttons in the header.
+- **Zoom**: Cmd/Ctrl + scroll wheel; also the **View** cluster / zoom buttons in the top command bar.
 
 **Touch (iPad, Apple Pencil)**
 
-- **Pan**: one finger drag on the canvas when **not** drawing.
-- **Zoom**: two-finger pinch on the canvas.
-- **Draw**: tap or use Apple Pencil when a condition is selected (same as mouse clicks for that measurement type).
+- **Pan**: one-finger drag when **not** drawing.
+- **Zoom**: two-finger pinch (automatically ignored while actively drawing so a stray thumb cannot cancel a measurement in progress).
+- **Draw**: tap or use Apple Pencil when a condition is selected (same as mouse clicks for that measurement type). Hyperlink regions, cutout polygons, and annotation shapes also work with touch.
+- **Select a markup**: tap it while in selection mode (not actively drawing).
+- **Move a markup**: tap to select, then drag it to its new position.
 - **Finish** a multi-point measurement: **double-tap** the canvas, or tap **Finish** on the floating toolbar (see [Tablet & touch](#8-tablet--touch-ipad) below).
-- **Context menu** on a markup: **long-press** (~½ second) on the measurement — same actions as right-click on desktop (stack order, select all similar).
+- **Context menu** on a markup: **long-press** (~½ second) — same actions as right-click on desktop (stack order, select all similar).
 
 - **Measure** only after you **select a condition** on the left and follow the tool’s tap/drag behavior for that type.
-- **Hyperlinks**, **cutouts**, and **annotations** integrate here (shortcuts on desktop; touch equivalents in the [shortcuts guide](/help/shortcuts)).
 
 ---
 
-## 6. Top toolbar (summary)
+## 6. Top command bar (summary)
+
+The top command bar is grouped into clusters so common actions are easier to scan: project/navigation on the left, page/view/markup controls in the center, and help/tools/status on the right. On smaller screens, some view controls collapse into the **View** menu to preserve space.
 
 | Area | What to use it for |
 |------|---------------------|
 | **Back to Projects** | Return to `/app`. |
 | **Undo / Redo** | History (also Cmd/Ctrl+Z etc.). |
 | **Previous / Next page** | Page navigation. |
-| **View** (smaller screens) or inline zoom | Zoom %, **Reset view**, **Rotate** CW/CCW. |
+| **View cluster** | Zoom %, **Reset view**, **Rotate** CW/CCW. On narrower screens this appears as a **View** menu. |
 | **Calibrate Scale** / **Recalibrate** | Set real-world scale from a known dimension (dialog + two clicks on the PDF). |
 | **Annotate** | Non-takeoff markup: text, arrow, rectangle, circle, color, **clear annotations**. |
 | **Help** (?) | **Common questions**, links to these guides, and context tips. Press **?** on the keyboard to toggle. |
-| **Tools** (wrench) | **Preferences** (crosshair, labels, magnifier, ortho default, hyperlinks). |
+| **Tools** (wrench) | **Preferences** (appearance, crosshair, labels, magnifier, ortho default, hyperlinks). |
 | **Ortho** badge | Visible when ortho snapping is on while measuring or calibrating. |
-| **Green dot** | “All changes saved” indicator. |
+| **All changes saved** chip | Green dot plus saved status. |
 
 ---
 
@@ -234,27 +240,32 @@ In **Safari** on iPad: **Share** → **Add to Home Screen**. The app opens full-
 
 | Gesture | When | What it does |
 |---------|------|----------------|
-| **One-finger drag** | Not measuring / calibrating / annotating | **Pan** the sheet |
-| **Two-finger pinch** | Any time on the canvas | **Zoom** in or out |
+| **One-finger drag** | Not drawing | **Pan** the sheet |
+| **Two-finger pinch** | Not actively drawing | **Zoom** in or out (ignored during drawing to protect the in-progress measurement) |
 | **Tap** | Condition selected, drawing mode | Place points (count, linear, area, etc.) |
+| **Tap on a markup** | Selection mode (not drawing) | **Select** the markup |
+| **Drag a selected markup** | Selection mode (not drawing) | **Move** the markup |
+| **Drag** | Cutout / hyperlink / annotation shape mode | Draw the region or shape |
 | **Double-tap** | Multi-point measurement in progress | **Finish** the measurement (same as double-click on desktop) |
-| **Long-press** (~½ s) | Markup selected / selection mode | **Context menu** (bring forward, send backward, select all similar) |
+| **Long-press** (~½ s) | On any markup | **Context menu** (bring forward, send backward, select all similar) |
 
 ### Floating toolbar while drawing
 
-On tablet layout, while you are **measuring** or **calibrating**, a **pill toolbar** appears at the bottom of the viewer:
+On tablet layout, a **pill toolbar** appears at the bottom of the viewer whenever any drawing or tool mode is active:
 
-| Button | Desktop equivalent |
-|--------|-------------------|
-| **Undo** | Cmd/Ctrl+Z |
-| **Cancel** | Escape (exit or step back) |
-| **Finish** | Double-click / double-tap (hidden for **count** and calibration) |
+| Button | Visible when | Desktop equivalent |
+|--------|--------------|-------------------|
+| **Undo** | Always (in any active mode) | Cmd/Ctrl+Z |
+| **Cancel** | Always (in any active mode) | Escape (exit or step back) |
+| **Finish** | Multi-point measurement only (not count, calibration, annotation, cutout, or hyperlink) | Double-click / double-tap |
+
+Modes that show the toolbar: measuring, calibrating, annotation tools (text, arrow, rectangle, circle), cutout drawing, and hyperlink region drawing.
 
 This toolbar does **not** appear on desktop — use the keyboard there.
 
 ### Sidebars on tablet
 
-Open **Takeoff** (left) or **Documents / Search / AI Chat** (right) with the **edge chevrons**. Drawers slide over the PDF; tap outside on the dimmed area to close. Condition row actions (hide, cutout, edit, etc.) stay available with larger tap targets.
+Open **Takeoff** (left) or **Documents / Search / AI Chat** (right) with the **edge chevrons**. Drawers slide over the PDF; tap outside on the dimmed area to close. Condition card action icons (hide, cutout, duplicate, edit, delete) stay visible on the card and use touch-friendly hit areas.
 
 ### Keyboard on iPad
 
