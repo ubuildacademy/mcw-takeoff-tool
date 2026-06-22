@@ -90,19 +90,26 @@ export function TakeoffWorkspaceHeader({
     onScaleChange(Math.min(PDF_VIEWER_MAX_SCALE, scale + ZOOM_STEP));
 
   return (
-    <div className="flex items-center justify-between gap-2 p-2 sm:p-4 border-b bg-muted/30 flex-wrap lg:flex-nowrap min-w-0">
+    <div
+      className="flex items-center justify-between gap-2 p-2 sm:p-4 border-b bg-muted/30 flex-wrap lg:flex-nowrap min-w-0"
+      style={{
+        paddingTop: 'max(0.5rem, env(safe-area-inset-top, 0px))',
+        paddingLeft: 'max(0.5rem, env(safe-area-inset-left, 0px))',
+        paddingRight: 'max(0.5rem, env(safe-area-inset-right, 0px))',
+      }}
+    >
       {/* Left - Back, Undo/Redo */}
       <div className="flex items-center gap-2 sm:gap-6 shrink-0">
-        <Button variant="ghost" onClick={onBackToProjects} className="flex items-center gap-2" title="Back to Projects">
+        <Button variant="ghost" onClick={onBackToProjects} className="flex items-center gap-2 min-h-[44px]" title="Back to Projects">
           <ArrowLeft className="w-4 h-4 shrink-0" />
           <span className="hidden lg:inline">Back to Projects</span>
         </Button>
         <Separator orientation="vertical" className="h-8 hidden sm:block" />
         <div className="flex items-center gap-1">
-          <Button size="sm" variant="outline" onClick={onUndo} disabled={!canUndo} title="Undo (⌘Z)">
+          <Button size="sm" variant="outline" onClick={onUndo} disabled={!canUndo} title="Undo (⌘Z)" className="min-h-[44px]">
             <Undo2 className="w-4 h-4" />
           </Button>
-          <Button size="sm" variant="outline" onClick={onRedo} disabled={!canRedo} title="Redo (⌘⇧Z)">
+          <Button size="sm" variant="outline" onClick={onRedo} disabled={!canRedo} title="Redo (⌘⇧Z)" className="min-h-[44px]">
             <Redo2 className="w-4 h-4" />
           </Button>
         </div>
@@ -117,6 +124,7 @@ export function TakeoffWorkspaceHeader({
             onClick={() => onPageChange(Math.max(1, currentPage - 1))}
             disabled={currentPage <= 1 || !currentPdfFile}
             title="Previous page"
+            className="min-h-[44px]"
           >
             <ChevronLeft className="w-4 h-4 lg:hidden" />
             <span className="hidden lg:inline">Previous</span>
@@ -130,6 +138,7 @@ export function TakeoffWorkspaceHeader({
             onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
             disabled={currentPage >= totalPages || !currentPdfFile}
             title="Next page"
+            className="min-h-[44px]"
           >
             <ChevronRight className="w-4 h-4 lg:hidden" />
             <span className="hidden lg:inline">Next</span>
@@ -141,7 +150,7 @@ export function TakeoffWorkspaceHeader({
         {/* View dropdown: scale, reset, rotate, calibrate - visible below lg to avoid mid-size overflow */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button size="sm" variant="outline" className="xl:hidden flex items-center gap-1" title="View options">
+            <Button size="sm" variant="outline" className="xl:hidden flex items-center gap-1 min-h-[44px]" title="View options">
               <Layout className="w-4 h-4" />
               <span>{currentPdfFile ? `${Math.round(scale * 100)}%` : 'View'}</span>
               <ChevronDown className="w-3 h-3" />
@@ -316,7 +325,7 @@ export function TakeoffWorkspaceHeader({
           size="icon"
           onClick={() => setSettingsOpen(true)}
           title="Tools"
-          className="shrink-0"
+          className="shrink-0 min-h-[44px] min-w-[44px]"
         >
           <Wrench className="w-4 h-4" />
         </Button>

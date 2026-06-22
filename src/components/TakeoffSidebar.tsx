@@ -44,9 +44,11 @@ interface TakeoffSidebarProps {
   viewerDocumentId?: string | null;
   /** 1-based page in the active PDF tab; condition quantities in the Conditions tab are scoped to this page. */
   currentPage?: number | null;
+  /** Extra classes merged onto the root element (e.g. `h-full` when rendered inside a drawer overlay). */
+  className?: string;
 }
 
-export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _onToolSelect, documents = [], onPageSelect, onPageOpenInNewTab, onExportStatusUpdate, onCutoutMode, cutoutMode, cutoutTargetConditionId, viewerDocumentId, currentPage }: TakeoffSidebarProps) {
+export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _onToolSelect, documents = [], onPageSelect, onPageOpenInNewTab, onExportStatusUpdate, onCutoutMode, cutoutMode, cutoutTargetConditionId, viewerDocumentId, currentPage, className }: TakeoffSidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -269,9 +271,11 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
   };
 
 
+  const rootClass = `w-80 bg-white border-r flex flex-col${className ? ` ${className}` : ''}`;
+
   if (loadingConditions) {
     return (
-      <div className="w-80 bg-white border-r flex flex-col">
+      <div className={rootClass}>
         <div className="p-4 border-b">
           <div className="animate-pulse">
             <div className="h-6 bg-gray-200 rounded mb-2"></div>
@@ -283,7 +287,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
   }
 
   return (
-    <div className="w-80 bg-white border-r flex flex-col">
+    <div className={rootClass}>
       {/* Header */}
       <div className="p-4 border-b">
         {/* Tabs */}

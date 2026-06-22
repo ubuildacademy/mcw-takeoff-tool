@@ -98,6 +98,12 @@ export interface PDFViewerProps {
    * for the already-selected condition. Pass `null` on unregister (e.g. unmount).
    */
   onRegisterEnterConditionDrawMode?: (handler: (() => void) | null) => void;
+  /**
+   * Register a handler that completes the current in-progress measurement (equivalent to
+   * a double-tap/double-click). Useful for the floating toolbar's "Finish" button.
+   * Pass `null` on unregister (e.g. unmount).
+   */
+  onRegisterFinishMeasurement?: (handler: (() => void) | null) => void;
 }
 
 /** Measurement shape used by PDFViewer for rendering (aligned with TakeoffMeasurement + legacy) */

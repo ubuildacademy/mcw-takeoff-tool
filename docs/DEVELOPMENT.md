@@ -140,4 +140,5 @@ Open **http://localhost:3001**
 - **README.md** – Overview and quick start
 - **docs/ROADMAP.md** – Backlog and planned improvements
 - **docs/TESTING.md** – Tests
+- **docs/PDF_VIEWER_ZOOM_DEBUG.md** – PDF zoom, CSS transforms, draw-mode stability (regression notes)
 - **docs/SUPABASE_SECURITY_CHECKLIST.md** – Supabase security (migrations, Auth)

@@ -275,7 +275,7 @@ export function TakeoffSidebarConditionList({
                       e.stopPropagation();
                       toggleMarkupHidden(projectId, condition.id);
                     }}
-                    className={`h-6 w-6 p-0 ${hiddenMarkupConditionIds.includes(condition.id) ? 'text-muted-foreground' : ''}`}
+                    className={`min-h-[44px] h-6 w-6 p-0 ${hiddenMarkupConditionIds.includes(condition.id) ? 'text-muted-foreground' : ''}`}
                     title={
                       hiddenMarkupConditionIds.includes(condition.id)
                         ? 'Show markups on page'
@@ -296,23 +296,23 @@ export function TakeoffSidebarConditionList({
                         e.stopPropagation();
                         onCutoutMode(condition);
                       }}
-                      className={`h-6 w-6 p-0 ${cutoutMode && cutoutTargetConditionId === condition.id ? 'bg-red-100 text-red-600' : 'text-red-500 hover:text-red-600'}`}
+                      className={`min-h-[44px] h-6 w-6 p-0 ${cutoutMode && cutoutTargetConditionId === condition.id ? 'bg-red-100 text-red-600' : 'text-red-500 hover:text-red-600'}`}
                       title="Add cut-out to existing measurements"
                     >
                       <Scissors className="w-3 h-3" />
                     </Button>
                   )}
-                  <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); onDuplicate(condition); }} className="h-6 w-6 p-0">
+                  <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); onDuplicate(condition); }} className="min-h-[44px] h-6 w-6 p-0">
                     <Copy className="w-3 h-3" />
                   </Button>
-                  <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); onEdit(condition); }} className="h-6 w-6 p-0">
+                  <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); onEdit(condition); }} className="min-h-[44px] h-6 w-6 p-0">
                     <Edit3 className="w-3 h-3" />
                   </Button>
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={(e) => { e.stopPropagation(); onDeleteClick(condition.id); }}
-                    className="h-6 w-6 p-0 text-destructive hover:text-destructive"
+                    className="min-h-[44px] h-6 w-6 p-0 text-destructive hover:text-destructive"
                   >
                     <Trash2 className="w-3 h-3" />
                   </Button>

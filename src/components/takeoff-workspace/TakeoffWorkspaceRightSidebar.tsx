@@ -15,6 +15,7 @@ const TabFallback = () => (
 );
 
 export function TakeoffWorkspaceRightSidebar({
+  isTabletDrawer,
   rightSidebarOpen,
   onRightSidebarOpenChange,
   rightSidebarTab,
@@ -38,15 +39,31 @@ export function TakeoffWorkspaceRightSidebar({
   onBulkExtractTitleblock,
   onRotateAllSheetsInDocument,
 }: TakeoffWorkspaceRightSidebarProps) {
+  // In tablet drawer mode the outer div is the positioning context for the
+  // absolute sidebar panel, and z-40 keeps it above the z-30 backdrop.
+  const outerClass = isTabletDrawer
+    ? 'flex shrink-0 relative z-40'
+    : 'flex';
+
+  // Tablet: overlay to the left of the toggle strip; Desktop: normal flow.
+  const panelClass = isTabletDrawer
+    ? 'absolute top-0 bottom-0 z-40 shadow-2xl bg-white border-l flex flex-col w-80 sm:w-96'
+    : 'w-96 bg-white border-l flex flex-col h-full';
+
   return (
-    <div className="flex">
+    <div className={outerClass}>
       <SidebarEdgeToggle
         side="right"
         open={rightSidebarOpen}
         onOpenChange={onRightSidebarOpenChange}
       />
       {rightSidebarOpen && (
-        <div className="w-96 bg-white border-l flex flex-col h-full">
+        <div
+          className={panelClass}
+          // right:100% places the panel's right edge at the left edge of this
+          // relative wrapper (i.e. immediately left of the toggle strip).
+          style={isTabletDrawer ? { right: '100%' } : undefined}
+        >
           <div className="flex border-b">
             <button
               className={`flex-1 px-3 py-3 text-sm font-medium border-b-2 transition-colors ${

@@ -105,7 +105,7 @@ export interface UsePDFViewerInteractionsOptions {
   setIsDeselecting: React.Dispatch<React.SetStateAction<boolean>>;
   isAnnotating: boolean;
   showTextInput: boolean;
-  applyInteractiveZoomTransforms: (overrideScale?: number) => void;
+  applyInteractiveZoomTransforms: (overrideScale?: number, skipScrollAdjust?: boolean) => void;
   // Keyboard handler options
   annotationTool: 'text' | 'arrow' | 'rectangle' | 'circle' | null;
   currentAnnotation: { x: number; y: number }[];
@@ -267,6 +267,13 @@ export interface UsePDFViewerInteractionsResult {
   handleCanvasDoubleClick: (e: React.MouseEvent<HTMLCanvasElement>) => void;
   handleSvgClick: (e: React.MouseEvent<SVGSVGElement>) => void;
   handleSvgDoubleClick: (e: React.MouseEvent<SVGSVGElement>) => void;
+  /**
+   * Programmatic zoom for pinch-to-zoom gestures (touch/Apple Pencil).
+   * `factor` is a multiplier relative to the current scale (e.g. 1.05 = zoom in 5%).
+   * `anchorClientX/Y` is the viewport-relative midpoint of the pinch, used to keep
+   * the area under the fingers in place while zooming.
+   */
+  handlePinchZoom: (factor: number, anchorClientX: number, anchorClientY: number) => void;
 }
 
 export function usePDFViewerInteractions(
@@ -497,7 +504,8 @@ export function usePDFViewerInteractions(
           // old normalised coords × CSS transform produce a different screen
           // position than the actual cursor (due to canvas offset in the container).
           requestAnimationFrame(() => {
-            applyInteractiveZoomTransforms(newScale);
+            // skipScrollAdjust=true: handleWheel already did cursor-anchored scroll adjustment above
+            applyInteractiveZoomTransforms(newScale, true);
 
             if ((isMeasuring || isCalibrating) && pdfCanvasRef.current && pdfPageRef.current) {
               const postRect = pdfCanvasRef.current.getBoundingClientRect();
@@ -2429,6 +2437,67 @@ export function usePDFViewerInteractions(
     [annotationTool, isMeasuring, cutoutMode, handleDoubleClick]
   );
 
+  const handlePinchZoom = useCallback(
+    (factor: number, anchorClientX: number, anchorClientY: number) => {
+      const newScale = Math.min(
+        PDF_VIEWER_MAX_SCALE,
+        Math.max(PDF_VIEWER_MIN_SCALE, viewState.scale * factor)
+      );
+
+      const rendersBlocked =
+        isMeasuring ||
+        isCalibrating ||
+        currentMeasurement.length > 0 ||
+        isDeselecting ||
+        (isAnnotating && !showTextInput);
+
+      if (pdfPageRef.current && !rendersBlocked) {
+        const freshViewport = pdfPageRef.current.getViewport({
+          scale: newScale,
+          rotation: viewState.rotation,
+        });
+        setPageViewports((prev) => ({ ...prev, [currentPage]: freshViewport }));
+        lastRenderedScaleRef.current = newScale;
+      }
+
+      setInternalViewState((prev) => ({ ...prev, scale: newScale }));
+      if (onScaleChange) onScaleChange(newScale);
+
+      const container = containerRef.current;
+      if (container) {
+        const rect = container.getBoundingClientRect();
+        const offsetX = anchorClientX - rect.left;
+        const offsetY = anchorClientY - rect.top;
+        const r = newScale / (viewState.scale || 1);
+        container.scrollLeft = (container.scrollLeft + offsetX) * r - offsetX;
+        container.scrollTop = (container.scrollTop + offsetY) * r - offsetY;
+      }
+
+      if (rendersBlocked) {
+        // skipScrollAdjust=true: handlePinchZoom already did cursor-anchored scroll adjustment above
+        requestAnimationFrame(() => applyInteractiveZoomTransforms(newScale, true));
+      }
+    },
+    [
+      viewState.scale,
+      viewState.rotation,
+      isMeasuring,
+      isCalibrating,
+      currentMeasurement.length,
+      isDeselecting,
+      isAnnotating,
+      showTextInput,
+      pdfPageRef,
+      setPageViewports,
+      lastRenderedScaleRef,
+      currentPage,
+      setInternalViewState,
+      onScaleChange,
+      containerRef,
+      applyInteractiveZoomTransforms,
+    ]
+  );
+
   return {
     getCssCoordsFromEvent,
     handleWheel,
@@ -2441,5 +2510,6 @@ export function usePDFViewerInteractions(
     handleCanvasDoubleClick,
     handleSvgClick,
     handleSvgDoubleClick,
+    handlePinchZoom,
   };
 }

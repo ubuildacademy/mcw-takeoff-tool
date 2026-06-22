@@ -98,6 +98,46 @@ describe('detectSheetRefsFromWordBoxes', () => {
     expect(refs.some((r) => r.normalizedRef === 'A4.02')).toBe(false);
   });
 
+  it('rejects over-merged detail+sheet tokens (e.g. A4.123410)', () => {
+    const words = [w('SEE', 0.05, 0.5), w('A4.123410', 0.12, 0.5)];
+    const strict = detectSheetRefsFromWordBoxes(words, { mode: 'strict' });
+    const loose = detectSheetRefsFromWordBoxes(words, { mode: 'loose' });
+    expect(strict.some((r) => r.normalizedRef === 'A4.12')).toBe(false);
+    expect(loose.some((r) => r.normalizedRef === 'A4.12')).toBe(false);
+  });
+
+  it('tolerates small vertical jitter on a cued line (scan skew / rotation)', () => {
+    // Centers within Y_CLUSTER_TOL still group as one reading line.
+    const words = [
+      { text: 'SEE', bbox: { x: 0.08, y: 0.5, width: 0.04, height: 0.02 } },
+      { text: 'A-101', bbox: { x: 0.14, y: 0.512, width: 0.06, height: 0.02 } },
+    ];
+    const refs = detectSheetRefsFromWordBoxes(words, { mode: 'strict' });
+    expect(refs.some((r) => r.normalizedRef === 'A101')).toBe(true);
+  });
+
+  it('does not forge a ref across a large vertical gap in a column', () => {
+    // Two split tokens stacked far apart should not union into one A4.02 callout box.
+    const words = [
+      { text: 'A4', bbox: { x: 0.5, y: 0.1, width: 0.024, height: 0.02 } },
+      { text: '.02', bbox: { x: 0.5, y: 0.5, width: 0.036, height: 0.02 } },
+    ];
+    const refs = detectSheetRefsFromWordBoxes(words, { mode: 'loose' });
+    expect(refs.some((r) => r.normalizedRef === 'A4.02')).toBe(false);
+  });
+
+  it('produces no false positives from pure title-block noise', () => {
+    const words = [
+      w('SCALE', 0.05, 0.9),
+      w('1/4"=1\'-0"', 0.15, 0.9),
+      w('DATE', 0.05, 0.93),
+      w('12/15/2024', 0.15, 0.93),
+      w('PROJECT', 0.05, 0.96),
+    ];
+    const loose = detectSheetRefsFromWordBoxes(words, { mode: 'loose' });
+    expect(loose).toHaveLength(0);
+  });
+
   it('isolated boxes link at the crop bbox (bubble OCR style)', () => {
     const words = [{ text: '15 A9.22', bbox: { x: 0.6, y: 0.41, width: 0.04, height: 0.06 } }];
     const refs = detectSheetRefsFromIsolatedBoxes(words, { mode: 'loose' });

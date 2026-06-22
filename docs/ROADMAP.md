@@ -16,6 +16,12 @@ Living list of **larger features**, **quality improvements**, and **outstanding 
 
 ## Backlog
 
+### iPad / tablet compatibility
+
+| Item | Notes |
+|------|--------|
+| **Submit feedback (Help menu)** | Lightweight in-app bug / feedback form for beta testers — distinct from **Contact** (general support). Should capture context (page, project, browser) and route to the team quickly (e.g. email or webhook). Entry point: Help menu. |
+
 ### Features & scale
 
 | Item | Notes |
@@ -53,6 +59,10 @@ Living list of **larger features**, **quality improvements**, and **outstanding 
 
 | Item | When |
 |------|------|
+| **iPad / tablet — Phase 3 (polish & platform)** | Floating action toolbar (Undo / Cancel / Finish) over the PDF canvas while drawing; long-press on SVG markups opens context menu (right-click equivalent for touch); `useKeyboardHeight` hook shifts dialogs above the software keyboard via Visual Viewport API; PWA `manifest.json` + Apple touch-icon + `theme-color` meta for "Add to Home Screen". | 2026-06 |
+| **iPad / tablet — Phase 2 (layout)** | Slide-over drawers for both sidebars below `lg` with semi-transparent backdrop; `viewport-fit=cover`; `env(safe-area-inset-*)` on header and status bar; 44 px minimum tap targets on all primary toolbar and condition-list buttons. | 2026-06 |
+| **iPad / tablet — Phase 1 (touch input)** | Pointer Events on canvas/SVG, `touch-action: none`, pinch-to-zoom, single-finger pan, `overscroll-contain` on canvas container. | 2026-06 |
+| **PDF zoom / draw-mode stability** | CSS-transform scroll compensation when entering/exiting measuring mode; clear stale crosshair on draw-mode entry (fixes canvas jump and cursor/crosshair offset after Space re-select). See `docs/PDF_VIEWER_ZOOM_DEBUG.md`. | 2026-06 |
 | Server ESLint (`lint:server` in CI via `npm run lint`) | 2026-05 |
 | Auto-hyperlink strict/loose mode in Tools UI | 2026-05 |
 | Auto-hyperlink refresh sheet index + unmatched-ref toast hints | 2026-05 |

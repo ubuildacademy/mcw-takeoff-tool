@@ -85,6 +85,8 @@ export interface TakeoffWorkspaceStatusBarProps {
 export type RightSidebarTab = 'documents' | 'search' | 'ai-chat';
 
 export interface TakeoffWorkspaceRightSidebarProps {
+  /** True below lg breakpoint — sidebar renders as a fixed-position drawer overlay. */
+  isTabletDrawer?: boolean;
   rightSidebarOpen: boolean;
   onRightSidebarOpenChange: (open: boolean) => void;
   rightSidebarTab: RightSidebarTab;

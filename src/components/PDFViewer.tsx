@@ -123,6 +123,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   onHyperlinkClick,
   onHyperlinkContextMenu,
   onRegisterEnterConditionDrawMode,
+  onRegisterFinishMeasurement,
 }) => {
   const {
     pdfDocument,
@@ -175,7 +176,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Helper to apply/remove interactive CSS zoom transforms when renders are blocked.
   // When called from wheel handler while renders are blocked, pass overrideScale so the
   // transform uses the new scale immediately (viewState hasn't updated yet).
-  const applyInteractiveZoomTransforms = useCallback((overrideScale?: number) => {
+  const applyInteractiveZoomTransforms = useCallback((overrideScale?: number, skipScrollAdjust?: boolean) => {
     const canvas = pdfCanvasRef.current as HTMLCanvasElement | null;
     const svg = svgOverlayRef.current as SVGSVGElement | null;
     if (!canvas || !svg || !pdfPageRef.current) return;
@@ -183,6 +184,28 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     const renderedScale = lastRenderedScaleRef.current || 1.0;
     const effectiveScale = overrideScale ?? viewState.scale ?? 1.0;
     const targetScale = effectiveScale / renderedScale;
+
+    // Parse the CSS scale currently applied to the canvas (1.0 if none).
+    const prevTransformStr = canvas.style.transform;
+    const prevCssScale = prevTransformStr.startsWith('scale(')
+      ? (parseFloat(prevTransformStr.slice(6, -1)) || 1.0)
+      : 1.0;
+
+    // When the CSS transform changes due to a state transition (not a wheel/pinch gesture),
+    // compensate the container scroll so the viewport centre stays over the same content.
+    // Wheel/pinch handlers already manage their own cursor-anchored scroll adjustment and
+    // pass skipScrollAdjust=true to opt out.
+    if (!skipScrollAdjust && Math.abs(targetScale - prevCssScale) > 0.001) {
+      const container = containerRef.current;
+      if (container) {
+        const ratio = targetScale / prevCssScale;
+        const cw = container.clientWidth;
+        const ch = container.clientHeight;
+        // Keep viewport centre over the same content position.
+        container.scrollLeft = ratio * (container.scrollLeft + cw / 2) - cw / 2;
+        container.scrollTop  = ratio * (container.scrollTop  + ch / 2) - ch / 2;
+      }
+    }
     
     // If targetScale is ~1, clear transforms
     if (Math.abs(targetScale - 1) < 0.0001) {
@@ -748,6 +771,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     handleCanvasDoubleClick,
     handleSvgClick,
     handleSvgDoubleClick,
+    handlePinchZoom,
   } = usePDFViewerInteractions({
     pdfCanvasRef,
     pdfPageRef,
@@ -2726,6 +2750,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Keep ref updated so document listener always calls latest handler
   handleWheelRef.current = handleWheel;
 
+  // Single-finger pan: scroll the canvas container by the touch delta (px).
+  const handleTouchPan = useCallback((dx: number, dy: number) => {
+    const c = containerRef.current;
+    if (!c) return;
+    c.scrollLeft -= dx;
+    c.scrollTop -= dy;
+  }, []);
+
   // Cmd+scroll zoom: document-level capture listener so we receive the event regardless of
   // which child is the target. Registered once; handler uses ref to avoid effect churn.
   useEffect(() => {
@@ -2968,6 +3000,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           !isMeasuring ||
           (isSelectionMode && isMeasuring);
         if (shouldApplySidebarConditionMode) {
+          // Clear stale crosshair position so a stale cursor pos isn't painted
+          // before CSS transforms settle — prevents the "crosshair offset" bug.
+          setMousePosition(null);
           setIsMeasuring(true);
           setIsSelectionMode(false);
           if (selectedMarkupIds.length > 0) setSelectedMarkupIds([]);
@@ -3061,6 +3096,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       if (titleblockSelectionMode) return;
       const cond = useConditionStore.getState().getSelectedCondition();
       if (!cond || cond.type === 'auto-count') return;
+      // Clear stale crosshair: mousePositionRef keeps the last cursor pos even
+      // while isMeasuring=false. Nulling it prevents a phantom crosshair from
+      // appearing at the old location before CSS transforms settle.
+      setMousePosition(null);
       setSelectedMarkupIds([]);
       setIsDeselecting(false);
       setIsMeasuring(true);
@@ -3072,12 +3111,28 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   }, [
     onRegisterEnterConditionDrawMode,
     titleblockSelectionMode,
+    setMousePosition,
     setSelectedMarkupIds,
     setIsDeselecting,
     setIsMeasuring,
     setIsSelectionMode,
     syncMeasurementTypeFromSelectedCondition,
   ]);
+
+  // Floating toolbar: register a "finish current measurement" handler so the
+  // parent can wire a Finish button without reaching into internal state.
+  useLayoutEffect(() => {
+    if (!onRegisterFinishMeasurement) return;
+    const handler = () => {
+      if (isContinuousDrawingRef.current && completeContinuousLinearMeasurementRef.current) {
+        void completeContinuousLinearMeasurementRef.current();
+      } else if (currentMeasurementRef.current.length > 0) {
+        void completeMeasurementRef.current(currentMeasurementRef.current);
+      }
+    };
+    onRegisterFinishMeasurement(handler);
+    return () => onRegisterFinishMeasurement(null);
+  }, [onRegisterFinishMeasurement, isContinuousDrawingRef, completeContinuousLinearMeasurementRef, currentMeasurementRef, completeMeasurementRef]);
 
   const prevAnnotationToolRef = useRef<'text' | 'arrow' | 'rectangle' | 'circle' | null>(null);
 
@@ -3249,7 +3304,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       {/* Single Canvas + SVG Overlay Container */}
       <div 
         ref={containerRef}
-        className="canvas-container flex-1 h-full overflow-auto"
+        className="canvas-container flex-1 h-full overflow-auto overscroll-contain"
         style={{ 
           cursor: cutoutMode 
             ? 'crosshair' 
@@ -3285,6 +3340,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             onSvgContextMenu={handleSvgContextMenu}
             isPDFLoading={isPDFLoading}
             textAnnotation={textAnnotationProps}
+            isMeasuringOrDrawing={isMeasuring || isCalibrating || isAnnotating || !!annotationTool}
+            onTouchPan={handleTouchPan}
+            onTouchPinch={handlePinchZoom}
           />
         </div>
       </div>

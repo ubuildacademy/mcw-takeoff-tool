@@ -93,7 +93,7 @@ class TitleblockExtractionService {
           timeout: 5000,
           env: { ...process.env, PATH: enhancedPath }
         });
-      } catch (fitzError) {
+      } catch {
         return {
           available: false,
           error: 'PyMuPDF (fitz) not available. Install with: pip install pymupdf'
@@ -106,7 +106,7 @@ class TitleblockExtractionService {
           timeout: 5000,
           env: { ...process.env, PATH: enhancedPath }
         });
-      } catch (tesseractError) {
+      } catch {
         return {
           available: false,
           error: 'pytesseract not available. OCR will not work. Install with: pip install pytesseract'
@@ -121,7 +121,7 @@ class TitleblockExtractionService {
           env: { ...process.env, PATH: enhancedPath }
         });
         opencvAvailable = true;
-      } catch (cvError) {
+      } catch {
         // OpenCV is optional - script will use fallback region detection
         console.warn('OpenCV not available - will use fallback titleblock detection');
         opencvAvailable = false;

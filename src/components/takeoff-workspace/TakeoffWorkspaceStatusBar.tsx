@@ -19,7 +19,14 @@ export function TakeoffWorkspaceStatusBar({
   measurementType,
 }: TakeoffWorkspaceStatusBarProps) {
   return (
-    <div className="flex items-center justify-between px-4 py-2 border-t bg-muted/30 text-sm">
+    <div
+      className="flex items-center justify-between px-4 py-2 border-t bg-muted/30 text-sm"
+      style={{
+        paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom, 0px))',
+        paddingLeft: 'max(1rem, env(safe-area-inset-left, 0px))',
+        paddingRight: 'max(1rem, env(safe-area-inset-right, 0px))',
+      }}
+    >
       <div className="flex items-center gap-4">
         {selectedSheet && (
           <>

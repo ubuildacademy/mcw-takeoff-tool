@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useState, useCallback, useRef } from 'react';
+import { useMediaQuery } from '../hooks/useMediaQuery';
 
 import { useParams, useNavigate } from 'react-router-dom';
 import PDFViewer from './PDFViewer';
@@ -32,6 +33,7 @@ import { TakeoffWorkspaceHeader } from './takeoff-workspace/TakeoffWorkspaceHead
 import { TakeoffWorkspaceStatusBar } from './takeoff-workspace/TakeoffWorkspaceStatusBar';
 import { TakeoffWorkspaceRightSidebar } from './takeoff-workspace/TakeoffWorkspaceRightSidebar';
 import { TakeoffWorkspaceModeBanners } from './takeoff-workspace/TakeoffWorkspaceModeBanners';
+import { TakeoffFloatingToolbar } from './takeoff-workspace/TakeoffFloatingToolbar';
 import { ExportProgressOverlay } from './takeoff-workspace/ExportProgressOverlay';
 import { TakeoffWorkspaceDialogs } from './takeoff-workspace/TakeoffWorkspaceDialogs';
 import { useTakeoffWorkspaceDocuments } from './takeoff-workspace/useTakeoffWorkspaceDocuments';
@@ -104,8 +106,15 @@ export function TakeoffWorkspace() {
 
   const selectedCondition = getSelectedCondition();
 
+  // Below lg (1024 px) sidebars become fixed drawers that overlay the canvas.
+  const isTablet = useMediaQuery('(max-width: 1023px)');
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
+
+  // Close left sidebar when entering tablet layout so the canvas is fully visible.
+  useEffect(() => {
+    if (isTablet) setLeftSidebarOpen(false);
+  }, [isTablet]);
   
   // Measurement state from PDFViewer
   const [isMeasuring, setIsMeasuring] = useState(false);
@@ -301,6 +310,20 @@ export function TakeoffWorkspace() {
 
   const handleRegisterEnterConditionDrawMode = useCallback((handler: (() => void) | null) => {
     enterConditionDrawModeFromPlanRef.current = handler;
+  }, []);
+
+  /** Floating toolbar: finish the current in-progress measurement. */
+  const finishMeasurementRef = useRef<(() => void) | null>(null);
+
+  const handleRegisterFinishMeasurement = useCallback((handler: (() => void) | null) => {
+    finishMeasurementRef.current = handler;
+  }, []);
+
+  /** Floating toolbar: cancel current drawing (Escape equivalent). */
+  const handleFloatingCancel = useCallback(() => {
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true })
+    );
   }, []);
 
   /** Condition id last cleared via Space — next Space re-selects it (toggle). */
@@ -992,10 +1015,21 @@ export function TakeoffWorkspace() {
       />
 
       {/* Main Content Area - Fixed height container */}
-      <div className="flex-1 flex min-h-0">
-        {/* Left Sidebar Toggle */}
-        <div className="flex">
-          {leftSidebarOpen && (
+      {/* relative: positioning context for tablet drawer overlays */}
+      <div className="flex-1 flex min-h-0 relative">
+        {/* Tablet backdrop — closes both drawers when tapped */}
+        {isTablet && (leftSidebarOpen || rightSidebarOpen) && (
+          <div
+            className="absolute inset-0 bg-black/50 z-30"
+            onClick={() => { setLeftSidebarOpen(false); setRightSidebarOpen(false); }}
+            aria-hidden="true"
+          />
+        )}
+
+        {/* Left sidebar column */}
+        <div className="flex shrink-0">
+          {/* Desktop: sidebar in flex flow.  Tablet: sidebar rendered as overlay below. */}
+          {!isTablet && leftSidebarOpen && (
             <TakeoffSidebar
               projectId={storeCurrentProject?.id ?? projectId ?? ''}
               onConditionSelect={handleConditionSelect}
@@ -1018,8 +1052,29 @@ export function TakeoffWorkspace() {
           />
         </div>
 
+        {/* Tablet left-sidebar drawer overlay — absolute, left of toggle strip */}
+        {isTablet && leftSidebarOpen && (
+          <div className="absolute left-10 top-0 bottom-0 z-40 shadow-2xl overflow-hidden">
+            <TakeoffSidebar
+              className="h-full"
+              projectId={storeCurrentProject?.id ?? projectId ?? ''}
+              onConditionSelect={handleConditionSelect}
+              onToolSelect={handleToolSelect}
+              documents={documents}
+              onPageSelect={tabsResult.handlePageSelect}
+              onPageOpenInNewTab={tabsResult.handlePageOpenInNewTab}
+              onExportStatusUpdate={handleExportStatusUpdate}
+              onCutoutMode={handleCutoutMode}
+              cutoutMode={cutoutMode}
+              cutoutTargetConditionId={cutoutTargetConditionId}
+              viewerDocumentId={currentPdfFile?.id ?? null}
+              currentPage={currentPage}
+            />
+          </div>
+        )}
+
         {/* PDF Viewer - Fixed height container */}
-        <div className="flex-1 flex flex-col h-full overflow-hidden">
+        <div className="relative flex-1 flex flex-col h-full overflow-hidden">
           {tabsResult.hasTabs && (
             <PDFViewerTabBar
               projectId={projectId ?? ''}
@@ -1080,6 +1135,7 @@ export function TakeoffWorkspace() {
               onHyperlinkClick={(sheetId, pageNumber) => tabsResult.handlePageOpenInNewTab(sheetId, pageNumber)}
               onHyperlinkContextMenu={handleHyperlinkContextMenu}
               onRegisterEnterConditionDrawMode={handleRegisterEnterConditionDrawMode}
+              onRegisterFinishMeasurement={handleRegisterFinishMeasurement}
             />
           ) : !projectFilesListReady ? (
             <div className="flex flex-col items-center justify-center flex-1 bg-muted/30 gap-3" role="status" aria-live="polite">
@@ -1098,10 +1154,22 @@ export function TakeoffWorkspace() {
               <div className="text-muted-foreground">Select a sheet</div>
             </div>
           )}
+          {/* Floating toolbar: touch-friendly equivalents for keyboard-only actions.
+              Tablet-only — desktop users have Esc, double-click, and ⌘Z. */}
+          <TakeoffFloatingToolbar
+            visible={isTablet && (isMeasuring || isCalibrating)}
+            measurementType={measurementType}
+            isCalibrating={isCalibrating}
+            canUndo={canUndo}
+            onUndo={() => undo()}
+            onCancel={handleFloatingCancel}
+            onFinish={() => finishMeasurementRef.current?.()}
+          />
           <SearchResultsList results={[]} />
         </div>
 
         <TakeoffWorkspaceRightSidebar
+          isTabletDrawer={isTablet}
           rightSidebarOpen={rightSidebarOpen}
           onRightSidebarOpenChange={setRightSidebarOpen}
           rightSidebarTab={rightSidebarTab}

@@ -33,10 +33,10 @@ async function runWithConcurrency<T>(
   const limit = Math.min(Math.max(1, concurrency), items.length);
   let nextIndex = 0;
   async function runner(): Promise<void> {
-    while (true) {
-      const i = nextIndex++;
-      if (i >= items.length) return;
-      await worker(items[i]!, i);
+    for (let i = nextIndex++; i < items.length; i = nextIndex++) {
+      const item = items[i];
+      if (item === undefined) continue;
+      await worker(item, i);
     }
   }
   await Promise.all(Array.from({ length: limit }, () => runner()));
@@ -66,7 +66,9 @@ function parseCalloutHyperlinkPassJson(stdout: string, stderr: string): CalloutP
   try {
     return tryParse(t);
   } catch {
-    const lineStarts = [...t.matchAll(/\n\{/g)].map((m) => m.index! + 1);
+    const lineStarts = [...t.matchAll(/\n\{/g)]
+      .map((m) => (m.index === undefined ? -1 : m.index + 1))
+      .filter((idx) => idx >= 0);
     for (const idx of lineStarts.reverse()) {
       try {
         return tryParse(t.slice(idx));
@@ -279,14 +281,16 @@ class AutoCountService {
   ): Promise<void> {
     const scale = 2.0;
     const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
-    const hasJs =
+    const validPageSize =
       pdfJsPageSize &&
       typeof pdfJsPageSize.width === 'number' &&
       pdfJsPageSize.width > 0 &&
       typeof pdfJsPageSize.height === 'number' &&
-      pdfJsPageSize.height > 0;
-    const command = hasJs
-      ? `${pythonCommand} "${this.extractTemplateClipScriptPath}" "${pdfPath}" ${pageNumber} ${scale} ${selectionBox.x} ${selectionBox.y} ${selectionBox.width} ${selectionBox.height} ${pdfJsPageSize!.width} ${pdfJsPageSize!.height} "${outputPath}"`
+      pdfJsPageSize.height > 0
+        ? pdfJsPageSize
+        : null;
+    const command = validPageSize
+      ? `${pythonCommand} "${this.extractTemplateClipScriptPath}" "${pdfPath}" ${pageNumber} ${scale} ${selectionBox.x} ${selectionBox.y} ${selectionBox.width} ${selectionBox.height} ${validPageSize.width} ${validPageSize.height} "${outputPath}"`
       : `${pythonCommand} "${this.extractTemplateClipScriptPath}" "${pdfPath}" ${pageNumber} ${scale} ${selectionBox.x} ${selectionBox.y} ${selectionBox.width} ${selectionBox.height} "${outputPath}"`;
 
     devLog(`📐 [extractMeridianClipToPng] selectionBox=`, selectionBox,
@@ -816,7 +820,7 @@ except Exception as e:
         });
         stdout = execResult.stdout;
         stderr = execResult.stderr;
-      } catch (execError: any) {
+      } catch (execError: unknown) {
         // Clean up temp file
         await removeVisualSearchTemp(fullPageImagePath);
         throw new Error(`Auto-count failed: ${execError instanceof Error ? execError.message : 'Unknown error'}`);
@@ -1146,10 +1150,9 @@ except Exception as e:
       const measurementsByPage = new Map<string, typeof conditionMeasurements>();
       for (const measurement of conditionMeasurements) {
         const key = measurement.sheetId;
-        if (!measurementsByPage.has(key)) {
-          measurementsByPage.set(key, []);
-        }
-        measurementsByPage.get(key)!.push(measurement);
+        const bucket = measurementsByPage.get(key) ?? [];
+        bucket.push(measurement);
+        measurementsByPage.set(key, bucket);
       }
 
       const thumbnails: Array<{ measurementId: string; thumbnail: string }> = [];
@@ -1205,7 +1208,7 @@ except Exception as e:
                   height: descData.baseViewport.height
                 };
               }
-            } catch (e) {
+            } catch {
               // Description is not JSON, fall back to center point method
             }
           }
