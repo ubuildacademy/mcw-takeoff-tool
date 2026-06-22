@@ -70,7 +70,7 @@ export const DEFAULT_HELP_FAQ_CONFIG: HelpFaqConfig = {
     id: 'measure',
     question: 'How do I start measuring?',
     answer:
-      'Create or select a condition in the left Takeoff sidebar, then press Space (when not typing in a field) or draw on the plan for that condition type. The status bar shows your active condition.',
+      'Create or select a condition in the left Takeoff sidebar, then draw on the plan for that condition type. On desktop, press Space (when not typing in a field) to start drawing from plan-only selection. On iPad, tap the condition and use touch or Apple Pencil on the canvas. The status bar shows your active condition.',
   },
   {
     id: 'left-vs-right',
@@ -94,7 +94,13 @@ export const DEFAULT_HELP_FAQ_CONFIG: HelpFaqConfig = {
     id: 'space-escape',
     question: 'What do Space and Escape do?',
     answer:
-      'Space starts drawing for the selected condition or clears/re-selects it depending on context. Escape backs out one step (last point, mode, or selection). See the shortcuts guide for the full list.',
+      'Space starts drawing for the selected condition or clears/re-selects it depending on context. Escape backs out one step (last point, mode, or selection). On iPad without a keyboard, use the floating Undo/Cancel/Finish toolbar while measuring. See the shortcuts guide for the full list.',
+  },
+  {
+    id: 'ipad-tablet',
+    question: 'Can I use Meridian Takeoff on iPad?',
+    answer:
+      'Yes. Use Safari or add the app to your Home Screen for full-screen use. Pinch to zoom, drag with one finger to pan, tap to measure, double-tap or Finish to complete a shape, and long-press a markup for the context menu. Sidebars open as slide-over drawers on narrow screens. See the workspace guide section Tablet & touch for details.',
   },
   {
     id: 'tools-profile',
@@ -170,6 +176,7 @@ export const HELP_HUB_CARDS: Array<{
       'Three-column layout and sidebars',
       'Documents, Search, and AI Chat',
       'Titleblock extraction and status bar',
+      'Tablet & touch (iPad) gestures',
     ],
   },
   {
@@ -179,6 +186,7 @@ export const HELP_HUB_CARDS: Array<{
     highlights: [
       'Calibrate and measure in six steps',
       'Space, Escape, undo, and hyperlinks',
+      'Touch & tablet gesture reference',
       'Profile vs Tools settings',
     ],
   },
@@ -198,16 +206,16 @@ export function getHelpSubtitle(surface: HelpSurface): string {
 
 export function getWorkspaceContextTip(state: WorkspaceHelpState): string | null {
   if (state.isCalibrating) {
-    return 'Click two points along your known dimension. Escape removes the last point.';
+    return 'Tap two points along your known dimension. Escape or Cancel (floating toolbar on iPad) removes the last point.';
   }
   if (state.isMeasuring) {
-    return 'Draw on the plan for the selected condition. Escape removes the last point.';
+    return 'Draw on the plan for the selected condition. Escape or Cancel removes the last point; double-tap or Finish completes multi-point shapes.';
   }
   if (!state.hasOpenPdf) {
     return 'Open the right sidebar (edge chevron) → Documents to upload PDFs and open a sheet.';
   }
   if (!state.hasSelectedCondition) {
-    return 'Select a condition on the left, then press Space to start measuring.';
+    return 'Select a condition on the left, then press Space (desktop) or tap and draw on the plan (iPad).';
   }
   return null;
 }
@@ -244,7 +252,7 @@ const HELP_TOPICS: Record<HelpTopicId, HelpItem & { guideHref: string }> = {
     id: 'calibrate',
     question: 'Calibrating scale',
     answer:
-      'Enter a known real-world length, then click two points along that dimension on the drawing. Use a dimension line or scale bar when possible. Escape removes the last point; re-calibrate after rotating a page.',
+      'Enter a known real-world length, then click or tap two points along that dimension on the drawing. Use a dimension line or scale bar when possible. Escape or Cancel removes the last point; re-calibrate after rotating a page.',
     guideHref: '/help/shortcuts',
   },
 };

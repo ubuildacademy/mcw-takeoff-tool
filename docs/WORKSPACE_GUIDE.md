@@ -34,6 +34,18 @@ The takeoff workspace URL is `/project/<projectId>`.
 - **Left edge chevron** (beside the takeoff panel): hide or show the **Takeoff** column.
 - **Right edge chevron** (beside the viewer): hide or show the **Documents / Search / AI Chat** column.
 
+**Tablet layout (iPad, narrow screens)**
+
+On viewports **under 1024px wide** (typical iPad portrait, phone, or a narrow browser window):
+
+- Both sidebars behave as **slide-over drawers** over the PDF instead of fixed columns.
+- The **left drawer** opens from the left edge chevron; the **right drawer** opens from the right edge chevron.
+- Tap the **semi-transparent backdrop** behind an open drawer to close it and return to the full canvas.
+- The left drawer **starts closed** when you enter tablet layout so the drawing area is maximized.
+- Header and status bar respect **safe areas** (notch, home indicator) when added to the Home Screen.
+
+With an **external keyboard** attached on a wide iPad (landscape, ≥1024px), the app uses the **desktop layout** and keyboard shortcuts; touch gestures still work on the canvas.
+
 ---
 
 ## 3. Left sidebar — Takeoff (Conditions, Reports, Costs)
@@ -167,10 +179,21 @@ A **project-scoped chat** that uses a **local or hosted LLM** via **Ollama** (co
 
 ### PDF viewer
 
-- **Pan**: middle-mouse drag (see hotkey doc).
-- **Zoom**: Ctrl/Cmd + scroll wheel; also **View** menu / zoom buttons in the header.
-- **Measure** only after you **select a condition** on the left and follow the tool’s click/drag behavior for that type.
-- **Hyperlinks**, **cutouts**, and **annotations** integrate here (shortcuts in the quick reference).
+**Desktop**
+
+- **Pan**: middle-mouse drag (see [shortcuts guide](/help/shortcuts)).
+- **Zoom**: Cmd/Ctrl + scroll wheel; also **View** menu / zoom buttons in the header.
+
+**Touch (iPad, Apple Pencil)**
+
+- **Pan**: one finger drag on the canvas when **not** drawing.
+- **Zoom**: two-finger pinch on the canvas.
+- **Draw**: tap or use Apple Pencil when a condition is selected (same as mouse clicks for that measurement type).
+- **Finish** a multi-point measurement: **double-tap** the canvas, or tap **Finish** on the floating toolbar (see [Tablet & touch](#8-tablet--touch-ipad) below).
+- **Context menu** on a markup: **long-press** (~½ second) on the measurement — same actions as right-click on desktop (stack order, select all similar).
+
+- **Measure** only after you **select a condition** on the left and follow the tool’s tap/drag behavior for that type.
+- **Hyperlinks**, **cutouts**, and **annotations** integrate here (shortcuts on desktop; touch equivalents in the [shortcuts guide](/help/shortcuts)).
 
 ---
 
@@ -199,7 +222,55 @@ A **project-scoped chat** that uses a **local or hosted LLM** via **Ollama** (co
 
 ---
 
-## 8. Related documentation
+## 8. Tablet & touch (iPad)
+
+Meridian Takeoff is usable on **iPad and other touch devices** in the browser, or as a **Home Screen web app** for a more app-like experience.
+
+### Add to Home Screen (optional)
+
+In **Safari** on iPad: **Share** → **Add to Home Screen**. The app opens full-screen with the Meridian icon. This uses the same account and data as the browser — no separate install.
+
+### Gestures on the PDF
+
+| Gesture | When | What it does |
+|---------|------|----------------|
+| **One-finger drag** | Not measuring / calibrating / annotating | **Pan** the sheet |
+| **Two-finger pinch** | Any time on the canvas | **Zoom** in or out |
+| **Tap** | Condition selected, drawing mode | Place points (count, linear, area, etc.) |
+| **Double-tap** | Multi-point measurement in progress | **Finish** the measurement (same as double-click on desktop) |
+| **Long-press** (~½ s) | Markup selected / selection mode | **Context menu** (bring forward, send backward, select all similar) |
+
+### Floating toolbar while drawing
+
+On tablet layout, while you are **measuring** or **calibrating**, a **pill toolbar** appears at the bottom of the viewer:
+
+| Button | Desktop equivalent |
+|--------|-------------------|
+| **Undo** | Cmd/Ctrl+Z |
+| **Cancel** | Escape (exit or step back) |
+| **Finish** | Double-click / double-tap (hidden for **count** and calibration) |
+
+This toolbar does **not** appear on desktop — use the keyboard there.
+
+### Sidebars on tablet
+
+Open **Takeoff** (left) or **Documents / Search / AI Chat** (right) with the **edge chevrons**. Drawers slide over the PDF; tap outside on the dimmed area to close. Condition row actions (hide, cutout, edit, etc.) stay available with larger tap targets.
+
+### Keyboard on iPad
+
+If you use a **Magic Keyboard** or Bluetooth keyboard:
+
+- All shortcuts in the [shortcuts guide](/help/shortcuts) work when focus is not in a text field.
+- In **wide** landscape (≥1024px), layout matches desktop (no floating toolbar).
+- Touch gestures and keyboard shortcuts can be mixed (e.g. pinch zoom, then Space to start measuring).
+
+### Dialogs and the on-screen keyboard
+
+When a dialog asks for text (e.g. calibration distance), the sheet shifts up so fields stay visible above the **software keyboard**.
+
+---
+
+## 9. Related documentation
 
 - **[Quick start & shortcuts](/help/shortcuts)** — Shortcuts, Space/Escape, Profile, Tools dialog.
 - **[Help home](/help)** — Search all guides and FAQs; print or save guides as PDF.

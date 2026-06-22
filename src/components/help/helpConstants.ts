@@ -8,6 +8,7 @@ export const HELP_SEARCH_SUGGESTIONS = [
   'Space shortcut',
   'titleblock',
   'OCR search',
+  'iPad touch',
 ] as const;
 
 export function faqAnchorId(surface: 'dashboard' | 'workspace', itemId: string): string {

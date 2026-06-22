@@ -133,6 +133,42 @@ Zoom is clamped to a sensible range so very large zoom does not freeze the viewe
 
 ---
 
+## Touch & tablet (iPad)
+
+On **iPad** and other touch devices, use these gestures on the PDF canvas. For layout (drawer sidebars, Home Screen app), see the **[Workspace guide](/help/workspace)** — section *Tablet & touch*.
+
+### Gestures
+
+| Action | Touch control |
+|--------|----------------|
+| **Pan** | One-finger drag (when not drawing) |
+| **Zoom** | Two-finger pinch |
+| **Place point** | Tap (or Apple Pencil) while measuring / calibrating / annotating |
+| **Finish** measurement | **Double-tap**, or **Finish** on the floating toolbar (tablet only) |
+| **Context menu** on markup | **Long-press** (~½ second) on the measurement |
+| **Open markup context menu** (desktop) | Right-click |
+
+### Floating toolbar (tablet only)
+
+While **measuring** or **calibrating** on a narrow screen (<1024px), a bottom toolbar offers **Undo**, **Cancel**, and **Finish** — the touch equivalents of Cmd/Ctrl+Z, Escape, and double-click. It is hidden on desktop and on wide iPad landscape with a keyboard.
+
+### Touch ↔ keyboard mapping
+
+| Desktop | Touch / tablet |
+|---------|----------------|
+| **Space** — start drawing for selected condition | Tap the condition in the left sidebar (drawer), then draw on the plan |
+| **Escape** — back one step / exit mode | **Cancel** on floating toolbar, or attached keyboard **Esc** |
+| **Cmd/Ctrl+Z** — undo | **Undo** on floating toolbar, or keyboard shortcut |
+| **Double-click** — finish multi-point measurement | **Double-tap**, or **Finish** on floating toolbar |
+| **Right-click** markup | **Long-press** markup |
+| **Cmd/Ctrl** + scroll — zoom | **Pinch** |
+| **Middle-mouse drag** — pan | **One-finger drag** (idle mode) |
+| **H** — hyperlink mode | Use **Tools** → Add hyperlink (no single-letter keys on touch keyboard without hardware keyboard) |
+
+With an **external keyboard**, desktop shortcuts apply. Touch gestures still work on the canvas at the same time.
+
+---
+
 ## Tabs
 
 - Click a **tab** to switch drawings.
@@ -144,7 +180,8 @@ Zoom is clamped to a sensible range so very large zoom does not freeze the viewe
 ## Tips
 
 - If a shortcut “does nothing,” click the PDF or a neutral area so focus is not inside an input, then try again.
-- Use **Escape** to step back one point at a time instead of canceling the entire operation when possible.
+- On **iPad**, use the **floating toolbar** or gestures above when no keyboard is attached.
+- Use **Escape** (or **Cancel** on tablet) to step back one point at a time instead of canceling the entire operation when possible.
 - Keep **calibration** on a clear, known dimension for best accuracy.
 
 ---
