@@ -44,28 +44,56 @@ router.post('/invitations', requireAuth, requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Invalid role' });
     }
 
-    // Check if user already exists
-    const { data: existingUsers } = await supabase.auth.admin.listUsers();
-    const userExists = existingUsers?.users?.some((user: any) => user.email?.toLowerCase() === email);
+    // Check if user already exists — page through all users to avoid the
+    // default 50-user page limit silently missing accounts.
+    let userExists = false;
+    let page = 1;
+    const perPage = 1000;
+    while (!userExists) {
+      const { data: pageData, error: listError } = await supabase.auth.admin.listUsers({ page, perPage });
+      if (listError) {
+        console.error('Error listing users:', listError);
+        return res.status(500).json({ error: 'Failed to check existing users' });
+      }
+      const users = pageData?.users ?? [];
+      if (users.some((u: any) => u.email?.toLowerCase() === email)) {
+        userExists = true;
+        break;
+      }
+      if (users.length < perPage) break; // last page
+      page++;
+    }
     if (userExists) {
       return res.status(400).json({ error: 'User already exists' });
     }
 
-    // Check if invitation already exists
-    const { data: existingInvitation, error: existingError } = await supabase
+    const now = new Date().toISOString();
+
+    // Check for an active (non-expired) pending invitation.
+    const { data: activeInvitation, error: existingError } = await supabase
       .from('user_invitations')
-      .select('id')
+      .select('id, expires_at')
       .eq('email', email)
       .eq('status', 'pending')
+      .gte('expires_at', now)
       .maybeSingle();
 
     if (existingError) {
       console.error('Error checking existing invitation:', existingError);
       return res.status(500).json({ error: 'Failed to check invitations', details: existingError.message });
     }
-    if (existingInvitation) {
+    if (activeInvitation) {
       return res.status(400).json({ error: 'Invitation already exists' });
     }
+
+    // Expire any stale pending invitations for this email before creating a
+    // fresh one (avoids orphaned rows blocking future re-invites).
+    await supabase
+      .from('user_invitations')
+      .update({ status: 'expired' })
+      .eq('email', email)
+      .eq('status', 'pending')
+      .lt('expires_at', now);
 
     const inviteToken = crypto.randomUUID();
     const expiresAt = new Date();
