@@ -1998,10 +1998,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Allow PDF render when user changes page so overlay (preview, crosshair) has correct viewport on every page.
     const isInitialRender = !isInitialRenderComplete;
     const samePageAsLastRender = lastRenderedPageRef.current === pageNum;
+    // Block canvas re-renders only when the user is ACTIVELY drawing (has placed ≥1 point)
+    // or in other interactive states that would cause flicker (calibrating, deselect cooldown,
+    // text annotation).  Merely having a condition selected (isMeasuring=true, no points yet)
+    // is NOT a reason to block — the deferred re-render path in the zoom effect needs this to
+    // fire so the canvas stays sharp and the full scroll range is available.
     const blockRenders =
       !isInitialRender &&
       samePageAsLastRender &&
-      (isMeasuring || isCalibrating || currentMeasurement.length > 0 || (isDeselecting && isInitialRenderComplete) || (isAnnotating && !showTextInput));
+      ((isMeasuring && currentMeasurement.length > 0) || isCalibrating || (isDeselecting && isInitialRenderComplete) || (isAnnotating && !showTextInput));
     
     if (blockRenders) {
       return;
@@ -2090,7 +2095,22 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       lastRenderedScaleRef.current = viewState.scale;
       lastRenderedRotationRef.current = viewState.rotation;
       
-      // Clear any interactive CSS transforms (no longer needed after full render)
+      // Clear any interactive CSS transforms (no longer needed after full render).
+      // Before clearing, compensate scroll so the visible viewport centre does not jump.
+      // If a CSS scale(P) was applied while the canvas was at the old render scale, the
+      // canvas has now been redrawn at P× the old scale.  The correct adjustment is:
+      //   scrollLeft' = scrollLeft + clientWidth / 2 × (1 − P)
+      // which undoes the visual shift introduced when we applied scale(P).
+      if (pdfCanvasRef.current && containerRef.current) {
+        const t = pdfCanvasRef.current.style.transform;
+        const prevCssScale = t.startsWith('scale(') ? (parseFloat(t.slice(6, -1)) || 1.0) : 1.0;
+        if (Math.abs(prevCssScale - 1.0) > 0.001) {
+          const cw = containerRef.current.clientWidth;
+          const ch = containerRef.current.clientHeight;
+          containerRef.current.scrollLeft += cw / 2 * (1 - prevCssScale);
+          containerRef.current.scrollTop  += ch / 2 * (1 - prevCssScale);
+        }
+      }
       if (pdfCanvasRef.current) {
         pdfCanvasRef.current.style.transform = '';
         pdfCanvasRef.current.style.transformOrigin = '';
@@ -2726,6 +2746,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     };
   }, [onLocationChange]);
 
+  // Keep the latest onLocationChange accessible inside the [] effect below without
+  // re-running it on every prop change (which would re-register the window globals).
+  const onLocationChangeRef = useRef(onLocationChange);
+  onLocationChangeRef.current = onLocationChange;
+
   // Add global functions to restore scroll position and read current scroll (for beforeunload save)
   useEffect(() => {
     setRestoreScrollPosition((x: number, y: number) => {
@@ -2742,6 +2767,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     });
 
     return () => {
+      // Flush the current scroll position synchronously before clearing the window globals.
+      // PDFViewer unmounts before TakeoffWorkspace (React unmounts children first), so the
+      // debounced scroll listener and TakeoffWorkspace's beforeunload handler can no longer
+      // read the container scroll after this cleanup runs. Calling onLocationChange here
+      // ensures the position reaches the Zustand store (and localStorage) immediately.
+      const container = containerRef.current;
+      if (container && onLocationChangeRef.current) {
+        onLocationChangeRef.current(container.scrollLeft, container.scrollTop);
+      }
       setRestoreScrollPosition(undefined);
       setGetCurrentScrollPosition(undefined);
     };
@@ -2771,12 +2805,56 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     return () => document.removeEventListener('wheel', onWheel, { capture: true });
   }, []);
 
+  // Tracks the previous rendersBlockedForZoom value and scale so the effect below can
+  // distinguish "just entered blocked state" from "already blocked and scale changed".
+  const prevRendersBlockedForZoomRef = useRef(rendersBlockedForZoom);
+  const prevEffectScaleRef = useRef(viewState.scale);
+
   // Apply or clear interactive CSS zoom when external scale changes while renders are blocked
   useEffect(() => {
+    const wasBlockedBefore = prevRendersBlockedForZoomRef.current;
+    prevRendersBlockedForZoomRef.current = rendersBlockedForZoom;
+    prevEffectScaleRef.current = viewState.scale;
+
+    // Helper: read the CSS scale currently on the canvas element.
+    const readPrevCssScale = (): number => {
+      const t = pdfCanvasRef.current?.style.transform ?? '';
+      return t.startsWith('scale(') ? (parseFloat(t.slice(6, -1)) || 1.0) : 1.0;
+    };
+
     if (rendersBlockedForZoom) {
+      const justBecameBlocked = !wasBlockedBefore;
+      if (justBecameBlocked) {
+        // Renders just became blocked because the user entered measuring/calibrating mode
+        // (e.g. selected a condition from the sidebar). The canvas was just rendered cleanly
+        // at the current scale, so no CSS transform is needed — and applying one would
+        // trigger scroll compensation that causes a visible page jump (the regression).
+        // Skip; any in-flight render will complete and remain visible (no flicker since the
+        // canvas content is correct). If the user then zooms WHILE measuring, the scale-
+        // change path below will apply a CSS transform correctly.
+        return;
+      }
+      // Already blocked and something changed (scale/rotation updated while measuring).
       applyInteractiveZoomTransforms();
     } else {
-      // Clear transforms if any
+      // Renders just became unblocked. Before clearing CSS transforms, compensate scroll
+      // so the same viewport centre remains over the same content.
+      const canvas = pdfCanvasRef.current;
+      const container = containerRef.current;
+      if (canvas && container) {
+        const prevCssScale = readPrevCssScale();
+        if (Math.abs(prevCssScale - 1.0) > 0.001) {
+          // Going from scale(P) → no transform. Apply centre-maintain reversal so the
+          // viewport doesn't jump when the CSS scale is removed.
+          const ratio = 1.0 / prevCssScale;
+          const cw = container.clientWidth;
+          const ch = container.clientHeight;
+          container.scrollLeft = ratio * (container.scrollLeft + cw / 2) - cw / 2;
+          container.scrollTop  = ratio * (container.scrollTop  + ch / 2) - ch / 2;
+        }
+      }
+
+      // Clear transforms
       if (pdfCanvasRef.current) {
         pdfCanvasRef.current.style.transform = '';
         pdfCanvasRef.current.style.transformOrigin = '';
@@ -2932,31 +3010,53 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   // Optimized re-render when view state changes (zoom/rotation)
   useEffect(() => {
     if (pdfDocument && isComponentMounted && isInitialRenderComplete) {
-      // ANTI-FLICKER: Skip PDF re-render during interactive operations or deselection cooldown
-      // Allow PDF renders during text annotation input (showTextInput = true)
-      // Allow initial renders even if in deselection mode (for page loads)
-      if (isMeasuring || isCalibrating || currentMeasurement.length > 0 || (isDeselecting && isInitialRenderComplete) || (isAnnotating && !showTextInput)) {
-        // When blocked, simulate zoom via CSS transform so the user sees immediate zoom
-        // without re-rendering the PDF canvas (prevents flicker while drawing)
-        applyInteractiveZoomTransforms();
+      // "Actively drawing" = user has placed at least one point in the current stroke.
+      // Only THEN do we fully block re-renders to prevent canvas flicker mid-draw.
+      const isActivelyDrawing = isMeasuring && currentMeasurement.length > 0;
+
+      // Hard-block cases: mid-draw, calibrating, deselect cooldown, text annotation in progress.
+      // CSS transform management (applyInteractiveZoomTransforms) is handled exclusively by the
+      // rendersBlockedForZoom effect above, which skips transforms on initial block entry to
+      // prevent the canvas-jump regression (see PDF_VIEWER_ZOOM_DEBUG.md).
+      if (isActivelyDrawing || isCalibrating || (isDeselecting && isInitialRenderComplete) || (isAnnotating && !showTextInput)) {
         return;
       }
-      
-      // NOTE: Removed redundant isDeselecting block - the check above already handles it
-      // Allowing renders during deselection enables proper markup selection
-      
-      // Optimized debounce for non-interactive mode
-      // CRITICAL: Use ref to avoid dependency on renderPDFPage which changes frequently
+
+      // Condition selected but no drawing started yet: trigger a real canvas re-render after
+      // the zoom gesture settles (200 ms).  This eliminates blurry scaled bitmaps and fixes
+      // the CSS-scroll-range limitation (CSS transforms don't expand the scrollable area, so
+      // at high zoom levels the user couldn't pan to the edges of the document).
+      // NOTE: We deliberately do NOT call applyInteractiveZoomTransforms() here — doing so
+      // while the canvas is still at the previous scale causes an immediate visible jump.
+      // The rendersBlockedForZoom effect handles transforms when already-blocked + scale changes.
+      if (isMeasuring) {
+        const cleanupId = setTimeout(() => {
+          // Remap scroll position from CSS-transform space to full-canvas space so the
+          // same content stays centred after the canvas resizes.
+          // Formula: centre_content is invariant → scrollNew = (scrollOld + vw/2) * F - vw/2
+          // where F = targetScale / lastRenderedScale = the CSS scale factor in effect.
+          const container = containerRef.current;
+          if (container) {
+            const F = viewState.scale / (lastRenderedScaleRef.current || 1);
+            if (Math.abs(F - 1) > 0.001) {
+              const vw = container.clientWidth;
+              const vh = container.clientHeight;
+              container.scrollLeft = (container.scrollLeft + vw / 2) * F - vw / 2;
+              container.scrollTop  = (container.scrollTop  + vh / 2) * F - vh / 2;
+            }
+          }
+          renderPDFPageRef.current?.(currentPage);
+        }, 200);
+        return () => clearTimeout(cleanupId);
+      }
+
+      // Normal (no condition selected): 30 ms debounce for crisp re-render.
       const timeoutId = setTimeout(() => {
-        if (renderPDFPageRef.current) {
-          renderPDFPageRef.current(currentPage);
-        }
-      }, 30); // Further reduced debounce for better responsiveness
-      
+        renderPDFPageRef.current?.(currentPage);
+      }, 30);
       return () => clearTimeout(timeoutId);
     }
   // NOTE: Using renderPDFPageRef instead of renderPDFPage to prevent cascading re-renders
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- applyInteractiveZoomTransforms intentionally omitted to avoid cascade
   }, [pdfDocument, viewState, currentPage, isComponentMounted, isMeasuring, isCalibrating, currentMeasurement, isDeselecting, isInitialRenderComplete, isAnnotating, showTextInput]);
 
 

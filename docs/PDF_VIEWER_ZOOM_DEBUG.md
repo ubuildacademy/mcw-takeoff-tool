@@ -35,7 +35,7 @@ When renders are **unblocked**, CSS transforms are cleared and `renderPDFPage` e
 
 ---
 
-## Fixed bug (2026-06): canvas jump + crosshair offset
+## Fixed bug (2026-06 v1): canvas jump + crosshair offset — deselect+Space path
 
 ### Symptoms
 
@@ -47,6 +47,47 @@ When renders are **unblocked**, CSS transforms are cleared and `renderPDFPage` e
 - Second cycle (deselect → Space again) often worked fine.
 
 Also reproducible when toggling measuring mode while `viewState.scale ≠ lastRenderedScaleRef` (e.g. zoomed during `isDeselecting` cooldown, then Space to draw).
+
+---
+
+## Regression (2026-06 v2): canvas jump on fresh sidebar condition select
+
+### Symptoms
+
+- User **zooms in**, pans to their area, then **selects a linear (or any) condition from the sidebar**.
+- The page visibly shifts at the moment of selection; crosshairs appear far from cursor.
+- No prior deselect cycle required — happens on a fresh condition pick.
+
+### Root cause
+
+The re-render effect (effect 3010) was calling `applyInteractiveZoomTransforms()` **immediately** in both the hard-block path and the soft-block (isMeasuring, no points yet) path every time the effect fired.
+
+When the user selected a condition:
+1. `isMeasuring` became `true` → effect 3010 fired.
+2. `applyInteractiveZoomTransforms()` was called.  If `lastRenderedScaleRef ≠ viewState.scale` (a 30–500 ms race window where an in-flight render hadn't completed yet), it applied `scale(R)` to the canvas **and** scroll-compensated by `R×(scroll + vw/2) − vw/2`.
+3. The in-flight render then completed — `renderPDFPage` cleared the CSS transform **without reversing** the scroll compensation, leaving the viewport at the wrong scroll position.
+
+The `rendersBlockedForZoom` effect (effect 2789) had the same issue: it called `applyInteractiveZoomTransforms()` unconditionally whenever `rendersBlockedForZoom` became `true`, including the first entry into measuring mode.
+
+Additionally, the clear path (when `rendersBlockedForZoom` went back to `false`) never compensated scroll before removing the CSS transform, so every deselect-cooldown cycle that included a zoom left a residual scroll drift.
+
+### Fix (2026-06 v2)
+
+**1. Skip CSS transform on initial block entry** (`PDFViewer.tsx` — effect 2789)
+
+Track `prevRendersBlockedForZoomRef`. When `rendersBlockedForZoom` just became `true` (the `wasBlockedBefore` flag is `false`), return immediately without calling `applyInteractiveZoomTransforms()`.  When scale/rotation changes *while already blocked*, `wasBlockedBefore` is `true` and the transform is applied normally (correct interactive-zoom behaviour).
+
+**2. Compensate scroll when unblocking** (`PDFViewer.tsx` — effect 2789 else branch)
+
+Before clearing CSS transforms when `rendersBlockedForZoom` goes `false`, apply the centre-maintain reversal:
+`scrollLeft = (1/P) × (scrollLeft + cw/2) − cw/2` (where P = previous CSS scale).
+
+**3. Remove redundant calls from the render effect** (`PDFViewer.tsx` — effect 3010)
+
+Removed `applyInteractiveZoomTransforms()` from the hard-block (`isActivelyDrawing / isCalibrating / isDeselecting / isAnnotating`) and soft-block (`isMeasuring` only) branches.  All CSS transform management now lives exclusively in effect 2789.  The soft-block path still schedules the 200 ms real re-render (canvas stays crisp and full scroll range is restored).
+
+**4. Compensate scroll in `renderPDFPage`** when clearing transforms after a completed render:
+`scrollLeft += cw/2 × (1 − P)` — undoes the shift that was introduced when `scale(P)` was originally applied against the smaller old canvas.
 
 ### Reproduction (manual QA)
 
@@ -110,6 +151,7 @@ Run these after changing zoom, scroll, measuring mode, `isDeselecting`, or point
 - [ ] Zoom while **not** measuring → PDF re-renders at new scale; markups and crosshair still align.
 - [ ] Select measurement on canvas → Space to draw same condition → stable.
 - [ ] Sidebar condition pick while zoomed → draw first point lands under cursor.
+- [ ] **Zoom → navigate → click condition in sidebar** → page does NOT move; crosshair appears at cursor on first mousemove. (v2 regression test)
 
 ---
 
