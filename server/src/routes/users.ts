@@ -149,6 +149,15 @@ router.post('/invitations', requireAuth, requireAdmin, async (req, res) => {
 // Get all invitations (admin only)
 router.get('/invitations', requireAuth, requireAdmin, async (req, res) => {
   try {
+    // Auto-expire stale pending rows before returning the list so the UI
+    // never shows an "active" invitation that has already passed its deadline.
+    const fetchNow = new Date().toISOString();
+    await supabase
+      .from('user_invitations')
+      .update({ status: 'expired' })
+      .eq('status', 'pending')
+      .lt('expires_at', fetchNow);
+
     const { data, error } = await supabase
       .from('user_invitations')
       .select('*')

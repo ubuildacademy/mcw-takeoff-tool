@@ -748,15 +748,25 @@ router.post(
       const { data: projectRow } = await supabase.from(TABLES.PROJECTS).select('name').eq('id', projectId).single();
       const inviteProjectName = (projectRow?.name as string) || 'Project';
 
+      const shareNow = new Date().toISOString();
       for (const email of validRecipients) {
         if (existingEmails.has(email)) continue;
+        // Only skip if there's a non-expired pending invitation already.
         const { data: existingInv } = await supabase
           .from('user_invitations')
           .select('id')
           .eq('email', email)
           .eq('status', 'pending')
+          .gte('expires_at', shareNow)
           .maybeSingle();
         if (existingInv) continue;
+        // Expire any stale pending rows for this email before inserting a fresh one.
+        await supabase
+          .from('user_invitations')
+          .update({ status: 'expired' })
+          .eq('email', email)
+          .eq('status', 'pending')
+          .lt('expires_at', shareNow);
 
         const inviteToken = crypto.randomUUID();
         const expiresAt = new Date();
