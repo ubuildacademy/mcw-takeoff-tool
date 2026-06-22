@@ -7,6 +7,17 @@ import { authHelpers } from '../lib/supabase';
 import { authService } from '../services/apiService';
 import { validatePassword, PASSWORD_REQUIREMENTS } from '../utils/passwordValidation';
 import { LandingNav } from './LandingNav';
+import {
+  authCard,
+  authCenter,
+  authDisabledInput,
+  authInput,
+  authLabel,
+  authLink,
+  authPageShell,
+  authSubtitle,
+  authTitle,
+} from './authPageStyles';
 
 /** Minimal invitation shape for signup form (from API validation) */
 interface InvitationInfo {
@@ -135,12 +146,12 @@ const SignupPage: React.FC = () => {
 
   if (isValidating) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex flex-col">
+      <div className={authPageShell}>
         <LandingNav showBackToHome />
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
+        <div className={authCenter}>
+          <div className={`${authCard} text-center`}>
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="mt-2 text-slate-600">Validating invitation...</p>
+            <p className="mt-3 text-slate-600">Validating invitation...</p>
           </div>
         </div>
       </div>
@@ -149,16 +160,16 @@ const SignupPage: React.FC = () => {
 
   if (!invitation) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex flex-col">
+      <div className={authPageShell}>
         <LandingNav showBackToHome />
-        <div className="flex-1 flex items-center justify-center p-4">
-          <div className="max-w-md w-full text-center">
+        <div className={authCenter}>
+          <div className={`${authCard} text-center`}>
             <div className="bg-red-50 border border-red-200 rounded-md p-4">
               <p className="text-red-600">{error}</p>
             </div>
             <Link
               to="/"
-              className="mt-4 inline-block text-blue-600 hover:text-blue-500"
+              className={`${authLink} mt-4 inline-block`}
             >
               ← Back to home
             </Link>
@@ -169,15 +180,15 @@ const SignupPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex flex-col">
+    <div className={authPageShell}>
       <LandingNav showBackToHome />
-      <div className="flex-1 flex items-center justify-center p-4">
-        <div className="max-w-md w-full space-y-8">
+      <div className={authCenter}>
+        <div className={authCard}>
           <div className="text-center">
-            <h2 className="text-2xl font-semibold text-slate-700">
+            <h2 className={authTitle}>
               Complete your account setup
             </h2>
-            <p className="mt-2 text-sm text-slate-600">
+            <p className={authSubtitle}>
               You've been invited to join as a {invitation.role}
             </p>
           </div>
@@ -185,7 +196,7 @@ const SignupPage: React.FC = () => {
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="space-y-4">
             <div>
-              <Label htmlFor="email">Email address</Label>
+              <Label htmlFor="email" className={authLabel}>Email address</Label>
               <Input
                 id="email"
                 name="email"
@@ -193,11 +204,11 @@ const SignupPage: React.FC = () => {
                 autoComplete="email"
                 value={invitation.email}
                 disabled
-                className="mt-1 bg-slate-50"
+                className={authDisabledInput}
               />
             </div>
             <div>
-              <Label htmlFor="fullName">Full Name</Label>
+              <Label htmlFor="fullName" className={authLabel}>Full Name</Label>
               <Input
                 id="fullName"
                 name="fullName"
@@ -206,12 +217,12 @@ const SignupPage: React.FC = () => {
                 required
                 value={formData.fullName}
                 onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
-                className="mt-1"
+                className={authInput}
                 placeholder="Enter your full name"
               />
             </div>
             <div>
-              <Label htmlFor="company">Company (Optional)</Label>
+              <Label htmlFor="company" className={authLabel}>Company (Optional)</Label>
               <Input
                 id="company"
                 name="company"
@@ -219,12 +230,12 @@ const SignupPage: React.FC = () => {
                 autoComplete="organization"
                 value={formData.company}
                 onChange={(e) => setFormData({ ...formData, company: e.target.value })}
-                className="mt-1"
+                className={authInput}
                 placeholder="Enter your company name"
               />
             </div>
             <div>
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password" className={authLabel}>Password</Label>
               <Input
                 id="password"
                 name="password"
@@ -233,12 +244,12 @@ const SignupPage: React.FC = () => {
                 required
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                className="mt-1"
+                className={authInput}
                 placeholder={PASSWORD_REQUIREMENTS}
               />
             </div>
             <div>
-              <Label htmlFor="confirmPassword">Confirm Password</Label>
+              <Label htmlFor="confirmPassword" className={authLabel}>Confirm Password</Label>
               <Input
                 id="confirmPassword"
                 name="confirmPassword"
@@ -247,7 +258,7 @@ const SignupPage: React.FC = () => {
                 required
                 value={formData.confirmPassword}
                 onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-                className="mt-1"
+                className={authInput}
                 placeholder="Confirm your password"
               />
             </div>
@@ -272,7 +283,7 @@ const SignupPage: React.FC = () => {
           <div className="text-center">
             <Link
               to="/login"
-              className="text-sm text-blue-600 hover:text-blue-500"
+              className={authLink}
             >
               Already have an account? Sign in
             </Link>

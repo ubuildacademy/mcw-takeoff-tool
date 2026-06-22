@@ -4,8 +4,10 @@ import { BrowserRouter as Router, Routes, Route, Navigate, useParams, Link } fro
 import AuthGuard from './components/AuthGuard';
 import ErrorBoundary from './components/ErrorBoundary';
 import { useProjectStore } from './store/slices/projectSlice';
+import { useUserPreferencesStore } from './store/slices/userPreferencesSlice';
 import { runStoreMigration } from './store/migrateStores';
 import { HelpFaqProvider } from './context/HelpFaqProvider';
+import { applyThemeMode } from './lib/theme';
 
 // Route-level code splitting: heavy app routes load on demand
 const ProjectList = lazy(() => import('./components/ProjectList').then(m => ({ default: m.ProjectList })));
@@ -64,11 +66,22 @@ function NotFoundPage() {
 
 function App() {
   const loadInitialData = useProjectStore((s) => s.loadInitialData);
+  const themeMode = useUserPreferencesStore((s) => s.themeMode);
   const isDev = import.meta.env.DEV;
 
   useEffect(() => {
     runStoreMigration();
   }, []);
+
+  useEffect(() => {
+    applyThemeMode(themeMode);
+    if (themeMode !== 'system') return;
+    const media = window.matchMedia?.('(prefers-color-scheme: dark)');
+    if (!media) return;
+    const handleChange = () => applyThemeMode('system');
+    media.addEventListener('change', handleChange);
+    return () => media.removeEventListener('change', handleChange);
+  }, [themeMode]);
 
   useEffect(() => {
     if (isDev) {

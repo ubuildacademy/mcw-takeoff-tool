@@ -6,6 +6,16 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { authHelpers, supabase } from '../lib/supabase';
 import { validatePassword, PASSWORD_REQUIREMENTS } from '../utils/passwordValidation';
+import {
+  authCard,
+  authCenter,
+  authInput,
+  authLabel,
+  authLink,
+  authPageShell,
+  authSubtitle,
+  authTitle,
+} from './authPageStyles';
 
 /**
  * Landing page when user clicks "Reset Password" in the email.
@@ -54,12 +64,12 @@ const ResetPasswordPage: React.FC = () => {
 
   if (hasSession === null) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex flex-col">
+      <div className={authPageShell}>
         <LandingNav showBackToHome />
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
+        <div className={authCenter}>
+          <div className={`${authCard} text-center`}>
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto" />
-            <p className="mt-2 text-slate-600">Loading...</p>
+            <p className="mt-3 text-slate-600">Loading...</p>
           </div>
         </div>
       </div>
@@ -68,14 +78,14 @@ const ResetPasswordPage: React.FC = () => {
 
   if (hasSession === false) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex flex-col">
+      <div className={authPageShell}>
         <LandingNav showBackToHome />
-        <div className="flex-1 flex items-center justify-center p-4">
-          <div className="max-w-md w-full text-center">
+        <div className={authCenter}>
+          <div className={`${authCard} text-center`}>
             <div className="bg-amber-50 border border-amber-200 rounded-md p-4">
               <p className="text-amber-800">This link has expired or has already been used. Please request a new password reset.</p>
             </div>
-            <Link to="/login" className="mt-4 inline-block text-blue-600 hover:text-blue-500">
+            <Link to="/login" className={`${authLink} mt-4 inline-block`}>
               Back to login
             </Link>
           </div>
@@ -85,15 +95,15 @@ const ResetPasswordPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex flex-col">
+    <div className={authPageShell}>
       <LandingNav showBackToHome />
-      <div className="flex-1 flex items-center justify-center p-4">
-        <div className="max-w-md w-full space-y-8">
+      <div className={authCenter}>
+        <div className={authCard}>
           <div className="text-center">
-            <h2 className="text-2xl font-semibold text-slate-700">
+            <h2 className={authTitle}>
               Set your new password
             </h2>
-            <p className="mt-2 text-sm text-slate-600">
+            <p className={authSubtitle}>
               Enter your new password below. {PASSWORD_REQUIREMENTS}
             </p>
           </div>
@@ -101,7 +111,7 @@ const ResetPasswordPage: React.FC = () => {
           <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="space-y-4">
             <div>
-              <Label htmlFor="password">New password</Label>
+              <Label htmlFor="password" className={authLabel}>New password</Label>
               <Input
                 id="password"
                 type="password"
@@ -110,10 +120,11 @@ const ResetPasswordPage: React.FC = () => {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder={PASSWORD_REQUIREMENTS}
+                className={authInput}
               />
             </div>
             <div>
-              <Label htmlFor="confirmPassword">Confirm password</Label>
+              <Label htmlFor="confirmPassword" className={authLabel}>Confirm password</Label>
               <Input
                 id="confirmPassword"
                 type="password"
@@ -122,6 +133,7 @@ const ResetPasswordPage: React.FC = () => {
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="Confirm new password"
+                className={authInput}
               />
             </div>
           </div>

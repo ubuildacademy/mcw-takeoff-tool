@@ -24,14 +24,28 @@
     --input: 214.3 31.8% 91.4%;
     --ring: 221.2 83.2% 53.3%;
     --radius: 0.5rem;
+    --workspace-bg: 214 32% 97%;
+    --workspace-chrome: 210 29% 98%;
+    --workspace-rail: 214 24% 95%;
+    --surface-panel: 0 0% 100%;
+    --surface-subtle: 214 42% 97%;
+    --surface-hover: 214 36% 95%;
+    --surface-selected: 219 100% 97%;
+    --border-strong: 215 26% 86%;
+    --accent-blue: 221 83% 53%;
+    --accent-blue-soft: 221 100% 96%;
+    --accent-green: 145 63% 37%;
+    --accent-green-soft: 144 54% 94%;
+    --accent-warning: 31 93% 45%;
+    --accent-warning-soft: 34 100% 94%;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
+    --background: 222 47% 7%;
     --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
+    --card: 222 36% 10%;
     --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
+    --popover: 222 36% 10%;
     --popover-foreground: 210 40% 98%;
     --primary: 217.2 91.2% 59.8%;
     --primary-foreground: 222.2 84% 4.9%;
@@ -46,12 +60,460 @@
     --border: 217.2 32.6% 17.5%;
     --input: 217.2 32.6% 17.5%;
     --ring: 224.3 76.3% 94.1%;
+    --workspace-bg: 222 39% 7%;
+    --workspace-chrome: 221 31% 12%;
+    --workspace-rail: 222 27% 11%;
+    --surface-panel: 222 28% 12%;
+    --surface-subtle: 220 25% 15%;
+    --surface-hover: 220 24% 18%;
+    --surface-selected: 220 44% 18%;
+    --border-strong: 218 19% 24%;
+    --accent-blue: 217 91% 64%;
+    --accent-blue-soft: 218 56% 18%;
+    --accent-green: 145 65% 43%;
+    --accent-green-soft: 145 40% 16%;
+    --accent-warning: 34 96% 56%;
+    --accent-warning-soft: 35 62% 17%;
+  }
+}
+
+@layer components {
+  .premium-glass {
+    background: hsl(var(--surface-panel) / 0.78);
+    backdrop-filter: blur(18px) saturate(1.3);
+    border-color: hsl(var(--border-strong) / 0.78);
+    box-shadow: 0 18px 48px hsl(222 47% 11% / 0.12);
+  }
+
+  .premium-hover-lift {
+    transition:
+      transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      border-color 180ms ease,
+      box-shadow 180ms ease,
+      background-color 180ms ease,
+      color 180ms ease;
+  }
+
+  .premium-hover-lift:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 12px 30px hsl(222 47% 11% / 0.12);
+  }
+
+  .premium-press {
+    transition:
+      transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      box-shadow 180ms ease,
+      background-color 180ms ease,
+      color 180ms ease,
+      opacity 180ms ease;
+  }
+
+  .premium-press:active {
+    transform: translateY(1px) scale(0.985);
+  }
+
+  .premium-card {
+    @apply rounded-2xl border bg-white;
+    border-color: hsl(215 26% 86% / 0.86);
+    box-shadow:
+      0 1px 2px hsl(222 47% 11% / 0.04),
+      0 18px 46px hsl(222 47% 11% / 0.08);
+    transition:
+      transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      box-shadow 220ms ease,
+      border-color 220ms ease;
+  }
+
+  .premium-card:hover {
+    transform: translateY(-3px);
+    border-color: hsl(221 83% 53% / 0.25);
+    box-shadow:
+      0 2px 4px hsl(222 47% 11% / 0.05),
+      0 24px 64px hsl(222 47% 11% / 0.14);
+  }
+
+  .premium-focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2;
+  }
+
+  .marketing-page {
+    background:
+      radial-gradient(circle at 12% 8%, hsl(214 100% 92% / 0.72), transparent 28rem),
+      radial-gradient(circle at 86% 18%, hsl(172 76% 88% / 0.38), transparent 26rem),
+      linear-gradient(180deg, hsl(214 42% 98%) 0%, white 38%, hsl(214 40% 97%) 100%);
+  }
+
+  .marketing-section {
+    @apply relative overflow-hidden;
+  }
+
+  .landing-hero {
+    background:
+      radial-gradient(circle at 14% 16%, hsl(217 91% 60% / 0.34), transparent 30rem),
+      radial-gradient(circle at 86% 20%, hsl(168 76% 42% / 0.22), transparent 28rem),
+      linear-gradient(135deg, hsl(222 47% 7%) 0%, hsl(224 54% 10%) 48%, hsl(218 70% 14%) 100%);
+  }
+
+  .landing-hero::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      linear-gradient(hsl(213 100% 83% / 0.07) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(213 100% 83% / 0.07) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: linear-gradient(180deg, black, transparent 78%);
+  }
+
+  .marketing-hero {
+    @apply relative overflow-hidden bg-white;
+    background:
+      linear-gradient(hsl(215 38% 94% / 0.42) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(215 38% 94% / 0.42) 1px, transparent 1px),
+      radial-gradient(circle at 50% 0%, hsl(221 100% 95%) 0%, white 58%);
+    background-size: 44px 44px, 44px 44px, auto;
+  }
+
+  .marketing-hero::after {
+    content: '';
+    position: absolute;
+    inset: auto 0 0;
+    height: 36%;
+    pointer-events: none;
+    background: linear-gradient(180deg, transparent, white 74%);
+  }
+
+  .marketing-copy-reveal {
+    animation: premium-fade-up 700ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+
+  .marketing-kicker {
+    @apply inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wide;
+    background: hsl(221 100% 96%);
+    border-color: hsl(221 83% 53% / 0.18);
+    color: hsl(221 83% 45%);
+  }
+
+  .marketing-cta-primary {
+    @apply rounded-lg bg-blue-600 text-white shadow-lg shadow-blue-600/20 hover:bg-blue-500;
+    transition: transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 180ms ease, background-color 180ms ease;
+  }
+
+  .marketing-cta-secondary {
+    @apply rounded-lg border border-slate-300 bg-white text-slate-700 shadow-sm hover:bg-slate-50 hover:text-slate-900;
+    transition: transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 180ms ease, background-color 180ms ease, color 180ms ease;
+  }
+
+  .marketing-cta-primary:active,
+  .marketing-cta-secondary:active {
+    transform: translateY(1px) scale(0.985);
+  }
+
+  .workspace-commandbar {
+    @apply flex items-center justify-between gap-2 border-b flex-wrap lg:flex-nowrap min-w-0;
+    background:
+      linear-gradient(180deg, hsl(var(--workspace-chrome)) 0%, hsl(var(--workspace-rail)) 100%);
+    border-color: hsl(var(--border-strong));
+    box-shadow: inset 0 -1px 0 hsl(var(--border) / 0.7);
+  }
+
+  .commandbar-zone {
+    @apply flex items-center min-w-0;
+  }
+
+  .commandbar-left {
+    @apply gap-2 shrink-0;
+  }
+
+  .commandbar-center {
+    @apply flex-1 justify-center gap-2 flex-wrap lg:flex-nowrap;
+  }
+
+  .commandbar-right {
+    @apply gap-2 shrink-0;
+  }
+
+  .command-cluster {
+    @apply inline-flex items-center gap-1 rounded-lg border p-1 shadow-sm;
+    background: hsl(var(--surface-panel));
+    border-color: hsl(var(--border-strong));
+    transition: transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1), border-color 180ms ease, box-shadow 180ms ease;
+  }
+
+  .command-cluster:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 12px 30px hsl(222 47% 11% / 0.12);
+  }
+
+  .command-button {
+    @apply h-9 min-h-9 rounded-md px-3 text-sm font-semibold text-slate-700;
+    color: hsl(var(--foreground) / 0.78);
+    transition: transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1), background-color 180ms ease, color 180ms ease, opacity 180ms ease;
+  }
+
+  .command-icon-button {
+    @apply h-9 min-h-9 w-9 rounded-md p-0 text-slate-700;
+    color: hsl(var(--foreground) / 0.78);
+    transition: transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1), background-color 180ms ease, color 180ms ease, opacity 180ms ease;
+  }
+
+  .command-button:active,
+  .command-icon-button:active {
+    transform: translateY(1px) scale(0.985);
+  }
+
+  .command-button-active {
+    background: hsl(var(--accent-blue-soft));
+    color: hsl(var(--accent-blue));
+  }
+
+  .command-button-success {
+    background: hsl(var(--accent-green));
+    color: white;
+  }
+
+  .command-button-warning {
+    background: hsl(var(--accent-warning));
+    color: white;
+  }
+
+  .metric-pill {
+    @apply inline-flex h-9 min-w-[4rem] items-center justify-center rounded-md px-3 text-sm font-semibold tabular-nums text-slate-800;
+    background: hsl(var(--surface-subtle));
+    border: 1px solid hsl(var(--border));
+    color: hsl(var(--foreground) / 0.86);
+  }
+
+  .status-chip {
+    @apply inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold whitespace-nowrap;
+    background: hsl(var(--surface-panel));
+    border-color: hsl(var(--border-strong));
+    color: hsl(var(--muted-foreground));
+  }
+
+  .status-chip-success {
+    background: hsl(var(--accent-green-soft));
+    border-color: hsl(var(--accent-green) / 0.25);
+    color: hsl(var(--accent-green));
+  }
+
+  .workspace-side-panel {
+    background: hsl(var(--surface-panel));
+    border-color: hsl(var(--border-strong));
+  }
+
+  .sidebar-edge-toggle {
+    background: hsl(var(--workspace-rail));
+    border-color: hsl(var(--border-strong));
+  }
+
+  .sidebar-edge-toggle:hover {
+    background: hsl(var(--surface-panel));
+  }
+
+  .workspace-tabbar {
+    @apply flex border-b p-1;
+    background: hsl(var(--surface-subtle));
+    border-color: hsl(var(--border-strong));
+  }
+
+  .workspace-tab {
+    @apply flex-1 min-w-0 rounded-md px-2 py-2 text-sm font-semibold text-slate-500 transition-colors;
+    color: hsl(var(--muted-foreground));
+    transition: transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1), background-color 180ms ease, color 180ms ease;
+  }
+
+  .workspace-tab:active {
+    transform: translateY(1px) scale(0.99);
+  }
+
+  .workspace-tab > div {
+    @apply min-w-0;
+  }
+
+  .workspace-tab span {
+    @apply truncate;
+  }
+
+  .takeoff-panel-tabs .workspace-tab {
+    @apply px-1 text-xs;
+  }
+
+  .takeoff-panel-tabs .workspace-tab > div {
+    @apply !gap-0.5;
+  }
+
+  .takeoff-panel-tabs .workspace-tab span {
+    @apply truncate;
+  }
+
+  .workspace-tab-active {
+    @apply text-blue-700 shadow-sm;
+    background: hsl(var(--surface-panel));
+    color: hsl(var(--accent-blue));
+    box-shadow: 0 1px 0 hsl(0 0% 100% / 0.8) inset, 0 8px 18px hsl(var(--accent-blue) / 0.08);
+  }
+
+  .pdf-tabbar {
+    @apply flex items-center gap-0 border-b px-1;
+    background: hsl(var(--workspace-rail));
+    border-color: hsl(var(--border-strong));
+  }
+
+  .pdf-tab {
+    @apply flex items-center gap-1.5 shrink-0 px-3 py-2 text-sm border-b-2 cursor-pointer transition-colors;
+  }
+
+  .pdf-tab-active {
+    @apply border-primary bg-white text-foreground shadow-sm;
+    background: hsl(var(--surface-panel));
+  }
+
+  .condition-card {
+    @apply relative overflow-hidden rounded-lg border bg-white cursor-pointer transition-all;
+    background: hsl(var(--surface-panel));
+    border-color: hsl(var(--border-strong));
+    transition:
+      transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      background-color 180ms ease,
+      border-color 180ms ease,
+      box-shadow 180ms ease;
+  }
+
+  .condition-card:hover {
+    background: hsl(var(--surface-subtle));
+    border-color: hsl(var(--accent-blue) / 0.28);
+    transform: translateY(-1px);
+    box-shadow: 0 10px 28px hsl(222 47% 11% / 0.08);
+  }
+
+  .condition-card-active {
+    background: hsl(var(--surface-selected));
+    border-color: hsl(var(--accent-blue));
+    box-shadow: 0 0 0 1px hsl(var(--accent-blue) / 0.2), 0 8px 18px hsl(var(--accent-blue) / 0.08);
+  }
+
+  .condition-color-rail {
+    @apply absolute left-0 top-0 bottom-0 w-1;
+  }
+
+  .condition-kind-icon {
+    @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-md border bg-white text-slate-600;
+    background: hsl(var(--surface-panel));
+    border-color: hsl(var(--border));
+    color: hsl(var(--muted-foreground));
+  }
+
+  .condition-kind-icon svg {
+    @apply !h-5 !w-5;
+  }
+
+  .condition-card-body {
+    @apply p-2.5 pl-4;
+  }
+
+  .condition-card-header {
+    @apply grid items-start gap-2;
+    grid-template-columns: 2rem minmax(0, 1fr);
+  }
+
+  .condition-card-main {
+    @apply min-w-0;
+  }
+
+  .condition-card-title-line {
+    @apply flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1;
+  }
+
+  .condition-card-actions {
+    @apply col-start-2 flex justify-center;
+  }
+
+  .condition-unit-pill {
+    @apply inline-flex h-6 items-center rounded-full border px-2 text-[11px] font-bold uppercase tracking-wide text-slate-600;
+    background: hsl(var(--surface-subtle));
+    border-color: hsl(var(--border));
+    color: hsl(var(--muted-foreground));
+  }
+
+  .condition-total {
+    @apply text-xs font-bold text-blue-700 tabular-nums;
+    color: hsl(var(--accent-blue));
+  }
+
+  .condition-action-group {
+    @apply flex items-center gap-1;
+  }
+
+  .condition-action-button {
+    @apply !h-8 !w-8 rounded-md !p-0 text-slate-500 hover:text-slate-900;
+    color: hsl(var(--muted-foreground));
+    transition: transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1), background-color 180ms ease, color 180ms ease;
+  }
+
+  .condition-action-button:active {
+    transform: translateY(1px) scale(0.96);
+  }
+
+  .condition-action-button:hover {
+    background: hsl(var(--surface-hover));
+    color: hsl(var(--foreground));
+  }
+
+  .condition-action-icon {
+    @apply !h-5 !w-5;
+  }
+
+  .condition-action-danger {
+    @apply text-red-500 hover:text-red-700 hover:bg-red-50;
+  }
+}
+
+@keyframes premium-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes premium-sheen {
+  0%,
+  42% {
+    transform: translateX(-110%);
+  }
+  58%,
+  100% {
+    transform: translateX(110%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
+
+  .premium-hover-lift:hover,
+  .premium-card:hover,
+  .condition-card:hover {
+    transform: none;
   }
 }
 
 @layer base {
   * {
     @apply border-border;
+    /* Remove the default gray tap flash on iOS Safari for all custom interactive elements. */
+    -webkit-tap-highlight-color: transparent;
   }
   html, body, #root {
     height: 100%;
@@ -115,7 +577,24 @@
   position: relative;
 }
 
+/* ── Touch / coarse-pointer overrides ───────────────────────────────────── */
 
+@media (pointer: coarse) {
+  /* Raise command bar buttons to the 44 px minimum touch target recommended
+     by Apple HIG and WCAG 2.5.5. The visual size stays the same; the extra
+     height is absorbed by the flex layout without pushing other elements. */
+  .command-button,
+  .command-icon-button {
+    min-height: 44px;
+    min-width: 44px;
+  }
 
-
-
+  /* The hover-lift transform on command clusters looks broken on touch because
+     the cluster stays "lifted" after the finger taps it. Disable the transform
+     while keeping the transition (so it's not jarring on hybrid devices that
+     switch between touch and mouse). */
+  .command-cluster:hover {
+    transform: none;
+    box-shadow: none;
+  }
+}

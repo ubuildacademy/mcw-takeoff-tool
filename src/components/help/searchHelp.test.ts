@@ -6,7 +6,7 @@ const sample: HelpSearchEntry[] = [
   {
     id: '1',
     title: 'How do I calibrate scale?',
-    snippet: 'Use Calibrate Scale in the toolbar',
+    snippet: 'Use Calibrate Scale in the top command bar',
     href: '/help',
     type: 'faq',
     surface: 'workspace',

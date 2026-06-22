@@ -24,6 +24,7 @@ import { ProjectSettingsDialog } from './ProjectSettingsDialog';
 import { BackupDialog } from './BackupDialog';
 import { ShareProjectModal } from './ShareProjectModal';
 import UserProfile from './UserProfile';
+import { MeridianBrandMark } from './LandingNav';
 import { HelpMenu } from './help/HelpMenu';
 import { HelpWelcomeBanner } from './help/HelpWelcomeBanner';
 import { useProjectStore } from '../store/slices/projectSlice';
@@ -79,8 +80,8 @@ function groupProjectsByUser(
   return result;
 }
 
-const CARD_BASE = 'bg-white border rounded-lg p-6 cursor-pointer hover:shadow-md transition-shadow';
-const ACTION_BUTTON = 'text-gray-500 hover:text-gray-700 hover:bg-gray-50';
+const CARD_BASE = 'bg-card border rounded-lg p-6 cursor-pointer hover:shadow-md transition-shadow';
+const ACTION_BUTTON = 'text-muted-foreground hover:text-foreground hover:bg-accent';
 
 interface ProjectCardsSectionProps {
   projects: Project[];
@@ -145,16 +146,16 @@ function ProjectCard({ project, getTotalCost, onShare, onBackup, onEdit, onDelet
   const stop = (e: React.MouseEvent) => e.stopPropagation();
   const actions = (
     <div className={`flex items-center gap-1 shrink-0 ${variant === 'list' ? 'ml-4' : ''}`}>
-      <Button variant="ghost" size="sm" onClick={(e) => { stop(e); onShare(project, e); }} className="text-green-600 hover:text-green-700 hover:bg-green-50" title="Share project via email">
+      <Button variant="ghost" size="sm" onClick={(e) => { stop(e); onShare(project, e); }} className="text-green-600 hover:text-green-700 hover:bg-green-500/10" title="Share project via email">
         <Share2 className="w-4 h-4" />
       </Button>
-      <Button variant="ghost" size="sm" onClick={(e) => { stop(e); onBackup(project, e); }} className="text-blue-500 hover:text-blue-700 hover:bg-blue-50" title="Backup project">
+      <Button variant="ghost" size="sm" onClick={(e) => { stop(e); onBackup(project, e); }} className="text-blue-500 hover:text-blue-700 hover:bg-blue-500/10" title="Backup project">
         <Download className="w-4 h-4" />
       </Button>
       <Button variant="ghost" size="sm" onClick={(e) => { stop(e); onEdit(project, e); }} className={ACTION_BUTTON} title="Project settings">
         <Settings className="w-4 h-4" />
       </Button>
-      <Button variant="ghost" size="sm" onClick={(e) => { stop(e); onDelete(project.id, e); }} className="text-red-500 hover:text-red-700 hover:bg-red-50" title="Delete project">
+      <Button variant="ghost" size="sm" onClick={(e) => { stop(e); onDelete(project.id, e); }} className="text-red-500 hover:text-red-700 hover:bg-red-500/10" title="Delete project">
         <Trash2 className="w-4 h-4" />
       </Button>
     </div>
@@ -388,17 +389,11 @@ export function ProjectList() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b bg-logoBg">
+      <header className="border-b border-border bg-card/95 shadow-sm">
         <div className="max-w-7xl mx-auto px-6 py-8">
           <div className="flex items-center justify-between mb-8">
             <div className="flex items-center gap-4">
-              <img
-                src="/logo.png"
-                alt="Meridian Takeoff"
-                className="h-12 w-12 object-contain"
-                width={48}
-                height={48}
-              />
+              <MeridianBrandMark className="h-12 w-12 shrink-0 text-2xl text-foreground" />
               <h1 className="text-3xl font-bold text-foreground tracking-tight">Meridian Takeoff</h1>
             </div>
             <div className="flex items-center gap-3">
@@ -614,4 +609,3 @@ export function ProjectList() {
     </div>
   );
 }
-

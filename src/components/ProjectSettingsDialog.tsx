@@ -273,7 +273,7 @@ export function ProjectSettingsDialog({ open, onOpenChange, project, onUpdated }
                 onChange={(e) => handleInputChange('profitMarginPercent', e.target.value)}
                 placeholder="15.0"
               />
-              <p className="text-xs text-gray-500 mt-1">
+              <p className="text-xs text-muted-foreground mt-1">
                 Default profit margin applied to all cost calculations
               </p>
             </div>

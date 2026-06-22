@@ -65,8 +65,8 @@ const ScaleApplicationDialog: React.FC<ScaleApplicationDialogProps> = ({
         </Select>
       </div>
 
-      <div className="bg-gray-50 p-3 rounded-md">
-        <p className="text-sm text-gray-600">
+      <div className="bg-muted/40 border border-border p-3 rounded-md">
+        <p className="text-sm text-muted-foreground">
           <strong>Current page:</strong> {currentPage} of {totalPages}<br/>
           <strong>Scale factor:</strong> 1 pixel = {scaleFactor.toFixed(6)} {unit}<br/>
           <strong>Scope:</strong> {selectedScope === 'page' ? 'This sheet only (page-specific)' : 'All sheets in project (each sheet will use this scale)'}

@@ -1023,3 +1023,28 @@ export const healthService = {
     return response.data;
   },
 };
+
+// Feedback service
+export const feedbackService = {
+  async submit(params: {
+    name: string;
+    email: string;
+    subject: string;
+    message: string;
+    logs: Array<{ level: string; message: string; timestamp: string }>;
+    screenshot?: Blob | null;
+  }): Promise<void> {
+    const formData = new FormData();
+    formData.append('name', params.name);
+    formData.append('email', params.email);
+    formData.append('subject', params.subject);
+    formData.append('message', params.message);
+    formData.append('logs', JSON.stringify(params.logs));
+    formData.append('url', window.location.href);
+    formData.append('userAgent', navigator.userAgent);
+    if (params.screenshot) {
+      formData.append('screenshot', params.screenshot, 'screenshot.png');
+    }
+    await apiClient.post('/feedback', formData);
+  },
+};

@@ -1,13 +1,17 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Button } from './ui/button';
-import { LandingNav } from './LandingNav';
+import { LandingNav, MeridianBrandMark } from './LandingNav';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { toast } from 'sonner';
 import { getApiBaseUrl } from '../lib/apiConfig';
 import { extractErrorMessage } from '../utils/commonUtils';
+
+const contactFormControlClass =
+  'mt-1 border-slate-300 bg-white text-slate-950 placeholder:text-slate-400 ring-offset-white focus-visible:ring-blue-600';
+const contactLabelClass = 'text-slate-900';
 
 const ContactPage: React.FC = () => {
   const navigate = useNavigate();
@@ -66,7 +70,7 @@ const ContactPage: React.FC = () => {
   };
 
   return (
-    <div className="contact-page min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
+    <div className="contact-page min-h-screen bg-slate-50">
       <LandingNav
         links={[
           { label: 'Features', onClick: handleFeatures },
@@ -77,7 +81,7 @@ const ContactPage: React.FC = () => {
       />
 
       {/* Hero Section - slate-50 to differentiate from white content sections */}
-      <section className="relative overflow-hidden bg-slate-50">
+      <section className="relative overflow-hidden bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16">
           <div className="text-center">
             <div className="mb-6 bg-blue-100 text-blue-800 border border-blue-200 rounded-full px-4 py-2 text-sm font-medium inline-block">
@@ -107,18 +111,18 @@ const ContactPage: React.FC = () => {
               <form onSubmit={handleSubmit} className="space-y-6">
                 <div className="grid sm:grid-cols-2 gap-6">
                   <div>
-                    <Label htmlFor="name">Name</Label>
+                    <Label htmlFor="name" className={contactLabelClass}>Name</Label>
                     <Input
                       id="name"
                       required
                       value={formData.name}
                       onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                       placeholder="Your name"
-                      className="mt-1"
+                      className={contactFormControlClass}
                     />
                   </div>
                   <div>
-                    <Label htmlFor="email">Email</Label>
+                    <Label htmlFor="email" className={contactLabelClass}>Email</Label>
                     <Input
                       id="email"
                       type="email"
@@ -126,33 +130,33 @@ const ContactPage: React.FC = () => {
                       value={formData.email}
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                       placeholder="you@company.com"
-                      className="mt-1"
+                      className={contactFormControlClass}
                     />
                   </div>
                 </div>
                 <div>
-                  <Label htmlFor="company">Company (optional)</Label>
+                  <Label htmlFor="company" className={contactLabelClass}>Company (optional)</Label>
                   <Input
                     id="company"
                     value={formData.company}
                     onChange={(e) => setFormData({ ...formData, company: e.target.value })}
                     placeholder="Your company"
-                    className="mt-1"
+                    className={contactFormControlClass}
                   />
                 </div>
                 <div>
-                  <Label htmlFor="subject">Subject</Label>
+                  <Label htmlFor="subject" className={contactLabelClass}>Subject</Label>
                   <Input
                     id="subject"
                     required
                     value={formData.subject}
                     onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
                     placeholder="How can we help?"
-                    className="mt-1"
+                    className={contactFormControlClass}
                   />
                 </div>
                 <div>
-                  <Label htmlFor="message">Message</Label>
+                  <Label htmlFor="message" className={contactLabelClass}>Message</Label>
                   <Textarea
                     id="message"
                     required
@@ -160,7 +164,7 @@ const ContactPage: React.FC = () => {
                     value={formData.message}
                     onChange={(e) => setFormData({ ...formData, message: e.target.value })}
                     placeholder="Tell us about your project or question..."
-                    className="mt-1"
+                    className={contactFormControlClass}
                   />
                 </div>
                 <Button
@@ -208,7 +212,7 @@ const ContactPage: React.FC = () => {
           <div className="grid md:grid-cols-4 gap-8">
             <div>
               <div className="flex items-center gap-2 mb-4">
-                <img src="/logo.png" alt="" className="h-8 w-8 rounded-lg object-contain" />
+                <MeridianBrandMark className="h-8 w-8 text-white" tone="light" />
                 <h3 className="text-lg font-semibold">Meridian Takeoff</h3>
               </div>
               <p className="text-slate-400">

@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from 'react';
 import { Button } from '../ui/button';
-import { Separator } from '../ui/separator';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,6 +34,7 @@ import type { TakeoffWorkspaceHeaderProps } from './TakeoffWorkspaceHeader.types
 import { ToolsDialog } from '../ToolsDialog';
 import { HelpMenu } from '../help/HelpMenu';
 import { PDF_VIEWER_MIN_SCALE, PDF_VIEWER_MAX_SCALE } from '../pdf-viewer/usePDFViewerInteractions';
+import { cn } from '../../lib/utils';
 
 const ZOOM_STEP = 0.1;
 
@@ -91,7 +91,7 @@ export function TakeoffWorkspaceHeader({
 
   return (
     <div
-      className="flex items-center justify-between gap-2 p-2 sm:p-4 border-b bg-muted/30 flex-wrap lg:flex-nowrap min-w-0"
+      className="workspace-commandbar p-2"
       style={{
         paddingTop: 'max(0.5rem, env(safe-area-inset-top, 0px))',
         paddingLeft: 'max(0.5rem, env(safe-area-inset-left, 0px))',
@@ -99,58 +99,60 @@ export function TakeoffWorkspaceHeader({
       }}
     >
       {/* Left - Back, Undo/Redo */}
-      <div className="flex items-center gap-2 sm:gap-6 shrink-0">
-        <Button variant="ghost" onClick={onBackToProjects} className="flex items-center gap-2 min-h-[44px]" title="Back to Projects">
+      <div className="commandbar-zone commandbar-left">
+        <Button
+          variant="ghost"
+          onClick={onBackToProjects}
+          className="command-button flex items-center gap-2"
+          title="Back to Projects"
+        >
           <ArrowLeft className="w-4 h-4 shrink-0" />
           <span className="hidden lg:inline">Back to Projects</span>
         </Button>
-        <Separator orientation="vertical" className="h-8 hidden sm:block" />
-        <div className="flex items-center gap-1">
-          <Button size="sm" variant="outline" onClick={onUndo} disabled={!canUndo} title="Undo (⌘Z)" className="min-h-[44px]">
+        <div className="command-cluster">
+          <Button size="sm" variant="ghost" onClick={onUndo} disabled={!canUndo} title="Undo (⌘Z)" className="command-icon-button">
             <Undo2 className="w-4 h-4" />
           </Button>
-          <Button size="sm" variant="outline" onClick={onRedo} disabled={!canRedo} title="Redo (⌘⇧Z)" className="min-h-[44px]">
+          <Button size="sm" variant="ghost" onClick={onRedo} disabled={!canRedo} title="Redo (⌘⇧Z)" className="command-icon-button">
             <Redo2 className="w-4 h-4" />
           </Button>
         </div>
       </div>
 
       {/* Center - Page nav, View (dropdown on small) or inline scale/rotate/calibrate (md+), Annotate */}
-      <div className="flex items-center gap-2 sm:gap-4 min-w-0 flex-1 justify-center flex-wrap lg:flex-nowrap">
-        <div className="flex items-center gap-1 sm:gap-2">
+      <div className="commandbar-zone commandbar-center">
+        <div className="command-cluster">
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
             onClick={() => onPageChange(Math.max(1, currentPage - 1))}
             disabled={currentPage <= 1 || !currentPdfFile}
             title="Previous page"
-            className="min-h-[44px]"
+            className="command-button"
           >
             <ChevronLeft className="w-4 h-4 lg:hidden" />
             <span className="hidden lg:inline">Previous</span>
           </Button>
-          <span className="shrink-0 whitespace-nowrap px-2 sm:px-3 py-1 bg-gray-100 rounded text-sm">
+          <span className="metric-pill">
             {currentPdfFile ? `${currentPage} / ${totalPages}` : 'No PDF'}
           </span>
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
             onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
             disabled={currentPage >= totalPages || !currentPdfFile}
             title="Next page"
-            className="min-h-[44px]"
+            className="command-button"
           >
             <ChevronRight className="w-4 h-4 lg:hidden" />
             <span className="hidden lg:inline">Next</span>
           </Button>
         </div>
 
-        <Separator orientation="vertical" className="h-8 hidden xl:block" />
-
         {/* View dropdown: scale, reset, rotate, calibrate - visible below lg to avoid mid-size overflow */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button size="sm" variant="outline" className="xl:hidden flex items-center gap-1 min-h-[44px]" title="View options">
+            <Button size="sm" variant="outline" className="xl:hidden command-button flex items-center gap-1 bg-background" title="View options">
               <Layout className="w-4 h-4" />
               <span>{currentPdfFile ? `${Math.round(scale * 100)}%` : 'View'}</span>
               <ChevronDown className="w-3 h-3" />
@@ -213,45 +215,51 @@ export function TakeoffWorkspaceHeader({
         {/* Inline view tools - visible from lg up (keeps mid-size bar from overflowing) */}
         {currentPdfFile && (
           <>
-            <div className="hidden xl:flex items-center gap-2">
-              <Button size="sm" variant="outline" onClick={handleZoomOut} disabled={scale <= PDF_VIEWER_MIN_SCALE} title="Zoom out">-</Button>
-              <span className="px-3 py-1 bg-gray-100 rounded text-sm min-w-[60px] text-center">{Math.round(scale * 100)}%</span>
-              <Button size="sm" variant="outline" onClick={handleZoomIn} disabled={scale >= PDF_VIEWER_MAX_SCALE} title="Zoom in">+</Button>
-              <Button size="sm" variant="outline" onClick={onResetView}>Reset View</Button>
+            <div className="hidden xl:inline-flex command-cluster">
+              <Button size="sm" variant="ghost" className="command-icon-button" onClick={handleZoomOut} disabled={scale <= PDF_VIEWER_MIN_SCALE} title="Zoom out">
+                <ZoomOut className="w-4 h-4" />
+              </Button>
+              <span className="metric-pill">{Math.round(scale * 100)}%</span>
+              <Button size="sm" variant="ghost" className="command-icon-button" onClick={handleZoomIn} disabled={scale >= PDF_VIEWER_MAX_SCALE} title="Zoom in">
+                <ZoomIn className="w-4 h-4" />
+              </Button>
+              <Button size="sm" variant="ghost" className="command-button" onClick={onResetView}>
+                <Maximize2 className="w-4 h-4 mr-1.5" />
+                Reset
+              </Button>
             </div>
-            <Separator orientation="vertical" className="h-8 hidden xl:block" />
-            <div className="hidden xl:flex items-center gap-2">
-              <Button size="sm" variant="outline" onClick={() => onRotatePage('counterclockwise')} title="Rotate counterclockwise">
+            <div className="hidden xl:inline-flex command-cluster">
+              <Button size="sm" variant="ghost" className="command-icon-button" onClick={() => onRotatePage('counterclockwise')} title="Rotate counterclockwise">
                 <RotateCcw className="w-4 h-4" />
               </Button>
-              <Button size="sm" variant="outline" onClick={() => onRotatePage('clockwise')} title="Rotate clockwise">
+              <Button size="sm" variant="ghost" className="command-icon-button" onClick={() => onRotatePage('clockwise')} title="Rotate clockwise">
                 <RotateCw className="w-4 h-4" />
               </Button>
             </div>
-            <Separator orientation="vertical" className="h-8 hidden xl:block" />
           </>
         )}
 
         <div className="hidden xl:block">
           <Button
             size="sm"
-            variant={isPageCalibrated ? 'default' : 'secondary'}
+            variant="ghost"
             onClick={onCalibrateScale}
-            className={isPageCalibrated ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-orange-600 hover:bg-orange-700 text-white'}
+            className={cn(
+              'command-button',
+              isPageCalibrated ? 'command-button-success hover:opacity-90' : 'command-button-warning hover:opacity-90'
+            )}
             title={isPageCalibrated ? 'Recalibrate' : 'Calibrate Scale'}
           >
             {isPageCalibrated ? 'Recalibrate' : 'Calibrate Scale'}
           </Button>
         </div>
 
-        <Separator orientation="vertical" className="h-8 hidden xl:block" />
-
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
               size="sm"
               variant={annotationTool ? 'default' : 'outline'}
-              className={annotationTool ? 'bg-blue-600 hover:bg-blue-700 text-white' : ''}
+              className={cn('command-button', annotationTool ? 'command-button-active border-blue-200' : 'bg-background')}
               title="Annotate"
             >
               <Pencil className="w-4 h-4 shrink-0 xl:mr-1" />
@@ -318,19 +326,19 @@ export function TakeoffWorkspaceHeader({
       </div>
 
       {/* Right - Help, Settings, Ortho badge, Saved status */}
-      <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+      <div className="commandbar-zone commandbar-right">
         <HelpMenu surface="workspace" workspaceState={helpWorkspaceState} />
         <Button
           variant="ghost"
           size="icon"
           onClick={() => setSettingsOpen(true)}
           title="Tools"
-          className="shrink-0 min-h-[44px] min-w-[44px]"
+          className="command-icon-button shrink-0"
         >
           <Wrench className="w-4 h-4" />
         </Button>
         {((isOrthoSnapping && isMeasuring) || (isCalibrating && isOrthoSnapping)) && (
-          <div className="flex items-center gap-1 bg-green-600 text-white px-2 py-1 rounded text-xs">
+          <div className="status-chip status-chip-success">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M3 12h18"/>
               <path d="M12 3v18"/>
@@ -338,7 +346,7 @@ export function TakeoffWorkspaceHeader({
             <span>Ortho</span>
           </div>
         )}
-        <div className="flex items-center gap-2 text-sm text-gray-600" title="All changes saved">
+        <div className="status-chip" title="All changes saved">
           <div className="w-2 h-2 bg-green-500 rounded-full shrink-0" />
           <span className="hidden 2xl:inline">All changes saved</span>
         </div>

@@ -20,8 +20,10 @@ export function TakeoffWorkspaceStatusBar({
 }: TakeoffWorkspaceStatusBarProps) {
   return (
     <div
-      className="flex items-center justify-between px-4 py-2 border-t bg-muted/30 text-sm"
+      className="flex items-center justify-between px-4 py-2 border-t text-sm"
       style={{
+        background: 'hsl(var(--workspace-rail))',
+        borderColor: 'hsl(var(--border-strong))',
         paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom, 0px))',
         paddingLeft: 'max(1rem, env(safe-area-inset-left, 0px))',
         paddingRight: 'max(1rem, env(safe-area-inset-right, 0px))',
@@ -45,11 +47,11 @@ export function TakeoffWorkspaceStatusBar({
 
       <div className="flex-1 flex justify-center">
         {selectedCondition ? (
-          <div className="text-center text-sm text-gray-600">
+          <div className="status-chip">
             {selectedCondition.name} - {selectedCondition.type} takeoff
           </div>
         ) : (
-          <div className="text-center text-sm text-gray-600">
+          <div className="text-center text-sm text-muted-foreground">
             Select a condition to start drawing
           </div>
         )}
@@ -181,7 +183,7 @@ export function TakeoffWorkspaceStatusBar({
             </div>
           </div>
         ) : (
-          <span className="text-sm text-gray-600">
+          <span className="text-sm text-muted-foreground">
             {uploading
               ? 'Uploading…'
               : isMeasuring || isCalibrating ? (

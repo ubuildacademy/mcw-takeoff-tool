@@ -23,7 +23,7 @@ export function SidebarEdgeToggle({ side, open, onOpenChange }: SidebarEdgeToggl
       size="sm"
       type="button"
       className={cn(
-        'h-full w-10 shrink-0 rounded-none px-0 text-foreground hover:bg-muted/80',
+        'sidebar-edge-toggle h-full w-10 shrink-0 rounded-none px-0 text-muted-foreground hover:text-foreground',
         side === 'left' ? 'border-r' : 'border-l'
       )}
       onClick={() => onOpenChange(!open)}

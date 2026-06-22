@@ -221,9 +221,9 @@ export function SearchTab({
   };
 
   return (
-    <div className="w-96 bg-white border-l flex flex-col h-full">
+    <div className="w-full bg-background border-l flex flex-col h-full text-foreground">
       {/* Header */}
-      <div className="p-4 border-b">
+      <div className="p-4 border-b bg-background">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">Document Search</h2>
           {searchQuery && (
@@ -253,7 +253,7 @@ export function SearchTab({
         {/* Search Input */}
         <div className="space-y-3">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
             <Input
               id="search-documents"
               name="search-documents"
@@ -267,11 +267,11 @@ export function SearchTab({
 
           {/* Document Filter */}
           <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700">Search in:</label>
+            <label className="text-sm font-medium text-muted-foreground">Search in:</label>
             <select
               value={selectedDocument || ''}
               onChange={(e) => handleDocumentSelect(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md bg-white hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+              className="w-full px-3 py-2 text-sm border border-input rounded-md bg-background text-foreground hover:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition-colors"
             >
               <option value="">All Documents</option>
               {ocrEnabledDocuments.map(doc => (
@@ -317,7 +317,7 @@ export function SearchTab({
         {!isSearching && !searchError && Object.keys(searchResults).length > 0 && (
           <div className="p-4 space-y-4">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-gray-700">
+              <span className="text-sm font-medium text-muted-foreground">
                 {getTotalResultsCount()} result{getTotalResultsCount() !== 1 ? 's' : ''} found
               </span>
             </div>
@@ -333,9 +333,9 @@ export function SearchTab({
             </div>
 
             {Object.entries(searchResults).map(([documentId, results]) => (
-              <div key={documentId} className="border rounded-lg">
+              <div key={documentId} className="border rounded-lg bg-card">
                 {/* Document Header */}
-                <div className="p-3 bg-gray-50 border-b">
+                <div className="p-3 bg-muted/40 border-b">
                   <div className="flex items-center gap-2">
                     <FileText className="w-4 h-4 text-muted-foreground" />
                     <span className="font-medium text-sm">{getDocumentName(documentId)}</span>
@@ -385,11 +385,11 @@ export function SearchTab({
                             {result.matches.length > 0 && (
                               <div className="space-y-1">
                                 {result.matches.slice(0, isExpanded ? result.matches.length : 1).map((match, matchIndex) => (
-                                  <div key={matchIndex} className="text-sm text-gray-700 bg-gray-50 p-3 rounded border">
-                                    <div className="font-mono text-xs text-gray-500 mb-1">
+                                  <div key={matchIndex} className="text-sm text-foreground bg-muted/40 p-3 rounded border">
+                                    <div className="font-mono text-xs text-muted-foreground mb-1">
                                       Page {result.pageNumber}
                                     </div>
-                                    <div className="text-gray-800">
+                                    <div className="text-foreground">
                                       ...{match.snippet}...
                                     </div>
                                   </div>

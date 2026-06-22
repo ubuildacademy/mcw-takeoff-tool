@@ -52,7 +52,7 @@ export const DEFAULT_HELP_FAQ_CONFIG: HelpFaqConfig = {
     id: 'where-is-help',
     question: 'Where is in-app help?',
     answer:
-      'Click the ? icon next to Tools in the top bar, or press ? on your keyboard. Open the workspace or shortcuts guide from the menu for the full walkthrough.',
+      'Click the ? icon in the top command bar, near Tools, or press ? on your keyboard. Open the workspace or shortcuts guide from the menu for the full walkthrough.',
   },
   {
     id: 'pdfs-sheets',
@@ -64,13 +64,13 @@ export const DEFAULT_HELP_FAQ_CONFIG: HelpFaqConfig = {
     id: 'calibrate',
     question: 'How do I calibrate scale?',
     answer:
-      'Use Calibrate Scale (or Recalibrate) in the top toolbar. Enter a known real-world distance, then click two points along that dimension on the drawing. Re-calibrate after rotating a page.',
+      'Use Calibrate Scale (or Recalibrate) in the top command bar. Enter a known real-world distance, then click two points along that dimension on the drawing. Re-calibrate after rotating a page.',
   },
   {
     id: 'measure',
     question: 'How do I start measuring?',
     answer:
-      'Create or select a condition in the left Takeoff sidebar, then draw on the plan for that condition type. On desktop, press Space (when not typing in a field) to start drawing from plan-only selection. On iPad, tap the condition and use touch or Apple Pencil on the canvas. The status bar shows your active condition.',
+      'Create or select a condition in the left Takeoff sidebar, then draw on the plan for that condition type. Each compact condition card shows its total, unit, and quick action icons. On desktop, press Space (when not typing in a field) to start drawing from plan-only selection. On iPad, tap the condition and use touch or Apple Pencil on the canvas. The status bar shows your active condition.',
   },
   {
     id: 'left-vs-right',
@@ -94,19 +94,19 @@ export const DEFAULT_HELP_FAQ_CONFIG: HelpFaqConfig = {
     id: 'space-escape',
     question: 'What do Space and Escape do?',
     answer:
-      'Space starts drawing for the selected condition or clears/re-selects it depending on context. Escape backs out one step (last point, mode, or selection). On iPad without a keyboard, use the floating Undo/Cancel/Finish toolbar while measuring. See the shortcuts guide for the full list.',
+      'Space starts drawing for the selected condition or clears/re-selects it depending on context. Escape backs out one step (last point, mode, or selection). On iPad without a keyboard, use the floating Undo/Cancel/Finish toolbar — it appears whenever you are measuring, calibrating, annotating, drawing a cutout, or placing a hyperlink. See the shortcuts guide for the full list.',
   },
   {
     id: 'ipad-tablet',
     question: 'Can I use Meridian Takeoff on iPad?',
     answer:
-      'Yes. Use Safari or add the app to your Home Screen for full-screen use. Pinch to zoom, drag with one finger to pan, tap to measure, double-tap or Finish to complete a shape, and long-press a markup for the context menu. Sidebars open as slide-over drawers on narrow screens. See the workspace guide section Tablet & touch for details.',
+      'Yes. Use Safari or add to your Home Screen for full-screen use. One-finger drag pans; two-finger pinch zooms (pinch is safely ignored during active drawing so it cannot cancel a measurement). Tap to place measurement points; double-tap or tap Finish to complete a shape. Tap an existing markup to select it; drag a selected markup to move it. Hyperlink regions, cutouts, and annotation shapes all work with touch — use the floating Cancel/Finish toolbar at the bottom of the canvas whenever any drawing mode is active. Long-press a markup for the context menu. Sidebars open as slide-over drawers on narrow screens. See the workspace guide section Tablet & touch for details.',
   },
   {
     id: 'tools-profile',
     question: 'Where are Tools vs Profile settings?',
     answer:
-      'Profile is on the project dashboard (Back to Projects, then Profile). Tools (wrench icon) in this workspace opens takeoff preferences: crosshairs, magnifier, ortho default, and hyperlinks. Press ? anytime for the help menu.',
+      'Profile is on the project dashboard (Back to Projects, then Profile). Tools (wrench icon) in this workspace opens takeoff preferences: appearance, crosshairs, magnifier, ortho default, and hyperlinks. Press ? anytime for the help menu.',
   },
   ],
 };

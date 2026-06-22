@@ -271,15 +271,15 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
   };
 
 
-  const rootClass = `w-80 bg-white border-r flex flex-col${className ? ` ${className}` : ''}`;
+  const rootClass = `w-80 workspace-side-panel border-r flex flex-col${className ? ` ${className}` : ''}`;
 
   if (loadingConditions) {
     return (
       <div className={rootClass}>
         <div className="p-4 border-b">
           <div className="animate-pulse">
-            <div className="h-6 bg-gray-200 rounded mb-2"></div>
-            <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+            <div className="h-6 bg-muted rounded mb-2"></div>
+            <div className="h-4 bg-muted rounded w-3/4"></div>
           </div>
         </div>
       </div>
@@ -289,14 +289,14 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
   return (
     <div className={rootClass}>
       {/* Header */}
-      <div className="p-4 border-b">
+      <div className="p-4 border-b bg-background">
         {/* Tabs */}
-        <div className="flex mb-4">
+        <div className="workspace-tabbar takeoff-panel-tabs mb-4">
           <button
-            className={`flex-1 px-2 py-2 text-sm font-medium border-b-2 transition-colors ${
+            className={`workspace-tab ${
               activeTab === 'conditions'
-                ? 'border-blue-500 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+                ? 'workspace-tab-active'
+                : 'hover:text-foreground hover:bg-muted/60'
             }`}
             onClick={() => setActiveTab('conditions')}
           >
@@ -306,10 +306,10 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
             </div>
           </button>
           <button
-            className={`flex-1 px-2 py-2 text-sm font-medium border-b-2 transition-colors ${
+            className={`workspace-tab ${
               activeTab === 'reports'
-                ? 'border-blue-500 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+                ? 'workspace-tab-active'
+                : 'hover:text-foreground hover:bg-muted/60'
             }`}
             onClick={() => setActiveTab('reports')}
           >
@@ -319,10 +319,10 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
             </div>
           </button>
           <button
-            className={`flex-1 px-2 py-2 text-sm font-medium border-b-2 transition-colors ${
+            className={`workspace-tab ${
               activeTab === 'costs'
-                ? 'border-blue-500 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+                ? 'workspace-tab-active'
+                : 'hover:text-foreground hover:bg-muted/60'
             }`}
             onClick={() => setActiveTab('costs')}
           >
@@ -358,9 +358,9 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
               </Button>
               
               {showExportDropdown && (
-                <div ref={dropdownRef} className="absolute right-0 top-full mt-1 w-48 bg-white border rounded-lg shadow-lg z-50">
+                <div ref={dropdownRef} className="absolute right-0 top-full mt-1 w-48 bg-popover text-popover-foreground border rounded-lg shadow-lg z-50">
                   <button
-                    className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                    className="w-full px-3 py-2 text-left text-sm hover:bg-accent flex items-center gap-2"
                     onClick={async (e) => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -377,7 +377,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                     Export Excel Report
                   </button>
                   <button
-                    className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                    className="w-full px-3 py-2 text-left text-sm hover:bg-accent flex items-center gap-2"
                     onClick={async (e) => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -394,7 +394,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                     Export PDF Report
                   </button>
                   <button
-                    className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                    className="w-full px-3 py-2 text-left text-sm hover:bg-accent flex items-center gap-2"
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -459,22 +459,22 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                   {/* Cost Summary Section */}
                   {costBreakdown.summary.totalCost > 0 && (
                     <div className="bg-gradient-to-br from-blue-50 to-indigo-100 rounded-lg p-4 border border-blue-200">
-                      <h3 className="text-lg font-semibold text-slate-900 mb-3">Project Cost Summary</h3>
+                      <h3 className="text-lg font-semibold text-foreground mb-3">Project Cost Summary</h3>
                       <div className="grid grid-cols-2 gap-4 text-sm">
                         <div className="flex justify-between">
-                          <span className="text-slate-600">Total Cost:</span>
+                          <span className="text-muted-foreground">Total Cost:</span>
                           <span className="font-semibold text-blue-600">${costBreakdown.summary.totalCost.toFixed(2)}</span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-slate-600">Profit Margin:</span>
+                          <span className="text-muted-foreground">Profit Margin:</span>
                           <span className="font-semibold text-green-600">{costBreakdown.summary.profitMarginPercent}%</span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-slate-600">Subtotal:</span>
+                          <span className="text-muted-foreground">Subtotal:</span>
                           <span className="font-medium">${costBreakdown.summary.subtotal.toFixed(2)}</span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-slate-600">Conditions with Costs:</span>
+                          <span className="text-muted-foreground">Conditions with Costs:</span>
                           <span className="font-medium">{costBreakdown.summary.conditionsWithCosts}</span>
                         </div>
                       </div>
@@ -509,15 +509,15 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                       <div key={conditionId} className="border rounded-lg">
                         {/* Condition Row */}
                         <div 
-                          className="p-3 hover:bg-gray-50 cursor-pointer"
+                          className="p-3 hover:bg-accent/50 cursor-pointer"
                           onClick={() => toggleConditionExpansion(conditionId)}
                         >
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
                               {isExpanded ? (
-                                <ChevronDown className="w-4 h-4 text-gray-500" />
+                                <ChevronDown className="w-4 h-4 text-muted-foreground" />
                               ) : (
-                                <ChevronRight className="w-4 h-4 text-gray-500" />
+                                <ChevronRight className="w-4 h-4 text-muted-foreground" />
                               )}
                               <div 
                                 className="w-4 h-4 rounded-full" 
@@ -527,7 +527,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                                 <div className="font-medium text-sm">
                                   {conditionData.condition.name}
                                 </div>
-                                <div className="text-xs text-gray-500">
+                                <div className="text-xs text-muted-foreground">
                                   {pageCount} page{pageCount !== 1 ? 's' : ''} • {conditionData.condition.type} • {conditionData.condition.unit}
                                 </div>
                               </div>
@@ -540,7 +540,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                                   : `${conditionData.grandTotal.toFixed(0)} ${conditionData.condition.unit}`
                                 }
                               </div>
-                              <div className="text-xs text-gray-500">
+                              <div className="text-xs text-muted-foreground">
                                 Total
                               </div>
                             </div>
@@ -549,9 +549,9 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
 
                         {/* Expanded Measurements */}
                         {isExpanded && (
-                          <div className="border-t bg-gray-50 p-3 space-y-3">
+                          <div className="border-t bg-muted/40 p-3 space-y-3">
                             {Object.values(conditionData.pages).map(pageData => (
-                              <div key={`${pageData.pageNumber}-${pageData.sheetName}`} className="bg-white rounded p-2">
+                              <div key={`${pageData.pageNumber}-${pageData.sheetName}`} className="bg-card rounded p-2">
                                 <div className="flex justify-between items-center mb-2">
                                   <button
                                     className="font-medium text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer text-left"
@@ -568,7 +568,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                                   </div>
                                 </div>
                                 
-                                <div className="text-xs text-gray-500">
+                                <div className="text-xs text-muted-foreground">
                                   {pageData.measurements.length} measurement{pageData.measurements.length !== 1 ? 's' : ''}
                                 </div>
                               </div>
@@ -606,7 +606,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                   {/* Project Cost Summary */}
                   <div className="bg-gradient-to-br from-purple-50 to-pink-100 rounded-lg p-4 border border-purple-200">
                     <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-lg font-semibold text-slate-900">Project Cost Summary</h3>
+                      <h3 className="text-lg font-semibold text-foreground">Project Cost Summary</h3>
                       <Button
                         variant="outline"
                         size="sm"
@@ -623,35 +623,35 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                     </div>
                     <div className="space-y-2">
                       <div className="flex justify-between items-center">
-                        <span className="text-sm text-slate-600">Material Costs</span>
-                        <span className="text-sm font-medium text-slate-900">${summary.totalMaterialCost.toFixed(2)}</span>
+                        <span className="text-sm text-muted-foreground">Material Costs</span>
+                        <span className="text-sm font-medium text-foreground">${summary.totalMaterialCost.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-sm text-slate-600">Equipment Costs</span>
-                        <span className="text-sm font-medium text-slate-900">${summary.totalEquipmentCost.toFixed(2)}</span>
+                        <span className="text-sm text-muted-foreground">Equipment Costs</span>
+                        <span className="text-sm font-medium text-foreground">${summary.totalEquipmentCost.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-sm text-slate-600">Waste Factor Costs</span>
-                        <span className="text-sm font-medium text-slate-900">${summary.totalWasteCost.toFixed(2)}</span>
+                        <span className="text-sm text-muted-foreground">Waste Factor Costs</span>
+                        <span className="text-sm font-medium text-foreground">${summary.totalWasteCost.toFixed(2)}</span>
                       </div>
-                      <div className="border-t border-slate-200 pt-2">
+                      <div className="border-t border-border pt-2">
                         <div className="flex justify-between items-center">
-                          <span className="font-semibold text-slate-900">Subtotal</span>
-                          <span className="font-semibold text-slate-900">${summary.subtotal.toFixed(2)}</span>
+                          <span className="font-semibold text-foreground">Subtotal</span>
+                          <span className="font-semibold text-foreground">${summary.subtotal.toFixed(2)}</span>
                         </div>
                         <div className="flex justify-between items-center">
-                          <span className="text-sm text-slate-600">Profit Margin ({summary.profitMarginPercent}%)</span>
+                          <span className="text-sm text-muted-foreground">Profit Margin ({summary.profitMarginPercent}%)</span>
                           <span className="text-sm text-green-600 font-medium">${summary.profitMarginAmount.toFixed(2)}</span>
                         </div>
-                        <div className="flex justify-between items-center pt-2 border-t border-slate-200">
-                          <span className="text-lg font-bold text-slate-900">Total Cost</span>
+                        <div className="flex justify-between items-center pt-2 border-t border-border">
+                          <span className="text-lg font-bold text-foreground">Total Cost</span>
                           <span className="text-lg font-bold text-blue-600">${summary.totalCost.toFixed(2)}</span>
                         </div>
                       </div>
                     </div>
                     {summary.excludedMeasurementsFromCost &&
                       summary.excludedMeasurementsFromCost.count > 0 && (
-                        <p className="text-xs text-amber-900 mt-3 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                        <p className="text-xs text-amber-900 mt-3 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 dark:bg-amber-950/30 dark:border-amber-800 dark:text-amber-200">
                           {summary.excludedMeasurementsFromCost.count} measurement(s) are not included in dollar
                           totals (missing matching condition locally).
                         </p>
@@ -661,9 +661,9 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
 
                   {/* Condition Cost Breakdown */}
                   <div className="space-y-3">
-                    <h4 className="font-semibold text-slate-900">Cost Breakdown by Condition</h4>
+                    <h4 className="font-semibold text-foreground">Cost Breakdown by Condition</h4>
                     {costConditions.filter(c => c.hasCosts).length === 0 ? (
-                      <div className="text-center py-6 text-slate-500 bg-slate-50 rounded-lg">
+                      <div className="text-center py-6 text-muted-foreground bg-muted/40 rounded-lg">
                         <DollarSign className="w-8 h-8 mx-auto mb-2 opacity-50" />
                         <p className="text-sm">No conditions with cost data</p>
                         <p className="text-xs">Add material or equipment costs to conditions to see breakdown</p>
@@ -673,7 +673,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                         if (!condition.hasCosts) return null;
                         
                         return (
-                        <div key={condition.condition.id} className="border rounded-lg p-4 bg-white shadow-sm hover:shadow-md transition-shadow">
+                        <div key={condition.condition.id} className="border rounded-lg p-4 bg-card shadow-sm hover:shadow-md transition-shadow">
                           <div className="flex items-center justify-between mb-3">
                             <div className="flex items-center gap-3">
                               <div 
@@ -681,7 +681,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                                 style={{ backgroundColor: condition.condition.color }}
                               />
                               <div>
-                                <span className="font-medium text-sm text-slate-900">{condition.condition.name}</span>
+                                <span className="font-medium text-sm text-foreground">{condition.condition.name}</span>
                                 <div className="flex items-center gap-2 mt-1">
                                   <Badge variant="outline" className="text-xs">
                                     {condition.condition.type}
@@ -696,7 +696,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                               <span className="font-bold text-lg text-blue-600">
                                 ${condition.subtotal.toFixed(2)}
                               </span>
-                              <div className="text-xs text-slate-500">
+                              <div className="text-xs text-muted-foreground">
                                 ${condition.quantity > 0 ? (condition.subtotal / condition.quantity).toFixed(2) : '0.00'}/unit
                               </div>
                             </div>
@@ -704,11 +704,11 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                           
                           <div className="space-y-2">
                             <div className="flex justify-between items-center text-sm">
-                              <span className="text-slate-600">Quantity</span>
+                              <span className="text-muted-foreground">Quantity</span>
                               <div className="text-right">
                                 <span className="font-medium">{condition.quantity.toFixed(2)} {condition.condition.unit}</span>
                                 {supportsWasteFactor(condition.condition.type) && condition.condition.wasteFactor > 0 && (
-                                  <div className="text-xs text-slate-500">
+                                  <div className="text-xs text-muted-foreground">
                                     + {condition.condition.wasteFactor}% waste = {condition.adjustedQuantity.toFixed(2)} {condition.condition.unit}
                                   </div>
                                 )}
@@ -717,18 +717,18 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                             
                             <div className="grid grid-cols-2 gap-2 text-sm">
                               <div className="flex justify-between">
-                                <span className="text-slate-600">Material</span>
+                                <span className="text-muted-foreground">Material</span>
                                 <span className="font-medium text-blue-600">${condition.materialCost.toFixed(2)}</span>
                               </div>
                               {condition.equipmentCost > 0 && (
                                 <div className="flex justify-between">
-                                  <span className="text-slate-600">Equipment</span>
+                                  <span className="text-muted-foreground">Equipment</span>
                                   <span className="font-medium text-green-600">${condition.equipmentCost.toFixed(2)}</span>
                                 </div>
                               )}
                               {condition.wasteCost > 0 && (
                                 <div className="flex justify-between">
-                                  <span className="text-slate-600">Waste</span>
+                                  <span className="text-muted-foreground">Waste</span>
                                   <span className="font-medium text-orange-600">${condition.wasteCost.toFixed(2)}</span>
                                 </div>
                               )}
@@ -749,7 +749,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
       {/* Delete Confirmation Modal */}
       {showDeleteConfirm && (
         <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-lg max-w-sm mx-4">
+          <div className="bg-background text-foreground border border-border p-6 rounded-lg max-w-sm mx-4 shadow-2xl">
             <h3 className="text-lg font-semibold mb-2">Delete Condition</h3>
             <p className="text-muted-foreground mb-4">
               Are you sure you want to delete this condition? This action cannot be undone.

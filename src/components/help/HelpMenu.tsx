@@ -1,6 +1,6 @@
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { HelpCircle, BookOpen, ChevronDown } from 'lucide-react';
+import { HelpCircle, BookOpen, ChevronDown, MessageSquarePlus } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { cn } from '@/lib/utils';
@@ -15,6 +15,7 @@ import {
 } from '../../content/helpContent';
 import { useHelpFaq } from '../../context/HelpFaqProvider';
 import { HelpSearch } from './HelpSearch';
+import { FeedbackDialog } from '../FeedbackDialog';
 
 export type HelpMenuProps = {
   surface: HelpSurface;
@@ -55,6 +56,9 @@ function HelpMenuComponent({ surface, workspaceState, variant = 'icon', classNam
   const [open, setOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showNewHint, setShowNewHint] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [pendingScreenshot, setPendingScreenshot] = useState<Blob | null>(null);
+  const capturingRef = useRef(false);
 
   const { getFaq } = useHelpFaq();
   const faq = getFaq(surface);
@@ -95,7 +99,38 @@ function HelpMenuComponent({ surface, workspaceState, variant = 'icon', classNam
     return () => document.removeEventListener('keydown', onKeyDown);
   }, []);
 
+  const handleFeedbackClick = useCallback(() => {
+    // Close the popover first so the screenshot captures the page behind it
+    handleOpenChange(false);
+    if (capturingRef.current) return;
+    capturingRef.current = true;
+    setPendingScreenshot(null);
+
+    // Brief delay to let the popover fully close before capturing
+    setTimeout(async () => {
+      try {
+        const { default: html2canvas } = await import('html2canvas');
+        const canvas = await html2canvas(document.body, {
+          useCORS: true,
+          allowTaint: true,
+          logging: false,
+          scale: Math.min(window.devicePixelRatio, 2),
+        });
+        const blob = await new Promise<Blob | null>((resolve) =>
+          canvas.toBlob(resolve, 'image/png')
+        );
+        setPendingScreenshot(blob);
+      } catch {
+        setPendingScreenshot(null);
+      } finally {
+        capturingRef.current = false;
+        setFeedbackOpen(true);
+      }
+    }, 180);
+  }, [handleOpenChange]);
+
   return (
+    <>
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <Button
@@ -222,8 +257,29 @@ function HelpMenuComponent({ surface, workspaceState, variant = 'icon', classNam
             <span className="tabular-nums text-muted-foreground">Press ? to toggle</span>
           </div>
         </div>
+
+        <div className="border-t px-3 py-2.5">
+          <button
+            type="button"
+            onClick={handleFeedbackClick}
+            className="w-full flex items-center gap-2 rounded-md px-2 py-2 text-sm font-medium text-foreground hover:bg-accent transition-colors"
+          >
+            <MessageSquarePlus className="w-4 h-4 shrink-0 text-primary" />
+            Submit Feedback
+            <span className="ml-auto text-xs text-muted-foreground font-normal bg-muted rounded px-1.5 py-0.5">
+              Beta
+            </span>
+          </button>
+        </div>
       </PopoverContent>
     </Popover>
+
+    <FeedbackDialog
+      open={feedbackOpen}
+      onOpenChange={setFeedbackOpen}
+      screenshot={pendingScreenshot}
+    />
+    </>
   );
 }
 

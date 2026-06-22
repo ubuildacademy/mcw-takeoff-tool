@@ -9,9 +9,10 @@ import {
 } from './ui/dialog';
 import { Label } from './ui/label';
 import { Button } from './ui/button';
-import { Link2, Trash2, Sparkles, Eraser } from 'lucide-react';
+import { Link2, Trash2, Sparkles, Eraser, Monitor, Moon, Sun } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserPreferencesStore } from '../store/slices/userPreferencesSlice';
+import type { ThemeMode } from '../lib/theme';
 import { isAutoHyperlinkUiEnabled } from '../services/batchHyperlink/batchHyperlinkFeature';
 import type { BatchHyperlinkPreflightResult } from '../services/batchHyperlink/batchHyperlinkPreflight';
 import type { DocumentOCRData } from '../services/serverOcrService';
@@ -115,6 +116,8 @@ export function ToolsDialog({
   const magnifierZoom = useUserPreferencesStore((s) => s.magnifierZoom);
   const setMagnifierEnabled = useUserPreferencesStore((s) => s.setMagnifierEnabled);
   const setMagnifierZoom = useUserPreferencesStore((s) => s.setMagnifierZoom);
+  const themeMode = useUserPreferencesStore((s) => s.themeMode);
+  const setThemeMode = useUserPreferencesStore((s) => s.setThemeMode);
 
   const showAutoHyperlink = isAutoHyperlinkUiEnabled() && Boolean(onPreflightAutoHyperlink && onExecuteAutoHyperlink);
   const [autoScope, setAutoScope] = useState<'project' | 'current'>('project');
@@ -154,6 +157,38 @@ export function ToolsDialog({
           {/* Preferences */}
           <section className="space-y-4">
             <h3 className="text-sm font-medium text-foreground">Preferences</h3>
+
+            <div className="space-y-2 rounded-md border border-border bg-muted/30 p-3">
+              <div className="flex items-start gap-3">
+                {themeMode === 'dark' ? (
+                  <Moon className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                ) : themeMode === 'light' ? (
+                  <Sun className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                ) : (
+                  <Monitor className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                )}
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div>
+                    <Label htmlFor="theme-mode" className="text-sm font-normal">
+                      Appearance
+                    </Label>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      Choose light mode, dark mode, or follow this device.
+                    </p>
+                  </div>
+                  <select
+                    id="theme-mode"
+                    value={themeMode}
+                    onChange={(e) => setThemeMode(e.target.value as ThemeMode)}
+                    className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                  >
+                    <option value="system">System</option>
+                    <option value="light">Light</option>
+                    <option value="dark">Dark</option>
+                  </select>
+                </div>
+              </div>
+            </div>
 
             {/* Crosshairs */}
             <div className="space-y-2">

@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from './ui/button';
-import { LandingNav } from './LandingNav';
+import { LandingNav, MeridianBrandMark } from './LandingNav';
 
 const FeaturesPage: React.FC = () => {
   const navigate = useNavigate();
@@ -25,7 +25,7 @@ const FeaturesPage: React.FC = () => {
   };
 
   return (
-    <div className="features-page min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
+    <div className="features-page marketing-page min-h-screen">
       <LandingNav
         links={[
           { label: 'Features', onClick: handleFeatures },
@@ -36,13 +36,13 @@ const FeaturesPage: React.FC = () => {
       />
 
       {/* Hero Section - slate-50 to differentiate from white content sections */}
-      <section className="relative overflow-hidden bg-slate-50">
+      <section className="marketing-hero">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16">
-          <div className="text-center">
-            <div className="mb-6 bg-blue-100 text-blue-800 border border-blue-200 rounded-full px-4 py-2 text-sm font-medium inline-block">
+          <div className="text-center marketing-copy-reveal">
+            <div className="marketing-kicker mb-6">
               Powerful Features
             </div>
-            <h1 className="text-5xl md:text-6xl font-bold text-slate-900 mb-6">
+            <h1 className="text-5xl md:text-6xl font-bold text-slate-950 mb-6 tracking-tight">
               Everything You Need to
               <span className="text-blue-600 block">Win More Bids</span>
             </h1>
@@ -54,7 +54,7 @@ const FeaturesPage: React.FC = () => {
               <Button 
                 onClick={handleLogin}
                 size="lg" 
-                className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 text-lg"
+                className="marketing-cta-primary px-8 py-3 text-lg"
               >
                 Start Free Trial
               </Button>
@@ -62,7 +62,7 @@ const FeaturesPage: React.FC = () => {
                 onClick={handlePricing}
                 size="lg" 
                 variant="outline" 
-                className="border-slate-300 text-slate-700 hover:bg-slate-50 px-8 py-3 text-lg"
+                className="marketing-cta-secondary px-8 py-3 text-lg"
               >
                 View Pricing
               </Button>
@@ -72,7 +72,7 @@ const FeaturesPage: React.FC = () => {
       </section>
 
       {/* Core Features Section */}
-      <section className="py-20 bg-white">
+      <section className="marketing-section py-20 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-16">
             <h2 className="text-4xl font-bold text-slate-900 mb-4">
@@ -367,7 +367,7 @@ const FeaturesPage: React.FC = () => {
           </div>
           
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-            <div className="bg-white rounded-xl p-8 shadow-sm border border-slate-200 hover:shadow-lg transition-shadow">
+            <div className="premium-card p-8">
               <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-6">
                 <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -380,7 +380,7 @@ const FeaturesPage: React.FC = () => {
               </p>
             </div>
 
-            <div className="bg-white rounded-xl p-8 shadow-sm border border-slate-200 hover:shadow-lg transition-shadow">
+            <div className="premium-card p-8">
               <div className="w-12 h-12 bg-indigo-100 rounded-lg flex items-center justify-center mb-6">
                 <svg className="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -393,7 +393,7 @@ const FeaturesPage: React.FC = () => {
               </p>
             </div>
 
-            <div className="bg-white rounded-xl p-8 shadow-sm border border-slate-200 hover:shadow-lg transition-shadow">
+            <div className="premium-card p-8">
               <div className="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center mb-6">
                 <svg className="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -406,7 +406,7 @@ const FeaturesPage: React.FC = () => {
               </p>
             </div>
 
-            <div className="bg-white rounded-xl p-8 shadow-sm border border-slate-200 hover:shadow-lg transition-shadow">
+            <div className="premium-card p-8">
               <div className="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center mb-6">
                 <svg className="w-6 h-6 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -419,7 +419,7 @@ const FeaturesPage: React.FC = () => {
               </p>
             </div>
 
-            <div className="bg-white rounded-xl p-8 shadow-sm border border-slate-200 hover:shadow-lg transition-shadow">
+            <div className="premium-card p-8">
               <div className="w-12 h-12 bg-red-100 rounded-lg flex items-center justify-center mb-6">
                 <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
@@ -432,7 +432,7 @@ const FeaturesPage: React.FC = () => {
               </p>
             </div>
 
-            <div className="bg-white rounded-xl p-8 shadow-sm border border-slate-200 hover:shadow-lg transition-shadow">
+            <div className="premium-card p-8">
               <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mb-6">
                 <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
@@ -514,14 +514,14 @@ const FeaturesPage: React.FC = () => {
             <Button 
               onClick={handleLogin}
               size="lg" 
-              className="bg-white text-blue-600 hover:bg-slate-50 px-8 py-3 text-lg"
+              className="marketing-cta-secondary px-8 py-3 text-lg"
             >
               Start Your Free Trial
             </Button>
             <Button 
               onClick={handlePricing}
               size="lg" 
-              className="bg-white text-blue-600 hover:bg-slate-50 px-8 py-3 text-lg border border-white"
+              className="marketing-cta-secondary px-8 py-3 text-lg"
             >
               View Pricing Plans
             </Button>
@@ -535,7 +535,7 @@ const FeaturesPage: React.FC = () => {
           <div className="grid md:grid-cols-4 gap-8">
             <div>
               <div className="flex items-center gap-2 mb-4">
-                <img src="/logo.png" alt="" className="h-8 w-8 rounded-lg object-contain" />
+                <MeridianBrandMark className="h-8 w-8 text-white" tone="light" />
                 <h3 className="text-lg font-semibold">Meridian Takeoff</h3>
               </div>
               <p className="text-slate-400">

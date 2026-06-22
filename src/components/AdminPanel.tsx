@@ -20,6 +20,7 @@ import { authHelpers, supabase, UserMetadata, UserInvitation } from '../lib/supa
 import { settingsService } from '../services/apiService';
 import { extractErrorMessage } from '../utils/commonUtils';
 import { AdminHelpFaqTab } from './help/AdminHelpFaqTab';
+import { cn } from '@/lib/utils';
 
 // Fallback when /api/ollama/models fails (https://ollama.com/search?c=cloud)
 const FALLBACK_OLLAMA_MODELS: OllamaModel[] = [
@@ -28,6 +29,17 @@ const FALLBACK_OLLAMA_MODELS: OllamaModel[] = [
   { name: 'deepseek-v3.1:671b', size: 0, digest: '', modified_at: '' },
   { name: 'qwen3-coder:480b', size: 0, digest: '', modified_at: '' },
 ];
+
+const adminPanelSection = 'border border-border rounded-lg bg-card p-6 shadow-sm';
+const adminNestedSection = 'border border-border rounded-lg bg-background/45 p-4';
+const adminMutedText = 'text-muted-foreground';
+const adminHelpText = 'text-sm text-muted-foreground';
+const adminTextArea =
+  'w-full rounded-md border border-input bg-background p-3 text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+const adminSelect =
+  'w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+const adminListRow =
+  'flex items-center justify-between gap-3 rounded-lg border border-border bg-background/60 p-3';
 
 interface AdminPanelProps {
   isOpen: boolean;
@@ -476,7 +488,7 @@ When answering questions:
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="w-[95vw] h-[95vh] max-w-none max-h-none overflow-hidden flex flex-col" aria-describedby="admin-panel-description">
+      <DialogContent className="w-[95vw] h-[95vh] max-w-none max-h-none overflow-hidden flex flex-col bg-background text-foreground" aria-describedby="admin-panel-description">
         <DialogDescription id="admin-panel-description" className="sr-only">
           System administration: AI prompts, model settings, and user management.
         </DialogDescription>
@@ -487,10 +499,10 @@ When answering questions:
           </DialogTitle>
         </DialogHeader>
 
-        <div className="flex-1 flex min-h-0">
+        <div className="flex-1 flex min-h-0 overflow-hidden rounded-lg border border-border">
           {/* Sidebar */}
-          <div className="w-64 border-r bg-gray-50 flex flex-col">
-            <div className="p-4 border-b">
+          <div className="w-64 border-r border-border bg-card flex flex-col">
+            <div className="p-4 border-b border-border">
               <h3 className="font-medium">Admin Tools</h3>
             </div>
               
@@ -502,11 +514,12 @@ When answering questions:
                       <button
                         key={tab.id}
                         onClick={() => setActiveTab(tab.id as typeof activeTab)}
-                        className={`w-full flex items-center gap-3 px-3 py-2 text-sm rounded-lg transition-colors ${
+                        className={cn(
+                          'w-full flex items-center gap-3 px-3 py-2 text-sm rounded-lg transition-colors',
                           activeTab === tab.id
-                            ? 'bg-blue-100 text-blue-700'
-                            : 'text-gray-600 hover:bg-gray-100'
-                        }`}
+                            ? 'bg-primary/12 text-primary'
+                            : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                        )}
                       >
                         <Icon className="w-4 h-4" />
                         {tab.label}
@@ -518,7 +531,7 @@ When answering questions:
             </div>
 
             {/* Main Content */}
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto bg-background">
               {activeTab === 'help-faq' && <AdminHelpFaqTab />}
 
               {activeTab === 'ai-prompt' && (
@@ -529,17 +542,17 @@ When answering questions:
                   
                   <div className="space-y-6">
                     {/* Titleblock Extraction Prompts */}
-                    <div className="border rounded-lg p-6">
+                    <div className={adminPanelSection}>
                       <div className="flex items-center justify-between mb-4">
                         <h3 className="text-lg font-semibold">Titleblock Extraction Prompts</h3>
                       </div>
-                      <p className="text-gray-600 mb-4">
+                      <p className={`${adminMutedText} mb-4`}>
                         Edit the AI prompts used for titleblock extraction. Each region (sheet number and sheet name) has its own prompt that the LLM uses to extract values from the OCR text.
                       </p>
                       
                       <div className="space-y-6">
                         {/* Sheet Number Prompt */}
-                        <div className="border rounded-lg p-4">
+                        <div className={adminNestedSection}>
                           <div className="flex items-center justify-between mb-4">
                             <h4 className="text-md font-semibold">Sheet Number Extraction Prompt</h4>
                             <div className="flex gap-2">
@@ -563,20 +576,20 @@ When answering questions:
                               </Button>
                             </div>
                           </div>
-                          <p className="text-sm text-gray-500 mb-2">
+                          <p className={`${adminHelpText} mb-2`}>
                             This prompt is used to extract sheet numbers from the sheet number region of the titleblock.
                           </p>
                           <textarea
                             id="sheet-number-prompt"
                             value={sheetNumberPrompt}
                             onChange={(e) => setSheetNumberPrompt(e.target.value)}
-                            className="w-full h-64 p-3 border rounded-md font-mono text-sm"
+                            className={`${adminTextArea} h-64 font-mono text-sm`}
                             placeholder="Enter prompt for sheet number extraction..."
                           />
                         </div>
 
                         {/* Sheet Name Prompt */}
-                        <div className="border rounded-lg p-4">
+                        <div className={adminNestedSection}>
                           <div className="flex items-center justify-between mb-4">
                             <h4 className="text-md font-semibold">Sheet Name Extraction Prompt</h4>
                             <div className="flex gap-2">
@@ -600,14 +613,14 @@ When answering questions:
                               </Button>
                             </div>
                           </div>
-                          <p className="text-sm text-gray-500 mb-2">
+                          <p className={`${adminHelpText} mb-2`}>
                             This prompt is used to extract sheet names/titles from the sheet name region of the titleblock.
                           </p>
                           <textarea
                             id="sheet-name-prompt"
                             value={sheetNamePrompt}
                             onChange={(e) => setSheetNamePrompt(e.target.value)}
-                            className="w-full h-64 p-3 border rounded-md font-mono text-sm"
+                            className={`${adminTextArea} h-64 font-mono text-sm`}
                             placeholder="Enter prompt for sheet name extraction..."
                           />
                         </div>
@@ -615,7 +628,7 @@ When answering questions:
                     </div>
 
                     {/* Chat Assistant Prompt */}
-                    <div className="border rounded-lg p-6">
+                    <div className={adminPanelSection}>
                       <div className="flex items-center justify-between mb-4">
                         <h3 className="text-lg font-semibold">Chat Assistant Prompt</h3>
                         <div className="flex gap-2">
@@ -640,7 +653,7 @@ When answering questions:
                           </Button>
                         </div>
                       </div>
-                      <p className="text-gray-600 mb-4">
+                      <p className={`${adminMutedText} mb-4`}>
                         Edit the system prompt used for the AI chat assistant in the chat tab.
                       </p>
                       
@@ -652,16 +665,16 @@ When answering questions:
                             name="chat-prompt"
                             value={chatPrompt}
                             onChange={(e) => setChatPrompt(e.target.value)}
-                            className="w-full h-32 p-3 border rounded-md resize-none"
+                            className={`${adminTextArea} h-32 resize-none`}
                             placeholder="You are an AI assistant specialized in construction takeoff and project analysis..."
                           />
                         </div>
                       </div>
                     </div>
                     
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                      <h4 className="font-medium text-blue-800 mb-2">ℹ️ How it works:</h4>
-                      <ul className="text-sm text-blue-700 space-y-1">
+                    <div className="rounded-lg border border-blue-500/25 bg-blue-500/10 p-4">
+                      <h4 className="font-medium text-blue-700 dark:text-blue-200 mb-2">How it works:</h4>
+                      <ul className="text-sm text-blue-700 dark:text-blue-100/90 space-y-1">
                         <li>• <strong>Titleblock Extraction Prompts:</strong> Used for extracting sheet numbers and names from titleblock regions (separate prompts for each field)</li>
                         <li>• <strong>Chat Assistant Prompt:</strong> Used for AI responses in the chat tab</li>
                         <li>• The JSON formatting for page labeling is automatically appended and cannot be changed</li>
@@ -678,47 +691,47 @@ When answering questions:
                   <h2 className="text-2xl font-bold mb-6">AI Chat Configuration</h2>
                   
                   <div className="space-y-6">
-                    <div className="border rounded-lg p-6">
+                    <div className={adminPanelSection}>
                       <h3 className="text-lg font-semibold mb-4">Model Settings</h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <Label>Default Model</Label>
                           <select 
-                            className="w-full p-2 border rounded-md"
+                            className={adminSelect}
                             value={selectedModel}
                             onChange={(e) => setSelectedModel(e.target.value)}
                           >
                             {availableModels.map((model) => (
-                              <option key={model.name} value={model.name}>
+                              <option key={model.name} value={model.name} className="bg-background text-foreground">
                                 {model.name} (cloud{model.size ? `, ${(model.size / 1024 / 1024 / 1024).toFixed(1)}GB` : ''})
                               </option>
                             ))}
                           </select>
-                          <p className="text-sm text-gray-600 mt-1">Primary AI model for chat responses</p>
+                          <p className={`${adminHelpText} mt-1`}>Primary AI model for chat responses</p>
                         </div>
                         <div>
                           <Label>Fallback Model</Label>
                           <select 
-                            className="w-full p-2 border rounded-md"
+                            className={adminSelect}
                             value={fallbackModel}
                             onChange={(e) => setFallbackModel(e.target.value)}
                           >
                             {availableModels.map((model) => (
-                              <option key={model.name} value={model.name}>
+                              <option key={model.name} value={model.name} className="bg-background text-foreground">
                                 {model.name} (cloud{model.size ? `, ${(model.size / 1024 / 1024 / 1024).toFixed(1)}GB` : ''})
                               </option>
                             ))}
                           </select>
-                          <p className="text-sm text-gray-600 mt-1">Backup model if primary fails</p>
+                          <p className={`${adminHelpText} mt-1`}>Backup model if primary fails</p>
                         </div>
                       </div>
                     </div>
 
-                    <div className="border rounded-lg p-6">
+                    <div className={adminPanelSection}>
                       <h3 className="text-lg font-semibold mb-4">OCR & AI Analysis Settings</h3>
-                      <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
-                        <h4 className="font-medium text-green-800 mb-2">✅ Current Approach: Simple OCR + AI</h4>
-                        <ul className="text-sm text-green-700 space-y-1">
+                      <div className="rounded-lg border border-green-500/25 bg-green-500/10 p-4">
+                        <h4 className="font-medium text-green-700 dark:text-green-200 mb-2">Current Approach: Simple OCR + AI</h4>
+                        <ul className="text-sm text-green-700 dark:text-green-100/90 space-y-1">
                           <li>• Fast text extraction using pdf-parse (18 seconds for 80 pages)</li>
                           <li>• AI analysis of extracted text for sheet labeling</li>
                           <li>• Reliable processing of all pages</li>
@@ -727,7 +740,7 @@ When answering questions:
                       </div>
                     </div>
 
-                    <div className="border rounded-lg p-6">
+                    <div className={adminPanelSection}>
                       <h3 className="text-lg font-semibold mb-4">Response Parameters</h3>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
@@ -740,7 +753,7 @@ When answering questions:
                             placeholder="0.7" 
                             defaultValue="0.7"
                           />
-                          <p className="text-sm text-gray-600 mt-1">Creativity level (0-2)</p>
+                          <p className={`${adminHelpText} mt-1`}>Creativity level (0-2)</p>
                         </div>
                         <div>
                           <Label>Top P</Label>
@@ -752,7 +765,7 @@ When answering questions:
                             placeholder="0.9" 
                             defaultValue="0.9"
                           />
-                          <p className="text-sm text-gray-600 mt-1">Response diversity (0-1)</p>
+                          <p className={`${adminHelpText} mt-1`}>Response diversity (0-1)</p>
                         </div>
                         <div>
                           <Label>Max Tokens</Label>
@@ -761,13 +774,13 @@ When answering questions:
                             placeholder="2048" 
                             defaultValue="2048"
                           />
-                          <p className="text-sm text-gray-600 mt-1">Maximum response length</p>
+                          <p className={`${adminHelpText} mt-1`}>Maximum response length</p>
                         </div>
                       </div>
                     </div>
 
 
-                    <div className="border rounded-lg p-6">
+                    <div className={adminPanelSection}>
                       <h3 className="text-lg font-semibold mb-4">Context & Memory</h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
@@ -777,21 +790,21 @@ When answering questions:
                             placeholder="10" 
                             defaultValue="10"
                           />
-                          <p className="text-sm text-gray-600 mt-1">Number of previous messages to include</p>
+                          <p className={`${adminHelpText} mt-1`}>Number of previous messages to include</p>
                         </div>
                         <div>
                           <Label>Project Context Level</Label>
-                          <select className="w-full p-2 border rounded-md">
-                            <option value="full">Full Project Data</option>
-                            <option value="summary">Summary Only</option>
-                            <option value="minimal">Minimal Context</option>
+                          <select className={adminSelect}>
+                            <option value="full" className="bg-background text-foreground">Full Project Data</option>
+                            <option value="summary" className="bg-background text-foreground">Summary Only</option>
+                            <option value="minimal" className="bg-background text-foreground">Minimal Context</option>
                           </select>
-                          <p className="text-sm text-gray-600 mt-1">Amount of project data to include</p>
+                          <p className={`${adminHelpText} mt-1`}>Amount of project data to include</p>
                         </div>
                       </div>
                     </div>
 
-                    <div className="border rounded-lg p-6">
+                    <div className={adminPanelSection}>
                       <h3 className="text-lg font-semibold mb-4">Performance & Limits</h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
@@ -801,7 +814,7 @@ When answering questions:
                             placeholder="300" 
                             defaultValue="300"
                           />
-                          <p className="text-sm text-gray-600 mt-1">Maximum time to wait for response</p>
+                          <p className={`${adminHelpText} mt-1`}>Maximum time to wait for response</p>
                         </div>
                         <div>
                           <Label>Rate Limit (requests/minute)</Label>
@@ -810,7 +823,7 @@ When answering questions:
                             placeholder="60" 
                             defaultValue="60"
                           />
-                          <p className="text-sm text-gray-600 mt-1">Maximum requests per minute</p>
+                          <p className={`${adminHelpText} mt-1`}>Maximum requests per minute</p>
                         </div>
                       </div>
                     </div>
@@ -899,7 +912,7 @@ When answering questions:
                   
                   <div className="space-y-8">
                     {/* Invite User Section */}
-                    <div className="border rounded-lg p-6">
+                    <div className={adminPanelSection}>
                       <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
                         <UserPlus className="w-5 h-5" />
                         Invite New User
@@ -922,12 +935,12 @@ When answering questions:
                           <select
                             id="invite-role"
                             name="invite-role"
-                            className="w-full p-2 border rounded-md"
+                            className={adminSelect}
                             value={inviteRole}
                             onChange={(e) => setInviteRole(e.target.value as 'admin' | 'user')}
                           >
-                            <option value="user">User</option>
-                            <option value="admin">Admin</option>
+                            <option value="user" className="bg-background text-foreground">User</option>
+                            <option value="admin" className="bg-background text-foreground">Admin</option>
                           </select>
                         </div>
                         <div className="flex items-end">
@@ -944,22 +957,22 @@ When answering questions:
                     </div>
 
                     {/* Pending Invitations */}
-                    <div className="border rounded-lg p-6">
+                    <div className={adminPanelSection}>
                       <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
                         <Mail className="w-5 h-5" />
                         Pending Invitations ({invitations.filter(inv => inv.status === 'pending').length})
                       </h3>
                       {invitations.filter(inv => inv.status === 'pending').length === 0 ? (
-                        <p className="text-gray-500">No pending invitations</p>
+                        <p className={adminMutedText}>No pending invitations</p>
                       ) : (
                         <div className="space-y-2">
                           {invitations
                             .filter(inv => inv.status === 'pending')
                             .map((invitation) => (
-                              <div key={invitation.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                              <div key={invitation.id} className={adminListRow}>
                                 <div>
                                   <p className="font-medium">{invitation.email}</p>
-                                  <p className="text-sm text-gray-600">
+                                  <p className={adminHelpText}>
                                     {invitation.source === 'project_share' ? (
                                       <>Project share: {invitation.project_name || 'Project'} • </>
                                     ) : (
@@ -972,7 +985,7 @@ When answering questions:
                                   variant="outline"
                                   size="sm"
                                   onClick={() => handleDeleteInvitation(invitation.id)}
-                                  className="text-red-600 hover:bg-red-50"
+                                  className="text-red-600 hover:bg-red-500/10 dark:text-red-400"
                                 >
                                   <Trash2 className="w-4 h-4" />
                                 </Button>
@@ -983,20 +996,20 @@ When answering questions:
                     </div>
 
                     {/* Active Users */}
-                    <div className="border rounded-lg p-6">
+                    <div className={adminPanelSection}>
                       <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
                         <Users className="w-5 h-5" />
                         Active Users ({users.length})
                       </h3>
                       {users.length === 0 ? (
-                        <p className="text-gray-500">No users found</p>
+                        <p className={adminMutedText}>No users found</p>
                       ) : (
                         <div className="space-y-2">
                           {users.map((user) => (
-                            <div key={user.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                            <div key={user.id} className={adminListRow}>
                               <div>
                                 <p className="font-medium">{user.full_name || 'No name'}</p>
-                                <p className="text-sm text-gray-600">
+                                <p className={adminHelpText}>
                                   Role: {user.role} • 
                                   Joined: {new Date(user.created_at).toLocaleDateString()}
                                   {user.company && ` • ${user.company}`}
@@ -1006,16 +1019,16 @@ When answering questions:
                                 <select
                                   value={user.role}
                                   onChange={(e) => handleUpdateUserRole(user.id, e.target.value as 'admin' | 'user')}
-                                  className="text-sm border rounded px-2 py-1"
+                                  className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                 >
-                                  <option value="user">User</option>
-                                  <option value="admin">Admin</option>
+                                  <option value="user" className="bg-background text-foreground">User</option>
+                                  <option value="admin" className="bg-background text-foreground">Admin</option>
                                 </select>
                                 <Button
                                   variant="outline"
                                   size="sm"
                                   onClick={() => handleDeleteUser(user.id)}
-                                  className="text-red-600 hover:bg-red-50"
+                                  className="text-red-600 hover:bg-red-500/10 dark:text-red-400"
                                 >
                                   <Trash2 className="w-4 h-4" />
                                 </Button>
@@ -1032,7 +1045,7 @@ When answering questions:
             </div>
           </div>
 
-        <DialogFooter>
+        <DialogFooter className="border-t border-border pt-4">
           <Button onClick={onClose}>
             Close
           </Button>

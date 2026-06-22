@@ -230,9 +230,9 @@ export function BackupDialog({
         <div className="space-y-4">
           {mode === 'backup' ? (
             <div className="space-y-4">
-              <div className="flex items-center gap-2 p-3 bg-blue-50 rounded-lg">
+              <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg dark:bg-blue-950/30 dark:border-blue-800">
                 <Database className="w-4 h-4 text-blue-600" />
-                <span className="text-sm text-blue-800">
+                <span className="text-sm text-blue-800 dark:text-blue-200">
                   This will include all project data, PDFs, conditions, measurements, scale calibrations, markups (arrows, text, shapes), page rotations, and settings.
                 </span>
               </div>
@@ -248,18 +248,18 @@ export function BackupDialog({
               )}
 
               {success && (
-                <div className="flex items-center gap-2 p-3 bg-green-50 rounded-lg">
+                <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg dark:bg-green-950/30 dark:border-green-800">
                   <CheckCircle className="w-4 h-4 text-green-600" />
-                  <span className="text-sm text-green-800">
+                  <span className="text-sm text-green-800 dark:text-green-200">
                     Backup created successfully! Download should start automatically.
                   </span>
                 </div>
               )}
 
               {error && (
-                <div className="flex items-center gap-2 p-3 bg-red-50 rounded-lg">
+                <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg dark:bg-red-950/30 dark:border-red-800">
                   <AlertCircle className="w-4 h-4 text-red-600" />
-                  <span className="text-sm text-red-800">{error}</span>
+                  <span className="text-sm text-red-800 dark:text-red-200">{error}</span>
                 </div>
               )}
 
@@ -307,15 +307,15 @@ export function BackupDialog({
                   type="file"
                   accept=".json"
                   onChange={handleFileSelect}
-                  className="w-full p-2 border rounded-md"
+                  className="w-full p-2 border border-input rounded-md bg-background text-foreground file:text-foreground"
                   disabled={loading}
                 />
               </div>
 
               {fileInfo && (
-                <div className="p-3 bg-gray-50 rounded-lg space-y-2">
+                <div className="p-3 bg-muted/40 border border-border rounded-lg space-y-2">
                   <div className="flex items-center gap-2">
-                    <FileText className="w-4 h-4 text-gray-600" />
+                    <FileText className="w-4 h-4 text-muted-foreground" />
                     <span className="font-medium">{fileInfo.projectName ?? 'Unknown'}</span>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-sm">
@@ -343,29 +343,29 @@ export function BackupDialog({
                     )}
                   </div>
                   {fileInfo.hasPDFs !== undefined && (
-                    <div className="flex items-center gap-2 p-2 bg-blue-50 rounded text-xs">
+                    <div className="flex items-center gap-2 p-2 bg-blue-50 border border-blue-200 rounded text-xs dark:bg-blue-950/30 dark:border-blue-800">
                       <CheckCircle className="w-3 h-3 text-blue-600" />
-                      <span className="text-blue-800">
+                      <span className="text-blue-800 dark:text-blue-200">
                         {(fileInfo.filesWithData ?? 0)} PDF file(s) included in backup
                         {(fileInfo.filesMissing ?? 0) > 0 && ` (${fileInfo.filesMissing} missing)`}
                       </span>
                     </div>
                   )}
                   {fileInfo.hasCalibrations && (
-                    <div className="flex items-center gap-2 p-2 bg-green-50 rounded text-xs">
+                    <div className="flex items-center gap-2 p-2 bg-green-50 border border-green-200 rounded text-xs dark:bg-green-950/30 dark:border-green-800">
                       <CheckCircle className="w-3 h-3 text-green-600" />
-                      <span className="text-green-800">
+                      <span className="text-green-800 dark:text-green-200">
                         Scale calibrations included
                       </span>
                     </div>
                   )}
                   {fileInfo.version && (
-                    <div className="text-xs text-gray-500">
+                    <div className="text-xs text-muted-foreground">
                       Version: {fileInfo.version} • Created: {fileInfo.timestamp ? new Date(fileInfo.timestamp).toLocaleString() : '—'}
                     </div>
                   )}
                   {!fileInfo.version && (
-                    <div className="text-xs text-gray-500">
+                    <div className="text-xs text-muted-foreground">
                       Created: {fileInfo.timestamp ? new Date(fileInfo.timestamp).toLocaleString() : '—'}
                     </div>
                   )}
@@ -383,18 +383,18 @@ export function BackupDialog({
               )}
 
               {success && (
-                <div className="flex items-center gap-2 p-3 bg-green-50 rounded-lg">
+                <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg dark:bg-green-950/30 dark:border-green-800">
                   <CheckCircle className="w-4 h-4 text-green-600" />
-                  <span className="text-sm text-green-800">
+                  <span className="text-sm text-green-800 dark:text-green-200">
                     Project restored successfully!
                   </span>
                 </div>
               )}
 
               {error && (
-                <div className="flex items-center gap-2 p-3 bg-red-50 rounded-lg">
+                <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg dark:bg-red-950/30 dark:border-red-800">
                   <AlertCircle className="w-4 h-4 text-red-600" />
-                  <span className="text-sm text-red-800">{error}</span>
+                  <span className="text-sm text-red-800 dark:text-red-200">{error}</span>
                 </div>
               )}
 
@@ -426,5 +426,4 @@ export function BackupDialog({
     </Dialog>
   );
 }
-
 

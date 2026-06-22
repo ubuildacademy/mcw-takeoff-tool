@@ -368,11 +368,11 @@ export function SheetSidebar({
 
   if (loading) {
     return (
-      <div className="w-96 bg-white border-l flex flex-col">
+      <div className="w-full bg-background border-l flex flex-col text-foreground">
         <div className="p-4 border-b">
           <div className="animate-pulse">
-            <div className="h-6 bg-gray-200 rounded mb-2"></div>
-            <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+            <div className="h-6 bg-muted rounded mb-2"></div>
+            <div className="h-4 bg-muted rounded w-3/4"></div>
           </div>
         </div>
       </div>
@@ -382,7 +382,7 @@ export function SheetSidebar({
   const filteredDocuments = getFilteredAndSortedDocuments();
 
   return (
-    <div className="w-96 bg-white border-l flex flex-col h-full">
+    <div className="w-full bg-background border-l flex flex-col h-full text-foreground">
       <SheetSidebarHeader
         filterBy={filterBy}
         onFilterByChange={setFilterBy}
@@ -412,7 +412,7 @@ export function SheetSidebar({
               if (document.totalPages === 1) {
                 const page = document.pages[0];
                 return (
-                  <div key={document.id} className="border rounded-lg [content-visibility:auto]">
+                  <div key={document.id} className="border rounded-lg bg-card [content-visibility:auto]">
                     {/* Document Header */}
                     <div
                       className="p-3 cursor-pointer hover:bg-accent/50 transition-colors"
@@ -564,7 +564,7 @@ export function SheetSidebar({
                                       e.stopPropagation();
                                       startEditingSheetName(document.id, page.pageNumber, page.sheetName || '');
                                     }}
-                                    className="h-6 w-6 p-0 text-gray-400 hover:text-gray-600 flex-shrink-0 mt-0.5"
+                                    className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground flex-shrink-0 mt-0.5"
                                     title="Edit sheet name"
                                   >
                                     <Edit2 className="w-3 h-3" />
@@ -615,7 +615,7 @@ export function SheetSidebar({
                                       {page.sheetNumber}
                                     </Badge>
                                   ) : (
-                                    <span className="text-xs text-gray-400 italic">No sheet #</span>
+                                    <span className="text-xs text-muted-foreground italic">No sheet #</span>
                                   )}
                                   <Button
                                     variant="ghost"
@@ -624,7 +624,7 @@ export function SheetSidebar({
                                       e.stopPropagation();
                                       startEditingSheetNumber(document.id, page.pageNumber, page.sheetNumber || '');
                                     }}
-                                    className="h-5 w-5 p-0 text-gray-400 hover:text-gray-600"
+                                    className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground"
                                     title={page.sheetNumber ? "Edit sheet number" : "Add sheet number"}
                                   >
                                     <Edit2 className="w-3 h-3" />
@@ -676,7 +676,7 @@ export function SheetSidebar({
               
               // Multi-page PDFs: show with expandable structure
               return (
-                <div key={document.id} className="border rounded-lg [content-visibility:auto]">
+                <div key={document.id} className="border rounded-lg bg-card [content-visibility:auto]">
                   {/* Document Header */}
                   <div
                     className="p-3 cursor-pointer hover:bg-accent/50 transition-colors"
@@ -684,11 +684,11 @@ export function SheetSidebar({
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <div className="flex items-center justify-center w-6 h-6 rounded hover:bg-gray-200 transition-colors">
+                        <div className="flex items-center justify-center w-6 h-6 rounded hover:bg-muted transition-colors">
                           {document.isExpanded ? (
-                            <ChevronDown className="w-4 h-4 text-gray-600" />
+                            <ChevronDown className="w-4 h-4 text-muted-foreground" />
                           ) : (
-                            <ChevronRight className="w-4 h-4 text-gray-600" />
+                            <ChevronRight className="w-4 h-4 text-muted-foreground" />
                           )}
                         </div>
                         <FileText className="w-4 h-4 text-muted-foreground" />
@@ -842,7 +842,7 @@ export function SheetSidebar({
                                         e.stopPropagation();
                                         startEditingSheetName(document.id, page.pageNumber, page.sheetName || '');
                                       }}
-                                      className="h-6 w-6 p-0 text-gray-400 hover:text-gray-600 flex-shrink-0 mt-0.5"
+                                      className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground flex-shrink-0 mt-0.5"
                                       title="Edit sheet name"
                                     >
                                       <Edit2 className="w-3 h-3" />
@@ -893,7 +893,7 @@ export function SheetSidebar({
                                         {page.sheetNumber}
                                       </Badge>
                                     ) : (
-                                      <span className="text-xs text-gray-400 italic">No sheet #</span>
+                                      <span className="text-xs text-muted-foreground italic">No sheet #</span>
                                     )}
                                     <Button
                                       variant="ghost"
@@ -902,7 +902,7 @@ export function SheetSidebar({
                                         e.stopPropagation();
                                         startEditingSheetNumber(document.id, page.pageNumber, page.sheetNumber || '');
                                       }}
-                                      className="h-5 w-5 p-0 text-gray-400 hover:text-gray-600"
+                                      className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground"
                                       title={page.sheetNumber ? "Edit sheet number" : "Add sheet number"}
                                     >
                                       <Edit2 className="w-3 h-3" />

@@ -10,31 +10,28 @@ export function WorkspaceLayoutIllustration({ className }: { className?: string 
       )}
       aria-label="Workspace layout diagram: Takeoff sidebar on the left, PDF viewer in the center, Documents Search and AI Chat on the right"
     >
-      {/* Top toolbar */}
-      <div className="flex flex-wrap items-center gap-1.5 border-b border-border bg-muted/40 px-3 py-2 text-[10px] sm:text-[11px]">
-        <span className="rounded bg-background px-2 py-1 font-medium text-foreground shadow-sm">← Projects</span>
-        <span className="rounded bg-background px-2 py-1 text-muted-foreground shadow-sm">Undo</span>
-        <span className="rounded bg-background px-2 py-1 text-muted-foreground shadow-sm">Redo</span>
-        <span className="hidden sm:inline text-muted-foreground">·</span>
-        <span className="rounded bg-background px-2 py-1 text-muted-foreground shadow-sm">Page</span>
-        <span className="rounded bg-background px-2 py-1 text-muted-foreground shadow-sm">View</span>
-        <span className="rounded bg-primary/10 px-2 py-1 font-medium text-primary shadow-sm">Calibrate</span>
-        <span className="rounded bg-background px-2 py-1 text-muted-foreground shadow-sm">Annotate</span>
-        <span className="ml-auto rounded bg-background px-2 py-1 text-muted-foreground shadow-sm">? Help</span>
-        <span className="rounded bg-background px-2 py-1 text-muted-foreground shadow-sm">Tools</span>
+      {/* Top command bar */}
+      <div className="flex flex-wrap items-center gap-1.5 border-b border-border bg-muted/50 px-3 py-2 text-[10px] sm:text-[11px]">
+        <span className="rounded-md bg-background px-2 py-1 font-medium text-foreground shadow-sm">← Projects</span>
+        <span className="rounded-md border bg-background px-2 py-1 text-muted-foreground shadow-sm">Undo · Redo</span>
+        <span className="rounded-md border bg-background px-2 py-1 text-muted-foreground shadow-sm">Prev · 5/80 · Next</span>
+        <span className="rounded-md border bg-background px-2 py-1 text-muted-foreground shadow-sm">Zoom · Reset</span>
+        <span className="rounded-md bg-emerald-600 px-2 py-1 font-medium text-white shadow-sm">Recalibrate</span>
+        <span className="rounded-md border bg-background px-2 py-1 text-muted-foreground shadow-sm">Annotate</span>
+        <span className="ml-auto rounded-full border bg-background px-2 py-1 text-muted-foreground shadow-sm">? · Tools · Saved</span>
       </div>
 
       <div className="flex min-h-[280px] sm:min-h-[320px]">
         {/* Left — Takeoff */}
         <div className="flex w-[26%] min-w-[88px] max-w-[140px] shrink-0 border-r border-border bg-white">
           <div className="flex flex-1 flex-col">
-            <div className="flex border-b border-border text-[9px] sm:text-[10px]">
+            <div className="flex gap-1 border-b border-border bg-muted/40 p-1 text-[9px] sm:text-[10px]">
               {['Conditions', 'Reports', 'Costs'].map((tab, i) => (
                 <span
                   key={tab}
                   className={cn(
-                    'flex-1 px-1 py-1.5 text-center',
-                    i === 0 ? 'border-b-2 border-primary font-semibold text-primary' : 'text-muted-foreground'
+                    'flex-1 rounded px-1 py-1.5 text-center',
+                    i === 0 ? 'bg-background font-semibold text-primary shadow-sm' : 'text-muted-foreground'
                   )}
                 >
                   {tab}
@@ -46,16 +43,17 @@ export function WorkspaceLayoutIllustration({ className }: { className?: string 
                 <div
                   key={name}
                   className={cn(
-                    'rounded border px-1.5 py-1 text-[9px] sm:text-[10px]',
+                    'relative rounded border py-1 pl-2 pr-1 text-[9px] sm:text-[10px]',
                     i === 0 ? 'border-primary/40 bg-primary/5 font-medium' : 'border-border text-muted-foreground'
                   )}
                 >
                   <span
-                    className="mr-1 inline-block h-2 w-2 rounded-full align-middle"
+                    className="absolute left-0 top-0 h-full w-0.5 rounded-l"
                     style={{ backgroundColor: i === 0 ? '#3b82f6' : i === 1 ? '#22c55e' : '#f59e0b' }}
                     aria-hidden
                   />
-                  {name}
+                  <span>{name}</span>
+                  <span className="float-right text-[8px] text-muted-foreground">view edit</span>
                 </div>
               ))}
             </div>
@@ -101,13 +99,13 @@ export function WorkspaceLayoutIllustration({ className }: { className?: string 
             ›
           </div>
           <div className="flex flex-1 flex-col">
-            <div className="flex border-b border-border text-[8px] sm:text-[9px]">
+            <div className="flex gap-1 border-b border-border bg-muted/40 p-1 text-[8px] sm:text-[9px]">
               {['Documents', 'Search', 'AI Chat'].map((tab, i) => (
                 <span
                   key={tab}
                   className={cn(
-                    'flex-1 px-0.5 py-1.5 text-center leading-tight',
-                    i === 0 ? 'border-b-2 border-primary font-semibold text-primary' : 'text-muted-foreground'
+                    'flex-1 rounded px-0.5 py-1.5 text-center leading-tight',
+                    i === 0 ? 'bg-background font-semibold text-primary shadow-sm' : 'text-muted-foreground'
                   )}
                 >
                   {tab}

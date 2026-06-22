@@ -39,12 +39,12 @@ export function HyperlinkContextMenu({
   return (
     <div
       ref={ref}
-      className="fixed z-[100] min-w-[160px] rounded-md border border-slate-200 bg-white py-1 shadow-lg"
+      className="fixed z-[100] min-w-[160px] rounded-md border bg-popover text-popover-foreground py-1 shadow-lg"
       style={{ left: x, top: y }}
     >
       <button
         type="button"
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-100"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent"
         onClick={() => {
           onEdit();
           onClose();
@@ -54,7 +54,7 @@ export function HyperlinkContextMenu({
       </button>
       <button
         type="button"
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-500/10"
         onClick={() => {
           onDelete();
           onClose();

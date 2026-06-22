@@ -4,6 +4,8 @@
  */
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import type { ThemeMode } from '../../lib/theme';
+import { applyThemeMode } from '../../lib/theme';
 
 const DEFAULT_CROSSHAIR_COLOR = '#000000';
 
@@ -22,6 +24,8 @@ export interface UserPreferencesState {
   magnifierEnabled: boolean;
   /** Magnifier zoom level (2, 3, or 4x) */
   magnifierZoom: 2 | 3 | 4;
+  /** App appearance preference */
+  themeMode: ThemeMode;
 
   setCrosshairFullScreen: (value: boolean) => void;
   setCrosshairColor: (value: string) => void;
@@ -31,6 +35,7 @@ export interface UserPreferencesState {
   setShowRunningLength: (value: boolean) => void;
   setMagnifierEnabled: (value: boolean) => void;
   setMagnifierZoom: (value: 2 | 3 | 4) => void;
+  setThemeMode: (value: ThemeMode) => void;
 }
 
 export const useUserPreferencesStore = create<UserPreferencesState>()(
@@ -44,6 +49,7 @@ export const useUserPreferencesStore = create<UserPreferencesState>()(
       showRunningLength: true,
       magnifierEnabled: false,
       magnifierZoom: 3,
+      themeMode: 'system',
 
       setCrosshairFullScreen: (value) => set({ crosshairFullScreen: value }),
       setCrosshairColor: (value) => set({ crosshairColor: value }),
@@ -53,6 +59,10 @@ export const useUserPreferencesStore = create<UserPreferencesState>()(
       setShowRunningLength: (value) => set({ showRunningLength: value }),
       setMagnifierEnabled: (value) => set({ magnifierEnabled: value }),
       setMagnifierZoom: (value) => set({ magnifierZoom: value }),
+      setThemeMode: (value) => {
+        applyThemeMode(value);
+        set({ themeMode: value });
+      },
     }),
     {
       name: 'user-preferences-store',
@@ -65,7 +75,11 @@ export const useUserPreferencesStore = create<UserPreferencesState>()(
         showRunningLength: state.showRunningLength,
         magnifierEnabled: state.magnifierEnabled,
         magnifierZoom: state.magnifierZoom,
+        themeMode: state.themeMode,
       }),
+      onRehydrateStorage: () => (state) => {
+        applyThemeMode(state?.themeMode ?? 'system');
+      },
     }
   )
 );

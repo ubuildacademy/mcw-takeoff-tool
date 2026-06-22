@@ -131,11 +131,11 @@ const UserProfile: React.FC<UserProfileProps> = ({ onClose }) => {
 
   if (isLoading) {
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" role="presentation">
-        <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4" role="dialog" aria-modal="true" aria-labelledby="dialog-profile-loading-title" aria-busy="true">
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" role="presentation">
+        <div className="bg-background text-foreground border border-border rounded-lg p-6 max-w-md w-full mx-4 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="dialog-profile-loading-title" aria-busy="true">
           <div className="text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto" aria-hidden="true"></div>
-            <p id="dialog-profile-loading-title" className="mt-2 text-slate-600">Loading profile...</p>
+            <p id="dialog-profile-loading-title" className="mt-2 text-muted-foreground">Loading profile...</p>
           </div>
         </div>
       </div>
@@ -143,10 +143,10 @@ const UserProfile: React.FC<UserProfileProps> = ({ onClose }) => {
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" role="presentation" onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); onClose(); } }}>
-      <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="dialog-user-profile-title">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" role="presentation" onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); onClose(); } }}>
+      <div className="bg-background text-foreground border border-border rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="dialog-user-profile-title">
         <div className="flex justify-between items-center mb-6">
-          <h2 id="dialog-user-profile-title" className="text-2xl font-bold text-slate-900">User Profile</h2>
+          <h2 id="dialog-user-profile-title" className="text-2xl font-bold text-foreground">User Profile</h2>
           <Button variant="ghost" onClick={onClose} aria-label="Close">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -169,7 +169,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ onClose }) => {
         <div className="space-y-8">
           {/* Profile Information */}
           <div>
-            <h3 className="text-lg font-semibold text-slate-900 mb-4">Profile Information</h3>
+            <h3 className="text-lg font-semibold text-foreground mb-4">Profile Information</h3>
             <form onSubmit={handleProfileUpdate} className="space-y-4">
               <div>
                 <Label htmlFor="fullName">Full Name</Label>
@@ -191,7 +191,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ onClose }) => {
               </div>
               <div>
                 <Label>Role</Label>
-                <div className="mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-md">
+                <div className="mt-1 px-3 py-2 bg-muted/40 border border-border rounded-md">
                   <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                     userMetadata?.role === 'admin' 
                       ? 'bg-purple-100 text-purple-800' 
@@ -209,7 +209,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ onClose }) => {
 
           {/* Change Password */}
           <div>
-            <h3 className="text-lg font-semibold text-slate-900 mb-4">Change Password</h3>
+            <h3 className="text-lg font-semibold text-foreground mb-4">Change Password</h3>
             <form onSubmit={handlePasswordChange} className="space-y-4">
               <div>
                 <Label htmlFor="newPassword">New Password</Label>
@@ -241,19 +241,19 @@ const UserProfile: React.FC<UserProfileProps> = ({ onClose }) => {
 
           {/* Account Actions */}
           <div>
-            <h3 className="text-lg font-semibold text-slate-900 mb-4">Account Actions</h3>
+            <h3 className="text-lg font-semibold text-foreground mb-4">Account Actions</h3>
             <div className="space-y-2">
               <Button
                 variant="outline"
                 onClick={handleSignOut}
-                className="w-full border-red-200 text-red-600 hover:bg-red-50"
+                className="w-full border-red-200 text-red-600 hover:bg-red-500/10"
               >
                 Sign Out
               </Button>
               <Button
                 variant="outline"
                 onClick={() => setShowDeleteConfirm(true)}
-                className="w-full border-red-200 text-red-600 hover:bg-red-50"
+                className="w-full border-red-200 text-red-600 hover:bg-red-500/10"
               >
                 Delete Account
               </Button>

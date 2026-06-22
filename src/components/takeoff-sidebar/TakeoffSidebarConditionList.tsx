@@ -76,7 +76,7 @@ function formatConditionValue(
     return (
       <div className="flex items-center gap-2">
         <span>{formatFeetAndInches(totalValue)} LF</span>
-        <span className="text-xs text-gray-500">{totalAreaValue.toFixed(0)} SF</span>
+        <span className="text-xs text-muted-foreground">{totalAreaValue.toFixed(0)} SF</span>
       </div>
     );
   }
@@ -87,7 +87,7 @@ function formatConditionValue(
     return (
       <div className="flex items-center gap-2">
         <span>{totalValue.toFixed(0)} SF</span>
-        {totalPerimeter > 0 && <span className="text-xs text-gray-500">{formatFeetAndInches(totalPerimeter)} LF</span>}
+        {totalPerimeter > 0 && <span className="text-xs text-muted-foreground">{formatFeetAndInches(totalPerimeter)} LF</span>}
       </div>
     );
   }
@@ -127,17 +127,17 @@ export interface TakeoffSidebarConditionListProps {
 function getTypeIcon(type: string) {
   switch (type) {
     case 'area':
-      return <Square className="w-4 h-4" />;
+      return <Square />;
     case 'volume':
-      return <Package className="w-4 h-4" />;
+      return <Package />;
     case 'linear':
-      return <Ruler className="w-4 h-4" />;
+      return <Ruler />;
     case 'count':
-      return <Hash className="w-4 h-4" />;
+      return <Hash />;
     case 'auto-count':
-      return <Search className="w-4 h-4" />;
+      return <Search />;
     default:
-      return <Calculator className="w-4 h-4" />;
+      return <Calculator />;
   }
 }
 
@@ -187,22 +187,27 @@ export function TakeoffSidebarConditionList({
 
   return (
     <>
-      <Input
-        id="conditions-search"
-        name="conditions-search"
-        type="search"
-        autoComplete="off"
-        placeholder="Search conditions..."
-        value={searchQuery}
-        onChange={(e) => onSearchChange(e.target.value)}
-        className="mb-2 h-8"
-      />
+      <div className="p-2 pb-0">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+          <Input
+            id="conditions-search"
+            name="conditions-search"
+            type="search"
+            autoComplete="off"
+            placeholder="Search conditions..."
+            value={searchQuery}
+            onChange={(e) => onSearchChange(e.target.value)}
+            className="h-9 pl-8 bg-background"
+          />
+        </div>
+      </div>
       <div className="p-2 space-y-2">
         {conditions.length === 0 ? (
           <div className="text-center py-6 text-muted-foreground">
             <Calculator className="w-12 h-12 mx-auto mb-2 opacity-50" />
             <p>No takeoff conditions yet</p>
-            <p className="text-sm">{onAddCondition ? 'Click the + button to create your first condition' : 'Create your first condition from the header.'}</p>
+            <p className="text-sm">{onAddCondition ? 'Click the + button to create your first condition' : 'Create your first condition from the sidebar.'}</p>
           </div>
         ) : (
           conditions.map((condition) => (
@@ -213,42 +218,126 @@ export function TakeoffSidebarConditionList({
                 else conditionRowRefs.current.delete(condition.id);
               }}
               className={cn(
-                'p-2 border rounded-lg cursor-pointer transition-colors',
-                selectedConditionId === condition.id && 'border-blue-500 bg-blue-50 shadow-sm',
-                selectedConditionId !== condition.id && condition.aiGenerated && 'border-blue-400 bg-blue-100/50 hover:bg-blue-100/70 shadow-sm',
-                selectedConditionId !== condition.id && !condition.aiGenerated && 'border-gray-200 hover:bg-accent/50'
+                'condition-card group',
+                selectedConditionId === condition.id && 'condition-card-active',
+                selectedConditionId !== condition.id && condition.aiGenerated && 'border-blue-300 bg-blue-50/70'
               )}
               onClick={() => onConditionClick(condition)}
             >
               {(() => {
                 const measurements = getConditionTakeoffMeasurements(projectId, condition.id);
                 const pageMeasurements = filterMeasurementsForCurrentPage(measurements, viewerDocumentId, currentPage);
+                const displayValue = formatConditionValue(condition, measurements, viewerDocumentId, currentPage);
+                const isHidden = hiddenMarkupConditionIds.includes(condition.id);
+                const thumbnails = matchThumbnails[condition.id] ?? [];
+                const thumbnailsLoading = loadingThumbnails.has(condition.id);
                 return (
               <>
-              <div className="flex items-start justify-between mb-1">
-                <div className="flex items-start gap-2 min-w-0 flex-1">
-                  {getTypeIcon(condition.type)}
-                  <div className="min-w-0 flex-1">
-                    <div className="relative pr-12">
-                      <span className="font-medium break-words block">{condition.name}</span>
-                      <Badge variant="outline" className="absolute top-0 right-0 text-xs flex-shrink-0">
-                        {condition.unit}
-                      </Badge>
-                    </div>
-                    {(selectedConditionId === condition.id || condition.aiGenerated) && (
-                      <div className="flex items-center gap-1 mt-1 flex-wrap">
-                        {selectedConditionId === condition.id && (
-                          <Badge variant="default" className="text-xs bg-blue-600" title="Click to deactivate">Active</Badge>
+              <div className="condition-color-rail" style={{ backgroundColor: condition.color }} />
+              <div className="condition-card-body">
+                <div className="condition-card-header">
+                  <div className="condition-kind-icon">
+                    {getTypeIcon(condition.type)}
+                  </div>
+                  <div className="condition-card-main">
+                    <div className="min-w-0">
+                        <div className="condition-card-title-line">
+                          <span className="font-semibold text-foreground break-words">{condition.name}</span>
+                          <span className="condition-unit-pill">{condition.unit}</span>
+                        </div>
+                        {(selectedConditionId === condition.id || condition.aiGenerated) && (
+                          <div className="flex items-center gap-1 mt-1 flex-wrap">
+                            {selectedConditionId === condition.id && (
+                              <Badge variant="default" className="text-xs bg-blue-600" title="Click to deactivate">Active</Badge>
+                            )}
+                            {condition.aiGenerated && (
+                              <span className="inline-flex items-center gap-1 text-xs font-medium text-blue-700">
+                                <Bot className="w-3 h-3 flex-shrink-0" />
+                                AI
+                              </span>
+                            )}
+                          </div>
                         )}
-                        {condition.aiGenerated && <Bot className="w-3 h-3 text-blue-600 flex-shrink-0" />}
+                    </div>
+                  </div>
+                      <div className="condition-card-actions">
+                        <div className="condition-action-group">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleMarkupHidden(projectId, condition.id);
+                            }}
+                            className={`condition-action-button ${isHidden ? 'text-muted-foreground' : ''}`}
+                            title={
+                              isHidden
+                                ? 'Show markups on page'
+                                : 'Hide markups on page (still in sidebar; excluded from PDF/Excel)'
+                            }
+                          >
+                            {isHidden ? (
+                              <EyeOff className="condition-action-icon" />
+                            ) : (
+                              <Eye className="condition-action-icon" />
+                            )}
+                          </Button>
+                          {(condition.type === 'area' || condition.type === 'volume') && onCutoutMode && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onCutoutMode(condition);
+                              }}
+                                className={`condition-action-button ${cutoutMode && cutoutTargetConditionId === condition.id ? 'bg-red-100 text-red-600 dark:bg-red-950/40 dark:text-red-300' : 'text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300'}`}
+                              title="Add cut-out to existing measurements"
+                            >
+                              <Scissors className="condition-action-icon" />
+                            </Button>
+                          )}
+                          <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); onDuplicate(condition); }} className="condition-action-button" title="Duplicate condition">
+                            <Copy className="condition-action-icon" />
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); onEdit(condition); }} className="condition-action-button" title="Edit condition">
+                            <Edit3 className="condition-action-icon" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => { e.stopPropagation(); onDeleteClick(condition.id); }}
+                            className="condition-action-button condition-action-danger"
+                            title="Delete condition"
+                          >
+                            <Trash2 className="condition-action-icon" />
+                          </Button>
+                        </div>
                       </div>
-                    )}
+                    <div className="col-start-2 min-w-0">
+                    <p
+                      className={`text-xs text-muted-foreground mt-0.5 ${selectedConditionId === condition.id ? '' : 'line-clamp-1'}`}
+                      title={condition.description || undefined}
+                    >
+                      {condition.description}
+                    </p>
+                    <div className="mt-1.5 flex items-center gap-2 text-xs text-muted-foreground">
+                      <span className="inline-flex items-center gap-1">
+                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: condition.color }} />
+                        Waste: {supportsWasteFactor(condition.type) ? `${condition.wasteFactor}%` : 'n/a'}
+                      </span>
+                      <span className="condition-total">
+                        {displayValue}
+                      </span>
+                      {condition.type === 'auto-count' && pageMeasurements.length > 0 && (
+                        <span>{pageMeasurements.length} match{pageMeasurements.length !== 1 ? 'es' : ''} on this page</span>
+                      )}
+                    </div>
                     {condition.searchImage && condition.type === 'auto-count' && (
-                      <div className="mt-1.5 bg-indigo-50 border border-indigo-200 rounded-lg overflow-hidden">
+                      <div className="mt-1.5 bg-indigo-50 border border-indigo-200 rounded-lg overflow-hidden dark:bg-indigo-950/30 dark:border-indigo-800">
                         <button
                           type="button"
                           onClick={(e) => toggleSearchedSymbol(condition.id, e)}
-                          className="w-full flex items-center justify-between gap-2 px-2 py-1 text-xs font-medium text-indigo-900 hover:bg-indigo-100/70 transition-colors text-left"
+                          className="w-full flex items-center justify-between gap-2 px-2 py-1 text-xs font-medium text-indigo-900 hover:bg-indigo-100/70 transition-colors text-left dark:text-indigo-200 dark:hover:bg-indigo-900/40"
                         >
                           Searched symbol
                           {collapsedSearchedSymbols.has(condition.id) ? <ChevronDown className="w-3 h-3 flex-shrink-0" /> : <ChevronUp className="w-3 h-3 flex-shrink-0" />}
@@ -258,83 +347,42 @@ export function TakeoffSidebarConditionList({
                             <img
                               src={getImageSrc(condition.searchImage)}
                               alt="Searched symbol"
-                              className="max-w-full h-auto max-h-14 rounded border border-indigo-300"
+                              className="max-w-full h-auto max-h-10 rounded border border-indigo-300 bg-white dark:border-indigo-700"
                               style={{ imageRendering: 'crisp-edges' }}
                             />
                           </div>
                         )}
                       </div>
                     )}
+                    {condition.type === 'auto-count' && (thumbnailsLoading || thumbnails.length > 0) && (
+                      <div className="mt-1.5">
+                        <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Matches
+                        </div>
+                        {thumbnailsLoading ? (
+                          <div className="grid grid-cols-3 gap-1.5">
+                            {[0, 1, 2].map((i) => (
+                              <div key={i} className="h-8 animate-pulse rounded-md bg-muted" />
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-3 gap-1.5">
+                            {thumbnails.slice(0, 6).map((thumb) => (
+                              <img
+                                key={thumb.measurementId}
+                                src={getImageSrc(thumb.thumbnail)}
+                                alt=""
+                                className="h-8 w-full rounded-md border border-border bg-white object-contain"
+                                style={{ imageRendering: 'crisp-edges' }}
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
-                <div className="flex items-center gap-1 flex-shrink-0 ml-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleMarkupHidden(projectId, condition.id);
-                    }}
-                    className={`min-h-[44px] h-6 w-6 p-0 ${hiddenMarkupConditionIds.includes(condition.id) ? 'text-muted-foreground' : ''}`}
-                    title={
-                      hiddenMarkupConditionIds.includes(condition.id)
-                        ? 'Show markups on page'
-                        : 'Hide markups on page (still in sidebar; excluded from PDF/Excel)'
-                    }
-                  >
-                    {hiddenMarkupConditionIds.includes(condition.id) ? (
-                      <EyeOff className="w-3 h-3" />
-                    ) : (
-                      <Eye className="w-3 h-3" />
-                    )}
-                  </Button>
-                  {(condition.type === 'area' || condition.type === 'volume') && onCutoutMode && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onCutoutMode(condition);
-                      }}
-                      className={`min-h-[44px] h-6 w-6 p-0 ${cutoutMode && cutoutTargetConditionId === condition.id ? 'bg-red-100 text-red-600' : 'text-red-500 hover:text-red-600'}`}
-                      title="Add cut-out to existing measurements"
-                    >
-                      <Scissors className="w-3 h-3" />
-                    </Button>
-                  )}
-                  <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); onDuplicate(condition); }} className="min-h-[44px] h-6 w-6 p-0">
-                    <Copy className="w-3 h-3" />
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); onEdit(condition); }} className="min-h-[44px] h-6 w-6 p-0">
-                    <Edit3 className="w-3 h-3" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={(e) => { e.stopPropagation(); onDeleteClick(condition.id); }}
-                    className="min-h-[44px] h-6 w-6 p-0 text-destructive hover:text-destructive"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </Button>
-                </div>
-              </div>
-              <p
-                className={`text-sm text-muted-foreground mb-1 ${selectedConditionId === condition.id ? '' : 'line-clamp-2'}`}
-                title={condition.description || undefined}
-              >
-                {condition.description}
-              </p>
-              {condition.type === 'auto-count' && pageMeasurements.length > 0 && (
-                <div className="text-xs text-gray-500 mb-1">
-                  {pageMeasurements.length} match{pageMeasurements.length !== 1 ? 'es' : ''} on this page
-                </div>
-              )}
-              <div className="flex items-center gap-3 text-xs">
-                <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: condition.color }} />
-                {supportsWasteFactor(condition.type) && <span>Waste: {condition.wasteFactor}%</span>}
-                <div className="font-medium text-blue-600">
-                  {formatConditionValue(condition, measurements, viewerDocumentId, currentPage)}
-                </div>
+
               </div>
             </>
                 );

@@ -61,7 +61,7 @@ const CalibrationDialog: React.FC<CalibrationDialogProps> = ({
             <p id="known-distance-label" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">Known Distance on Drawing</p>
             <div className="flex gap-2 items-end">
               <div className="flex-1">
-                <Label htmlFor="feet-input" className="text-xs text-gray-600">Feet</Label>
+                <Label htmlFor="feet-input" className="text-xs text-muted-foreground">Feet</Label>
                 <Input
                   id="feet-input"
                   name="feet"
@@ -75,7 +75,7 @@ const CalibrationDialog: React.FC<CalibrationDialogProps> = ({
                 />
               </div>
               <div className="flex-1">
-                <Label htmlFor="inches-input" className="text-xs text-gray-600">Inches</Label>
+                <Label htmlFor="inches-input" className="text-xs text-muted-foreground">Inches</Label>
                 <Input
                   id="inches-input"
                   name="inches"
@@ -90,14 +90,14 @@ const CalibrationDialog: React.FC<CalibrationDialogProps> = ({
                 />
               </div>
             </div>
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-muted-foreground">
               Enter the known distance in feet and inches. Use a known dimension like a wall length, door width, or scale bar.
             </p>
           </div>
 
           {currentScale && (
-            <div className="p-3 bg-blue-50 border border-blue-200 rounded">
-              <p className="text-sm text-blue-700">
+            <div className="p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded">
+              <p className="text-sm text-blue-700 dark:text-blue-300">
                 Current scale: 1 pixel = {currentScale.scaleFactor.toFixed(6)} {currentScale.unit}
               </p>
             </div>

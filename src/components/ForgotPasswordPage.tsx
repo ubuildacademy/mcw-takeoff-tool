@@ -5,6 +5,16 @@ import { LandingNav } from './LandingNav';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { authHelpers } from '../lib/supabase';
+import {
+  authCard,
+  authCenter,
+  authInput,
+  authLabel,
+  authLink,
+  authPageShell,
+  authSubtitle,
+  authTitle,
+} from './authPageStyles';
 
 const ForgotPasswordPage: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -32,14 +42,14 @@ const ForgotPasswordPage: React.FC = () => {
 
   if (sent) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex flex-col">
+      <div className={authPageShell}>
         <LandingNav showBackToHome />
-        <div className="flex-1 flex items-center justify-center p-4">
-          <div className="max-w-md w-full text-center">
+        <div className={authCenter}>
+          <div className={`${authCard} text-center`}>
             <div className="mt-6 bg-green-50 border border-green-200 rounded-md p-4">
               <p className="text-green-800">Check your email for a link to reset your password.</p>
             </div>
-            <Link to="/login" className="mt-4 inline-block text-blue-600 hover:text-blue-500">
+            <Link to="/login" className={`${authLink} mt-4 inline-block`}>
               Back to login
             </Link>
           </div>
@@ -49,22 +59,22 @@ const ForgotPasswordPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex flex-col">
+    <div className={authPageShell}>
       <LandingNav showBackToHome />
-      <div className="flex-1 flex items-center justify-center p-4">
-        <div className="max-w-md w-full space-y-8">
+      <div className={authCenter}>
+        <div className={authCard}>
           <div className="text-center">
-            <h2 className="text-2xl font-semibold text-slate-700">
+            <h2 className={authTitle}>
               Reset your password
             </h2>
-            <p className="mt-2 text-sm text-slate-600">
-                Enter your email and we&apos;ll send you a link to reset your password.
+            <p className={authSubtitle}>
+              Enter your email and we&apos;ll send you a link to reset your password.
             </p>
           </div>
 
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div>
-            <Label htmlFor="email">Email address</Label>
+            <Label htmlFor="email" className={authLabel}>Email address</Label>
             <Input
               id="email"
               type="email"
@@ -73,6 +83,7 @@ const ForgotPasswordPage: React.FC = () => {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="Enter your email"
+              className={authInput}
             />
           </div>
 
@@ -92,7 +103,7 @@ const ForgotPasswordPage: React.FC = () => {
         </form>
 
         <div className="text-center">
-          <Link to="/login" className="text-sm text-blue-600 hover:text-blue-500">
+          <Link to="/login" className={authLink}>
             ← Back to login
           </Link>
         </div>

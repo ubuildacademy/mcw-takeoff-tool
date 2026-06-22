@@ -26,6 +26,7 @@ import calibrationRoutes from './routes/calibrations';
 import authRoutes from './routes/auth';
 import sharedImportRoutes from './routes/sharedImport';
 import contactRoutes from './routes/contact';
+import feedbackRoutes from './routes/feedback';
 import helpRoutes from './routes/help';
 import { logEmailConfigStatus } from './services/emailService';
 import { devLog } from './lib/devLog';
@@ -278,6 +279,7 @@ app.use('/api/titleblock', titleblockRoutes);
 app.use('/api/calibrations', calibrationRoutes);
 app.use('/api/shared-import', sharedImportRoutes);
 app.use('/api/contact', contactRoutes);
+app.use('/api/feedback', feedbackRoutes);
 app.use('/api/help', helpRoutes);
 
 // API 404 handler (keeps frontend SPA routing separate)

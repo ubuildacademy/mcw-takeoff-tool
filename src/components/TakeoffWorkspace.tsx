@@ -42,7 +42,7 @@ import { useTakeoffWorkspaceTitleblock } from './takeoff-workspace/useTakeoffWor
 import { useTakeoffWorkspaceOCR } from './takeoff-workspace/useTakeoffWorkspaceOCR';
 import { useTakeoffWorkspaceProjectInit } from './takeoff-workspace/useTakeoffWorkspaceProjectInit';
 import { useTakeoffWorkspaceCalibration } from './takeoff-workspace/useTakeoffWorkspaceCalibration';
-import { useTakeoffWorkspaceTabs } from './takeoff-workspace/useTakeoffWorkspaceTabs';
+import { useTakeoffWorkspaceTabs, getSheetLabel } from './takeoff-workspace/useTakeoffWorkspaceTabs';
 import { PDFViewerTabBar } from './pdf-viewer/PDFViewerTabBar';
 import { SearchResultsList } from './takeoff-workspace/SearchResultsList';
 import { HyperlinkSheetPickerDialog } from './HyperlinkSheetPickerDialog';
@@ -192,6 +192,31 @@ export function TakeoffWorkspace() {
     }
   }, [currentPdfFile?.id, documents]);
 
+  // Sync selectedSheet/DocumentId/PageNumber from the persisted activeTab when the workspace
+  // mounts (after SPA navigation) or when the active tab / document data changes.
+  // The Zustand tab store survives navigation, but the parent React state resets to null on
+  // every mount — leaving the sidebar and status bar blank until the user manually clicks a sheet.
+  useEffect(() => {
+    const { activeTab } = tabsResult;
+    if (!activeTab || !currentPdfFile || projectFiles.length === 0) return;
+
+    const label = getSheetLabel(documents, projectFiles, activeTab.documentId, activeTab.pageNumber);
+    const doc = documents.find((d) => d.id === activeTab.documentId);
+    const page = doc?.pages?.find((p) => p.pageNumber === activeTab.pageNumber);
+
+    setSelectedDocumentId(activeTab.documentId);
+    setSelectedPageNumber(activeTab.pageNumber);
+    setSelectedSheet({
+      id: activeTab.documentId,
+      name: label,
+      pageNumber: activeTab.pageNumber,
+      isVisible: page?.isVisible ?? true,
+      hasTakeoffs: page?.hasTakeoffs ?? false,
+      takeoffCount: page?.takeoffCount ?? 0,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- setters are stable; activeTab identity + data deps are the real triggers
+  }, [tabsResult.activeTab, currentPdfFile, documents, projectFiles]);
+
   // Derive scale/rotation from store so they stay in sync when switching tabs (no useEffect timing issues)
   const scale = useDocumentViewStore((s) =>
     sheetId ? s.getDocumentScaleBySheet(sheetId) : 1
@@ -231,16 +256,26 @@ export function TakeoffWorkspace() {
     isDev,
   });
 
-  // Persist scroll position on unload/refresh so viewport restores to same spot (per-tab)
+  // Persist scroll position on browser unload/refresh AND on SPA navigation (component unmount).
+  // A ref tracks the current sheetId so the cleanup can save without re-running the effect on
+  // every tab switch (which would save the wrong position when switching between sheets).
+  const activeSheetIdRef = useRef<string | null>(null);
+  activeSheetIdRef.current = tabsResult.sheetId;
   useEffect(() => {
-    const handleBeforeUnload = () => {
-      if (!tabsResult.sheetId) return;
+    const saveScroll = () => {
+      const id = activeSheetIdRef.current;
+      if (!id) return;
       const pos = getCurrentScrollPosition();
-      if (pos) setDocumentLocationBySheet(tabsResult.sheetId, pos);
+      if (pos) setDocumentLocationBySheet(id, pos);
     };
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [tabsResult.sheetId, setDocumentLocationBySheet]);
+    window.addEventListener('beforeunload', saveScroll);
+    return () => {
+      window.removeEventListener('beforeunload', saveScroll);
+      // Also persist when the user navigates within the SPA (React Router unmounts this component
+      // without firing beforeunload, so the last scroll position would otherwise be lost).
+      saveScroll();
+    };
+  }, [setDocumentLocationBySheet]);
 
   // Handle measurement state changes from PDFViewer
   // CRITICAL: Wrapped in useCallback to prevent infinite re-render loops
@@ -1155,11 +1190,11 @@ export function TakeoffWorkspace() {
             </div>
           )}
           {/* Floating toolbar: touch-friendly equivalents for keyboard-only actions.
-              Tablet-only — desktop users have Esc, double-click, and ⌘Z. */}
+              Tablet-only — desktop users have Esc, double-click, and ⌘Z.
+              Shown for any active drawing mode so Cancel/Undo are always reachable. */}
           <TakeoffFloatingToolbar
-            visible={isTablet && (isMeasuring || isCalibrating)}
-            measurementType={measurementType}
-            isCalibrating={isCalibrating}
+            visible={isTablet && (isMeasuring || isCalibrating || !!annotationTool || cutoutMode || hyperlinkMode)}
+            showFinish={isMeasuring && measurementType !== 'count' && measurementType !== ''}
             canUndo={canUndo}
             onUndo={() => undo()}
             onCancel={handleFloatingCancel}

@@ -47,8 +47,8 @@ export function TakeoffWorkspaceRightSidebar({
 
   // Tablet: overlay to the left of the toggle strip; Desktop: normal flow.
   const panelClass = isTabletDrawer
-    ? 'absolute top-0 bottom-0 z-40 shadow-2xl bg-white border-l flex flex-col w-80 sm:w-96'
-    : 'w-96 bg-white border-l flex flex-col h-full';
+    ? 'absolute top-0 bottom-0 z-40 shadow-2xl workspace-side-panel border-l flex flex-col w-80 sm:w-96'
+    : 'w-96 workspace-side-panel border-l flex flex-col h-full';
 
   return (
     <div className={outerClass}>
@@ -64,12 +64,12 @@ export function TakeoffWorkspaceRightSidebar({
           // relative wrapper (i.e. immediately left of the toggle strip).
           style={isTabletDrawer ? { right: '100%' } : undefined}
         >
-          <div className="flex border-b">
+          <div className="workspace-tabbar">
             <button
-              className={`flex-1 px-3 py-3 text-sm font-medium border-b-2 transition-colors ${
+              className={`workspace-tab ${
                 rightSidebarTab === 'documents'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                  ? 'workspace-tab-active'
+                  : 'hover:text-foreground hover:bg-muted/60'
               }`}
               onClick={() => onRightSidebarTabChange('documents')}
             >
@@ -79,10 +79,10 @@ export function TakeoffWorkspaceRightSidebar({
               </div>
             </button>
             <button
-              className={`flex-1 px-3 py-3 text-sm font-medium border-b-2 transition-colors ${
+              className={`workspace-tab ${
                 rightSidebarTab === 'search'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                  ? 'workspace-tab-active'
+                  : 'hover:text-foreground hover:bg-muted/60'
               }`}
               onClick={() => onRightSidebarTabChange('search')}
             >
@@ -92,10 +92,10 @@ export function TakeoffWorkspaceRightSidebar({
               </div>
             </button>
             <button
-              className={`flex-1 px-3 py-3 text-sm font-medium border-b-2 transition-colors ${
+              className={`workspace-tab ${
                 rightSidebarTab === 'ai-chat'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                  ? 'workspace-tab-active'
+                  : 'hover:text-foreground hover:bg-muted/60'
               }`}
               onClick={() => onRightSidebarTabChange('ai-chat')}
             >

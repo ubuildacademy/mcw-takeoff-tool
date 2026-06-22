@@ -95,6 +95,18 @@ function ptMid(pts: Map<number, { x: number; y: number }>): { x: number; y: numb
   return { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
 }
 
+// Returns true when the touch target sits on a rendered markup element
+// (measurement or annotation with a data attribute).
+function isMarkupTarget(target: EventTarget | null): boolean {
+  if (!target || !(target instanceof Element)) return false;
+  return !!(
+    target.getAttribute('data-measurement-id') ??
+    target.getAttribute('data-annotation-id') ??
+    target.closest('[data-measurement-id]') ??
+    target.closest('[data-annotation-id]')
+  );
+}
+
 // ── Canvas drag threshold: if touch moves < this px it's considered a tap ─
 
 const TAP_MOVE_THRESHOLD_PX = 8;
@@ -157,6 +169,10 @@ export const PDFViewerCanvasOverlay: React.FC<PDFViewerCanvasOverlayProps> = ({
   const longPressTimerId = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressPos = useRef<{ x: number; y: number } | null>(null);
 
+  // True when the current touch sequence started on a markup element in selection mode.
+  // Routes move/up through the drag-move mouse handlers instead of panning.
+  const touchStartedOnMarkup = useRef(false);
+
   // ── Shared pointer handlers (used by both canvas and SVG) ───────────────
 
   const onTouchPointerDown = useCallback(
@@ -177,11 +193,16 @@ export const PDFViewerCanvasOverlay: React.FC<PDFViewerCanvasOverlayProps> = ({
       }
 
       if (touchPtrs.current.size >= 2) {
-        // Second (or later) finger → enter pinch mode
+        if (isMeasuringOrDrawing) {
+          // While drawing, silently ignore extra fingers so a stray thumb cannot
+          // cancel an in-progress measurement. Drawing resumes normally once the
+          // extra finger lifts.
+          return;
+        }
+        // Idle mode: second finger starts pinch-to-zoom.
         const [p1, p2] = [...touchPtrs.current.values()];
         pinchBase.current = { dist: ptDist(p1, p2) };
         wasInPinch.current = true;
-        // Cancel any in-progress single-touch drawing
         onCanvasMouseLeave();
         return;
       }
@@ -189,6 +210,7 @@ export const PDFViewerCanvasOverlay: React.FC<PDFViewerCanvasOverlayProps> = ({
       // Single touch
       hasDragged.current = false;
       wasInPinch.current = false;
+      touchStartedOnMarkup.current = false;
       tapDown.current = { x: e.clientX, y: e.clientY, t: Date.now() };
 
       // Start long-press timer so a sustained press opens the context menu.
@@ -221,9 +243,14 @@ export const PDFViewerCanvasOverlay: React.FC<PDFViewerCanvasOverlayProps> = ({
         // used by the handler (clientX/Y, button, target, preventDefault, …)
         // are available on PointerEvent.
         onCanvasMouseDown(e as unknown as React.MouseEvent<HTMLCanvasElement>);
+      } else if (e.currentTarget instanceof SVGSVGElement && isMarkupTarget(e.target)) {
+        // In selection mode the user touched an existing markup — start a drag-move
+        // by forwarding to the SVG mouse-down handler (which sets up moveStart state).
+        touchStartedOnMarkup.current = true;
+        onSvgMouseDown(e as unknown as React.MouseEvent<SVGSVGElement>);
       }
     },
-    [isMeasuringOrDrawing, onCanvasMouseDown, onCanvasMouseLeave, onSvgContextMenu, svgOverlayRef]
+    [isMeasuringOrDrawing, onCanvasMouseDown, onCanvasMouseLeave, onSvgContextMenu, onSvgMouseDown, svgOverlayRef]
   );
 
   const onTouchPointerMove = useCallback(
@@ -261,9 +288,9 @@ export const PDFViewerCanvasOverlay: React.FC<PDFViewerCanvasOverlayProps> = ({
           }
         }
 
-        if (isMeasuringOrDrawing && !wasInPinch.current) {
+        if ((isMeasuringOrDrawing || touchStartedOnMarkup.current) && !wasInPinch.current) {
           onCanvasMouseMove(e as unknown as React.MouseEvent<HTMLCanvasElement>);
-        } else if (!isMeasuringOrDrawing) {
+        } else if (!isMeasuringOrDrawing && !touchStartedOnMarkup.current) {
           onTouchPan?.(dx, dy);
         }
       }
@@ -296,44 +323,47 @@ export const PDFViewerCanvasOverlay: React.FC<PDFViewerCanvasOverlayProps> = ({
         wasInPinch.current = false;
         hasDragged.current = false;
         tapDown.current = null;
+        touchStartedOnMarkup.current = false;
         return;
       }
 
-      if (isMeasuringOrDrawing) {
-        // Complete any drag operations (move, rect-draw, etc.)
+      // Complete any drag operation: active drawing mode OR markup drag-move in selection mode.
+      if (isMeasuringOrDrawing || touchStartedOnMarkup.current) {
         void onCanvasMouseUp(e as unknown as React.MouseEvent<HTMLCanvasElement>);
+      }
+      touchStartedOnMarkup.current = false;
 
-        if (!hasDragged.current) {
-          // It was a tap → fire click AND double-click detection.
-          // We route to the SVG click handler when the SVG is the active target
-          // (svgPointerEvents = 'auto') because handleSvgClick carries markup-
-          // selection logic. Otherwise use the canvas click handler.
-          const fromSvg = e.currentTarget instanceof SVGSVGElement;
+      if (!hasDragged.current) {
+        // Clean tap → fire click regardless of drawing mode so that:
+        //   • Tapping a markup in selection mode selects it (onSvgClick handles the data attribute lookup)
+        //   • Tapping empty canvas deselects or triggers the idle canvas click logic
+        // We route to the SVG click handler when the SVG is the active target because
+        // handleSvgClick carries markup-selection and hyperlink logic.
+        const fromSvg = e.currentTarget instanceof SVGSVGElement;
+        if (fromSvg) {
+          void onSvgClick(e as unknown as React.MouseEvent<SVGSVGElement>);
+        } else {
+          void onCanvasClick(e as unknown as React.MouseEvent<HTMLCanvasElement>);
+        }
+
+        // Double-tap detection
+        const now = Date.now();
+        const lt = lastTap.current;
+        const cur = tapDown.current;
+        if (
+          lt &&
+          cur &&
+          now - lt.t < DOUBLE_TAP_MAX_MS &&
+          Math.hypot(cur.x - lt.x, cur.y - lt.y) < DOUBLE_TAP_MAX_DIST_PX
+        ) {
           if (fromSvg) {
-            void onSvgClick(e as unknown as React.MouseEvent<SVGSVGElement>);
+            onSvgDoubleClick(e as unknown as React.MouseEvent<SVGSVGElement>);
           } else {
-            void onCanvasClick(e as unknown as React.MouseEvent<HTMLCanvasElement>);
+            onCanvasDoubleClick(e as unknown as React.MouseEvent<HTMLCanvasElement>);
           }
-
-          // Double-tap detection
-          const now = Date.now();
-          const lt = lastTap.current;
-          const cur = tapDown.current;
-          if (
-            lt &&
-            cur &&
-            now - lt.t < DOUBLE_TAP_MAX_MS &&
-            Math.hypot(cur.x - lt.x, cur.y - lt.y) < DOUBLE_TAP_MAX_DIST_PX
-          ) {
-            if (fromSvg) {
-              onSvgDoubleClick(e as unknown as React.MouseEvent<SVGSVGElement>);
-            } else {
-              onCanvasDoubleClick(e as unknown as React.MouseEvent<HTMLCanvasElement>);
-            }
-            lastTap.current = null;
-          } else {
-            lastTap.current = cur;
-          }
+          lastTap.current = null;
+        } else {
+          lastTap.current = cur;
         }
       }
 
@@ -363,6 +393,7 @@ export const PDFViewerCanvasOverlay: React.FC<PDFViewerCanvasOverlayProps> = ({
         hasDragged.current = false;
         tapDown.current = null;
         wasInPinch.current = false;
+        touchStartedOnMarkup.current = false;
       }
     },
     []

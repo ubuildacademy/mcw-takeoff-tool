@@ -285,8 +285,8 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
   const effectiveUnit = formData.unit || getDefaultUnit(formData.type, formData.includeHeight);
 
   return (
-    <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white p-6 rounded-lg max-w-md mx-4 w-full max-h-[90vh] overflow-y-auto">
+    <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-50 backdrop-blur-sm">
+      <div className="bg-background text-foreground border border-border shadow-2xl p-6 rounded-lg max-w-md mx-4 w-full max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold">{editingCondition ? 'Edit Condition' : 'Create New Condition'}</h3>
           <Button variant="ghost" size="sm" onClick={onClose}>
@@ -434,7 +434,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
               {depthError && (
                 <p className="text-sm text-red-500 mt-1">{depthError}</p>
               )}
-              <p className="text-xs text-gray-500 mt-1">
+              <p className="text-xs text-muted-foreground mt-1">
                 Enter depth as decimal feet (1.5) or feet/inches (1'6&quot;)
               </p>
             </div>
@@ -454,7 +454,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
               {heightError && (
                 <p className="text-sm text-red-500 mt-1">{heightError}</p>
               )}
-              <p className="text-xs text-gray-500 mt-1">
+              <p className="text-xs text-muted-foreground mt-1">
                 Enter height as decimal feet (1.5) or feet/inches (1'6&quot;)
               </p>
             </div>
@@ -503,30 +503,30 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
           {formData.type === 'auto-count' && (
             <>
               {formData.searchImage && (
-                <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-2">
-                  <p className="text-xs font-medium text-indigo-900 mb-1.5">Searched symbol</p>
+                <div className="bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 rounded-lg p-2">
+                  <p className="text-xs font-medium text-indigo-900 dark:text-indigo-200 mb-1.5">Searched symbol</p>
                   <img
                     src={getImageSrc(formData.searchImage)}
                     alt="Searched symbol"
-                    className="max-w-full h-auto max-h-20 rounded border border-indigo-300"
+                    className="max-w-full h-auto max-h-20 rounded border border-indigo-300 dark:border-indigo-700 bg-white"
                     style={{ imageRendering: 'crisp-edges' }}
                   />
-                  <p className="text-xs text-indigo-600 mt-1">Defined by selection on PDF. Re-run search to change.</p>
+                  <p className="text-xs text-indigo-600 dark:text-indigo-300 mt-1">Defined by selection on PDF. Re-run search to change.</p>
                 </div>
               )}
-              <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+              <div className="bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 rounded-lg p-4">
                 <div className="flex items-start space-x-2">
                   <div className="flex-shrink-0">
-                    <div className="w-6 h-6 bg-indigo-100 rounded-full flex items-center justify-center">
-                      <span className="text-indigo-600 text-sm">🔍</span>
+                    <div className="w-6 h-6 bg-indigo-100 dark:bg-indigo-900 rounded-full flex items-center justify-center">
+                      <span className="text-indigo-600 dark:text-indigo-300 text-sm">🔍</span>
                     </div>
                   </div>
                   <div className="flex-1">
-                    <h4 className="text-sm font-medium text-indigo-900 mb-1">Auto-Count Condition</h4>
-                    <p className="text-sm text-indigo-700 mb-2">
+                    <h4 className="text-sm font-medium text-indigo-900 dark:text-indigo-200 mb-1">Auto-Count Condition</h4>
+                    <p className="text-sm text-indigo-700 dark:text-indigo-300 mb-2">
                       After creating this condition, you'll be able to draw a selection box around a symbol on the drawing to define what to count.
                     </p>
-                    <p className="text-xs text-indigo-600">
+                    <p className="text-xs text-indigo-600 dark:text-indigo-300">
                       The system will use AI to automatically find and count all similar symbols based on your selected scope.
                     </p>
                   </div>
@@ -548,7 +548,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
                     <SelectItem value="entire-project">Entire Project</SelectItem>
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-gray-500 mt-1">
+                <p className="text-xs text-muted-foreground mt-1">
                   Select where to search for matching symbols: current page only, all pages in the current document, or all pages in all documents.
                 </p>
               </div>
@@ -565,7 +565,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
                   onChange={(e) => handleInputChange('searchThreshold', e.target.value)}
                   placeholder="0.7"
                 />
-                <p className="text-xs text-gray-500 mt-1">
+                <p className="text-xs text-muted-foreground mt-1">
                   How confident the AI should be before counting a match (0.1 = very loose, 1.0 = very strict)
                 </p>
               </div>
@@ -604,7 +604,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
               }}
               placeholder="0.00"
             />
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-xs text-muted-foreground mt-1">
               Fixed equipment cost for this condition (e.g., crane rental, specialized tools)
             </p>
           </div>
@@ -622,4 +622,3 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
     </div>
   );
 }
-

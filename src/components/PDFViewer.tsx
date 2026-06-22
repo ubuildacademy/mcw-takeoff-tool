@@ -2060,47 +2060,65 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       
       // Calculate outputScale for crisp rendering
       const outputScale = Math.min(window.devicePixelRatio || 1, 2);
-      
-      // Update canvas and SVG dimensions with page-specific data
-      updateCanvasDimensions(pageNum, viewport, outputScale, page);
-      
-      // Clear canvas
-      pdfContext.clearRect(0, 0, pdfCanvas.width, pdfCanvas.height);
-      pdfContext.setTransform(1, 0, 0, 1, 0, 0);
-      
-      // Clear SVG overlay completely to prevent cross-page contamination
-      if (svgOverlayRef.current) {
-        svgOverlayRef.current.innerHTML = '';
+      const canvasWidth  = Math.round(viewport.width  * outputScale);
+      const canvasHeight = Math.round(viewport.height * outputScale);
+
+      // ── Double-buffer: render to an offscreen canvas so the main canvas keeps showing
+      // its previous content until the new bitmap is fully ready.  Once the PDF.js render
+      // task resolves we atomically: resize the main canvas, blit the offscreen frame,
+      // clear CSS transforms, clear the SVG overlay, and rebuild the overlay – all in the
+      // same synchronous JS execution so the browser commits it as a single paint with no
+      // blank / white frame visible to the user.
+      //
+      // For page-navigation (different page) we still clear the canvas immediately so the
+      // user doesn't see a stale page while the new one loads; only same-page re-renders
+      // (zoom, rotation, deselect settle) benefit from the offscreen swap.
+      const isSamePage = lastRenderedPageRef.current === pageNum;
+
+      let renderTargetCtx: CanvasRenderingContext2D;
+      let offscreenCanvas: HTMLCanvasElement | null = null;
+
+      if (isSamePage) {
+        // Same page (zoom/rotation/settle): render offscreen, keep old content visible.
+        offscreenCanvas = document.createElement('canvas');
+        offscreenCanvas.width  = canvasWidth;
+        offscreenCanvas.height = canvasHeight;
+        const offCtx = offscreenCanvas.getContext('2d');
+        if (!offCtx) {
+          // Fallback: render directly (old behaviour, rare)
+          renderTargetCtx = pdfContext;
+          updateCanvasDimensions(pageNum, viewport, outputScale, page);
+          pdfContext.clearRect(0, 0, pdfCanvas.width, pdfCanvas.height);
+          pdfContext.setTransform(1, 0, 0, 1, 0, 0);
+          if (svgOverlayRef.current) svgOverlayRef.current.innerHTML = '';
+        } else {
+          renderTargetCtx = offCtx;
+        }
+      } else {
+        // Different page: clear canvas + SVG immediately so stale content isn't shown.
+        renderTargetCtx = pdfContext;
+        updateCanvasDimensions(pageNum, viewport, outputScale, page);
+        pdfContext.clearRect(0, 0, pdfCanvas.width, pdfCanvas.height);
+        pdfContext.setTransform(1, 0, 0, 1, 0, 0);
+        if (svgOverlayRef.current) svgOverlayRef.current.innerHTML = '';
       }
-      
-      // Render with page-specific transform for outputScale - optimized for performance
+
       const renderContext = {
-        canvasContext: pdfContext,
+        canvasContext: renderTargetCtx,
         viewport: viewport,
         transform: [outputScale, 0, 0, outputScale, 0, 0],
-        // Performance optimizations
-        enableWebGL: false, // Disable WebGL for better compatibility and performance
-        renderInteractiveForms: false, // Disable interactive forms for better performance
+        enableWebGL: false,
+        renderInteractiveForms: false,
       };
-      
+
       const renderTask = page.render(renderContext as unknown as Parameters<PDFPageProxy['render']>[0]);
       renderTaskRef.current = renderTask;
       await renderTask.promise;
-      
-      // After PDF is rendered, ensure overlay is properly initialized and render takeoff annotations
-      onPageShown(pageNum, viewport);
-      
-      // Record the page and scale at which the PDF canvas was actually rendered
-      lastRenderedPageRef.current = pageNum;
-      lastRenderedScaleRef.current = viewState.scale;
-      lastRenderedRotationRef.current = viewState.rotation;
-      
-      // Clear any interactive CSS transforms (no longer needed after full render).
-      // Before clearing, compensate scroll so the visible viewport centre does not jump.
-      // If a CSS scale(P) was applied while the canvas was at the old render scale, the
-      // canvas has now been redrawn at P× the old scale.  The correct adjustment is:
-      //   scrollLeft' = scrollLeft + clientWidth / 2 × (1 − P)
-      // which undoes the visual shift introduced when we applied scale(P).
+
+      // ── Atomic commit (all synchronous – one browser paint) ──────────────────────────
+
+      // Step 1: CSS-transform scroll compensation — must happen before canvas resize so we
+      // read the correct pre-resize scroll position and CSS scale.
       if (pdfCanvasRef.current && containerRef.current) {
         const t = pdfCanvasRef.current.style.transform;
         const prevCssScale = t.startsWith('scale(') ? (parseFloat(t.slice(6, -1)) || 1.0) : 1.0;
@@ -2111,6 +2129,25 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           containerRef.current.scrollTop  += ch / 2 * (1 - prevCssScale);
         }
       }
+
+      // Step 2: If we rendered offscreen, resize the main canvas and blit the new frame.
+      const mainCanvas = pdfCanvasRef.current;
+      if (offscreenCanvas && mainCanvas) {
+        const mainCtx = mainCanvas.getContext('2d');
+        if (mainCtx) {
+          mainCanvas.width  = canvasWidth;
+          mainCanvas.height = canvasHeight;
+          mainCanvas.style.width  = `${viewport.width}px`;
+          mainCanvas.style.height = `${viewport.height}px`;
+          mainCtx.setTransform(1, 0, 0, 1, 0, 0);
+          mainCtx.drawImage(offscreenCanvas, 0, 0);
+        }
+        // Keep React state in sync (no DOM side-effects here)
+        setPageViewports(prev => ({ ...prev, [pageNum]: viewport }));
+        setPageOutputScales(prev => ({ ...prev, [pageNum]: outputScale }));
+      }
+
+      // Step 3: Clear CSS transforms (canvas already shows correct content — no jump).
       if (pdfCanvasRef.current) {
         pdfCanvasRef.current.style.transform = '';
         pdfCanvasRef.current.style.transformOrigin = '';
@@ -2119,37 +2156,20 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         svgOverlayRef.current.style.transform = '';
         svgOverlayRef.current.style.transformOrigin = '';
       }
-      // Post-zoom settle: ensure overlay is refreshed immediately after canvas render
-      // CRITICAL: Always redraw overlay after clearing SVG so crosshairs/preview show on every page
-      // (when in measuring/calibrating/annotating mode there are no measurements yet, but we need the overlay)
-      try {
-        const currentMeasurements = useMeasurementStore.getState().takeoffMeasurements.filter(
-          (m) =>
-        m.projectId === effectiveProjectId &&
-        m.sheetId === file.id &&
-        samePdfPageKey(m.pdfPage, pageNum)
-        );
-        const hasAnnotationsOnPage = localAnnotations.filter((a) => a.pageNumber === pageNum).length > 0;
-        const pageHyperlinks = useHyperlinkStore.getState().getPageHyperlinks(effectiveProjectId || '', file.id || '', pageNum);
-        const hasMarkups =
-          currentMeasurements.length > 0 ||
-          localTakeoffMeasurements.length > 0 ||
-          hasAnnotationsOnPage ||
-          pageHyperlinks.length > 0;
-        const isInteractiveMode = isMeasuring || isCalibrating || isAnnotating || isDrawingBoxSelection;
-        const currentSelectionMode = isSelectionMode;
-        if (hasMarkups || isInteractiveMode) {
-          renderMarkupsWithPointerEvents(pageNum, viewport, page, currentSelectionMode);
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error('[PDFViewer] renderMarkupsWithPointerEvents failed after page render', {
-          pageNum,
-          sheetId: file.id,
-          projectId: effectiveProjectId,
-          message,
-        });
+
+      // Step 4: Clear and rebuild the SVG overlay.  Clearing here (after the canvas blit)
+      // means the SVG is blank for the shortest possible time before onPageShown fills it.
+      if (isSamePage && svgOverlayRef.current) {
+        svgOverlayRef.current.innerHTML = '';
       }
+
+      // Record what was rendered
+      lastRenderedPageRef.current = pageNum;
+      lastRenderedScaleRef.current = viewState.scale;
+      lastRenderedRotationRef.current = viewState.rotation;
+
+      // Rebuild overlay (sets SVG attrs + redraws all measurements / annotations)
+      onPageShown(pageNum, viewport);
       
       // Removed verbose logging - was causing console spam
       
@@ -2571,6 +2591,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     const pts = activePointsRef.current;
     if (pts.length < 2) return;
 
+    // Remove consecutive duplicate points. The double-click gesture fires two click
+    // events before dblclick — handleClick now writes those synchronously to the ref so
+    // dblclick sees them. Both clicks land at the same screen position, so the finish
+    // point appears twice (or the start is duplicated on an immediate double-click).
+    // Strip any consecutive duplicates to keep the stored geometry clean.
+    const deduped = pts.filter(
+      (p, i) => i === 0 || p.x !== pts[i - 1].x || p.y !== pts[i - 1].y,
+    );
+    if (deduped.length < 2) return;
+
     // Remove rubber band element with guarded removal
     const currentRubberBand = pageRubberBandRefs.current[currentPage];
     if (currentRubberBand?.parentNode) {
@@ -2581,8 +2611,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     pageRubberBandRefs.current[currentPage] = null;
     setRubberBandElement(null);
 
-    // Complete with ref snapshot — state can lag one click behind double-click completion
-    completeMeasurement(pts);
+    completeMeasurement(deduped);
 
     // Reset continuous drawing state
     setIsContinuousDrawing(false);
@@ -2837,44 +2866,53 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       // Already blocked and something changed (scale/rotation updated while measuring).
       applyInteractiveZoomTransforms();
     } else {
-      // Renders just became unblocked. Before clearing CSS transforms, compensate scroll
-      // so the same viewport centre remains over the same content.
-      const canvas = pdfCanvasRef.current;
-      const container = containerRef.current;
-      if (canvas && container) {
-        const prevCssScale = readPrevCssScale();
-        if (Math.abs(prevCssScale - 1.0) > 0.001) {
-          // Going from scale(P) → no transform. Apply centre-maintain reversal so the
-          // viewport doesn't jump when the CSS scale is removed.
-          const ratio = 1.0 / prevCssScale;
-          const cw = container.clientWidth;
-          const ch = container.clientHeight;
-          container.scrollLeft = ratio * (container.scrollLeft + cw / 2) - cw / 2;
-          container.scrollTop  = ratio * (container.scrollTop  + ch / 2) - ch / 2;
+      // Renders just became unblocked (e.g. isDeselecting cooldown ended, draw mode exited).
+      //
+      // Guard: only clear CSS transforms immediately when the canvas bitmap is already at the
+      // desired scale/rotation.  If there is a mismatch (the user zoomed while blocked and the
+      // canvas hasn't re-rendered yet), clearing the transform would snap the canvas from its
+      // CSS-scaled visual size back to its old layout size for ~30 ms — a visible jump.
+      // Instead we leave the CSS transforms in place; the 30 ms debounced renderPDFPage call
+      // (from the zoom effect) will blit the new bitmap and clear transforms atomically so the
+      // user never sees the intermediate wrong-sized canvas.
+      const scaleMatch = Math.abs((lastRenderedScaleRef.current || 1) - viewState.scale) < 0.001;
+      const rotMatch   = (lastRenderedRotationRef.current ?? 0) === viewState.rotation;
+
+      if (scaleMatch && rotMatch) {
+        // Canvas is already at the right scale — safe to clear transforms immediately.
+        const canvas    = pdfCanvasRef.current;
+        const container = containerRef.current;
+        if (canvas && container) {
+          const prevCssScale = readPrevCssScale();
+          if (Math.abs(prevCssScale - 1.0) > 0.001) {
+            const ratio = 1.0 / prevCssScale;
+            const cw = container.clientWidth;
+            const ch = container.clientHeight;
+            container.scrollLeft = ratio * (container.scrollLeft + cw / 2) - cw / 2;
+            container.scrollTop  = ratio * (container.scrollTop  + ch / 2) - ch / 2;
+          }
+        }
+        if (pdfCanvasRef.current) {
+          pdfCanvasRef.current.style.transform = '';
+          pdfCanvasRef.current.style.transformOrigin = '';
+        }
+        if (svgOverlayRef.current) {
+          svgOverlayRef.current.style.transform = '';
+          svgOverlayRef.current.style.transformOrigin = '';
+        }
+        // Re-render annotations at the correct viewport now that transforms are cleared.
+        const hasMarkups =
+          localTakeoffMeasurements.length > 0 || localAnnotations.length > 0 || hyperlinkCountForFile > 0;
+        if (pdfDocument && pdfPageRef.current && hasMarkups) {
+          const freshViewport = pdfPageRef.current.getViewport({
+            scale: viewState.scale,
+            rotation: viewState.rotation,
+          });
+          renderMarkupsWithPointerEvents(currentPage, freshViewport, pdfPageRef.current ?? undefined);
         }
       }
-
-      // Clear transforms
-      if (pdfCanvasRef.current) {
-        pdfCanvasRef.current.style.transform = '';
-        pdfCanvasRef.current.style.transformOrigin = '';
-      }
-      if (svgOverlayRef.current) {
-        svgOverlayRef.current.style.transform = '';
-        svgOverlayRef.current.style.transformOrigin = '';
-      }
-      
-      // CRITICAL: After clearing CSS transforms, re-render annotations with correct viewport
-      // This fixes the issue where annotations disappear after zoom completes
-      const hasMarkups =
-        localTakeoffMeasurements.length > 0 || localAnnotations.length > 0 || hyperlinkCountForFile > 0;
-      if (pdfDocument && pdfPageRef.current && hasMarkups) {
-        const freshViewport = pdfPageRef.current.getViewport({ 
-          scale: viewState.scale, 
-          rotation: viewState.rotation 
-        });
-        renderMarkupsWithPointerEvents(currentPage, freshViewport, pdfPageRef.current ?? undefined);
-      }
+      // else: scale/rotation mismatch — leave CSS transforms applied so the canvas keeps its
+      // correct visual appearance until renderPDFPage commits the new bitmap and clears them.
     }
   }, [viewState.scale, viewState.rotation, rendersBlockedForZoom, applyInteractiveZoomTransforms, pdfDocument, localTakeoffMeasurements, localAnnotations, currentPage, renderMarkupsWithPointerEvents, hyperlinkCountForFile]);
 
@@ -3440,7 +3478,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             onSvgContextMenu={handleSvgContextMenu}
             isPDFLoading={isPDFLoading}
             textAnnotation={textAnnotationProps}
-            isMeasuringOrDrawing={isMeasuring || isCalibrating || isAnnotating || !!annotationTool}
+            isMeasuringOrDrawing={isMeasuring || isCalibrating || isAnnotating || !!annotationTool || cutoutMode || hyperlinkMode || isDrawingBoxSelection}
             onTouchPan={handleTouchPan}
             onTouchPinch={handlePinchZoom}
           />

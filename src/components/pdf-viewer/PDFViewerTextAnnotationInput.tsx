@@ -54,7 +54,7 @@ export const PDFViewerTextAnnotationInput: React.FC<PDFViewerTextAnnotationInput
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={handleKeyDown}
-        className={`border-2 border-blue-500 rounded px-2 py-1 text-sm shadow-lg bg-white ${className}`.trim()}
+        className={`border-2 border-blue-500 rounded px-2 py-1 text-sm shadow-lg bg-background text-foreground ${className}`.trim()}
         placeholder={placeholder}
         style={{
           minWidth: '120px',

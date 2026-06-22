@@ -36,7 +36,7 @@ export function HelpWelcomeBanner() {
         <div className="min-w-0">
           <p className="font-medium text-foreground">New to Meridian Takeoff?</p>
           <p className="text-sm text-muted-foreground mt-1 leading-snug">
-            Use <strong>Help</strong> in the header or press{' '}
+            Use <strong>Help</strong> in the dashboard header or press{' '}
             <kbd className="px-1 py-0.5 rounded border bg-background text-xs font-mono">?</kbd> in a project for
             shortcuts and tips. Browse the{' '}
             <Link to="/help" className="text-primary hover:underline" onClick={dismiss}>

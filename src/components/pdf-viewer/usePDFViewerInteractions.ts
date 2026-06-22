@@ -1723,6 +1723,8 @@ export function usePDFViewerInteractions(
             x: curBase.x - startBase.x,
             y: curBase.y - startBase.y,
           });
+          setMousePosition(curBase);
+          queueEphemeralPaint();
         }
         return;
       }
@@ -1753,6 +1755,8 @@ export function usePDFViewerInteractions(
           const x = Math.min(coords.x, measurementDragStart.x);
           const y = Math.min(coords.y, measurementDragStart.y);
           setMeasurementDragBox({ x, y, width, height });
+          setMousePosition(cssToBaseNormalized(coords.x, coords.y, dp, baseViewport, effectiveRotation));
+          queueEphemeralPaint();
         }
         return;
       }
@@ -1771,6 +1775,8 @@ export function usePDFViewerInteractions(
             x: curBase.x - startBase.x,
             y: curBase.y - startBase.y,
           });
+          setMousePosition(curBase);
+          queueEphemeralPaint();
         }
         return;
       }
@@ -1782,6 +1788,8 @@ export function usePDFViewerInteractions(
           const x = Math.min(coords.x, annotationDragStart.x);
           const y = Math.min(coords.y, annotationDragStart.y);
           setAnnotationDragBox({ x, y, width, height });
+          setMousePosition(cssToBaseNormalized(coords.x, coords.y, dp, baseViewport, effectiveRotation));
+          queueEphemeralPaint();
         }
         return;
       }
@@ -2145,17 +2153,26 @@ export function usePDFViewerInteractions(
         pdfCoords = applyOrthoSnapping(pdfCoords, referencePoints);
       }
       if (effectiveMeasurementType === 'linear') {
-        if (!isContinuousDrawing) {
+        // Use the ref (not React state) for the isContinuousDrawing check so that
+        // the second click of a double-click sees the ref already flipped to true by
+        // the first click — React state is still false until the batch is flushed.
+        if (!isContinuousDrawingRef.current) {
+          const newPoints = [pdfCoords];
+          // Write refs synchronously so handleDoubleClick can read current values
+          // before React re-renders (all three events in a dblclick fire in the
+          // same synchronous execution; useLayoutEffect only runs after the flush).
+          activePointsRef.current = newPoints;
+          isContinuousDrawingRef.current = true;
           setIsContinuousDrawing(true);
-          setActivePoints([pdfCoords]);
+          setActivePoints(newPoints);
           createRubberBandElementRef.current?.();
         } else {
-          setActivePoints((prev) => {
-            const newPoints = [...prev, pdfCoords];
-            const newLength = calculateRunningLength(newPoints);
-            setRunningLength(newLength);
-            return newPoints;
-          });
+          const newPoints = [...activePointsRef.current, pdfCoords];
+          // Write ref synchronously for the same reason as above.
+          activePointsRef.current = newPoints;
+          const newLength = calculateRunningLength(newPoints);
+          setRunningLength(newLength);
+          setActivePoints(newPoints);
         }
       } else {
         setCurrentMeasurement((prev) => [...prev, pdfCoords]);

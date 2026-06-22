@@ -248,7 +248,7 @@ export function AdminHelpFaqTab() {
           </p>
         )}
         {!customized && (
-          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-2 inline-block">
+          <p className="text-xs text-amber-700 dark:text-amber-200 bg-amber-500/10 border border-amber-500/25 rounded px-2 py-1 mt-2 inline-block">
             Using bundled defaults (not yet customized on server)
           </p>
         )}

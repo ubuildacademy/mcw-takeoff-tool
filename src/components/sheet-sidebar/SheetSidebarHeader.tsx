@@ -30,7 +30,7 @@ export function SheetSidebarHeader({
   };
 
   return (
-    <div className="p-4 border-b relative">
+    <div className="p-4 border-b relative bg-background text-foreground">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold">Project Documents</h2>
         <div className="flex gap-2 relative">
@@ -58,9 +58,9 @@ export function SheetSidebarHeader({
             </Button>
 
             {openBulkActionsMenu && (
-              <div className="absolute right-0 top-full mt-1 w-56 bg-white border rounded-lg shadow-lg z-50 py-1">
+              <div className="absolute right-0 top-full mt-1 w-56 bg-popover text-popover-foreground border rounded-lg shadow-lg z-50 py-1">
                 <button
-                  className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 text-blue-600 flex items-center gap-2"
+                  className="w-full px-3 py-2 text-left text-sm hover:bg-primary/10 text-primary flex items-center gap-2"
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
@@ -72,7 +72,7 @@ export function SheetSidebarHeader({
                   Extract Titleblock Info (All)
                 </button>
                 <button
-                  className="w-full px-3 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center gap-2"
+                  className="w-full px-3 py-2 text-left text-sm hover:bg-destructive/10 text-red-600 dark:text-red-400 flex items-center gap-2"
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
@@ -102,7 +102,7 @@ export function SheetSidebarHeader({
 
       <div className="space-y-3">
         <div className="space-y-2">
-          <label htmlFor="sheet-search-pages" className="text-sm font-medium text-gray-700 flex items-center gap-2">
+          <label htmlFor="sheet-search-pages" className="text-sm font-medium text-muted-foreground flex items-center gap-2">
             <Search className="w-4 h-4" />
             Search Pages
           </label>
@@ -119,7 +119,7 @@ export function SheetSidebarHeader({
         </div>
 
         <div className="space-y-2">
-          <label htmlFor="sheet-filter-pages" className="text-sm font-medium text-gray-700 flex items-center gap-2">
+          <label htmlFor="sheet-filter-pages" className="text-sm font-medium text-muted-foreground flex items-center gap-2">
             <Filter className="w-4 h-4" />
             Filter Pages
           </label>
@@ -130,7 +130,7 @@ export function SheetSidebarHeader({
             onChange={(e) =>
               onFilterByChange((e.target.value as SheetSidebarFilterBy) || 'all')
             }
-            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md bg-white hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+            className="w-full px-3 py-2 text-sm border border-input rounded-md bg-background text-foreground hover:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition-colors"
           >
             <option value="all">All Pages</option>
             <option value="withTakeoffs">With Takeoffs</option>

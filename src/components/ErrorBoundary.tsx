@@ -76,7 +76,7 @@ class ErrorBoundary extends Component<Props, State> {
     if (this.state.hasError) {
       if (this.state.isExpectedError) {
         return (
-          <div className="flex items-center justify-center p-4 text-slate-500 text-sm" role="alert">
+          <div className="flex items-center justify-center p-4 text-muted-foreground text-sm" role="alert">
             Resource could not be loaded.
           </div>
         );
@@ -89,16 +89,16 @@ class ErrorBoundary extends Component<Props, State> {
       const isDev = import.meta.env.DEV;
 
       return (
-        <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center p-4">
-          <div className="max-w-2xl w-full bg-white rounded-lg shadow-lg border border-red-200 p-6">
+        <div className="min-h-screen bg-background flex items-center justify-center p-4">
+          <div className="max-w-2xl w-full bg-card text-card-foreground rounded-lg shadow-lg border border-red-200 p-6 dark:border-red-900/60">
             <div className="flex items-center gap-3 mb-4">
               <AlertTriangle className="w-8 h-8 text-red-600" />
-              <h1 className="text-2xl font-bold text-slate-900">
+              <h1 className="text-2xl font-bold text-foreground">
                 Something went wrong
               </h1>
             </div>
 
-            <p className="text-slate-600 mb-6">
+            <p className="text-muted-foreground mb-6">
               An unexpected error occurred. Please try refreshing the page or returning to the project list.
             </p>
 
@@ -160,4 +160,3 @@ class ErrorBoundary extends Component<Props, State> {
 }
 
 export default ErrorBoundary;
-

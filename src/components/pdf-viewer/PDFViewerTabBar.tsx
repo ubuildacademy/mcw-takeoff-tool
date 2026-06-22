@@ -48,7 +48,7 @@ export function PDFViewerTabBar({
   if (tabs.length === 0) return null;
 
   return (
-    <div className="flex items-center gap-0 border-b bg-muted/30 px-1">
+    <div className="pdf-tabbar">
       <div className="flex flex-1 min-w-0 overflow-x-auto">
         {tabs.map((tab) => (
           <div
@@ -67,10 +67,10 @@ export function PDFViewerTabBar({
               }
             }}
             className={cn(
-              'flex items-center gap-1.5 shrink-0 px-3 py-2 text-sm border-b-2 cursor-pointer transition-colors',
-              'hover:bg-muted/50',
+              'pdf-tab',
+              'hover:bg-muted/60',
               activeTabId === tab.id
-                ? 'border-primary bg-background text-foreground'
+                ? 'pdf-tab-active'
                 : 'border-transparent text-muted-foreground'
             )}
           >

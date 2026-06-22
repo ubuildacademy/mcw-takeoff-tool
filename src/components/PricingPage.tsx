@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
-import { LandingNav } from './LandingNav';
+import { LandingNav, MeridianBrandMark } from './LandingNav';
 
 const PricingPage: React.FC = () => {
   const navigate = useNavigate();
@@ -27,7 +27,7 @@ const PricingPage: React.FC = () => {
   };
 
   return (
-    <div className="pricing-page min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
+    <div className="pricing-page marketing-page min-h-screen">
       <LandingNav
         links={[
           { label: 'Features', onClick: handleFeatures },
@@ -38,13 +38,13 @@ const PricingPage: React.FC = () => {
       />
 
       {/* Hero Section - slate-50 to differentiate from white content sections */}
-      <section className="relative overflow-hidden bg-slate-50">
+      <section className="marketing-hero">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16">
-          <div className="text-center">
-            <div className="mb-6 bg-blue-100 text-blue-800 border border-blue-200 rounded-full px-4 py-2 text-sm font-medium inline-block">
+          <div className="text-center marketing-copy-reveal">
+            <div className="marketing-kicker mb-6">
               Simple, Transparent Pricing
             </div>
-            <h1 className="text-5xl md:text-6xl font-bold text-slate-900 mb-6">
+            <h1 className="text-5xl md:text-6xl font-bold text-slate-950 mb-6 tracking-tight">
               Choose Your
               <span className="text-blue-600 block">Perfect Plan</span>
             </h1>
@@ -62,7 +62,7 @@ const PricingPage: React.FC = () => {
           <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
             
             {/* Starter Plan */}
-            <div className="relative p-8 rounded-2xl border border-slate-200 bg-white hover:shadow-lg transition-shadow">
+            <div className="premium-card relative p-8">
               <div className="text-center">
                 <h3 className="text-2xl font-bold text-slate-900 mb-2">Starter</h3>
                 <p className="text-slate-600 mb-6">Perfect for small contractors and freelancers</p>
@@ -122,7 +122,7 @@ const PricingPage: React.FC = () => {
             </div>
 
             {/* Professional Plan - Most Popular */}
-            <div className="relative p-8 rounded-2xl border-2 border-blue-500 bg-white hover:shadow-lg transition-shadow">
+            <div className="premium-card relative p-8 border-2 border-blue-500">
               <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">
                 <Badge className="bg-blue-600 text-white px-4 py-1">
                   Most Popular
@@ -187,7 +187,7 @@ const PricingPage: React.FC = () => {
             </div>
 
             {/* Enterprise Plan */}
-            <div className="relative p-8 rounded-2xl border border-slate-200 bg-white hover:shadow-lg transition-shadow">
+            <div className="premium-card relative p-8">
               <div className="text-center">
                 <h3 className="text-2xl font-bold text-slate-900 mb-2">Enterprise</h3>
                 <p className="text-slate-600 mb-6">For large construction firms and GCs</p>
@@ -328,7 +328,7 @@ const PricingPage: React.FC = () => {
           <div className="grid md:grid-cols-4 gap-8">
             <div>
               <div className="flex items-center gap-2 mb-4">
-                <img src="/logo.png" alt="" className="h-8 w-8 rounded-lg object-contain" />
+                <MeridianBrandMark className="h-8 w-8 text-white" tone="light" />
                 <h3 className="text-lg font-semibold">Meridian Takeoff</h3>
               </div>
               <p className="text-slate-400">

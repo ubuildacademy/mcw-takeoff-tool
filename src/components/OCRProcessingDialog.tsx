@@ -182,9 +182,9 @@ export function OCRProcessingDialog({
         
         <div className="space-y-6">
           {/* Document Info */}
-          <div className="p-4 bg-gray-50 rounded-lg">
+          <div className="p-4 bg-muted/40 border border-border rounded-lg">
             <h3 className="font-medium mb-2">{documentName}</h3>
-            <div className="flex items-center gap-4 text-sm text-gray-600">
+            <div className="flex items-center gap-4 text-sm text-muted-foreground">
               <span>{pageNumbers.length} pages to process</span>
               <span>•</span>
               <span>Document ID: {documentId}</span>
@@ -196,18 +196,18 @@ export function OCRProcessingDialog({
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium">Processing Progress</span>
-                <span className="text-sm text-gray-600">{Math.round(progress)}%</span>
+                <span className="text-sm text-muted-foreground">{Math.round(progress)}%</span>
               </div>
               <SimpleProgress value={progress} className="w-full" />
               
               <div className="space-y-2">
-                <div className="flex items-center gap-2 text-sm text-gray-600">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Clock className="w-4 h-4" />
                   <span>{statusMessage}</span>
                 </div>
                 
                 {totalPages > 0 && (
-                  <div className="flex items-center gap-2 text-sm text-gray-500">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <span>Pages: {currentPage} / {totalPages}</span>
                     {currentPage > 0 && (
                       <span>•</span>
@@ -229,13 +229,13 @@ export function OCRProcessingDialog({
                 {results.map((result) => (
                   <div
                     key={result.pageNumber}
-                    className="flex items-center justify-between p-3 border rounded-lg"
+                    className="flex items-center justify-between p-3 border border-border rounded-lg bg-card"
                   >
                     <div className="flex items-center gap-3">
-                      <FileText className="w-4 h-4 text-gray-400" />
+                      <FileText className="w-4 h-4 text-muted-foreground" />
                       <span className="font-medium">Page {result.pageNumber}</span>
                       {result.processingTime && (
-                        <span className="text-sm text-gray-500">
+                        <span className="text-sm text-muted-foreground">
                           ({result.processingTime.toFixed(1)}s)
                         </span>
                       )}
@@ -266,7 +266,7 @@ export function OCRProcessingDialog({
 
           {/* Summary */}
           {isComplete && (
-            <div className="p-4 bg-blue-50 rounded-lg">
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg dark:bg-blue-950/30 dark:border-blue-800">
               <h4 className="font-medium mb-2">Processing Complete</h4>
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div className="flex items-center gap-2">
@@ -285,12 +285,12 @@ export function OCRProcessingDialog({
 
           {/* Error */}
           {error && (
-            <div className="p-4 bg-red-50 rounded-lg">
-              <div className="flex items-center gap-2 text-red-600">
+            <div className="p-4 bg-red-50 border border-red-200 rounded-lg dark:bg-red-950/30 dark:border-red-800">
+              <div className="flex items-center gap-2 text-red-600 dark:text-red-300">
                 <AlertCircle className="w-4 h-4" />
                 <span className="font-medium">Error</span>
               </div>
-              <p className="text-sm text-red-600 mt-1">{error}</p>
+              <p className="text-sm text-red-600 mt-1 dark:text-red-300">{error}</p>
             </div>
           )}
         </div>
@@ -318,7 +318,7 @@ export function OCRProcessingDialog({
 
 // Simple Progress component
 const SimpleProgress = ({ value, className }: { value: number; className?: string }) => (
-  <div className={`w-full bg-gray-200 rounded-full h-2 ${className}`}>
+  <div className={`w-full bg-muted rounded-full h-2 ${className}`}>
     <div
       className="bg-blue-600 h-2 rounded-full transition-all duration-300"
       style={{ width: `${value}%` }}

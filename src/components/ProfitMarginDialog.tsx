@@ -84,16 +84,16 @@ export function ProfitMarginDialog({ open, onOpenChange, projectId: _projectId }
             onChange={(e) => setProfitMargin(e.target.value)}
             placeholder="15.0"
           />
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-muted-foreground">
             This percentage will be applied to all cost calculations as a profit margin on top of material, labor, and equipment costs.
           </p>
         </div>
         
-        <div className="bg-blue-50 p-3 rounded-lg">
-          <p className="text-sm text-blue-800">
+        <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900 p-3 rounded-lg">
+          <p className="text-sm text-blue-800 dark:text-blue-300">
             <strong>Current Project:</strong> {currentProject?.name}
           </p>
-          <p className="text-xs text-blue-600 mt-1">
+          <p className="text-xs text-blue-600 dark:text-blue-300 mt-1">
             The profit margin is applied globally to all conditions in this project.
           </p>
         </div>

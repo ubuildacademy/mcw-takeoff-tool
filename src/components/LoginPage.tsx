@@ -5,6 +5,24 @@ import { LandingNav } from './LandingNav';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { authHelpers } from '../lib/supabase';
+import {
+  authCard,
+  authCenter,
+  authInput,
+  authLabel,
+  authLink,
+  authPageShell,
+  authSubtitle,
+  authTitle,
+} from './authPageStyles';
+
+function getAuthErrorMessage(error: unknown): string | undefined {
+  if (error && typeof error === 'object' && 'message' in error) {
+    const message = (error as { message?: unknown }).message;
+    return typeof message === 'string' ? message : undefined;
+  }
+  return undefined;
+}
 
 const LoginPage: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -28,8 +46,8 @@ const LoginPage: React.FC = () => {
 
       const isLikelyNetworkOrCors =
         !!direct.error &&
-        typeof (direct.error as any)?.message === 'string' &&
-        /(failed to fetch|network|cors|fetch)/i.test((direct.error as any).message);
+        !!getAuthErrorMessage(direct.error) &&
+        /(failed to fetch|network|cors|fetch)/i.test(getAuthErrorMessage(direct.error) ?? '');
 
       if (direct.error && isLikelyNetworkOrCors) {
         const proxy = await authHelpers.signInViaProxy(email, password);
@@ -37,7 +55,7 @@ const LoginPage: React.FC = () => {
       }
 
       if (error) {
-        setError((error as { message?: string })?.message ?? 'An error occurred');
+        setError(getAuthErrorMessage(error) ?? 'An error occurred');
       } else {
         navigate(redirect.startsWith('/') ? redirect : `/${redirect}`, { replace: true });
       }
@@ -49,23 +67,23 @@ const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex flex-col">
+    <div className={authPageShell}>
       <LandingNav showBackToHome />
-      <div className="flex-1 flex items-center justify-center p-4">
-        <div className="max-w-md w-full space-y-8">
+      <div className={authCenter}>
+        <div className={authCard}>
           <div className="text-center">
-            <h2 className="text-2xl font-semibold text-slate-700">
-            Sign in to your account
+            <h2 className={authTitle}>
+              Sign in to your account
             </h2>
-          <p className="mt-2 text-sm text-slate-600">
-            Access your construction takeoff projects
-          </p>
-        </div>
+            <p className={authSubtitle}>
+              Access your construction takeoff projects.
+            </p>
+          </div>
 
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="space-y-4">
             <div>
-              <Label htmlFor="email">Email address</Label>
+              <Label htmlFor="email" className={authLabel}>Email address</Label>
               <Input
                 id="email"
                 name="email"
@@ -74,12 +92,12 @@ const LoginPage: React.FC = () => {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="mt-1"
+                className={authInput}
                 placeholder="Enter your email"
               />
             </div>
             <div>
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password" className={authLabel}>Password</Label>
               <Input
                 id="password"
                 name="password"
@@ -88,7 +106,7 @@ const LoginPage: React.FC = () => {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="mt-1"
+                className={authInput}
                 placeholder="Enter your password"
               />
             </div>
@@ -113,7 +131,7 @@ const LoginPage: React.FC = () => {
           <div className="text-center">
             <Link
               to="/forgot-password"
-              className="text-sm text-blue-600 hover:text-blue-500"
+              className={authLink}
             >
               Forgot password?
             </Link>

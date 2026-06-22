@@ -138,9 +138,9 @@ export function AutoCountProgressDialog({
         
         <div className="space-y-6">
           {/* Condition Info */}
-          <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
-            <h3 className="font-medium text-indigo-900 mb-1">{conditionName}</h3>
-            <div className="flex items-center gap-4 text-sm text-indigo-700">
+          <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-lg dark:bg-indigo-950/30 dark:border-indigo-800">
+            <h3 className="font-medium text-indigo-900 mb-1 dark:text-indigo-100">{conditionName}</h3>
+            <div className="flex items-center gap-4 text-sm text-indigo-700 dark:text-indigo-300">
               <span>Scope: {scopeLabels[searchScope]}</span>
               {progress && (
                 <>
@@ -160,13 +160,13 @@ export function AutoCountProgressDialog({
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium">Search Progress</span>
-                <span className="text-sm text-gray-600">{displayProgressPercent}%</span>
+                <span className="text-sm text-muted-foreground">{displayProgressPercent}%</span>
               </div>
               <Progress value={displayProgressPercent} className="w-full h-2" />
-              <div className="text-sm text-indigo-700 font-medium">{stageLabel}</div>
+              <div className="text-sm text-indigo-700 font-medium dark:text-indigo-300">{stageLabel}</div>
               
               <div className="space-y-2">
-                <div className="flex items-center gap-2 text-sm text-gray-600">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Clock className="w-4 h-4" />
                   <span>
                     {pageProgressLabel}
@@ -175,7 +175,7 @@ export function AutoCountProgressDialog({
                 </div>
                 
                 {progress.currentPage && (
-                  <div className="flex items-center gap-2 text-sm text-gray-500">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <span>Current page: {progress.currentPage}</span>
                   </div>
                 )}
@@ -185,8 +185,8 @@ export function AutoCountProgressDialog({
 
           {/* Cancelling State */}
           {isCancelling && (
-            <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <div className="flex items-center gap-2 text-yellow-800">
+            <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg dark:bg-yellow-950/30 dark:border-yellow-800">
+              <div className="flex items-center gap-2 text-yellow-800 dark:text-yellow-200">
                 <Clock className="w-4 h-4 animate-spin" />
                 <span className="text-sm font-medium">Cancelling search...</span>
               </div>
@@ -197,27 +197,27 @@ export function AutoCountProgressDialog({
           {isComplete && (
             <div className={`p-4 rounded-lg border ${
               completionResult.success 
-                ? 'bg-green-50 border-green-200' 
-                : 'bg-yellow-50 border-yellow-200'
+                ? 'bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800' 
+                : 'bg-yellow-50 border-yellow-200 dark:bg-yellow-950/30 dark:border-yellow-800'
             }`}>
               {completionResult.success ? (
                 <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-green-800">
+                  <div className="flex items-center gap-2 text-green-800 dark:text-green-200">
                     <CheckCircle2 className="w-5 h-5" />
                     <span className="font-medium">Search completed successfully!</span>
                   </div>
-                  <p className="text-green-700 text-sm">
+                  <p className="text-green-700 text-sm dark:text-green-300">
                     Found <span className="font-semibold">{completionResult.matchesFound}</span> matching items and created <span className="font-semibold">{completionResult.measurementsCreated}</span> count measurements.
                   </p>
                 </div>
               ) : (
                 <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-yellow-800">
+                  <div className="flex items-center gap-2 text-yellow-800 dark:text-yellow-200">
                     <AlertCircle className="w-5 h-5" />
                     <span className="font-medium">No matches found</span>
                   </div>
                   {completionResult.message && (
-                    <p className="text-yellow-700 text-sm whitespace-pre-line">
+                    <p className="text-yellow-700 text-sm whitespace-pre-line dark:text-yellow-300">
                       {completionResult.message}
                     </p>
                   )}
