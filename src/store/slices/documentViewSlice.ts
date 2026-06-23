@@ -5,6 +5,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { parseDocumentIdFromSheetId } from '../../lib/sheetUtils';
+import { markDocumentViewStoreHydrated } from '../persistHydration';
 
 interface DocumentViewState {
   // State
@@ -243,9 +244,15 @@ export const useDocumentViewStore = create<DocumentViewState>()(
 
       hasExplicitViewStateForSheet: (sheetId) => {
         const state = get();
+        const documentId = parseDocumentIdFromSheetId(sheetId);
         return (
           state.documentLocationsBySheet[sheetId] != null ||
-          state.documentScalesBySheet[sheetId] != null
+          state.documentScalesBySheet[sheetId] != null ||
+          state.documentRotationsBySheet[sheetId] != null ||
+          state.documentLocations[documentId] != null ||
+          state.documentScales[documentId] != null ||
+          (state.documentRotations[documentId] != null &&
+            state.documentRotations[documentId] !== 0)
         );
       },
     }),
@@ -262,6 +269,12 @@ export const useDocumentViewStore = create<DocumentViewState>()(
         lastViewedDocumentIds: state.lastViewedDocumentIds,
         lastViewedDocumentId: state.lastViewedDocumentId,
       }),
+      onRehydrateStorage: () => (_state, error) => {
+        if (error) {
+          console.warn('[document-view-store] Rehydration failed:', error);
+        }
+        markDocumentViewStoreHydrated();
+      },
     }
   )
 );

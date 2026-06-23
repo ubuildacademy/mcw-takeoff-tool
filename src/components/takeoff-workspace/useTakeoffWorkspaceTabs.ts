@@ -3,6 +3,7 @@ import { restoreScrollPosition, triggerFitToWindow } from '../../lib/windowBridg
 import { getSheetId } from '../../lib/sheetUtils';
 import { usePdfViewerTabsStore } from '../../store/slices/pdfViewerTabsSlice';
 import { useDocumentViewStore } from '../../store/slices/documentViewSlice';
+import { whenDocumentViewStoreHydrated } from '../../store/persistHydration';
 import type { ProjectFile, PDFDocument } from '../../types';
 
 const SCROLL_RESTORE_DELAYS_MS = [50, 150, 300, 500, 700, 1000];
@@ -352,6 +353,7 @@ export function useTakeoffWorkspaceTabs({
   );
 
   const isInitialRenderRef = useRef(true);
+  const pendingRestoreCancelRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (activeTab) {
@@ -359,6 +361,13 @@ export function useTakeoffWorkspaceTabs({
       isInitialRenderRef.current = true;
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    return () => {
+      pendingRestoreCancelRef.current?.();
+      pendingRestoreCancelRef.current = null;
+    };
+  }, []);
 
   const handleLocationChange = useCallback(
     (x: number, y: number) => {
@@ -368,7 +377,14 @@ export function useTakeoffWorkspaceTabs({
   );
 
   const handlePDFRendered = useCallback(() => {
-    if (sheetId && isInitialRenderRef.current) {
+    if (!sheetId || !isInitialRenderRef.current) return;
+
+    pendingRestoreCancelRef.current?.();
+    pendingRestoreCancelRef.current = null;
+
+    const applyViewportRestore = () => {
+      if (!sheetId || !isInitialRenderRef.current) return;
+
       const session = viewportSessionRef.current;
       const isStale = () => session !== viewportSessionRef.current;
       const saved = getDocumentLocationBySheet(sheetId);
@@ -380,7 +396,9 @@ export function useTakeoffWorkspaceTabs({
         runFitToWindowWithRetries(isStale);
       }
       isInitialRenderRef.current = false;
-    }
+    };
+
+    pendingRestoreCancelRef.current = whenDocumentViewStoreHydrated(applyViewportRestore);
   }, [sheetId, getDocumentLocationBySheet]);
 
   return {

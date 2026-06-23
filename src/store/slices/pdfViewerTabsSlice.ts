@@ -5,6 +5,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { getSheetId } from '../../lib/sheetUtils';
+import { markPdfViewerTabsStoreHydrated } from '../persistHydration';
 
 export const PDF_VIEWER_MAX_TABS = 15;
 
@@ -238,6 +239,12 @@ export const usePdfViewerTabsStore = create<PdfViewerTabsState>()(
         openTabsByProject: state.openTabsByProject,
         activeTabIdByProject: state.activeTabIdByProject,
       }),
+      onRehydrateStorage: () => (_state, error) => {
+        if (error) {
+          console.warn('[pdf-viewer-tabs-store] Rehydration failed:', error);
+        }
+        markPdfViewerTabsStoreHydrated();
+      },
     }
   )
 );

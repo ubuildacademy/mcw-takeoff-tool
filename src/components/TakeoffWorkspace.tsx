@@ -13,6 +13,7 @@ import { useCalibrationStore } from '../store/slices/calibrationSlice';
 import { useAnnotationStore } from '../store/slices/annotationSlice';
 import { useHyperlinkStore } from '../store/slices/hyperlinkSlice';
 import { useDocumentViewStore } from '../store/slices/documentViewSlice';
+import { useViewStoresHydrated } from '../store/useViewStoresHydrated';
 import { useUndoStore } from '../store';
 import type { TakeoffCondition, Sheet, ProjectFile, PDFDocument, SearchResult } from '../types';
 import type { DocumentOCRData } from '../services/serverOcrService';
@@ -175,6 +176,7 @@ export function TakeoffWorkspace() {
       ),
   });
 
+  const viewStoresHydrated = useViewStoresHydrated();
   const currentPdfFile = tabsResult.currentPdfFile;
   const currentPage = tabsResult.currentPage;
   const sheetId = tabsResult.sheetId;
@@ -268,9 +270,16 @@ export function TakeoffWorkspace() {
       const pos = getCurrentScrollPosition();
       if (pos) setDocumentLocationBySheet(id, pos);
     };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') saveScroll();
+    };
     window.addEventListener('beforeunload', saveScroll);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pagehide', saveScroll);
     return () => {
       window.removeEventListener('beforeunload', saveScroll);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pagehide', saveScroll);
       // Also persist when the user navigates within the SPA (React Router unmounts this component
       // without firing beforeunload, so the last scroll position would otherwise be lost).
       saveScroll();
@@ -1184,6 +1193,11 @@ export function TakeoffWorkspace() {
             </div>
           ) : documents.length === 0 ? (
             <EmptyDocumentsPlaceholder onPdfUpload={handlePdfUpload} uploading={uploading} />
+          ) : !viewStoresHydrated ? (
+            <div className="flex flex-col items-center justify-center flex-1 bg-muted/30 gap-3" role="status" aria-live="polite">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+              <p className="text-sm text-muted-foreground">Restoring workspace…</p>
+            </div>
           ) : (
             <div className="flex items-center justify-center flex-1 bg-muted/30">
               <div className="text-muted-foreground">Select a sheet</div>
