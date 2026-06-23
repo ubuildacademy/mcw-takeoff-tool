@@ -16,6 +16,8 @@ import {
   Database,
   Loader2,
   RotateCcw,
+  Send,
+  KeyRound,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ollamaService, type OllamaModel } from '../services/ollamaService';
@@ -83,6 +85,8 @@ export function AdminPanel({ isOpen, onClose, projectId: _projectId }: AdminPane
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'admin' | 'user'>('user');
   const [isInviting, setIsInviting] = useState(false);
+  const [resendingId, setResendingId] = useState<string | null>(null);
+  const [resettingPasswordId, setResettingPasswordId] = useState<string | null>(null);
 
   // Get default prompt for sheet number extraction
   const getDefaultSheetNumberPrompt = () => {
@@ -541,6 +545,43 @@ When answering questions:
     } catch (error) {
       console.error('Error deleting invitation:', error);
       toast.error(extractErrorMessage(error, 'Failed to delete invitation'));
+    }
+  };
+
+  const handleResendInvitation = async (invitationId: string) => {
+    setResendingId(invitationId);
+    try {
+      const result = await authHelpers.resendInvitation(invitationId);
+      await loadInvitations();
+      if (result?.email_sent) {
+        toast.success('Invitation resent successfully!');
+      } else {
+        toast.warning('Invitation expiry extended, but email could not be sent. Check server logs.');
+      }
+    } catch (error) {
+      console.error('Error resending invitation:', error);
+      toast.error(extractErrorMessage(error, 'Failed to resend invitation'));
+    } finally {
+      setResendingId(null);
+    }
+  };
+
+  const handleResetPassword = async (userId: string, userEmail?: string) => {
+    const label = userEmail || 'this user';
+    if (!confirm(`Send a password reset email to ${label}?`)) return;
+    setResettingPasswordId(userId);
+    try {
+      const result = await authHelpers.resetUserPassword(userId);
+      if (result?.email_sent) {
+        toast.success(`Password reset email sent to ${label}`);
+      } else {
+        toast.warning('Reset link generated but email could not be sent. Check server logs.');
+      }
+    } catch (error) {
+      console.error('Error sending password reset:', error);
+      toast.error(extractErrorMessage(error, 'Failed to send password reset'));
+    } finally {
+      setResettingPasswordId(null);
     }
   };
 
@@ -1245,6 +1286,17 @@ When answering questions:
                                 <Button
                                   variant="outline"
                                   size="sm"
+                                  onClick={() => handleResendInvitation(invitation.id)}
+                                  disabled={resendingId === invitation.id}
+                                  title="Resend invitation email"
+                                >
+                                  {resendingId === invitation.id
+                                    ? <Loader2 className="w-4 h-4 animate-spin" />
+                                    : <Send className="w-4 h-4" />}
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
                                   onClick={() => handleDeleteInvitation(invitation.id)}
                                   className="text-red-600 hover:bg-red-500/10 dark:text-red-400"
                                 >
@@ -1271,12 +1323,24 @@ When answering questions:
                               <div>
                                 <p className="font-medium">{user.full_name || 'No name'}</p>
                                 <p className={adminHelpText}>
-                                  Role: {user.role} • 
+                                  {user.email && <>{user.email} • </>}
+                                  Role: {user.role} •
                                   Joined: {new Date(user.created_at).toLocaleDateString()}
                                   {user.company && ` • ${user.company}`}
                                 </p>
                               </div>
                               <div className="flex items-center gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleResetPassword(user.id, user.email)}
+                                  disabled={resettingPasswordId === user.id}
+                                  title="Send password reset email"
+                                >
+                                  {resettingPasswordId === user.id
+                                    ? <Loader2 className="w-4 h-4 animate-spin" />
+                                    : <KeyRound className="w-4 h-4" />}
+                                </Button>
                                 <select
                                   value={user.role}
                                   onChange={(e) => handleUpdateUserRole(user.id, e.target.value as 'admin' | 'user')}

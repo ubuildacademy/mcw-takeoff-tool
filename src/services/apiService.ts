@@ -563,8 +563,23 @@ export const userService = {
     return response.data;
   },
 
+  async resendInvitation(invitationId: string) {
+    const response = await apiClient.post(`/users/invitations/${invitationId}/resend`);
+    return response.data;
+  },
+
   async updateUserRole(userId: string, role: 'admin' | 'user') {
     const response = await apiClient.patch(`/users/${userId}/role`, { role });
+    return response.data;
+  },
+
+  async getUsers() {
+    const response = await apiClient.get('/users');
+    return response.data;
+  },
+
+  async resetUserPassword(userId: string) {
+    const response = await apiClient.post(`/users/${userId}/reset-password`);
     return response.data;
   },
 

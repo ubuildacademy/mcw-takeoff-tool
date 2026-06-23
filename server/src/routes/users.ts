@@ -146,6 +146,47 @@ router.post('/invitations', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+// Resend invitation email (admin only)
+router.post('/invitations/:id/resend', requireAuth, requireAdmin, validateUUIDParam('id'), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { data: invitation, error: fetchError } = await supabase
+      .from('user_invitations')
+      .select('*')
+      .eq('id', id)
+      .eq('status', 'pending')
+      .single();
+
+    if (fetchError || !invitation) {
+      return res.status(404).json({ error: 'Invitation not found or no longer pending' });
+    }
+
+    // Reset expiry to 7 days from now
+    const newExpiry = new Date();
+    newExpiry.setDate(newExpiry.getDate() + 7);
+
+    await supabase
+      .from('user_invitations')
+      .update({ expires_at: newExpiry.toISOString() })
+      .eq('id', id);
+
+    const inviteUrl = `${process.env.FRONTEND_URL || 'http://localhost:3001'}/signup/${invitation.invite_token}`;
+    const emailSent = await emailService.sendInvitation({
+      email: invitation.email,
+      role: invitation.role,
+      inviteUrl,
+      invitedBy: req.user!.email || 'Admin',
+      expiresAt: newExpiry.toISOString(),
+    });
+
+    res.json({ success: true, email_sent: emailSent, expires_at: newExpiry.toISOString() });
+  } catch (error) {
+    console.error('Error resending invitation:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Get all invitations (admin only)
 router.get('/invitations', requireAuth, requireAdmin, async (req, res) => {
   try {
@@ -193,6 +234,58 @@ router.delete('/invitations/:id', requireAuth, requireAdmin, validateUUIDParam('
     res.json({ success: true });
   } catch (error) {
     console.error('Error in delete invitation:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Send password reset email for a user (admin only)
+router.post('/:id/reset-password', requireAuth, requireAdmin, validateUUIDParam('id'), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { data: userData, error: userError } = await supabase.auth.admin.getUserById(id);
+    if (userError || !userData.user?.email) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const email = userData.user.email;
+    const redirectTo = `${process.env.FRONTEND_URL || 'http://localhost:3001'}/reset-password`;
+
+    const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
+      type: 'recovery',
+      email,
+      options: { redirectTo },
+    });
+
+    if (linkError || !linkData?.properties?.action_link) {
+      console.error('Error generating recovery link:', linkError);
+      return res.status(500).json({ error: 'Failed to generate reset link' });
+    }
+
+    const resetLink = linkData.properties.action_link;
+    const emailSent = await emailService.sendEmail({
+      to: email,
+      subject: 'Reset your Meridian Takeoff password',
+      text: `Click the link below to reset your password:\n\n${resetLink}\n\nThis link expires in 1 hour.`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <div style="background:#2563eb;color:white;padding:20px;text-align:center;border-radius:8px 8px 0 0">
+            <h2 style="margin:0">Meridian Takeoff</h2>
+          </div>
+          <div style="padding:24px;background:#f9fafb;border-radius:0 0 8px 8px">
+            <h3>Reset your password</h3>
+            <p>An admin has requested a password reset for your account.</p>
+            <div style="text-align:center;margin:24px 0">
+              <a href="${resetLink}" style="background:#2563eb;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block">Reset Password</a>
+            </div>
+            <p style="color:#6b7280;font-size:14px">This link expires in 1 hour. If you did not request this, you can ignore this email.</p>
+          </div>
+        </div>`,
+    });
+
+    res.json({ success: true, email_sent: emailSent });
+  } catch (error) {
+    console.error('Error sending password reset:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

@@ -24,6 +24,7 @@ export interface UserMetadata {
   role: 'admin' | 'user'
   full_name?: string
   company?: string
+  email?: string
   created_at: string
   updated_at: string
 }
@@ -207,19 +208,19 @@ export const authHelpers = {
     return metadata?.role === 'admin'
   },
 
-  // Get all users (admin only)
+  // Get all users (admin only) - uses backend API to include email
   async getAllUsers(): Promise<UserMetadata[]> {
-    const { data, error } = await supabase
-      .from('user_metadata')
-      .select('*')
-      .order('created_at', { ascending: false })
-
-    if (error) {
+    const { userService } = await import('../services/apiService')
+    try {
+      const data = await userService.getUsers()
+      return (data || []).map((u: UserMetadata & { auth_users?: { email?: string } }) => ({
+        ...u,
+        email: u.email ?? u.auth_users?.email,
+      }))
+    } catch (error) {
       console.error('Error fetching users:', error)
       return []
     }
-
-    return data || []
   },
 
   // Create user invitation (now uses backend API to send email)
@@ -305,6 +306,18 @@ export const authHelpers = {
   async deleteInvitation(invitationId: string) {
     const { userService } = await import('../services/apiService')
     return await userService.deleteInvitation(invitationId)
+  },
+
+  // Resend invitation email - uses backend API
+  async resendInvitation(invitationId: string) {
+    const { userService } = await import('../services/apiService')
+    return await userService.resendInvitation(invitationId)
+  },
+
+  // Send password reset email for a user (admin only)
+  async resetUserPassword(userId: string) {
+    const { userService } = await import('../services/apiService')
+    return await userService.resetUserPassword(userId)
   },
 
   // Update user role (admin only) - uses backend API
