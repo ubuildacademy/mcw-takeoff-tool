@@ -309,7 +309,7 @@ export function renderSVGMeasurement(
   svg: SVGSVGElement,
   measurement: Measurement,
   viewport: PageViewport,
-  page: PDFPageProxy | undefined,
+  _page: PDFPageProxy | undefined,
   options: RenderSVGMeasurementOptions
 ): void {
   if (!measurement || !measurement.points || !viewport) return;
@@ -317,7 +317,6 @@ export function renderSVGMeasurement(
   if (points.length < 1) return;
   if (measurement.type === 'count' && points.length < 1) return;
   if (measurement.type !== 'count' && points.length < 2) return;
-  if (!page) return;
 
   const {
     rotation,

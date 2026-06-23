@@ -13,7 +13,7 @@ export interface PDFViewerInteractionsRefs {
   svgOverlayRef: RefObject<SVGSVGElement | null>;
   containerRef: RefObject<HTMLDivElement | null>;
   renderPDFPageRef: RefObject<((pageNum: number) => Promise<void>) | null>;
-  completeMeasurementRef: RefObject<(points: { x: number; y: number }[]) => Promise<void>>;
+  completeMeasurementRef: RefObject<(points: { x: number; y: number }[]) => Promise<boolean>>;
   isSelectionModeRef: RefObject<boolean>;
   lastRenderedScaleRef: RefObject<number>;
   /** Rotation last painted on the canvas; used with lastRenderedScaleRef when viewState.rotation updates before render completes. */
@@ -80,7 +80,7 @@ export interface PDFViewerInteractionsOptions
   /** Apply CSS zoom when PDF render is blocked; pass overrideScale when called from wheel so transform uses new scale before state updates */
   applyInteractiveZoomTransforms: (overrideScale?: number) => void;
   /** Completion handlers (defined in PDFViewer, passed in) */
-  completeMeasurement: (points: { x: number; y: number }[]) => Promise<void>;
+  completeMeasurement: (points: { x: number; y: number }[]) => Promise<boolean>;
   completeCutout: (points: { x: number; y: number }[]) => Promise<void>;
   completeContinuousLinearMeasurement: () => Promise<void>;
   /** Props */

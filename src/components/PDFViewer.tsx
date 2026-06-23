@@ -57,6 +57,7 @@ import {
   canvasPixelExtent,
 } from '../utils/measurementGeometry';
 import { toast } from 'sonner';
+import { MeasurementCalculator } from '../utils/measurementCalculation';
 import { takeoffMeasurementToPdfViewerMeasurement } from '../utils/takeoffMeasurementDisplay';
 import {
   canvasMeasurementSelectionMatchesCondition,
@@ -276,7 +277,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   }, []);
   const measurementDragJustCompletedRef = useRef(false);
   const cutoutDragJustCompletedRef = useRef(false);
-  const completeMeasurementRef = useRef<(points: { x: number; y: number }[]) => Promise<void>>(() => Promise.resolve());
+  const completeMeasurementRef = useRef<(points: { x: number; y: number }[]) => Promise<boolean>>(() => Promise.resolve(false));
   const createRubberBandElementRef = useRef<(() => void) | null>(null);
   const completeCutoutRef = useRef<((points: { x: number; y: number }[]) => Promise<void>) | null>(null);
   const completeContinuousLinearMeasurementRef = useRef<(() => Promise<void>) | null>(null);
@@ -2251,18 +2252,18 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Refs and setter stable; omit
   }, [currentViewport, currentPage]);
   // Complete current measurement
-  const completeMeasurement = useCallback(async (points: { x: number; y: number }[]) => {
+  const completeMeasurement = useCallback(async (points: { x: number; y: number }[]): Promise<boolean> => {
     // Prevent duplicate calls within a very short window (100ms) - allows legitimate double-clicks
     const now = Date.now();
     if (isCompletingMeasurementRef.current && (now - lastCompletionTimeRef.current) < 100) {
       // Block duplicate measurement completion calls
-      return;
+      return false;
     }
     
     const currentSelectedConditionId = useConditionStore.getState().selectedConditionId;
 
     if (!currentSelectedConditionId || points.length === 0) {
-      return;
+      return false;
     }
     
     // Set flag and timestamp to prevent duplicate calls
@@ -2273,16 +2274,24 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (!selectedCondition) {
       // Reset flag if condition not found
       isCompletingMeasurementRef.current = false;
-      return;
+      return false;
     }
     
     let calculatedValue = 0;
     let unit = selectedCondition.unit;
     
-    if (!currentViewport) {
-      // Reset flag if no viewport
+    // Prefer live viewport; fall back to pdfPageRef when the callback was created before
+    // pageViewports hydrated (preview uses fresh viewport deps; this closure must not stay stale).
+    let viewport = currentViewport;
+    if (!viewport && pdfPageRef.current) {
+      viewport = pdfPageRef.current.getViewport({
+        scale: lastRenderedScaleRef.current || viewState.scale,
+        rotation: lastRenderedRotationRef.current ?? viewState.rotation ?? 0,
+      });
+    }
+    if (!viewport) {
       isCompletingMeasurementRef.current = false;
-      return;
+      return false;
     }
     
     // Store measurements in normalized coordinates (0-1) - simple and reliable
@@ -2291,9 +2300,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       y: point.y
     }));
     
-    // Import the measurement calculator
-    const { MeasurementCalculator } = await import('../utils/measurementCalculation');
-    
     // Create scale info object using the calibration base viewport
     const calibBase = calibrationViewportRef.current;
     const scaleInfo = {
@@ -2301,8 +2307,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       unit: 'ft',
       scaleText: 'calibrated',
       confidence: 0.95, // High confidence for manual calibration
-      viewportWidth: (calibBase?.viewportWidth) || currentViewport.width,
-      viewportHeight: (calibBase?.viewportHeight) || currentViewport.height
+      viewportWidth: (calibBase?.viewportWidth) || viewport.width,
+      viewportHeight: (calibBase?.viewportHeight) || viewport.height
     };
     
     // Dev-only overlay: compares validator vs measurement pixel path on linear spans (see measurementDebug state).
@@ -2426,12 +2432,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       }).catch(error => {
         if (isTakeoffMeasurementCreateAborted(error)) return;
         console.error(`Failed to save ${measurementType.toUpperCase()} measurement:`, error);
-        // Reset flag on error
         isCompletingMeasurementRef.current = false;
+        const msg = error instanceof Error ? error.message : String(error);
+        toast.error('Measurement could not be saved', {
+          description: msg || 'Check your connection and try again.',
+        });
       });
     } else {
       // Reset flag if no project/file
       isCompletingMeasurementRef.current = false;
+      return false;
     }
     
     // Clear current measurement
@@ -2443,8 +2453,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setTimeout(() => {
       isCompletingMeasurementRef.current = false;
     }, 500);
+    return true;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Refs and setters stable; omit
-  }, [getSelectedCondition, measurementType, scaleFactor, effectiveProjectId, currentPage, file.id]);
+  }, [getSelectedCondition, measurementType, scaleFactor, effectiveProjectId, currentPage, file.id, currentViewport, viewState.scale, viewState.rotation]);
 
   useEffect(() => {
     completeMeasurementRef.current = completeMeasurement;
@@ -2611,9 +2622,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     pageRubberBandRefs.current[currentPage] = null;
     setRubberBandElement(null);
 
-    completeMeasurement(deduped);
+    const saved = await completeMeasurement(deduped);
+    if (!saved) return;
 
-    // Reset continuous drawing state
+    // Reset continuous drawing state only after the measurement was queued for save
     setIsContinuousDrawing(false);
     setActivePoints([]);
     setRunningLength(0);

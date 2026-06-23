@@ -227,7 +227,7 @@ export interface UsePDFViewerInteractionsOptions {
   annotationDragJustCompletedRef: MutableRefObject<boolean>;
   isSelectionModeRef: MutableRefObject<boolean>;
   isMeasuringRef: MutableRefObject<boolean>;
-  completeMeasurementRef: MutableRefObject<(points: { x: number; y: number }[]) => Promise<void>>;
+  completeMeasurementRef: MutableRefObject<(points: { x: number; y: number }[]) => Promise<boolean>>;
   // Store-derived / callbacks
   annotationColor: string;
   setTextInputPosition: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
