@@ -20,7 +20,7 @@ export function TakeoffWorkspaceStatusBar({
 }: TakeoffWorkspaceStatusBarProps) {
   return (
     <div
-      className="flex items-center justify-between px-4 py-2 border-t text-sm"
+      className="relative z-10 flex shrink-0 items-center justify-between px-4 py-2 border-t text-sm"
       style={{
         background: 'hsl(var(--workspace-rail))',
         borderColor: 'hsl(var(--border-strong))',

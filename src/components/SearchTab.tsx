@@ -221,7 +221,7 @@ export function SearchTab({
   };
 
   return (
-    <div className="w-full bg-background border-l flex flex-col h-full text-foreground">
+    <div className="w-full bg-background border-l flex flex-col flex-1 min-h-0 text-foreground">
       {/* Header */}
       <div className="p-4 border-b bg-background">
         <div className="flex items-center justify-between mb-4">

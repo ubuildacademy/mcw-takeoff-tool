@@ -9,7 +9,7 @@ const SearchTab = lazy(() => import('../SearchTab').then((m) => ({ default: m.Se
 const ChatTab = lazy(() => import('../ChatTab').then((m) => ({ default: m.ChatTab })));
 
 const TabFallback = () => (
-  <div className="flex-1 flex items-center justify-center p-8" role="status" aria-label="Loading tab">
+  <div className="flex flex-1 items-center justify-center p-8 min-h-0" role="status" aria-label="Loading tab">
     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary" />
   </div>
 );
@@ -42,13 +42,15 @@ export function TakeoffWorkspaceRightSidebar({
   // In tablet drawer mode the outer div is the positioning context for the
   // absolute sidebar panel, and z-40 keeps it above the z-30 backdrop.
   const outerClass = isTabletDrawer
-    ? 'flex shrink-0 relative z-40'
-    : 'flex';
+    ? 'flex shrink-0 relative z-40 min-h-0'
+    : 'flex shrink-0 min-h-0';
 
   // Tablet: overlay to the left of the toggle strip; Desktop: normal flow.
   const panelClass = isTabletDrawer
-    ? 'absolute top-0 bottom-0 z-40 shadow-2xl workspace-side-panel border-l flex flex-col w-80 sm:w-96'
-    : 'w-96 workspace-side-panel border-l flex flex-col h-full';
+    ? 'absolute top-0 bottom-0 z-40 shadow-2xl workspace-side-panel border-l flex flex-col min-h-0 overflow-hidden w-80 sm:w-96'
+    : 'w-96 workspace-side-panel border-l flex flex-col h-full min-h-0 overflow-hidden';
+
+  const tabPanelClass = 'flex flex-1 flex-col min-h-0 overflow-hidden';
 
   return (
     <div className={outerClass}>
@@ -107,45 +109,51 @@ export function TakeoffWorkspaceRightSidebar({
           </div>
 
           {rightSidebarTab === 'documents' && (
-            <SheetSidebar
-              projectId={projectId}
-              documents={documents}
-              documentsLoading={documentsLoading}
-              onPageSelect={onPageSelect}
-              onPageOpenInNewTab={onPageOpenInNewTab}
-              selectedDocumentId={selectedDocumentId}
-              selectedPageNumber={selectedPageNumber}
-              onOCRRequest={onOCRRequest}
-              onOcrSearchResults={onOcrSearchResults}
-              onDocumentsUpdate={onDocumentsUpdate}
-              onReloadDocuments={onReloadDocuments}
-              onPdfUpload={onPdfUpload}
-              uploading={uploading}
-              onExtractTitleblockForDocument={onExtractTitleblockForDocument}
-              onBulkExtractTitleblock={onBulkExtractTitleblock}
-              onRotateAllSheetsInDocument={onRotateAllSheetsInDocument}
-            />
+            <div className={tabPanelClass}>
+              <SheetSidebar
+                projectId={projectId}
+                documents={documents}
+                documentsLoading={documentsLoading}
+                onPageSelect={onPageSelect}
+                onPageOpenInNewTab={onPageOpenInNewTab}
+                selectedDocumentId={selectedDocumentId}
+                selectedPageNumber={selectedPageNumber}
+                onOCRRequest={onOCRRequest}
+                onOcrSearchResults={onOcrSearchResults}
+                onDocumentsUpdate={onDocumentsUpdate}
+                onReloadDocuments={onReloadDocuments}
+                onPdfUpload={onPdfUpload}
+                uploading={uploading}
+                onExtractTitleblockForDocument={onExtractTitleblockForDocument}
+                onBulkExtractTitleblock={onBulkExtractTitleblock}
+                onRotateAllSheetsInDocument={onRotateAllSheetsInDocument}
+              />
+            </div>
           )}
 
           {rightSidebarTab === 'search' && (
-            <Suspense fallback={<TabFallback />}>
-              <SearchTab
-                projectId={projectId}
-                documents={documents}
-                onPageSelect={onPageSelect}
-                onSearchResultSelect={onSearchResultSelect}
-                selectedDocumentId={selectedDocumentId}
-                selectedPageNumber={selectedPageNumber}
-                onReloadDocuments={onReloadDocuments}
-                onStartOcrTracking={onStartOcrTracking}
-              />
-            </Suspense>
+            <div className={tabPanelClass}>
+              <Suspense fallback={<TabFallback />}>
+                <SearchTab
+                  projectId={projectId}
+                  documents={documents}
+                  onPageSelect={onPageSelect}
+                  onSearchResultSelect={onSearchResultSelect}
+                  selectedDocumentId={selectedDocumentId}
+                  selectedPageNumber={selectedPageNumber}
+                  onReloadDocuments={onReloadDocuments}
+                  onStartOcrTracking={onStartOcrTracking}
+                />
+              </Suspense>
+            </div>
           )}
 
           {rightSidebarTab === 'ai-chat' && (
-            <Suspense fallback={<TabFallback />}>
-              <ChatTab projectId={projectId} documents={documents} />
-            </Suspense>
+            <div className={tabPanelClass}>
+              <Suspense fallback={<TabFallback />}>
+                <ChatTab projectId={projectId} documents={documents} />
+              </Suspense>
+            </div>
           )}
         </div>
       )}

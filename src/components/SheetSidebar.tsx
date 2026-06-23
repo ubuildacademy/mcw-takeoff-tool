@@ -382,7 +382,7 @@ export function SheetSidebar({
   const filteredDocuments = getFilteredAndSortedDocuments();
 
   return (
-    <div className="w-full bg-background border-l flex flex-col h-full text-foreground">
+    <div className="w-full bg-background border-l flex flex-col flex-1 min-h-0 text-foreground">
       <SheetSidebarHeader
         filterBy={filterBy}
         onFilterByChange={setFilterBy}
