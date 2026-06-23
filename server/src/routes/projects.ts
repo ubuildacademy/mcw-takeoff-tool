@@ -468,18 +468,12 @@ export async function performImportFromBackup(
 router.get('/', requireAuth, async (req, res) => {
   try {
     const userId = req.user?.id;
-    const userIsAdmin = req.user?.role === 'admin';
-    
-    // Build query based on user role
-    let query = supabase
+
+    const query = supabase
       .from(TABLES.PROJECTS)
       .select('*')
+      .eq('user_id', userId)
       .order('last_modified', { ascending: false });
-    
-    // If not admin, only show user's own projects
-    if (!userIsAdmin) {
-      query = query.eq('user_id', userId);
-    }
     
     const { data: projects, error } = await query;
     

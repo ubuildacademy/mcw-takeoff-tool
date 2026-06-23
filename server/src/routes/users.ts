@@ -10,20 +10,28 @@ const router = Router();
 // Get all users (admin only)
 router.get('/', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { data, error } = await supabase
+    const { data: metadata, error: metaError } = await supabase
       .from('user_metadata')
-      .select(`
-        *,
-        auth_users:auth.users!inner(email)
-      `)
+      .select('*')
       .order('created_at', { ascending: false });
 
-    if (error) {
-      console.error('Error fetching users:', error);
+    if (metaError) {
+      console.error('Error fetching user metadata:', metaError);
       return res.status(500).json({ error: 'Failed to fetch users' });
     }
 
-    res.json(data || []);
+    // Fetch emails via admin API (auth.users join is not available via PostgREST)
+    const { data: authData, error: authError } = await supabase.auth.admin.listUsers({ perPage: 1000 });
+    if (authError) {
+      console.error('Error fetching auth users:', authError);
+    }
+    const emailById: Record<string, string> = {};
+    for (const u of authData?.users ?? []) {
+      if (u.email) emailById[u.id] = u.email;
+    }
+
+    const users = (metadata || []).map((u) => ({ ...u, email: emailById[u.id] ?? null }));
+    res.json(users);
   } catch (error) {
     console.error('Error in get users:', error);
     res.status(500).json({ error: 'Internal server error' });
