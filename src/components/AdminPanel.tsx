@@ -14,9 +14,8 @@ import {
   Trash2,
   Mail,
   Database,
-  Upload,
-  FileText,
   Loader2,
+  RotateCcw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ollamaService, type OllamaModel } from '../services/ollamaService';
@@ -25,7 +24,8 @@ import { settingsService } from '../services/apiService';
 import { extractErrorMessage } from '../utils/commonUtils';
 import { AdminHelpFaqTab } from './help/AdminHelpFaqTab';
 import { CHAT_PRESET_CONFIGS, CHAT_PRESET_SETTING_KEY } from '../constants/chatPresets';
-import { knowledgeBaseService, type KbDocument } from '../services/knowledgeBaseService';
+import { knowledgeBaseService } from '../services/knowledgeBaseService';
+import { KB_CHAR_BUDGET } from '../constants/chatPresets';
 import { cn } from '@/lib/utils';
 
 // Fallback when /api/ollama/models fails (https://ollama.com/search?c=cloud)
@@ -70,11 +70,12 @@ export function AdminPanel({ isOpen, onClose, projectId: _projectId }: AdminPane
     Object.fromEntries(CHAT_PRESET_CONFIGS.map((p) => [p.id, p.defaultPrompt]))
   );
 
-  // Knowledge base state
-  const [kbDocuments, setKbDocuments] = useState<KbDocument[]>([]);
+  // Knowledge base wiki-editor state
+  const kbPresets = CHAT_PRESET_CONFIGS.filter((p) => p.usesKnowledgeBase);
+  const [kbPresetId, setKbPresetId] = useState<string>(kbPresets[0]?.id ?? '');
+  const [kbDraft, setKbDraft] = useState<string>('');
   const [kbLoading, setKbLoading] = useState(false);
-  const [kbUploading, setKbUploading] = useState(false);
-  const [kbDeletingId, setKbDeletingId] = useState<string | null>(null);
+  const [kbSaving, setKbSaving] = useState(false);
   
   // User management state
   const [users, setUsers] = useState<UserMetadata[]>([]);
@@ -355,11 +356,13 @@ When answering questions:
     }
   };
 
-  const loadKbDocuments = async () => {
+  const loadKbContent = async (presetId?: string) => {
+    const id = presetId ?? kbPresetId;
+    if (!id) return;
     setKbLoading(true);
     try {
-      const docs = await knowledgeBaseService.getDocuments();
-      setKbDocuments(docs);
+      const content = await knowledgeBaseService.getContent(id);
+      setKbDraft(content);
     } catch (error) {
       toast.error(extractErrorMessage(error, 'Failed to load knowledge base'));
     } finally {
@@ -367,36 +370,29 @@ When answering questions:
     }
   };
 
-  const handleKbUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    setKbUploading(true);
+  const handleKbPresetChange = (presetId: string) => {
+    setKbPresetId(presetId);
+    setKbDraft('');
+    loadKbContent(presetId);
+  };
+
+  const handleKbSave = async () => {
+    if (!kbPresetId) return;
+    setKbSaving(true);
     try {
-      for (let i = 0; i < files.length; i++) {
-        await knowledgeBaseService.uploadDocument(files[i]);
-      }
-      toast.success(`${files.length} document${files.length > 1 ? 's' : ''} uploaded to knowledge base`);
-      await loadKbDocuments();
+      await knowledgeBaseService.saveContent(kbPresetId, kbDraft);
+      toast.success('Knowledge base saved');
     } catch (error) {
-      toast.error(extractErrorMessage(error, 'Upload failed'));
+      toast.error(extractErrorMessage(error, 'Failed to save knowledge base'));
     } finally {
-      setKbUploading(false);
-      e.target.value = '';
+      setKbSaving(false);
     }
   };
 
-  const handleKbDelete = async (docId: string, name: string) => {
-    if (!confirm(`Remove "${name}" from the knowledge base?`)) return;
-    setKbDeletingId(docId);
-    try {
-      await knowledgeBaseService.deleteDocument(docId);
-      setKbDocuments((prev) => prev.filter((d) => d.id !== docId));
-      toast.success('Document removed from knowledge base');
-    } catch (error) {
-      toast.error(extractErrorMessage(error, 'Failed to delete document'));
-    } finally {
-      setKbDeletingId(null);
-    }
+  const handleKbResetToDefault = () => {
+    if (!confirm('Reset to built-in default content? Any custom edits will be lost.')) return;
+    const defaultContent = knowledgeBaseService.getDefaultContent(kbPresetId);
+    setKbDraft(defaultContent);
   };
 
   // Load available models and saved settings when AI settings tab is opened
@@ -480,7 +476,7 @@ When answering questions:
       loadPresetPrompts();
     }
     if (isOpen && activeTab === 'knowledge-base') {
-      loadKbDocuments();
+      loadKbContent();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, isOpen]);
@@ -633,120 +629,113 @@ When answering questions:
               {activeTab === 'help-faq' && <AdminHelpFaqTab />}
 
               {activeTab === 'knowledge-base' && (
-                <div className="p-6">
-                  <div className="mb-6">
-                    <h2 className="text-2xl font-bold">Knowledge Base</h2>
-                    <p className={`${adminMutedText} mt-1 text-sm`}>
-                      Upload reference documents (specs, manufacturer data sheets, ASTM standards, guides) that the AI uses when answering technical questions in knowledge-base-enabled chat modes. Users never see these documents directly — the AI reads them as background context.
-                    </p>
-                  </div>
-
-                  <div className="space-y-6">
-                    <div className={adminPanelSection}>
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-lg font-semibold flex items-center gap-2">
-                          <Database className="w-5 h-5" />
-                          Reference Documents
-                          {kbDocuments.length > 0 && (
-                            <span className="text-sm font-normal text-muted-foreground">
-                              ({kbDocuments.length} document{kbDocuments.length !== 1 ? 's' : ''})
-                            </span>
-                          )}
-                        </h3>
-                        <div className="flex gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={loadKbDocuments}
-                            disabled={kbLoading}
-                          >
-                            <RefreshCw className={`w-4 h-4 mr-2 ${kbLoading ? 'animate-spin' : ''}`} />
-                            Refresh
-                          </Button>
-                          <label className="cursor-pointer">
-                            <input
-                              type="file"
-                              accept=".pdf"
-                              multiple
-                              className="hidden"
-                              onChange={handleKbUpload}
-                              disabled={kbUploading}
-                            />
-                            <Button
-                              asChild={false}
-                              size="sm"
-                              disabled={kbUploading}
-                              onClick={(e) => {
-                                const label = (e.currentTarget as HTMLButtonElement).closest('label');
-                                label?.querySelector('input')?.click();
-                              }}
-                            >
-                              {kbUploading ? (
-                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                              ) : (
-                                <Upload className="w-4 h-4 mr-2" />
-                              )}
-                              {kbUploading ? 'Uploading...' : 'Upload PDF'}
-                            </Button>
-                          </label>
-                        </div>
+                <div className="flex flex-col h-full">
+                  {/* KB header bar */}
+                  <div className="p-6 pb-4 border-b border-border shrink-0">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <h2 className="text-2xl font-bold flex items-center gap-2">
+                          <Database className="w-6 h-6" />
+                          Knowledge Base
+                        </h2>
+                        <p className={`${adminMutedText} mt-1 text-sm max-w-xl`}>
+                          Per-trade wiki injected as AI context. Users never see this — the model reads it automatically when the matching mode is selected.
+                        </p>
                       </div>
 
-                      {kbLoading ? (
-                        <div className="flex items-center justify-center py-8">
-                          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-                        </div>
-                      ) : kbDocuments.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center py-10 text-center border border-dashed border-border rounded-lg">
-                          <Database className="w-10 h-10 text-muted-foreground mb-3" />
-                          <p className="text-muted-foreground font-medium">No documents in knowledge base</p>
-                          <p className="text-sm text-muted-foreground mt-1">
-                            Upload PDFs — manufacturer data sheets, specs, SWRI guides, ASTM standards
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          {kbDocuments.map((doc) => (
-                            <div key={doc.id} className={adminListRow}>
-                              <div className="flex items-center gap-3 min-w-0">
-                                <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
-                                <div className="min-w-0">
-                                  <p className="font-medium truncate">{doc.originalName}</p>
-                                  <p className={adminHelpText}>
-                                    {doc.size ? `${(doc.size / 1024 / 1024).toFixed(1)} MB` : ''}
-                                    {doc.uploadedAt ? ` • Uploaded ${new Date(doc.uploadedAt).toLocaleDateString()}` : ''}
-                                  </p>
-                                </div>
-                              </div>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleKbDelete(doc.id, doc.originalName)}
-                                disabled={kbDeletingId === doc.id}
-                                className="text-red-600 hover:bg-red-500/10 dark:text-red-400 shrink-0"
-                              >
-                                {kbDeletingId === doc.id ? (
-                                  <Loader2 className="w-4 h-4 animate-spin" />
-                                ) : (
-                                  <Trash2 className="w-4 h-4" />
-                                )}
-                              </Button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleKbResetToDefault}
+                          disabled={kbLoading || kbSaving}
+                        >
+                          <RotateCcw className="w-4 h-4 mr-2" />
+                          Reset to Default
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={handleKbSave}
+                          disabled={kbLoading || kbSaving}
+                        >
+                          {kbSaving ? (
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          ) : (
+                            <CheckCircle className="w-4 h-4 mr-2" />
+                          )}
+                          {kbSaving ? 'Saving...' : 'Save'}
+                        </Button>
+                      </div>
                     </div>
 
-                    <div className="rounded-lg border border-blue-500/25 bg-blue-500/10 p-4">
-                      <h4 className="font-medium text-blue-700 dark:text-blue-200 mb-2">How the Knowledge Base works:</h4>
-                      <ul className="text-sm text-blue-700 dark:text-blue-100/90 space-y-1">
-                        <li>• Documents are OCR'd automatically after upload</li>
-                        <li>• When a user chats in a KB-enabled mode (e.g., Div 7 Waterproofing Estimator), the AI reads this knowledge base as background context alongside the project plans</li>
-                        <li>• Up to 25,000 characters of KB content is injected per session — prioritize concise, high-value reference material</li>
-                        <li>• Good candidates: manufacturer application guides, ASTM/SWRI standards, CSI spec sections, product data sheets</li>
-                        <li>• Users never see the knowledge base documents — the AI references them automatically</li>
-                      </ul>
-                    </div>
+                    {/* Trade / preset selector */}
+                    {kbPresets.length > 1 && (
+                      <div className="flex items-center gap-3 mt-4">
+                        <span className="text-sm text-muted-foreground shrink-0">Trade:</span>
+                        <div className="flex gap-2">
+                          {kbPresets.map((p) => (
+                            <button
+                              key={p.id}
+                              onClick={() => handleKbPresetChange(p.id)}
+                              className={cn(
+                                'px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+                                kbPresetId === p.id
+                                  ? 'bg-primary text-primary-foreground'
+                                  : 'bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                              )}
+                            >
+                              {p.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Character budget indicator */}
+                    {!kbLoading && kbDraft && (() => {
+                      const pct = Math.min(100, Math.round((kbDraft.length / KB_CHAR_BUDGET) * 100));
+                      const over = kbDraft.length > KB_CHAR_BUDGET;
+                      const barColor = over
+                        ? 'bg-red-500'
+                        : pct > 80
+                        ? 'bg-yellow-500'
+                        : 'bg-green-500';
+                      return (
+                        <div className="mt-3">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs text-muted-foreground">Context budget</span>
+                            <span className={`text-xs font-mono ${over ? 'text-red-500' : 'text-muted-foreground'}`}>
+                              {kbDraft.length.toLocaleString()} / {KB_CHAR_BUDGET.toLocaleString()} chars
+                              {over ? ' — content will be truncated' : ''}
+                            </span>
+                          </div>
+                          <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${barColor}`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Wiki editor — fills remaining height */}
+                  <div className="flex-1 min-h-0 p-6 pt-4">
+                    {kbLoading ? (
+                      <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
+                        <Loader2 className="w-6 h-6 animate-spin" />
+                        <span className="text-sm">Loading knowledge base…</span>
+                      </div>
+                    ) : (
+                      <textarea
+                        value={kbDraft}
+                        onChange={(e) => setKbDraft(e.target.value)}
+                        className="w-full h-full rounded-lg border border-input bg-background p-4 font-mono text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none leading-relaxed"
+                        placeholder={`Write your ${kbPresets.find(p => p.id === kbPresetId)?.name ?? 'trade'} knowledge base here.\n\nUse plain text with section headers (e.g., === SECTION NAME ===) to organize content.\nThe AI will reference this automatically when answering technical questions in this mode.`}
+                        spellCheck={false}
+                      />
+                    )}
                   </div>
                 </div>
               )}

@@ -71,6 +71,8 @@ export function ChatTab({ projectId, documents }: ChatTabProps) {
   });
   // Prompts loaded from server settings (admin-editable); fall back to defaults from constants
   const [presetPrompts, setPresetPrompts] = useState<Record<string, string>>({});
+  // KB content cached per preset — loaded once on mount/preset-change, not per message
+  const [kbCache, setKbCache] = useState<Record<string, string>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Simple function to render message content as plain text
@@ -111,7 +113,22 @@ export function ChatTab({ projectId, documents }: ChatTabProps) {
     }
   }, []);
 
-  // On mount: user name + Ollama availability + preset prompts from server settings
+  // Load KB content for a preset and cache it; no-op if already cached
+  const loadKbForPreset = useCallback(async (presetId: string) => {
+    setKbCache(prev => {
+      if (presetId in prev) return prev; // Already cached
+      return prev;
+    });
+    try {
+      const content = await knowledgeBaseService.getContent(presetId);
+      setKbCache(prev => ({ ...prev, [presetId]: content }));
+    } catch {
+      // KB unavailable — silently use empty string
+      setKbCache(prev => ({ ...prev, [presetId]: '' }));
+    }
+  }, []);
+
+  // On mount: user name + Ollama availability + preset prompts + KB for current preset
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -131,7 +148,7 @@ export function ChatTab({ projectId, documents }: ChatTabProps) {
         }
       }
 
-      // Load admin-configured prompts for each preset (fail silently — falls back to defaults)
+      // Load admin-configured prompts for each preset (fail silently)
       try {
         const loaded: Record<string, string> = {};
         await Promise.all(
@@ -146,11 +163,19 @@ export function ChatTab({ projectId, documents }: ChatTabProps) {
         );
         if (!cancelled) setPresetPrompts(loaded);
       } catch {
-        // Silently ignore — defaults from constants will be used
+        // Silently ignore
       }
     })();
     return () => { cancelled = true; };
   }, []);
+
+  // Load KB content whenever the selected preset changes (lazy, cached)
+  useEffect(() => {
+    const preset = CHAT_PRESET_MAP[selectedPresetId];
+    if (preset?.usesKnowledgeBase && !(selectedPresetId in kbCache)) {
+      loadKbForPreset(selectedPresetId);
+    }
+  }, [selectedPresetId, kbCache, loadKbForPreset]);
 
   // Load chat history from localStorage for persistence
   useEffect(() => {
@@ -205,7 +230,11 @@ export function ChatTab({ projectId, documents }: ChatTabProps) {
       timestamp: new Date(),
     };
     setMessages([welcomeMsg]);
-  }, [projectId, userName]);
+    // Pre-load KB for new preset if not already cached
+    if (preset.usesKnowledgeBase && !(newPresetId in kbCache)) {
+      loadKbForPreset(newPresetId);
+    }
+  }, [projectId, userName, kbCache, loadKbForPreset]);
 
   // Handle sending a message
   const handleSendMessage = async () => {
@@ -236,13 +265,11 @@ export function ChatTab({ projectId, documents }: ChatTabProps) {
       const activePreset = CHAT_PRESET_MAP[selectedPresetId] ?? CHAT_PRESET_MAP['general'];
       const systemPrompt = presetPrompts[selectedPresetId] ?? activePreset.defaultPrompt;
 
-      const [projectContext, kbContext] = await Promise.all([
-        buildProjectContext(),
-        activePreset.usesKnowledgeBase ? knowledgeBaseService.buildContext() : Promise.resolve(''),
-      ]);
+      const [projectContext] = await Promise.all([buildProjectContext()]);
 
-      const kbSection = kbContext
-        ? `\n\n=== KNOWLEDGE BASE ===\nThe following reference documents have been loaded by the admin. Use them to answer technical questions about materials, installation methods, specifications, and standards.\n\n${kbContext}\n=== END KNOWLEDGE BASE ===`
+      const kbContent = kbCache[selectedPresetId] ?? '';
+      const kbSection = kbContent
+        ? `\n\n=== KNOWLEDGE BASE ===\nUse the following reference material to answer technical questions about materials, installation methods, specifications, and standards. Cite the section when referencing it.\n\n${kbContent}\n=== END KNOWLEDGE BASE ===`
         : '';
 
       const ollamaMessages: OllamaMessage[] = [
