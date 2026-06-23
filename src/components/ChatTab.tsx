@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
-import { 
-  Send, 
-  Bot, 
-  User, 
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import {
+  Send,
+  Bot,
+  User,
   Loader2,
   AlertCircle,
   MessageSquare,
@@ -20,6 +21,8 @@ import { useProjectStore } from '../store/slices/projectSlice';
 import { useConditionStore } from '../store/slices/conditionSlice';
 import { useMeasurementStore } from '../store/slices/measurementSlice';
 import { authHelpers } from '../lib/supabase';
+import { settingsService } from '../services/apiService';
+import { CHAT_PRESET_CONFIGS, CHAT_PRESET_MAP, CHAT_PRESET_SETTING_KEY } from '../constants/chatPresets';
 import type { PDFDocument } from '../types';
 
 /** Strip markdown to plain text (pure, no closure — safe to define outside component). */
@@ -62,6 +65,11 @@ export function ChatTab({ projectId, documents }: ChatTabProps) {
   const [retryingConnection, setRetryingConnection] = useState(false);
   const [userName, setUserName] = useState<string>('');
   const [quotaInfo, setQuotaInfo] = useState<OllamaQuotaInfo | null>(null);
+  const [selectedPresetId, setSelectedPresetId] = useState<string>(() => {
+    return localStorage.getItem(`chat-preset-${projectId}`) ?? 'general';
+  });
+  // Prompts loaded from server settings (admin-editable); fall back to defaults from constants
+  const [presetPrompts, setPresetPrompts] = useState<Record<string, string>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Simple function to render message content as plain text
@@ -102,7 +110,7 @@ export function ChatTab({ projectId, documents }: ChatTabProps) {
     }
   }, []);
 
-  // On mount: user name + Ollama availability
+  // On mount: user name + Ollama availability + preset prompts from server settings
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -120,6 +128,24 @@ export function ChatTab({ projectId, documents }: ChatTabProps) {
           console.error('Failed to initialize chat:', error);
           setIsOllamaAvailable(false);
         }
+      }
+
+      // Load admin-configured prompts for each preset (fail silently — falls back to defaults)
+      try {
+        const loaded: Record<string, string> = {};
+        await Promise.all(
+          CHAT_PRESET_CONFIGS.map(async (preset) => {
+            try {
+              const res = await settingsService.getSetting(CHAT_PRESET_SETTING_KEY(preset.id));
+              if (res?.value) loaded[preset.id] = res.value;
+            } catch {
+              // Not configured yet — default will be used
+            }
+          })
+        );
+        if (!cancelled) setPresetPrompts(loaded);
+      } catch {
+        // Silently ignore — defaults from constants will be used
       }
     })();
     return () => { cancelled = true; };
@@ -153,20 +179,32 @@ export function ChatTab({ projectId, documents }: ChatTabProps) {
   // Add initial system message
   useEffect(() => {
     if (messages.length === 0 && isOllamaAvailable) {
-      // Extract first name from full name (split by space and take first part)
       const firstName = userName ? userName.split(' ')[0] : null;
-      const greeting = firstName ? `Hello ${firstName}!` : 'Hello!';
+      const preset = CHAT_PRESET_MAP[selectedPresetId] ?? CHAT_PRESET_MAP['general'];
       const systemMessage: ChatMessage = {
         id: 'system-welcome',
         role: 'assistant',
-        content: `${greeting} I'm your AI assistant for this takeoff project. I can help you analyze documents, answer questions about the project, and assist with measurements.
-
-What would you like to know about this project?`,
+        content: preset.welcomeMessage(firstName),
         timestamp: new Date()
       };
       setMessages([systemMessage]);
     }
-  }, [isOllamaAvailable, messages.length, userName]);
+  }, [isOllamaAvailable, messages.length, userName, selectedPresetId]);
+
+  const handlePresetChange = useCallback((newPresetId: string) => {
+    setSelectedPresetId(newPresetId);
+    localStorage.setItem(`chat-preset-${projectId}`, newPresetId);
+    localStorage.removeItem(`chat-${projectId}`);
+    const firstName = userName ? userName.split(' ')[0] : null;
+    const preset = CHAT_PRESET_MAP[newPresetId] ?? CHAT_PRESET_MAP['general'];
+    const welcomeMsg: ChatMessage = {
+      id: `system-welcome-${Date.now()}`,
+      role: 'assistant',
+      content: preset.welcomeMessage(firstName),
+      timestamp: new Date(),
+    };
+    setMessages([welcomeMsg]);
+  }, [projectId, userName]);
 
   // Handle sending a message
   const handleSendMessage = async () => {
@@ -197,20 +235,13 @@ What would you like to know about this project?`,
       const projectContext = await buildProjectContext();
 
       // Create messages for Ollama
+      const activePreset = CHAT_PRESET_MAP[selectedPresetId] ?? CHAT_PRESET_MAP['general'];
+      // Use admin-configured prompt if set; otherwise fall back to the hardcoded default
+      const systemPrompt = presetPrompts[selectedPresetId] ?? activePreset.defaultPrompt;
       const ollamaMessages: OllamaMessage[] = [
         {
           role: 'system',
-          content: `You are an AI assistant specialized in construction takeoff and project analysis. You help users understand their construction documents, measurements, and project requirements.
-
-${projectContext}
-
-When answering questions:
-- Be specific and reference actual data from the project when possible
-- If you reference a document or page, mention the document name and page number
-- Help users understand measurements, conditions, and project details
-- If you don't have enough information, ask clarifying questions
-- Be concise but thorough in your responses
-- IMPORTANT: Respond in plain text only. Do not use any markdown formatting, code blocks, asterisks, or special formatting. Use simple text with line breaks for readability.`
+          content: `${systemPrompt}\n\n${projectContext}`
         },
         ...messages.slice(-10).map(msg => ({
           role: msg.role as 'user' | 'assistant',
@@ -516,7 +547,7 @@ Generated by Meridian Takeoff`;
   return (
     <div className="flex flex-col flex-1 min-h-0 bg-background text-foreground">
       {/* Header with AI icon */}
-      <div className="p-4 border-b">
+      <div className="p-3 border-b space-y-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
@@ -526,14 +557,13 @@ Generated by Meridian Takeoff`;
             </div>
             <h3 className="text-lg font-semibold text-foreground">AI Assistant</h3>
           </div>
-          
+
           <div className="flex items-center gap-1 min-w-0">
             {typeof quotaInfo?.dailyRemaining === 'number' && typeof quotaInfo?.dailyLimit === 'number' && (
               <div className="text-xs text-muted-foreground mr-2 whitespace-nowrap">
                 Chats today: {quotaInfo.dailyRemaining}/{quotaInfo.dailyLimit}
               </div>
             )}
-            {/* Action Buttons */}
             {messages.length > 0 && (
               <>
                 <Button
@@ -557,6 +587,23 @@ Generated by Meridian Takeoff`;
               </>
             )}
           </div>
+        </div>
+
+        {/* Preset selector */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground shrink-0">Mode:</span>
+          <Select value={selectedPresetId} onValueChange={handlePresetChange}>
+            <SelectTrigger className="h-7 text-xs flex-1">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {CHAT_PRESET_CONFIGS.map((preset) => (
+                <SelectItem key={preset.id} value={preset.id} className="text-xs">
+                  {preset.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
 

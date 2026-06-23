@@ -20,6 +20,7 @@ import { authHelpers, supabase, UserMetadata, UserInvitation } from '../lib/supa
 import { settingsService } from '../services/apiService';
 import { extractErrorMessage } from '../utils/commonUtils';
 import { AdminHelpFaqTab } from './help/AdminHelpFaqTab';
+import { CHAT_PRESET_CONFIGS, CHAT_PRESET_SETTING_KEY } from '../constants/chatPresets';
 import { cn } from '@/lib/utils';
 
 // Fallback when /api/ollama/models fails (https://ollama.com/search?c=cloud)
@@ -59,6 +60,10 @@ export function AdminPanel({ isOpen, onClose, projectId: _projectId }: AdminPane
   const [sheetNumberPrompt, setSheetNumberPrompt] = useState<string>('');
   const [sheetNamePrompt, setSheetNamePrompt] = useState<string>('');
   const [chatPrompt, setChatPrompt] = useState<string>('');
+  // Chat preset prompts — keyed by preset id, loaded from server
+  const [presetPromptDrafts, setPresetPromptDrafts] = useState<Record<string, string>>(() =>
+    Object.fromEntries(CHAT_PRESET_CONFIGS.map((p) => [p.id, p.defaultPrompt]))
+  );
   
   // User management state
   const [users, setUsers] = useState<UserMetadata[]>([]);
@@ -306,6 +311,39 @@ When answering questions:
     }
   };
 
+  // Load preset prompts from settings (one request per preset)
+  const loadPresetPrompts = async () => {
+    const drafts: Record<string, string> = {};
+    await Promise.all(
+      CHAT_PRESET_CONFIGS.map(async (preset) => {
+        try {
+          const res = await settingsService.getSetting(CHAT_PRESET_SETTING_KEY(preset.id));
+          drafts[preset.id] = res?.value ?? preset.defaultPrompt;
+        } catch {
+          drafts[preset.id] = preset.defaultPrompt;
+        }
+      })
+    );
+    setPresetPromptDrafts(drafts);
+  };
+
+  const savePresetPrompt = async (presetId: string) => {
+    try {
+      setIsLoading(true);
+      const value = presetPromptDrafts[presetId] ?? '';
+      const hasSession = await ensureSession();
+      if (hasSession) {
+        await settingsService.updateSetting(CHAT_PRESET_SETTING_KEY(presetId), value);
+      }
+      localStorage.setItem(CHAT_PRESET_SETTING_KEY(presetId), value);
+      toast.success('Preset prompt saved!');
+    } catch (error) {
+      toast.error(extractErrorMessage(error, 'Failed to save preset prompt'));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Load available models and saved settings when AI settings tab is opened
   const loadAvailableModels = async () => {
     try {
@@ -384,6 +422,7 @@ When answering questions:
       loadSheetNumberPrompt();
       loadSheetNamePrompt();
       loadChatPrompt();
+      loadPresetPrompts();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, isOpen]);
@@ -672,11 +711,66 @@ When answering questions:
                       </div>
                     </div>
                     
+                    {/* Chat Presets */}
+                    <div className={adminPanelSection}>
+                      <div className="mb-4">
+                        <h3 className="text-lg font-semibold">Chat Presets</h3>
+                        <p className={`${adminMutedText} mt-1 text-sm`}>
+                          System prompts for each AI chat mode. Users select a preset by name — they cannot see or edit these prompts.
+                        </p>
+                      </div>
+
+                      <div className="space-y-6">
+                        {CHAT_PRESET_CONFIGS.map((preset) => (
+                          <div key={preset.id} className={adminNestedSection}>
+                            <div className="flex items-center justify-between mb-3">
+                              <h4 className="text-md font-semibold">{preset.name}</h4>
+                              <div className="flex gap-2">
+                                <Button
+                                  onClick={() =>
+                                    setPresetPromptDrafts((prev) => ({
+                                      ...prev,
+                                      [preset.id]: preset.defaultPrompt,
+                                    }))
+                                  }
+                                  variant="outline"
+                                  size="sm"
+                                >
+                                  <RefreshCw className="w-4 h-4 mr-2" />
+                                  Reset to Default
+                                </Button>
+                                <Button
+                                  onClick={() => savePresetPrompt(preset.id)}
+                                  disabled={isLoading}
+                                  size="sm"
+                                >
+                                  <CheckCircle className="w-4 h-4 mr-2" />
+                                  Save
+                                </Button>
+                              </div>
+                            </div>
+                            <textarea
+                              value={presetPromptDrafts[preset.id] ?? preset.defaultPrompt}
+                              onChange={(e) =>
+                                setPresetPromptDrafts((prev) => ({
+                                  ...prev,
+                                  [preset.id]: e.target.value,
+                                }))
+                              }
+                              className={`${adminTextArea} h-64 font-mono text-sm`}
+                              placeholder={`System prompt for "${preset.name}"...`}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
                     <div className="rounded-lg border border-blue-500/25 bg-blue-500/10 p-4">
                       <h4 className="font-medium text-blue-700 dark:text-blue-200 mb-2">How it works:</h4>
                       <ul className="text-sm text-blue-700 dark:text-blue-100/90 space-y-1">
                         <li>• <strong>Titleblock Extraction Prompts:</strong> Used for extracting sheet numbers and names from titleblock regions (separate prompts for each field)</li>
                         <li>• <strong>Chat Assistant Prompt:</strong> Used for AI responses in the chat tab</li>
+                        <li>• <strong>Chat Presets:</strong> System prompts users select in the chat mode dropdown — users see only the preset name, not the prompt text</li>
                         <li>• The JSON formatting for page labeling is automatically appended and cannot be changed</li>
                         <li>• Test changes on a small document first</li>
                       </ul>
