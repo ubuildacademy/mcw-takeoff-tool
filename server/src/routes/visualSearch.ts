@@ -220,6 +220,9 @@ router.post('/complete-search', requireAuth, imageInferenceBurstRateLimit, requi
   }) => {
     if (wantsSSE) {
       res.write(`data: ${JSON.stringify({ type: 'progress', ...progress })}\n\n`);
+      if (typeof (res as unknown as { flush?: () => void }).flush === 'function') {
+        (res as unknown as { flush: () => void }).flush();
+      }
     }
   };
   

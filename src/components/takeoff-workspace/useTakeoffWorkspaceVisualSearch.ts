@@ -152,6 +152,8 @@ export function useTakeoffWorkspaceVisualSearch({
         setAutoCountProgress({
           current: 0,
           total: 100,
+          currentPage: effectiveSheet.pageNumber,
+          pagesTotal: searchScope === 'current-page' ? 1 : undefined,
           stage: 'preparing',
           stageLabel: 'Preparing auto-count'
         });
