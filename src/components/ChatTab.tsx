@@ -23,6 +23,7 @@ import { useMeasurementStore } from '../store/slices/measurementSlice';
 import { authHelpers } from '../lib/supabase';
 import { settingsService } from '../services/apiService';
 import { CHAT_PRESET_CONFIGS, CHAT_PRESET_MAP, CHAT_PRESET_SETTING_KEY } from '../constants/chatPresets';
+import { knowledgeBaseService } from '../services/knowledgeBaseService';
 import type { PDFDocument } from '../types';
 
 /** Strip markdown to plain text (pure, no closure — safe to define outside component). */
@@ -232,16 +233,22 @@ export function ChatTab({ projectId, documents }: ChatTabProps) {
 
     try {
       // Build context from project data
-      const projectContext = await buildProjectContext();
-
-      // Create messages for Ollama
       const activePreset = CHAT_PRESET_MAP[selectedPresetId] ?? CHAT_PRESET_MAP['general'];
-      // Use admin-configured prompt if set; otherwise fall back to the hardcoded default
       const systemPrompt = presetPrompts[selectedPresetId] ?? activePreset.defaultPrompt;
+
+      const [projectContext, kbContext] = await Promise.all([
+        buildProjectContext(),
+        activePreset.usesKnowledgeBase ? knowledgeBaseService.buildContext() : Promise.resolve(''),
+      ]);
+
+      const kbSection = kbContext
+        ? `\n\n=== KNOWLEDGE BASE ===\nThe following reference documents have been loaded by the admin. Use them to answer technical questions about materials, installation methods, specifications, and standards.\n\n${kbContext}\n=== END KNOWLEDGE BASE ===`
+        : '';
+
       const ollamaMessages: OllamaMessage[] = [
         {
           role: 'system',
-          content: `${systemPrompt}\n\n${projectContext}`
+          content: `${systemPrompt}${kbSection}\n\n${projectContext}`
         },
         ...messages.slice(-10).map(msg => ({
           role: msg.role as 'user' | 'assistant',

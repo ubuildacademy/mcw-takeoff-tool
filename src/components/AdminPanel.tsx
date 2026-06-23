@@ -3,7 +3,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './ui/dialog';
-import { 
+import {
   RefreshCw,
   Settings,
   Brain,
@@ -12,7 +12,11 @@ import {
   Users,
   UserPlus,
   Trash2,
-  Mail
+  Mail,
+  Database,
+  Upload,
+  FileText,
+  Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ollamaService, type OllamaModel } from '../services/ollamaService';
@@ -21,6 +25,7 @@ import { settingsService } from '../services/apiService';
 import { extractErrorMessage } from '../utils/commonUtils';
 import { AdminHelpFaqTab } from './help/AdminHelpFaqTab';
 import { CHAT_PRESET_CONFIGS, CHAT_PRESET_SETTING_KEY } from '../constants/chatPresets';
+import { knowledgeBaseService, type KbDocument } from '../services/knowledgeBaseService';
 import { cn } from '@/lib/utils';
 
 // Fallback when /api/ollama/models fails (https://ollama.com/search?c=cloud)
@@ -50,7 +55,7 @@ interface AdminPanelProps {
 
 export function AdminPanel({ isOpen, onClose, projectId: _projectId }: AdminPanelProps) {
   const [activeTab, setActiveTab] = useState<
-    'ai-prompt' | 'ai-settings' | 'user-management' | 'help-faq'
+    'ai-prompt' | 'ai-settings' | 'user-management' | 'help-faq' | 'knowledge-base'
   >('user-management');
   const [isLoading, setIsLoading] = useState(false);
   const [availableModels, setAvailableModels] = useState<OllamaModel[]>([]);
@@ -64,6 +69,12 @@ export function AdminPanel({ isOpen, onClose, projectId: _projectId }: AdminPane
   const [presetPromptDrafts, setPresetPromptDrafts] = useState<Record<string, string>>(() =>
     Object.fromEntries(CHAT_PRESET_CONFIGS.map((p) => [p.id, p.defaultPrompt]))
   );
+
+  // Knowledge base state
+  const [kbDocuments, setKbDocuments] = useState<KbDocument[]>([]);
+  const [kbLoading, setKbLoading] = useState(false);
+  const [kbUploading, setKbUploading] = useState(false);
+  const [kbDeletingId, setKbDeletingId] = useState<string | null>(null);
   
   // User management state
   const [users, setUsers] = useState<UserMetadata[]>([]);
@@ -344,6 +355,50 @@ When answering questions:
     }
   };
 
+  const loadKbDocuments = async () => {
+    setKbLoading(true);
+    try {
+      const docs = await knowledgeBaseService.getDocuments();
+      setKbDocuments(docs);
+    } catch (error) {
+      toast.error(extractErrorMessage(error, 'Failed to load knowledge base'));
+    } finally {
+      setKbLoading(false);
+    }
+  };
+
+  const handleKbUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setKbUploading(true);
+    try {
+      for (let i = 0; i < files.length; i++) {
+        await knowledgeBaseService.uploadDocument(files[i]);
+      }
+      toast.success(`${files.length} document${files.length > 1 ? 's' : ''} uploaded to knowledge base`);
+      await loadKbDocuments();
+    } catch (error) {
+      toast.error(extractErrorMessage(error, 'Upload failed'));
+    } finally {
+      setKbUploading(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleKbDelete = async (docId: string, name: string) => {
+    if (!confirm(`Remove "${name}" from the knowledge base?`)) return;
+    setKbDeletingId(docId);
+    try {
+      await knowledgeBaseService.deleteDocument(docId);
+      setKbDocuments((prev) => prev.filter((d) => d.id !== docId));
+      toast.success('Document removed from knowledge base');
+    } catch (error) {
+      toast.error(extractErrorMessage(error, 'Failed to delete document'));
+    } finally {
+      setKbDeletingId(null);
+    }
+  };
+
   // Load available models and saved settings when AI settings tab is opened
   const loadAvailableModels = async () => {
     try {
@@ -423,6 +478,9 @@ When answering questions:
       loadSheetNamePrompt();
       loadChatPrompt();
       loadPresetPrompts();
+    }
+    if (isOpen && activeTab === 'knowledge-base') {
+      loadKbDocuments();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, isOpen]);
@@ -518,6 +576,7 @@ When answering questions:
 
   const tabs = [
     { id: 'user-management', label: 'User Management', icon: Users },
+    { id: 'knowledge-base', label: 'Knowledge Base', icon: Database },
     { id: 'help-faq', label: 'Help & FAQ', icon: BookOpen },
     { id: 'ai-prompt', label: 'AI Prompt Editor', icon: Brain },
     { id: 'ai-settings', label: 'AI Settings', icon: Brain },
@@ -572,6 +631,125 @@ When answering questions:
             {/* Main Content */}
             <div className="flex-1 overflow-y-auto bg-background">
               {activeTab === 'help-faq' && <AdminHelpFaqTab />}
+
+              {activeTab === 'knowledge-base' && (
+                <div className="p-6">
+                  <div className="mb-6">
+                    <h2 className="text-2xl font-bold">Knowledge Base</h2>
+                    <p className={`${adminMutedText} mt-1 text-sm`}>
+                      Upload reference documents (specs, manufacturer data sheets, ASTM standards, guides) that the AI uses when answering technical questions in knowledge-base-enabled chat modes. Users never see these documents directly — the AI reads them as background context.
+                    </p>
+                  </div>
+
+                  <div className="space-y-6">
+                    <div className={adminPanelSection}>
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-lg font-semibold flex items-center gap-2">
+                          <Database className="w-5 h-5" />
+                          Reference Documents
+                          {kbDocuments.length > 0 && (
+                            <span className="text-sm font-normal text-muted-foreground">
+                              ({kbDocuments.length} document{kbDocuments.length !== 1 ? 's' : ''})
+                            </span>
+                          )}
+                        </h3>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={loadKbDocuments}
+                            disabled={kbLoading}
+                          >
+                            <RefreshCw className={`w-4 h-4 mr-2 ${kbLoading ? 'animate-spin' : ''}`} />
+                            Refresh
+                          </Button>
+                          <label className="cursor-pointer">
+                            <input
+                              type="file"
+                              accept=".pdf"
+                              multiple
+                              className="hidden"
+                              onChange={handleKbUpload}
+                              disabled={kbUploading}
+                            />
+                            <Button
+                              asChild={false}
+                              size="sm"
+                              disabled={kbUploading}
+                              onClick={(e) => {
+                                const label = (e.currentTarget as HTMLButtonElement).closest('label');
+                                label?.querySelector('input')?.click();
+                              }}
+                            >
+                              {kbUploading ? (
+                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                              ) : (
+                                <Upload className="w-4 h-4 mr-2" />
+                              )}
+                              {kbUploading ? 'Uploading...' : 'Upload PDF'}
+                            </Button>
+                          </label>
+                        </div>
+                      </div>
+
+                      {kbLoading ? (
+                        <div className="flex items-center justify-center py-8">
+                          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                        </div>
+                      ) : kbDocuments.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-10 text-center border border-dashed border-border rounded-lg">
+                          <Database className="w-10 h-10 text-muted-foreground mb-3" />
+                          <p className="text-muted-foreground font-medium">No documents in knowledge base</p>
+                          <p className="text-sm text-muted-foreground mt-1">
+                            Upload PDFs — manufacturer data sheets, specs, SWRI guides, ASTM standards
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {kbDocuments.map((doc) => (
+                            <div key={doc.id} className={adminListRow}>
+                              <div className="flex items-center gap-3 min-w-0">
+                                <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
+                                <div className="min-w-0">
+                                  <p className="font-medium truncate">{doc.originalName}</p>
+                                  <p className={adminHelpText}>
+                                    {doc.size ? `${(doc.size / 1024 / 1024).toFixed(1)} MB` : ''}
+                                    {doc.uploadedAt ? ` • Uploaded ${new Date(doc.uploadedAt).toLocaleDateString()}` : ''}
+                                  </p>
+                                </div>
+                              </div>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleKbDelete(doc.id, doc.originalName)}
+                                disabled={kbDeletingId === doc.id}
+                                className="text-red-600 hover:bg-red-500/10 dark:text-red-400 shrink-0"
+                              >
+                                {kbDeletingId === doc.id ? (
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <Trash2 className="w-4 h-4" />
+                                )}
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="rounded-lg border border-blue-500/25 bg-blue-500/10 p-4">
+                      <h4 className="font-medium text-blue-700 dark:text-blue-200 mb-2">How the Knowledge Base works:</h4>
+                      <ul className="text-sm text-blue-700 dark:text-blue-100/90 space-y-1">
+                        <li>• Documents are OCR'd automatically after upload</li>
+                        <li>• When a user chats in a KB-enabled mode (e.g., Div 7 Waterproofing Estimator), the AI reads this knowledge base as background context alongside the project plans</li>
+                        <li>• Up to 25,000 characters of KB content is injected per session — prioritize concise, high-value reference material</li>
+                        <li>• Good candidates: manufacturer application guides, ASTM/SWRI standards, CSI spec sections, product data sheets</li>
+                        <li>• Users never see the knowledge base documents — the AI references them automatically</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {activeTab === 'ai-prompt' && (
                 <div className="p-6">
