@@ -259,6 +259,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const prevIsSelectionModeRef = useRef<boolean>(false);
   /** Tracks last condition id applied by the "condition selected" effect so we only reset draw mode when the sidebar selection changes, not when Space toggles canvas match. */
   const prevSelectedConditionIdForModeRef = useRef<string | null>(null);
+  /** True when any markups are selected — read inside useLayoutEffect to avoid adding selectedMarkupIds to deps (causes infinite loop). */
+  const hasMarkupsSelectedRef = useRef(false);
   // CRITICAL FIX: Ref to always hold current isSelectionMode value for click handlers
   // This ensures the click handler always uses the latest state, even if React hasn't re-rendered
   const isSelectionModeRef = useRef<boolean>(true);
@@ -3110,6 +3112,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   }, [pdfDocument, viewState, currentPage, isComponentMounted, isMeasuring, isCalibrating, currentMeasurement, isDeselecting, isInitialRenderComplete, isAnnotating, showTextInput]);
 
 
+  // Sync ref every render so the layout effect below can read it without adding selectedMarkupIds to deps.
+  hasMarkupsSelectedRef.current = selectedMarkupIds.length > 0;
+
   // Set measurement type when condition is selected; sidebar selection enters draw mode (Space still toggles off / re-select).
   // useLayoutEffect so measuring/selection flags update before paint (avoids a click on empty canvas seeing stale isMeasuring).
   useLayoutEffect(() => {
@@ -3149,7 +3154,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           idChanged ||
           !isMeasuring ||
           (isSelectionMode && isMeasuring);
-        if (shouldApplySidebarConditionMode) {
+        // Skip entering draw mode only when the user is building a cross-condition multi-select
+        // via Cmd+click on the SAME sidebar condition (!idChanged). An explicit sidebar condition
+        // change (idChanged = true) still clears the selection and enters draw mode.
+        const hasMixedSelection = hasMarkupsSelectedRef.current && !idChanged;
+        if (shouldApplySidebarConditionMode && !hasMixedSelection) {
           // Clear stale crosshair position so a stale cursor pos isn't painted
           // before CSS transforms settle — prevents the "crosshair offset" bug.
           setMousePosition(null);
