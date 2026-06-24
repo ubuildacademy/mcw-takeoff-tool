@@ -2,7 +2,7 @@
  * Hook that provides PDFViewer mouse/keyboard event handlers.
  * Accepts context from PDFViewer so handlers don't close over all state inline.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MutableRefObject, RefObject } from 'react';
 import axios from 'axios';
 import type { PDFPageProxy, PageViewport } from 'pdfjs-dist';
@@ -416,6 +416,14 @@ export function usePDFViewerInteractions(
     measurementMoveCommitInProgressRef,
     onMeasurementMoveCommitEnded,
   } = options;
+
+  // Ref mirror of currentCutout so handleDoubleClick always sees the latest points.
+  // React state in a dblclick closure can be one click behind (same issue already fixed
+  // for measurements via currentMeasurementRef / activePointsRef).
+  const currentCutoutRef = useRef<{ x: number; y: number }[]>([]);
+  useEffect(() => {
+    currentCutoutRef.current = currentCutout;
+  }, [currentCutout]);
 
   const queueEphemeralPaint = useCallback(() => {
     scheduleEphemeralPaintRef.current?.();
@@ -2244,8 +2252,15 @@ export function usePDFViewerInteractions(
       const cm = currentMeasurementRef.current;
       const icd = isContinuousDrawingRef.current;
 
-      if (cutoutMode && cutoutTargetConditionId && currentCutout.length >= 3) {
-        completeCutoutRef.current?.(currentCutout);
+      if (cutoutMode && cutoutTargetConditionId) {
+        // Use ref so we always see the latest points — React state in the dblclick
+        // closure can be stale (the two preceding click events may not have committed).
+        const latestCutout = currentCutoutRef.current;
+        if (latestCutout.length >= 3) {
+          completeCutoutRef.current?.(latestCutout);
+        }
+        // Always return when in cutout mode so we never fall through to the
+        // isMeasuring branch and accidentally complete a regular measurement.
         return;
       }
       if (isMeasuring) {
@@ -2265,12 +2280,11 @@ export function usePDFViewerInteractions(
         }
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- Completion callbacks via refs; omit
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Completion callbacks via refs; currentCutout read via currentCutoutRef
     [
       measurementType,
       cutoutMode,
       cutoutTargetConditionId,
-      currentCutout,
       isMeasuring,
     ]
   );

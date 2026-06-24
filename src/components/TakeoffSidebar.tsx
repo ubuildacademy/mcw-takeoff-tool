@@ -778,7 +778,13 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
           projectId={projectId}
           onClose={handleCloseDialog}
           onConditionCreated={(_condition) => {
-            refreshProjectConditions(projectId); // Force refresh conditions from API
+            // For new conditions only: refresh from API to get server-assigned fields.
+            // Edits go through updateCondition which already syncs the store, so
+            // refreshing here would cause a loadingConditions flash that unmounts
+            // the sidebar condition list and makes markups appear to vanish.
+            if (!editingCondition) {
+              refreshProjectConditions(projectId);
+            }
             handleCloseDialog();
           }}
           onConditionSelect={onConditionSelect} // Pass condition select handler for auto-selection

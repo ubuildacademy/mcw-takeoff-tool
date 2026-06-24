@@ -396,7 +396,10 @@ export function renderSVGMeasurement(
           let pathData = `M ${pointString.split(' ')[0]} L ${pointString.split(' ').slice(1).join(' L ')} Z`;
           measurement.cutouts.forEach((cutout) => {
             if (cutout?.points?.length >= 3) {
-              const cutoutPointString = cutout.points.map((p) => `${p.x * vw},${p.y * vh}`).join(' ');
+              const cutoutPointString = cutout.points.map((p) => {
+                const pt = baseNormToViewportPixels(p.x, p.y, { width: vw, height: vh }, rotation);
+                return `${pt.x},${pt.y}`;
+              }).join(' ');
               pathData += ` M ${cutoutPointString.split(' ')[0]} L ${cutoutPointString.split(' ').slice(1).join(' L ')} Z`;
             }
           });
@@ -459,7 +462,10 @@ export function renderSVGMeasurement(
           let pathData = `M ${pointString.split(' ')[0]} L ${pointString.split(' ').slice(1).join(' L ')} Z`;
           measurement.cutouts.forEach((cutout) => {
             if (cutout?.points?.length >= 3) {
-              const cutoutPointString = cutout.points.map((p) => `${p.x * vw},${p.y * vh}`).join(' ');
+              const cutoutPointString = cutout.points.map((p) => {
+                const pt = baseNormToViewportPixels(p.x, p.y, { width: vw, height: vh }, rotation);
+                return `${pt.x},${pt.y}`;
+              }).join(' ');
               pathData += ` M ${cutoutPointString.split(' ')[0]} L ${cutoutPointString.split(' ').slice(1).join(' L ')} Z`;
             }
           });
