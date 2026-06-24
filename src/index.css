@@ -598,3 +598,17 @@
     box-shadow: none;
   }
 }
+
+/* Cut-out mode: scissors button single-pulse on activation */
+@keyframes scissors-pulse {
+  0%   { transform: scale(1); }
+  30%  { transform: scale(1.35) rotate(-15deg); }
+  60%  { transform: scale(0.92) rotate(5deg); }
+  100% { transform: scale(1) rotate(0deg); }
+}
+
+.scissors-pulse-once {
+  animation: scissors-pulse 0.45s cubic-bezier(0.36, 0.07, 0.19, 0.97) forwards;
+}
+
+/* Cut-out mode cursor pill — floating near the mouse, positioned via JS */

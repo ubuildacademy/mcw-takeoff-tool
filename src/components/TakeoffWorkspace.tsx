@@ -463,6 +463,7 @@ export function TakeoffWorkspace() {
     visualSearch.visualSearchMode,
   ]);
 
+
   const rotatePage = (direction: 'clockwise' | 'counterclockwise') => {
     const rotationStep = direction === 'clockwise' ? 90 : -90;
     const newRotation = (rotation + rotationStep) % 360;
@@ -508,9 +509,14 @@ export function TakeoffWorkspace() {
   const handleCutoutMode = useCallback((conditionId: string | null) => {
     setCutoutMode(!!conditionId);
     setCutoutTargetConditionId(conditionId);
+    if (conditionId) {
+      // Activate drawing mode so SVG pointer-events are off, cursor is crosshair,
+      // and click handlers enter the cutout branch immediately (isMeasuring=true required).
+      enterConditionDrawModeFromPlanRef.current?.();
+    }
   }, []);
 
-  /** Cut-out mode is invalid without the matching condition selected (e.g. deselect, auto-count completion). */
+  /** Exit cut-out mode when a different condition is selected. */
   useEffect(() => {
     if (!cutoutMode || cutoutTargetConditionId == null) return;
     if (selectedConditionId !== cutoutTargetConditionId) {
@@ -1327,6 +1333,7 @@ export function TakeoffWorkspace() {
           onClose={() => setHyperlinkContextMenu(null)}
         />
       )}
+
 
     </div>
   );

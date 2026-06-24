@@ -927,6 +927,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     return typeof t === 'number' && t >= 1 && t <= 8 ? t : 2;
   }, [conditions]);
 
+  const getConditionShape = useCallback((conditionId: string, fallback?: string): string => {
+    const condition = conditions.find(c => c.id === conditionId);
+    return condition?.markerShape || fallback || 'circle';
+  }, [conditions]);
+
   /** Crosshair, dashed previews, running length — reads `mousePositionRef` / `runningLengthRef` (no React state on mousemove). */
   const paintEphemeralMarkupLayer = useCallback(() => {
     if (!svgOverlayRef.current || !currentViewport) return;
@@ -1480,6 +1485,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         selectedMarkupIds,
         getConditionColor,
         getConditionLineThickness,
+        getConditionShape,
         selectionMode: isSelectionMode,
         showLabel: showMeasurementLabels,
         pixelWidth: pixelW,
@@ -1646,7 +1652,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     scheduleEphemeralPaint();
 
   // eslint-disable-next-line react-hooks/exhaustive-deps -- Large render callback; refs and some deps intentionally omitted to avoid cascade
-  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, isSelectionMode, currentPage, isContinuousDrawing, activePoints, localAnnotations, annotationTool, currentAnnotation, annotationMoveId, annotationMoveIds, annotationColor, measurementMoveId, measurementMoveIds, cutoutMode, currentCutout, isBoxSelectionMode, isDrawingBoxSelection, hyperlinkMode, effectiveProjectId, file.id, getPageTakeoffMeasurements, getSelectedCondition, measurementsLoading, getConditionColor, getConditionLineThickness, crosshairFullScreen, crosshairColor, crosshairStrokeWidth, showMeasurementLabels, showRunningLength, hyperlinkCountForFile, hiddenMarkupConditionIds, ocrHighlightBoxes, scheduleEphemeralPaint]);
+  }, [localTakeoffMeasurements, currentMeasurement, measurementType, isMeasuring, isCalibrating, calibrationPoints, isSelectionMode, currentPage, isContinuousDrawing, activePoints, localAnnotations, annotationTool, currentAnnotation, annotationMoveId, annotationMoveIds, annotationColor, measurementMoveId, measurementMoveIds, cutoutMode, currentCutout, isBoxSelectionMode, isDrawingBoxSelection, hyperlinkMode, effectiveProjectId, file.id, getPageTakeoffMeasurements, getSelectedCondition, measurementsLoading, getConditionColor, getConditionLineThickness, getConditionShape, crosshairFullScreen, crosshairColor, crosshairStrokeWidth, showMeasurementLabels, showRunningLength, hyperlinkCountForFile, hiddenMarkupConditionIds, ocrHighlightBoxes, scheduleEphemeralPaint]);
 
   // OPTIMIZED: Update only visual styling of markups when selection changes (no full re-render)
   const updateMarkupSelection = useCallback((newSelectedIds: string[], previousSelectedIds: string[]) => {
@@ -1754,7 +1760,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
     idsToDeselect.forEach(deselectId);
     idsToSelect.forEach(selectId);
-  }, [localTakeoffMeasurements, localAnnotations, getConditionColor, getConditionLineThickness]);
+  }, [localTakeoffMeasurements, localAnnotations, getConditionColor, getConditionLineThickness, getConditionShape]);
 
   // Re-render annotations when measurements or interaction state changes
   // NOTE: selectedMarkupIds is used in the effect below to update only visual styling on selection change
@@ -2421,6 +2427,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         pdfCoordinates: points,
         conditionColor: selectedCondition.color,
         conditionName: selectedCondition.name,
+        ...(measurementType === 'count' && selectedCondition.markerShape != null && {
+          conditionMarkerShape: selectedCondition.markerShape,
+        }),
         ...(measurementType === 'linear' && selectedCondition.lineThickness != null && {
           conditionLineThickness: selectedCondition.lineThickness,
         }),

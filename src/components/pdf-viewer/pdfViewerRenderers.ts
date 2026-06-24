@@ -20,6 +20,7 @@ export interface RenderSVGMeasurementOptions {
   selectedMarkupIds: string[];
   getConditionColor: (id: string, fallback?: string) => string;
   getConditionLineThickness?: (id: string) => number;
+  getConditionShape?: (id: string, fallback?: string) => string;
   selectionMode: boolean;
   /** When false, value labels (LF, SF, CY, etc.) on completed measurements are hidden. Defaults to true. */
   showLabel?: boolean;
@@ -304,6 +305,84 @@ export function renderSVGCrosshair(
   svg.appendChild(makeLine(vx, vy1, vx, vy2));    // vertical
 }
 
+/** Creates a single count marker SVG element for the given shape. */
+function createCountMarkerElement(
+  shape: string,
+  cx: number,
+  cy: number,
+  color: string,
+  r: number,
+  selectionMode: boolean
+): SVGElement {
+  const ns = 'http://www.w3.org/2000/svg';
+  let el: SVGElement;
+
+  switch (shape) {
+    case 'square': {
+      const rect = document.createElementNS(ns, 'rect');
+      rect.setAttribute('x', String(cx - r));
+      rect.setAttribute('y', String(cy - r));
+      rect.setAttribute('width', String(r * 2));
+      rect.setAttribute('height', String(r * 2));
+      rect.setAttribute('fill', color);
+      el = rect;
+      break;
+    }
+    case 'triangle': {
+      const poly = document.createElementNS(ns, 'polygon');
+      poly.setAttribute(
+        'points',
+        `${cx},${cy - r * 1.25} ${cx + r * 1.1},${cy + r * 0.6} ${cx - r * 1.1},${cy + r * 0.6}`
+      );
+      poly.setAttribute('fill', color);
+      el = poly;
+      break;
+    }
+    case 'star': {
+      const outerR = r * 1.15;
+      const innerR = r * 0.46;
+      const pts: string[] = [];
+      for (let i = 0; i < 10; i++) {
+        const angle = ((i * 36 - 90) * Math.PI) / 180;
+        const radius = i % 2 === 0 ? outerR : innerR;
+        pts.push(`${cx + radius * Math.cos(angle)},${cy + radius * Math.sin(angle)}`);
+      }
+      const poly = document.createElementNS(ns, 'polygon');
+      poly.setAttribute('points', pts.join(' '));
+      poly.setAttribute('fill', color);
+      el = poly;
+      break;
+    }
+    case 'checkmark': {
+      const poly = document.createElementNS(ns, 'polyline');
+      poly.setAttribute(
+        'points',
+        `${cx - r},${cy} ${cx - r * 0.25},${cy + r * 0.85} ${cx + r},${cy - r * 0.9}`
+      );
+      poly.setAttribute('fill', 'none');
+      poly.setAttribute('stroke', color);
+      poly.setAttribute('stroke-width', '2.5');
+      poly.setAttribute('stroke-linecap', 'round');
+      poly.setAttribute('stroke-linejoin', 'round');
+      el = poly;
+      break;
+    }
+    default: {
+      const circle = document.createElementNS(ns, 'circle');
+      circle.setAttribute('cx', String(cx));
+      circle.setAttribute('cy', String(cy));
+      circle.setAttribute('r', String(r));
+      circle.setAttribute('fill', color);
+      el = circle;
+      break;
+    }
+  }
+
+  el.style.pointerEvents = selectionMode ? 'auto' : 'none';
+  el.style.cursor = selectionMode ? 'pointer' : 'default';
+  return el;
+}
+
 /** Renders a single takeoff measurement as SVG (polyline/polygon/circle + label). */
 export function renderSVGMeasurement(
   svg: SVGSVGElement,
@@ -323,6 +402,7 @@ export function renderSVGMeasurement(
     selectedMarkupIds,
     getConditionColor,
     getConditionLineThickness,
+    getConditionShape,
     selectionMode,
     showLabel = true,
     pixelWidth,
@@ -522,20 +602,10 @@ export function renderSVGMeasurement(
       break;
     case 'count': {
       const point = { x: transformedPoints[0].x, y: transformedPoints[0].y };
-      const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      circle.setAttribute('cx', point.x.toString());
-      circle.setAttribute('cy', point.y.toString());
-      circle.setAttribute('r', '8');
-      circle.setAttribute('fill', liveColor);
-      if (isSelected) {
-        circle.setAttribute('stroke', '#ff0000');
-        circle.setAttribute('stroke-width', '3');
-      } else {
-        circle.setAttribute('stroke', 'none');
-      }
-      circle.setAttribute('data-measurement-id', measurement.id);
-      circle.style.pointerEvents = selectionMode ? 'auto' : 'none';
-      circle.style.cursor = selectionMode ? 'pointer' : 'default';
+      const shape = getConditionShape
+        ? getConditionShape(measurement.conditionId, measurement.conditionMarkerShape)
+        : (measurement.conditionMarkerShape || 'circle');
+
       const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
       hitArea.setAttribute('cx', point.x.toString());
       hitArea.setAttribute('cy', point.y.toString());
@@ -545,8 +615,24 @@ export function renderSVGMeasurement(
       hitArea.setAttribute('data-measurement-id', measurement.id);
       hitArea.style.pointerEvents = selectionMode ? 'auto' : 'none';
       hitArea.style.cursor = selectionMode ? 'pointer' : 'default';
+
+      const marker = createCountMarkerElement(shape, point.x, point.y, liveColor, 8, selectionMode);
+      marker.setAttribute('data-measurement-id', measurement.id);
+
       svg.appendChild(hitArea);
-      svg.appendChild(circle);
+      svg.appendChild(marker);
+
+      if (isSelected) {
+        const ring = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        ring.setAttribute('cx', point.x.toString());
+        ring.setAttribute('cy', point.y.toString());
+        ring.setAttribute('r', '12');
+        ring.setAttribute('fill', 'none');
+        ring.setAttribute('stroke', '#ff0000');
+        ring.setAttribute('stroke-width', '3');
+        ring.style.pointerEvents = 'none';
+        svg.appendChild(ring);
+      }
       break;
     }
   }

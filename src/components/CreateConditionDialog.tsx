@@ -8,6 +8,7 @@ import { X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useShallow } from 'zustand/react/shallow';
 import { useConditionStore } from '../store/slices/conditionSlice';
+import { useConditionFolderStore } from '../store/slices/conditionFolderSlice';
 import type { TakeoffCondition } from '../types';
 import { generateDistinctColor, parseDepthInput, formatDepthOutput } from '../utils/commonUtils';
 
@@ -44,6 +45,10 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
   const addCondition = useConditionStore((s) => s.addCondition);
   const updateCondition = useConditionStore((s) => s.updateCondition);
   const conditions = useConditionStore(useShallow((s) => s.conditions));
+  const folders = useConditionFolderStore((s) => s.getFolders(projectId));
+  const ensureFoldersLoaded = useConditionFolderStore((s) => s.ensureFoldersLoaded);
+
+  useEffect(() => { ensureFoldersLoaded(projectId); }, [projectId, ensureFoldersLoaded]);
 
   const [formData, setFormData] = useState({
     name: editingCondition?.name || '',
@@ -59,11 +64,13 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
     includeHeight: editingCondition?.includeHeight || false,
     height: editingCondition?.height ? formatDepthOutput(editingCondition.height) : '',
     lineThickness: editingCondition?.lineThickness?.toString() || '2',
+    markerShape: (editingCondition?.markerShape || 'circle') as 'circle' | 'triangle' | 'square' | 'star' | 'checkmark',
     // Auto-count specific fields
     searchImage: editingCondition?.searchImage || '',
     searchImageId: editingCondition?.searchImageId || '',
     searchThreshold: editingCondition?.searchThreshold?.toString() || '0.7',
-    searchScope: editingCondition?.searchScope || 'current-page' as 'current-page' | 'entire-document' | 'entire-project'
+    searchScope: editingCondition?.searchScope || 'current-page' as 'current-page' | 'entire-document' | 'entire-project',
+    folderId: editingCondition?.folderId ?? null,
   });
   const [loading, setLoading] = useState(false);
   const [depthError, setDepthError] = useState<string>('');
@@ -98,10 +105,12 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
       includeHeight: editingCondition.includeHeight || false,
       height: editingCondition.height ? formatDepthOutput(editingCondition.height) : '',
       lineThickness: editingCondition.lineThickness?.toString() || '2',
+      markerShape: (editingCondition.markerShape || 'circle') as 'circle' | 'triangle' | 'square' | 'star' | 'checkmark',
       searchImage: editingCondition.searchImage || '',
       searchImageId: editingCondition.searchImageId || '',
       searchThreshold: editingCondition.searchThreshold?.toString() || '0.7',
-      searchScope: (editingCondition.searchScope || 'current-page') as 'current-page' | 'entire-document' | 'entire-project'
+      searchScope: (editingCondition.searchScope || 'current-page') as 'current-page' | 'entire-document' | 'entire-project',
+      folderId: editingCondition.folderId ?? null,
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps -- Sync only when switching to edit a condition
   }, [editingCondition?.id]);
@@ -192,13 +201,15 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
         lineThickness: formData.type === 'linear' && formData.lineThickness
           ? Math.max(1, Math.min(8, parseInt(formData.lineThickness, 10) || 2))
           : undefined,
+        ...(isCountLikeCondition(formData.type) && { markerShape: formData.markerShape }),
         // Auto-count specific fields
         ...(formData.type === 'auto-count' && {
           searchImage: formData.searchImage,
           searchImageId: formData.searchImageId,
           searchThreshold: formData.searchThreshold ? parseFloat(formData.searchThreshold) : 0.7,
           searchScope: formData.searchScope || 'current-page'
-        })
+        }),
+        folderId: formData.folderId ?? null,
       };
       
       let result: TakeoffCondition;
@@ -233,7 +244,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
     }
   };
 
-  const handleInputChange = (field: string, value: string | number | boolean) => {
+  const handleInputChange = (field: string, value: string | number | boolean | null) => {
     setFormData(prev => {
       const newData = { ...prev, [field]: value };
       
@@ -461,7 +472,48 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
           )}
 
           <div className="grid grid-cols-2 gap-4">
-            {!isCountLikeCondition(formData.type) && (
+            {isCountLikeCondition(formData.type) ? (
+              <div>
+                <Label>Marker Shape</Label>
+                <div className="flex gap-1 mt-2">
+                  {(['circle', 'triangle', 'square', 'star', 'checkmark'] as const).map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => handleInputChange('markerShape', s)}
+                      title={s.charAt(0).toUpperCase() + s.slice(1)}
+                      className={`p-1 rounded border-2 transition-colors ${
+                        formData.markerShape === s
+                          ? 'border-primary bg-primary/10'
+                          : 'border-transparent hover:border-muted-foreground/30 bg-muted/50'
+                      }`}
+                    >
+                      <svg width="22" height="22" viewBox="-12 -12 24 24" xmlns="http://www.w3.org/2000/svg">
+                        {s === 'circle' && <circle cx="0" cy="0" r="9" fill={formData.color} />}
+                        {s === 'square' && <rect x="-9" y="-9" width="18" height="18" fill={formData.color} />}
+                        {s === 'triangle' && <polygon points="0,-10 10,5.5 -10,5.5" fill={formData.color} />}
+                        {s === 'star' && (
+                          <polygon
+                            points="0,-9 2.35,-3.24 8.56,-2.78 3.80,1.24 5.29,7.28 0,4 -5.29,7.28 -3.80,1.24 -8.56,-2.78 -2.35,-3.24"
+                            fill={formData.color}
+                          />
+                        )}
+                        {s === 'checkmark' && (
+                          <polyline
+                            points="-8,0 -2.5,7 9,-7"
+                            fill="none"
+                            stroke={formData.color}
+                            strokeWidth="2.5"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        )}
+                      </svg>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
               <div>
                 <Label htmlFor="wasteFactor">Waste Factor (%)</Label>
                 <Input
@@ -477,7 +529,7 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
               </div>
             )}
 
-            <div className={isCountLikeCondition(formData.type) ? 'col-span-2' : ''}>
+            <div>
               <Label htmlFor="color">Color</Label>
               <Input
                 id="color"
@@ -488,6 +540,26 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
               />
             </div>
           </div>
+
+          {folders.length > 0 && (
+            <div>
+              <Label htmlFor="folderId">Folder</Label>
+              <Select
+                value={formData.folderId ?? ''}
+                onValueChange={(v) => handleInputChange('folderId', v === '__none__' ? null : v)}
+              >
+                <SelectTrigger id="folderId">
+                  <SelectValue placeholder="None (uncategorized)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">None (uncategorized)</SelectItem>
+                  {folders.map((f) => (
+                    <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           <div>
             <Label htmlFor="description">Description</Label>

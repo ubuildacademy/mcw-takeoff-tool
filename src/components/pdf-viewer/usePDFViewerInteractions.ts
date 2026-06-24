@@ -425,6 +425,14 @@ export function usePDFViewerInteractions(
     currentCutoutRef.current = currentCutout;
   }, [currentCutout]);
 
+  // Ref mirrors for cutoutMode and cutoutTargetConditionId — updated synchronously on
+  // every render so event handlers never read a stale closure value. The same prop-through-
+  // render-boundary problem that makes currentCutout stale in dblclick also affects these.
+  const cutoutModeRef = useRef(cutoutMode);
+  cutoutModeRef.current = cutoutMode;
+  const cutoutTargetConditionIdRef = useRef(cutoutTargetConditionId);
+  cutoutTargetConditionIdRef.current = cutoutTargetConditionId;
+
   const queueEphemeralPaint = useCallback(() => {
     scheduleEphemeralPaintRef.current?.();
   }, [scheduleEphemeralPaintRef]);
@@ -610,6 +618,7 @@ export function usePDFViewerInteractions(
             unit: m.unit,
             conditionColor: m.conditionColor,
             conditionName: m.conditionName,
+            ...(m.conditionMarkerShape && { conditionMarkerShape: m.conditionMarkerShape }),
             ...(m.perimeterValue != null && { perimeterValue: m.perimeterValue }),
             ...(m.areaValue != null && { areaValue: m.areaValue }),
             ...(m.cutouts && m.cutouts.length > 0 && {
@@ -993,7 +1002,7 @@ export function usePDFViewerInteractions(
 
       if (
         isMeasuring &&
-        !cutoutMode &&
+        !cutoutModeRef.current &&
         (measurementType === 'area' || measurementType === 'volume') &&
         currentSelectedConditionId &&
         !annotationTool &&
@@ -1010,8 +1019,8 @@ export function usePDFViewerInteractions(
       }
 
       if (
-        cutoutMode &&
-        cutoutTargetConditionId &&
+        cutoutModeRef.current &&
+        cutoutTargetConditionIdRef.current &&
         !annotationTool &&
         !(visualSearchMode || !!titleblockSelectionMode)
       ) {
@@ -1070,8 +1079,7 @@ export function usePDFViewerInteractions(
       setAnnotationMoveDelta,
       setMeasurementDragStart,
       setMeasurementDragBox,
-      cutoutMode,
-      cutoutTargetConditionId,
+      // cutoutMode/cutoutTargetConditionId intentionally omitted — read from refs above
       setCutoutDragStart,
       setCutoutDragBox,
       setAnnotationDragStart,
@@ -1281,7 +1289,7 @@ export function usePDFViewerInteractions(
 
       if (
         measurementDragStart &&
-        !cutoutMode &&
+        !cutoutModeRef.current &&
         (measurementType === 'area' || measurementType === 'volume')
       ) {
         const { useLastRenderedViewport: dragUseLR, effectiveRotation: dragEffRot } =
@@ -1330,7 +1338,7 @@ export function usePDFViewerInteractions(
         return;
       }
 
-      if (cutoutDragStart && cutoutTargetConditionId) {
+      if (cutoutDragStart && cutoutTargetConditionIdRef.current) {
         const { useLastRenderedViewport: cutUseLR, effectiveRotation: cutEffRot } =
           getCanvasCoordinateSpace(
             viewState.scale || 1,
@@ -1607,8 +1615,7 @@ export function usePDFViewerInteractions(
       measurementMoveOriginalPoints,
       measurementDragStart,
       cutoutDragStart,
-      cutoutTargetConditionId,
-      cutoutMode,
+      // cutoutTargetConditionId/cutoutMode read from refs above — omit from deps
       measurementType,
       currentViewport,
       viewState,
@@ -1753,7 +1760,7 @@ export function usePDFViewerInteractions(
       }
       if (
         measurementDragStart &&
-        !cutoutMode &&
+        !cutoutModeRef.current &&
         (measurementType === 'area' || measurementType === 'volume')
       ) {
         const coords = getCssCoordsFromEvent(event);
@@ -1882,7 +1889,7 @@ export function usePDFViewerInteractions(
       }
       let pdfCoords = cssToBaseNormalized(cssX, cssY, dp, baseViewport, effectiveRotation);
       if (isOrthoSnapping) {
-        const referencePoints = cutoutMode ? currentCutout : isContinuousDrawing ? activePoints : currentMeasurement;
+        const referencePoints = cutoutModeRef.current ? currentCutout : isContinuousDrawing ? activePoints : currentMeasurement;
         pdfCoords = applyOrthoSnapping(pdfCoords, referencePoints);
       }
       setMousePosition(pdfCoords);
@@ -1920,7 +1927,7 @@ export function usePDFViewerInteractions(
       }
       queueEphemeralPaint();
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- pdfCanvasRef omit; added isOrthoSnapping, cutoutMode, currentCutout
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- pdfCanvasRef omit; cutoutMode read via ref
     [
       annotationTool,
       annotationDragStart,
@@ -1966,7 +1973,7 @@ export function usePDFViewerInteractions(
       pageRubberBandRefs,
       currentMeasurement,
       setIsDeselecting,
-      cutoutMode,
+      // cutoutMode read from ref — omit from deps
       currentCutout,
       hyperlinkMode,
       hyperlinkDrawStart,
@@ -2090,7 +2097,7 @@ export function usePDFViewerInteractions(
         });
         return;
       }
-      if (cutoutMode && cutoutTargetConditionId) {
+      if (cutoutModeRef.current && cutoutTargetConditionIdRef.current) {
         if (cutoutDragJustCompletedRef.current) {
           cutoutDragJustCompletedRef.current = false;
           return;
@@ -2153,11 +2160,16 @@ export function usePDFViewerInteractions(
         clearCanvasConditionSelection();
         return;
       }
+      // Swallow the click that immediately follows a completed drag-rectangle measurement.
+      if (measurementDragJustCompletedRef.current) {
+        measurementDragJustCompletedRef.current = false;
+        return;
+      }
       let pdfCoords = cssToBaseNormalized(cssX, cssY, dp, baseViewport, effectiveRotation);
       if (isOrthoSnapping && (isMeasuring || enteredDrawFromCanvasMatch) && mousePositionRef.current) {
         pdfCoords = mousePositionRef.current;
       } else if (isOrthoSnapping) {
-        const referencePoints = cutoutMode ? currentCutout : isContinuousDrawing ? activePoints : currentMeasurement;
+        const referencePoints = cutoutModeRef.current ? currentCutout : isContinuousDrawing ? activePoints : currentMeasurement;
         pdfCoords = applyOrthoSnapping(pdfCoords, referencePoints);
       }
       if (effectiveMeasurementType === 'linear') {
@@ -2206,8 +2218,7 @@ export function usePDFViewerInteractions(
       isOrthoSnapping,
       isMeasuring,
       mousePositionRef,
-      cutoutMode,
-      cutoutTargetConditionId,
+      // cutoutMode/cutoutTargetConditionId read from refs — omit from deps
       currentCutout,
       isDeselecting,
       visualSearchMode,
@@ -2252,7 +2263,7 @@ export function usePDFViewerInteractions(
       const cm = currentMeasurementRef.current;
       const icd = isContinuousDrawingRef.current;
 
-      if (cutoutMode && cutoutTargetConditionId) {
+      if (cutoutModeRef.current && cutoutTargetConditionIdRef.current) {
         // Use ref so we always see the latest points — React state in the dblclick
         // closure can be stale (the two preceding click events may not have committed).
         const latestCutout = currentCutoutRef.current;
@@ -2280,11 +2291,10 @@ export function usePDFViewerInteractions(
         }
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- Completion callbacks via refs; currentCutout read via currentCutoutRef
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Completion callbacks via refs; cutout state read via refs
     [
       measurementType,
-      cutoutMode,
-      cutoutTargetConditionId,
+      // cutoutMode/cutoutTargetConditionId read from refs — omit from deps
       isMeasuring,
     ]
   );
@@ -2343,7 +2353,7 @@ export function usePDFViewerInteractions(
         isCalibrating ||
         annotationTool ||
         isMeasuring ||
-        cutoutMode ||
+        cutoutModeRef.current ||
         (visualSearchMode && isSelectingSymbol) ||
         (!!titleblockSelectionMode && isSelectingSymbol)
       ) {
@@ -2441,7 +2451,7 @@ export function usePDFViewerInteractions(
       isCalibrating,
       annotationTool,
       isMeasuring,
-      cutoutMode,
+      // cutoutMode read from ref — omit from deps
       visualSearchMode,
       isSelectingSymbol,
       titleblockSelectionMode,
@@ -2459,13 +2469,13 @@ export function usePDFViewerInteractions(
 
   const handleSvgDoubleClick = useCallback(
     (e: React.MouseEvent<SVGSVGElement>) => {
-      if (annotationTool || isMeasuring || cutoutMode) {
+      if (annotationTool || isMeasuring || cutoutModeRef.current) {
         e.preventDefault();
         e.stopPropagation();
         handleDoubleClick(e as React.MouseEvent<HTMLCanvasElement | SVGSVGElement>);
       }
     },
-    [annotationTool, isMeasuring, cutoutMode, handleDoubleClick]
+    [annotationTool, isMeasuring, handleDoubleClick]
   );
 
   const handlePinchZoom = useCallback(

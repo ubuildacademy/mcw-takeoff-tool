@@ -22,6 +22,14 @@ export interface Project {
   userId?: string; // Owner user ID (for admin grouping)
 }
 
+export interface ConditionFolder {
+  id: string;
+  projectId: string;
+  name: string;
+  sortOrder: number;
+  createdAt: string;
+}
+
 export interface TakeoffCondition {
   id: string;
   projectId: string;
@@ -31,6 +39,7 @@ export interface TakeoffCondition {
   wasteFactor: number;
   color: string;
   description: string;
+  folderId?: string | null;
   includePerimeter?: boolean; // For area and volume measurements, include perimeter calculation
   depth?: number; // For volume measurements, depth in feet
   includeHeight?: boolean; // For linear measurements, include height for area calculation
@@ -45,6 +54,7 @@ export interface TakeoffCondition {
   searchImageId?: string; // Reference to uploaded image file
   searchThreshold?: number; // Confidence threshold for matches (0-1)
   searchScope?: 'current-page' | 'entire-document' | 'entire-project'; // Search scope for auto-count
+  markerShape?: 'circle' | 'triangle' | 'square' | 'star' | 'checkmark'; // For count conditions, shape of the marker
 }
 
 export interface TakeoffMeasurement {
@@ -63,6 +73,8 @@ export interface TakeoffMeasurement {
   conditionName: string;
   /** For linear measurements, stroke width in px. Defaults to 2. */
   conditionLineThickness?: number;
+  /** For count measurements, shape of the marker. Defaults to 'circle'. */
+  conditionMarkerShape?: string;
   description?: string; // Optional description for the measurement
   perimeterValue?: number; // Perimeter in linear feet for area measurements
   areaValue?: number; // Area in square feet for linear measurements with height

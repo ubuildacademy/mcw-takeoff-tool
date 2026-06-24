@@ -51,6 +51,14 @@ export interface StoredSheet {
   updatedAt: string;
 }
 
+export interface StoredConditionFolder {
+  id: string;
+  projectId: string;
+  name: string;
+  sortOrder: number;
+  createdAt: string;
+}
+
 export interface StoredCondition {
   id: string;
   projectId: string;
@@ -60,6 +68,7 @@ export interface StoredCondition {
   wasteFactor: number;
   color: string;
   description?: string;
+  folderId?: string | null;
   laborCost?: number;
   materialCost?: number;
   equipmentCost?: number;
@@ -73,6 +82,7 @@ export interface StoredCondition {
   searchThreshold?: number;
   searchScope?: 'current-page' | 'entire-document' | 'entire-project';
   lineThickness?: number; // For linear measurements, stroke width in px (1-8, default 2)
+  markerShape?: string; // For count conditions, shape of the marker
   createdAt: string;
   aiGenerated?: boolean;
 }
@@ -106,6 +116,14 @@ interface FileRow {
   mimetype: string;
   uploaded_at: string;
 }
+interface ConditionFolderRow {
+  id: string;
+  project_id: string;
+  name: string;
+  sort_order: number;
+  created_at: string;
+}
+
 interface ConditionRow {
   id: string;
   project_id: string;
@@ -115,6 +133,7 @@ interface ConditionRow {
   waste_factor: number;
   color: string;
   description?: string;
+  folder_id?: string | null;
   labor_cost?: number;
   material_cost?: number;
   equipment_cost?: number;
@@ -127,6 +146,7 @@ interface ConditionRow {
   search_threshold?: number;
   search_scope?: string;
   line_thickness?: number;
+  marker_shape?: string;
   created_at?: string;
   ai_generated?: boolean;
 }
@@ -594,6 +614,7 @@ class SupabaseStorage {
       searchImageId: item.search_image_id,
       searchThreshold: item.search_threshold,
       ...(item.line_thickness != null && { lineThickness: item.line_thickness }),
+      ...(item.marker_shape != null && { markerShape: item.marker_shape }),
       createdAt: item.created_at ?? '',
       ...(item.ai_generated !== undefined && { aiGenerated: item.ai_generated })
     }));
@@ -622,6 +643,7 @@ class SupabaseStorage {
       wasteFactor: item.waste_factor,
       color: item.color,
       description: item.description,
+      folderId: item.folder_id ?? null,
       laborCost: item.labor_cost,
       materialCost: item.material_cost,
       equipmentCost: item.equipment_cost,
@@ -634,6 +656,7 @@ class SupabaseStorage {
       searchThreshold: item.search_threshold,
       searchScope: (item.search_scope as StoredCondition['searchScope']) ?? undefined,
       ...(item.line_thickness != null && { lineThickness: item.line_thickness }),
+      ...(item.marker_shape != null && { markerShape: item.marker_shape }),
       createdAt: item.created_at ?? '',
       ...(item.ai_generated !== undefined && { aiGenerated: item.ai_generated }),
     };
@@ -673,6 +696,7 @@ class SupabaseStorage {
       wasteFactor: item.waste_factor,
       color: item.color,
       description: item.description,
+      folderId: item.folder_id ?? null,
       laborCost: item.labor_cost,
       materialCost: item.material_cost,
       equipmentCost: item.equipment_cost,
@@ -685,6 +709,7 @@ class SupabaseStorage {
       searchThreshold: item.search_threshold,
       searchScope: (item.search_scope as StoredCondition['searchScope']) ?? undefined,
       ...(item.line_thickness != null && { lineThickness: item.line_thickness }),
+      ...(item.marker_shape != null && { markerShape: item.marker_shape }),
       createdAt: item.created_at ?? '',
       ...(item.ai_generated !== undefined && { aiGenerated: item.ai_generated })
     }));
@@ -726,6 +751,7 @@ class SupabaseStorage {
       search_image: condition.searchImage,
       search_image_id: condition.searchImageId,
       search_threshold: condition.searchThreshold,
+      folder_id: condition.folderId ?? null,
       created_at: condition.createdAt
     };
     
@@ -750,7 +776,10 @@ class SupabaseStorage {
     if (condition.lineThickness !== undefined) {
       dbCondition.line_thickness = condition.lineThickness;
     }
-    
+    if (condition.markerShape !== undefined) {
+      dbCondition.marker_shape = condition.markerShape;
+    }
+
     let result = await supabase
       .from(TABLES.CONDITIONS)
       .upsert(dbCondition)
@@ -787,6 +816,7 @@ class SupabaseStorage {
       wasteFactor: data.waste_factor,
       color: data.color,
       description: data.description,
+      folderId: data.folder_id ?? null,
       laborCost: data.labor_cost,
       materialCost: data.material_cost,
       equipmentCost: data.equipment_cost,
@@ -799,6 +829,7 @@ class SupabaseStorage {
       searchThreshold: data.search_threshold,
       searchScope: data.search_scope,
       ...(data.line_thickness != null && { lineThickness: data.line_thickness }),
+      ...(data.marker_shape != null && { markerShape: data.marker_shape }),
       createdAt: data.created_at,
       ...(data.ai_generated !== undefined && { aiGenerated: data.ai_generated })
     };
@@ -1730,6 +1761,69 @@ class SupabaseStorage {
       createdAt: item.created_at,
       updatedAt: item.updated_at
     }));
+  }
+
+  // ─── Condition Folders ───────────────────────────────────────────────────
+
+  async getConditionFoldersByProject(projectId: string): Promise<StoredConditionFolder[]> {
+    const { data, error } = await supabase
+      .from(TABLES.CONDITION_FOLDERS)
+      .select('*')
+      .eq('project_id', projectId)
+      .order('sort_order', { ascending: true });
+
+    if (error) {
+      if (hasColumnNotFoundError(error)) {
+        console.warn('⚠️ takeoff_condition_folders table not found. Run migrations.');
+        return [];
+      }
+      throw new DatabaseError('Failed to fetch condition folders', error, { projectId });
+    }
+
+    return (data || []).map((item: ConditionFolderRow): StoredConditionFolder => ({
+      id: item.id,
+      projectId: item.project_id,
+      name: item.name,
+      sortOrder: item.sort_order,
+      createdAt: item.created_at,
+    }));
+  }
+
+  async saveConditionFolder(folder: Omit<StoredConditionFolder, 'createdAt'> & { createdAt?: string }): Promise<StoredConditionFolder> {
+    const row = {
+      id: folder.id,
+      project_id: folder.projectId,
+      name: folder.name,
+      sort_order: folder.sortOrder,
+      ...(folder.createdAt && { created_at: folder.createdAt }),
+    };
+
+    const { data, error } = await supabase
+      .from(TABLES.CONDITION_FOLDERS)
+      .upsert(row)
+      .select()
+      .single();
+
+    if (error) throw new DatabaseError('Failed to save condition folder', error);
+
+    const item = data as ConditionFolderRow;
+    return {
+      id: item.id,
+      projectId: item.project_id,
+      name: item.name,
+      sortOrder: item.sort_order,
+      createdAt: item.created_at,
+    };
+  }
+
+  async deleteConditionFolder(id: string): Promise<void> {
+    // ON DELETE SET NULL on conditions.folder_id handles the cascade automatically
+    const { error } = await supabase
+      .from(TABLES.CONDITION_FOLDERS)
+      .delete()
+      .eq('id', id);
+
+    if (error) throw new DatabaseError('Failed to delete condition folder', error, { id });
   }
 
   // Seed initial data if empty

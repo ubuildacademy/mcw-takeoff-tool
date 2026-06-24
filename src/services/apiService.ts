@@ -409,6 +409,8 @@ export const conditionService = {
         searchImageId: condition.search_image_id || condition.searchImageId,
         searchThreshold: condition.search_threshold || condition.searchThreshold,
         aiGenerated: condition.ai_generated !== undefined ? condition.ai_generated : condition.aiGenerated,
+        folderId: condition.folder_id !== undefined ? condition.folder_id : condition.folderId,
+        markerShape: condition.marker_shape || condition.markerShape,
         createdAt: condition.created_at || condition.createdAt
       })) || [];
       
@@ -449,6 +451,28 @@ export const conditionService = {
   async duplicateCondition(id: string) {
     const response = await apiClient.post(`/conditions/${id}/duplicate`);
     return response.data;
+  },
+};
+
+export const conditionFolderService = {
+  async getProjectFolders(projectId: string) {
+    const response = await apiClient.get(`/condition-folders/project/${projectId}`);
+    return response.data as { folders: import('../types').ConditionFolder[] };
+  },
+
+  async createFolder(projectId: string, name: string) {
+    const response = await apiClient.post('/condition-folders', { projectId, name });
+    return response.data as { success: boolean; folder: import('../types').ConditionFolder };
+  },
+
+  async updateFolder(id: string, updates: { name?: string; sortOrder?: number }) {
+    const response = await apiClient.put(`/condition-folders/${id}`, updates);
+    return response.data as { success: boolean; folder: import('../types').ConditionFolder };
+  },
+
+  async deleteFolder(id: string) {
+    const response = await apiClient.delete(`/condition-folders/${id}`);
+    return response.data as { success: boolean };
   },
 };
 

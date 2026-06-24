@@ -310,29 +310,51 @@ function drawMeasurementToCanvas(
     case 'count':
       if (transformedPoints.length >= 1) {
         const point = transformedPoints[0];
-        
-        // Draw circle with white border
-        ctx.beginPath();
-        ctx.arc(point.x, point.y, 8, 0, 2 * Math.PI);
-        ctx.fill();
-        
-        ctx.strokeStyle = 'rgb(255, 255, 255)';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        ctx.strokeStyle = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
-        ctx.lineWidth = 2;
-        
-        // Add count text
-        ctx.font = 'bold 14px Arial';
-        ctx.fillStyle = 'rgb(255, 255, 255)';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        
-        const countValue = measurement.calculatedValue >= 1 
-          ? Math.round(measurement.calculatedValue).toString()
-          : '1';
-        
-        ctx.fillText(countValue, point.x, point.y);
+        const markerShape = measurement.conditionMarkerShape || 'circle';
+        const r = 8;
+
+        ctx.save();
+        ctx.translate(point.x, point.y);
+
+        if (markerShape === 'checkmark') {
+          ctx.beginPath();
+          ctx.moveTo(-r, 0);
+          ctx.lineTo(-r * 0.25, r * 0.85);
+          ctx.lineTo(r, -r * 0.9);
+          ctx.strokeStyle = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+          ctx.lineWidth = 2.5;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          ctx.stroke();
+        } else {
+          ctx.beginPath();
+          if (markerShape === 'square') {
+            ctx.rect(-r, -r, r * 2, r * 2);
+          } else if (markerShape === 'triangle') {
+            ctx.moveTo(0, -r * 1.25);
+            ctx.lineTo(r * 1.1, r * 0.6);
+            ctx.lineTo(-r * 1.1, r * 0.6);
+            ctx.closePath();
+          } else if (markerShape === 'star') {
+            const outerR = r * 1.15;
+            const innerR = r * 0.46;
+            for (let i = 0; i < 10; i++) {
+              const angle = ((i * 36 - 90) * Math.PI) / 180;
+              const radius = i % 2 === 0 ? outerR : innerR;
+              if (i === 0) ctx.moveTo(radius * Math.cos(angle), radius * Math.sin(angle));
+              else ctx.lineTo(radius * Math.cos(angle), radius * Math.sin(angle));
+            }
+            ctx.closePath();
+          } else {
+            ctx.arc(0, 0, r, 0, 2 * Math.PI);
+          }
+          ctx.fill();
+          ctx.strokeStyle = 'rgb(255, 255, 255)';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        }
+
+        ctx.restore();
       }
       break;
   }

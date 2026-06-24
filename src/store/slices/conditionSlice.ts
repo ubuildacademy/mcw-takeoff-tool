@@ -109,6 +109,10 @@ export const useConditionStore = create<ConditionState>()(
                       updatedCondition.lineThickness != null && {
                         conditionLineThickness: updatedCondition.lineThickness,
                       }),
+                    ...(m.type === 'count' &&
+                      updatedCondition.markerShape != null && {
+                        conditionMarkerShape: updatedCondition.markerShape,
+                      }),
                   }
                 : m
             ),

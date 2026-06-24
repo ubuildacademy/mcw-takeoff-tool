@@ -106,7 +106,9 @@ router.post('/', requireAuth, sanitizeBody('name', 'description'), async (req, r
       searchImageId,
       searchThreshold,
       searchScope,
-      lineThickness
+      lineThickness,
+      folderId,
+      markerShape
     } = req.body;
 
     // Validation
@@ -247,6 +249,8 @@ router.post('/', requireAuth, sanitizeBody('name', 'description'), async (req, r
       ...(type === 'linear' && lineThickness != null && {
         lineThickness: Math.max(1, Math.min(8, typeof lineThickness === 'string' ? parseInt(lineThickness, 10) || 2 : lineThickness))
       }),
+      ...((type === 'count' || type === 'auto-count') && markerShape != null && { markerShape }),
+      folderId: folderId ?? null,
       createdAt: now
     };
     
@@ -320,7 +324,9 @@ router.put('/:id', requireAuth, validateUUIDParam('id'), sanitizeBody('name', 'd
       searchImageId,
       searchThreshold,
       searchScope,
-      lineThickness
+      lineThickness,
+      folderId,
+      markerShape
     } = req.body;
 
     // Validation
@@ -417,9 +423,11 @@ router.put('/:id', requireAuth, validateUUIDParam('id'), sanitizeBody('name', 'd
       ...(searchScope !== undefined && { searchScope }),
       ...(lineThickness !== undefined && {
         lineThickness: Math.max(1, Math.min(8, typeof lineThickness === 'string' ? parseInt(lineThickness, 10) || 2 : lineThickness))
-      })
+      }),
+      ...(folderId !== undefined && { folderId: folderId ?? null }),
+      ...(markerShape !== undefined && { markerShape })
     };
-    
+
     const savedCondition = await storage.saveCondition(updatedCondition);
     
     return res.json({ 

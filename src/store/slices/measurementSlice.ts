@@ -200,6 +200,9 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
         ...(measurementData.type === 'linear' && condition?.lineThickness != null && {
           conditionLineThickness: condition.lineThickness,
         }),
+        ...(measurementData.type === 'count' && condition?.markerShape != null && {
+          conditionMarkerShape: condition.markerShape,
+        }),
       };
 
       const optimisticId = createPendingMeasurementId();

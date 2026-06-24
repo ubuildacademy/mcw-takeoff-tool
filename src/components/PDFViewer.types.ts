@@ -121,6 +121,7 @@ export interface PDFViewerMeasurement {
   pdfCoordinates: Array<{ x: number; y: number }>;
   conditionColor: string;
   conditionName: string;
+  conditionMarkerShape?: string;
   perimeterValue?: number;
   areaValue?: number;
   cutouts?: Array<{

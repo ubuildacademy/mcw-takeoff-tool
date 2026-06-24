@@ -3,7 +3,6 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { devLog } from '../lib/devLog';
 import {
-  Plus,
   Calculator,
   FileText,
   ChevronDown,
@@ -271,7 +270,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
   };
 
 
-  const rootClass = `w-80 workspace-side-panel border-r flex flex-col${className ? ` ${className}` : ''}`;
+  const rootClass = `w-80 workspace-side-panel border-r flex flex-col transition-colors${cutoutMode ? ' border-l-2 border-l-red-500' : ''}${className ? ` ${className}` : ''}`;
 
   if (loadingConditions) {
     return (
@@ -335,11 +334,8 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
 
         {/* Tab Content Header */}
         {activeTab === 'conditions' && (
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center mb-4">
             <h2 className="text-lg font-semibold">Takeoff Conditions</h2>
-            <Button size="sm" variant="outline" onClick={() => setShowCreateDialog(true)}>
-              <Plus className="w-4 h-4" />
-            </Button>
           </div>
         )}
 
@@ -604,7 +600,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
               return (
                 <div className="space-y-4">
                   {/* Project Cost Summary */}
-                  <div className="bg-gradient-to-br from-purple-50 to-pink-100 rounded-lg p-4 border border-purple-200">
+                  <div className="bg-gradient-to-br from-purple-50 to-pink-100 dark:from-purple-950/40 dark:to-pink-950/30 rounded-lg p-4 border border-purple-200 dark:border-purple-900/60">
                     <div className="flex items-center justify-between mb-3">
                       <h3 className="text-lg font-semibold text-foreground">Project Cost Summary</h3>
                       <Button
@@ -641,11 +637,11 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                         </div>
                         <div className="flex justify-between items-center">
                           <span className="text-sm text-muted-foreground">Profit Margin ({summary.profitMarginPercent}%)</span>
-                          <span className="text-sm text-green-600 font-medium">${summary.profitMarginAmount.toFixed(2)}</span>
+                          <span className="text-sm text-green-600 dark:text-green-400 font-medium">${summary.profitMarginAmount.toFixed(2)}</span>
                         </div>
                         <div className="flex justify-between items-center pt-2 border-t border-border">
                           <span className="text-lg font-bold text-foreground">Total Cost</span>
-                          <span className="text-lg font-bold text-blue-600">${summary.totalCost.toFixed(2)}</span>
+                          <span className="text-lg font-bold text-blue-600 dark:text-blue-400">${summary.totalCost.toFixed(2)}</span>
                         </div>
                       </div>
                     </div>
@@ -677,7 +673,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                           <div className="flex items-center justify-between mb-3">
                             <div className="flex items-center gap-3">
                               <div 
-                                className="w-5 h-5 rounded-full border-2 border-white shadow-sm" 
+                                className="w-5 h-5 rounded-full border-2 border-border shadow-sm"
                                 style={{ backgroundColor: condition.condition.color }}
                               />
                               <div>
@@ -693,7 +689,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                               </div>
                             </div>
                             <div className="text-right">
-                              <span className="font-bold text-lg text-blue-600">
+                              <span className="font-bold text-lg text-blue-600 dark:text-blue-400">
                                 ${condition.subtotal.toFixed(2)}
                               </span>
                               <div className="text-xs text-muted-foreground">
@@ -718,18 +714,18 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                             <div className="grid grid-cols-2 gap-2 text-sm">
                               <div className="flex justify-between">
                                 <span className="text-muted-foreground">Material</span>
-                                <span className="font-medium text-blue-600">${condition.materialCost.toFixed(2)}</span>
+                                <span className="font-medium text-blue-600 dark:text-blue-400">${condition.materialCost.toFixed(2)}</span>
                               </div>
                               {condition.equipmentCost > 0 && (
                                 <div className="flex justify-between">
                                   <span className="text-muted-foreground">Equipment</span>
-                                  <span className="font-medium text-green-600">${condition.equipmentCost.toFixed(2)}</span>
+                                  <span className="font-medium text-green-600 dark:text-green-400">${condition.equipmentCost.toFixed(2)}</span>
                                 </div>
                               )}
                               {condition.wasteCost > 0 && (
                                 <div className="flex justify-between">
                                   <span className="text-muted-foreground">Waste</span>
-                                  <span className="font-medium text-orange-600">${condition.wasteCost.toFixed(2)}</span>
+                                  <span className="font-medium text-orange-600 dark:text-orange-400">${condition.wasteCost.toFixed(2)}</span>
                                 </div>
                               )}
                             </div>

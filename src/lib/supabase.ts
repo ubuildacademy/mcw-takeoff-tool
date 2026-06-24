@@ -403,6 +403,7 @@ export interface Database {
           labor_cost: number | null
           material_cost: number | null
           include_perimeter: boolean | null
+          marker_shape: string | null
           created_at: string
         }
         Insert: {
@@ -417,6 +418,7 @@ export interface Database {
           labor_cost?: number | null
           material_cost?: number | null
           include_perimeter?: boolean | null
+          marker_shape?: string | null
           created_at?: string
         }
         Update: {
@@ -431,6 +433,7 @@ export interface Database {
           labor_cost?: number | null
           material_cost?: number | null
           include_perimeter?: boolean | null
+          marker_shape?: string | null
           created_at?: string
         }
       }

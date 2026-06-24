@@ -46,6 +46,7 @@ export const TABLES = {
   PROJECTS: 'takeoff_projects',
   FILES: 'takeoff_files',
   CONDITIONS: 'takeoff_conditions',
+  CONDITION_FOLDERS: 'takeoff_condition_folders',
   SHEETS: 'takeoff_sheets',
   TAKEOFF_MEASUREMENTS: 'takeoff_measurements',
   APP_SETTINGS: 'app_settings',
