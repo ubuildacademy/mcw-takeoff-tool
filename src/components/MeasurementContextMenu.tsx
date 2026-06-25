@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 interface ConditionOption {
   id: string;
@@ -58,6 +58,7 @@ export function MeasurementContextMenu({
   const submenuRef = useRef<HTMLDivElement>(null);
   const moveToRef = useRef<HTMLButtonElement>(null);
   const [showConditionSubmenu, setShowConditionSubmenu] = useState(false);
+  const [submenuStyle, setSubmenuStyle] = useState<React.CSSProperties>({});
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -87,25 +88,22 @@ export function MeasurementContextMenu({
   const menuLeft = Math.min(x, window.innerWidth - MENU_WIDTH - 8);
   const menuMaxHeight = window.innerHeight - y - 8;
 
-  const getSubmenuStyle = (): React.CSSProperties => {
-    if (!moveToRef.current) return { left: menuLeft + MENU_WIDTH + 2, top: y };
+  useLayoutEffect(() => {
+    if (!showConditionSubmenu || !moveToRef.current) return;
     const rect = moveToRef.current.getBoundingClientRect();
     const spaceRight = window.innerWidth - rect.right;
-    const left = spaceRight >= SUBMENU_WIDTH + 4
-      ? rect.right + 2
-      : rect.left - SUBMENU_WIDTH - 2;
-    // Clamp top so submenu doesn't go below viewport
+    const left = spaceRight >= SUBMENU_WIDTH + 4 ? rect.right + 2 : rect.left - SUBMENU_WIDTH - 2;
     const maxHeight = window.innerHeight - rect.top - 8;
     const top = Math.min(rect.top, window.innerHeight - Math.min(maxHeight, 300) - 8);
-    return {
+    setSubmenuStyle({
       position: 'fixed',
       left,
       top,
       maxHeight: Math.max(80, maxHeight),
       overflowY: 'auto',
       zIndex: 101,
-    };
-  };
+    });
+  }, [showConditionSubmenu, menuLeft, y]);
 
   const btnClass = 'flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40';
 
@@ -197,7 +195,7 @@ export function MeasurementContextMenu({
         <div
           ref={submenuRef}
           className="min-w-[220px] rounded-md border bg-popover text-popover-foreground py-1 shadow-lg"
-          style={getSubmenuStyle()}
+          style={submenuStyle}
           onMouseEnter={() => setShowConditionSubmenu(true)}
           onMouseLeave={() => setShowConditionSubmenu(false)}
         >
