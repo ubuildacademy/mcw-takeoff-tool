@@ -59,6 +59,7 @@ Living list of **larger features**, **quality improvements**, and **outstanding 
 
 | Item | When |
 |------|------|
+| **Count sub-quantity** | Fixed measurement (linear, area, or volume) attached per count marker. Set type + unit + value per count on any Count or Auto-Count condition. Reports show both count and sub-quantity total; Costs price on sub-quantity (e.g. 5 windows × 10 LF × $3/LF = $150). Excel export includes Sub-Qty Total and Sub-Qty Unit columns. DB migration: `add_sub_quantity_to_conditions.sql`. | 2026-06 |
 | **iPad / tablet — Phase 3 (polish & platform)** | Floating action toolbar (Undo / Cancel / Finish) over the PDF canvas while drawing; long-press on SVG markups opens context menu (right-click equivalent for touch); `useKeyboardHeight` hook shifts dialogs above the software keyboard via Visual Viewport API; PWA `manifest.json` + Apple touch-icon + `theme-color` meta for "Add to Home Screen". | 2026-06 |
 | **iPad / tablet — Phase 2 (layout)** | Slide-over drawers for both sidebars below `lg` with semi-transparent backdrop; `viewport-fit=cover`; `env(safe-area-inset-*)` on header and status bar; 44 px minimum tap targets on all primary toolbar and condition-list buttons. | 2026-06 |
 | **iPad / tablet — Phase 1 (touch input)** | Pointer Events on canvas/SVG, `touch-action: none`, pinch-to-zoom, single-finger pan, `overscroll-contain` on canvas container. | 2026-06 |

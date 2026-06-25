@@ -60,7 +60,7 @@ Settings are split between **your account** (on the project list) and **takeoff 
 
 **Hyperlinks** (same dialog)
 
-- **Add hyperlink** — Same as pressing **H** (draw a region and pick a destination sheet).
+- **Add hyperlink** — Same as pressing **Shift+H** (draw a region and pick a destination sheet).
 - **Clear all hyperlinks** — Removes manual links on the current scope as implemented in the app.
 
 ---
@@ -86,10 +86,10 @@ Escape **backs out** of the current mode or selection, usually one step at a tim
 |------|-------------------|
 | **Hyperlink** placement | Exits hyperlink mode and cancels any in-progress link. |
 | **Cutout** drag | Cancels the cutout rectangle. |
-| **Annotation** tools (shapes, arrows, etc.) | Removes the **last** placed point; if nothing is left, **exits** the annotation tool. |
+| **Annotation** tools (text, arrow, rectangle, circle, highlighter) | **Exits** the annotation tool immediately and clears any in-progress draw state. |
+| **Selected annotation or markup** (in selection mode, not in a drawing tool) | **Clears** the selection. |
 | **Calibration** | Removes the **last** calibration point; if none remain, **exits** calibration and clears calibration state. |
-| **Measuring** (including continuous linear) | Removes the **last** point; if none remain, **stops** measuring. |
-| **Markup selection** (items selected on the canvas, not typing) | **Clears** the selection. |
+| **Measuring** (including continuous linear) | Removes the **last** point; if none remain (or immediately after finishing a segment), **exits draw mode** and returns to selection mode. |
 
 **Text annotation input** (small text box on the PDF): **Escape** cancels; **Enter** saves.
 
@@ -105,22 +105,28 @@ Escape **backs out** of the current mode or selection, usually one step at a tim
 | **Redo** | Cmd/Ctrl+**Shift**+**Z** or Cmd/Ctrl+**Y** |
 | **Copy** selected markups | Cmd/Ctrl+**C** (when markups are selected in selection mode) |
 | **Paste** copied markups | Cmd/Ctrl+**V** |
+| **Paste as New Condition** | Cmd/Ctrl+**Shift**+**V** — pastes copied markups into a brand-new condition cloned from the source (named "[Original] - COPY", new distinct color). Auto-selects the new condition so you can rename it immediately. |
 | **Delete** selected markups | **Delete** or **Backspace** (with markups selected in selection mode) |
-| **Add hyperlink** mode | **H** (when not typing in a field) |
+| **Add hyperlink** mode | **Shift+H** (when not typing in a field) |
 | **Toggle ortho snapping** (horizontal/vertical alignment while drawing or calibrating) | **Control** — press to toggle while in measure or calibration mode |
 
 ### Annotation tools (no takeoff condition selected)
 
-With **no** condition selected and **not** typing in a field, single letter keys toggle **markup** tools (press again to turn off):
+With **no** condition selected and **not** typing in a field, single letter keys toggle annotation tools (press the same key again to turn off). All shortcuts are shown next to each tool in the **Annotate** menu.
 
 | Key | Tool |
 |-----|------|
+| **H** | Highlighter (freehand — click and drag to draw) |
 | **R** | Rectangle |
-| **T** | Text |
 | **C** | Circle |
 | **A** | Arrow |
+| **T** | Text |
 
-These do **not** run when a condition is active in the sidebar (the app prioritizes takeoff for that case).
+**Filled toggle (rectangle & circle):** While the rectangle or circle tool is active, re-open the Annotate menu to reveal a **Filled** toggle. When on, the shape is filled with your annotation color at 30% opacity. The setting persists — you only need to set it once.
+
+**Escape** exits any active annotation tool immediately (or clears a selected annotation if no tool is active).
+
+These shortcuts do **not** run when a condition is active in the sidebar (the app prioritizes takeoff for that case).
 
 ---
 
@@ -153,11 +159,24 @@ On **iPad** and other touch devices, use these gestures on the PDF canvas. For l
 | **Context menu** on markup | **Long-press** (~½ second) on the markup |
 | **Open markup context menu** (desktop) | Right-click |
 
+### Markup right-click context menu
+
+Right-clicking a markup (or long-pressing on tablet) opens a context menu with the following actions. If multiple markups are selected, clipboard and move actions apply to **all selected markups**.
+
+| Action | What it does |
+|--------|--------------|
+| **Copy** | Copies the selected markup(s) to the clipboard (same as Cmd/Ctrl+C). |
+| **Paste** | Pastes clipboard markups onto the current page with a small offset (disabled if clipboard is empty). |
+| **Paste as New Condition** | Pastes clipboard markups into a new condition cloned from the source — named "[Original] - COPY" with a new auto-assigned color. The new condition is auto-selected for immediate renaming. Disabled if clipboard is empty. |
+| **Bring forward / Send backward / Send to back** | Adjusts the z-order (layer stacking) of the markup on the page. |
+| **Select all similar** | Selects all markups on the current page that belong to the same condition. |
+| **Move to condition →** | Reassigns the selected markup(s) to a different condition. A flyout lists all compatible conditions (same type AND unit — linear LF cannot move to linear-with-height SF). Color and styling update immediately. Useful when you accidentally draw under the wrong condition. |
+
 ### Floating toolbar (tablet only)
 
 While any drawing mode is active on a narrow screen (<1024 px), a bottom toolbar offers **Undo**, **Cancel**, and (for multi-point measurements) **Finish** — the touch equivalents of Cmd/Ctrl+Z, Escape, and double-click.
 
-**Modes that show the toolbar:** measuring, calibrating, annotation tools (text, arrow, rectangle, circle), cutout drawing, hyperlink region drawing.
+**Modes that show the toolbar:** measuring, calibrating, annotation tools (text, arrow, rectangle, circle, highlighter), cutout drawing, hyperlink region drawing.
 
 The toolbar is hidden on desktop and on wide iPad landscape (with an attached keyboard).
 
@@ -172,7 +191,7 @@ The toolbar is hidden on desktop and on wide iPad landscape (with an attached ke
 | **Right-click** markup | **Long-press** markup |
 | **Cmd/Ctrl** + scroll — zoom | **Pinch** |
 | **Middle-mouse drag** — pan | **One-finger drag** (idle mode) |
-| **H** — hyperlink mode | **Tools** (wrench) → **Add hyperlink**, or attach a keyboard and press H |
+| **Shift+H** — hyperlink mode | **Tools** (wrench) → **Add hyperlink**, or attach a keyboard and press Shift+H |
 
 With an **external keyboard**, desktop shortcuts apply. Touch gestures still work on the canvas at the same time.
 
@@ -193,6 +212,7 @@ With an **external keyboard**, desktop shortcuts apply. Touch gestures still wor
 - Condition card action icons remain visible in the left sidebar/drawer; tap the eye, scissors, copy, pencil, or trash icons for condition-specific actions.
 - Use **Escape** (or **Cancel** on tablet) to step back one point at a time instead of canceling the entire operation when possible.
 - Keep **calibration** on a clear, known dimension for best accuracy.
+- **Count conditions** can carry a fixed measurement per marker — set **Quantity per Count** (type, unit, value) in the condition form. Example: 5 windows × 10 LF each = 50 LF tracked in Reports and priced in Costs. See the workspace guide for details.
 
 ---
 

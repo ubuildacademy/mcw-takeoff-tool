@@ -86,8 +86,9 @@ export function TakeoffWorkspace() {
   const [hyperlinkMode, setHyperlinkMode] = useState(false);
   
   // Annotation states
-  const [annotationTool, setAnnotationTool] = useState<'text' | 'arrow' | 'rectangle' | 'circle' | null>(null);
+  const [annotationTool, setAnnotationTool] = useState<'text' | 'arrow' | 'rectangle' | 'circle' | 'freehand-highlight' | null>(null);
   const [annotationColor, setAnnotationColor] = useState<string>('#FF0000');
+  const [annotationFilled, setAnnotationFilled] = useState<boolean>(false);
   
   const setCurrentProject = useProjectStore((s) => s.setCurrentProject);
   const setSelectedCondition = useConditionStore((s) => s.setSelectedCondition);
@@ -423,8 +424,8 @@ export function TakeoffWorkspace() {
         return;
       }
 
-      // H: Add hyperlink (when not typing)
-      if (!isTyping && (event.key === 'h' || event.key === 'H') && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      // Shift+H: Add hyperlink (when not typing)
+      if (!isTyping && event.key === 'H' && event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
         event.preventDefault();
         handleAddHyperlink();
         return;
@@ -1038,8 +1039,10 @@ export function TakeoffWorkspace() {
         onCalibrateScale={handleCalibrateScale}
         annotationTool={annotationTool}
         annotationColor={annotationColor}
+        annotationFilled={annotationFilled}
         onAnnotationToolChange={setAnnotationTool}
         onAnnotationColorChange={setAnnotationColor}
+        onAnnotationFilledChange={setAnnotationFilled}
         onClearAnnotations={() => {
           setAnnotationTool(null);
           if (projectId && currentPdfFile?.id && selectedPageNumber) {
@@ -1171,6 +1174,7 @@ export function TakeoffWorkspace() {
               onPDFRendered={tabsResult.handlePDFRendered}
               annotationTool={annotationTool}
               annotationColor={annotationColor}
+              annotationFilled={annotationFilled}
               onAnnotationToolChange={setAnnotationTool}
               visualSearchMode={visualSearch.visualSearchMode}
               visualSearchCondition={visualSearch.visualSearchCondition}

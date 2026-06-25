@@ -80,8 +80,9 @@ function formatConditionValue(
   currentPage?: number | null
 ): ReactNode {
   const current = filterMeasurementsForCurrentPage(measurements, viewerDocumentId, currentPage);
-  const totalValue = current.reduce((sum, m) => sum + (m.netCalculatedValue ?? m.calculatedValue ?? 0), 0);
-  const totalAreaValue = current.reduce((sum, m) => sum + (m.areaValue ?? 0), 0);
+  const multiplier = condition.multiplier ?? 1;
+  const totalValue = current.reduce((sum, m) => sum + (m.netCalculatedValue ?? m.calculatedValue ?? 0), 0) * multiplier;
+  const totalAreaValue = current.reduce((sum, m) => sum + (m.areaValue ?? 0), 0) * multiplier;
   if (totalValue <= 0) return null;
   if (condition.type === 'linear' && condition.includeHeight && condition.height && totalAreaValue > 0) {
     return `${formatFeetAndInches(totalValue)} LF · ${totalAreaValue.toFixed(0)} SF`;
@@ -198,11 +199,13 @@ export function TakeoffSidebarConditionList({
   const [newFolderName, setNewFolderName] = useState('');
   const newFolderInputRef = useRef<HTMLInputElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
+  const skipRenameBlurRef = useRef(false);
 
   // ── context menu state ──
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null);
   const [folderSearch, setFolderSearch] = useState('');
   const ctxMenuRef = useRef<HTMLDivElement>(null);
+  const folderFlyoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── scroll selected into view ──
   useLayoutEffect(() => {
@@ -349,6 +352,14 @@ export function TakeoffSidebarConditionList({
             {condition.aiGenerated && (
               <Bot className="w-3 h-3 flex-shrink-0 mt-0.5 text-blue-500" />
             )}
+            {(condition.multiplier ?? 1) > 1 && (
+              <span
+                title={`Quantity multiplier: ×${condition.multiplier} — total = measured × ${condition.multiplier}`}
+                className="text-[10px] font-bold px-1 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400 leading-tight flex-shrink-0 mt-0.5"
+              >
+                ×{condition.multiplier}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-1.5 mt-0.5 text-xs text-muted-foreground">
             {getTypeIcon(condition.type)}
@@ -487,10 +498,22 @@ export function TakeoffSidebarConditionList({
                         value={renameValue}
                         onChange={(e) => setRenameValue(e.target.value)}
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter') handleRenameFolder(folder.id);
-                          if (e.key === 'Escape') setRenamingFolderId(null);
+                          if (e.key === 'Enter') {
+                            skipRenameBlurRef.current = true;
+                            handleRenameFolder(folder.id);
+                          }
+                          if (e.key === 'Escape') {
+                            skipRenameBlurRef.current = true;
+                            setRenamingFolderId(null);
+                          }
                         }}
-                        onBlur={() => handleRenameFolder(folder.id)}
+                        onBlur={() => {
+                          if (skipRenameBlurRef.current) {
+                            skipRenameBlurRef.current = false;
+                            return;
+                          }
+                          handleRenameFolder(folder.id);
+                        }}
                         onClick={(e) => e.stopPropagation()}
                         className="flex-1 text-sm font-medium bg-transparent outline-none border-b border-primary"
                       />
@@ -561,7 +584,18 @@ export function TakeoffSidebarConditionList({
           <CtxItem icon={<Copy />} label="Duplicate" onClick={() => { onDuplicate(ctxCondition); setCtxMenu(null); }} />
           <CtxSep />
           {/* Move to folder row — relative so flyout anchors to it */}
-          <div className="relative">
+          <div
+            className="relative"
+            onMouseEnter={() => {
+              if (folderFlyoutTimerRef.current) clearTimeout(folderFlyoutTimerRef.current);
+              setCtxMenu((prev) => prev ? { ...prev, showFolderFlyout: true } : null);
+            }}
+            onMouseLeave={() => {
+              folderFlyoutTimerRef.current = setTimeout(() => {
+                setCtxMenu((prev) => prev ? { ...prev, showFolderFlyout: false } : null);
+              }, 150);
+            }}
+          >
             <CtxItem
               icon={<Folder />}
               label="Move to folder"
@@ -570,7 +604,17 @@ export function TakeoffSidebarConditionList({
               onClick={() => setCtxMenu((prev) => prev ? { ...prev, showFolderFlyout: !prev.showFolderFlyout } : null)}
             />
             {ctxMenu.showFolderFlyout && (
-              <div className="absolute left-full top-0 ml-1 z-[10000] w-52 bg-popover border border-border rounded-lg shadow-xl py-1.5 px-1.5">
+              <div
+                className="absolute left-full top-0 z-[10000] w-52 bg-popover border border-border rounded-lg shadow-xl py-1.5 px-1.5"
+                onMouseEnter={() => {
+                  if (folderFlyoutTimerRef.current) clearTimeout(folderFlyoutTimerRef.current);
+                }}
+                onMouseLeave={() => {
+                  folderFlyoutTimerRef.current = setTimeout(() => {
+                    setCtxMenu((prev) => prev ? { ...prev, showFolderFlyout: false } : null);
+                  }, 150);
+                }}
+              >
                 <input
                   autoFocus
                   type="text"

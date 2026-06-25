@@ -423,16 +423,26 @@ function drawAnnotationToCanvas(
     const y = Math.min(points[0].y, points[1].y);
     const width = Math.abs(points[1].x - points[0].x);
     const height = Math.abs(points[1].y - points[0].y);
-    
+
+    if (annotation.filled) {
+      ctx.globalAlpha = 0.3;
+      ctx.fillRect(x, y, width, height);
+      ctx.globalAlpha = 0.8;
+    }
     ctx.strokeRect(x, y, width, height);
   } else if (annotation.type === 'circle' && points.length === 2) {
     const cx = (points[0].x + points[1].x) / 2;
     const cy = (points[0].y + points[1].y) / 2;
     const rx = Math.abs(points[1].x - points[0].x) / 2;
     const ry = Math.abs(points[1].y - points[0].y) / 2;
-    
+
     ctx.beginPath();
     ctx.ellipse(cx, cy, rx, ry, 0, 0, 2 * Math.PI);
+    if (annotation.filled) {
+      ctx.globalAlpha = 0.3;
+      ctx.fill();
+      ctx.globalAlpha = 0.8;
+    }
     ctx.stroke();
   } else if (annotation.type === 'freehand' && points.length >= 2) {
     ctx.beginPath();
@@ -441,8 +451,19 @@ function drawAnnotationToCanvas(
       ctx.lineTo(points[i].x, points[i].y);
     }
     ctx.stroke();
+  } else if (annotation.type === 'freehand-highlight' && points.length >= 2) {
+    ctx.globalAlpha = 0.4;
+    ctx.lineWidth = 16;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) {
+      ctx.lineTo(points[i].x, points[i].y);
+    }
+    ctx.stroke();
   }
-  
+
   ctx.globalAlpha = 1.0;
 }
 

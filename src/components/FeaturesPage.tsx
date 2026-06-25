@@ -438,10 +438,10 @@ const FeaturesPage: React.FC = () => {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
                 </svg>
               </div>
-              <h3 className="text-xl font-semibold text-slate-900 mb-3">Custom Conditions</h3>
+              <h3 className="text-xl font-semibold text-slate-900 mb-3">Custom Conditions & Folders</h3>
               <p className="text-slate-600">
-                Create custom takeoff conditions with waste factors and material costs. 
-                Build a comprehensive library for each project type.
+                Create custom takeoff conditions with waste factors and material costs.
+                Organize them into collapsible folders to keep large projects clean and easy to navigate.
               </p>
             </div>
           </div>

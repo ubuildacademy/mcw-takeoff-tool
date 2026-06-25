@@ -60,7 +60,7 @@ Use this panel to define **what** you are measuring, see **quantities**, and see
 
 ### Conditions tab
 
-- **+** — **Create condition**. The dialog lets you set type, units, color, waste, costs, and other fields depending on type (**auto-count / visual search** is a distinct condition type when you need template-based counting).
+- **+** — **Create condition**. The dialog lets you set type, units, color, waste, multiplier, costs, and other fields depending on type (**auto-count / visual search** is a distinct condition type when you need template-based counting).
 - **Search** box — Filters conditions by **name** or **description**.
 - **Click** a condition to **select** it for drawing on the plan; **click again** to clear selection.
 - **Totals on each card** are scoped to the **active sheet tab** and **current page** in the viewer (so numbers track what you see).
@@ -79,6 +79,87 @@ Each condition card is compact so large projects can show many line items. The c
 | **Trash** | **Delete** the condition (confirmed). |
 
 **Visual / auto-count** style conditions may show **search imagery** and compact **match thumbnails** when applicable.
+
+### Condition folders
+
+Group conditions into named folders to keep large projects organized.
+
+| Action | How |
+|--------|-----|
+| **Create a folder** | Click the **folder +** button in the Conditions toolbar → type a name → **Enter** or click ✓. |
+| **Move a condition into a folder** | **Right-click** the condition card → **Move to folder** → pick a folder from the searchable flyout. |
+| **Remove a condition from its folder** | Right-click → **Move to folder** → **Remove from folder** (appears when already in a folder). |
+| **Rename a folder** | Hover the folder header → click the **pencil** icon → edit inline → **Enter** to confirm, **Escape** to cancel. |
+| **Delete a folder** | Hover the folder header → click the **trash** icon. Conditions in the folder are moved to **Uncategorized** (not deleted). |
+| **Collapse / expand** | Click the folder header row. |
+
+Conditions not assigned to any folder appear below all folders under an **Uncategorized** divider.
+
+#### Copying, pasting, and reassigning markups
+
+**Copy & paste** (keyboard or right-click context menu)
+
+Select one or more markups on the canvas (selection mode), then copy and paste:
+
+| Action | How |
+|--------|-----|
+| **Copy** | Cmd/Ctrl+**C**, or right-click → **Copy** |
+| **Paste** (same condition) | Cmd/Ctrl+**V**, or right-click → **Paste** — pastes onto the current page with a small offset so the copy is visible next to the original |
+| **Paste as New Condition** | Cmd/Ctrl+**Shift**+**V**, or right-click → **Paste as New Condition** — creates a new condition cloned from the source (type, unit, waste, and settings carried over) named "[Original] - COPY" with a new auto-assigned color, then pastes the markups under it. The new condition is auto-selected so you can rename it immediately. |
+
+**Tip:** Use *Paste as New Condition* when you need to differentiate copied scope — for example, duplicating a material area and then adjusting one variant without redrawing.
+
+**Move to condition** (reassign markups)
+
+If you draw markups under the wrong condition, reassign them without redrawing:
+
+1. Select the markups to move (click, box-select, or right-click → **Select all similar** to grab all markups for a condition on the current page).
+2. Right-click any selected markup → **Move to condition →** and pick the target condition from the flyout.
+
+The markups are immediately reassigned — their color, styling, and condition totals update to reflect the new condition. Only conditions with the **same type and unit** appear in the flyout. For example, a linear (LF) markup can only move to another linear (LF) condition — not to a linear-with-height (SF) condition, even though both are technically "linear" type. This prevents silent unit mismatches that would corrupt quantities.
+
+#### Quantity Multiplier
+
+Any condition type supports a **Quantity Multiplier** — an integer you set in the condition form to scale all measured quantities by a fixed factor.
+
+**When to use it**
+
+You've taken off an area (or linear run, or count) in one location and know the exact same scope repeats in N other identical locations. Instead of drawing all N instances, set **Multiplier = N** and the condition reports N× the measured total.
+
+**How it works**
+
+- The multiplier is applied to the **sum of all measurements** for that condition, then waste (if any) is applied on top: `total = measured × multiplier × (1 + waste%)`.
+- The multiplied total is what appears in the **condition card**, **Reports tab**, **Costs tab**, and **Excel export**.
+- A small amber **×N** badge appears on the condition card name so the multiplier is always visible at a glance.
+- Hovering the badge shows a tooltip explaining the multiplier.
+- The **Costs tab** breakdown shows `×N multiplier · +X% waste = Y SF` to make the calculation transparent.
+
+**Caution**
+
+The multiplier is a powerful shortcut but easy to forget is active. The amber ×N badge is intentionally prominent. When reviewing an estimate, always confirm multiplied conditions are intentional.
+
+**To remove it**, edit the condition and clear the Multiplier field (or set it back to 1).
+
+#### Count conditions — Quantity per Count
+
+**Count** and **Auto-Count** conditions support an optional **Quantity per Count** field. This lets each marker carry a fixed measurement (linear, area, or volume) so you get both the count and a derived quantity in one condition.
+
+**How to configure it**
+
+1. Create or edit a **Count** (or **Auto-Count**) condition.
+2. In the **Quantity per Count** section, choose a **type** (Linear, Area, or Volume).
+3. Pick a **unit** (e.g. LF, SF, CY) and enter the **value per count** (e.g. 10).
+4. Save the condition.
+
+**How quantities appear**
+
+- **Reports tab**: each condition row shows the count (`5 EA`) and the sub-quantity total (`50 LF`) directly below it.
+- **Costs tab**: the quantity row shows both the count and the priced quantity (`= 50 LF (priced)`). Material cost is billed per sub-quantity unit (e.g. `$3/LF × 50 LF = $150`).
+- **Excel export**: includes a **Sub-Qty Total** and **Sub-Qty Unit** column on the Quantities sheet.
+
+**To use multiple sub-quantities** (e.g. both LF of trim and SF of glass per window), create separate count conditions — each condition carries one fixed sub-quantity.
+
+**To remove the sub-quantity**, edit the condition, set the Type back to **None**, and save.
 
 ### Reports tab
 
@@ -195,7 +276,7 @@ A **project-scoped chat** that uses a **local or hosted LLM** via **Ollama** (co
 - **Select a markup**: tap it while in selection mode (not actively drawing).
 - **Move a markup**: tap to select, then drag it to its new position.
 - **Finish** a multi-point measurement: **double-tap** the canvas, or tap **Finish** on the floating toolbar (see [Tablet & touch](#8-tablet--touch-ipad) below).
-- **Context menu** on a markup: **long-press** (~½ second) — same actions as right-click on desktop (stack order, select all similar).
+- **Context menu** on a markup: **long-press** (~½ second) — same actions as right-click on desktop (copy, paste, paste as new condition, stack order, select all similar, move to condition).
 
 - **Measure** only after you **select a condition** on the left and follow the tool’s tap/drag behavior for that type.
 

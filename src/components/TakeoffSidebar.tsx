@@ -531,11 +531,16 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                             
                             <div className="text-right">
                               <div className="font-semibold text-sm">
-                                {conditionData.condition.unit === 'ft' || conditionData.condition.unit === 'feet' 
+                                {conditionData.condition.unit === 'ft' || conditionData.condition.unit === 'feet'
                                   ? formatFeetAndInches(conditionData.grandTotal)
                                   : `${conditionData.grandTotal.toFixed(0)} ${conditionData.condition.unit}`
                                 }
                               </div>
+                              {conditionData.condition.subQuantityPerCount != null && conditionData.condition.subQuantityPerCount > 0 && (
+                                <div className="font-medium text-sm text-blue-600 dark:text-blue-400">
+                                  {(conditionData.grandTotal * conditionData.condition.subQuantityPerCount).toFixed(2)} {conditionData.condition.subQuantityUnit}
+                                </div>
+                              )}
                               <div className="text-xs text-muted-foreground">
                                 Total
                               </div>
@@ -703,9 +708,19 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                               <span className="text-muted-foreground">Quantity</span>
                               <div className="text-right">
                                 <span className="font-medium">{condition.quantity.toFixed(2)} {condition.condition.unit}</span>
-                                {supportsWasteFactor(condition.condition.type) && condition.condition.wasteFactor > 0 && (
+                                {condition.subQuantityTotal != null && condition.subQuantityTotal > 0 && (
+                                  <div className="text-xs text-blue-600 dark:text-blue-400">
+                                    = {condition.subQuantityTotal.toFixed(2)} {condition.subQuantityUnit} (priced)
+                                  </div>
+                                )}
+                                {((condition.condition.multiplier ?? 1) > 1 || (supportsWasteFactor(condition.condition.type) && condition.condition.wasteFactor > 0)) && (
                                   <div className="text-xs text-muted-foreground">
-                                    + {condition.condition.wasteFactor}% waste = {condition.adjustedQuantity.toFixed(2)} {condition.condition.unit}
+                                    {(condition.condition.multiplier ?? 1) > 1 && (
+                                      <span className="text-amber-600 dark:text-amber-400">×{condition.condition.multiplier} multiplier</span>
+                                    )}
+                                    {(condition.condition.multiplier ?? 1) > 1 && supportsWasteFactor(condition.condition.type) && condition.condition.wasteFactor > 0 && ' · '}
+                                    {supportsWasteFactor(condition.condition.type) && condition.condition.wasteFactor > 0 && `+${condition.condition.wasteFactor}% waste`}
+                                    {' = '}{condition.adjustedQuantity.toFixed(2)} {condition.condition.unit}
                                   </div>
                                 )}
                               </div>

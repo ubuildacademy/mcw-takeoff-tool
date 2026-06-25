@@ -410,6 +410,9 @@ export function ChatTab({ projectId, documents }: ChatTabProps) {
         if (condition.type !== 'count' && condition.type !== 'auto-count' && condition.wasteFactor > 0) {
           context += `, ${condition.wasteFactor}% waste`;
         }
+        if ((condition.multiplier ?? 1) > 1) {
+          context += `, ×${condition.multiplier} multiplier`;
+        }
         if (condition.laborCost) context += `, $${condition.laborCost} labor cost`;
         if (condition.materialCost) context += `, $${condition.materialCost} material cost`;
         if (condition.description) context += ` - ${condition.description}`;

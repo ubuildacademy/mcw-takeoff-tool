@@ -94,7 +94,7 @@ export const DEFAULT_HELP_FAQ_CONFIG: HelpFaqConfig = {
     id: 'space-escape',
     question: 'What do Space and Escape do?',
     answer:
-      'Space starts drawing for the selected condition or clears/re-selects it depending on context. Escape backs out one step (last point, mode, or selection). On iPad without a keyboard, use the floating Undo/Cancel/Finish toolbar — it appears whenever you are measuring, calibrating, annotating, drawing a cutout, or placing a hyperlink. See the shortcuts guide for the full list.',
+      'Space starts drawing for the selected condition or clears/re-selects it depending on context. Escape backs out one step (last point, mode, or selection) — or exits draw mode entirely when no points are in progress (e.g. right after finishing a segment). On iPad without a keyboard, use the floating Undo/Cancel/Finish toolbar — it appears whenever you are measuring, calibrating, annotating, drawing a cutout, or placing a hyperlink. See the shortcuts guide for the full list.',
   },
   {
     id: 'ipad-tablet',
@@ -107,6 +107,30 @@ export const DEFAULT_HELP_FAQ_CONFIG: HelpFaqConfig = {
     question: 'Where are Tools vs Profile settings?',
     answer:
       'Profile is on the project dashboard (Back to Projects, then Profile). Tools (wrench icon) in this workspace opens takeoff preferences: appearance, crosshairs, magnifier, ortho default, and hyperlinks. Press ? anytime for the help menu.',
+  },
+  {
+    id: 'condition-folders',
+    question: 'How do I organize conditions into folders?',
+    answer:
+      'Click the folder + button at the top of the Conditions tab to create a new folder, then type a name and press Enter. To assign a condition to a folder, right-click the condition and choose "Move to folder" — a searchable submenu shows your folders. Right-click the same way to remove a condition from its folder. Hover over a folder header to rename (pencil) or delete (trash) it. Conditions in a deleted folder move to Uncategorized.',
+  },
+  {
+    id: 'count-sub-quantity',
+    question: 'Can a count condition also track a linear, area, or volume quantity?',
+    answer:
+      'Yes — use "Quantity per Count" in the condition form. Set a type (Linear, Area, or Volume), a unit (e.g. LF), and a value per count (e.g. 10). Every marker you place adds that amount to the sub-quantity total. Example: 5 window markers × 10 LF each = 50 LF shown in Reports and Costs. When a material cost is set, it prices on the sub-quantity total (e.g. $3/LF × 50 LF = $150).',
+  },
+  {
+    id: 'copy-paste-conditions',
+    question: 'Can I copy markups to a different condition, or fix markups drawn under the wrong condition?',
+    answer:
+      'Yes — two ways. To copy markups into a brand-new condition: select the markups, copy (Cmd/Ctrl+C or right-click → Copy), then Paste as New Condition (Cmd/Ctrl+Shift+V or right-click → Paste as New Condition). A new condition named "[Original] - COPY" is created with a distinct color and the markups are pasted under it — auto-selected so you can rename it immediately. To reassign existing markups to a different condition: select them on the canvas, right-click → Move to condition, then pick the target from the flyout. The flyout only shows conditions with the same type AND unit — so a linear (LF) markup cannot move to a linear-with-height (SF) condition even though both are "linear", preventing silent unit mismatches. Color and totals update instantly.',
+  },
+  {
+    id: 'quantity-multiplier',
+    question: 'What is the Quantity Multiplier on a condition?',
+    answer:
+      'The Quantity Multiplier scales a condition\'s total without re-drawing. Set it to an integer (e.g. 3) when the same area, run, or count repeats in N identical locations — draw one instance and multiply. The condition card, Reports, Costs, and Excel export all show the already-multiplied total (measured × N). Waste applies on top. An amber ×N badge on the condition name makes the multiplier visible at a glance. To remove it, edit the condition and clear the Multiplier field.',
   },
   ],
 };
@@ -209,7 +233,7 @@ export function getWorkspaceContextTip(state: WorkspaceHelpState): string | null
     return 'Tap two points along your known dimension. Escape or Cancel (floating toolbar on iPad) removes the last point.';
   }
   if (state.isMeasuring) {
-    return 'Draw on the plan for the selected condition. Escape or Cancel removes the last point; double-tap or Finish completes multi-point shapes.';
+    return 'Draw on the plan for the selected condition. Escape or Cancel removes the last point; double-tap or Finish completes multi-point shapes. Escape with no points in progress exits draw mode and returns to selection mode.';
   }
   if (!state.hasOpenPdf) {
     return 'Open the right sidebar (edge chevron) → Documents to upload PDFs and open a sheet.';

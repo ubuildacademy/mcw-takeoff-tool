@@ -72,10 +72,6 @@ router.put('/:id', requireAuth, validateUUIDParam('id'), sanitizeBody('name'), a
     const userId = req.user?.id;
     const userIsAdmin = req.user?.role === 'admin';
 
-    // Fetch existing to check project access
-    const existing = await storage.getConditionFoldersByProject('');
-    // We need the folder to get its projectId — fetch via a broader lookup
-    // Re-use supabase direct query since storage doesn't have getFolder by id
     const { supabase, TABLES } = await import('../supabase');
     const { data, error } = await supabase
       .from(TABLES.CONDITION_FOLDERS)

@@ -423,30 +423,36 @@ export function useTakeoffExport({
         condition: 1,
         quantity: 2,
         unit: 3,
-        areaValue: 4,
-        perimeter: 5,
-        height: 6,
-        sheetNumber: 7,
-        sheetName: 8,
-        pageRef: 9,
-        wastePct: 10,
-        wasteAmt: 11,
-        materialCostPerUnit: 12,
-        equipmentCost: 13,
-        description: 14,
-        timestamp: 15,
-        isTotalRow: 16, // hidden helper
-        pageKey: 17, // hidden helper
+        subQtyTotal: 4,
+        subQtyUnit: 5,
+        areaValue: 6,
+        perimeter: 7,
+        height: 8,
+        sheetNumber: 9,
+        sheetName: 10,
+        pageRef: 11,
+        multiplier: 12,
+        wastePct: 13,
+        wasteAmt: 14,
+        materialCostPerUnit: 15,
+        equipmentCost: 16,
+        description: 17,
+        timestamp: 18,
+        isTotalRow: 19, // hidden helper
+        pageKey: 20, // hidden helper
       } as const;
       detailSheet.getColumn(COL.condition).width = 25;
       detailSheet.getColumn(COL.quantity).width = 12;
       detailSheet.getColumn(COL.unit).width = 6;
+      detailSheet.getColumn(COL.subQtyTotal).width = 16;
+      detailSheet.getColumn(COL.subQtyUnit).width = 10;
       detailSheet.getColumn(COL.areaValue).width = 15;
       detailSheet.getColumn(COL.perimeter).width = 15;
       detailSheet.getColumn(COL.height).width = 15;
       detailSheet.getColumn(COL.sheetNumber).width = 12;
       detailSheet.getColumn(COL.sheetName).width = 35;
       detailSheet.getColumn(COL.pageRef).width = 10;
+      detailSheet.getColumn(COL.multiplier).width = 12;
       detailSheet.getColumn(COL.wastePct).width = 12;
       detailSheet.getColumn(COL.wasteAmt).width = 15;
       detailSheet.getColumn(COL.materialCostPerUnit).width = 18;
@@ -459,8 +465,8 @@ export function useTakeoffExport({
       detailSheet.getColumn(COL.pageKey).hidden = true;
 
       const detailHeaders = [
-        'Condition', 'Quantity', 'Unit', 'Area Value (SF)', 'Perimeter (LF)', 'Height (LF)', 'Sheet Number', 'Sheet Name', 'Page Reference',
-        'Waste Factor (%)', 'Waste Amount', 'Material Cost/Unit', 'Equipment Cost', 'Description', 'Timestamp',
+        'Condition', 'Quantity', 'Unit', 'Sub-Qty Total', 'Sub-Qty Unit', 'Area Value (SF)', 'Perimeter (LF)', 'Height (LF)', 'Sheet Number', 'Sheet Name', 'Page Reference',
+        'Multiplier', 'Waste Factor (%)', 'Waste Amount', 'Material Cost/Unit', 'Equipment Cost', 'Description', 'Timestamp',
         'Is Total Row', 'Page Key',
       ];
       const detailHeaderRowNum = 1;
@@ -524,6 +530,19 @@ export function useTakeoffExport({
         quantityCell.numFmt = '#,##0.00';
         quantityCell.style = rowStyle;
         detailSheet.getCell(rowNum, col++).value = condition.unit;
+        // Sub-quantity columns: total for this measurement row and the unit
+        const sqValue = (measurement.netCalculatedValue ?? measurement.calculatedValue) * (condition.subQuantityPerCount ?? 0);
+        const subQtyTotalCell = detailSheet.getCell(rowNum, col++);
+        if (condition.subQuantityPerCount != null && condition.subQuantityPerCount > 0) {
+          subQtyTotalCell.value = sqValue;
+          subQtyTotalCell.numFmt = '#,##0.00';
+        }
+        subQtyTotalCell.style = rowStyle;
+        const subQtyUnitCell = detailSheet.getCell(rowNum, col++);
+        if (condition.subQuantityUnit) {
+          subQtyUnitCell.value = condition.subQuantityUnit;
+        }
+        subQtyUnitCell.style = rowStyle;
         const areaValueCell = detailSheet.getCell(rowNum, col++);
         if (measurement.areaValue != null) {
           areaValueCell.value = measurement.areaValue;
@@ -550,6 +569,10 @@ export function useTakeoffExport({
         sheetNameCell.value = pageData.sheetName;
         sheetNameCell.style = { ...rowStyle, alignment: { horizontal: 'left', vertical: 'top', wrapText: true } };
         detailSheet.getCell(rowNum, col++).value = `P${pageData.pageNumber}`;
+        const multiplierMeasCell = detailSheet.getCell(rowNum, col++);
+        multiplierMeasCell.value = condition.multiplier ?? 1;
+        multiplierMeasCell.numFmt = '#,##0';
+        multiplierMeasCell.style = rowStyle;
         const wasteFactorCell = detailSheet.getCell(rowNum, col++);
         wasteFactorCell.value = condition.wasteFactor ?? 0;
         wasteFactorCell.numFmt = '0.00"%"';
@@ -594,6 +617,19 @@ export function useTakeoffExport({
         detailSheet.getCell(detailRowNum, col++).value = `${condition.name} - TOTAL`;
         const quantityCol = col++;
         detailSheet.getCell(detailRowNum, col++).value = condition.unit;
+        // Sub-quantity total columns for TOTAL row (will be SUM formula after rows are written)
+        const subQtyTotalCol = col++;
+        const subQtyTotalSummaryCell = detailSheet.getCell(detailRowNum, subQtyTotalCol);
+        if (condition.subQuantityPerCount != null && condition.subQuantityPerCount > 0) {
+          subQtyTotalSummaryCell.numFmt = '#,##0.00';
+        }
+        subQtyTotalSummaryCell.style = conditionSummaryStyle;
+        const subQtyUnitCol = col++;
+        const subQtyUnitSummaryCell = detailSheet.getCell(detailRowNum, subQtyUnitCol);
+        if (condition.subQuantityUnit) {
+          subQtyUnitSummaryCell.value = condition.subQuantityUnit;
+        }
+        subQtyUnitSummaryCell.style = conditionSummaryStyle;
         const areaValueCol = col++;
         const areaValueCell = detailSheet.getCell(detailRowNum, areaValueCol);
         areaValueCell.style = conditionSummaryStyle;
@@ -610,6 +646,13 @@ export function useTakeoffExport({
         detailSheet.getCell(detailRowNum, col++).value = '';
         detailSheet.getCell(detailRowNum, col++).value = '';
         detailSheet.getCell(detailRowNum, col++).value = '';
+        const multiplierCol = col++;
+        const multiplierTotCell = detailSheet.getCell(detailRowNum, multiplierCol);
+        const condMultiplier = condition.multiplier ?? 1;
+        multiplierTotCell.value = condMultiplier;
+        multiplierTotCell.numFmt = '#,##0';
+        multiplierTotCell.style = condMultiplier > 1 ? { ...conditionSummaryStyle, ...inputStyle } : conditionSummaryStyle;
+        (multiplierTotCell as unknown as { protection?: { locked?: boolean } }).protection = { locked: false };
         const wasteFactorCol = col++;
         const wasteFactorSummaryCell = detailSheet.getCell(detailRowNum, wasteFactorCol);
         wasteFactorSummaryCell.numFmt = '0.00"%"';
@@ -649,9 +692,16 @@ export function useTakeoffExport({
         const measurementEndRowActual = detailRowNum - 1;
         const quantityColLetter = colIndexToLetter(quantityCol);
         const quantityFormulaCell = detailSheet.getCell(conditionStartRow, quantityCol);
-        quantityFormulaCell.value = { formula: `SUM(${quantityColLetter}${measurementStartRow}:${quantityColLetter}${measurementEndRowActual})` };
+        const multiplierColLetter = colIndexToLetter(multiplierCol);
+        quantityFormulaCell.value = { formula: `SUM(${quantityColLetter}${measurementStartRow}:${quantityColLetter}${measurementEndRowActual})*${multiplierColLetter}${conditionStartRow}` };
         quantityFormulaCell.numFmt = '#,##0.00';
         quantityFormulaCell.style = conditionSummaryStyle;
+        // Sub-quantity SUM formula for TOTAL row
+        if (condition.subQuantityPerCount != null && condition.subQuantityPerCount > 0) {
+          const subQtyColLetter = colIndexToLetter(subQtyTotalCol);
+          subQtyTotalSummaryCell.value = { formula: `SUM(${subQtyColLetter}${measurementStartRow}:${subQtyColLetter}${measurementEndRowActual})` };
+          subQtyTotalSummaryCell.numFmt = '#,##0.00';
+        }
         if (condition.type === 'linear' && condition.includeHeight) {
           const areaValueColLetter = colIndexToLetter(areaValueCol);
           areaValueCell.value = { formula: `SUM(${areaValueColLetter}${measurementStartRow}:${areaValueColLetter}${measurementEndRowActual})` };
@@ -667,8 +717,7 @@ export function useTakeoffExport({
           wasteFactorSummaryCell.value = {
             formula: `AVERAGE(${wasteFactorColLetter}${measurementStartRow}:${wasteFactorColLetter}${measurementEndRowActual})`,
           };
-          const wasteAmountColLetter = colIndexToLetter(wasteAmountCol);
-          wasteAmountCell.value = { formula: `SUM(${wasteAmountColLetter}${measurementStartRow}:${wasteAmountColLetter}${measurementEndRowActual})` };
+          wasteAmountCell.value = { formula: `${quantityColLetter}${conditionStartRow}*${wasteFactorColLetter}${conditionStartRow}/100` };
           wasteAmountCell.numFmt = '#,##0.00';
         }
       });
@@ -686,8 +735,8 @@ export function useTakeoffExport({
       const isTotalRow = `--(Quantities!$${isTotalColLetter}$2:$${isTotalColLetter}$${qL}=1)`;
       const hasConditionText = `--(Quantities!$${condColLetter}$2:$${condColLetter}$${qL}<>"")`;
 
-      const materialFromQuantities = `SUMPRODUCT(Quantities!$${qtyColLetter}$2:$${qtyColLetter}$${qL},Quantities!$${matCostColLetter}$2:$${matCostColLetter}$${qL},${isMeasurementRow},${hasConditionText})`;
-      const wasteCostFromQuantities = `SUMPRODUCT(Quantities!$${wasteAmtColLetter}$2:$${wasteAmtColLetter}$${qL},Quantities!$${matCostColLetter}$2:$${matCostColLetter}$${qL},${isMeasurementRow},${hasConditionText})`;
+      const materialFromQuantities = `SUMPRODUCT(Quantities!$${qtyColLetter}$2:$${qtyColLetter}$${qL},Quantities!$${matCostColLetter}$2:$${matCostColLetter}$${qL},${isTotalRow},${hasConditionText})`;
+      const wasteCostFromQuantities = `SUMPRODUCT(Quantities!$${wasteAmtColLetter}$2:$${wasteAmtColLetter}$${qL},Quantities!$${matCostColLetter}$2:$${matCostColLetter}$${qL},${isTotalRow},${hasConditionText})`;
       const equipmentFromQuantities = `SUMPRODUCT(Quantities!$${equipCostColLetter}$2:$${equipCostColLetter}$${qL},${isTotalRow},${hasConditionText})`;
       const profitMarginPct = costBreakdown.summary.profitMarginPercent ?? 15;
 
