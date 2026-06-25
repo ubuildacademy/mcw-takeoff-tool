@@ -55,6 +55,11 @@ export interface TakeoffCondition {
   searchThreshold?: number; // Confidence threshold for matches (0-1)
   searchScope?: 'current-page' | 'entire-document' | 'entire-project'; // Search scope for auto-count
   markerShape?: 'circle' | 'triangle' | 'square' | 'star' | 'checkmark'; // For count conditions, shape of the marker
+  multiplier?: number; // Integer quantity multiplier (e.g. 3 = same area in 3 locations; null/undefined = 1x)
+  // Sub-quantity: a fixed measurement attached to each count instance (e.g. 10 LF per window)
+  subQuantityType?: 'linear' | 'area' | 'volume';
+  subQuantityUnit?: string; // e.g. 'LF', 'SF', 'CY'
+  subQuantityPerCount?: number; // quantity per marker; total = markerCount × subQuantityPerCount
 }
 
 export interface TakeoffMeasurement {
@@ -127,9 +132,10 @@ export interface Annotation {
   projectId: string;
   sheetId: string;
   pageNumber: number;
-  type: 'text' | 'freehand' | 'arrow' | 'rectangle' | 'circle' | 'highlight';
+  type: 'text' | 'freehand' | 'arrow' | 'rectangle' | 'circle' | 'highlight' | 'freehand-highlight';
   points: Array<{ x: number; y: number }>; // PDF coordinates (0-1 scale)
   color: string;
+  filled?: boolean; // rectangle/circle: render with semi-transparent fill
   text?: string; // For text annotations
   timestamp: string;
 }
@@ -227,6 +233,9 @@ export interface ConditionCostBreakdown {
   wasteCost: number; // additional cost due to waste factor
   subtotal: number;
   hasCosts: boolean;
+  // Set when a count condition has sub-quantity configured
+  subQuantityTotal?: number; // markerCount × subQuantityPerCount
+  subQuantityUnit?: string;  // e.g. 'LF'
 }
 
 export interface ProjectCostBreakdown {

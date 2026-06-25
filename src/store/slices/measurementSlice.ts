@@ -65,6 +65,8 @@ interface MeasurementState {
   clearForProjectSwitch: (newProjectId: string) => void;
   /** Copy condition markups by ids into clipboard (for paste). */
   copyMarkupsByIds: (ids: string[]) => void;
+  /** Reassign markups to a different condition, updating conditionId and all denormalized styling. */
+  reassignMarkupsToCondition: (markupIds: string[], targetConditionId: string) => Promise<void>;
   /** Recalculate existing measurements after calibration change (same project/sheet/page scope). */
   recalculateMeasurementsForCalibration: (
     projectId: string,
@@ -179,6 +181,21 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
         return cond?.type !== 'auto-count';
       });
       set({ copiedMarkups: copied });
+    },
+
+    reassignMarkupsToCondition: async (markupIds, targetConditionId) => {
+      const targetCondition = useConditionStore.getState().getConditionById(targetConditionId);
+      if (!targetCondition) return;
+      const { takeoffMeasurements } = get();
+      const targets = takeoffMeasurements.filter((m) => markupIds.includes(m.id));
+      const updates: Partial<TakeoffMeasurement> = {
+        conditionId: targetConditionId,
+        conditionColor: targetCondition.color,
+        conditionName: targetCondition.name,
+        ...(targetCondition.lineThickness != null && { conditionLineThickness: targetCondition.lineThickness }),
+        ...(targetCondition.markerShape != null && { conditionMarkerShape: targetCondition.markerShape }),
+      };
+      await Promise.all(targets.map((m) => get().updateTakeoffMeasurement(m.id, updates)));
     },
 
     addTakeoffMeasurement: async (measurementData) => {
@@ -674,20 +691,28 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
       }, 0);
       
       const wasteFactor = supportsWasteFactor(condition.type) ? (condition.wasteFactor || 0) : 0;
-      const adjustedQuantity = quantity * (1 + wasteFactor / 100);
-      
+      const multiplier = condition.multiplier ?? 1;
+      const adjustedQuantity = quantity * multiplier * (1 + wasteFactor / 100);
+
       const materialCostPerUnit = condition.materialCost || 0;
       const equipmentCost = condition.equipmentCost || 0;
-      
-      const materialCost = adjustedQuantity * materialCostPerUnit;
-      const wasteCost = (adjustedQuantity - quantity) * materialCostPerUnit;
-      
+
+      // For count conditions with sub-quantity, cost is priced on the sub-quantity total
+      const hasSubQty = (condition.type === 'count' || condition.type === 'auto-count') &&
+        condition.subQuantityPerCount != null && condition.subQuantityPerCount > 0;
+      const subQuantityTotal = hasSubQty ? quantity * multiplier * condition.subQuantityPerCount! : undefined;
+      const costQuantity = hasSubQty ? subQuantityTotal! : adjustedQuantity;
+
+      const materialCost = costQuantity * materialCostPerUnit;
+      const wasteCost = hasSubQty ? 0 : (adjustedQuantity - quantity * multiplier) * materialCostPerUnit;
+
       const subtotal = materialCost + equipmentCost + wasteCost;
-      
+
       return {
         condition,
         quantity,
         adjustedQuantity,
+        ...(hasSubQty && { subQuantityTotal, subQuantityUnit: condition.subQuantityUnit }),
         materialCost,
         equipmentCost,
         wasteCost,

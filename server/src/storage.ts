@@ -83,6 +83,10 @@ export interface StoredCondition {
   searchScope?: 'current-page' | 'entire-document' | 'entire-project';
   lineThickness?: number; // For linear measurements, stroke width in px (1-8, default 2)
   markerShape?: string; // For count conditions, shape of the marker
+  multiplier?: number;
+  subQuantityType?: 'linear' | 'area' | 'volume';
+  subQuantityUnit?: string;
+  subQuantityPerCount?: number;
   createdAt: string;
   aiGenerated?: boolean;
 }
@@ -147,6 +151,10 @@ interface ConditionRow {
   search_scope?: string;
   line_thickness?: number;
   marker_shape?: string;
+  multiplier?: number;
+  sub_quantity_type?: string;
+  sub_quantity_unit?: string;
+  sub_quantity_per_count?: number;
   created_at?: string;
   ai_generated?: boolean;
 }
@@ -615,6 +623,10 @@ class SupabaseStorage {
       searchThreshold: item.search_threshold,
       ...(item.line_thickness != null && { lineThickness: item.line_thickness }),
       ...(item.marker_shape != null && { markerShape: item.marker_shape }),
+      ...(item.multiplier != null && { multiplier: item.multiplier }),
+      ...(item.sub_quantity_type != null && { subQuantityType: item.sub_quantity_type as StoredCondition['subQuantityType'] }),
+      ...(item.sub_quantity_unit != null && { subQuantityUnit: item.sub_quantity_unit }),
+      ...(item.sub_quantity_per_count != null && { subQuantityPerCount: item.sub_quantity_per_count }),
       createdAt: item.created_at ?? '',
       ...(item.ai_generated !== undefined && { aiGenerated: item.ai_generated })
     }));
@@ -657,6 +669,10 @@ class SupabaseStorage {
       searchScope: (item.search_scope as StoredCondition['searchScope']) ?? undefined,
       ...(item.line_thickness != null && { lineThickness: item.line_thickness }),
       ...(item.marker_shape != null && { markerShape: item.marker_shape }),
+      ...(item.multiplier != null && { multiplier: item.multiplier }),
+      ...(item.sub_quantity_type != null && { subQuantityType: item.sub_quantity_type as StoredCondition['subQuantityType'] }),
+      ...(item.sub_quantity_unit != null && { subQuantityUnit: item.sub_quantity_unit }),
+      ...(item.sub_quantity_per_count != null && { subQuantityPerCount: item.sub_quantity_per_count }),
       createdAt: item.created_at ?? '',
       ...(item.ai_generated !== undefined && { aiGenerated: item.ai_generated }),
     };
@@ -710,6 +726,10 @@ class SupabaseStorage {
       searchScope: (item.search_scope as StoredCondition['searchScope']) ?? undefined,
       ...(item.line_thickness != null && { lineThickness: item.line_thickness }),
       ...(item.marker_shape != null && { markerShape: item.marker_shape }),
+      ...(item.multiplier != null && { multiplier: item.multiplier }),
+      ...(item.sub_quantity_type != null && { subQuantityType: item.sub_quantity_type as StoredCondition['subQuantityType'] }),
+      ...(item.sub_quantity_unit != null && { subQuantityUnit: item.sub_quantity_unit }),
+      ...(item.sub_quantity_per_count != null && { subQuantityPerCount: item.sub_quantity_per_count }),
       createdAt: item.created_at ?? '',
       ...(item.ai_generated !== undefined && { aiGenerated: item.ai_generated })
     }));
@@ -779,6 +799,18 @@ class SupabaseStorage {
     if (condition.markerShape !== undefined) {
       dbCondition.marker_shape = condition.markerShape;
     }
+    if (condition.multiplier !== undefined) {
+      dbCondition.multiplier = condition.multiplier;
+    }
+    if (condition.subQuantityType !== undefined) {
+      dbCondition.sub_quantity_type = condition.subQuantityType ?? null;
+    }
+    if (condition.subQuantityUnit !== undefined) {
+      dbCondition.sub_quantity_unit = condition.subQuantityUnit ?? null;
+    }
+    if (condition.subQuantityPerCount !== undefined) {
+      dbCondition.sub_quantity_per_count = condition.subQuantityPerCount ?? null;
+    }
 
     let result = await supabase
       .from(TABLES.CONDITIONS)
@@ -830,6 +862,9 @@ class SupabaseStorage {
       searchScope: data.search_scope,
       ...(data.line_thickness != null && { lineThickness: data.line_thickness }),
       ...(data.marker_shape != null && { markerShape: data.marker_shape }),
+      ...(data.sub_quantity_type != null && { subQuantityType: data.sub_quantity_type as StoredCondition['subQuantityType'] }),
+      ...(data.sub_quantity_unit != null && { subQuantityUnit: data.sub_quantity_unit }),
+      ...(data.sub_quantity_per_count != null && { subQuantityPerCount: data.sub_quantity_per_count }),
       createdAt: data.created_at,
       ...(data.ai_generated !== undefined && { aiGenerated: data.ai_generated })
     };

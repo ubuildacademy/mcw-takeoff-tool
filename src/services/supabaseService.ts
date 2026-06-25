@@ -187,9 +187,10 @@ export const supabaseService = {
             const value = m.net_calculated_value != null ? m.net_calculated_value : m.calculated_value;
             return sum + (value ?? 0);
           }, 0);
-          const adjustedQuantity = quantity * (1 + wasteFactor / 100);
+          const multiplier = (cond as { multiplier?: number }).multiplier ?? 1;
+          const adjustedQuantity = quantity * multiplier * (1 + wasteFactor / 100);
           const materialCost = adjustedQuantity * materialCostPerUnit;
-          const wasteCost = (adjustedQuantity - quantity) * materialCostPerUnit;
+          const wasteCost = (adjustedQuantity - quantity * multiplier) * materialCostPerUnit;
           subtotal += materialCost + equipmentCost + wasteCost;
         }
         const profitMarginAmount = subtotal * (profitMarginPercent / 100);

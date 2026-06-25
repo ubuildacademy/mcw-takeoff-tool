@@ -71,6 +71,10 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
     searchThreshold: editingCondition?.searchThreshold?.toString() || '0.7',
     searchScope: editingCondition?.searchScope || 'current-page' as 'current-page' | 'entire-document' | 'entire-project',
     folderId: editingCondition?.folderId ?? null,
+    multiplier: editingCondition?.multiplier?.toString() || '',
+    subQuantityType: (editingCondition?.subQuantityType || '') as '' | 'linear' | 'area' | 'volume',
+    subQuantityUnit: editingCondition?.subQuantityUnit || '',
+    subQuantityPerCount: editingCondition?.subQuantityPerCount?.toString() || '',
   });
   const [loading, setLoading] = useState(false);
   const [depthError, setDepthError] = useState<string>('');
@@ -111,6 +115,10 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
       searchThreshold: editingCondition.searchThreshold?.toString() || '0.7',
       searchScope: (editingCondition.searchScope || 'current-page') as 'current-page' | 'entire-document' | 'entire-project',
       folderId: editingCondition.folderId ?? null,
+      multiplier: editingCondition.multiplier?.toString() || '',
+      subQuantityType: (editingCondition.subQuantityType || '') as '' | 'linear' | 'area' | 'volume',
+      subQuantityUnit: editingCondition.subQuantityUnit || '',
+      subQuantityPerCount: editingCondition.subQuantityPerCount?.toString() || '',
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps -- Sync only when switching to edit a condition
   }, [editingCondition?.id]);
@@ -210,6 +218,21 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
           searchScope: formData.searchScope || 'current-page'
         }),
         folderId: formData.folderId ?? null,
+        ...(formData.multiplier && parseInt(formData.multiplier, 10) > 1
+          ? { multiplier: parseInt(formData.multiplier, 10) }
+          : { multiplier: undefined }),
+        // Sub-quantity: only for count/auto-count with a valid type and value.
+        // When clearing (no type or value), send undefined so server skips the field
+        // unless we were editing an existing condition that had sub-qty (then send null to clear it).
+        ...(isCountLikeCondition(formData.type) && formData.subQuantityType && formData.subQuantityPerCount && parseFloat(formData.subQuantityPerCount) > 0
+          ? {
+              subQuantityType: formData.subQuantityType,
+              subQuantityUnit: formData.subQuantityUnit || (formData.subQuantityType === 'linear' ? 'LF' : formData.subQuantityType === 'area' ? 'SF' : 'CY'),
+              subQuantityPerCount: parseFloat(formData.subQuantityPerCount),
+            }
+          : editingCondition?.subQuantityType
+            ? { subQuantityType: null as unknown as undefined, subQuantityUnit: null as unknown as undefined, subQuantityPerCount: null as unknown as undefined }
+            : {}),
       };
       
       let result: TakeoffCondition;
@@ -287,7 +310,11 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
         depth: value === 'volume' ? prev.depth : '',
         lineThickness: value === 'linear' ? prev.lineThickness || '2' : '',
         searchImage: value === 'auto-count' ? prev.searchImage : '',
-        searchImageId: value === 'auto-count' ? prev.searchImageId : ''
+        searchImageId: value === 'auto-count' ? prev.searchImageId : '',
+        // Reset sub-quantity fields when switching away from count
+        subQuantityType: (value === 'count' || value === 'auto-count') ? prev.subQuantityType : '' as '' | 'linear' | 'area' | 'volume',
+        subQuantityUnit: (value === 'count' || value === 'auto-count') ? prev.subQuantityUnit : '',
+        subQuantityPerCount: (value === 'count' || value === 'auto-count') ? prev.subQuantityPerCount : '',
       };
       return newData;
     });
@@ -530,6 +557,27 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
             )}
 
             <div>
+              <Label htmlFor="multiplier">
+                Quantity Multiplier
+              </Label>
+              <Input
+                id="multiplier"
+                type="number"
+                min="1"
+                step="1"
+                value={formData.multiplier}
+                onChange={(e) => handleInputChange('multiplier', e.target.value)}
+                placeholder="1 (no multiplier)"
+                title="Multiplies the total measured quantity. Use when the same area/count repeats in N identical locations."
+              />
+              {formData.multiplier && parseInt(formData.multiplier, 10) > 1 && (
+                <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                  ⚠ ×{formData.multiplier} multiplier active — quantities will be multiplied
+                </p>
+              )}
+            </div>
+
+            <div>
               <Label htmlFor="color">Color</Label>
               <Input
                 id="color"
@@ -644,9 +692,103 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
             </>
           )}
 
+          {isCountLikeCondition(formData.type) && (
+            <div className="space-y-3 border border-border rounded-lg p-3 bg-muted/30">
+              <div>
+                <Label className="text-sm font-medium">Quantity per Count</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Attach a fixed measurement to each count — e.g. 10 LF of trim per window.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label htmlFor="subQuantityType" className="text-xs">Type</Label>
+                  <Select
+                    value={formData.subQuantityType || '__none__'}
+                    onValueChange={(v) => {
+                      const sqType = v === '__none__' ? '' : v as 'linear' | 'area' | 'volume';
+                      const defaultSqUnit = sqType === 'linear' ? 'LF' : sqType === 'area' ? 'SF' : sqType === 'volume' ? 'CY' : '';
+                      setFormData(prev => ({ ...prev, subQuantityType: sqType as '' | 'linear' | 'area' | 'volume', subQuantityUnit: defaultSqUnit, subQuantityPerCount: prev.subQuantityPerCount }));
+                    }}
+                  >
+                    <SelectTrigger id="subQuantityType" className="h-8 text-sm">
+                      <SelectValue placeholder="None" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">None</SelectItem>
+                      <SelectItem value="linear">Linear</SelectItem>
+                      <SelectItem value="area">Area</SelectItem>
+                      <SelectItem value="volume">Volume</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {formData.subQuantityType && (
+                  <div>
+                    <Label htmlFor="subQuantityUnit" className="text-xs">Unit</Label>
+                    <Select
+                      value={formData.subQuantityUnit}
+                      onValueChange={(v) => handleInputChange('subQuantityUnit', v)}
+                    >
+                      <SelectTrigger id="subQuantityUnit" className="h-8 text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {formData.subQuantityType === 'linear' && (
+                          <>
+                            <SelectItem value="LF">LF (Linear Feet)</SelectItem>
+                            <SelectItem value="LY">LY (Linear Yards)</SelectItem>
+                            <SelectItem value="LM">LM (Linear Meters)</SelectItem>
+                          </>
+                        )}
+                        {formData.subQuantityType === 'area' && (
+                          <>
+                            <SelectItem value="SF">SF (Square Feet)</SelectItem>
+                            <SelectItem value="SY">SY (Square Yards)</SelectItem>
+                            <SelectItem value="SM">SM (Square Meters)</SelectItem>
+                          </>
+                        )}
+                        {formData.subQuantityType === 'volume' && (
+                          <>
+                            <SelectItem value="CY">CY (Cubic Yards)</SelectItem>
+                            <SelectItem value="CF">CF (Cubic Feet)</SelectItem>
+                            <SelectItem value="CM">CM (Cubic Meters)</SelectItem>
+                          </>
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+              {formData.subQuantityType && (
+                <div>
+                  <Label htmlFor="subQuantityPerCount" className="text-xs">
+                    Value per count ({formData.subQuantityUnit})
+                  </Label>
+                  <Input
+                    id="subQuantityPerCount"
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={formData.subQuantityPerCount}
+                    onChange={(e) => handleInputChange('subQuantityPerCount', e.target.value)}
+                    placeholder="e.g., 10"
+                    className="h-8 text-sm mt-1"
+                  />
+                  {formData.subQuantityPerCount && parseFloat(formData.subQuantityPerCount) > 0 && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Each marker adds {formData.subQuantityPerCount} {formData.subQuantityUnit} to the total.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           <div>
             <Label htmlFor="materialCost">
-              Material Cost ({formData.type === 'count' ? '$/unit' : `$/${effectiveUnit}`})
+              Material Cost ({isCountLikeCondition(formData.type) && formData.subQuantityType && formData.subQuantityUnit
+                ? `$/${formData.subQuantityUnit}`
+                : formData.type === 'count' || formData.type === 'auto-count' ? '$/unit' : `$/${effectiveUnit}`})
             </Label>
             <Input
               id="materialCost"

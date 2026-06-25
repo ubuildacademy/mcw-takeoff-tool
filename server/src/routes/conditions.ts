@@ -108,7 +108,11 @@ router.post('/', requireAuth, sanitizeBody('name', 'description'), async (req, r
       searchScope,
       lineThickness,
       folderId,
-      markerShape
+      markerShape,
+      multiplier,
+      subQuantityType,
+      subQuantityUnit,
+      subQuantityPerCount,
     } = req.body;
 
     // Validation
@@ -250,10 +254,16 @@ router.post('/', requireAuth, sanitizeBody('name', 'description'), async (req, r
         lineThickness: Math.max(1, Math.min(8, typeof lineThickness === 'string' ? parseInt(lineThickness, 10) || 2 : lineThickness))
       }),
       ...((type === 'count' || type === 'auto-count') && markerShape != null && { markerShape }),
+      ...(multiplier != null && Number.isInteger(Number(multiplier)) && Number(multiplier) >= 1 && { multiplier: Number(multiplier) }),
+      ...((type === 'count' || type === 'auto-count') && subQuantityType != null ? {
+        subQuantityType: subQuantityType || null,
+        subQuantityUnit: subQuantityUnit || null,
+        subQuantityPerCount: subQuantityPerCount != null ? Number(subQuantityPerCount) : null,
+      } : {}),
       folderId: folderId ?? null,
       createdAt: now
     };
-    
+
     devLog('Creating condition with data:', JSON.stringify(newCondition, null, 2));
     devLog('Depth value being saved:', { depth: newCondition.depth, depthType: typeof newCondition.depth });
     
@@ -326,7 +336,11 @@ router.put('/:id', requireAuth, validateUUIDParam('id'), sanitizeBody('name', 'd
       searchScope,
       lineThickness,
       folderId,
-      markerShape
+      markerShape,
+      multiplier,
+      subQuantityType,
+      subQuantityUnit,
+      subQuantityPerCount,
     } = req.body;
 
     // Validation
@@ -425,7 +439,17 @@ router.put('/:id', requireAuth, validateUUIDParam('id'), sanitizeBody('name', 'd
         lineThickness: Math.max(1, Math.min(8, typeof lineThickness === 'string' ? parseInt(lineThickness, 10) || 2 : lineThickness))
       }),
       ...(folderId !== undefined && { folderId: folderId ?? null }),
-      ...(markerShape !== undefined && { markerShape })
+      ...(markerShape !== undefined && { markerShape }),
+      ...(multiplier !== undefined && (
+        multiplier === null
+          ? { multiplier: undefined }
+          : Number.isInteger(Number(multiplier)) && Number(multiplier) >= 1
+            ? { multiplier: Number(multiplier) }
+            : {}
+      )),
+      ...(subQuantityType !== undefined && { subQuantityType: subQuantityType || null }),
+      ...(subQuantityUnit !== undefined && { subQuantityUnit: subQuantityUnit || null }),
+      ...(subQuantityPerCount !== undefined && { subQuantityPerCount: subQuantityPerCount === null ? null : Number(subQuantityPerCount) }),
     };
 
     const savedCondition = await storage.saveCondition(updatedCondition);
