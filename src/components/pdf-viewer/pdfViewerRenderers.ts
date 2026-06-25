@@ -644,7 +644,29 @@ export interface RenderSVGAnnotationOptions {
   selectionMode: boolean;
 }
 
-/** Renders a single annotation (text, arrow, rectangle, circle, highlight) as SVG. */
+/** Renders freehand-highlight path (PDF-normalized coords) during live drawing (ephemeral layer). */
+export function renderSVGFreehandHighlightPreview(
+  svg: SVGSVGElement,
+  points: { x: number; y: number }[],
+  viewport: { width: number; height: number; rotation?: number },
+  color: string
+): void {
+  if (points.length < 2) return;
+  const rotation = viewport.rotation ?? 0;
+  const vp = points.map((p) => baseNormToViewportPixels(p.x, p.y, viewport, rotation));
+  const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+  poly.setAttribute('points', vp.map((p) => `${p.x},${p.y}`).join(' '));
+  poly.setAttribute('stroke', color);
+  poly.setAttribute('stroke-width', '16');
+  poly.setAttribute('stroke-opacity', '0.4');
+  poly.setAttribute('stroke-linecap', 'round');
+  poly.setAttribute('stroke-linejoin', 'round');
+  poly.setAttribute('fill', 'none');
+  poly.setAttribute('pointer-events', 'none');
+  svg.appendChild(poly);
+}
+
+/** Renders a single annotation (text, arrow, rectangle, circle, highlight, freehand-highlight) as SVG. */
 export function renderSVGAnnotation(
   svg: SVGSVGElement,
   annotation: Annotation,
@@ -742,24 +764,31 @@ export function renderSVGAnnotation(
     rect.setAttribute('height', height.toString());
     rect.setAttribute('stroke', strokeColor);
     rect.setAttribute('stroke-width', strokeWidth);
-    rect.setAttribute('fill', 'none');
+    if (annotation.filled) {
+      rect.setAttribute('fill', annotation.color);
+      rect.setAttribute('fill-opacity', '0.3');
+    } else {
+      rect.setAttribute('fill', 'none');
+    }
     rect.setAttribute('data-annotation-id', annotation.id);
-    rect.style.pointerEvents = selectionMode ? 'stroke' : 'none';
+    rect.style.pointerEvents = selectionMode ? (annotation.filled ? 'auto' : 'stroke') : 'none';
     rect.style.cursor = selectionMode ? 'pointer' : 'default';
     svg.appendChild(rect);
-    // Hit area: stroke-only so interior passes through to markups below (e.g. measurements)
-    const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    hitArea.setAttribute('x', x.toString());
-    hitArea.setAttribute('y', y.toString());
-    hitArea.setAttribute('width', width.toString());
-    hitArea.setAttribute('height', height.toString());
-    hitArea.setAttribute('fill', 'none');
-    hitArea.setAttribute('stroke', 'transparent');
-    hitArea.setAttribute('stroke-width', ANNOTATION_HIT_STROKE_WIDTH.toString());
-    hitArea.setAttribute('data-annotation-id', annotation.id);
-    hitArea.style.pointerEvents = selectionMode ? 'stroke' : 'none';
-    hitArea.style.cursor = selectionMode ? 'pointer' : 'default';
-    svg.appendChild(hitArea);
+    if (!annotation.filled) {
+      // Hit area: stroke-only so interior passes through to markups below (e.g. measurements)
+      const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      hitArea.setAttribute('x', x.toString());
+      hitArea.setAttribute('y', y.toString());
+      hitArea.setAttribute('width', width.toString());
+      hitArea.setAttribute('height', height.toString());
+      hitArea.setAttribute('fill', 'none');
+      hitArea.setAttribute('stroke', 'transparent');
+      hitArea.setAttribute('stroke-width', ANNOTATION_HIT_STROKE_WIDTH.toString());
+      hitArea.setAttribute('data-annotation-id', annotation.id);
+      hitArea.style.pointerEvents = selectionMode ? 'stroke' : 'none';
+      hitArea.style.cursor = selectionMode ? 'pointer' : 'default';
+      svg.appendChild(hitArea);
+    }
   } else if (annotation.type === 'circle' && points.length === 2) {
     const cx = (points[0].x + points[1].x) / 2;
     const cy = (points[0].y + points[1].y) / 2;
@@ -772,24 +801,31 @@ export function renderSVGAnnotation(
     ellipse.setAttribute('ry', ry.toString());
     ellipse.setAttribute('stroke', strokeColor);
     ellipse.setAttribute('stroke-width', strokeWidth);
-    ellipse.setAttribute('fill', 'none');
+    if (annotation.filled) {
+      ellipse.setAttribute('fill', annotation.color);
+      ellipse.setAttribute('fill-opacity', '0.3');
+    } else {
+      ellipse.setAttribute('fill', 'none');
+    }
     ellipse.setAttribute('data-annotation-id', annotation.id);
-    ellipse.style.pointerEvents = selectionMode ? 'stroke' : 'none';
+    ellipse.style.pointerEvents = selectionMode ? (annotation.filled ? 'auto' : 'stroke') : 'none';
     ellipse.style.cursor = selectionMode ? 'pointer' : 'default';
     svg.appendChild(ellipse);
-    // Hit area: stroke-only so interior passes through to markups below
-    const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
-    hitArea.setAttribute('cx', cx.toString());
-    hitArea.setAttribute('cy', cy.toString());
-    hitArea.setAttribute('rx', rx.toString());
-    hitArea.setAttribute('ry', ry.toString());
-    hitArea.setAttribute('fill', 'none');
-    hitArea.setAttribute('stroke', 'transparent');
-    hitArea.setAttribute('stroke-width', ANNOTATION_HIT_STROKE_WIDTH.toString());
-    hitArea.setAttribute('data-annotation-id', annotation.id);
-    hitArea.style.pointerEvents = selectionMode ? 'stroke' : 'none';
-    hitArea.style.cursor = selectionMode ? 'pointer' : 'default';
-    svg.appendChild(hitArea);
+    if (!annotation.filled) {
+      // Hit area: stroke-only so interior passes through to markups below
+      const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
+      hitArea.setAttribute('cx', cx.toString());
+      hitArea.setAttribute('cy', cy.toString());
+      hitArea.setAttribute('rx', rx.toString());
+      hitArea.setAttribute('ry', ry.toString());
+      hitArea.setAttribute('fill', 'none');
+      hitArea.setAttribute('stroke', 'transparent');
+      hitArea.setAttribute('stroke-width', ANNOTATION_HIT_STROKE_WIDTH.toString());
+      hitArea.setAttribute('data-annotation-id', annotation.id);
+      hitArea.style.pointerEvents = selectionMode ? 'stroke' : 'none';
+      hitArea.style.cursor = selectionMode ? 'pointer' : 'default';
+      svg.appendChild(hitArea);
+    }
   } else if (annotation.type === 'highlight' && points.length >= 2) {
     const x = Math.min(...points.map((p) => p.x));
     const y = Math.min(...points.map((p) => p.y));
@@ -808,6 +844,30 @@ export function renderSVGAnnotation(
     rect.style.pointerEvents = selectionMode ? 'auto' : 'none';
     rect.style.cursor = selectionMode ? 'pointer' : 'default';
     svg.appendChild(rect);
+  } else if (annotation.type === 'freehand-highlight' && points.length >= 2) {
+    const pointsStr = points.map((p) => `${p.x},${p.y}`).join(' ');
+    const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    poly.setAttribute('points', pointsStr);
+    poly.setAttribute('stroke', annotation.color);
+    poly.setAttribute('stroke-width', '16');
+    poly.setAttribute('stroke-opacity', isSelected ? '0.6' : '0.35');
+    poly.setAttribute('stroke-linecap', 'round');
+    poly.setAttribute('stroke-linejoin', 'round');
+    poly.setAttribute('fill', 'none');
+    poly.setAttribute('data-annotation-id', annotation.id);
+    poly.style.pointerEvents = selectionMode ? 'stroke' : 'none';
+    poly.style.cursor = selectionMode ? 'pointer' : 'default';
+    svg.appendChild(poly);
+    // Wide transparent hit area
+    const hitPoly = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    hitPoly.setAttribute('points', pointsStr);
+    hitPoly.setAttribute('stroke', 'transparent');
+    hitPoly.setAttribute('stroke-width', '24');
+    hitPoly.setAttribute('fill', 'none');
+    hitPoly.setAttribute('data-annotation-id', annotation.id);
+    hitPoly.style.pointerEvents = selectionMode ? 'stroke' : 'none';
+    hitPoly.style.cursor = selectionMode ? 'pointer' : 'default';
+    svg.appendChild(hitPoly);
   }
 }
 
@@ -976,7 +1036,7 @@ export function renderRunningLengthDisplay(
 }
 
 export interface RenderSVGCurrentAnnotationOptions {
-  annotationTool: 'text' | 'arrow' | 'rectangle' | 'circle' | null;
+  annotationTool: 'text' | 'arrow' | 'rectangle' | 'circle' | 'freehand-highlight' | null;
   currentAnnotation: { x: number; y: number }[];
   mousePosition: { x: number; y: number } | null;
   annotationColor: string;

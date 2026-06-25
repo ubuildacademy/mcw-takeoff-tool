@@ -307,7 +307,7 @@ export function ToolsDialog({
                 disabled={!onAddHyperlink}
               >
                 <Link2 className="w-4 h-4 mr-2 shrink-0" />
-                Add hyperlink (H)
+                Add hyperlink (⇧H)
               </Button>
 
               {showAutoHyperlink && (

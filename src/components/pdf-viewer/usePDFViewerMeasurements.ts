@@ -74,6 +74,10 @@ export interface UsePDFViewerMeasurementsResult {
   setAnnotationDragStart: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
   annotationDragBoxRef: React.MutableRefObject<{ x: number; y: number; width: number; height: number } | null>;
   setAnnotationDragBox: React.Dispatch<React.SetStateAction<{ x: number; y: number; width: number; height: number } | null>>;
+  // Freehand highlight drawing state
+  freehandHighlightDrawingRef: React.MutableRefObject<boolean>;
+  freehandHighlightPointsRef: React.MutableRefObject<{ x: number; y: number }[]>;
+  freehandHighlightJustCompletedRef: React.MutableRefObject<boolean>;
   // Annotation move state (drag selected annotation in selection mode; move all selected on drag)
   annotationMoveId: string | null;
   setAnnotationMoveId: React.Dispatch<React.SetStateAction<string | null>>;
@@ -201,6 +205,11 @@ export function usePDFViewerMeasurements({
     },
     [scheduleEphemeralPaintRef]
   );
+
+  // Freehand highlight drawing state
+  const freehandHighlightDrawingRef = useRef<boolean>(false);
+  const freehandHighlightPointsRef = useRef<{ x: number; y: number }[]>([]);
+  const freehandHighlightJustCompletedRef = useRef<boolean>(false);
 
   // Annotation move state (drag selected annotation in selection mode; move all selected on drag)
   const [annotationMoveId, setAnnotationMoveId] = useState<string | null>(null);
@@ -395,6 +404,9 @@ export function usePDFViewerMeasurements({
     setAnnotationDragStart,
     annotationDragBoxRef,
     setAnnotationDragBox,
+    freehandHighlightDrawingRef,
+    freehandHighlightPointsRef,
+    freehandHighlightJustCompletedRef,
     annotationMoveId,
     setAnnotationMoveId,
     annotationMoveIds,

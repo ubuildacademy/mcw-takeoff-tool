@@ -28,6 +28,7 @@ import {
   renderSVGCalibrationPointsEphemeral,
   renderRunningLengthDisplay,
   renderSVGCurrentAnnotation,
+  renderSVGFreehandHighlightPreview,
   renderSVGCurrentMeasurementCommitted,
   renderSVGCurrentMeasurementEphemeral,
 } from './pdf-viewer/pdfViewerRenderers';
@@ -67,6 +68,7 @@ import {
 } from '../utils/takeoffMeasurementLookup';
 import { setRestoreScrollPosition, setGetCurrentScrollPosition, setTriggerCalibration, setTriggerFitToWindow } from '../lib/windowBridge';
 import { ocrApiService } from '../services/apiService';
+import { generateDistinctColor } from '../utils/commonUtils';
 
 /** Normalized offset for pasted markups (~2% of page) so pasted markup is visible next to original */
 const _PASTE_OFFSET = 0.02;
@@ -106,6 +108,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   onMeasurementStateChange,
   annotationTool = null,
   annotationColor = '#FF0000',
+  annotationFilled = false,
   onAnnotationToolChange,
   onLocationChange,
   onPDFRendered,
@@ -468,6 +471,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setAnnotationDragStart,
     annotationDragBoxRef,
     setAnnotationDragBox,
+    freehandHighlightDrawingRef,
+    freehandHighlightPointsRef,
+    freehandHighlightJustCompletedRef,
     annotationMoveId,
     setAnnotationMoveId,
     annotationMoveIds,
@@ -596,12 +602,16 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           const measurementId = measurementTarget.getAttribute('data-measurement-id');
           if (measurementId) {
             e.preventDefault();
+            // Auto-select the right-clicked markup if not already in selection
+            if (!selectedMarkupIds.includes(measurementId)) {
+              setSelectedMarkupIds([measurementId]);
+            }
             setMeasurementContextMenu({ measurementId, x: e.clientX, y: e.clientY });
           }
         }
       }
     },
-    [isSelectionMode, onHyperlinkContextMenu]
+    [isSelectionMode, onHyperlinkContextMenu, selectedMarkupIds, setSelectedMarkupIds]
   );
 
   // Keep ref in sync with state (runs synchronously during render)
@@ -642,12 +652,113 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const hiddenMarkupConditionIds = useConditionStore(
     useShallow((s) => (s.hiddenMarkupConditionIdsByProject ?? {})[effectiveProjectId ?? ''] ?? [])
   );
+  const addCondition = useConditionStore((s) => s.addCondition);
+  const getProjectConditions = useConditionStore((s) => s.getProjectConditions);
   const addAnnotation = useAnnotationStore((s) => s.addAnnotation);
   const updateAnnotation = useAnnotationStore((s) => s.updateAnnotation);
   const getPageTakeoffMeasurements = useMeasurementStore((s) => s.getPageTakeoffMeasurements);
   const updateTakeoffMeasurement = useMeasurementStore((s) => s.updateTakeoffMeasurement);
   const reorderTakeoffMeasurementStack = useMeasurementStore((s) => s.reorderTakeoffMeasurementStack);
   const sendTakeoffMeasurementToBack = useMeasurementStore((s) => s.sendTakeoffMeasurementToBack);
+  const copiedMarkups = useMeasurementStore((s) => s.copiedMarkups);
+  const copyMarkupsByIds = useMeasurementStore((s) => s.copyMarkupsByIds);
+  const addTakeoffMeasurementForPaste = useMeasurementStore((s) => s.addTakeoffMeasurement);
+  const reassignMarkupsToCondition = useMeasurementStore((s) => s.reassignMarkupsToCondition);
+
+  const handlePasteFromContextMenu = useCallback(() => {
+    if (!copiedMarkups.length || !effectiveProjectId || !file.id) return;
+    setMeasurementContextMenu(null);
+    const offsetPoint = (p: { x: number; y: number }) => ({ x: p.x + 0.02, y: p.y + 0.02 });
+    for (const m of copiedMarkups) {
+      const payload = {
+        projectId: effectiveProjectId,
+        sheetId: file.id,
+        pdfPage: currentPage,
+        conditionId: m.conditionId,
+        type: m.type,
+        points: m.points.map(offsetPoint),
+        pdfCoordinates: m.pdfCoordinates.map(offsetPoint),
+        calculatedValue: m.calculatedValue,
+        unit: m.unit,
+        conditionColor: m.conditionColor,
+        conditionName: m.conditionName,
+        ...(m.conditionMarkerShape && { conditionMarkerShape: m.conditionMarkerShape }),
+        ...(m.perimeterValue != null && { perimeterValue: m.perimeterValue }),
+        ...(m.areaValue != null && { areaValue: m.areaValue }),
+        ...(m.cutouts && m.cutouts.length > 0 && {
+          cutouts: m.cutouts.map((c) => ({
+            ...c,
+            points: c.points.map(offsetPoint),
+            pdfCoordinates: c.pdfCoordinates.map(offsetPoint),
+          })),
+        }),
+        ...(m.netCalculatedValue != null && { netCalculatedValue: m.netCalculatedValue }),
+        ...(m.description != null && { description: m.description }),
+      };
+      addTakeoffMeasurementForPaste(payload).catch((err) => {
+        if (isTakeoffMeasurementCreateAborted(err)) return;
+        console.error('Paste from context menu failed:', err);
+      });
+    }
+  }, [copiedMarkups, effectiveProjectId, file.id, currentPage, addTakeoffMeasurementForPaste]);
+
+  const handlePasteAsNewConditionFromContextMenu = useCallback(async () => {
+    if (!copiedMarkups.length || !effectiveProjectId || !file.id) return;
+    setMeasurementContextMenu(null);
+    const firstMarkup = copiedMarkups[0];
+    const sourceCondition = conditions.find((c) => c.id === firstMarkup.conditionId);
+    if (!sourceCondition) return;
+    const existingColors = getProjectConditions(effectiveProjectId)
+      .map((c) => c.color)
+      .filter((c): c is string => typeof c === 'string');
+    const newColor = generateDistinctColor(existingColors);
+    const newName = `${sourceCondition.name} - COPY`;
+    const { id: _sourceId, ...sourceConditionData } = sourceCondition;
+    try {
+      const newConditionId = await addCondition({
+        ...sourceConditionData,
+        name: newName,
+        color: newColor,
+        projectId: effectiveProjectId,
+      });
+      const offsetPoint = (p: { x: number; y: number }) => ({ x: p.x + 0.02, y: p.y + 0.02 });
+      for (const m of copiedMarkups) {
+        const payload = {
+          projectId: effectiveProjectId,
+          sheetId: file.id,
+          pdfPage: currentPage,
+          conditionId: newConditionId,
+          type: m.type,
+          points: m.points.map(offsetPoint),
+          pdfCoordinates: m.pdfCoordinates.map(offsetPoint),
+          calculatedValue: m.calculatedValue,
+          unit: m.unit,
+          conditionColor: newColor,
+          conditionName: newName,
+          ...(m.conditionMarkerShape && { conditionMarkerShape: m.conditionMarkerShape }),
+          ...(m.perimeterValue != null && { perimeterValue: m.perimeterValue }),
+          ...(m.areaValue != null && { areaValue: m.areaValue }),
+          ...(m.cutouts && m.cutouts.length > 0 && {
+            cutouts: m.cutouts.map((c) => ({
+              ...c,
+              points: c.points.map(offsetPoint),
+              pdfCoordinates: c.pdfCoordinates.map(offsetPoint),
+            })),
+          }),
+          ...(m.netCalculatedValue != null && { netCalculatedValue: m.netCalculatedValue }),
+          ...(m.description != null && { description: m.description }),
+        };
+        addTakeoffMeasurementForPaste(payload).catch((err) => {
+          if (isTakeoffMeasurementCreateAborted(err)) return;
+          console.error('Paste as new condition markup failed:', err);
+        });
+      }
+      setSelectedCondition(newConditionId);
+    } catch (err) {
+      console.error('Paste as new condition failed:', err);
+      toast.error('Failed to create new condition');
+    }
+  }, [copiedMarkups, effectiveProjectId, file.id, currentPage, conditions, getProjectConditions, addCondition, addTakeoffMeasurementForPaste, setSelectedCondition]);
 
   const measurementContextMenuStack = useMemo(() => {
     if (!measurementContextMenu || !effectiveProjectId || !file.id) {
@@ -725,6 +836,36 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       getPageTakeoffMeasurements,
     ]
   );
+
+  const handleCopyFromContextMenu = useCallback(() => {
+    if (!measurementContextMenu) return;
+    const { measurementId } = measurementContextMenu;
+    const idsToCopy = selectedMeasurementIds.includes(measurementId)
+      ? selectedMeasurementIds
+      : [measurementId];
+    copyMarkupsByIds(idsToCopy);
+    setMeasurementContextMenu(null);
+  }, [measurementContextMenu, selectedMeasurementIds, copyMarkupsByIds]);
+
+  const handleMoveToCondition = useCallback(async (targetConditionId: string) => {
+    if (!measurementContextMenu) return;
+    const { measurementId } = measurementContextMenu;
+    const clickedMeasurement = localTakeoffMeasurements.find((m) => m.id === measurementId);
+    if (!clickedMeasurement) return;
+    setMeasurementContextMenu(null);
+    const idsToMove = selectedMeasurementIds.includes(measurementId)
+      ? selectedMeasurementIds.filter((id) => {
+          const m = localTakeoffMeasurements.find((x) => x.id === id);
+          return m?.type === clickedMeasurement.type;
+        })
+      : [measurementId];
+    try {
+      await reassignMarkupsToCondition(idsToMove, targetConditionId);
+    } catch (err) {
+      console.error('Move to condition failed:', err);
+      toast.error('Failed to move markups');
+    }
+  }, [measurementContextMenu, localTakeoffMeasurements, selectedMeasurementIds, reassignMarkupsToCondition]);
 
   const syncMeasurementTypeFromSelectedCondition = useCallback(() => {
     const condition = getSelectedCondition();
@@ -898,6 +1039,10 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     isMeasuringRef,
     completeMeasurementRef,
     annotationColor,
+    annotationFilled,
+    freehandHighlightDrawingRef,
+    freehandHighlightPointsRef,
+    freehandHighlightJustCompletedRef,
     setTextInputPosition,
     setShowTextInput,
     localTakeoffMeasurements,
@@ -1011,6 +1156,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       pageNum === currentPage
     ) {
       renderSVGAnnotationDragBox(ephemeralSvg, annotationDragLive, viewport, annotationColor);
+    }
+
+    if (annotationTool === 'freehand-highlight' && freehandHighlightDrawingRef.current && pageNum === currentPage) {
+      const fhPts = freehandHighlightPointsRef.current;
+      if (fhPts.length >= 2) {
+        renderSVGFreehandHighlightPreview(ephemeralSvg, fhPts, viewport, annotationColor);
+      }
     }
     const measurementDragLive = measurementDragBoxRef.current;
     if (measurementDragLive && (measurementType === 'area' || measurementType === 'volume') && pageNum === currentPage) {
@@ -1249,7 +1401,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     annotationElements.forEach((el) => {
       const element = el as SVGElement;
       const tag = element.tagName?.toLowerCase();
-      const strokeOnly = tag === 'rect' || tag === 'ellipse';
+      const strokeOnly = (tag === 'rect' || tag === 'ellipse') && element.getAttribute('fill') === 'none';
       element.style.pointerEvents = selectionMode ? (strokeOnly ? 'stroke' : 'auto') : 'none';
       element.style.cursor = selectionMode ? 'pointer' : 'default';
     });
@@ -1709,7 +1861,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         if (annotation) {
           const defaultColor = annotation.color;
           const defaultStrokeWidth = '3';
-          if (element.tagName === 'line' || element.tagName === 'rect' || element.tagName === 'ellipse') {
+          if (element.tagName === 'polyline') {
+            element.setAttribute('stroke-opacity', '0.35');
+          } else if (element.tagName === 'line' || element.tagName === 'rect' || element.tagName === 'ellipse') {
             element.setAttribute('stroke', defaultColor);
             element.setAttribute('stroke-width', defaultStrokeWidth);
           } else if (element.tagName === 'text') {
@@ -1749,11 +1903,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       newAnnotationElements.forEach((el) => {
         const element = el as SVGElement;
         if (element.getAttribute('stroke') === 'transparent') return;
-        if (element.tagName === 'line' || element.tagName === 'rect' || element.tagName === 'ellipse') {
-          element.setAttribute('stroke', '#00ff00');
+        const annotation = localAnnotations.find((a) => a.id === newSelectedId);
+        const selColor = annotation?.color ?? element.getAttribute('stroke') ?? '#000';
+        if (element.tagName === 'polyline') {
+          element.setAttribute('stroke-opacity', '0.6');
+        } else if (element.tagName === 'line' || element.tagName === 'rect' || element.tagName === 'ellipse') {
+          element.setAttribute('stroke', selColor);
           element.setAttribute('stroke-width', '5');
         } else if (element.tagName === 'text') {
-          element.setAttribute('fill', '#00ff00');
+          element.setAttribute('fill', selColor);
         }
       });
     };
@@ -3302,7 +3460,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     return () => onRegisterFinishMeasurement(null);
   }, [onRegisterFinishMeasurement, isContinuousDrawingRef, completeContinuousLinearMeasurementRef, currentMeasurementRef, completeMeasurementRef]);
 
-  const prevAnnotationToolRef = useRef<'text' | 'arrow' | 'rectangle' | 'circle' | null>(null);
+  const prevAnnotationToolRef = useRef<'text' | 'arrow' | 'rectangle' | 'circle' | 'freehand-highlight' | null>(null);
 
   // Set annotation mode when annotation tool is selected
   useEffect(() => {
@@ -3474,9 +3632,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         ref={containerRef}
         className="canvas-container flex-1 h-full overflow-auto overscroll-contain"
         style={{ 
-          cursor: cutoutMode 
-            ? 'crosshair' 
-            : (isCalibrating ? 'crosshair' : (isMeasuring ? 'crosshair' : (isBoxSelectionMode ? 'crosshair' : (isSelectionMode ? 'pointer' : 'default'))))
+          cursor: cutoutMode
+            ? 'crosshair'
+            : (isCalibrating ? 'crosshair' : (isMeasuring ? 'crosshair' : (isBoxSelectionMode ? 'crosshair' : (annotationTool ? 'crosshair' : (isSelectionMode ? 'pointer' : 'default')))))
         }}
       >
         <div className="flex justify-start p-6 relative">
@@ -3515,20 +3673,38 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         </div>
       </div>
 
-      {measurementContextMenu && (
-        <MeasurementContextMenu
-          x={measurementContextMenu.x}
-          y={measurementContextMenu.y}
-          onBringForward={handleMeasurementBringForward}
-          onSendBackward={handleMeasurementSendBackward}
-          onSendToBack={handleMeasurementSendToBack}
-          canBringForward={measurementContextMenuStack.canBringForward}
-          canSendBackward={measurementContextMenuStack.canSendBackward}
-          canSendToBack={measurementContextMenuStack.canSendToBack}
-          onSelectAllSimilar={handleMeasurementSelectAllSimilar}
-          onClose={() => setMeasurementContextMenu(null)}
-        />
-      )}
+      {measurementContextMenu && (() => {
+        const contextMeasurement = localTakeoffMeasurements.find(
+          (m) => m.id === measurementContextMenu.measurementId
+        );
+        // Scope to current project only so conditions from other projects never appear
+        const projectConditions = conditions.filter(
+          (c) => c.projectId === effectiveProjectId
+        );
+        return (
+          <MeasurementContextMenu
+            x={measurementContextMenu.x}
+            y={measurementContextMenu.y}
+            onCopy={handleCopyFromContextMenu}
+            onPaste={handlePasteFromContextMenu}
+            onPasteAsNewCondition={handlePasteAsNewConditionFromContextMenu}
+            canPaste={copiedMarkups.length > 0}
+            onBringForward={handleMeasurementBringForward}
+            onSendBackward={handleMeasurementSendBackward}
+            onSendToBack={handleMeasurementSendToBack}
+            canBringForward={measurementContextMenuStack.canBringForward}
+            canSendBackward={measurementContextMenuStack.canSendBackward}
+            canSendToBack={measurementContextMenuStack.canSendToBack}
+            onSelectAllSimilar={handleMeasurementSelectAllSimilar}
+            conditions={projectConditions}
+            currentConditionId={contextMeasurement?.conditionId}
+            currentConditionType={contextMeasurement?.type}
+            currentMeasurementUnit={contextMeasurement?.unit}
+            onMoveToCondition={handleMoveToCondition}
+            onClose={() => setMeasurementContextMenu(null)}
+          />
+        );
+      })()}
 
       <PDFViewerMagnifier
         pdfCanvasRef={pdfCanvasRef}

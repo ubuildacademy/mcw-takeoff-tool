@@ -29,6 +29,8 @@ import {
   ZoomOut,
   Maximize2,
   Wrench,
+  Highlighter,
+  PaintBucket,
 } from 'lucide-react';
 import type { TakeoffWorkspaceHeaderProps } from './TakeoffWorkspaceHeader.types';
 import { ToolsDialog } from '../ToolsDialog';
@@ -52,8 +54,10 @@ export function TakeoffWorkspaceHeader({
   onCalibrateScale,
   annotationTool,
   annotationColor,
+  annotationFilled,
   onAnnotationToolChange,
   onAnnotationColorChange,
+  onAnnotationFilledChange,
   onClearAnnotations,
   isOrthoSnapping,
   isMeasuring,
@@ -276,6 +280,14 @@ export function TakeoffWorkspaceHeader({
             >
               <Type className="w-4 h-4 mr-2" />
               Text Annotation
+              <span className="ml-auto text-xs text-muted-foreground">T</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => onAnnotationToolChange(annotationTool === 'freehand-highlight' ? null : 'freehand-highlight')}
+              className={annotationTool === 'freehand-highlight' ? 'bg-accent' : ''}
+            >
+              <Highlighter className="w-4 h-4 mr-2" />
+              Highlighter  <span className="ml-auto text-xs text-muted-foreground">H</span>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuLabel className="text-xs">Shapes</DropdownMenuLabel>
@@ -285,6 +297,7 @@ export function TakeoffWorkspaceHeader({
             >
               <ArrowRight className="w-4 h-4 mr-2" />
               Arrow
+              <span className="ml-auto text-xs text-muted-foreground">A</span>
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => onAnnotationToolChange(annotationTool === 'rectangle' ? null : 'rectangle')}
@@ -292,6 +305,7 @@ export function TakeoffWorkspaceHeader({
             >
               <Square className="w-4 h-4 mr-2" />
               Rectangle
+              <span className="ml-auto text-xs text-muted-foreground">R</span>
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => onAnnotationToolChange(annotationTool === 'circle' ? null : 'circle')}
@@ -299,7 +313,18 @@ export function TakeoffWorkspaceHeader({
             >
               <Circle className="w-4 h-4 mr-2" />
               Circle
+              <span className="ml-auto text-xs text-muted-foreground">C</span>
             </DropdownMenuItem>
+            {(annotationTool === 'rectangle' || annotationTool === 'circle') && (
+              <DropdownMenuItem
+                onClick={(e) => { e.preventDefault(); onAnnotationFilledChange(!annotationFilled); }}
+                className={annotationFilled ? 'bg-accent' : ''}
+              >
+                <PaintBucket className="w-4 h-4 mr-2" />
+                Filled
+                <span className="ml-auto text-xs text-muted-foreground">{annotationFilled ? 'On' : 'Off'}</span>
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem className="flex items-center justify-between">
               <div className="flex items-center">

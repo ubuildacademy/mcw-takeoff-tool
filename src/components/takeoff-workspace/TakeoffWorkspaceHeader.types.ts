@@ -24,7 +24,7 @@ export interface OcrJobEntry {
   totalPages?: number;
 }
 
-export type AnnotationTool = 'text' | 'arrow' | 'rectangle' | 'circle' | null;
+export type AnnotationTool = 'text' | 'arrow' | 'rectangle' | 'circle' | 'freehand-highlight' | null;
 
 export interface TakeoffWorkspaceHeaderProps {
   onBackToProjects: () => void;
@@ -40,8 +40,10 @@ export interface TakeoffWorkspaceHeaderProps {
   onCalibrateScale: () => void;
   annotationTool: AnnotationTool;
   annotationColor: string;
+  annotationFilled: boolean;
   onAnnotationToolChange: (tool: AnnotationTool) => void;
   onAnnotationColorChange: (color: string) => void;
+  onAnnotationFilledChange: (filled: boolean) => void;
   onClearAnnotations: () => void;
   isOrthoSnapping: boolean;
   isMeasuring: boolean;

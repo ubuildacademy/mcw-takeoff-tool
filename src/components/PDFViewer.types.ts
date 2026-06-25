@@ -64,9 +64,10 @@ export interface PDFViewerProps {
     measurementType: string,
     isOrthoSnapping: boolean
   ) => void;
-  annotationTool?: 'text' | 'arrow' | 'rectangle' | 'circle' | null;
+  annotationTool?: 'text' | 'arrow' | 'rectangle' | 'circle' | 'freehand-highlight' | null;
   annotationColor?: string;
-  onAnnotationToolChange?: (tool: 'text' | 'arrow' | 'rectangle' | 'circle' | null) => void;
+  annotationFilled?: boolean;
+  onAnnotationToolChange?: (tool: 'text' | 'arrow' | 'rectangle' | 'circle' | 'freehand-highlight' | null) => void;
   onLocationChange?: (x: number, y: number) => void;
   onPDFRendered?: () => void;
   visualSearchMode?: boolean;

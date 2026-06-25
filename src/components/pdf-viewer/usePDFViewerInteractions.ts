@@ -21,6 +21,7 @@ import {
   normalizeRotationDeg,
 } from '../../utils/measurementGeometry';
 import { isEditableKeyboardTarget } from '../../utils/keyboardUtils';
+import { generateDistinctColor } from '../../utils/commonUtils';
 import { getMarkupIdsFromElementsFromPoint } from '../../utils/markupHitTest';
 import { toast } from 'sonner';
 import {
@@ -73,11 +74,12 @@ function getCanvasCoordinateSpace(
   return { interactiveScale, useLastRenderedViewport, effectiveRotation };
 }
 
-const ANNOTATION_SHORTCUTS: Record<string, 'rectangle' | 'text' | 'circle' | 'arrow'> = {
+const ANNOTATION_SHORTCUTS: Record<string, 'rectangle' | 'text' | 'circle' | 'arrow' | 'freehand-highlight'> = {
   r: 'rectangle',
   t: 'text',
   c: 'circle',
   a: 'arrow',
+  h: 'freehand-highlight',
 };
 
 /** Max zoom scale to avoid slow/frozen PDF (canvas size = viewport × devicePixelRatio; ~265%+ becomes very heavy). */
@@ -107,10 +109,10 @@ export interface UsePDFViewerInteractionsOptions {
   showTextInput: boolean;
   applyInteractiveZoomTransforms: (overrideScale?: number, skipScrollAdjust?: boolean) => void;
   // Keyboard handler options
-  annotationTool: 'text' | 'arrow' | 'rectangle' | 'circle' | null;
+  annotationTool: 'text' | 'arrow' | 'rectangle' | 'circle' | 'freehand-highlight' | null;
   currentAnnotation: { x: number; y: number }[];
   setCurrentAnnotation: React.Dispatch<React.SetStateAction<{ x: number; y: number }[]>>;
-  onAnnotationToolChange?: (tool: 'text' | 'arrow' | 'rectangle' | 'circle' | null) => void;
+  onAnnotationToolChange?: (tool: 'text' | 'arrow' | 'rectangle' | 'circle' | 'freehand-highlight' | null) => void;
   calibrationPoints: { x: number; y: number }[];
   setCalibrationPoints: React.Dispatch<React.SetStateAction<{ x: number; y: number }[]>>;
   setIsCalibrating: React.Dispatch<React.SetStateAction<boolean>>;
@@ -230,6 +232,10 @@ export interface UsePDFViewerInteractionsOptions {
   completeMeasurementRef: MutableRefObject<(points: { x: number; y: number }[]) => Promise<boolean>>;
   // Store-derived / callbacks
   annotationColor: string;
+  annotationFilled: boolean;
+  freehandHighlightDrawingRef: React.MutableRefObject<boolean>;
+  freehandHighlightPointsRef: React.MutableRefObject<{ x: number; y: number }[]>;
+  freehandHighlightJustCompletedRef: React.MutableRefObject<boolean>;
   setTextInputPosition: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
   setShowTextInput: React.Dispatch<React.SetStateAction<boolean>>;
   localTakeoffMeasurements: import('../../types').TakeoffMeasurement[];
@@ -400,6 +406,10 @@ export function usePDFViewerInteractions(
     isMeasuringRef,
     completeMeasurementRef,
     annotationColor,
+    annotationFilled,
+    freehandHighlightDrawingRef,
+    freehandHighlightPointsRef,
+    freehandHighlightJustCompletedRef,
     setTextInputPosition,
     setShowTextInput,
     localTakeoffMeasurements,
@@ -440,6 +450,10 @@ export function usePDFViewerInteractions(
   const copyMarkupsByIds = useMeasurementStore((s) => s.copyMarkupsByIds);
   const copiedMarkups = useMeasurementStore((s) => s.copiedMarkups);
   const addTakeoffMeasurement = useMeasurementStore((s) => s.addTakeoffMeasurement);
+  const addCondition = useConditionStore((s) => s.addCondition);
+  const setSelectedCondition = useConditionStore((s) => s.setSelectedCondition);
+  const getProjectConditions = useConditionStore((s) => s.getProjectConditions);
+  const getConditionById = useConditionStore((s) => s.getConditionById);
   const getPageTakeoffMeasurements = useMeasurementStore((s) => s.getPageTakeoffMeasurements);
   const _getSelectedCondition = useConditionStore((s) => s.getSelectedCondition);
   const selectedConditionId = useConditionStore((s) => s.selectedConditionId);
@@ -593,12 +607,72 @@ export function usePDFViewerInteractions(
     async (event: KeyboardEvent) => {
       const keyNorm = (event.key ?? '').toLowerCase();
       const isCopy = (event.metaKey || event.ctrlKey) && keyNorm === 'c';
-      const isPaste = (event.metaKey || event.ctrlKey) && keyNorm === 'v';
+      const isPaste = (event.metaKey || event.ctrlKey) && !event.shiftKey && keyNorm === 'v';
+      const isPasteAsNew = (event.metaKey || event.ctrlKey) && event.shiftKey && keyNorm === 'v';
       let handled = false;
 
       if (isCopy && isSelectionMode && selectedMeasurementIds.length > 0 && currentProjectId && file.id) {
         event.preventDefault();
         copyMarkupsByIds(selectedMeasurementIds);
+        handled = true;
+      }
+
+      if (isPasteAsNew && copiedMarkups.length > 0 && currentProjectId && file.id) {
+        event.preventDefault();
+        const firstMarkup = copiedMarkups[0];
+        const sourceCondition = getConditionById(firstMarkup.conditionId);
+        if (sourceCondition) {
+          const existingColors = getProjectConditions(currentProjectId)
+            .map((c) => c.color)
+            .filter((c): c is string => typeof c === 'string');
+          const newColor = generateDistinctColor(existingColors);
+          const newName = `${sourceCondition.name} - COPY`;
+          const { id: _sourceId, ...sourceConditionData } = sourceCondition;
+          try {
+            const newConditionId = await addCondition({
+              ...sourceConditionData,
+              name: newName,
+              color: newColor,
+              projectId: currentProjectId,
+            });
+            const offsetPoint = (p: { x: number; y: number }) => ({ x: p.x + PASTE_OFFSET, y: p.y + PASTE_OFFSET });
+            for (const m of copiedMarkups) {
+              const payload = {
+                projectId: currentProjectId,
+                sheetId: file.id,
+                pdfPage: currentPage,
+                conditionId: newConditionId,
+                type: m.type,
+                points: m.points.map(offsetPoint),
+                pdfCoordinates: m.pdfCoordinates.map(offsetPoint),
+                calculatedValue: m.calculatedValue,
+                unit: m.unit,
+                conditionColor: newColor,
+                conditionName: newName,
+                ...(m.conditionMarkerShape && { conditionMarkerShape: m.conditionMarkerShape }),
+                ...(m.perimeterValue != null && { perimeterValue: m.perimeterValue }),
+                ...(m.areaValue != null && { areaValue: m.areaValue }),
+                ...(m.cutouts && m.cutouts.length > 0 && {
+                  cutouts: m.cutouts.map((c) => ({
+                    ...c,
+                    points: c.points.map(offsetPoint),
+                    pdfCoordinates: c.pdfCoordinates.map(offsetPoint),
+                  })),
+                }),
+                ...(m.netCalculatedValue != null && { netCalculatedValue: m.netCalculatedValue }),
+                ...(m.description != null && { description: m.description }),
+              };
+              addTakeoffMeasurement(payload).catch((err) => {
+                if (isTakeoffMeasurementCreateAborted(err)) return;
+                console.error('Paste as new condition markup failed:', err);
+              });
+            }
+            setSelectedCondition(newConditionId);
+          } catch (err) {
+            console.error('Paste as new condition failed:', err);
+            toast.error('Failed to create new condition');
+          }
+        }
         handled = true;
       }
 
@@ -645,13 +719,14 @@ export function usePDFViewerInteractions(
 
       if (handled) return;
 
-      // Annotation shortcuts R/T/C/A: only when no condition selected and not typing in input
+      // Annotation shortcuts R/T/C/A/H: only when no condition selected and not typing in input
       const isTyping = isEditableKeyboardTarget(event.target);
       if (
         !isTyping &&
         !event.metaKey &&
         !event.ctrlKey &&
         !event.altKey &&
+        !event.shiftKey &&
         !selectedConditionId &&
         onAnnotationToolChange &&
         keyNorm in ANNOTATION_SHORTCUTS
@@ -679,7 +754,17 @@ export function usePDFViewerInteractions(
 
       if (event.key === 'Escape' && annotationTool) {
         event.preventDefault();
-        if (currentAnnotation.length > 0) {
+        if (annotationTool === 'freehand-highlight') {
+          freehandHighlightDrawingRef.current = false;
+          freehandHighlightPointsRef.current = [];
+          onAnnotationToolChange?.(null);
+          queueEphemeralPaint();
+        } else if (annotationTool === 'rectangle' || annotationTool === 'circle' || annotationTool === 'arrow') {
+          setAnnotationDragStart(null);
+          setAnnotationDragBox(null);
+          onAnnotationToolChange?.(null);
+          queueEphemeralPaint();
+        } else if (currentAnnotation.length > 0) {
           setCurrentAnnotation((prev) => {
             const newPoints = [...prev];
             newPoints.pop();
@@ -750,6 +835,11 @@ export function usePDFViewerInteractions(
             }
             return newMeasurement;
           });
+        } else {
+          // No in-progress points — exit draw mode and return to selection mode
+          clearCanvasConditionSelection();
+          setMousePosition(null);
+          queueEphemeralPaint();
         }
       } else if (
         event.key === 'Escape' &&
@@ -842,6 +932,10 @@ export function usePDFViewerInteractions(
       copyMarkupsByIds,
       copiedMarkups,
       addTakeoffMeasurement,
+      addCondition,
+      setSelectedCondition,
+      getProjectConditions,
+      getConditionById,
       setCurrentAnnotation,
       setCalibrationPoints,
       setIsCalibrating,
@@ -864,6 +958,8 @@ export function usePDFViewerInteractions(
       cutoutDragStart,
       setCutoutDragStart,
       setCutoutDragBox,
+      setAnnotationDragStart,
+      setAnnotationDragBox,
       queueEphemeralPaint,
     ]
   );
@@ -1032,6 +1128,46 @@ export function usePDFViewerInteractions(
           event.stopPropagation();
           return;
         }
+      }
+
+      if (annotationTool === 'freehand-highlight' && !(visualSearchMode || !!titleblockSelectionMode)) {
+        const coords = getCssCoordsFromEvent(event);
+        if (coords) {
+          const { useLastRenderedViewport: fhDnUseLR, effectiveRotation: fhDnEffRot } =
+            getCanvasCoordinateSpace(
+              viewState.scale || 1,
+              lastRenderedScaleRef.current || 1,
+              pdfCanvasRef.current,
+              viewState.rotation ?? 0,
+              lastRenderedRotationRef.current ?? 0
+            );
+          let fhDnViewport = currentViewport;
+          if (!fhDnViewport && pdfPageRef.current) {
+            fhDnViewport = pdfPageRef.current.getViewport({
+              scale: lastRenderedScaleRef.current || viewState.scale,
+              rotation: fhDnEffRot,
+            });
+          }
+          if (fhDnUseLR && pdfPageRef.current) {
+            fhDnViewport = pdfPageRef.current.getViewport({
+              scale: lastRenderedScaleRef.current,
+              rotation: fhDnEffRot,
+            });
+          }
+          if (fhDnViewport) {
+            const fhDnDp = canvasPixelExtent(pdfCanvasRef.current, fhDnViewport);
+            const fhDnBase = pdfPageRef.current?.getViewport({ scale: 1, rotation: 0 }) ?? fhDnViewport;
+            const firstPt = cssToBaseNormalized(coords.x, coords.y, fhDnDp, fhDnBase, fhDnEffRot);
+            freehandHighlightDrawingRef.current = true;
+            freehandHighlightPointsRef.current = [firstPt];
+          } else {
+            freehandHighlightDrawingRef.current = true;
+            freehandHighlightPointsRef.current = [];
+          }
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        return;
       }
 
       if (isShapeTool && !(visualSearchMode || !!titleblockSelectionMode)) {
@@ -1468,6 +1604,29 @@ export function usePDFViewerInteractions(
         return;
       }
 
+      if (freehandHighlightDrawingRef.current && annotationTool === 'freehand-highlight') {
+        freehandHighlightDrawingRef.current = false;
+        const pdfPts = freehandHighlightPointsRef.current;
+        freehandHighlightPointsRef.current = [];
+        if (pdfPts.length >= 2 && currentProjectId && file.id) {
+          const created = addAnnotation({
+            projectId: currentProjectId,
+            sheetId: file.id,
+            type: 'freehand-highlight',
+            points: pdfPts,
+            color: annotationColor,
+            pageNumber: currentPage,
+          });
+          useUndoStore.getState().push({ type: 'annotation_add', id: created.id, annotation: created });
+          setLocalAnnotations((prev) => [...prev, created]);
+          freehandHighlightJustCompletedRef.current = true;
+        }
+        queueEphemeralPaint();
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
       if (annotationDragStart && ['arrow', 'rectangle', 'circle'].includes(annotationTool ?? '')) {
         const { useLastRenderedViewport: annDragUseLR, effectiveRotation: annDragEffRot } =
           getCanvasCoordinateSpace(
@@ -1526,6 +1685,7 @@ export function usePDFViewerInteractions(
                 type: annotationTool as 'arrow' | 'rectangle' | 'circle',
                 points: [p1, p2],
                 color: annotationColor,
+                filled: (annotationTool === 'rectangle' || annotationTool === 'circle') ? annotationFilled : undefined,
                 pageNumber: currentPage,
               });
               useUndoStore.getState().push({ type: 'annotation_add', id: created.id, annotation: created });
@@ -1634,6 +1794,7 @@ export function usePDFViewerInteractions(
       annotationTool,
       addAnnotation,
       annotationColor,
+      annotationFilled,
       currentPage,
       currentProjectId,
       file.id,
@@ -1795,6 +1956,22 @@ export function usePDFViewerInteractions(
         }
         return;
       }
+      if (freehandHighlightDrawingRef.current && annotationTool === 'freehand-highlight') {
+        const coords = getCssCoordsFromEvent(event);
+        if (coords) {
+          const normPt = cssToBaseNormalized(coords.x, coords.y, dp, baseViewport, effectiveRotation);
+          const pts = freehandHighlightPointsRef.current;
+          const last = pts[pts.length - 1];
+          const normThreshold = 6 / dp.w;
+          const dist = last ? Math.hypot(normPt.x - last.x, normPt.y - last.y) : Infinity;
+          if (dist > normThreshold) {
+            freehandHighlightPointsRef.current = [...pts, normPt];
+            queueEphemeralPaint();
+          }
+        }
+        return;
+      }
+
       if (annotationDragStart && ['arrow', 'rectangle', 'circle'].includes(annotationTool ?? '')) {
         const coords = getCssCoordsFromEvent(event);
         if (coords) {
@@ -2231,6 +2408,7 @@ export function usePDFViewerInteractions(
       currentPage,
       addAnnotation,
       annotationColor,
+      annotationFilled,
       onAnnotationToolChange,
       viewState,
       setPageViewports,
@@ -2326,6 +2504,11 @@ export function usePDFViewerInteractions(
             return;
           }
         }
+      }
+      if (freehandHighlightJustCompletedRef.current) {
+        freehandHighlightJustCompletedRef.current = false;
+        e.stopPropagation();
+        return;
       }
       if (annotationMoveJustCompletedRef.current) {
         annotationMoveJustCompletedRef.current = false;
