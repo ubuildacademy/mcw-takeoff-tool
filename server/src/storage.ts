@@ -176,6 +176,7 @@ interface TakeoffMeasurementRow {
   perimeter_value?: number;
   area_value?: number;
   cutouts?: unknown;
+  arcs?: unknown;
   net_calculated_value?: number;
   stack_order?: number;
   created_at?: string;
@@ -261,6 +262,9 @@ function mapTakeoffMeasurementToDbRow(measurement: StoredTakeoffMeasurement): Re
   if (measurement.cutouts !== undefined) {
     row.cutouts = measurement.cutouts;
   }
+  if (measurement.arcs !== undefined) {
+    row.arcs = measurement.arcs;
+  }
   const net = optionalFiniteMeasurementNumber(measurement.netCalculatedValue);
   if (net !== undefined) {
     row.net_calculated_value = net;
@@ -295,6 +299,72 @@ export interface StoredTakeoffMeasurement {
   netCalculatedValue?: number;
   /** Z-order on page; lower = behind, higher = in front. */
   stackOrder?: number;
+  /** Arc segments (DXF bulge); segmentIndex i = points[i]→points[i+1]. Absent/null = all straight (null clears the column). */
+  arcs?: Array<{ segmentIndex: number; bulge: number }> | null;
+}
+
+export interface StoredSheetHyperlink {
+  id: string;
+  projectId: string;
+  sourceSheetId: string;
+  sourcePageNumber: number;
+  sourceRect: { x: number; y: number; width: number; height: number };
+  targetSheetId: string;
+  targetPageNumber: number;
+  targetUrl?: string | null;
+  targetViewport?: { x: number; y: number; zoom: number } | null;
+  origin?: 'manual' | 'batch';
+  detectedSheetRef?: string | null;
+  timestamp: string;
+}
+
+interface SheetHyperlinkRow {
+  id: string;
+  project_id: string;
+  source_sheet_id: string;
+  source_page_number: number;
+  source_rect: unknown;
+  target_sheet_id: string;
+  target_page_number: number;
+  target_url: string | null;
+  target_viewport: unknown;
+  origin: string;
+  detected_sheet_ref: string | null;
+  timestamp: string;
+}
+
+function mapHyperlinkRow(item: SheetHyperlinkRow): StoredSheetHyperlink {
+  return {
+    id: item.id,
+    projectId: item.project_id,
+    sourceSheetId: item.source_sheet_id,
+    sourcePageNumber: item.source_page_number,
+    sourceRect: item.source_rect as StoredSheetHyperlink['sourceRect'],
+    targetSheetId: item.target_sheet_id,
+    targetPageNumber: item.target_page_number,
+    targetUrl: item.target_url,
+    targetViewport: item.target_viewport as StoredSheetHyperlink['targetViewport'],
+    origin: item.origin === 'batch' ? 'batch' : 'manual',
+    detectedSheetRef: item.detected_sheet_ref,
+    timestamp: item.timestamp,
+  };
+}
+
+function mapHyperlinkToDbRow(h: StoredSheetHyperlink): Record<string, unknown> {
+  return {
+    id: h.id,
+    project_id: h.projectId,
+    source_sheet_id: h.sourceSheetId,
+    source_page_number: h.sourcePageNumber,
+    source_rect: h.sourceRect,
+    target_sheet_id: h.targetSheetId ?? '',
+    target_page_number: h.targetPageNumber ?? 1,
+    target_url: h.targetUrl ?? null,
+    target_viewport: h.targetViewport ?? null,
+    origin: h.origin === 'batch' ? 'batch' : 'manual',
+    detected_sheet_ref: h.detectedSheetRef ?? null,
+    timestamp: h.timestamp,
+  };
 }
 
 export interface StoredCalibration {
@@ -941,6 +1011,7 @@ class SupabaseStorage {
       perimeterValue: item.perimeter_value,
       areaValue: item.area_value,
       cutouts: item.cutouts as StoredTakeoffMeasurement['cutouts'],
+      arcs: item.arcs as StoredTakeoffMeasurement['arcs'],
       netCalculatedValue: item.net_calculated_value,
       stackOrder: item.stack_order ?? 0
     }));
@@ -976,6 +1047,7 @@ class SupabaseStorage {
       perimeterValue: item.perimeter_value,
       areaValue: item.area_value,
       cutouts: item.cutouts as StoredTakeoffMeasurement['cutouts'],
+      arcs: item.arcs as StoredTakeoffMeasurement['arcs'],
       netCalculatedValue: item.net_calculated_value,
       stackOrder: item.stack_order ?? 0,
     };
@@ -1013,6 +1085,7 @@ class SupabaseStorage {
       perimeterValue: item.perimeter_value,
       areaValue: item.area_value,
       cutouts: item.cutouts as StoredTakeoffMeasurement['cutouts'],
+      arcs: item.arcs as StoredTakeoffMeasurement['arcs'],
       netCalculatedValue: item.net_calculated_value,
       stackOrder: item.stack_order ?? 0,
     }));
@@ -1039,6 +1112,7 @@ class SupabaseStorage {
       perimeterValue: item.perimeter_value,
       areaValue: item.area_value,
       cutouts: item.cutouts as StoredTakeoffMeasurement['cutouts'],
+      arcs: item.arcs as StoredTakeoffMeasurement['arcs'],
       netCalculatedValue: item.net_calculated_value,
       stackOrder: item.stack_order ?? 0
     });
@@ -1099,6 +1173,7 @@ class SupabaseStorage {
       perimeterValue: item.perimeter_value,
       areaValue: item.area_value,
       cutouts: item.cutouts as StoredTakeoffMeasurement['cutouts'],
+      arcs: item.arcs as StoredTakeoffMeasurement['arcs'],
       netCalculatedValue: item.net_calculated_value,
       stackOrder: item.stack_order ?? 0
     }));
@@ -1133,6 +1208,7 @@ class SupabaseStorage {
       perimeterValue: item.perimeter_value,
       areaValue: item.area_value,
       cutouts: item.cutouts as StoredTakeoffMeasurement['cutouts'],
+      arcs: item.arcs as StoredTakeoffMeasurement['arcs'],
       netCalculatedValue: item.net_calculated_value,
       stackOrder: item.stack_order ?? 0
     }));
@@ -1168,6 +1244,7 @@ class SupabaseStorage {
       perimeterValue: item.perimeter_value,
       areaValue: item.area_value,
       cutouts: item.cutouts as StoredTakeoffMeasurement['cutouts'],
+      arcs: item.arcs as StoredTakeoffMeasurement['arcs'],
       netCalculatedValue: item.net_calculated_value,
       stackOrder: item.stack_order ?? 0
     }));
@@ -1244,6 +1321,7 @@ class SupabaseStorage {
       perimeterValue: data.perimeter_value,
       areaValue: data.area_value,
       cutouts: data.cutouts,
+      arcs: data.arcs,
       netCalculatedValue: data.net_calculated_value,
       stackOrder: data.stack_order ?? 0
     };
@@ -1336,6 +1414,7 @@ class SupabaseStorage {
         perimeterValue: item.perimeter_value,
         areaValue: item.area_value,
         cutouts: item.cutouts as StoredTakeoffMeasurement['cutouts'],
+      arcs: item.arcs as StoredTakeoffMeasurement['arcs'],
         netCalculatedValue: item.net_calculated_value,
         stackOrder: item.stack_order ?? 0
       }));
@@ -1859,6 +1938,76 @@ class SupabaseStorage {
       .eq('id', id);
 
     if (error) throw new DatabaseError('Failed to delete condition folder', error, { id });
+  }
+
+  // ── Sheet hyperlinks (manual + auto-hyperlink, incl. deep-link views) ────
+
+  async getHyperlinksByProject(projectId: string): Promise<StoredSheetHyperlink[]> {
+    const { data, error } = await supabase
+      .from('sheet_hyperlinks')
+      .select('*')
+      .eq('project_id', projectId);
+    if (error) throw new DatabaseError('Failed to fetch hyperlinks', error, { projectId });
+    return (data || []).map(mapHyperlinkRow);
+  }
+
+  /** Upsert by id (ids are client-generated so localStorage imports keep theirs). */
+  async saveHyperlinksBulk(hyperlinks: StoredSheetHyperlink[]): Promise<void> {
+    if (hyperlinks.length === 0) return;
+    const rows = hyperlinks.map(mapHyperlinkToDbRow);
+    const { error } = await supabase.from('sheet_hyperlinks').upsert(rows, { onConflict: 'id' });
+    if (error) throw new DatabaseError('Failed to save hyperlinks', error, { count: hyperlinks.length });
+  }
+
+  async updateHyperlink(
+    id: string,
+    projectId: string,
+    updates: Partial<Pick<StoredSheetHyperlink, 'targetSheetId' | 'targetPageNumber' | 'targetUrl' | 'sourceRect' | 'targetViewport'>>
+  ): Promise<void> {
+    const row: Record<string, unknown> = {};
+    if (updates.targetSheetId !== undefined) row.target_sheet_id = updates.targetSheetId;
+    if (updates.targetPageNumber !== undefined) row.target_page_number = updates.targetPageNumber;
+    if (updates.targetUrl !== undefined) row.target_url = updates.targetUrl;
+    if (updates.sourceRect !== undefined) row.source_rect = updates.sourceRect;
+    if (updates.targetViewport !== undefined) row.target_viewport = updates.targetViewport;
+    if (Object.keys(row).length === 0) return;
+    const { error } = await supabase
+      .from('sheet_hyperlinks')
+      .update(row)
+      .eq('id', id)
+      .eq('project_id', projectId);
+    if (error) throw new DatabaseError('Failed to update hyperlink', error, { id });
+  }
+
+  async deleteHyperlink(id: string, projectId: string): Promise<void> {
+    const { error } = await supabase
+      .from('sheet_hyperlinks')
+      .delete()
+      .eq('id', id)
+      .eq('project_id', projectId);
+    if (error) throw new DatabaseError('Failed to delete hyperlink', error, { id });
+  }
+
+  /** Removes origin='batch' links for a project; returns count removed. */
+  async deleteBatchHyperlinksByProject(projectId: string): Promise<number> {
+    const { data, error } = await supabase
+      .from('sheet_hyperlinks')
+      .delete()
+      .eq('project_id', projectId)
+      .eq('origin', 'batch')
+      .select('id');
+    if (error) throw new DatabaseError('Failed to clear batch hyperlinks', error, { projectId });
+    return data?.length ?? 0;
+  }
+
+  async deleteAllHyperlinksByProject(projectId: string): Promise<number> {
+    const { data, error } = await supabase
+      .from('sheet_hyperlinks')
+      .delete()
+      .eq('project_id', projectId)
+      .select('id');
+    if (error) throw new DatabaseError('Failed to clear hyperlinks', error, { projectId });
+    return data?.length ?? 0;
   }
 
   // Seed initial data if empty

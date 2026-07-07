@@ -118,6 +118,24 @@ router.get('/sheet/:sheetId/page/:pageNumber', requireAuth, async (req, res) => 
   }
 });
 
+/** Keep only well-formed arc entries ({segmentIndex: int ≥ 0, bulge: finite ≠ 0}); undefined when none. */
+function sanitizeArcs(value: unknown): Array<{ segmentIndex: number; bulge: number }> | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const clean = value
+    .filter(
+      (a): a is { segmentIndex: number; bulge: number } =>
+        !!a &&
+        typeof a === 'object' &&
+        Number.isInteger((a as { segmentIndex?: unknown }).segmentIndex) &&
+        (a as { segmentIndex: number }).segmentIndex >= 0 &&
+        typeof (a as { bulge?: unknown }).bulge === 'number' &&
+        Number.isFinite((a as { bulge: number }).bulge) &&
+        (a as { bulge: number }).bulge !== 0
+    )
+    .map((a) => ({ segmentIndex: a.segmentIndex, bulge: a.bulge }));
+  return clean.length > 0 ? clean : undefined;
+}
+
 // Create a new takeoff measurement - requires auth and project access
 router.post('/', requireAuth, async (req, res) => {
   try {
@@ -138,7 +156,8 @@ router.post('/', requireAuth, async (req, res) => {
       conditionName,
       perimeterValue,
       areaValue,
-      stackOrder
+      stackOrder,
+      arcs
     } = req.body;
 
     // Validation
@@ -207,7 +226,8 @@ router.post('/', requireAuth, async (req, res) => {
       conditionName: conditionName || 'Unknown',
       perimeterValue: optionalFinite(perimeterValue),
       areaValue: optionalFinite(areaValue),
-      stackOrder: typeof stackOrder === 'number' && Number.isFinite(stackOrder) ? stackOrder : 0
+      stackOrder: typeof stackOrder === 'number' && Number.isFinite(stackOrder) ? stackOrder : 0,
+      arcs: sanitizeArcs(arcs)
     };
     
     const savedMeasurement = await storage.saveTakeoffMeasurement(newMeasurement);
@@ -316,6 +336,12 @@ router.put('/:id', requireAuth, validateUUIDParam('id'), async (req, res) => {
       body.stackOrder = body.stack_order;
     }
     delete body.stack_order;
+
+    // Sanitize arcs; an explicit empty/cleared list must write NULL (undefined
+    // would keep the old DB value via the object spread below).
+    if ('arcs' in body) {
+      body.arcs = sanitizeArcs(body.arcs) ?? null;
+    }
 
     const updatedMeasurement = { ...existingMeasurement, ...body };
     const savedMeasurement = await storage.saveTakeoffMeasurement(updatedMeasurement);
