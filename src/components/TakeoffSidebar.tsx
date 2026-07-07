@@ -13,6 +13,7 @@ import {
   Mail,
   DollarSign,
   Edit3,
+  LayoutTemplate,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useShallow } from 'zustand/react/shallow';
@@ -24,6 +25,8 @@ import { SendReportModal } from './SendReportModal';
 import { formatFeetAndInches } from '../lib/utils';
 import { extractErrorMessage } from '../utils/commonUtils';
 import { useTakeoffExport, TakeoffSidebarConditionList } from './takeoff-sidebar';
+import { PDFExportOptionsDialog } from './takeoff-sidebar/PDFExportOptionsDialog';
+import { ConditionTemplatesDialog } from './takeoff-sidebar/ConditionTemplatesDialog';
 import { supabase } from '../lib/supabase';
 
 // TakeoffCondition interface imported from shared types
@@ -55,7 +58,9 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
   const [activeTab, setActiveTab] = useState<'conditions' | 'reports' | 'costs'>('conditions');
   const [expandedConditions, setExpandedConditions] = useState<Set<string>>(new Set());
   const [showExportDropdown, setShowExportDropdown] = useState(false);
+  const [showPdfExportOptions, setShowPdfExportOptions] = useState(false);
   const [showSendReportModal, setShowSendReportModal] = useState(false);
+  const [showTemplatesDialog, setShowTemplatesDialog] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [matchThumbnails, setMatchThumbnails] = useState<Record<string, Array<{ measurementId: string; thumbnail: string }>>>({});
   const [loadingThumbnails, setLoadingThumbnails] = useState<Set<string>>(new Set());
@@ -334,8 +339,17 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
 
         {/* Tab Content Header */}
         {activeTab === 'conditions' && (
-          <div className="flex items-center mb-4">
+          <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold">Takeoff Conditions</h2>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setShowTemplatesDialog(true)}
+              title="Save this project's conditions as a reusable template, or apply a saved template"
+            >
+              <LayoutTemplate className="w-4 h-4 mr-1" />
+              Templates
+            </Button>
           </div>
         )}
 
@@ -374,20 +388,15 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                   </button>
                   <button
                     className="w-full px-3 py-2 text-left text-sm hover:bg-accent flex items-center gap-2"
-                    onClick={async (e) => {
+                    onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
                       setShowExportDropdown(false);
-                      try {
-                        await exportToPDF();
-                      } catch (error) {
-                        console.error('PDF export error:', error);
-                        toast.error(extractErrorMessage(error, 'Error exporting PDF file. Please try again.'));
-                      }
+                      setShowPdfExportOptions(true);
                     }}
                   >
                     <FileImage className="w-4 h-4" />
-                    Export PDF Report
+                    Export PDF Report…
                   </button>
                   <button
                     className="w-full px-3 py-2 text-left text-sm hover:bg-accent flex items-center gap-2"
@@ -802,6 +811,27 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
           editingCondition={editingCondition}
         />
       )}
+
+      <ConditionTemplatesDialog
+        open={showTemplatesDialog}
+        onOpenChange={setShowTemplatesDialog}
+        projectId={projectId}
+        conditions={conditions}
+      />
+
+      <PDFExportOptionsDialog
+        open={showPdfExportOptions}
+        onOpenChange={setShowPdfExportOptions}
+        projectId={projectId}
+        onExport={async () => {
+          try {
+            await exportToPDF();
+          } catch (error) {
+            console.error('PDF export error:', error);
+            toast.error(extractErrorMessage(error, 'Error exporting PDF file. Please try again.'));
+          }
+        }}
+      />
 
       <SendReportModal
         projectId={projectId}

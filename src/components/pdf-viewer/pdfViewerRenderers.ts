@@ -11,6 +11,80 @@ import type { Annotation, SheetHyperlink } from '../../types';
 import { formatFeetAndInches } from '../../lib/utils';
 import { calculateDistance } from '../../utils/commonUtils';
 import { baseNormToViewportPixels } from '../../utils/measurementGeometry';
+import { arcApexPoint, expandPolylineWithArcs } from '../../utils/arcGeometry';
+
+/** Group class for the vertex-edit handle layer (cleared/redrawn with committed markups). */
+export const VERTEX_EDIT_LAYER_CLASS = 'vertex-edit-layer';
+
+/**
+ * Vertex-edit handles for one measurement (explicit edit mode only — never
+ * rendered during normal selection, so takeoffs can't be reshaped by accident).
+ * Square handles = vertices (drag to move). Round handles = segment midpoints
+ * (drag off the chord to bow the segment into a circular arc; drag back to
+ * straighten). Handle elements carry data attrs the edit hook reads:
+ *   data-vertex-handle / data-arc-handle = index,
+ *   plus layer-level data-pixel-w/h and data-rotation for coordinate math.
+ */
+export function renderVertexEditHandles(
+  svg: SVGSVGElement,
+  measurement: Measurement,
+  options: { rotation: number; pixelWidth: number; pixelHeight: number }
+): void {
+  const { rotation, pixelWidth, pixelHeight } = options;
+  const points = measurement.points;
+  if (!points || points.length < 2 || measurement.type === 'count') return;
+
+  const layer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  layer.setAttribute('class', VERTEX_EDIT_LAYER_CLASS);
+  layer.setAttribute('data-edit-measurement-id', measurement.id);
+  layer.setAttribute('data-pixel-w', String(pixelWidth));
+  layer.setAttribute('data-pixel-h', String(pixelHeight));
+  layer.setAttribute('data-rotation', String(rotation));
+
+  const px = points.map((p) =>
+    baseNormToViewportPixels(p.x, p.y, { width: pixelWidth, height: pixelHeight }, rotation)
+  );
+  const closed = measurement.type === 'area' || measurement.type === 'volume';
+  const segmentCount = closed ? px.length : px.length - 1;
+  const bulgeBySegment = new Map<number, number>();
+  for (const a of measurement.arcs ?? []) bulgeBySegment.set(a.segmentIndex, a.bulge);
+
+  // Midpoint (arc) handles first so vertex handles sit on top at shared corners.
+  for (let i = 0; i < segmentCount; i++) {
+    const p0 = px[i];
+    const p1 = px[(i + 1) % px.length];
+    const apex = arcApexPoint(p0, p1, bulgeBySegment.get(i) ?? 0);
+    const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    c.setAttribute('cx', String(apex.x));
+    c.setAttribute('cy', String(apex.y));
+    c.setAttribute('r', '6');
+    c.setAttribute('fill', bulgeBySegment.get(i) ? '#2563eb' : '#ffffff');
+    c.setAttribute('stroke', '#2563eb');
+    c.setAttribute('stroke-width', '2');
+    c.setAttribute('data-arc-handle', String(i));
+    c.style.cursor = 'grab';
+    c.style.pointerEvents = 'auto';
+    layer.appendChild(c);
+  }
+
+  for (let i = 0; i < px.length; i++) {
+    const r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    const HALF = 5;
+    r.setAttribute('x', String(px[i].x - HALF));
+    r.setAttribute('y', String(px[i].y - HALF));
+    r.setAttribute('width', String(HALF * 2));
+    r.setAttribute('height', String(HALF * 2));
+    r.setAttribute('fill', '#ffffff');
+    r.setAttribute('stroke', '#dc2626');
+    r.setAttribute('stroke-width', '2');
+    r.setAttribute('data-vertex-handle', String(i));
+    r.style.cursor = 'grab';
+    r.style.pointerEvents = 'auto';
+    layer.appendChild(r);
+  }
+
+  svg.appendChild(layer);
+}
 
 /** Re-export so existing imports from this module keep working. Prefer `measurementGeometry` for new code. */
 export { baseNormToViewportPixels };
@@ -131,6 +205,12 @@ export function renderSVGHyperlinks(
     rect.setAttribute('data-hyperlink-id', h.id);
     rect.setAttribute('data-target-sheet', h.targetSheetId);
     rect.setAttribute('data-target-page', String(h.targetPageNumber));
+    if (h.targetViewport) {
+      rect.setAttribute(
+        'data-target-viewport',
+        `${h.targetViewport.x},${h.targetViewport.y},${h.targetViewport.zoom}`
+      );
+    }
     rect.setAttribute('cursor', 'pointer');
     rect.setAttribute('vector-effect', 'non-scaling-stroke');
     svg.appendChild(rect);
@@ -412,9 +492,14 @@ export function renderSVGMeasurement(
   const vw = pixelWidth ?? currentViewport.width;
   const vh = pixelHeight ?? currentViewport.height;
 
-  const transformedPoints = points.map((point) =>
+  // Arc segments tessellate in pixel space (uniform aspect) so curves stay
+  // circular on screen; returns the same array when there are no arcs.
+  const trueVertexPoints = points.map((point) =>
     baseNormToViewportPixels(point.x, point.y, { width: vw, height: vh }, rotation)
   );
+  const transformedPoints = expandPolylineWithArcs(trueVertexPoints, measurement.arcs, {
+    closed: measurement.type === 'area' || measurement.type === 'volume',
+  });
 
   const isSelected = selectedMarkupIds.includes(measurement.id);
   const liveColor = getConditionColor(measurement.conditionId, measurement.conditionColor);

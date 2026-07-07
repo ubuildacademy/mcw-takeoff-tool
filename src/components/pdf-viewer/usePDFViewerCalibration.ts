@@ -60,6 +60,16 @@ export interface UsePDFViewerCalibrationResult {
   completeCalibration: (points: { x: number; y: number }[]) => void;
   startCalibration: (knownDistance: number, unit: string) => void;
   applyScale: (scope: 'page' | 'document') => void;
+  /**
+   * Detected-scale flow: enter verify mode for a scale read from the sheet text.
+   * The user clicks two points across a printed dimension; we show what that line
+   * would measure at the proposed scale and only apply after they confirm the
+   * match. Never applies a stated scale blind — replotted sheets make stated
+   * scales wrong and that would corrupt every quantity on the job.
+   */
+  startDetectedScaleVerification: (scaleFactor: number, unit: string, label: string) => void;
+  /** Non-null while verifying a detected scale (drives viewer hint copy). */
+  detectedScaleVerification: { scaleFactor: number; unit: string; label: string } | null;
 }
 
 export function usePDFViewerCalibration({
@@ -90,6 +100,11 @@ export function usePDFViewerCalibration({
   const [showScaleApplicationDialog, setShowScaleApplicationDialog] = useState(false);
   const [pendingScaleData, setPendingScaleData] = useState<{ scaleFactor: number; unit: string } | null>(null);
   const [calibrationData, setCalibrationData] = useState<{ knownDistance: number; unit: string } | null>(null);
+  const [detectedScaleVerification, setDetectedScaleVerification] = useState<{
+    scaleFactor: number;
+    unit: string;
+    label: string;
+  } | null>(null);
   const [calibrationValidation, setCalibrationValidation] = useState<{
     points: { x: number; y: number }[];
     display: string;
@@ -130,6 +145,54 @@ export function usePDFViewerCalibration({
 
   const completeCalibration = useCallback(
     (points: { x: number; y: number }[]) => {
+      // Detected-scale verify mode: measure the clicked line at the proposed
+      // scale and ask the user to confirm it matches the printed dimension.
+      if (detectedScaleVerification && points.length === 2) {
+        const pdfPage = pdfPageRef.current;
+        if (!pdfPage) return;
+        const { scaleFactor: proposedFactor, unit: proposedUnit, label } = detectedScaleVerification;
+        const baseViewport = pdfPage.getViewport({ scale: 1, rotation: 0 });
+        const dx = (points[1].x - points[0].x) * baseViewport.width;
+        const dy = (points[1].y - points[0].y) * baseViewport.height;
+        const pixelDistance = Math.sqrt(dx * dx + dy * dy);
+        setCalibrationPoints([]);
+        setIsCalibrating(false);
+        setDetectedScaleVerification(null);
+        if (pixelDistance < 1) {
+          toast.error('Points are too close together — try again across a printed dimension.');
+          return;
+        }
+        const measured = pixelDistance * proposedFactor;
+        const display =
+          proposedUnit === 'ft' ? formatFeetAndInches(measured) : `${measured.toFixed(2)} ${proposedUnit}`;
+        const confirmed = confirm(
+          `At ${label}, the line you drew measures ${display}.\n\n` +
+            `Does that match the printed dimension on the drawing?\n\n` +
+            `If it doesn't match, the sheet was likely replotted at a different size — ` +
+            `cancel and calibrate manually from a known dimension.`
+        );
+        if (!confirmed) {
+          toast.info('Detected scale discarded. Calibrate manually from a known dimension.');
+          return;
+        }
+        if (externalScaleFactor === undefined) setInternalScaleFactor(proposedFactor);
+        if (externalUnit === undefined) setInternalUnit(proposedUnit);
+        if (externalIsPageCalibrated === undefined) setInternalIsPageCalibrated(true);
+        calibrationViewportRef.current = {
+          scaleFactor: proposedFactor,
+          unit: proposedUnit,
+          viewportWidth: baseViewport.width,
+          viewportHeight: baseViewport.height,
+          scale: baseViewport.scale,
+          rotation: baseViewport.rotation,
+        };
+        setCalibrationValidation({ points, display, page: currentPage });
+        setTimeout(() => setCalibrationValidation(null), 3000);
+        setPendingScaleData({ scaleFactor: proposedFactor, unit: proposedUnit });
+        setShowScaleApplicationDialog(true);
+        return;
+      }
+
       if (points.length !== 2 || !calibrationData || !currentViewport) return;
       const knownDistance = calibrationData.knownDistance;
       const unitVal = calibrationData.unit;
@@ -218,6 +281,7 @@ export function usePDFViewerCalibration({
     },
     [
       calibrationData,
+      detectedScaleVerification,
       onCalibrationComplete,
       currentViewport,
       viewStateRotation,
@@ -231,10 +295,26 @@ export function usePDFViewerCalibration({
 
   const startCalibration = useCallback((knownDistance: number, unitVal: string) => {
     setCalibrationData({ knownDistance, unit: unitVal });
+    setDetectedScaleVerification(null);
     setIsCalibrating(true);
     setCalibrationPoints([]);
     setShowCalibrationDialog(false);
   }, []);
+
+  const startDetectedScaleVerification = useCallback(
+    (newScaleFactor: number, unitVal: string, label: string) => {
+      setCalibrationData(null);
+      setDetectedScaleVerification({ scaleFactor: newScaleFactor, unit: unitVal, label });
+      setIsCalibrating(true);
+      setCalibrationPoints([]);
+      setShowCalibrationDialog(false);
+      toast.info(
+        `Verify ${label}: click both ends of a printed dimension on the drawing`,
+        { duration: 6000 }
+      );
+    },
+    []
+  );
 
   const applyScale = useCallback(
     (scope: 'page' | 'document') => {
@@ -285,5 +365,7 @@ export function usePDFViewerCalibration({
     completeCalibration,
     startCalibration,
     applyScale,
+    startDetectedScaleVerification,
+    detectedScaleVerification,
   };
 }

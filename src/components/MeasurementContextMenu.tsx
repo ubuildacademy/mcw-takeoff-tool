@@ -15,7 +15,10 @@ export interface MeasurementContextMenuProps {
   onPaste?: () => void;
   onPasteAsNewCondition?: () => void;
   canPaste?: boolean;
-  onSelectAllSimilar: () => void;
+  /** Omit for markup kinds where "similar" has no meaning (e.g. annotations). */
+  onSelectAllSimilar?: () => void;
+  /** Delete the right-clicked markup (annotations; measurements delete via conditions). */
+  onDelete?: () => void;
   onBringForward?: () => void;
   onSendBackward?: () => void;
   onSendToBack?: () => void;
@@ -27,6 +30,10 @@ export interface MeasurementContextMenuProps {
   currentConditionType?: string;
   currentMeasurementUnit?: string;
   onMoveToCondition?: (conditionId: string) => void;
+  /** Enter vertex edit mode (drag vertices; drag segment midpoints to curve). Not offered for counts. */
+  onEditVertices?: () => void;
+  /** Arm move mode: the selection can be dragged until Esc/M/selection change. */
+  onMove?: () => void;
   onClose: () => void;
 }
 
@@ -41,6 +48,7 @@ export function MeasurementContextMenu({
   onPasteAsNewCondition,
   canPaste = false,
   onSelectAllSimilar,
+  onDelete,
   onBringForward,
   onSendBackward,
   onSendToBack,
@@ -52,6 +60,8 @@ export function MeasurementContextMenu({
   currentConditionType,
   currentMeasurementUnit,
   onMoveToCondition,
+  onEditVertices,
+  onMove,
   onClose,
 }: MeasurementContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
@@ -139,35 +149,82 @@ export function MeasurementContextMenu({
           </>
         )}
 
-        {/* Z-order section */}
-        <button
-          type="button"
-          className={btnClass}
-          disabled={!canBringForward}
-          onClick={() => { if (canBringForward) onBringForward?.(); }}
-        >
-          Bring forward
-        </button>
-        <button
-          type="button"
-          className={btnClass}
-          disabled={!canSendBackward}
-          onClick={() => { if (canSendBackward) onSendBackward?.(); }}
-        >
-          Send backward
-        </button>
-        <button
-          type="button"
-          className={btnClass}
-          disabled={!canSendToBack}
-          onClick={() => { if (canSendToBack) onSendToBack?.(); }}
-        >
-          Send to back
-        </button>
-        <div className="my-1 border-t border-border" />
-        <button type="button" className={btnClass} onClick={onSelectAllSimilar}>
-          Select all similar
-        </button>
+        {/* Z-order section (measurements only — annotations have no stack order) */}
+        {(onBringForward || onSendBackward || onSendToBack) && (
+          <>
+            <button
+              type="button"
+              className={btnClass}
+              disabled={!canBringForward}
+              onClick={() => { if (canBringForward) onBringForward?.(); }}
+            >
+              Bring forward
+            </button>
+            <button
+              type="button"
+              className={btnClass}
+              disabled={!canSendBackward}
+              onClick={() => { if (canSendBackward) onSendBackward?.(); }}
+            >
+              Send backward
+            </button>
+            <button
+              type="button"
+              className={btnClass}
+              disabled={!canSendToBack}
+              onClick={() => { if (canSendToBack) onSendToBack?.(); }}
+            >
+              Send to back
+            </button>
+            <div className="my-1 border-t border-border" />
+          </>
+        )}
+        {onMove && (
+          <button
+            type="button"
+            className={btnClass}
+            onClick={() => {
+              onMove();
+              onClose();
+            }}
+          >
+            Move
+            <span className="ml-auto text-xs text-muted-foreground">M</span>
+          </button>
+        )}
+        {onEditVertices && (
+          <button
+            type="button"
+            className={btnClass}
+            onClick={() => {
+              onEditVertices();
+              onClose();
+            }}
+          >
+            Edit vertices
+            <span className="ml-auto text-xs text-muted-foreground">drag ○ to curve</span>
+          </button>
+        )}
+        {onSelectAllSimilar && (
+          <button type="button" className={btnClass} onClick={onSelectAllSimilar}>
+            Select all similar
+          </button>
+        )}
+        {onDelete && (
+          <>
+            <div className="my-1 border-t border-border" />
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-500/10"
+              onClick={() => {
+                onDelete();
+                onClose();
+              }}
+            >
+              Delete
+            </button>
+          </>
+        )}
 
         {/* Move to condition — always shown when handler provided */}
         {onMoveToCondition && (

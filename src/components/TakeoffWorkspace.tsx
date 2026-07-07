@@ -1,9 +1,14 @@
-import { useEffect, useLayoutEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 
 import { useParams, useNavigate } from 'react-router-dom';
 import PDFViewer from './PDFViewer';
 import { TakeoffSidebar } from './TakeoffSidebar';
+import { Button } from './ui/button';
+import { CommandPalette, type CommandItem } from './CommandPalette';
+import { ScheduleReviewDialog } from './ScheduleReviewDialog';
+import { RevisionCompareDialog } from './RevisionCompareDialog';
+import { generateDistinctColor } from '../utils/commonUtils';
 
 import { useShallow } from 'zustand/react/shallow';
 import { useProjectStore } from '../store/slices/projectSlice';
@@ -15,7 +20,7 @@ import { useHyperlinkStore } from '../store/slices/hyperlinkSlice';
 import { useDocumentViewStore } from '../store/slices/documentViewSlice';
 import { useViewStoresHydrated } from '../store/useViewStoresHydrated';
 import { useUndoStore } from '../store';
-import type { TakeoffCondition, Sheet, ProjectFile, PDFDocument, SearchResult } from '../types';
+import type { TakeoffCondition, Sheet, ProjectFile, PDFDocument, SearchResult, SheetHyperlink } from '../types';
 import type { DocumentOCRData } from '../services/serverOcrService';
 import { toast } from 'sonner';
 import { applyBatchHyperlinkResults, runBatchHyperlinks } from '../services/batchHyperlink/runBatchHyperlinks';
@@ -26,7 +31,19 @@ import { runBubbleOcrForDocument } from '../services/batchHyperlink/runBubbleOcr
 import { buildCalloutPassWordBoxes } from '../services/batchHyperlink/buildCalloutPassWordBoxes';
 import type { BatchOcrWordBox } from '../services/batchHyperlink/detectSheetRefsFromWordBoxes';
 import { fetchStoredOcrForDocument } from '../services/batchHyperlink/fetchStoredOcrForDocument';
-import { triggerCalibration, triggerFitToWindow, getCurrentScrollPosition } from '../lib/windowBridge';
+import { runVectorCalloutsForDocument, type VectorCalloutClient } from '../services/batchHyperlink/runVectorCalloutsForDocument';
+import { resolveTargetViews } from '../services/batchHyperlink/resolveTargetViews';
+import { BatchHyperlinkReviewDialog } from './BatchHyperlinkReviewDialog';
+import type { SkippedRefSample } from '../services/batchHyperlink/runBatchHyperlinks';
+import { devLog } from '../lib/devLog';
+import {
+  triggerCalibration,
+  triggerFitToWindow,
+  getCurrentScrollPosition,
+  centerViewportOnPoint,
+  getNormalizedViewportCenter,
+  triggerRoomProposals,
+} from '../lib/windowBridge';
 import { fileService } from '../services/apiService';
 import { MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL_MB } from '../constants/deliveryLimits';
 import { SidebarEdgeToggle } from './takeoff-workspace/SidebarEdgeToggle';
@@ -84,6 +101,171 @@ export function TakeoffWorkspace() {
 
   // Hyperlink mode (H to add manual link; Extract creates from OCR)
   const [hyperlinkMode, setHyperlinkMode] = useState(false);
+  /** Magic wand: click inside enclosed rooms to auto-measure (area/volume condition selected). */
+  const [magicWandMode, setMagicWandMode] = useState(false);
+
+  const handleToggleMagicWand = useCallback(() => {
+    const next = !magicWandMode;
+    setMagicWandMode(next);
+    if (next) {
+      setHyperlinkMode(false);
+      setAnnotationTool(null);
+      toast.info(
+        'Magic wand on — select an area/volume condition, then click inside an enclosed room. Esc exits.',
+        { duration: 5000 }
+      );
+    }
+  }, [magicWandMode]);
+
+  // Schedule→takeoff: box a schedule on the sheet → parsed table review →
+  // count conditions with markers on the schedule rows. The box-draw phase
+  // piggybacks the hyperlink draw path (same interaction, different callback).
+  const [scheduleSelectMode, setScheduleSelectMode] = useState(false);
+  const [scheduleTable, setScheduleTable] = useState<{
+    documentId: string;
+    pageNumber: number;
+    mode: 'ruled' | 'clustered';
+    rows: string[][];
+    rowBoxes: Array<{ y0: number; y1: number }>;
+    region: { x0: number; y0: number; x1: number; y1: number };
+  } | null>(null);
+  const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
+
+  const handleStartScheduleSelect = useCallback(() => {
+    setScheduleSelectMode(true);
+    setHyperlinkMode(false);
+    setMagicWandMode(false);
+    setAnnotationTool(null);
+    toast.info('Drag a box around the schedule table (headers included).', { duration: 5000 });
+  }, []);
+
+  const handleScheduleRegionDrawn = useCallback(
+    async (
+      rect: { x: number; y: number; width: number; height: number },
+      sourceSheetId: string,
+      sourcePageNumber: number
+    ) => {
+      setScheduleSelectMode(false);
+      if (!projectId) return;
+      const parsing = toast.loading('Reading schedule…');
+      try {
+        const { ocrApiService } = await import('../services/apiService');
+        const result = await ocrApiService.runTableExtract(
+          sourceSheetId,
+          projectId,
+          sourcePageNumber,
+          rect
+        );
+        toast.dismiss(parsing);
+        if (!result.rows || result.rows.length === 0) {
+          toast.error('No table found in that box. Include the whole schedule and try again.');
+          return;
+        }
+        setScheduleTable({
+          documentId: sourceSheetId,
+          pageNumber: sourcePageNumber,
+          mode: result.mode,
+          rows: result.rows,
+          rowBoxes: result.rowBoxes,
+          region: result.region,
+        });
+        setScheduleDialogOpen(true);
+      } catch (e) {
+        toast.dismiss(parsing);
+        console.error('Schedule extract failed:', e);
+        // Surface the server's details field (axios wraps it) — "no vector
+        // text on this page" beats "Request failed with status code 500".
+        const responseData = (e as { response?: { data?: { details?: string; error?: string } } })
+          .response?.data;
+        toast.error(
+          responseData?.details ||
+            responseData?.error ||
+            (e instanceof Error ? e.message : 'Schedule extraction failed')
+        );
+      }
+    },
+    [projectId]
+  );
+
+  const handleScheduleApply = useCallback(
+    async (rowsToApply: Array<{ rowIndex: number; name: string; qty: number }>) => {
+      if (!projectId || !scheduleTable) return;
+      const conditionStore = useConditionStore.getState();
+      const { addTakeoffMeasurement } = useMeasurementStore.getState();
+      const existingColors = conditionStore
+        .getProjectConditions(projectId)
+        .map((c) => c.color)
+        .filter((c): c is string => typeof c === 'string');
+      let conditionsCreated = 0;
+      let markersCreated = 0;
+      try {
+        for (const row of rowsToApply) {
+          const color = generateDistinctColor(existingColors);
+          existingColors.push(color);
+          const conditionId = await conditionStore.addCondition({
+            projectId,
+            name: row.name,
+            type: 'count',
+            unit: 'EA',
+            wasteFactor: 0,
+            color,
+            description: 'From schedule takeoff',
+          });
+          conditionsCreated += 1;
+
+          // Markers sit ON the schedule row: auditable against the printed
+          // QTY, movable to real plan locations afterwards.
+          const rowBox = scheduleTable.rowBoxes[row.rowIndex];
+          const y = rowBox ? (rowBox.y0 + rowBox.y1) / 2 : scheduleTable.region.y0;
+          const xStart = Math.min(0.98, scheduleTable.region.x1 + 0.006);
+          const qty = Math.min(row.qty, 200); // sanity cap
+          for (let i = 0; i < qty; i++) {
+            const point = { x: Math.min(0.995, xStart + i * 0.007), y };
+            await addTakeoffMeasurement({
+              projectId,
+              sheetId: scheduleTable.documentId,
+              conditionId,
+              type: 'count',
+              points: [point],
+              calculatedValue: 1,
+              unit: 'EA',
+              pdfPage: scheduleTable.pageNumber,
+              pdfCoordinates: [point],
+              conditionColor: color,
+              conditionName: row.name,
+            });
+            markersCreated += 1;
+          }
+        }
+        toast.success(
+          `Schedule applied: ${conditionsCreated} condition${conditionsCreated === 1 ? '' : 's'}, ${markersCreated} count markers`,
+          { description: 'Markers sit beside their schedule rows — drag them onto the plan if needed.' }
+        );
+      } catch (e) {
+        console.error('Schedule apply failed:', e);
+        toast.error(
+          `Schedule partially applied (${conditionsCreated} conditions, ${markersCreated} markers). Check connection and retry remaining rows.`
+        );
+      }
+    },
+    [projectId, scheduleTable]
+  );
+
+  // Revision compare (old rev vs new rev overlay + takeoff carry)
+  const [revisionCompareOpen, setRevisionCompareOpen] = useState(false);
+
+  // ⌘K / Ctrl+K command palette
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
   
   // Annotation states
   const [annotationTool, setAnnotationTool] = useState<'text' | 'arrow' | 'rectangle' | 'circle' | 'freehand-highlight' | null>(null);
@@ -740,10 +922,19 @@ export function TakeoffWorkspace() {
     navigate('/app');
   };
 
+  // Hyperlinks are DB-backed: fetch the project's links once per session
+  // (also performs the one-time import of pre-migration localStorage links).
+  useEffect(() => {
+    if (projectId) {
+      void useHyperlinkStore.getState().loadProjectHyperlinks(projectId);
+    }
+  }, [projectId]);
+
   const handleClearHyperlinks = useCallback(() => {
-    useHyperlinkStore.getState().clearAllHyperlinks();
+    if (!projectId) return;
+    useHyperlinkStore.getState().clearAllHyperlinks(projectId);
     toast.success('All hyperlinks cleared');
-  }, []);
+  }, [projectId]);
 
   const handleClearBatchHyperlinks = useCallback(() => {
     if (!projectId) return;
@@ -775,6 +966,7 @@ export function TakeoffWorkspace() {
     }) => {
       if (!projectId) return;
       const freshDocs = (await loadProjectDocuments()) ?? documents;
+      let progressToast: string | number | undefined;
       try {
         // Pre-step A: re-extract text with PyMuPDF (MuPDF) for any document whose stored OCR is
         // missing PyMuPDF-sourced word boxes. PDF.js silently drops glyphs in Type-3 fonts and
@@ -799,6 +991,49 @@ export function TakeoffWorkspace() {
         let calloutPassWordBoxCount = 0;
         const touchedDocIds = new Set<string>();
 
+        // Pre-step 0: vector callout pass. Reads callout circles/hexagons straight
+        // from the PDF drawing commands and pairs them with exact text — the
+        // precision path for CAD-exported sets. Reference callouts are merged into
+        // stored OCR server-side (`source: 'vector_callout'`); the returned callout
+        // map powers the review table and auto target views. Seconds per document,
+        // so it runs on every invocation; the raster passes below stay as fallback
+        // for flattened pages.
+        const calloutsByPageKey = new Map<string, VectorCalloutClient[]>();
+        const vectorDocs =
+          opts.scope === 'current' && currentPdfFile?.id
+            ? freshDocs.filter((d) => d.id === currentPdfFile.id)
+            : freshDocs;
+        let vectorReferenceCallouts = 0;
+
+        progressToast = toast.loading(`Scanning callouts 0/${vectorDocs.length}…`);
+        let vectorDocsDone = 0;
+        let vectorCursor = 0;
+        const vectorWorker = async () => {
+          while (vectorCursor < vectorDocs.length) {
+            const doc = vectorDocs[vectorCursor];
+            vectorCursor += 1;
+            try {
+              const vec = await runVectorCalloutsForDocument({
+                documentId: doc.id,
+                projectId,
+              });
+              if (vec.referenceCallouts > 0) touchedDocIds.add(doc.id);
+              vectorReferenceCallouts += vec.referenceCallouts;
+              for (const [k, v] of vec.calloutsByPageKey) calloutsByPageKey.set(k, v);
+            } catch (err) {
+              console.error(`[auto-hyperlink] Vector callout pass failed for ${doc.name}:`, err);
+              // Soft fail: raster passes below still cover this document.
+            } finally {
+              vectorDocsDone += 1;
+              toast.loading(`Scanning callouts ${vectorDocsDone}/${vectorDocs.length}…`, {
+                id: progressToast,
+              });
+            }
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(3, vectorDocs.length) }, vectorWorker));
+
+        let pymupdfDocsDone = 0;
         for (const target of pymupdfTargets) {
           touchedDocIds.add(target.id);
           try {
@@ -813,9 +1048,15 @@ export function TakeoffWorkspace() {
             toast.error(
               `Re-extracting text from ${target.name} failed; continuing with saved text only.`,
             );
+          } finally {
+            pymupdfDocsDone += 1;
+            toast.loading(`Re-extracting text ${pymupdfDocsDone}/${pymupdfTargets.length}…`, {
+              id: progressToast,
+            });
           }
         }
 
+        let bubbleOcrDocsDone = 0;
         for (const target of bubbleOcrTargets) {
           touchedDocIds.add(target.id);
           try {
@@ -830,6 +1071,11 @@ export function TakeoffWorkspace() {
             toast.error(
               `Scanning bubbles in ${target.name} failed; continuing with text-only matches.`,
             );
+          } finally {
+            bubbleOcrDocsDone += 1;
+            toast.loading(`Scanning bubbles ${bubbleOcrDocsDone}/${bubbleOcrTargets.length}…`, {
+              id: progressToast,
+            });
           }
         }
 
@@ -840,10 +1086,13 @@ export function TakeoffWorkspace() {
           if (refreshed) ocrMap.set(docId, refreshed);
         }
 
+        // Vector pass is authoritative on CAD exports (exact geometry + exact text); only fall
+        // back to the slow raster template-matching pass when it found nothing to work with.
         const shouldRunCalloutPass =
-          opts.scope === 'current' ||
-          pymupdfTargets.length > 0 ||
-          bubbleOcrTargets.length > 0;
+          (opts.scope === 'current' ||
+            pymupdfTargets.length > 0 ||
+            bubbleOcrTargets.length > 0) &&
+          vectorReferenceCallouts === 0;
         let visualWordBoxesByPageKey: Map<string, BatchOcrWordBox[]> | undefined;
         if (shouldRunCalloutPass) {
           try {
@@ -864,6 +1113,7 @@ export function TakeoffWorkspace() {
           }
         }
 
+        toast.loading('Matching sheet references…', { id: progressToast });
         const run = await runBatchHyperlinks({
           projectId,
           documents: freshDocs,
@@ -873,7 +1123,16 @@ export function TakeoffWorkspace() {
           ocrByDocumentId: ocrMap,
           visualWordBoxesByPageKey,
         });
-        applyBatchHyperlinkResults(run.created, projectId, useHyperlinkStore.getState());
+
+        // Auto target views: match each link's source callout (detail label) to a
+        // detail-title bubble on the target page so the link lands zoomed on the
+        // exact detail. Only fills confident matches; others keep page navigation.
+        const targetViews = resolveTargetViews(run.created, calloutsByPageKey);
+        if (targetViews.linksWithViews > 0) {
+          devLog(
+            `[auto-hyperlink] ${targetViews.linksWithViews}/${run.createdCount} links got auto target views`
+          );
+        }
         if (import.meta.env.DEV) {
           // Diag: see which refs are failing so we can fix detection / index mismatches.
           const SHEET_SHAPE = /^[A-Z]{1,3}\d{1,3}(\.\d+)?$/;
@@ -906,16 +1165,29 @@ export function TakeoffWorkspace() {
           );
           console.log(diag);
         }
-        const { title, description } = formatAutoHyperlinkToast(run, {
-          pymupdfDocsRan,
-          pymupdfPagesExtracted,
-          bubbleOcrDocsRan,
-          bubbleOcrCalloutsFound,
-          calloutPassPagesMatched,
-          calloutPassWordBoxCount,
-        });
-        toast.success(title, description ? { description } : undefined);
+        if (run.createdCount === 0) {
+          // Nothing to review — surface the detection stats so the user sees why.
+          const { title, description } = formatAutoHyperlinkToast(run, {
+            pymupdfDocsRan,
+            pymupdfPagesExtracted,
+            bubbleOcrDocsRan,
+            bubbleOcrCalloutsFound,
+            calloutPassPagesMatched,
+            calloutPassWordBoxCount,
+          });
+          if (progressToast !== undefined) toast.dismiss(progressToast);
+          toast.success(title, description ? { description } : undefined);
+        } else {
+          // Nothing is written yet — the review dialog applies on confirm.
+          if (progressToast !== undefined) toast.dismiss(progressToast);
+          setBatchReview({
+            links: run.created,
+            noTargetRefs: run.topNoTargetRefs,
+            ambiguousRefs: run.topAmbiguousRefs,
+          });
+        }
       } catch (e) {
+        if (progressToast !== undefined) toast.dismiss(progressToast);
         console.error(e);
         toast.error(e instanceof Error ? e.message : 'Auto-hyperlink failed');
         throw e;
@@ -925,6 +1197,30 @@ export function TakeoffWorkspace() {
   );
 
   const [hyperlinkPickerOpen, setHyperlinkPickerOpen] = useState(false);
+  /** Non-null while the user positions the view on a link's target page ("Set target view"). */
+  const [viewCaptureHyperlinkId, setViewCaptureHyperlinkId] = useState<string | null>(null);
+  /** Auto-hyperlink results awaiting user review; nothing is written until Apply. */
+  const [batchReview, setBatchReview] = useState<{
+    links: SheetHyperlink[];
+    noTargetRefs: SkippedRefSample[];
+    ambiguousRefs: SkippedRefSample[];
+  } | null>(null);
+
+  const handleBatchReviewApply = useCallback(
+    (selected: SheetHyperlink[]) => {
+      if (!projectId) return;
+      applyBatchHyperlinkResults(selected, projectId, useHyperlinkStore.getState());
+      const withViews = selected.filter((l) => l.targetViewport).length;
+      toast.success(
+        `Applied ${selected.length} hyperlink${selected.length === 1 ? '' : 's'}`,
+        withViews > 0
+          ? { description: `${withViews} land zoomed on the exact detail` }
+          : undefined
+      );
+      setBatchReview(null);
+    },
+    [projectId]
+  );
   const [hyperlinkContextMenu, setHyperlinkContextMenu] = useState<{
     hyperlinkId: string;
     x: number;
@@ -945,11 +1241,20 @@ export function TakeoffWorkspace() {
     []
   );
 
+  /** Navigate to a link's target page and enter view-capture mode for it. */
+  const startViewCapture = useCallback(
+    (hyperlinkId: string, targetSheetId: string, targetPageNumber: number) => {
+      tabsResult.handlePageOpenInNewTab(targetSheetId, targetPageNumber);
+      setViewCaptureHyperlinkId(hyperlinkId);
+    },
+    [tabsResult]
+  );
+
   const handleHyperlinkTargetSelect = useCallback(
-    (targetSheetId: string, targetPageNumber: number) => {
+    (targetSheetId: string, targetPageNumber: number, setViewAfter?: boolean) => {
       if (!projectId || !pendingHyperlink) return;
       const { addHyperlink } = useHyperlinkStore.getState();
-      addHyperlink({
+      const created = addHyperlink({
         projectId,
         sourceSheetId: pendingHyperlink.sourceSheetId,
         sourcePageNumber: pendingHyperlink.sourcePageNumber,
@@ -960,9 +1265,13 @@ export function TakeoffWorkspace() {
       setHyperlinkMode(false);
       setPendingHyperlink(null);
       setHyperlinkPickerOpen(false);
-      toast.success('Hyperlink created');
+      if (setViewAfter) {
+        startViewCapture(created.id, targetSheetId, targetPageNumber);
+      } else {
+        toast.success('Hyperlink created');
+      }
     },
-    [projectId, pendingHyperlink]
+    [projectId, pendingHyperlink, startViewCapture]
   );
 
   const handleHyperlinkPickerCancel = useCallback(() => {
@@ -1003,18 +1312,147 @@ export function TakeoffWorkspace() {
   }, [editingHyperlinkId]);
 
   const handleHyperlinkUpdate = useCallback(
-    (targetSheetId: string, targetPageNumber: number) => {
+    (targetSheetId: string, targetPageNumber: number, setViewAfter?: boolean) => {
       if (!editingHyperlinkId) return;
-      useHyperlinkStore.getState().updateHyperlink(editingHyperlinkId, {
+      const linkId = editingHyperlinkId;
+      const previous = useHyperlinkStore.getState().getHyperlinkById(linkId);
+      const targetChanged =
+        previous?.targetSheetId !== targetSheetId || previous?.targetPageNumber !== targetPageNumber;
+      useHyperlinkStore.getState().updateHyperlink(linkId, {
         targetSheetId,
         targetPageNumber,
+        // A saved view on the old target page makes no sense on the new one.
+        ...(targetChanged ? { targetViewport: undefined } : {}),
       });
       setEditingHyperlinkId(null);
       setHyperlinkPickerOpen(false);
-      toast.success('Hyperlink updated');
+      if (setViewAfter) {
+        startViewCapture(linkId, targetSheetId, targetPageNumber);
+      } else {
+        toast.success('Hyperlink updated');
+      }
     },
-    [editingHyperlinkId]
+    [editingHyperlinkId, startViewCapture]
   );
+
+  const handleHyperlinkSetTargetView = useCallback(() => {
+    if (!hyperlinkContextMenu) return;
+    const hyperlink = useHyperlinkStore.getState().getHyperlinkById(hyperlinkContextMenu.hyperlinkId);
+    setHyperlinkContextMenu(null);
+    if (hyperlink && hyperlink.targetSheetId) {
+      startViewCapture(hyperlink.id, hyperlink.targetSheetId, hyperlink.targetPageNumber);
+    }
+  }, [hyperlinkContextMenu, startViewCapture]);
+
+  const handleSaveTargetView = useCallback(() => {
+    if (!viewCaptureHyperlinkId) return;
+    const center = getNormalizedViewportCenter();
+    if (!center) {
+      toast.error('Could not read the current view. Is the target sheet open?');
+      return;
+    }
+    useHyperlinkStore.getState().updateHyperlink(viewCaptureHyperlinkId, {
+      targetViewport: center,
+    });
+    setViewCaptureHyperlinkId(null);
+    toast.success('Target view saved — the link now lands exactly here');
+  }, [viewCaptureHyperlinkId]);
+
+  // Command palette items: sheets, conditions, viewer actions. Rebuilt only
+  // when the underlying lists change; actions close the palette themselves.
+  const allConditions = useConditionStore((s) => s.conditions);
+  const paletteItems = useMemo<CommandItem[]>(() => {
+    const items: CommandItem[] = [
+      {
+        id: 'action-calibrate',
+        label: calibration.isPageCalibrated ? 'Recalibrate scale' : 'Calibrate scale',
+        group: 'actions',
+        keywords: 'scale calibration',
+        action: handleCalibrateScale,
+      },
+      {
+        id: 'action-wand',
+        label: magicWandMode ? 'Turn off magic wand' : 'Magic wand (measure rooms by click)',
+        group: 'actions',
+        keywords: 'wand room fill auto measure',
+        action: handleToggleMagicWand,
+      },
+      {
+        id: 'action-fit',
+        label: 'Fit sheet to window',
+        group: 'actions',
+        keywords: 'zoom reset view',
+        action: handleResetView,
+      },
+      // Held from production per beta feedback (2026-07): schedule parsing is
+      // unreliable on real sets and room proposals need footprint constraints.
+      // Both stay available in dev builds for continued dial-in.
+      ...(import.meta.env.DEV
+        ? [
+            {
+              id: 'action-schedule',
+              label: 'Schedule → takeoff (box a schedule table)',
+              group: 'actions' as const,
+              keywords: 'schedule table door window count import',
+              action: handleStartScheduleSelect,
+            },
+            {
+              id: 'action-rooms',
+              label: 'Propose rooms on this sheet',
+              group: 'actions' as const,
+              keywords: 'rooms auto measure suggest wand all',
+              action: () => triggerRoomProposals(),
+            },
+          ]
+        : []),
+      {
+        id: 'action-revision-compare',
+        label: 'Compare sheet revisions…',
+        group: 'actions',
+        keywords: 'revision diff overlay slip sheet compare carry addendum',
+        action: () => setRevisionCompareOpen(true),
+      },
+    ];
+
+    if (projectId) {
+      for (const condition of allConditions) {
+        if (condition.projectId !== projectId) continue;
+        items.push({
+          id: `condition-${condition.id}`,
+          label: condition.name,
+          sublabel: `${condition.type} · ${condition.unit}`,
+          keywords: condition.type,
+          group: 'conditions',
+          action: () => setSelectedCondition(condition.id),
+        });
+      }
+    }
+
+    for (const doc of documents) {
+      for (const page of doc.pages ?? []) {
+        const num = page.sheetNumber && page.sheetNumber !== 'Unknown' ? page.sheetNumber : null;
+        const name = page.sheetName && page.sheetName !== 'Unknown' ? page.sheetName : null;
+        items.push({
+          id: `sheet-${doc.id}-${page.pageNumber}`,
+          label: num ?? `${doc.name} p.${page.pageNumber}`,
+          sublabel: name ?? doc.name,
+          keywords: `${name ?? ''} ${doc.name}`,
+          group: 'sheets',
+          action: () => tabsResult.handlePageOpenInNewTab(doc.id, page.pageNumber),
+        });
+      }
+    }
+    return items;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- handlers stable enough for palette rebuild purposes
+  }, [
+    allConditions,
+    documents,
+    projectId,
+    calibration.isPageCalibrated,
+    magicWandMode,
+    handleToggleMagicWand,
+    setSelectedCondition,
+  ]);
 
   const storeCurrentProject = getCurrentProject();
   const currentProject = storeCurrentProject || {
@@ -1037,6 +1475,8 @@ export function TakeoffWorkspace() {
         onRotatePage={rotatePage}
         isPageCalibrated={calibration.isPageCalibrated}
         onCalibrateScale={handleCalibrateScale}
+        magicWandMode={magicWandMode}
+        onToggleMagicWand={handleToggleMagicWand}
         annotationTool={annotationTool}
         annotationColor={annotationColor}
         annotationFilled={annotationFilled}
@@ -1183,10 +1623,27 @@ export function TakeoffWorkspace() {
               // but sends regions back through a separate callback.
               titleblockSelectionMode={titleblock.titleblockSelectionMode}
               onTitleblockSelectionComplete={titleblock.handleTitleblockSelectionComplete}
-              hyperlinkMode={hyperlinkMode}
-              onHyperlinkRegionDrawn={handleHyperlinkRegionDrawn}
-              onHyperlinkModeChange={setHyperlinkMode}
-              onHyperlinkClick={(sheetId, pageNumber) => tabsResult.handlePageOpenInNewTab(sheetId, pageNumber)}
+              // Schedule box-select piggybacks the hyperlink draw interaction:
+              // same drag-a-box mechanics, different completion handler.
+              hyperlinkMode={hyperlinkMode || scheduleSelectMode}
+              onHyperlinkRegionDrawn={(rect, sheetId, pageNumber) => {
+                if (scheduleSelectMode) void handleScheduleRegionDrawn(rect, sheetId, pageNumber);
+                else handleHyperlinkRegionDrawn(rect, sheetId, pageNumber);
+              }}
+              onHyperlinkModeChange={(active) => {
+                if (scheduleSelectMode) setScheduleSelectMode(active);
+                else setHyperlinkMode(active);
+              }}
+              magicWandMode={magicWandMode}
+              onMagicWandModeChange={setMagicWandMode}
+              onHyperlinkClick={(sheetId, pageNumber, targetViewport) => {
+                tabsResult.handlePageOpenInNewTab(sheetId, pageNumber);
+                if (targetViewport) {
+                  // After the tab switch's own scroll restore (200ms one-shot); the
+                  // centering call retries internally while the page renders.
+                  setTimeout(() => centerViewportOnPoint(targetViewport), 400);
+                }
+              }}
               onHyperlinkContextMenu={handleHyperlinkContextMenu}
               onRegisterEnterConditionDrawMode={handleRegisterEnterConditionDrawMode}
               onRegisterFinishMeasurement={handleRegisterFinishMeasurement}
@@ -1334,8 +1791,58 @@ export function TakeoffWorkspace() {
           hyperlinkId={hyperlinkContextMenu.hyperlinkId}
           onEdit={handleHyperlinkEdit}
           onDelete={handleHyperlinkDelete}
+          onSetTargetView={handleHyperlinkSetTargetView}
           onClose={() => setHyperlinkContextMenu(null)}
         />
+      )}
+
+      {batchReview && (
+        <BatchHyperlinkReviewDialog
+          open={!!batchReview}
+          onOpenChange={(next) => {
+            if (!next) setBatchReview(null);
+          }}
+          links={batchReview.links}
+          documents={documents}
+          noTargetRefs={batchReview.noTargetRefs}
+          ambiguousRefs={batchReview.ambiguousRefs}
+          onApply={handleBatchReviewApply}
+          onCancel={() => setBatchReview(null)}
+        />
+      )}
+
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} items={paletteItems} />
+
+      <ScheduleReviewDialog
+        open={scheduleDialogOpen}
+        onOpenChange={setScheduleDialogOpen}
+        table={scheduleTable}
+        onApply={handleScheduleApply}
+      />
+
+      {projectId && (
+        <RevisionCompareDialog
+          open={revisionCompareOpen}
+          onOpenChange={setRevisionCompareOpen}
+          projectId={projectId}
+          documents={documents}
+          currentDocumentId={currentPdfFile?.id ?? null}
+          currentPageNumber={currentPage ?? null}
+        />
+      )}
+
+      {viewCaptureHyperlinkId && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[95] flex items-center gap-3 rounded-lg border bg-popover text-popover-foreground px-4 py-3 shadow-xl">
+          <span className="text-sm">
+            Pan and zoom to the exact spot this link should land on.
+          </span>
+          <Button size="sm" onClick={handleSaveTargetView}>
+            Save target view
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setViewCaptureHyperlinkId(null)}>
+            Cancel
+          </Button>
+        </div>
       )}
 
 

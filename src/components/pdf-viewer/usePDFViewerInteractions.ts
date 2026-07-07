@@ -181,8 +181,22 @@ export interface UsePDFViewerInteractionsOptions {
     pageNumber: number
   ) => void;
   onHyperlinkModeChange?: (active: boolean) => void;
-  onHyperlinkClick?: (targetSheetId: string, targetPageNumber: number) => void;
+  onHyperlinkClick?: (
+    targetSheetId: string,
+    targetPageNumber: number,
+    targetViewport?: { x: number; y: number; zoom: number }
+  ) => void;
   // Move/drag state (from usePDFViewerMeasurements)
+  /**
+   * Move gate: markup move-drag only starts while true (armed via context menu
+   * "Move" or the M hotkey). Prevents accidental nudges when clicking around
+   * a selection. Read from a ref so arming never re-creates handlers.
+   */
+  moveArmedRef: React.RefObject<boolean>;
+  /** Magic wand mode: clicks are routed to onMagicWandClick instead of draw/select. */
+  magicWandModeRef?: React.RefObject<boolean>;
+  /** Base-normalized (rotation-0, 0-1) click point while wand mode is active. */
+  onMagicWandClick?: (point: { x: number; y: number }) => void;
   measurementMoveId: string | null;
   setMeasurementMoveId: React.Dispatch<React.SetStateAction<string | null>>;
   measurementMoveIds: string[];
@@ -361,6 +375,9 @@ export function usePDFViewerInteractions(
     onHyperlinkRegionDrawn,
     onHyperlinkModeChange,
     onHyperlinkClick,
+    moveArmedRef,
+    magicWandModeRef,
+    onMagicWandClick,
     measurementMoveId,
     setMeasurementMoveId,
     measurementMoveIds,
@@ -427,7 +444,18 @@ export function usePDFViewerInteractions(
     onMeasurementMoveCommitEnded,
   } = options;
 
-  // Ref mirror of currentCutout so handleDoubleClick always sees the latest points.
+  /** Parse the `data-target-viewport` attr ("x,y,zoom") set by renderSVGHyperlinks. */
+function parseTargetViewportAttr(
+  el: Element
+): { x: number; y: number; zoom: number } | undefined {
+  const raw = el.getAttribute('data-target-viewport');
+  if (!raw) return undefined;
+  const [x, y, zoom] = raw.split(',').map(Number);
+  if ([x, y, zoom].some((n) => !Number.isFinite(n)) || zoom <= 0) return undefined;
+  return { x, y, zoom };
+}
+
+// Ref mirror of currentCutout so handleDoubleClick always sees the latest points.
   // React state in a dblclick closure can be one click behind (same issue already fixed
   // for measurements via currentMeasurementRef / activePointsRef).
   const currentCutoutRef = useRef<{ x: number; y: number }[]>([]);
@@ -480,13 +508,26 @@ export function usePDFViewerInteractions(
     [viewState.scale, viewState.rotation, pdfCanvasRef, lastRenderedScaleRef, lastRenderedRotationRef]
   );
 
-  const handleWheel = useCallback(
-    (event: WheelEvent) => {
-      if (event.ctrlKey || event.metaKey) {
-        event.preventDefault();
+  // rAF throttle for ctrl/meta wheel zoom: trackpads fire wheel events at up to
+  // 120 Hz; accumulate deltas and apply one zoom per animation frame (same
+  // pattern as touch pinch in PDFViewerCanvasOverlay).
+  const wheelZoomAccPx = useRef(0);
+  const wheelZoomLatestEvent = useRef<WheelEvent | null>(null);
+  const wheelZoomRaf = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (wheelZoomRaf.current) cancelAnimationFrame(wheelZoomRaf.current);
+    };
+  }, []);
 
-        const ZOOM_STEP = 1.2;
-        const zoomFactor = event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
+  const applyWheelZoom = useCallback(
+    (pxDelta: number, event: WheelEvent) => {
+      {
+        // Map accumulated CSS-pixel delta to a zoom factor via exp so the
+        // response is proportional to gesture speed:
+        //   • Trackpad pinch (deltaY ≈ 2-5 px/event) → tiny per-event step → smooth
+        //   • Mouse scroll wheel (deltaY ≈ 100 px/event) → ~18% per click → snappy
+        const zoomFactor = Math.exp(-pxDelta * 0.002);
         const newScale = Math.min(
           PDF_VIEWER_MAX_SCALE,
           Math.max(PDF_VIEWER_MIN_SCALE, viewState.scale * zoomFactor)
@@ -601,6 +642,31 @@ export function usePDFViewerInteractions(
       containerRef,
       queueEphemeralPaint,
     ]
+  );
+
+  const handleWheel = useCallback(
+    (event: WheelEvent) => {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      event.preventDefault();
+
+      // Normalize to CSS pixels regardless of deltaMode.
+      const pxDelta =
+        event.deltaMode === 1 ? event.deltaY * 16 :  // lines → px
+        event.deltaMode === 2 ? event.deltaY * 800 : // pages → px
+        event.deltaY;                                  // already px
+
+      wheelZoomAccPx.current += pxDelta;
+      wheelZoomLatestEvent.current = event;
+      if (wheelZoomRaf.current) return;
+      wheelZoomRaf.current = requestAnimationFrame(() => {
+        wheelZoomRaf.current = null;
+        const acc = wheelZoomAccPx.current;
+        const latest = wheelZoomLatestEvent.current;
+        wheelZoomAccPx.current = 0;
+        if (latest && acc !== 0) applyWheelZoom(acc, latest);
+      });
+    },
+    [applyWheelZoom]
   );
 
   const handleKeyDown = useCallback(
@@ -1048,7 +1114,7 @@ export function usePDFViewerInteractions(
         }
       }
 
-      if (isSelectionMode && selectedMarkupIds.length > 0) {
+      if (moveArmedRef.current && isSelectionMode && selectedMarkupIds.length > 0) {
         const target = event.target as HTMLElement;
         const measurementId =
           target.getAttribute?.('data-measurement-id') ??
@@ -1072,7 +1138,7 @@ export function usePDFViewerInteractions(
         }
       }
 
-      if (isSelectionMode && selectedMarkupIds.length > 0) {
+      if (moveArmedRef.current && isSelectionMode && selectedMarkupIds.length > 0) {
         const target = event.target as HTMLElement;
         const annotationId =
           target.getAttribute?.('data-annotation-id') ??
@@ -2198,7 +2264,7 @@ export function usePDFViewerInteractions(
           if (!Number.isNaN(pageNumber)) {
             event.preventDefault();
             event.stopPropagation();
-            onHyperlinkClick(sheetId, pageNumber);
+            onHyperlinkClick(sheetId, pageNumber, parseTargetViewportAttr(targetEl));
             return;
           }
         }
@@ -2234,6 +2300,14 @@ export function usePDFViewerInteractions(
       }
       const dp = canvasPixelExtent(pdfCanvasRef.current, viewport);
       const baseViewport = pdfPageRef.current?.getViewport({ scale: 1, rotation: 0 }) ?? viewport;
+
+      // Magic wand: consume the click before any selection/draw-mode branch so
+      // wand clicks can never start a measurement or clear a selection.
+      if (magicWandModeRef?.current && onMagicWandClick) {
+        onMagicWandClick(cssToBaseNormalized(cssX, cssY, dp, baseViewport, effectiveRotation));
+        return;
+      }
+
       const currentSelectedConditionId = useConditionStore.getState().selectedConditionId;
       let effectiveMeasurementType = measurementType;
       let enteredDrawFromCanvasMatch = false;
@@ -2393,6 +2467,7 @@ export function usePDFViewerInteractions(
       setIsSelectionMode,
       syncMeasurementTypeFromSelectedCondition,
       isOrthoSnapping,
+      onMagicWandClick,
       isMeasuring,
       mousePositionRef,
       // cutoutMode/cutoutTargetConditionId read from refs — omit from deps
@@ -2500,7 +2575,7 @@ export function usePDFViewerInteractions(
           if (!Number.isNaN(pageNumber)) {
             e.preventDefault();
             e.stopPropagation();
-            onHyperlinkClick(sheetId, pageNumber);
+            onHyperlinkClick(sheetId, pageNumber, parseTargetViewportAttr(targetEl));
             return;
           }
         }

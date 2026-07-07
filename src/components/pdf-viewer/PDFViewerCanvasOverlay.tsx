@@ -1,4 +1,4 @@
-import React, { useRef, useCallback, type RefObject } from 'react';
+import React, { useRef, useCallback, useEffect, type RefObject } from 'react';
 import { PDFViewerLoadingIndicator } from './PDFViewerLoadingIndicator';
 import { PDFViewerTextAnnotationInput } from './PDFViewerTextAnnotationInput';
 
@@ -31,7 +31,7 @@ export interface PDFViewerCanvasOverlayProps {
   onSvgMouseLeave: () => void;
   onSvgClick: (event: React.MouseEvent<SVGSVGElement>) => void;
   onSvgDoubleClick: (event: React.MouseEvent<SVGSVGElement>) => void;
-  onSvgContextMenu?: (event: React.MouseEvent<SVGSVGElement>) => void;
+  onSvgContextMenu?: (event: React.MouseEvent<Element>) => void;
   isPDFLoading: boolean;
   textAnnotation: PDFViewerCanvasOverlayTextAnnotationProps | null;
   // ── Touch / pointer gesture props (iPad / Apple Pencil support) ───────────
@@ -157,6 +157,11 @@ export const PDFViewerCanvasOverlay: React.FC<PDFViewerCanvasOverlayProps> = ({
 
   // Pinch state: captured when a 2nd touch pointer goes down
   const pinchBase = useRef<{ dist: number } | null>(null);
+  // rAF throttle: batch all pointer-move events within a single frame into one
+  // onTouchPinch call so 120 Hz iPads don't fire handlePinchZoom 120×/s.
+  const pendingPinchRaf = useRef<number | null>(null);
+  const pinchAccFactor = useRef(1);
+  const pinchLatestMid = useRef<{ x: number; y: number } | null>(null);
 
   // Single-touch bookkeeping
   const tapDown = useRef<{ x: number; y: number; t: number } | null>(null);
@@ -172,6 +177,12 @@ export const PDFViewerCanvasOverlay: React.FC<PDFViewerCanvasOverlayProps> = ({
   // True when the current touch sequence started on a markup element in selection mode.
   // Routes move/up through the drag-move mouse handlers instead of panning.
   const touchStartedOnMarkup = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      if (pendingPinchRaf.current) cancelAnimationFrame(pendingPinchRaf.current);
+    };
+  }, []);
 
   // ── Shared pointer handlers (used by both canvas and SVG) ───────────────
 
@@ -202,6 +213,8 @@ export const PDFViewerCanvasOverlay: React.FC<PDFViewerCanvasOverlayProps> = ({
         // Idle mode: second finger starts pinch-to-zoom.
         const [p1, p2] = [...touchPtrs.current.values()];
         pinchBase.current = { dist: ptDist(p1, p2) };
+        pinchAccFactor.current = 1;
+        pinchLatestMid.current = null;
         wasInPinch.current = true;
         onCanvasMouseLeave();
         return;
@@ -267,9 +280,21 @@ export const PDFViewerCanvasOverlay: React.FC<PDFViewerCanvasOverlayProps> = ({
         const currentDist = ptDist(p1, p2);
         const factor = currentDist / pinchBase.current.dist;
         const mid = ptMid(touchPtrs.current);
-        onTouchPinch?.(factor, mid.x, mid.y);
-        // Update base so each frame delivers an incremental factor near 1.0
+        // Update base immediately so each event computes an incremental factor.
         pinchBase.current = { dist: currentDist };
+        // Accumulate factors across all pointer events in this frame; deliver
+        // the combined factor once per animation frame to cap at display rate.
+        pinchAccFactor.current *= factor;
+        pinchLatestMid.current = mid;
+        if (!pendingPinchRaf.current) {
+          pendingPinchRaf.current = requestAnimationFrame(() => {
+            pendingPinchRaf.current = null;
+            const f = pinchAccFactor.current;
+            const m = pinchLatestMid.current;
+            pinchAccFactor.current = 1;
+            if (m && onTouchPinch) onTouchPinch(f, m.x, m.y);
+          });
+        }
         return;
       }
 
@@ -403,6 +428,10 @@ export const PDFViewerCanvasOverlay: React.FC<PDFViewerCanvasOverlayProps> = ({
     <div
       className="relative inline-block"
       style={{ margin: 0, padding: 0, border: 'none', outline: 'none' }}
+      // On the wrapper (not just the SVG) so right-clicks that land on the
+      // canvas — markups have pointer-events: none outside selection mode —
+      // still reach the in-app menu handler instead of the browser menu.
+      onContextMenu={onSvgContextMenu}
     >
       <canvas
         ref={pdfCanvasRef as RefObject<HTMLCanvasElement>}
@@ -435,7 +464,6 @@ export const PDFViewerCanvasOverlay: React.FC<PDFViewerCanvasOverlayProps> = ({
         onMouseUp={onSvgMouseUp}
         onMouseLeave={onSvgMouseLeave}
         onClick={onSvgClick}
-        onContextMenu={onSvgContextMenu}
         onDoubleClick={onSvgDoubleClick}
         // Pointer events — touch / Apple Pencil path
         onPointerDown={onTouchPointerDown}

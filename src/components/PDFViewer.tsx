@@ -13,7 +13,7 @@ import { usePDFLoad } from './pdf-viewer/usePDFLoad';
 import { usePDFViewerCalibration } from './pdf-viewer/usePDFViewerCalibration';
 import { usePDFViewerData } from './pdf-viewer/usePDFViewerData';
 import { usePDFViewerMeasurements } from './pdf-viewer/usePDFViewerMeasurements';
-import { usePDFViewerInteractions, PDF_VIEWER_MAX_SCALE } from './pdf-viewer/usePDFViewerInteractions';
+import { usePDFViewerInteractions, PDF_VIEWER_MAX_SCALE, PDF_VIEWER_MIN_SCALE } from './pdf-viewer/usePDFViewerInteractions';
 import {
   renderSVGSelectionBox,
   renderSVGHyperlinkDrawBox,
@@ -31,7 +31,12 @@ import {
   renderSVGFreehandHighlightPreview,
   renderSVGCurrentMeasurementCommitted,
   renderSVGCurrentMeasurementEphemeral,
+  renderVertexEditHandles,
 } from './pdf-viewer/pdfViewerRenderers';
+import { useVertexEditMode } from './pdf-viewer/useVertexEditMode';
+import { getMarkupIdsFromElementsFromPoint } from '../utils/markupHitTest';
+import { magicWandPolygon, proposeRooms } from '../utils/floodFillRoom';
+import { RoomProposalsDialog } from './RoomProposalsDialog';
 import {
   ensureMarkupLayerGroups,
   clearCommittedMarkupLayer,
@@ -56,9 +61,10 @@ import {
   baseNormDeltaToViewportPixels,
   baseNormToViewportPixels,
   canvasPixelExtent,
+  cssToBaseNormalized,
 } from '../utils/measurementGeometry';
 import { toast } from 'sonner';
-import { MeasurementCalculator } from '../utils/measurementCalculation';
+import { MeasurementCalculator, type ScaleInfo } from '../utils/measurementCalculation';
 import { takeoffMeasurementToPdfViewerMeasurement } from '../utils/takeoffMeasurementDisplay';
 import {
   canvasMeasurementSelectionMatchesCondition,
@@ -66,7 +72,23 @@ import {
   measurementDrawModeForCondition,
   samePdfPageKey,
 } from '../utils/takeoffMeasurementLookup';
-import { setRestoreScrollPosition, setGetCurrentScrollPosition, setTriggerCalibration, setTriggerFitToWindow } from '../lib/windowBridge';
+import {
+  setRestoreScrollPosition,
+  setGetCurrentScrollPosition,
+  setTriggerCalibration,
+  setTriggerFitToWindow,
+  setCenterViewportOnPoint,
+  setTriggerRoomProposals,
+  setGetNormalizedViewportCenter,
+  type NormalizedViewportTarget,
+} from '../lib/windowBridge';
+import {
+  assessSheetSize,
+  detectScalesInText,
+  textItemsToScanText,
+  type DetectedScale,
+  type SheetSizeAssessment,
+} from '../utils/scaleDetection';
 import { ocrApiService } from '../services/apiService';
 import { generateDistinctColor } from '../utils/commonUtils';
 
@@ -126,6 +148,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   onHyperlinkModeChange,
   onHyperlinkClick,
   onHyperlinkContextMenu,
+  // Magic wand props
+  magicWandMode = false,
+  onMagicWandModeChange,
   onRegisterEnterConditionDrawMode,
   onRegisterFinishMeasurement,
 }) => {
@@ -418,7 +443,40 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     completeCalibration,
     startCalibration,
     applyScale,
+    startDetectedScaleVerification,
   } = calibration;
+
+  // Auto-scale detection: when the calibration dialog opens, scan the page's
+  // vector text for scale notations and size-check the sheet. Suggestions only —
+  // applying one always goes through the click-to-verify flow (see
+  // usePDFViewerCalibration.startDetectedScaleVerification).
+  const [detectedScales, setDetectedScales] = useState<DetectedScale[]>([]);
+  const [sheetSizeAssessment, setSheetSizeAssessment] = useState<SheetSizeAssessment | null>(null);
+  useEffect(() => {
+    if (!showCalibrationDialog) return;
+    let cancelled = false;
+    (async () => {
+      const page = pdfPageRef.current;
+      if (!page) return;
+      const baseViewport = page.getViewport({ scale: 1, rotation: 0 });
+      const sizeAssessment = assessSheetSize(baseViewport.width, baseViewport.height);
+      const textContent = await page.getTextContent();
+      const scanText = textItemsToScanText(textContent.items as Array<{ str?: string }>);
+      const scales = detectScalesInText(scanText).slice(0, 3);
+      if (!cancelled) {
+        setSheetSizeAssessment(sizeAssessment);
+        setDetectedScales(scales);
+      }
+    })().catch(() => {
+      if (!cancelled) {
+        setDetectedScales([]);
+        setSheetSizeAssessment(null);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [showCalibrationDialog, currentPage]);
 
   // Measurement/annotation/selection state and helpers (after calibration so we have scaleFactor + calibrationViewportRef)
   const measurementsState = usePDFViewerMeasurements({
@@ -562,6 +620,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
   const [measurementContextMenu, setMeasurementContextMenu] = useState<{
     measurementId: string;
+    /** Which markup family was right-clicked; annotations get a reduced menu. */
+    kind: 'measurement' | 'annotation';
     x: number;
     y: number;
   } | null>(null);
@@ -569,6 +629,110 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   useEffect(() => {
     setMeasurementContextMenu(null);
   }, [currentPage, file.id]);
+
+  // Vertex edit mode: explicit per-markup editing (context menu "Edit vertices").
+  // Ref mirror lets renderTakeoffAnnotations read it without dep-array churn.
+  const [editingMarkupId, setEditingMarkupId] = useState<string | null>(null);
+  const editingMarkupIdRef = useRef<string | null>(null);
+  editingMarkupIdRef.current = editingMarkupId;
+
+  useEffect(() => {
+    setEditingMarkupId(null);
+  }, [currentPage, file.id]);
+
+  // Move gate: markup drags only start while armed (context menu "Move" or M
+  // hotkey), so clicking around a selection can't nudge takeoffs by accident.
+  const [moveArmed, setMoveArmed] = useState(false);
+  const moveArmedRef = useRef(false);
+  moveArmedRef.current = moveArmed;
+
+  const armMove = useCallback(() => {
+    setMoveArmed(true);
+    toast.info('Move armed — drag the selected markup(s). Press M or Esc to cancel.', {
+      duration: 4000,
+    });
+  }, []);
+
+  // Disarm when the selection, mode, or page changes — arming is per-intent.
+  useEffect(() => {
+    setMoveArmed(false);
+  }, [selectedMarkupIds, isSelectionMode, currentPage, file.id]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+      ) {
+        return;
+      }
+      if ((e.key === 'm' || e.key === 'M') && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        if (isSelectionMode && selectedMarkupIds.length > 0) {
+          e.preventDefault();
+          if (moveArmedRef.current) {
+            setMoveArmed(false);
+            toast.info('Move disarmed');
+          } else {
+            armMove();
+          }
+        }
+      } else if (e.key === 'Escape' && moveArmedRef.current) {
+        setMoveArmed(false);
+      } else if (e.key === 'Escape' && magicWandModeRef.current) {
+        onMagicWandModeChangeRef.current?.(false);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [isSelectionMode, selectedMarkupIds, armMove]);
+
+  // ── Magic wand: click inside an enclosed room → area/volume polygon ─────
+  const magicWandModeRef = useRef(magicWandMode);
+  magicWandModeRef.current = magicWandMode;
+  const onMagicWandModeChangeRef = useRef(onMagicWandModeChange);
+  onMagicWandModeChangeRef.current = onMagicWandModeChange;
+  /** Page raster at rotation 0 for flood fill, cached per file+page. */
+  const wandRasterRef = useRef<{
+    fileId: string;
+    page: number;
+    raster: { data: Uint8ClampedArray; width: number; height: number };
+  } | null>(null);
+  const wandBusyRef = useRef(false);
+
+  const getWandRaster = useCallback(async (): Promise<{
+    data: Uint8ClampedArray;
+    width: number;
+    height: number;
+  } | null> => {
+    const cached = wandRasterRef.current;
+    if (cached && cached.fileId === file.id && cached.page === currentPage) return cached.raster;
+    const page = pdfPageRef.current;
+    if (!page) return null;
+    // Rotation 0 so raster coords are plain normalized × dims (no rotation math).
+    // ~3500 px max side ≈ 100 dpi on ARCH D: walls are several px thick, and
+    // anti-aliased edges act as extra sealing against hairline gaps.
+    const base = page.getViewport({ scale: 1, rotation: 0 });
+    const scale = Math.min(3500 / Math.max(base.width, base.height), 4);
+    const viewport = page.getViewport({ scale, rotation: 0 });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(viewport.width);
+    canvas.height = Math.round(viewport.height);
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return null;
+    await page.render({ canvasContext: ctx, viewport } as unknown as Parameters<typeof page.render>[0]).promise;
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const raster = { data: imageData.data, width: canvas.width, height: canvas.height };
+    wandRasterRef.current = { fileId: file.id ?? '', page: currentPage, raster };
+    return raster;
+  }, [file.id, currentPage]);
+
+  // The wand click pipeline is defined after the vertex-edit wiring (it reuses
+  // getVertexEditScaleInfo); the interactions hook gets this stable wrapper.
+  const handleMagicWandClickRef = useRef<((p: { x: number; y: number }) => void) | null>(null);
+  const onMagicWandClickStable = useCallback((p: { x: number; y: number }) => {
+    handleMagicWandClickRef.current?.(p);
+  }, []);
 
   const handleMeasurementSelectAllSimilar = useCallback(() => {
     if (!measurementContextMenu) return;
@@ -585,29 +749,47 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   }, [measurementContextMenu, localTakeoffMeasurements, setSelectedMarkupIds]);
 
   const handleSvgContextMenu = useCallback(
-    (e: React.MouseEvent<SVGSVGElement>) => {
+    (e: React.MouseEvent<Element>) => {
+      // Never show the browser menu over the sheet — an in-app menu (or
+      // nothing) always beats Chrome's menu popping up mid-takeoff.
+      e.preventDefault();
+
       const hyperlinkTarget = (e.target as Element)?.closest?.('[data-hyperlink-id]');
       if (hyperlinkTarget && onHyperlinkContextMenu) {
         const id = hyperlinkTarget.getAttribute('data-hyperlink-id');
         if (id) {
-          e.preventDefault();
           setMeasurementContextMenu(null);
           onHyperlinkContextMenu(id, e.clientX, e.clientY);
         }
         return;
       }
       if (isSelectionMode) {
-        const measurementTarget = (e.target as Element)?.closest?.('[data-measurement-id]');
-        if (measurementTarget) {
-          const measurementId = measurementTarget.getAttribute('data-measurement-id');
-          if (measurementId) {
-            e.preventDefault();
-            // Auto-select the right-clicked markup if not already in selection
-            if (!selectedMarkupIds.includes(measurementId)) {
-              setSelectedMarkupIds([measurementId]);
-            }
-            setMeasurementContextMenu({ measurementId, x: e.clientX, y: e.clientY });
+        // Direct target first; fall back to a stacking-order hit test so
+        // right-clicks that land on the canvas or between SVG children still
+        // find the markup under the cursor. Annotations open the same menu
+        // with a reduced item set (Move, Delete).
+        const targetEl = e.target as Element;
+        let measurementId =
+          targetEl?.closest?.('[data-measurement-id]')?.getAttribute('data-measurement-id') ?? null;
+        let annotationId =
+          targetEl?.closest?.('[data-annotation-id]')?.getAttribute('data-annotation-id') ?? null;
+        if (!measurementId && !annotationId && svgOverlayRef.current) {
+          const hit = getMarkupIdsFromElementsFromPoint(svgOverlayRef.current, e.clientX, e.clientY);
+          measurementId = hit.measurementIdsInOrder[0] ?? null;
+          if (!measurementId) annotationId = hit.annotationIdsInOrder[0] ?? null;
+        }
+        const markupId = measurementId ?? annotationId;
+        if (markupId) {
+          // Auto-select the right-clicked markup if not already in selection
+          if (!selectedMarkupIds.includes(markupId)) {
+            setSelectedMarkupIds([markupId]);
           }
+          setMeasurementContextMenu({
+            measurementId: markupId,
+            kind: measurementId ? 'measurement' : 'annotation',
+            x: e.clientX,
+            y: e.clientY,
+          });
         }
       }
     },
@@ -1031,6 +1213,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     measurementMoveJustCompletedRef,
     measurementMoveCommitInProgressRef,
     onMeasurementMoveCommitEnded: bumpMeasurementMirrorFlush,
+    moveArmedRef,
+    magicWandModeRef,
+    onMagicWandClick: onMagicWandClickStable,
     annotationMoveJustCompletedRef,
     measurementDragJustCompletedRef,
     cutoutDragJustCompletedRef,
@@ -1489,6 +1674,245 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     renderMarkupsWithPointerEventsRef.current = renderMarkupsWithPointerEvents;
   }, [renderMarkupsWithPointerEvents]);
 
+  // ── Vertex edit mode wiring ─────────────────────────────────────────────
+  const viewRotationRef = useRef(viewState.rotation ?? 0);
+  viewRotationRef.current = viewState.rotation ?? 0;
+
+  const repaintCommittedMarkups = useCallback(() => {
+    if (currentViewport) {
+      renderMarkupsWithPointerEvents(currentPage, currentViewport, pdfPageRef.current ?? undefined, true);
+    }
+  }, [renderMarkupsWithPointerEvents, currentPage, currentViewport]);
+
+  // Handles appear/disappear with the mode (renderTakeoffAnnotations reads the ref).
+  useEffect(() => {
+    repaintCommittedMarkups();
+  }, [editingMarkupId, repaintCommittedMarkups]);
+
+  // Same scale info the creation path feeds MeasurementCalculator, so edited
+  // markups recompute with identical math.
+  const getVertexEditScaleInfo = useCallback((): ScaleInfo | null => {
+    const calibBase = calibrationViewportRef.current;
+    const vp =
+      currentViewport ??
+      pdfPageRef.current?.getViewport({
+        scale: lastRenderedScaleRef.current || viewState.scale,
+        rotation: lastRenderedRotationRef.current ?? viewState.rotation ?? 0,
+      }) ??
+      null;
+    if (!vp) return null;
+    return {
+      scaleFactor,
+      unit: 'ft',
+      scaleText: 'calibrated',
+      confidence: 0.95,
+      viewportWidth: calibBase?.viewportWidth || vp.width,
+      viewportHeight: calibBase?.viewportHeight || vp.height,
+    };
+  }, [scaleFactor, currentViewport, viewState.scale, viewState.rotation, calibrationViewportRef]);
+
+  useVertexEditMode({
+    editingMarkupId,
+    exitEditMode: useCallback(() => setEditingMarkupId(null), []),
+    pdfCanvasRef,
+    svgOverlayRef,
+    getScaleInfo: getVertexEditScaleInfo,
+    requestRepaint: repaintCommittedMarkups,
+    getRotation: useCallback(() => viewRotationRef.current, []),
+  });
+
+  // ── Room proposals: whole-sheet magic wand ─────────────────────────────
+  const [roomProposals, setRoomProposals] = useState<{
+    items: Array<{ id: string; areaDisplay: string; vertexCount: number }>;
+    polygons: Map<string, Array<{ x: number; y: number }>>;
+    conditionId: string;
+    conditionName: string;
+  } | null>(null);
+  const [roomProposalsOpen, setRoomProposalsOpen] = useState(false);
+
+  const handleProposeRooms = useCallback(async () => {
+    if (wandBusyRef.current) return;
+    const condition = useConditionStore.getState().getSelectedCondition();
+    if (!condition || (condition.type !== 'area' && condition.type !== 'volume')) {
+      toast.error('Select an area or volume condition first, then run room proposals.');
+      return;
+    }
+    const scaleInfo = getVertexEditScaleInfo();
+    if (!scaleInfo?.viewportWidth || !scaleInfo.viewportHeight) {
+      toast.error('Calibrate the sheet scale before proposing rooms.');
+      return;
+    }
+    wandBusyRef.current = true;
+    const scanning = toast.loading('Scanning sheet for enclosed rooms…');
+    try {
+      const raster = await getWandRaster();
+      if (!raster) return;
+      const found = proposeRooms(raster);
+      const items: Array<{ id: string; areaDisplay: string; vertexCount: number }> = [];
+      const polygons = new Map<string, Array<{ x: number; y: number }>>();
+      for (let i = 0; i < found.length; i++) {
+        const polygon = found[i].polygon.map((p) => ({
+          x: p.x / raster.width,
+          y: p.y / raster.height,
+        }));
+        const calc =
+          condition.type === 'area'
+            ? MeasurementCalculator.calculateArea(polygon, scaleInfo, 1.0)
+            : MeasurementCalculator.calculateVolume(polygon, scaleInfo, condition.depth || 1, 1.0);
+        if (!calc.validation.isValid) continue;
+        const id = `room-${i}`;
+        items.push({
+          id,
+          areaDisplay: `${Math.round(calc.calculatedValue).toLocaleString()} ${calc.unit}`,
+          vertexCount: polygon.length,
+        });
+        polygons.set(id, polygon);
+      }
+      setRoomProposals({ items, polygons, conditionId: condition.id, conditionName: condition.name });
+      setRoomProposalsOpen(true);
+    } catch (error) {
+      console.error('Room proposals failed:', error);
+      toast.error('Room proposal scan failed on this page.');
+    } finally {
+      toast.dismiss(scanning);
+      wandBusyRef.current = false;
+    }
+  }, [getWandRaster, getVertexEditScaleInfo]);
+
+  useEffect(() => {
+    setTriggerRoomProposals(() => {
+      void handleProposeRooms();
+    });
+    return () => setTriggerRoomProposals(undefined);
+  }, [handleProposeRooms]);
+
+  const handleApplyRoomProposals = useCallback(
+    async (selectedIds: string[]) => {
+      const data = roomProposals;
+      if (!data || !effectiveProjectId || !file.id) return;
+      const condition = useConditionStore.getState().getConditionById(data.conditionId);
+      const scaleInfo = getVertexEditScaleInfo();
+      if (!condition || !scaleInfo?.viewportWidth || !scaleInfo.viewportHeight) return;
+      const addTakeoffMeasurement = useMeasurementStore.getState().addTakeoffMeasurement;
+      let created = 0;
+      try {
+        for (const id of selectedIds) {
+          const polygon = data.polygons.get(id);
+          if (!polygon) continue;
+          const calc =
+            condition.type === 'area'
+              ? MeasurementCalculator.calculateArea(polygon, scaleInfo, 1.0)
+              : MeasurementCalculator.calculateVolume(polygon, scaleInfo, condition.depth || 1, 1.0);
+          if (!calc.validation.isValid) continue;
+          const createPayload = {
+            projectId: effectiveProjectId,
+            sheetId: file.id,
+            conditionId: condition.id,
+            type: condition.type as 'area' | 'volume',
+            points: polygon,
+            calculatedValue: calc.calculatedValue,
+            unit: calc.unit,
+            pdfPage: currentPage,
+            pdfCoordinates: polygon,
+            conditionColor: condition.color,
+            conditionName: condition.name,
+            ...(condition.includePerimeter && calc.perimeterValue != null
+              ? { perimeterValue: calc.perimeterValue }
+              : {}),
+          };
+          const savedId = await addTakeoffMeasurement(createPayload);
+          useUndoStore.getState().push({ type: 'measurement_add', id: savedId, createPayload });
+          created += 1;
+        }
+        toast.success(`Added ${created} room${created === 1 ? '' : 's'} to ${condition.name}`);
+      } catch (error) {
+        console.error('Applying room proposals failed:', error);
+        toast.error(`Added ${created} rooms before an error — check connection and re-run for the rest.`);
+      }
+    },
+    [roomProposals, effectiveProjectId, file.id, currentPage, getVertexEditScaleInfo]
+  );
+
+  // Magic wand click pipeline (wrapper ref assigned each render; see declaration above).
+  const handleMagicWandClick = useCallback(
+    async (norm: { x: number; y: number }) => {
+      if (wandBusyRef.current) return;
+      const condition = useConditionStore.getState().getSelectedCondition();
+      if (!condition || (condition.type !== 'area' && condition.type !== 'volume')) {
+        toast.error('Select an area or volume condition first, then click inside a room.');
+        return;
+      }
+      wandBusyRef.current = true;
+      try {
+        const raster = await getWandRaster();
+        if (!raster) return;
+        const result = magicWandPolygon(raster, norm.x * raster.width, norm.y * raster.height);
+        if (!result.ok) {
+          const message =
+            result.reason === 'leaked'
+              ? 'Region isn’t enclosed — the fill escaped through an opening. Zoom in and draw manually, or click a more enclosed area.'
+              : result.reason === 'on-boundary'
+                ? 'That click landed on linework. Click inside the open part of the room.'
+                : 'Region is too small to measure. Zoom in and try a larger area.';
+          toast.error(message);
+          return;
+        }
+        const polygon = result.polygon.map((p) => ({
+          x: p.x / raster.width,
+          y: p.y / raster.height,
+        }));
+
+        const scaleInfo = getVertexEditScaleInfo();
+        if (!scaleInfo?.viewportWidth || !scaleInfo.viewportHeight) {
+          toast.error('Calibrate the sheet scale before using the magic wand.');
+          return;
+        }
+        const calcResult =
+          condition.type === 'area'
+            ? MeasurementCalculator.calculateArea(polygon, scaleInfo, 1.0)
+            : MeasurementCalculator.calculateVolume(polygon, scaleInfo, condition.depth || 1, 1.0);
+        if (!calcResult.validation.isValid) {
+          toast.error('Could not compute a valid area from that region.');
+          return;
+        }
+
+        if (!effectiveProjectId || !file.id) return;
+        const createPayload = {
+          projectId: effectiveProjectId,
+          sheetId: file.id,
+          conditionId: condition.id,
+          type: condition.type as 'area' | 'volume',
+          points: polygon,
+          calculatedValue: calcResult.calculatedValue,
+          unit: calcResult.unit,
+          pdfPage: currentPage,
+          pdfCoordinates: polygon,
+          conditionColor: condition.color,
+          conditionName: condition.name,
+          ...(condition.includePerimeter && calcResult.perimeterValue != null
+            ? { perimeterValue: calcResult.perimeterValue }
+            : {}),
+        };
+        const savedId = await useMeasurementStore.getState().addTakeoffMeasurement(createPayload);
+        useUndoStore.getState().push({ type: 'measurement_add', id: savedId, createPayload });
+        const display =
+          condition.type === 'area'
+            ? `${calcResult.calculatedValue.toFixed(0)} SF`
+            : `${calcResult.calculatedValue.toFixed(1)} CY`;
+        toast.success(`Room measured: ${display}`, {
+          description: 'Click another room, or press Esc to exit the wand.',
+        });
+      } catch (error) {
+        console.error('Magic wand failed:', error);
+        toast.error('Magic wand failed on this page.');
+      } finally {
+        wandBusyRef.current = false;
+      }
+    },
+    [getWandRaster, getVertexEditScaleInfo, effectiveProjectId, file.id, currentPage]
+  );
+  handleMagicWandClickRef.current = handleMagicWandClick;
+
   // SVG-based takeoff annotation renderer - Page-specific with viewport isolation
   const renderTakeoffAnnotations = useCallback((pageNum: number, viewport: PageViewport, page?: PDFPageProxy) => {
     if (!viewport || !svgOverlayRef.current) return;
@@ -1644,6 +2068,18 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         pixelHeight: pixelH,
       });
     });
+
+    // Vertex edit mode: draw handles for the markup being edited (on top of markups).
+    if (editingMarkupIdRef.current) {
+      const editing = pageMeasurements.find((m) => m.id === editingMarkupIdRef.current);
+      if (editing) {
+        renderVertexEditHandles(committedSvg, editing, {
+          rotation: viewState.rotation || 0,
+          pixelWidth: pixelW,
+          pixelHeight: pixelH,
+        });
+      }
+    }
 
     // Draw calibration validator overlay if present for this page
     if (calibrationValidation && calibrationValidation.page === pageNum && calibrationValidation.points.length === 2) {
@@ -2183,9 +2619,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (!isInitialRenderComplete) {
       setIsPDFLoading(true);
     }
-    
-    // Reduced delay for better performance
-    await new Promise(resolve => setTimeout(resolve, 5));
     
     if (!isComponentMounted || !pdfDocument || !pdfCanvasRef.current || !containerRef.current) {
       return;
@@ -2934,6 +3367,119 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     }
   }, [pdfDocument, viewState.rotation, onScaleChange, currentPage]);
 
+  // Deep-link landing: set zoom, then center the container on a base-normalized point.
+  // Scroll is applied with retries because the canvas resizes asynchronously after the
+  // scale change (same timing problem scroll-restore-after-tab-switch already handles).
+  const DEEP_LINK_SCROLL_RETRY_DELAYS_MS = useMemo(() => [120, 300, 600, 1000, 1500], []);
+
+  const centerViewportOnPoint = useCallback(
+    (target: NormalizedViewportTarget) => {
+      const page = pdfPageRef.current;
+      const container = containerRef.current;
+      if (!page || !container) return;
+
+      const zoom = Math.min(PDF_VIEWER_MAX_SCALE, Math.max(PDF_VIEWER_MIN_SCALE, target.zoom));
+
+      // Same order as fitToWindow: fresh viewport first, then scale state.
+      const freshViewport = page.getViewport({ scale: zoom, rotation: viewState.rotation });
+      setPageViewports((prev) => ({ ...prev, [currentPage]: freshViewport }));
+      if (onScaleChange) {
+        onScaleChange(zoom);
+      } else {
+        setInternalViewState((prev) => ({ ...prev, scale: zoom }));
+      }
+
+      const applyScroll = () => {
+        const canvas = pdfCanvasRef.current;
+        const c = containerRef.current;
+        if (!canvas || !c) return;
+        const cRect = c.getBoundingClientRect();
+        const kRect = canvas.getBoundingClientRect();
+        if (kRect.width < 1 || kRect.height < 1) return;
+        const pt = baseNormToViewportPixels(
+          target.x,
+          target.y,
+          { width: kRect.width, height: kRect.height },
+          viewState.rotation
+        );
+        const canvasLeftInContent = kRect.left - cRect.left + c.scrollLeft;
+        const canvasTopInContent = kRect.top - cRect.top + c.scrollTop;
+        c.scrollLeft = Math.max(0, canvasLeftInContent + pt.x - c.clientWidth / 2);
+        c.scrollTop = Math.max(0, canvasTopInContent + pt.y - c.clientHeight / 2);
+      };
+
+      requestAnimationFrame(applyScroll);
+      DEEP_LINK_SCROLL_RETRY_DELAYS_MS.forEach((d) => setTimeout(applyScroll, d));
+
+      // Highlight pulse once the view has settled, so the eye lands on the exact spot.
+      setTimeout(() => {
+        const canvas = pdfCanvasRef.current;
+        if (!canvas) return;
+        const kRect = canvas.getBoundingClientRect();
+        const pt = baseNormToViewportPixels(
+          target.x,
+          target.y,
+          { width: kRect.width, height: kRect.height },
+          viewState.rotation
+        );
+        const pulse = document.createElement('div');
+        pulse.style.cssText =
+          'position:fixed;pointer-events:none;z-index:90;width:22px;height:22px;' +
+          'border:3px solid rgb(59,130,246);border-radius:9999px;transform:translate(-50%,-50%);';
+        pulse.style.left = `${kRect.left + pt.x}px`;
+        pulse.style.top = `${kRect.top + pt.y}px`;
+        document.body.appendChild(pulse);
+        const anim = pulse.animate(
+          [
+            { opacity: 1, transform: 'translate(-50%,-50%) scale(0.6)' },
+            { opacity: 0.9, transform: 'translate(-50%,-50%) scale(2.4)' },
+            { opacity: 0, transform: 'translate(-50%,-50%) scale(3.4)' },
+          ],
+          { duration: 1200, easing: 'ease-out' }
+        );
+        anim.onfinish = () => pulse.remove();
+        setTimeout(() => pulse.remove(), 1600); // safety net if onfinish never fires
+      }, DEEP_LINK_SCROLL_RETRY_DELAYS_MS[DEEP_LINK_SCROLL_RETRY_DELAYS_MS.length - 1] + 150);
+    },
+    [viewState.rotation, currentPage, onScaleChange, DEEP_LINK_SCROLL_RETRY_DELAYS_MS]
+  );
+
+  // Current view center as a deep-link target (inverse of centerViewportOnPoint).
+  const getNormalizedViewportCenter = useCallback((): NormalizedViewportTarget | null => {
+    const canvas = pdfCanvasRef.current;
+    const container = containerRef.current;
+    const page = pdfPageRef.current;
+    if (!canvas || !container || !page) return null;
+    const cRect = container.getBoundingClientRect();
+    const kRect = canvas.getBoundingClientRect();
+    if (kRect.width < 1 || kRect.height < 1) return null;
+    const cssX = cRect.left + container.clientWidth / 2 - kRect.left;
+    const cssY = cRect.top + container.clientHeight / 2 - kRect.top;
+    const baseVp = page.getViewport({ scale: 1, rotation: 0 });
+    const norm = cssToBaseNormalized(
+      cssX,
+      cssY,
+      { w: kRect.width, h: kRect.height },
+      baseVp,
+      viewState.rotation
+    );
+    // Clamp: center may sit in the gray gutter around a zoomed-out page.
+    return {
+      x: Math.min(1, Math.max(0, norm.x)),
+      y: Math.min(1, Math.max(0, norm.y)),
+      zoom: viewState.scale || 1,
+    };
+  }, [viewState.rotation, viewState.scale]);
+
+  useEffect(() => {
+    setCenterViewportOnPoint(centerViewportOnPoint);
+    setGetNormalizedViewportCenter(getNormalizedViewportCenter);
+    return () => {
+      setCenterViewportOnPoint(undefined);
+      setGetNormalizedViewportCenter(undefined);
+    };
+  }, [centerViewportOnPoint, getNormalizedViewportCenter]);
+
   // Add scroll position tracking (debounced so we persist final position on reload)
   useEffect(() => {
     const container = containerRef.current;
@@ -3673,7 +4219,30 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         </div>
       </div>
 
-      {measurementContextMenu && (() => {
+      {measurementContextMenu && measurementContextMenu.kind === 'annotation' && (
+        <MeasurementContextMenu
+          x={measurementContextMenu.x}
+          y={measurementContextMenu.y}
+          onMove={() => {
+            armMove();
+            setMeasurementContextMenu(null);
+          }}
+          onDelete={() => {
+            const annotationStore = useAnnotationStore.getState();
+            const ann = annotationStore.getAnnotationById(measurementContextMenu.measurementId);
+            if (ann) {
+              // Same undo contract as the Delete-key path in usePDFViewerInteractions.
+              useUndoStore.getState().push({ type: 'annotation_delete', annotation: ann });
+              annotationStore.deleteAnnotation(measurementContextMenu.measurementId);
+            }
+            setSelectedMarkupIds([]);
+            setMeasurementContextMenu(null);
+          }}
+          onClose={() => setMeasurementContextMenu(null)}
+        />
+      )}
+
+      {measurementContextMenu && measurementContextMenu.kind === 'measurement' && (() => {
         const contextMeasurement = localTakeoffMeasurements.find(
           (m) => m.id === measurementContextMenu.measurementId
         );
@@ -3701,6 +4270,18 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
             currentConditionType={contextMeasurement?.type}
             currentMeasurementUnit={contextMeasurement?.unit}
             onMoveToCondition={handleMoveToCondition}
+            onMove={() => {
+              armMove();
+              setMeasurementContextMenu(null);
+            }}
+            onEditVertices={
+              contextMeasurement && contextMeasurement.type !== 'count'
+                ? () => {
+                    setEditingMarkupId(measurementContextMenu.measurementId);
+                    setMeasurementContextMenu(null);
+                  }
+                : undefined
+            }
             onClose={() => setMeasurementContextMenu(null)}
           />
         );
@@ -3713,6 +4294,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         magnifierEnabled={magnifierEnabled}
         magnifierZoom={magnifierZoom}
         isActive={isMeasuring || isCalibrating || !!annotationTool}
+      />
+
+      <RoomProposalsDialog
+        open={roomProposalsOpen}
+        onOpenChange={setRoomProposalsOpen}
+        proposals={roomProposals?.items ?? null}
+        conditionName={roomProposals?.conditionName ?? ''}
+        onApply={handleApplyRoomProposals}
       />
 
       <PDFViewerDialogs
@@ -3729,6 +4318,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         isCalibrating={isCalibrating}
         currentPage={currentPage}
         totalPages={totalPages}
+        detectedScales={detectedScales}
+        sheetSizeAssessment={sheetSizeAssessment}
+        onUseDetectedScale={(scale) =>
+          startDetectedScaleVerification(scale.scaleFactor, 'ft', scale.label)
+        }
       />
     </div>
   );

@@ -38,6 +38,9 @@ export interface TakeoffWorkspaceHeaderProps {
   onRotatePage: (direction: 'clockwise' | 'counterclockwise') => void;
   isPageCalibrated: boolean;
   onCalibrateScale: () => void;
+  /** Magic wand: click inside enclosed rooms to auto-measure them. */
+  magicWandMode?: boolean;
+  onToggleMagicWand?: () => void;
   annotationTool: AnnotationTool;
   annotationColor: string;
   annotationFilled: boolean;

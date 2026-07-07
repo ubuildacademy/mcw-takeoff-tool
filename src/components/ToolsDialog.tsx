@@ -294,8 +294,8 @@ export function ToolsDialog({
             <h3 className="text-sm font-medium text-foreground">Hyperlinks</h3>
             <p className="text-sm text-muted-foreground">
               Draw a box to link by hand, or use <span className="font-medium text-foreground">Auto-hyperlink</span> to
-              turn sheet callouts into taps that jump to the right page. It uses your saved searchable text and sheet
-              numbers in the sidebar.
+              turn sheet callouts into taps that jump to the right page. Detected links open in a review table before
+              anything is applied; section/detail tags read from vector geometry can land zoomed on the exact detail.
             </p>
 
             <div className="flex flex-col gap-2">

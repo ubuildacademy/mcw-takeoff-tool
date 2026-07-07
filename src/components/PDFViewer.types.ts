@@ -80,6 +80,10 @@ export interface PDFViewerProps {
   onTitleblockSelectionComplete?: (field: 'sheetNumber' | 'sheetName', selectionBox: SelectionBox, pageNumber: number) => void;
   /** Hyperlink mode: draw rect to create link */
   hyperlinkMode?: boolean;
+  /** Magic wand: click inside an enclosed room to auto-create an area/volume polygon. */
+  magicWandMode?: boolean;
+  /** Exit wand mode (Esc, tool switch). */
+  onMagicWandModeChange?: (active: boolean) => void;
   /** Call when L is pressed to enter hyperlink mode */
   onEnterHyperlinkMode?: () => void;
   /** Call when user finishes drawing hyperlink region */
@@ -91,7 +95,11 @@ export interface PDFViewerProps {
   /** Call to exit hyperlink mode */
   onHyperlinkModeChange?: (active: boolean) => void;
   /** Call when user clicks a hyperlink to navigate */
-  onHyperlinkClick?: (targetSheetId: string, targetPageNumber: number) => void;
+  onHyperlinkClick?: (
+    targetSheetId: string,
+    targetPageNumber: number,
+    targetViewport?: { x: number; y: number; zoom: number }
+  ) => void;
   /** Call when user right-clicks a hyperlink (for Edit/Delete menu) */
   onHyperlinkContextMenu?: (hyperlinkId: string, clientX: number, clientY: number) => void;
   /**
@@ -135,6 +143,12 @@ export interface PDFViewerMeasurement {
   /** Z-order on page; lower = behind, higher = in front. */
   stackOrder?: number;
   color?: string;
+  /**
+   * Circular-arc segments (DXF bulge, see src/utils/arcGeometry.ts).
+   * segmentIndex i = points[i]→points[i+1]; for area/volume, index
+   * points.length-1 is the closing edge. Absent/empty = all straight.
+   */
+  arcs?: Array<{ segmentIndex: number; bulge: number }>;
 }
 
 /** Alias for use inside PDFViewer (backward compatible) */

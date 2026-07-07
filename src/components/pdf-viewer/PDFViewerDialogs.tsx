@@ -1,4 +1,5 @@
 import React, { Suspense, lazy } from 'react';
+import type { DetectedScale, SheetSizeAssessment } from '../../utils/scaleDetection';
 
 /** Lazy-loaded; calibration dialogs load when user opens calibration flow */
 const CalibrationDialog = lazy(() => import('../CalibrationDialog'));
@@ -18,6 +19,10 @@ export interface PDFViewerDialogsProps {
   isCalibrating: boolean;
   currentPage: number;
   totalPages: number;
+  detectedScales?: DetectedScale[];
+  sheetSizeAssessment?: SheetSizeAssessment | null;
+  /** Start the click-to-verify flow for a scale notation found on the sheet. */
+  onUseDetectedScale?: (scale: DetectedScale) => void;
 }
 
 /**
@@ -38,6 +43,9 @@ export const PDFViewerDialogs: React.FC<PDFViewerDialogsProps> = ({
   isCalibrating,
   currentPage,
   totalPages,
+  detectedScales,
+  sheetSizeAssessment,
+  onUseDetectedScale,
 }) => (
   <>
     <Suspense fallback={null}>
@@ -47,6 +55,9 @@ export const PDFViewerDialogs: React.FC<PDFViewerDialogsProps> = ({
         onStartCalibration={startCalibration}
         currentScale={isPageCalibrated ? { scaleFactor, unit } : null}
         isCalibrating={isCalibrating}
+        detectedScales={detectedScales}
+        sheetSizeAssessment={sheetSizeAssessment}
+        onUseDetectedScale={onUseDetectedScale}
       />
     </Suspense>
     <Suspense fallback={null}>

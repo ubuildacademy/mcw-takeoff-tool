@@ -9,6 +9,7 @@ import {
   useEffect,
   useCallback,
   type ReactNode,
+  type CSSProperties,
 } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { Input } from '../ui/input';
@@ -206,6 +207,7 @@ export function TakeoffSidebarConditionList({
   const [folderSearch, setFolderSearch] = useState('');
   const ctxMenuRef = useRef<HTMLDivElement>(null);
   const folderFlyoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [ctxMenuStyle, setCtxMenuStyle] = useState<CSSProperties>({});
 
   // ── scroll selected into view ──
   useLayoutEffect(() => {
@@ -226,6 +228,28 @@ export function TakeoffSidebarConditionList({
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
+  }, [ctxMenu]);
+
+  // ── clamp context menu so it always fits the viewport ──
+  useLayoutEffect(() => {
+    if (!ctxMenu || !ctxMenuRef.current) return;
+    const rect = ctxMenuRef.current.getBoundingClientRect();
+    const margin = 8;
+    const left = Math.min(ctxMenu.x, window.innerWidth - rect.width - margin);
+    const maxHeight = window.innerHeight - margin * 2;
+    let top = ctxMenu.y;
+    if (top + rect.height > window.innerHeight - margin) {
+      // Not enough room below — flip above the click point if that fits better,
+      // otherwise just clamp so the bottom edge stays on screen.
+      const above = ctxMenu.y - rect.height;
+      top = above >= margin ? above : Math.max(margin, window.innerHeight - rect.height - margin);
+    }
+    setCtxMenuStyle({
+      left: Math.max(margin, left),
+      top,
+      maxHeight,
+      overflowY: 'auto',
+    });
   }, [ctxMenu]);
 
   // ── focus new folder input ──
@@ -255,6 +279,7 @@ export function TakeoffSidebarConditionList({
     e.stopPropagation();
     setCtxMenu({ x: e.clientX, y: e.clientY, conditionId, showFolderFlyout: false });
     setFolderSearch('');
+    setCtxMenuStyle({});
   }, []);
 
   const ctxCondition = ctxMenu ? conditions.find((c) => c.id === ctxMenu.conditionId) ?? null : null;
@@ -578,7 +603,7 @@ export function TakeoffSidebarConditionList({
         <div
           ref={ctxMenuRef}
           className="fixed z-[9999] min-w-[180px] bg-popover text-popover-foreground border border-border rounded-lg shadow-lg py-1"
-          style={{ left: ctxMenu.x, top: ctxMenu.y }}
+          style={{ left: ctxMenu.x, top: ctxMenu.y, visibility: ctxMenuStyle.left != null ? 'visible' : 'hidden', ...ctxMenuStyle }}
         >
           <CtxItem icon={<Pencil />} label="Edit condition" onClick={() => { onEdit(ctxCondition); setCtxMenu(null); }} />
           <CtxItem icon={<Copy />} label="Duplicate" onClick={() => { onDuplicate(ctxCondition); setCtxMenu(null); }} />

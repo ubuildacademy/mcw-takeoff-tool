@@ -4,6 +4,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { HelpTopicTrigger } from './help/HelpTopicTrigger';
+import type { DetectedScale, SheetSizeAssessment } from '../utils/scaleDetection';
 
 interface CalibrationDialogProps {
   isOpen: boolean;
@@ -11,6 +12,32 @@ interface CalibrationDialogProps {
   onStartCalibration: (knownDistance: number, unit: string) => void;
   currentScale?: { scaleFactor: number; unit: string } | null;
   isCalibrating?: boolean;
+  /** Scale notations found in the sheet's vector text (best candidate first). */
+  detectedScales?: DetectedScale[];
+  /** Physical sheet-size check backing the detected scales' trustworthiness. */
+  sheetSizeAssessment?: SheetSizeAssessment | null;
+  /** Start click-to-verify for a detected scale. Never applies the scale directly. */
+  onUseDetectedScale?: (scale: DetectedScale) => void;
+}
+
+/** Copy for the sheet-size check. Replotted sheets make stated scales wrong. */
+function sheetSizeMessage(a: SheetSizeAssessment): { text: string; warn: boolean } {
+  const dims = `${a.widthIn.toFixed(1)}×${a.heightIn.toFixed(1)}"`;
+  if (a.verdict === 'half-size') {
+    return {
+      warn: true,
+      text: a.standardName
+        ? `Sheet is ${dims} (${a.standardName}) — but this is also a half-size print of ${a.halfSizeOf}. If this set was printed reduced, the stated scale is 2× off. Verify carefully.`
+        : `Sheet is ${dims} — looks like a half-size print of ${a.halfSizeOf}. The stated scale is likely 2× off. Prefer manual calibration.`,
+    };
+  }
+  if (a.verdict === 'unknown') {
+    return {
+      warn: true,
+      text: `Sheet is ${dims} — not a standard plot size. This may be a fit-to-page reprint, which makes any stated scale wrong. Prefer manual calibration.`,
+    };
+  }
+  return { warn: false, text: `Sheet is ${dims} (${a.standardName}) — standard plot size.` };
 }
 
 const CalibrationDialog: React.FC<CalibrationDialogProps> = ({
@@ -18,7 +45,10 @@ const CalibrationDialog: React.FC<CalibrationDialogProps> = ({
   onClose,
   onStartCalibration,
   currentScale,
-  isCalibrating = false
+  isCalibrating = false,
+  detectedScales,
+  sheetSizeAssessment,
+  onUseDetectedScale,
 }) => {
   const [feet, setFeet] = useState('');
   const [inches, setInches] = useState('');
@@ -57,6 +87,50 @@ const CalibrationDialog: React.FC<CalibrationDialogProps> = ({
         </DialogHeader>
         
         <div className="space-y-4">
+          {!isCalibrating && detectedScales && detectedScales.length > 0 && onUseDetectedScale && (
+            <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded space-y-2">
+              <p className="text-sm font-medium text-emerald-800 dark:text-emerald-300">
+                Scale found on this sheet
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {detectedScales.map((scale) => (
+                  <Button
+                    key={scale.label}
+                    size="sm"
+                    variant="outline"
+                    className="border-emerald-300 dark:border-emerald-700"
+                    onClick={() => onUseDetectedScale(scale)}
+                    title={
+                      scale.nearScaleKeyword
+                        ? 'Found next to the word "SCALE" on this sheet'
+                        : 'Found in the sheet text'
+                    }
+                  >
+                    Verify &amp; use {scale.label}
+                  </Button>
+                ))}
+              </div>
+              {sheetSizeAssessment && (() => {
+                const msg = sheetSizeMessage(sheetSizeAssessment);
+                return (
+                  <p
+                    className={
+                      msg.warn
+                        ? 'text-xs text-amber-700 dark:text-amber-400 font-medium'
+                        : 'text-xs text-emerald-700 dark:text-emerald-400'
+                    }
+                  >
+                    {msg.warn ? '⚠ ' : ''}{msg.text}
+                  </p>
+                );
+              })()}
+              <p className="text-xs text-emerald-700 dark:text-emerald-400">
+                You'll be asked to click a printed dimension to confirm the scale before it's applied —
+                a stated scale is only correct if the sheet was plotted at its original size.
+              </p>
+            </div>
+          )}
+
           <div className="space-y-2" role="group" aria-labelledby="known-distance-label">
             <p id="known-distance-label" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">Known Distance on Drawing</p>
             <div className="flex gap-2 items-end">

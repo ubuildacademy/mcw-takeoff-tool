@@ -30,6 +30,7 @@ export function takeoffMeasurementToPdfViewerMeasurement(m: TakeoffMeasurement):
       cutouts: m.cutouts,
       netCalculatedValue: m.netCalculatedValue ?? undefined,
       stackOrder: m.stackOrder ?? 0,
+      arcs: m.arcs,
     };
   } catch {
     return null;

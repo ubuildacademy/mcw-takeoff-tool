@@ -31,6 +31,7 @@ import {
   Wrench,
   Highlighter,
   PaintBucket,
+  Wand2,
 } from 'lucide-react';
 import type { TakeoffWorkspaceHeaderProps } from './TakeoffWorkspaceHeader.types';
 import { ToolsDialog } from '../ToolsDialog';
@@ -52,6 +53,8 @@ export function TakeoffWorkspaceHeader({
   onRotatePage,
   isPageCalibrated,
   onCalibrateScale,
+  magicWandMode = false,
+  onToggleMagicWand,
   annotationTool,
   annotationColor,
   annotationFilled,
@@ -257,6 +260,21 @@ export function TakeoffWorkspaceHeader({
             {isPageCalibrated ? 'Recalibrate' : 'Calibrate Scale'}
           </Button>
         </div>
+
+        {currentPdfFile && onToggleMagicWand && (
+          <div className="hidden xl:block">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onToggleMagicWand}
+              className={cn('command-button', magicWandMode && 'command-button-success hover:opacity-90')}
+              title="Magic wand: select an area/volume condition, then click inside an enclosed room to measure it automatically. Esc exits."
+            >
+              <Wand2 className="w-4 h-4 mr-1.5" />
+              Wand
+            </Button>
+          </div>
+        )}
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
