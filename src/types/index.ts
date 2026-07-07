@@ -92,6 +92,14 @@ export interface TakeoffMeasurement {
   netCalculatedValue?: number; // calculatedValue - sum of all cutouts
   /** Z-order on this PDF page: lower = behind, higher = in front (SVG paint order). */
   stackOrder?: number;
+  /**
+   * Circular-arc segments (DXF bulge convention, see src/utils/arcGeometry.ts).
+   * segmentIndex i = points[i]→points[i+1]; for area/volume polygons index
+   * points.length-1 is the closing edge. Absent/empty = all straight segments.
+   * Bulge is scale/rotation invariant, so the same value applies in normalized
+   * page space and any uniform pixel space.
+   */
+  arcs?: Array<{ segmentIndex: number; bulge: number }>;
 }
 
 export interface Sheet {
@@ -156,6 +164,12 @@ export interface SheetHyperlink {
   targetPageNumber: number;
   /** Optional external URL (use when targetSheetId is empty) */
   targetUrl?: string;
+  /**
+   * Optional precise landing view on the target page: (x, y) is the point to center,
+   * normalized 0-1 in unrotated PDF space; zoom is the viewer scale to apply.
+   * Absent = legacy behavior (open page at default view).
+   */
+  targetViewport?: { x: number; y: number; zoom: number };
   timestamp: string;
   /** Manual vs batch auto-hyperlink; omit/undefined treated as manual for legacy data */
   origin?: 'manual' | 'batch';
