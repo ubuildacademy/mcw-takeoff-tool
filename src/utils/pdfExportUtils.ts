@@ -1,6 +1,7 @@
 import { PDFDocument, rgb, StandardFonts, type PDFPage, type PDFFont } from 'pdf-lib';
 import type { TakeoffMeasurement, Annotation, TakeoffCondition } from '../types';
 import { formatFeetAndInches } from '../lib/utils';
+import { expandPolylineWithArcs } from './arcGeometry';
 
 // Render sheets at a slightly higher resolution so zooming is less blurry,
 // while preserving the physical PDF page size by downscaling the embedded image.
@@ -18,6 +19,38 @@ interface PageMeasurements {
 
 const HEX_COLOR_RE = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i;
 
+/** Where the on-page legend box is anchored on each exported sheet. */
+export type LegendAnchor =
+  | 'top-left'
+  | 'top-center'
+  | 'top-right'
+  | 'middle-left'
+  | 'middle-right'
+  | 'bottom-left'
+  | 'bottom-center'
+  | 'bottom-right';
+
+/** How completed measurements are labeled on exported sheet pages. */
+export type MarkupLabelMode = 'quantity' | 'nameOnly' | 'none';
+
+export interface PdfSheetExportOptions {
+  /** Draw the per-page quantities legend box on each sheet. */
+  showLegend: boolean;
+  /** Legend rows: condition name with or without the quantity. */
+  legendContent: 'nameAndQty' | 'nameOnly';
+  /** Legend box anchor, so it can avoid covering different titleblock layouts. */
+  legendAnchor: LegendAnchor;
+  /** Text drawn at each measurement: quantity (default), condition name, or nothing. */
+  markupLabelMode: MarkupLabelMode;
+}
+
+export const DEFAULT_PDF_SHEET_EXPORT_OPTIONS: PdfSheetExportOptions = {
+  showLegend: true,
+  legendContent: 'nameAndQty',
+  legendAnchor: 'bottom-center',
+  markupLabelMode: 'quantity',
+};
+
 /** Parse `#RRGGBB` to 8-bit RGB channels. */
 function parseHexRgb(
   hex: string,
@@ -28,17 +61,19 @@ function parseHexRgb(
   return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
 }
 
-/** Floating legend on a rendered sheet page (bottom-center), only for rows on this page. */
+/** Floating legend on a rendered sheet page, only for rows on this page. */
 function drawPageLegendOverlay(
   page: PDFPage,
   items: Array<{ condition: TakeoffCondition; total: number }>,
   font: PDFFont,
-  fontBold: PDFFont
+  fontBold: PDFFont,
+  legendContent: 'nameAndQty' | 'nameOnly' = 'nameAndQty',
+  anchor: LegendAnchor = 'bottom-center'
 ): void {
   if (items.length === 0) return;
 
   const sorted = [...items].sort((a, b) => a.condition.name.localeCompare(b.condition.name));
-  const { width: pageWidth } = page.getSize();
+  const { width: pageWidth, height: pageHeight } = page.getSize();
 
   // Make the on-page legend easier to read in print/PDF viewers.
   const fontSize = 13;
@@ -55,7 +90,9 @@ function drawPageLegendOverlay(
   const titleText = 'This page';
   const lines: string[] = sorted.map(({ condition, total }) => {
     const label = truncate(condition.name, 40);
-    return `${label}: ${total.toFixed(2)} ${condition.unit}`;
+    return legendContent === 'nameOnly'
+      ? label
+      : `${label}: ${total.toFixed(2)} ${condition.unit}`;
   });
 
   let contentWidth = fontBold.widthOfTextAtSize(titleText, titleSize);
@@ -69,8 +106,18 @@ function drawPageLegendOverlay(
   );
   const boxHeight = padding + titleSize + titleBodyGap + lines.length * lineHeight + padding;
 
-  const boxLeft = Math.max(edgeMargin, (pageWidth - boxWidth) / 2);
-  const boxBottom = edgeMargin;
+  const boxHorizontal = anchor.endsWith('left')
+    ? edgeMargin
+    : anchor.endsWith('right')
+      ? pageWidth - edgeMargin - boxWidth
+      : (pageWidth - boxWidth) / 2;
+  const boxVertical = anchor.startsWith('top')
+    ? pageHeight - edgeMargin - boxHeight
+    : anchor.startsWith('middle')
+      ? (pageHeight - boxHeight) / 2
+      : edgeMargin;
+  const boxLeft = Math.max(edgeMargin, boxHorizontal);
+  const boxBottom = Math.max(edgeMargin, boxVertical);
 
   page.drawRectangle({
     x: boxLeft,
@@ -178,13 +225,19 @@ function drawMeasurementToCanvas(
   ctx: CanvasRenderingContext2D,
   measurement: TakeoffMeasurement,
   viewport: { width: number; height: number },
-  rotation: number
+  rotation: number,
+  labelMode: MarkupLabelMode = 'quantity'
 ): void {
   if (!measurement.pdfCoordinates || measurement.pdfCoordinates.length === 0) return;
-  
-  const transformedPoints = measurement.pdfCoordinates.map(p => 
+
+  // Vertex dots and labels anchor on true vertices; strokes/fills use the
+  // arc-expanded outline (tessellated in pixel space so arcs stay circular).
+  const trueVertexPoints = measurement.pdfCoordinates.map(p =>
     transformCoordinates(p, viewport, rotation)
   );
+  const transformedPoints = expandPolylineWithArcs(trueVertexPoints, measurement.arcs, {
+    closed: measurement.type === 'area' || measurement.type === 'volume',
+  });
   
   const strokeColor = measurement.conditionColor || '#000000';
   const rgb = parseHexRgb(strokeColor, { r: 0, g: 0, b: 0 });
@@ -204,35 +257,38 @@ function drawMeasurementToCanvas(
           ctx.lineTo(transformedPoints[i].x, transformedPoints[i].y);
         }
         ctx.stroke();
-        
-        // Draw dots
-        transformedPoints.forEach(point => {
+
+        // Draw dots (true vertices only, not tessellated arc points)
+        trueVertexPoints.forEach(point => {
           ctx.beginPath();
           ctx.arc(point.x, point.y, 4, 0, 2 * Math.PI);
           ctx.fill();
         });
         
         // Add text
-        const startPoint = transformedPoints[0];
-        const endPoint = transformedPoints[transformedPoints.length - 1];
-        const midPoint = {
-          x: (startPoint.x + endPoint.x) / 2,
-          y: (startPoint.y + endPoint.y) / 2
-        };
-        
-        ctx.font = '12px Arial';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'bottom';
-        
-        const linearValue = (measurement.unit === 'ft' || measurement.unit === 'feet' || measurement.unit === 'LF' || measurement.unit === 'lf')
-          ? formatFeetAndInches(measurement.calculatedValue)
-          : `${measurement.calculatedValue.toFixed(2)} ${measurement.unit}`;
-        
-        const displayValue = measurement.areaValue
-          ? `${linearValue} LF / ${measurement.areaValue.toFixed(0)} SF`
-          : linearValue;
-        
-        ctx.fillText(displayValue, midPoint.x, midPoint.y - 5);
+        if (labelMode !== 'none') {
+          const startPoint = transformedPoints[0];
+          const endPoint = transformedPoints[transformedPoints.length - 1];
+          const midPoint = {
+            x: (startPoint.x + endPoint.x) / 2,
+            y: (startPoint.y + endPoint.y) / 2
+          };
+
+          ctx.font = '12px Arial';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'bottom';
+
+          const linearValue = (measurement.unit === 'ft' || measurement.unit === 'feet' || measurement.unit === 'LF' || measurement.unit === 'lf')
+            ? formatFeetAndInches(measurement.calculatedValue)
+            : `${measurement.calculatedValue.toFixed(2)} ${measurement.unit}`;
+
+          const quantityLabel = measurement.areaValue
+            ? `${linearValue} LF / ${measurement.areaValue.toFixed(0)} SF`
+            : linearValue;
+          const displayValue = labelMode === 'nameOnly' ? measurement.conditionName : quantityLabel;
+
+          ctx.fillText(displayValue, midPoint.x, midPoint.y - 5);
+        }
       }
       break;
       
@@ -272,38 +328,42 @@ function drawMeasurementToCanvas(
 
         ctx.stroke();
 
-        transformedPoints.forEach((point) => {
+        trueVertexPoints.forEach((point) => {
           ctx.beginPath();
           ctx.arc(point.x, point.y, 4, 0, 2 * Math.PI);
           ctx.fill();
         });
 
         // Add text
-        const centerX = transformedPoints.reduce((sum, p) => sum + p.x, 0) / transformedPoints.length;
-        const centerY = transformedPoints.reduce((sum, p) => sum + p.y, 0) / transformedPoints.length;
-        
-        ctx.font = 'bold 12px Arial';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        
-        const displayValue = measurement.netCalculatedValue !== undefined && measurement.netCalculatedValue !== null
-          ? measurement.netCalculatedValue
-          : measurement.calculatedValue;
-        
-        let finalDisplayValue: string;
-        if (measurement.type === 'area') {
-          const areaValue = `${displayValue.toFixed(0)} SF`;
-          finalDisplayValue = measurement.perimeterValue
-            ? `${areaValue} / ${formatFeetAndInches(measurement.perimeterValue)} LF`
-            : areaValue;
-        } else {
-          const volumeValue = `${displayValue.toFixed(0)} CY`;
-          finalDisplayValue = measurement.perimeterValue
-            ? `${volumeValue} / ${formatFeetAndInches(measurement.perimeterValue)} LF`
-            : volumeValue;
+        if (labelMode !== 'none') {
+          const centerX = transformedPoints.reduce((sum, p) => sum + p.x, 0) / transformedPoints.length;
+          const centerY = transformedPoints.reduce((sum, p) => sum + p.y, 0) / transformedPoints.length;
+
+          ctx.font = 'bold 12px Arial';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+
+          const displayValue = measurement.netCalculatedValue !== undefined && measurement.netCalculatedValue !== null
+            ? measurement.netCalculatedValue
+            : measurement.calculatedValue;
+
+          let finalDisplayValue: string;
+          if (labelMode === 'nameOnly') {
+            finalDisplayValue = measurement.conditionName;
+          } else if (measurement.type === 'area') {
+            const areaValue = `${displayValue.toFixed(0)} SF`;
+            finalDisplayValue = measurement.perimeterValue
+              ? `${areaValue} / ${formatFeetAndInches(measurement.perimeterValue)} LF`
+              : areaValue;
+          } else {
+            const volumeValue = `${displayValue.toFixed(0)} CY`;
+            finalDisplayValue = measurement.perimeterValue
+              ? `${volumeValue} / ${formatFeetAndInches(measurement.perimeterValue)} LF`
+              : volumeValue;
+          }
+
+          ctx.fillText(finalDisplayValue, centerX, centerY);
         }
-        
-        ctx.fillText(finalDisplayValue, centerX, centerY);
       }
       break;
       
@@ -476,7 +536,8 @@ async function renderPageWithMarkupsToCanvas(
   measurements: TakeoffMeasurement[],
   annotations: Annotation[],
   documentRotation: number,
-  scale: number = 2.0
+  scale: number = 2.0,
+  labelMode: MarkupLabelMode = 'quantity'
 ): Promise<{ imageData: Uint8Array; width: number; height: number }> {
   const { getPdfjs } = await import('../lib/pdfjs');
   const pdfjsLib = await getPdfjs();
@@ -509,7 +570,7 @@ async function renderPageWithMarkupsToCanvas(
   // to pixel coordinates matching this viewport (with rotation already applied)
   // Draw measurements directly to canvas
   measurements.forEach(measurement => {
-    drawMeasurementToCanvas(ctx, measurement, viewport, documentRotation);
+    drawMeasurementToCanvas(ctx, measurement, viewport, documentRotation, labelMode);
   });
   
   // Draw annotations directly to canvas
@@ -548,7 +609,8 @@ export async function exportPagesWithMeasurementsToPDF(
   pagesWithMeasurements: PageMeasurements[],
   projectName: string,
   documentRotations?: Map<string, number>,
-  onProgress?: (progress: number) => void
+  onProgress?: (progress: number) => void,
+  options: PdfSheetExportOptions = DEFAULT_PDF_SHEET_EXPORT_OPTIONS
 ): Promise<ExportResult> {
   try {
     // Create a new PDF document
@@ -602,7 +664,8 @@ export async function exportPagesWithMeasurementsToPDF(
             pageMeasurement.measurements,
             pageMeasurement.annotations || [],
             documentRotation,
-            EXPORT_RENDER_SCALE
+            EXPORT_RENDER_SCALE,
+            options.markupLabelMode
           );
           
           // Embed the rendered image as a new page (downscaled to preserve page size).
@@ -620,8 +683,15 @@ export async function exportPagesWithMeasurementsToPDF(
           });
 
           const legendItems = pageMeasurement.pageLegendItems;
-          if (legendItems && legendItems.length > 0) {
-            drawPageLegendOverlay(addedPage, legendItems, legendFont, legendFontBold);
+          if (options.showLegend && legendItems && legendItems.length > 0) {
+            drawPageLegendOverlay(
+              addedPage,
+              legendItems,
+              legendFont,
+              legendFontBold,
+              options.legendContent,
+              options.legendAnchor
+            );
           }
 
           processedPages++;

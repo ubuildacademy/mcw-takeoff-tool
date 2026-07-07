@@ -8,3 +8,4 @@ export { useDocumentViewStore } from './documentViewSlice';
 export { usePdfViewerTabsStore, type PDFViewerTab } from './pdfViewerTabsSlice';
 export { useUndoStore } from './undoSlice';
 export type { UndoEntry } from './undoSlice';
+export { usePdfExportPrefsStore } from './pdfExportPrefsSlice';

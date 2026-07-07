@@ -1360,8 +1360,10 @@ export function useTakeoffExport({
       });
 
       const { exportPagesWithMeasurementsToPDF, downloadPDF } = await import('../../utils/pdfExportUtils');
+      const { usePdfExportPrefsStore } = await import('../../store/slices/pdfExportPrefsSlice');
       const { PDFDocument: PDFLibDocument } = await import('pdf-lib');
 
+      const sheetExportOptions = usePdfExportPrefsStore.getState().getOptions(projectId);
       const exportResult = await exportPagesWithMeasurementsToPDF(
         pagesForExport,
         currentProject?.name ?? 'Project',
@@ -1369,7 +1371,8 @@ export function useTakeoffExport({
         (progress) => {
           const mappedProgress = 30 + progress * 0.5;
           onExportStatusUpdate?.('pdf', Math.round(mappedProgress));
-        }
+        },
+        sheetExportOptions
       );
 
       if (exportResult.skippedSheets.length > 0) {
