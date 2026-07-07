@@ -193,7 +193,8 @@ Reuse a set of conditions across projects instead of rebuilding trade packs by h
 - **Save a template:** In the dialog, name the template (e.g. "Waterproofing — Div 7" or "Residential drywall") and save. It captures the **current project's** conditions — type, unit, color, waste factor, costs, multiplier, and sub-quantity settings.
 - **Apply a template:** Pick a saved template and apply it to seed conditions into the current project. Rows whose **name already exists** in the project are skipped, so applying a template twice (or into a project that already has some of those conditions) will not create duplicates.
 - **What is not included:** Auto-count **search images** are not part of a template — auto-count conditions come back without their reference imagery and need it re-added.
-- **Where templates live:** Templates are stored **per browser** (localStorage), not per project or account — they are available in any project you open on the same browser/device, but do not follow you to a different computer.
+- **Where templates live:** Templates are saved to your **account**, so they follow you to any device you sign in on. (Templates created in an older version that lived in the browser are **imported automatically** the first time you open the dialog.)
+- **Sharing with your team:** Toggle a template to **Shared** to publish it to everyone in your deployment. Shared templates carry a **Shared** badge and are **read-only** to other users — only the owner (or an admin) can rename, edit sharing, or delete them. Anyone can **apply** a shared template to their own projects.
 
 ### Reports tab
 
@@ -290,8 +291,11 @@ Use this when sheet **names** and **numbers** in the sidebar are empty or wrong 
 A **project-scoped chat** that uses a **local or hosted LLM** via **Ollama** (connection is checked when you open the tab).
 
 - **If Ollama is unavailable**, you’ll see an error and **Retry Connection** (depends on your deployment’s API keys / server).
-- When connected, the assistant receives **context** built from: project metadata, **conditions**, **measurement summary**, **recent measurements**, and **OCR text** from documents (when retrievable).
-- **Clear** and **Export** (downloads a `.txt` transcript) appear when there are messages.
+- **Modes:** A selector at the top switches the assistant’s focus — **General Assistant**, or the **Division 7 Waterproofing Estimator** (a senior-estimator persona with a built-in Div 7 reference knowledge base). Changing mode starts a fresh conversation.
+- **Question-aware context:** For each question the assistant is given project metadata, **all conditions**, the **takeoff totals by condition**, the **document list**, and — instead of dumping every page — the **most relevant sheet pages selected for that question**. Name a sheet number (e.g. **A-101**) and it focuses on that sheet. This keeps answers accurate on large sets that would otherwise overflow the model’s context window.
+- **Formatted answers:** Replies use **markdown** — quantity breakdowns come back as **tables**, and references cite the **document and page/sheet**.
+- **Controls:** **Stop** ends a long reply while keeping the partial text; **Copy** grabs a reply; **suggested-question chips** appear on a fresh chat. **Clear** and **Export** (downloads a `.txt` transcript) appear when there are messages.
+- **Limits:** There is a **daily per-user message limit** (admins are exempt); the remaining count shows in the header.
 - Chat history for the project is stored in **browser localStorage** (`chat-<projectId>`).
 
 ---

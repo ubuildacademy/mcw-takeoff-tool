@@ -182,9 +182,15 @@ export const DEFAULT_HELP_FAQ_CONFIG: HelpFaqConfig = {
   },
   {
     id: 'condition-templates',
-    question: 'How do I reuse conditions across projects?',
+    question: 'How do I reuse conditions across projects, and can I share them with my team?',
     answer:
-      'Open Templates from the Conditions tab. Save the current project\'s conditions as a named template, then apply that template to seed a new project — rows with a name that already exists are skipped. Costs, waste factors, units, colors, and sub-quantities carry over, but auto-count search images do not. Templates are stored per browser, not per project.',
+      'Open Templates from the Conditions tab. Save the current project\'s conditions as a named template, then apply that template to seed a new project — rows with a name that already exists are skipped. Costs, waste factors, units, colors, and sub-quantities carry over, but auto-count search images do not. Templates are saved to your account, so they follow you to any device (templates from an older version import automatically the first time). Turn on "Shared" to publish a template to everyone on your team; shared templates show a Shared badge and are read-only to other users, while you (or an admin) stay in control of edits.',
+  },
+  {
+    id: 'ai-chat-assistant',
+    question: 'How does the AI Chat assistant use my project?',
+    answer:
+      'AI Chat reads your project as it answers: conditions, takeoff totals, and the text of your uploaded sheets. For each question it automatically pulls the most relevant sheets — mention a sheet number like A-101 and it focuses there. Pick a mode at the top (General, or the Division 7 waterproofing estimator with its built-in reference). Answers come back formatted with tables for quantity breakdowns and cite the sheet and page. Use Stop to end a long answer, Copy to grab a reply, and the suggested-question chips on a fresh chat to get started. There is a daily message limit per user (admins are exempt).',
   },
   {
     id: 'pdf-export-options',

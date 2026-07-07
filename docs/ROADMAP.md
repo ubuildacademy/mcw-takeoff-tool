@@ -31,17 +31,20 @@ Living list of **larger features**, **quality improvements**, and **outstanding 
 | **Schedule → takeoff** | "Very strange" results on real sets per beta test. Gated behind dev builds (palette entry hidden in prod). Needs: repro assets from real schedules, header-detection hardening, merged-cell handling. |
 | **Room proposals** | Gated with schedule tool. See dial-in section below. |
 
-### AI chat overhaul (next major workstream per owner)
+### AI chat overhaul
+
+Round 1 shipped 2026-07 (see Recently shipped). Remaining ideas for later:
 
 | Item | Notes |
 |------|--------|
-| **Make chat genuinely helpful** | Scope TBD with Jeff: context injection (current project/sheet/conditions?), takeoff-aware answers, KB expansion beyond Div 7, UX. Ties into [ai-infra] fallback chain/paid tier later. |
+| **KB expansion beyond Div 7** | Add estimator personas/knowledge bases for other divisions (concrete, masonry, drywall…) alongside the Div 7 pack. |
+| **Retrieval tuning on real sets** | Current page retrieval is IDF term-scoring + sheet-ref boost (`utils/chatContext.ts`). Watch behavior on large real sets; consider phrase/section awareness if answers miss context. |
+| **AI infra** | Fallback chain + paid tier ([ai-infra] memory) — separate workstream, still deferred. |
 
 ### Cleanup queue
 
 | Item | Notes |
 |------|--------|
-| **Condition templates → DB (per-user)** | Currently localStorage (per browser). Move to per-user table like hyperlinks so template libraries follow the estimator across devices; prerequisite for cost/assembly integration later. |
 | **Cutout vertex editing** | Beta ask (not urgent): extend vertex edit mode to cutout boundaries (handles per cutout ring; arcs optional). |
 | **Wand/proposals: furniture-aware fill** | Rooms with beds/rugs force many clicks (interior linework splits regions). Idea: morphological opening on the raster before fill — erode strokes thinner than N px so furniture outlines stop blocking while thick walls survive. Fixes both wand ergonomics and room-proposal over-segmentation. |
 
@@ -100,7 +103,8 @@ Living list of **larger features**, **quality improvements**, and **outstanding 
 | **Room proposals (whole-sheet)** | ⌘K → "Propose rooms on this sheet": grid-seeded flood-fill sweep (`proposeRooms` in `floodFillRoom.ts`) finds every enclosed region once (shared visited mask, ~O(page)), filters leaks/dust, review dialog with computed areas → accepted rooms become measurements in the selected area/volume condition. Deterministic, no LLM. | 2026-07 |
 | **Schedule → takeoff (no LLM)** | ⌘K → "Schedule → takeoff": drag a box around a door/window/fixture schedule → server `table_extract.py` reconstructs the table from line-grid geometry + exact vector text (word-alignment clustering fallback for borderless schedules) → review dialog with column mapping (name/qty auto-guessed from headers) → each row becomes a count condition with QTY markers placed on its schedule row (auditable, draggable). Route `POST /ocr/table-extract/:documentId`. | 2026-07 |
 | **Command palette (⌘K)** | Fuzzy jump to sheets (by number/name), activate conditions, run actions (calibrate, magic wand, fit, schedule takeoff, room proposals). `src/components/CommandPalette.tsx`. | 2026-07 |
-| **Condition templates (trade packs)** | Conditions sidebar → "Templates": save the project's condition definitions (costs, waste, units, colors, sub-quantities) as a named template; apply to any project (name-dupes skipped). localStorage library (`conditionTemplatesSlice`). | 2026-07 |
+| **Condition templates (trade packs) → DB + team sharing** | Conditions sidebar → "Templates": save the project's condition definitions (costs, waste, units, colors, sub-quantities) as a named template; apply to any project (name-dupes skipped). Persisted per-user in `condition_templates` (run `create_condition_templates_table.sql`) so libraries follow the estimator across devices; one-time localStorage import on first load. "Shared" toggle publishes a template to all users (Shared badge, read-only to non-owners; owner/admin edit); create/upsert refuses to overwrite or reassign another user's template. Routes under `/api/condition-templates`. | 2026-07 |
+| **AI chat overhaul** | Chat was injecting every OCR page into every prompt with no `num_ctx`, so Ollama silently truncated it. Now per-message context = compact project summary (all conditions + full takeoff totals + doc list) plus **question-aware page retrieval** (`utils/chatContext.ts`: IDF-weighted term scoring + sheet-ref boost so "A-101" focuses that sheet; 6k/page, 24k total budget; first-page fallback for generic asks). OCR cached per-doc; `num_ctx` 32768, temperature 0.3. Answers render as **GFM markdown** (tables for quantities, sheet/page citations) via react-markdown; **Stop**/**Copy** buttons, wider bubbles, suggested-question chips. Deterministic client work — still Ollama free tier, no new API cost. | 2026-07 |
 | **Magic wand room fill** | Header "Wand" button: with an area/volume condition selected, click inside an enclosed room → flood fill bounded by wall linework → boundary trace → simplified polygon → measurement created with full quantity math (undo-able). Deterministic raster CV (`src/utils/floodFillRoom.ts` + tests), no ML. Leak-safe: fills that escape through openings or touch the page edge error out with guidance instead of producing garbage polygons. Page raster cached per sheet (~100 dpi, rotation 0). | 2026-07 |
 | **Markup interaction safety** | Right-click over the sheet never shows the browser menu (wrapper-level handler + stacking-order hit test). Annotations get a context menu (Move, Delete w/ undo). Moves are gated: select → "Move" menu item or M hotkey arms the drag; Esc/M/selection change disarms — no more accidental nudges. | 2026-07 |
 | **Arc segments + vertex edit mode** | Takeoff markups support circular-arc segments (DXF bulge convention, `takeoff_measurements.arcs` JSONB — run `add_arcs_to_takeoff_measurements.sql`). Explicit edit mode via markup context menu "Edit vertices" (accidental-edit safeguard): square handles move vertices, round midpoint handles drag off the chord to bow a segment into an arc (snap back to straighten). Quantities (length/area/perimeter/net) recompute with arc curvature on commit; arcs render in viewer + PDF export. Core math in `src/utils/arcGeometry.ts` (tessellation in uniform pixel space; bulge is scale/rotation invariant) + tests. | 2026-07 |
