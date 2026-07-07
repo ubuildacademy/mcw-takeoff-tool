@@ -96,3 +96,6 @@ __pycache__/
 *.pyo
 *.pyd
 .Python
+
+# Claude Code local settings (machine-specific permissions)
+.claude/settings.local.json
