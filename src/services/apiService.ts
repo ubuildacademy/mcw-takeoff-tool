@@ -532,6 +532,47 @@ export const authService = {
 };
 
 // Calibration service
+/** Sheet hyperlinks: DB-persisted so links follow the project across devices. */
+export const hyperlinkService = {
+  async getProjectHyperlinks(projectId: string) {
+    const response = await apiClient.get(`/hyperlinks/project/${projectId}`);
+    return response.data as { hyperlinks: import('../types').SheetHyperlink[] };
+  },
+
+  /** Upsert by id (client-generated ids; used for create, batch apply, imports, restore). */
+  async bulkUpsert(projectId: string, hyperlinks: import('../types').SheetHyperlink[]) {
+    const response = await apiClient.post(`/hyperlinks/project/${projectId}/bulk`, { hyperlinks });
+    return response.data as { success: boolean; saved: number; skipped: number };
+  },
+
+  async update(
+    projectId: string,
+    id: string,
+    updates: Partial<Pick<import('../types').SheetHyperlink, 'targetSheetId' | 'targetPageNumber' | 'targetUrl' | 'sourceRect' | 'targetViewport'>>
+  ) {
+    // Explicit null clears a saved target view server-side (undefined would be dropped by JSON).
+    const body = { ...updates } as Record<string, unknown>;
+    if ('targetViewport' in updates && updates.targetViewport === undefined) {
+      body.targetViewport = null;
+    }
+    await apiClient.put(`/hyperlinks/project/${projectId}/${id}`, body);
+  },
+
+  async remove(projectId: string, id: string) {
+    await apiClient.delete(`/hyperlinks/project/${projectId}/${id}`);
+  },
+
+  async clearBatch(projectId: string) {
+    const response = await apiClient.delete(`/hyperlinks/project/${projectId}/batch`);
+    return response.data as { success: boolean; removed: number };
+  },
+
+  async clearAll(projectId: string) {
+    const response = await apiClient.delete(`/hyperlinks/project/${projectId}`);
+    return response.data as { success: boolean; removed: number };
+  },
+};
+
 export const calibrationService = {
   async getCalibration(projectId: string, sheetId: string, pageNumber?: number) {
     const params = pageNumber !== undefined ? `?pageNumber=${pageNumber}` : '';
@@ -933,6 +974,71 @@ export const ocrApiService = {
       totalPages: number;
       calloutsFound: number;
       pagesWithCallouts: number;
+    };
+  },
+
+  /**
+   * Auto-hyperlink precision pass for vector (CAD-exported) PDFs: server reads callout
+   * geometry (circles/hexagons) straight from PDF drawing commands via PyMuPDF and pairs
+   * each shape with the exact text inside it. Reference callouts are merged into stored
+   * OCR (`source: 'vector_callout'`); the full callout payload comes back for the review
+   * table and auto target views. Seconds per document — runs on every Auto-hyperlink.
+   */
+  /**
+   * Schedule→takeoff: reconstruct a table from a boxed region of a vector sheet
+   * (server-side line-grid geometry + exact text; clustering fallback for
+   * borderless schedules). Deterministic — no OCR, no LLM.
+   */
+  async runTableExtract(
+    documentId: string,
+    projectId: string,
+    pageNumber: number,
+    region: { x: number; y: number; width: number; height: number }
+  ) {
+    const response = await apiClient.post(`/ocr/table-extract/${documentId}`, {
+      projectId,
+      pageNumber,
+      region,
+    }, {
+      timeout: 2 * 60 * 1000,
+    });
+    return response.data as {
+      documentId: string;
+      pageNumber: number;
+      mode: 'ruled' | 'clustered';
+      rows: string[][];
+      rowBoxes: Array<{ y0: number; y1: number }>;
+      region: { x0: number; y0: number; x1: number; y1: number };
+    };
+  },
+
+  async runVectorCalloutExtract(documentId: string, projectId: string) {
+    const response = await apiClient.post(`/ocr/vector-callouts/${documentId}`, {
+      projectId,
+    }, {
+      timeout: 15 * 60 * 1000,
+    });
+    return response.data as {
+      documentId: string;
+      totalPages: number;
+      calloutsFound: number;
+      referenceCallouts: number;
+      pages: Array<{
+        pageNumber: number;
+        width: number;
+        height: number;
+        rotation: number;
+        callouts: Array<{
+          bbox: { x: number; y: number; width: number; height: number };
+          shape: 'circle' | 'hexagon';
+          detailLabel: string | null;
+          sheetRef: string | null;
+          kind: 'reference' | 'detail_title' | 'unlabeled';
+          titleText: string | null;
+          words: Array<{ text: string; x: number; y: number; width: number; height: number }>;
+        }>;
+        error?: string;
+      }>;
     };
   },
 };

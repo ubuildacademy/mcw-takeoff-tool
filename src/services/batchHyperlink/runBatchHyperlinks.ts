@@ -24,7 +24,7 @@ export interface RunBatchHyperlinksOptions {
   visualWordBoxesByPageKey?: Map<string, BatchOcrWordBox[]>;
 }
 
-const SUPPLEMENTAL_WORD_SOURCES = new Set(['bubble_ocr', 'callout_pass']);
+const SUPPLEMENTAL_WORD_SOURCES = new Set(['bubble_ocr', 'callout_pass', 'vector_callout']);
 
 function isSupplementalWordBox(source: string | undefined): boolean {
   return source != null && SUPPLEMENTAL_WORD_SOURCES.has(source);

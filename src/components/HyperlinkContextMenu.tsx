@@ -6,6 +6,8 @@ export interface HyperlinkContextMenuProps {
   hyperlinkId: string;
   onEdit: () => void;
   onDelete: () => void;
+  /** Navigate to the target page and capture the exact landing view for this link. */
+  onSetTargetView?: () => void;
   onClose: () => void;
 }
 
@@ -15,6 +17,7 @@ export function HyperlinkContextMenu({
   hyperlinkId: _hyperlinkId,
   onEdit,
   onDelete,
+  onSetTargetView,
   onClose,
 }: HyperlinkContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
@@ -52,6 +55,18 @@ export function HyperlinkContextMenu({
       >
         Edit...
       </button>
+      {onSetTargetView && (
+        <button
+          type="button"
+          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent"
+          onClick={() => {
+            onSetTargetView();
+            onClose();
+          }}
+        >
+          Set target view...
+        </button>
+      )}
       <button
         type="button"
         className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-500/10"

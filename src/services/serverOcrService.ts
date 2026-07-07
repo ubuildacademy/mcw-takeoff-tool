@@ -12,7 +12,7 @@ export interface OCRResult {
     text: string;
     confidence: number;
     bbox: { x: number; y: number; width: number; height: number };
-    source: 'pdfjs' | 'tesseract' | 'pymupdf' | 'bubble_ocr';
+    source: 'pdfjs' | 'tesseract' | 'pymupdf' | 'bubble_ocr' | 'vector_callout';
     ocrRotationDeg?: number;
   }>;
 }

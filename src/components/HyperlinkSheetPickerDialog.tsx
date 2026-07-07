@@ -23,8 +23,12 @@ export interface HyperlinkSheetPickerDialogProps {
   /** When editing, the current target to pre-select */
   initialTargetSheetId?: string;
   initialTargetPageNumber?: number;
-  /** Create mode: called when user picks target */
-  onSelect: (targetSheetId: string, targetPageNumber: number) => void;
+  /**
+   * Called when user picks a target. `setViewAfter` is true when they chose
+   * "…& set view": the workspace should navigate to the target and capture
+   * the exact landing view (position + zoom) for this link.
+   */
+  onSelect: (targetSheetId: string, targetPageNumber: number, setViewAfter?: boolean) => void;
   /** Edit mode: when set, dialog is in edit mode (title may differ) */
   isEditMode?: boolean;
   /** Edit mode only: remove the hyperlink entirely (same as context menu Delete) */
@@ -142,12 +146,12 @@ export function HyperlinkSheetPickerDialog({
     onOpenChange(next);
   };
 
-  const handleConfirm = () => {
+  const handleConfirm = (setViewAfter?: boolean) => {
     if (!selected) return;
     const [sheetId, pageStr] = selected.split(':');
     const pageNumber = parseInt(pageStr, 10);
     if (sheetId && !Number.isNaN(pageNumber)) {
-      onSelect(sheetId, pageNumber);
+      onSelect(sheetId, pageNumber, setViewAfter);
       setSelected(null);
       onOpenChange(false);
     }
@@ -205,7 +209,15 @@ export function HyperlinkSheetPickerDialog({
             <Button variant="outline" onClick={() => handleOpenChange(false)}>
               Cancel
             </Button>
-            <Button onClick={handleConfirm} disabled={!selected}>
+            <Button
+              variant="secondary"
+              onClick={() => handleConfirm(true)}
+              disabled={!selected}
+              title="Create the link, then position the view on the target page so the link lands exactly there"
+            >
+              {isEditMode ? 'Update & set view…' : 'Create & set view…'}
+            </Button>
+            <Button onClick={() => handleConfirm()} disabled={!selected}>
               {isEditMode ? 'Update' : 'Create link'}
             </Button>
           </div>

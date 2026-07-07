@@ -5,7 +5,7 @@ export interface BatchOcrWordBox {
   text: string;
   bbox: { x: number; y: number; width: number; height: number };
   confidence?: number;
-  source?: 'pdfjs' | 'tesseract' | 'pymupdf' | 'bubble_ocr' | 'callout_pass';
+  source?: 'pdfjs' | 'tesseract' | 'pymupdf' | 'bubble_ocr' | 'callout_pass' | 'vector_callout';
 }
 
 const Y_CLUSTER_TOL = 0.018;
