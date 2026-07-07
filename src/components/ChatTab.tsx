@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import ReactMarkdown, { type Components } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
@@ -11,7 +13,10 @@ import {
   MessageSquare,
   Trash2,
   FileText,
-  RefreshCw
+  RefreshCw,
+  Copy,
+  Check,
+  Square
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useShallow } from 'zustand/react/shallow';
@@ -24,6 +29,7 @@ import { authHelpers } from '../lib/supabase';
 import { settingsService } from '../services/apiService';
 import { CHAT_PRESET_CONFIGS, CHAT_PRESET_MAP, CHAT_PRESET_SETTING_KEY } from '../constants/chatPresets';
 import { knowledgeBaseService } from '../services/knowledgeBaseService';
+import { buildStaticProjectContext, retrieveRelevantPages, type ChatSourceDoc } from '../utils/chatContext';
 import type { PDFDocument } from '../types';
 
 /** Strip markdown to plain text (pure, no closure — safe to define outside component). */
@@ -58,6 +64,39 @@ interface ChatTabProps {
   documents: PDFDocument[];
 }
 
+/** Compact Tailwind styling for assistant markdown (tables, code, lists). Defined once, outside the component. */
+const markdownComponents: Components = {
+  p: ({ ...props }) => <p className="mb-2 last:mb-0 leading-relaxed" {...props} />,
+  table: ({ ...props }) => (
+    <div className="overflow-x-auto my-2 max-w-full">
+      <table className="border-collapse text-sm" {...props} />
+    </div>
+  ),
+  thead: ({ ...props }) => <thead {...props} />,
+  th: ({ ...props }) => <th className="border px-2 py-1 bg-muted text-left font-medium whitespace-nowrap" {...props} />,
+  td: ({ ...props }) => <td className="border px-2 py-1 align-top" {...props} />,
+  ul: ({ ...props }) => <ul className="list-disc list-outside pl-5 space-y-0.5 my-1" {...props} />,
+  ol: ({ ...props }) => <ol className="list-decimal list-outside pl-5 space-y-0.5 my-1" {...props} />,
+  li: ({ ...props }) => <li {...props} />,
+  h1: ({ ...props }) => <h1 className="text-base font-semibold mt-2 mb-1" {...props} />,
+  h2: ({ ...props }) => <h2 className="text-sm font-semibold mt-2 mb-1" {...props} />,
+  h3: ({ ...props }) => <h3 className="text-sm font-semibold mt-1 mb-1" {...props} />,
+  a: ({ ...props }) => <a className="text-blue-600 underline break-all" target="_blank" rel="noreferrer" {...props} />,
+  strong: ({ ...props }) => <strong className="font-semibold" {...props} />,
+  blockquote: ({ ...props }) => <blockquote className="border-l-2 pl-2 italic text-muted-foreground my-1" {...props} />,
+  pre: ({ ...props }) => <pre className="bg-muted rounded p-2 my-1 overflow-x-auto text-xs font-mono" {...props} />,
+  code: ({ ...props }) => <code className="px-1 py-0.5 rounded bg-muted/70 text-xs font-mono" {...props} />,
+  hr: ({ ...props }) => <hr className="my-2 border-border" {...props} />,
+};
+
+/** Generic suggested-question chips shown under the welcome message before the user has asked anything. */
+const SUGGESTED_QUESTIONS = [
+  'Summarize my takeoff so far',
+  'What conditions have no measurements yet?',
+  'What scope gaps should I check?',
+  'What documents have been uploaded?',
+];
+
 export function ChatTab({ projectId, documents }: ChatTabProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState('');
@@ -73,20 +112,41 @@ export function ChatTab({ projectId, documents }: ChatTabProps) {
   const [presetPrompts, setPresetPrompts] = useState<Record<string, string>>({});
   // KB content cached per preset — loaded once on mount/preset-change, not per message
   const [kbCache, setKbCache] = useState<Record<string, string>>({});
+  // Message id whose content was just copied (drives the brief check-mark confirmation on the copy button)
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // OCR text cache, keyed by document id — fetched once per document, reused across every message.
+  const ocrCacheRef = useRef<Map<string, ChatSourceDoc>>(new Map());
+  // Aborts the in-flight streaming request when the user clicks Stop.
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Simple function to render message content as plain text
+  // Render assistant content as GitHub-flavored markdown (tables, lists, headings); user content stays plain text.
   const renderMessageContent = (message: ChatMessage) => {
+    if (message.role === 'user') {
+      return <div className="whitespace-pre-wrap">{message.content}</div>;
+    }
     return (
-      <div className="whitespace-pre-wrap">
-        {stripMarkdown(message.content)}
+      <div className="text-sm [&>*:first-child]:mt-0">
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+          {message.content}
+        </ReactMarkdown>
       </div>
     );
   };
 
+  const handleCopyMessage = useCallback(async (message: ChatMessage) => {
+    try {
+      await navigator.clipboard.writeText(message.content);
+      setCopiedMessageId(message.id);
+      toast.success('Copied to clipboard');
+      setTimeout(() => setCopiedMessageId((current) => (current === message.id ? null : current)), 1500);
+    } catch {
+      toast.error('Failed to copy');
+    }
+  }, []);
+
   const getCurrentProject = useProjectStore((s) => s.getCurrentProject);
   const getProjectTakeoffSummary = useMeasurementStore((s) => s.getProjectTakeoffSummary);
-  const getProjectTakeoffMeasurements = useMeasurementStore((s) => s.getProjectTakeoffMeasurements);
   // Narrow selector with shallow eq: only this project's conditions (fewer re-renders when other projects change)
   const conditions = useConditionStore(useShallow((s) => s.getProjectConditions(projectId)));
   // Do not load conditions/measurements here — the left conditions sidebar owns loading.
@@ -236,14 +296,53 @@ export function ChatTab({ projectId, documents }: ChatTabProps) {
     }
   }, [projectId, userName, kbCache, loadKbForPreset]);
 
-  // Handle sending a message
-  const handleSendMessage = async () => {
-    if (!inputMessage.trim() || isLoading || !isOllamaAvailable) return;
+  // Ensure every current document's OCR data is cached (ref, not state — fetching does not need a re-render).
+  // Only documents not already cached are fetched, in parallel; already-cached docs are reused as-is.
+  const getCachedOcrDocs = useCallback(async (): Promise<ChatSourceDoc[]> => {
+    const cache = ocrCacheRef.current;
+    const missing = documents.filter((d) => !cache.has(d.id));
+    if (missing.length > 0) {
+      const fetched = await Promise.all(
+        missing.map(async (doc): Promise<ChatSourceDoc> => {
+          const docName = doc.originalName || doc.filename || doc.name;
+          try {
+            const ocrData = await serverOcrService.getDocumentData(doc.id, projectId);
+            const pages = Array.isArray(ocrData?.results)
+              ? ocrData.results
+                  .filter((r) => r != null && r.pageNumber != null)
+                  .map((r) => ({ pageNumber: r.pageNumber, text: r.text ?? '' }))
+              : [];
+            return { docId: doc.id, docName, pages };
+          } catch {
+            // OCR not available for this document yet — cache as empty so we don't retry every message.
+            return { docId: doc.id, docName, pages: [] };
+          }
+        })
+      );
+      for (const chatDoc of fetched) {
+        cache.set(chatDoc.docId, chatDoc);
+      }
+    }
+    return documents
+      .map((d) => cache.get(d.id))
+      .filter((d): d is ChatSourceDoc => d != null);
+  }, [documents, projectId]);
+
+  // Stop the in-flight streaming response, keeping whatever content has arrived so far.
+  const handleStopStreaming = useCallback(() => {
+    abortControllerRef.current?.abort();
+  }, []);
+
+  // Core send routine — accepts explicit content so suggested-question chips can send
+  // without going through input-field state (which would otherwise be stale here).
+  const sendMessage = useCallback(async (rawContent: string) => {
+    const content = rawContent.trim();
+    if (!content || isLoading || !isOllamaAvailable) return;
 
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
       role: 'user',
-      content: inputMessage.trim(),
+      content,
       timestamp: new Date()
     };
 
@@ -260,12 +359,33 @@ export function ChatTab({ projectId, documents }: ChatTabProps) {
       isStreaming: true
     };
 
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
-      // Build context from project data
       const activePreset = CHAT_PRESET_MAP[selectedPresetId] ?? CHAT_PRESET_MAP['general'];
       const systemPrompt = presetPrompts[selectedPresetId] ?? activePreset.defaultPrompt;
 
-      const [projectContext] = await Promise.all([buildProjectContext()]);
+      // OCR text is cached per document id (ref) so it is fetched once, not on every message.
+      const cachedDocs = await getCachedOcrDocs();
+
+      const staticContext = buildStaticProjectContext({
+        projectId,
+        project: getCurrentProject(),
+        conditions,
+        totals: getProjectTakeoffSummary(projectId),
+        documents: documents.map((d) => ({
+          name: d.originalName || d.filename || d.name,
+          pageCount: d.totalPages,
+        })),
+      });
+
+      // Question-aware retrieval over OCR page text, instead of stuffing every page of
+      // every document into the prompt (which silently got truncated by the model's context window).
+      const relevantPages = retrieveRelevantPages(content, cachedDocs);
+      const relevantSection = relevantPages
+        ? `\n\n=== RELEVANT SHEET TEXT (auto-selected for this question) ===\n${relevantPages}`
+        : '';
 
       const kbContent = kbCache[selectedPresetId] ?? '';
       const kbSection = kbContent
@@ -275,7 +395,7 @@ export function ChatTab({ projectId, documents }: ChatTabProps) {
       const ollamaMessages: OllamaMessage[] = [
         {
           role: 'system',
-          content: `${systemPrompt}${kbSection}\n\n${projectContext}`
+          content: `${systemPrompt}${kbSection}\n\n${staticContext}${relevantSection}`
         },
         ...messages.slice(-10).map(msg => ({
           role: msg.role as 'user' | 'assistant',
@@ -296,30 +416,30 @@ export function ChatTab({ projectId, documents }: ChatTabProps) {
         messages: ollamaMessages,
         stream: true,
         options: {
-          temperature: 0.7,
-          top_p: 0.9
+          temperature: 0.3,
+          top_p: 0.9,
+          num_ctx: 32768
         }
-      })) {
+      }, controller.signal)) {
         // Update quota display whenever we get new header info (once per request).
         const q = ollamaService.getLastQuotaInfo();
         if (q) setQuotaInfo(q);
 
         if (chunk.message?.content) {
           fullResponse += chunk.message.content;
-          
-          // Update the streaming message with markdown stripped
-          setMessages(prev => prev.map(msg => 
-            msg.id === assistantMessage.id 
-              ? { ...msg, content: stripMarkdown(fullResponse) }
+
+          // Store raw markdown — rendering (or stripping for export) happens at display time.
+          setMessages(prev => prev.map(msg =>
+            msg.id === assistantMessage.id
+              ? { ...msg, content: fullResponse }
               : msg
           ));
         }
 
         if (chunk.done) {
-          // Mark streaming as complete and ensure final content is markdown-free
-          setMessages(prev => prev.map(msg => 
-            msg.id === assistantMessage.id 
-              ? { ...msg, isStreaming: false, content: stripMarkdown(fullResponse) }
+          setMessages(prev => prev.map(msg =>
+            msg.id === assistantMessage.id
+              ? { ...msg, isStreaming: false, content: fullResponse }
               : msg
           ));
           break;
@@ -327,6 +447,14 @@ export function ChatTab({ projectId, documents }: ChatTabProps) {
       }
 
     } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        // User clicked Stop — keep whatever partial content already streamed in, just end the stream.
+        setMessages(prev => prev.map(msg =>
+          msg.id === assistantMessageId ? { ...msg, isStreaming: false } : msg
+        ));
+        return;
+      }
+
       console.error('Error sending message to Ollama:', error);
 
       const q = ollamaService.getLastQuotaInfo();
@@ -361,121 +489,19 @@ export function ChatTab({ projectId, documents }: ChatTabProps) {
       ));
     } finally {
       setIsLoading(false);
+      abortControllerRef.current = null;
     }
-  };
+  }, [isLoading, isOllamaAvailable, selectedPresetId, presetPrompts, getCachedOcrDocs, projectId, getCurrentProject, conditions, getProjectTakeoffSummary, documents, kbCache, messages]);
 
-  // Build comprehensive project context for AI
-  const buildProjectContext = async (): Promise<string> => {
-    const project = getCurrentProject();
-    const projectSummary = getProjectTakeoffSummary(projectId);
-    const takeoffMeasurements = getProjectTakeoffMeasurements(projectId);
-    
-    let context = `=== PROJECT OVERVIEW ===\n`;
-    
-    // Project details
-    if (project) {
-      context += `Project: ${project.name}\n`;
-      context += `Client: ${project.client || 'Not specified'}\n`;
-      context += `Location: ${project.location || 'Not specified'}\n`;
-      context += `Project Type: ${project.projectType || 'Not specified'}\n`;
-      context += `Status: ${project.status || 'active'}\n`;
-      context += `Description: ${project.description || 'No description'}\n`;
-      if (project.contactPerson) context += `Contact: ${project.contactPerson} (${project.contactEmail || 'No email'})\n`;
-      if (project.startDate) context += `Start Date: ${project.startDate}\n`;
-    } else {
-      context += `Project ID: ${projectId}\n`;
-    }
-    
-    // Takeoff summary
-    if (projectSummary) {
-      context += `\n=== TAKEOFF SUMMARY ===\n`;
-      context += `Total Measurements: ${projectSummary.totalMeasurements}\n`;
-      context += `Total Value: ${projectSummary.totalValue}\n`;
-      
-      if (Object.keys(projectSummary.byCondition).length > 0) {
-        context += `\nBy Condition:\n`;
-        Object.entries(projectSummary.byCondition).forEach(([conditionId, data]) => {
-          const condition = conditions.find(c => c.id === conditionId);
-          const conditionName = condition?.name || `Condition ${conditionId}`;
-          context += `- ${conditionName}: ${data.count} measurements, ${data.value} ${data.unit}\n`;
-        });
-      }
-    }
-    
-    // Conditions
-    if (conditions.length > 0) {
-      context += `\n=== TAKEOFF CONDITIONS ===\n`;
-      conditions.forEach(condition => {
-        context += `- ${condition.name} (${condition.type}): ${condition.unit}`;
-        if (condition.type !== 'count' && condition.type !== 'auto-count' && condition.wasteFactor > 0) {
-          context += `, ${condition.wasteFactor}% waste`;
-        }
-        if ((condition.multiplier ?? 1) > 1) {
-          context += `, ×${condition.multiplier} multiplier`;
-        }
-        if (condition.laborCost) context += `, $${condition.laborCost} labor cost`;
-        if (condition.materialCost) context += `, $${condition.materialCost} material cost`;
-        if (condition.description) context += ` - ${condition.description}`;
-        context += `\n`;
-      });
-    }
-    
-    // Documents (OCR is automatic, so we just list them)
-    if (documents.length > 0) {
-      context += `\n=== DOCUMENTS ===\n`;
-      
-      for (const doc of documents) {
-        context += `- ${doc.originalName || doc.filename}`;
-        if (doc.size) context += ` (${(doc.size / 1024 / 1024).toFixed(1)}MB)`;
-        if (doc.uploadedAt) context += ` - Uploaded: ${new Date(doc.uploadedAt).toLocaleDateString()}`;
-        context += `\n`;
-        
-        // Get OCR data from server (documents are automatically OCR'd)
-        try {
-          const ocrData = await serverOcrService.getDocumentData(doc.id, projectId);
-          // CRITICAL FIX: Ensure results is an array before accessing length
-          if (ocrData && Array.isArray(ocrData.results) && ocrData.results.length > 0) {
-            // Include full text content from all pages for comprehensive AI analysis
-            // CRITICAL FIX: Filter out null/undefined results before accessing pageNumber
-            const fullText = ocrData.results
-              .filter((r) => r != null && r.pageNumber != null)
-              .map((result) => `    Page ${result.pageNumber}:\n${result.text ?? ''}`)
-              .join('\n\n');
-            if (fullText) {
-              context += `  Full OCR content:\n${fullText}\n`;
-            }
-          }
-        } catch {
-          // Silently skip if OCR data not available
-        }
-      }
-    } else {
-      context += `\n=== DOCUMENTS ===\n`;
-      context += `No documents uploaded to this project yet.\n`;
-    }
-    
-    // Recent takeoff measurements
-    if (takeoffMeasurements.length > 0) {
-      context += `\n=== RECENT MEASUREMENTS ===\n`;
-      const recentMeasurements = takeoffMeasurements
-        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-        .slice(0, 10);
-      
-      recentMeasurements.forEach(measurement => {
-        const condition = conditions.find(c => c.id === measurement.conditionId);
-        const conditionName = condition?.name || `Condition ${measurement.conditionId}`;
-        context += `- ${conditionName}: ${measurement.calculatedValue} ${measurement.unit}`;
-        if (measurement.description) context += ` (${measurement.description})`;
-        context += `\n`;
-      });
-      
-      if (takeoffMeasurements.length > 10) {
-        context += `... and ${takeoffMeasurements.length - 10} more measurements\n`;
-      }
-    }
-    
-    return context;
-  };
+  // Handle sending a message from the input field
+  const handleSendMessage = useCallback(() => {
+    void sendMessage(inputMessage);
+  }, [sendMessage, inputMessage]);
+
+  // Handle a suggested-question chip click — sends immediately, bypassing input-field state.
+  const handleSuggestedQuestion = useCallback((question: string) => {
+    void sendMessage(question);
+  }, [sendMessage]);
 
   // Handle key press
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -657,50 +683,83 @@ Generated by Meridian Takeoff`;
             </p>
           </div>
         ) : (
-          messages.map((message) => (
-            <div
-              key={message.id}
-              className={`flex gap-3 ${
-                message.role === 'user' ? 'justify-end' : 'justify-start'
-              }`}
-            >
-              {message.role === 'assistant' && (
-                <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
-                  <Bot className="w-4 h-4 text-blue-600" />
-                </div>
-              )}
-              
+          <>
+            {messages.map((message) => (
               <div
-                className={`max-w-xs rounded-lg p-3 ${
-                  message.role === 'user'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-card text-foreground border shadow-sm'
+                key={message.id}
+                className={`group flex gap-3 ${
+                  message.role === 'user' ? 'justify-end' : 'justify-start'
                 }`}
               >
-                <div className="text-sm">
-                  {renderMessageContent(message)}
-                  {message.isStreaming && (
-                    <span className="inline-block w-2 h-4 bg-current animate-pulse ml-1" />
+                {message.role === 'assistant' && (
+                  <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+                    <Bot className="w-4 h-4 text-blue-600" />
+                  </div>
+                )}
+
+                <div
+                  className={`rounded-lg p-3 ${
+                    message.role === 'user' ? 'max-w-md bg-blue-600 text-white' : 'max-w-[85%] bg-card text-foreground border shadow-sm'
+                  }`}
+                >
+                  <div className="text-sm">
+                    {renderMessageContent(message)}
+                    {message.isStreaming && (
+                      <span className="inline-block w-2 h-4 bg-current animate-pulse ml-1" />
+                    )}
+                  </div>
+                  {message.error && (
+                    <div className="mt-2 text-sm text-red-600">
+                      Error: {message.error}
+                    </div>
+                  )}
+                  {message.role === 'assistant' && !message.isStreaming && message.content && (
+                    <button
+                      type="button"
+                      onClick={() => handleCopyMessage(message)}
+                      className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Copy message"
+                    >
+                      {copiedMessageId === message.id ? (
+                        <>
+                          <Check className="w-3 h-3" /> Copied
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3 h-3" /> Copy
+                        </>
+                      )}
+                    </button>
                   )}
                 </div>
-                {message.error && (
-                  <div className="mt-2 text-sm text-red-600">
-                    Error: {message.error}
+
+                {message.role === 'user' && (
+                  <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
+                    <User className="w-4 h-4 text-green-600" />
                   </div>
                 )}
               </div>
-
-              {message.role === 'user' && (
-                <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
-                  <User className="w-4 h-4 text-green-600" />
-                </div>
-              )}
-            </div>
-          ))
+            ))}
+            {messages.length === 1 && (
+              <div className="flex flex-wrap gap-2 justify-start pl-11">
+                {SUGGESTED_QUESTIONS.map((question) => (
+                  <button
+                    key={question}
+                    type="button"
+                    onClick={() => handleSuggestedQuestion(question)}
+                    disabled={isLoading}
+                    className="text-xs px-3 py-1.5 rounded-full border bg-card hover:bg-accent hover:text-accent-foreground text-foreground transition-colors disabled:opacity-50 disabled:pointer-events-none"
+                  >
+                    {question}
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
         )}
         <div ref={messagesEndRef} />
       </div>
-      
+
       {/* Input bar at bottom */}
       <div className="p-4 border-t bg-background">
         <div className="flex gap-2">
@@ -714,18 +773,26 @@ Generated by Meridian Takeoff`;
             disabled={isLoading}
             className="flex-1"
           />
-          <Button 
-            onClick={handleSendMessage}
-            disabled={!inputMessage.trim() || isLoading}
-            size="sm"
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4"
-          >
-            {isLoading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
+          {isLoading ? (
+            <Button
+              onClick={handleStopStreaming}
+              size="sm"
+              variant="destructive"
+              className="px-4"
+              title="Stop generating"
+            >
+              <Square className="w-4 h-4" />
+            </Button>
+          ) : (
+            <Button
+              onClick={handleSendMessage}
+              disabled={!inputMessage.trim()}
+              size="sm"
+              className="bg-blue-600 hover:bg-blue-700 text-white px-4"
+            >
               <Send className="w-4 h-4" />
-            )}
-          </Button>
+            </Button>
+          )}
         </div>
       </div>
       

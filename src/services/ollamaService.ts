@@ -30,6 +30,8 @@ export interface OllamaChatRequest {
     repeat_penalty?: number;
     seed?: number;
     stop?: string[];
+    /** Context window size (tokens). Ollama silently truncates the prompt when this is too small. */
+    num_ctx?: number;
   };
 }
 
@@ -175,8 +177,9 @@ class OllamaService {
         messages: request.messages,
         stream: false,
         options: {
-          temperature: request.options?.temperature || 0.7,
-          top_p: request.options?.top_p || 0.9,
+          temperature: request.options?.temperature ?? 0.7,
+          top_p: request.options?.top_p ?? 0.9,
+          num_ctx: request.options?.num_ctx,
         }
       });
       this.isConnected = true;
@@ -200,7 +203,7 @@ class OllamaService {
 
   // Send a streaming chat message to Ollama cloud with robust error handling
   // Uses fetch for streaming (ReadableStream); apiClient does not support streaming responses
-  async *chatStream(request: OllamaChatRequest): AsyncGenerator<OllamaStreamResponse, void, unknown> {
+  async *chatStream(request: OllamaChatRequest, signal?: AbortSignal): AsyncGenerator<OllamaStreamResponse, void, unknown> {
     let retryCount = 0;
     const maxStreamRetries = 2;
     const { getApiBaseUrl } = await import('../lib/apiConfig');
@@ -221,10 +224,12 @@ class OllamaService {
             messages: request.messages,
             stream: true,
             options: {
-              temperature: request.options?.temperature || 0.7,
-              top_p: request.options?.top_p || 0.9,
+              temperature: request.options?.temperature ?? 0.7,
+              top_p: request.options?.top_p ?? 0.9,
+              num_ctx: request.options?.num_ctx,
             }
-          })
+          }),
+          signal,
         });
 
         const quotaFromHeaders: OllamaQuotaInfo = {
@@ -320,6 +325,11 @@ class OllamaService {
         break;
 
       } catch (error) {
+        // User-initiated abort (Stop button): surface immediately, never retry.
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw error;
+        }
+
         console.error(`Error in streaming chat (attempt ${retryCount + 1}/${maxStreamRetries + 1}):`, error);
         this.isConnected = false;
         this.connectionRetries++;
