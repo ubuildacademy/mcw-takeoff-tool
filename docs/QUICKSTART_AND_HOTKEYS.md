@@ -25,6 +25,16 @@ After calibration, measurements use your scale. If you rotate a page after calib
 
 For a full walkthrough of every panel and tab, see the **[Workspace guide](/help/workspace)**.
 
+### Command palette (⌘K)
+
+Press **Cmd/Ctrl+K** anywhere in the workspace to open the command palette. Type to filter:
+
+- **Sheets** — jump to any page by sheet number or sheet name.
+- **Conditions** — activate a condition for drawing.
+- **Actions** — **Calibrate scale** / **Recalibrate scale**, **Magic wand**, **Schedule → takeoff**, **Propose rooms on this sheet**, **Compare sheet revisions…**, **Fit sheet to window**.
+
+Use **Arrow Up/Down** to move the highlight, **Enter** to run the highlighted item, and **Escape** to close the palette without doing anything.
+
 ---
 
 ## User Profile & Tools (settings)
@@ -90,6 +100,10 @@ Escape **backs out** of the current mode or selection, usually one step at a tim
 | **Selected annotation or markup** (in selection mode, not in a drawing tool) | **Clears** the selection. |
 | **Calibration** | Removes the **last** calibration point; if none remain, **exits** calibration and clears calibration state. |
 | **Measuring** (including continuous linear) | Removes the **last** point; if none remain (or immediately after finishing a segment), **exits draw mode** and returns to selection mode. |
+| **Magic wand** | Exits magic wand mode. |
+| **Move armed** (after pressing **M** or choosing **Move** from the context menu) | Disarms the move — the selection stays, but dragging no longer moves it. |
+| **Vertex edit mode** | Cancels an in-progress handle drag; pressing it again (or clicking away) exits vertex edit mode. |
+| **Command palette** | Closes the palette. |
 
 **Text annotation input** (small text box on the PDF): **Escape** cancels; **Enter** saves.
 
@@ -101,12 +115,14 @@ Escape **backs out** of the current mode or selection, usually one step at a tim
 
 | Action | Shortcut |
 |--------|-----------|
+| **Command palette** | Cmd/Ctrl+**K** — jump to a sheet, activate a condition, or run an action (calibrate, magic wand, schedule takeoff, room proposals, revision compare, fit to window). Arrow keys + Enter to run, Escape to close. |
 | **Undo** | Cmd/Ctrl+**Z** |
 | **Redo** | Cmd/Ctrl+**Shift**+**Z** or Cmd/Ctrl+**Y** |
 | **Copy** selected markups | Cmd/Ctrl+**C** (when markups are selected in selection mode) |
 | **Paste** copied markups | Cmd/Ctrl+**V** |
 | **Paste as New Condition** | Cmd/Ctrl+**Shift**+**V** — pastes copied markups into a brand-new condition cloned from the source (named "[Original] - COPY", new distinct color). Auto-selects the new condition so you can rename it immediately. |
 | **Delete** selected markups | **Delete** or **Backspace** (with markups selected in selection mode) |
+| **Arm/disarm Move** | **M** (with one or more markups selected, in selection mode) — arms dragging for the selection; press **M** again, **Escape**, or change the selection to disarm. Same as right-click → **Move**. Works for measurements and annotations. |
 | **Add hyperlink** mode | **Shift+H** (when not typing in a field) |
 | **Toggle ortho snapping** (horizontal/vertical alignment while drawing or calibrating) | **Control** — press to toggle while in measure or calibration mode |
 
@@ -154,7 +170,7 @@ On **iPad** and other touch devices, use these gestures on the PDF canvas. For l
 | **Place point** | Tap (or Apple Pencil) while measuring / calibrating / annotating |
 | **Draw a region / shape** | Drag while in cutout, hyperlink, or annotation-shape mode |
 | **Select a markup** | Tap it (in selection mode, not drawing) |
-| **Move a markup** | Tap to select, then drag to new position |
+| **Move a markup** | Tap to select, then long-press → **Move** (arms the move), then drag to new position |
 | **Finish** measurement | **Double-tap**, or **Finish** on the floating toolbar (tablet only) |
 | **Context menu** on markup | **Long-press** (~½ second) on the markup |
 | **Open markup context menu** (desktop) | Right-click |
@@ -169,8 +185,13 @@ Right-clicking a markup (or long-pressing on tablet) opens a context menu with t
 | **Paste** | Pastes clipboard markups onto the current page with a small offset (disabled if clipboard is empty). |
 | **Paste as New Condition** | Pastes clipboard markups into a new condition cloned from the source — named "[Original] - COPY" with a new auto-assigned color. The new condition is auto-selected for immediate renaming. Disabled if clipboard is empty. |
 | **Bring forward / Send backward / Send to back** | Adjusts the z-order (layer stacking) of the markup on the page. |
+| **Move** | Arms move mode for the selected markup(s) — the next drag repositions them. Same as pressing **M**. Press **M** again, **Escape**, or change the selection to disarm. Works for measurements and annotations. |
+| **Edit vertices** | Enters vertex edit mode for the markup: drag a square handle to move a corner, or drag a round mid-segment handle off the line to bow that segment into an arc (drag back onto the line to straighten). Quantities recompute on release. Not offered for count markers. |
 | **Select all similar** | Selects all markups on the current page that belong to the same condition. |
 | **Move to condition →** | Reassigns the selected markup(s) to a different condition. A flyout lists all compatible conditions (same type AND unit — linear LF cannot move to linear-with-height SF). Color and styling update immediately. Useful when you accidentally draw under the wrong condition. |
+| **Delete** (annotations) | Deletes the right-clicked annotation. Measurements are deleted via their condition (Delete/Backspace with the markup selected). |
+
+Annotations also gained a right-click menu — **Move** and **Delete** — separate from the takeoff/annotation drawing tools.
 
 ### Floating toolbar (tablet only)
 
@@ -189,9 +210,11 @@ The toolbar is hidden on desktop and on wide iPad landscape (with an attached ke
 | **Cmd/Ctrl+Z** — undo | **Undo** on floating toolbar, or keyboard shortcut |
 | **Double-click** — finish multi-point measurement | **Double-tap**, or **Finish** on floating toolbar |
 | **Right-click** markup | **Long-press** markup |
+| **M** — arm/disarm Move | Long-press markup → **Move**, then drag |
 | **Cmd/Ctrl** + scroll — zoom | **Pinch** |
 | **Middle-mouse drag** — pan | **One-finger drag** (idle mode) |
 | **Shift+H** — hyperlink mode | **Tools** (wrench) → **Add hyperlink**, or attach a keyboard and press Shift+H |
+| **Cmd/Ctrl+K** — command palette | Attach a keyboard and press Cmd/Ctrl+K (no dedicated touch gesture) |
 
 With an **external keyboard**, desktop shortcuts apply. Touch gestures still work on the canvas at the same time.
 
@@ -212,7 +235,9 @@ With an **external keyboard**, desktop shortcuts apply. Touch gestures still wor
 - Condition card action icons remain visible in the left sidebar/drawer; tap the eye, scissors, copy, pencil, or trash icons for condition-specific actions.
 - Use **Escape** (or **Cancel** on tablet) to step back one point at a time instead of canceling the entire operation when possible.
 - Keep **calibration** on a clear, known dimension for best accuracy.
+- The **Calibrate** dialog auto-detects printed scale notations and flags half-size or fit-to-page reprints, but it never applies a scale for you — always click both ends of a printed dimension to confirm before it's used.
 - **Count conditions** can carry a fixed measurement per marker — set **Quantity per Count** (type, unit, value) in the condition form. Example: 5 windows × 10 LF each = 50 LF tracked in Reports and priced in Costs. See the workspace guide for details.
+- Not sure where a feature lives? Press **Cmd/Ctrl+K** and type — sheets, conditions, and actions like Magic wand or Schedule → takeoff are all reachable from the palette.
 
 ---
 

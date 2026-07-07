@@ -61,6 +61,7 @@ Use this panel to define **what** you are measuring, see **quantities**, and see
 ### Conditions tab
 
 - **+** — **Create condition**. The dialog lets you set type, units, color, waste, multiplier, costs, and other fields depending on type (**auto-count / visual search** is a distinct condition type when you need template-based counting).
+- **Templates** — Save or apply a **condition template** (see [Condition templates](#condition-templates) below).
 - **Search** box — Filters conditions by **name** or **description**.
 - **Click** a condition to **select** it for drawing on the plan; **click again** to clear selection.
 - **Totals on each card** are scoped to the **active sheet tab** and **current page** in the viewer (so numbers track what you see).
@@ -118,6 +119,29 @@ If you draw markups under the wrong condition, reassign them without redrawing:
 
 The markups are immediately reassigned — their color, styling, and condition totals update to reflect the new condition. Only conditions with the **same type and unit** appear in the flyout. For example, a linear (LF) markup can only move to another linear (LF) condition — not to a linear-with-height (SF) condition, even though both are technically "linear" type. This prevents silent unit mismatches that would corrupt quantities.
 
+#### Moving markups
+
+Dragging a markup is a **deliberate, two-step action** — select, then arm the move — so a stray click or drag can't nudge a takeoff by accident.
+
+1. Select one or more markups (click, or right-click → **Select all similar**).
+2. Arm the move: right-click → **Move**, or press **M**.
+3. Drag the selection to its new position.
+
+**Disarming:** press **M** again, press **Escape**, or change the selection — all three disarm the move without undoing anything you've already dragged.
+
+This applies to **measurements and annotations alike**. Annotations (text, arrow, rectangle, circle, highlighter) have their own right-click context menu with **Move** and **Delete**.
+
+#### Edit vertices & arcs
+
+Right-click a measurement (not a count marker) and choose **Edit vertices** to reshape it directly instead of redrawing.
+
+- **Square handles** at each vertex — drag to move that corner.
+- **Round mid-segment handles** — drag one **off** the straight line between two vertices to bow that segment into a **circular arc**; drag it back onto the line to straighten the segment again.
+- **Quantities recompute** (length, area, perimeter, net) as soon as you release the handle, accounting for arc curvature.
+- **Escape** cancels an in-progress handle drag, or exits edit mode entirely if nothing is being dragged.
+
+Entering edit mode is **only** available from the context menu — there's no accidental way to trigger it — and **count** conditions can't be vertex-edited (there are no line segments to reshape). Arcs render in both the viewer and PDF export.
+
 #### Quantity Multiplier
 
 Any condition type supports a **Quantity Multiplier** — an integer you set in the condition form to scale all measured quantities by a fixed factor.
@@ -161,12 +185,35 @@ The multiplier is a powerful shortcut but easy to forget is active. The amber ×
 
 **To remove the sub-quantity**, edit the condition, set the Type back to **None**, and save.
 
+#### Condition templates
+
+Reuse a set of conditions across projects instead of rebuilding trade packs by hand.
+
+- **Where to open it:** **Templates** button next to the **Takeoff Conditions** heading, at the top of the Conditions tab.
+- **Save a template:** In the dialog, name the template (e.g. "Waterproofing — Div 7" or "Residential drywall") and save. It captures the **current project's** conditions — type, unit, color, waste factor, costs, multiplier, and sub-quantity settings.
+- **Apply a template:** Pick a saved template and apply it to seed conditions into the current project. Rows whose **name already exists** in the project are skipped, so applying a template twice (or into a project that already has some of those conditions) will not create duplicates.
+- **What is not included:** Auto-count **search images** are not part of a template — auto-count conditions come back without their reference imagery and need it re-added.
+- **Where templates live:** Templates are stored **per browser** (localStorage), not per project or account — they are available in any project you open on the same browser/device, but do not follow you to a different computer.
+
 ### Reports tab
 
 - Expandable **quantity** breakdown by condition and by **sheet/page**.
 - **Click a sheet name** in the report to **jump** the viewer to that page.
 - **Export** menu: **Excel**, **PDF**, and **Email report** (opens the send flow).
 - When cost data exists, a **project cost summary** may appear at the top of this tab.
+
+#### PDF export options
+
+**Export PDF Report…** opens a **PDF Export Options** dialog before generating anything:
+
+| Option | Choices |
+|--------|---------|
+| **Measurement labels on sheets** | **Quantity** (e.g. "1,250 SF"), **Condition name** (e.g. "Deck Coating"), or **None** (markup only). |
+| **Per-page legend** | On or off. |
+| **Legend content** (when on) | **Name + quantity**, or **Name only**. |
+| **Legend position** | An 8-position grid (corners and edge midpoints) so you can pick a spot that keeps the titleblock visible. |
+
+Your choices are **saved per project** and reused automatically the next time you export — including from the **Email report** flow, which shares the same saved options.
 
 ### Costs tab
 
@@ -274,15 +321,84 @@ A **project-scoped chat** that uses a **local or hosted LLM** via **Ollama** (co
 - **Zoom**: two-finger pinch (automatically ignored while actively drawing so a stray thumb cannot cancel a measurement in progress).
 - **Draw**: tap or use Apple Pencil when a condition is selected (same as mouse clicks for that measurement type). Hyperlink regions, cutout polygons, and annotation shapes also work with touch.
 - **Select a markup**: tap it while in selection mode (not actively drawing).
-- **Move a markup**: tap to select, then drag it to its new position.
-- **Finish** a multi-point measurement: **double-tap** the canvas, or tap **Finish** on the floating toolbar (see [Tablet & touch](#8-tablet--touch-ipad) below).
-- **Context menu** on a markup: **long-press** (~½ second) — same actions as right-click on desktop (copy, paste, paste as new condition, stack order, select all similar, move to condition).
+- **Move a markup**: tap to select, long-press → **Move** to arm the drag, then drag it to its new position. See [Moving markups](#moving-markups) below.
+- **Finish** a multi-point measurement: **double-tap** the canvas, or tap **Finish** on the floating toolbar (see [Tablet & touch](#9-tablet--touch-ipad) below).
+- **Context menu** on a markup: **long-press** (~½ second) — same actions as right-click on desktop (copy, paste, paste as new condition, stack order, Move, Edit vertices, select all similar, move to condition; annotations show Move and Delete).
 
 - **Measure** only after you **select a condition** on the left and follow the tool’s tap/drag behavior for that type.
 
+### Hyperlinks (deep links & auto-hyperlink)
+
+Sheet hyperlinks can land on an **exact spot at an exact zoom**, not just "open this sheet."
+
+**Setting a target view**
+
+- When creating or editing a link, use **"Create & set view…"** (or **"Update & set view…"** on an existing link), or right-click an existing link → **"Set target view…"**.
+- You're taken to the target page — position the view (pan/zoom) the way you want it to open, then click **"Save target view."**
+- Clicking the link afterward jumps straight to that position and zoom level, with a brief **highlight pulse** so you know you've arrived.
+
+**Auto-hyperlink can set target views for you.** When it can match a detail callout on the source sheet to the matching detail title on the target sheet, it captures that detail's view automatically — no manual positioning needed for those links.
+
+**Auto-hyperlink review**
+
+Running **Auto-hyperlink** (from Tools) no longer writes links silently — it opens a **review table** first:
+
+- Rows are grouped by **source sheet**, each with its own checkbox so you can accept or skip individual links.
+- A separate list shows **unmatched references** with the reason they couldn't be matched (e.g. no sheet with that number in the project, or an ambiguous match across multiple documents).
+- Applying **replaces existing auto-hyperlinks**; any links you created **manually** are left untouched.
+
 ---
 
-## 6. Top command bar (summary)
+## 6. Command palette & sheet workflows
+
+### Command palette (⌘K)
+
+Press **Cmd/Ctrl+K** anywhere in the workspace to open a searchable palette (`src/components/CommandPalette.tsx`). Type to filter across three groups:
+
+- **Sheets** — jump to any page by sheet number or sheet name; opens it in a new tab.
+- **Conditions** — activate a condition for drawing, same as clicking it in the left sidebar.
+- **Actions** — **Calibrate scale** / **Recalibrate scale**, **Magic wand**, **Schedule → takeoff**, **Propose rooms on this sheet**, **Compare sheet revisions…**, **Fit sheet to window**.
+
+**Arrow Up/Down** move the highlight, **Enter** runs the highlighted item (and closes the palette), **Escape** closes without doing anything.
+
+### Magic wand (room fill)
+
+The **Wand** button lives in the top command bar. Select an **area** or **volume** condition first, then click inside an enclosed room on the plan — the app fills the room bounded by the surrounding wall linework, traces the boundary, and creates the measurement with full quantity math already applied. It lands on the **inside face** of the walls.
+
+- Requires the sheet to be **calibrated** first.
+- If the region is not fully enclosed (an open doorway, a gap in linework), the wand **refuses** and shows a message instead of guessing at a boundary.
+- **Escape** exits wand mode; the resulting measurement **undoes** like any other.
+
+### Propose rooms on this sheet
+
+Open from ⌘K → **"Propose rooms on this sheet."** Instead of clicking room-by-room, this scans the **entire sheet** for enclosed regions in one pass and opens a review list with computed areas, **biggest first**. Uncheck anything you don't want (legends, title block cells, and other non-room enclosed shapes can show up), then apply to add the remaining rooms to the selected area/volume condition. Same calibration requirement as the magic wand.
+
+**Known limitation:** the sweep currently proposes **every** enclosed region it finds, so always review the list before applying rather than accepting it wholesale.
+
+### Schedule → takeoff
+
+Open from ⌘K → **"Schedule → takeoff."** Drag a box around a door/window/fixture schedule table on the sheet, including its header row. The table is reconstructed from the sheet's **vector text** (no OCR) — this only works on **vector PDFs**; scanned sheets are refused with a message.
+
+A review dialog follows:
+
+- **Name column** and **Qty column** are auto-guessed from the header text and can be remapped.
+- Uncheck any row you don't want.
+- Applying creates **one count condition per row**, with **QTY markers** placed beside that row on the schedule itself — so the count is auditable against the printed quantity, and the markers can be dragged onto the plan afterward.
+
+### Compare sheet revisions
+
+Open from ⌘K → **"Compare sheet revisions…"** Pick the **old** and **new** revision of the same sheet (they must share the same sheet size). The dialog overlays both:
+
+- **Red** — linework removed in the new revision.
+- **Blue** — linework added in the new revision.
+- **Unchanged** linework is faded so the changes stand out.
+- Zoom the overlay at **50% / 100% / 200%**.
+
+**Carry takeoffs to new rev** copies every measurement from the old sheet onto the new one — including **cutouts and arcs** — and flags any takeoff sitting on a changed area so you can review it. Each carried measurement can be **undone individually**, like any other takeoff action.
+
+---
+
+## 7. Top command bar (summary)
 
 The top command bar is grouped into clusters so common actions are easier to scan: project/navigation on the left, page/view/markup controls in the center, and help/tools/status on the right. On smaller screens, some view controls collapse into the **View** menu to preserve space.
 
@@ -292,16 +408,25 @@ The top command bar is grouped into clusters so common actions are easier to sca
 | **Undo / Redo** | History (also Cmd/Ctrl+Z etc.). |
 | **Previous / Next page** | Page navigation. |
 | **View cluster** | Zoom %, **Reset view**, **Rotate** CW/CCW. On narrower screens this appears as a **View** menu. |
-| **Calibrate Scale** / **Recalibrate** | Set real-world scale from a known dimension (dialog + two clicks on the PDF). |
+| **Calibrate Scale** / **Recalibrate** | Set real-world scale from a known dimension (dialog + two clicks on the PDF). The dialog auto-detects printed scale notations and warns about half-size or fit-to-page reprints — see [Auto-scale detection](#auto-scale-detection) below. |
 | **Annotate** | Non-takeoff markup: text, arrow, rectangle, circle, color, **clear annotations**. |
 | **Help** (?) | **Common questions**, links to these guides, and context tips. Press **?** on the keyboard to toggle. |
 | **Tools** (wrench) | **Preferences** (appearance, crosshair, labels, magnifier, ortho default, hyperlinks). |
 | **Ortho** badge | Visible when ortho snapping is on while measuring or calibrating. |
 | **All changes saved** chip | Green dot plus saved status. |
 
+### Auto-scale detection
+
+The **Calibrate** dialog scans the sheet for scale information before you calibrate manually:
+
+- It looks for printed **scale notations** on the sheet (e.g. `1/4" = 1'-0"`, `1"=20'`, `1:100`).
+- It checks the sheet's **physical size** against standard plot sizes and warns if the sheet looks like a **half-size print** or a **fit-to-page reprint** — either of which would make a printed scale wrong.
+
+**Detected scales are never applied blindly.** Choosing a detected scale still requires you to click both ends of a printed dimension on the drawing and confirm the measured value matches before it's applied. This keeps calibration accurate even when a set has been reduced, enlarged, or reprinted to fit a page.
+
 ---
 
-## 7. Bottom status bar
+## 8. Bottom status bar
 
 - **Left**: Current **sheet** name and **page**, and **project** name.
 - **Center**: **Selected condition** and type, or a prompt to select a condition.
@@ -309,7 +434,7 @@ The top command bar is grouped into clusters so common actions are easier to sca
 
 ---
 
-## 8. Tablet & touch (iPad)
+## 9. Tablet & touch (iPad)
 
 Meridian Takeoff is usable on **iPad and other touch devices** in the browser, or as a **Home Screen web app** for a more app-like experience.
 
@@ -325,10 +450,10 @@ In **Safari** on iPad: **Share** → **Add to Home Screen**. The app opens full-
 | **Two-finger pinch** | Not actively drawing | **Zoom** in or out (ignored during drawing to protect the in-progress measurement) |
 | **Tap** | Condition selected, drawing mode | Place points (count, linear, area, etc.) |
 | **Tap on a markup** | Selection mode (not drawing) | **Select** the markup |
-| **Drag a selected markup** | Selection mode (not drawing) | **Move** the markup |
+| **Long-press → Move, then drag** | Selection mode, markup(s) selected | **Move** the markup (move must be armed first — see [Moving markups](#moving-markups)) |
 | **Drag** | Cutout / hyperlink / annotation shape mode | Draw the region or shape |
 | **Double-tap** | Multi-point measurement in progress | **Finish** the measurement (same as double-click on desktop) |
-| **Long-press** (~½ s) | On any markup | **Context menu** (bring forward, send backward, select all similar) |
+| **Long-press** (~½ s) | On any markup | **Context menu** (bring forward, send backward, Move, Edit vertices, select all similar, move to condition; annotations: Move, Delete) |
 
 ### Floating toolbar while drawing
 
@@ -362,7 +487,7 @@ When a dialog asks for text (e.g. calibration distance), the sheet shifts up so 
 
 ---
 
-## 9. Related documentation
+## 10. Related documentation
 
 - **[Quick start & shortcuts](/help/shortcuts)** — Shortcuts, Space/Escape, Profile, Tools dialog.
 - **[Help home](/help)** — Search all guides and FAQs; print or save guides as PDF.

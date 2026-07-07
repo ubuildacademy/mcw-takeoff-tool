@@ -132,6 +132,72 @@ export const DEFAULT_HELP_FAQ_CONFIG: HelpFaqConfig = {
     answer:
       'The Quantity Multiplier scales a condition\'s total without re-drawing. Set it to an integer (e.g. 3) when the same area, run, or count repeats in N identical locations — draw one instance and multiply. The condition card, Reports, Costs, and Excel export all show the already-multiplied total (measured × N). Waste applies on top. An amber ×N badge on the condition name makes the multiplier visible at a glance. To remove it, edit the condition and clear the Multiplier field.',
   },
+  {
+    id: 'command-palette',
+    question: 'What does the ⌘K command palette do?',
+    answer:
+      'Press ⌘K (Ctrl+K on Windows) to open a searchable palette. Type to jump to any sheet by number or name, activate a condition, or run an action like Calibrate, Magic wand, Schedule → takeoff, Propose rooms, Compare sheet revisions, or Fit to window. Use the arrow keys and Enter to run the highlighted item; Escape closes the palette.',
+  },
+  {
+    id: 'magic-wand',
+    question: 'How does the magic wand measure a room automatically?',
+    answer:
+      'Click Wand in the top command bar (or find it in ⌘K), select an area or volume condition, then click inside an enclosed room — the app fills to the inside face of the walls and adds the measurement for you. The sheet must be calibrated first. If the room is not fully enclosed (an open doorway, for example) the wand refuses and tells you why instead of guessing. Escape exits wand mode, and the result undoes like any other measurement.',
+  },
+  {
+    id: 'room-proposals',
+    question: 'What does "Propose rooms on this sheet" do?',
+    answer:
+      'Open it from ⌘K. It scans the whole sheet for enclosed regions and lists them with computed areas, biggest first, so you can uncheck anything you do not want before adding the rest to the selected area/volume condition. It requires the same calibration as the magic wand. It currently proposes every enclosed region it finds — including legends or titleblock cells — so review the list before applying.',
+  },
+  {
+    id: 'schedule-to-takeoff',
+    question: 'How does Schedule → takeoff work?',
+    answer:
+      'Open "Schedule → takeoff" from ⌘K, then drag a box around a schedule table on the sheet, including its headers. The table is read directly from the sheet\'s vector text (no OCR), and a review dialog guesses the name and QTY columns for you to remap or uncheck rows. Applying creates one count condition per row with QTY markers placed beside that row so you can audit against the printed number and drag markers onto the plan afterward. It only works on vector PDFs — scanned sheets are refused with a message.',
+  },
+  {
+    id: 'revision-compare',
+    question: 'How do I compare sheet revisions and carry takeoffs forward?',
+    answer:
+      'Open "Compare sheet revisions…" from ⌘K and pick the old and new revision of a sheet (they must be the same sheet size). The overlay shows red for removed linework, blue for added, and fades unchanged content, with 50/100/200% zoom. "Carry takeoffs to new rev" copies every measurement — including cutouts and arcs — from the old sheet to the new one and flags any takeoff sitting on a changed area for review; each carried measurement can be undone individually.',
+  },
+  {
+    id: 'edit-vertices-arcs',
+    question: 'How do I edit the vertices or add a curve to a measurement?',
+    answer:
+      'Right-click a measurement and choose "Edit vertices." Square handles move corners, and dragging a round mid-segment handle off the line bows that segment into a circular arc — drag it back onto the line to straighten it again. Quantities recompute when you release the handle, and Escape cancels a drag or exits edit mode. Count conditions cannot be vertex-edited, and edit mode only starts from the context menu so a takeoff can\'t be reshaped by accident.',
+  },
+  {
+    id: 'moving-markups',
+    question: 'How do I move a measurement or annotation?',
+    answer:
+      'Select the markup(s), then right-click → Move or press M to arm the move, and drag to reposition. Escape, pressing M again, or changing the selection disarms it. This applies to both measurements and annotations — annotations also have their own right-click menu with Move and Delete.',
+  },
+  {
+    id: 'deep-hyperlinks',
+    question: 'Can a hyperlink open a sheet already zoomed to the right spot?',
+    answer:
+      'Yes. When creating or editing a link, use "Create & set view…" or "Update & set view…" (or right-click an existing link → "Set target view…"), then navigate to the target page, position the view, and click "Save target view." Clicking the link afterward lands on that exact spot and zoom with a highlight pulse. Auto-hyperlink can set these automatically when it matches a detail callout to the detail title on the target sheet.',
+  },
+  {
+    id: 'condition-templates',
+    question: 'How do I reuse conditions across projects?',
+    answer:
+      'Open Templates from the Conditions tab. Save the current project\'s conditions as a named template, then apply that template to seed a new project — rows with a name that already exists are skipped. Costs, waste factors, units, colors, and sub-quantities carry over, but auto-count search images do not. Templates are stored per browser, not per project.',
+  },
+  {
+    id: 'pdf-export-options',
+    question: 'What options do I have when exporting a PDF report?',
+    answer:
+      '"Export PDF Report…" opens an options dialog first: choose what measurement labels show on sheets (quantity, condition name, or none), whether each page gets a legend, what the legend includes (name and quantity, or name only), and where the legend sits using an 8-position grid (corners and edge midpoints) so it stays clear of the titleblock. Your choices are saved per project, and emailed reports reuse the same saved options.',
+  },
+  {
+    id: 'auto-scale-detection',
+    question: 'Does calibration detect the scale automatically?',
+    answer:
+      'The Calibrate dialog scans the sheet for printed scale notations (like 1/4" = 1\'-0", 1"=20\', or 1:100) and checks the sheet\'s physical size against standard plot sizes, warning if it looks like a half-size or fit-to-page reprint. Picking a detected scale never applies it directly — you still click both ends of a printed dimension and confirm the value matches before it takes effect.',
+  },
   ],
 };
 
