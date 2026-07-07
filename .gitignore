@@ -99,3 +99,6 @@ __pycache__/
 
 # Claude Code local settings (machine-specific permissions)
 .claude/settings.local.json
+
+# Git worktrees created by tooling
+.claude/worktrees/
