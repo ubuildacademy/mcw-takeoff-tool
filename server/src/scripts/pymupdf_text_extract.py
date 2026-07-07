@@ -65,9 +65,18 @@ def extract_text(pdf_path: str) -> dict:
         for page_index in range(total_pages):
             try:
                 page = doc[page_index]
-                rect = page.rect  # In PDF points; origin top-left after rotation removed
-                width = float(rect.width) or 1.0
-                height = float(rect.height) or 1.0
+                # PyMuPDF word coordinates are in UNROTATED page space, but
+                # page.rect is the ROTATED visible box — swap the normalization
+                # dims on /Rotate 90/270 pages or every box lands misplaced
+                # (same fix as table_extract.py; verified empirically).
+                rotation = int(getattr(page, "rotation", 0) or 0) % 360
+                rect = page.rect  # In PDF points; origin top-left
+                if rotation in (90, 270):
+                    width = float(rect.height) or 1.0
+                    height = float(rect.width) or 1.0
+                else:
+                    width = float(rect.width) or 1.0
+                    height = float(rect.height) or 1.0
 
                 # get_text("words") -> list of tuples
                 #   (x0, y0, x1, y1, "word", block_no, line_no, word_no)

@@ -6,6 +6,8 @@ import { supabase } from '../supabase';
 import { simpleOcrService, type OCRWordBox, type SimpleOCRResult } from '../services/simpleOcrService';
 import { pymupdfTextExtractor } from '../services/pymupdfTextExtractor';
 import { bubbleOcrExtractor } from '../services/bubbleOcrExtractor';
+import { vectorCalloutExtractor } from '../services/vectorCalloutExtractor';
+import { tableExtractor } from '../services/tableExtractor';
 import { requireAuth, hasProjectAccess, isAdmin, validateUUIDParam, isValidUUID } from '../middleware';
 import { devLog, devWarn } from '../lib/devLog';
 
@@ -731,6 +733,210 @@ router.post(
         await fs.remove(tempPath);
       } catch (cleanupErr) {
         devWarn('bubble-ocr-extract: failed to remove temp PDF', cleanupErr);
+      }
+    }
+  },
+);
+
+/**
+ * Auto-hyperlink precision pass for vector (CAD-exported) PDFs: read callout
+ * geometry (circles/hexagons) straight from the PDF drawing commands via
+ * PyMuPDF `get_drawings()` and pair each shape with the exact text inside it.
+ * No rasterization, no OCR — exact coordinates and exact text.
+ *
+ * Two outputs:
+ *   1) Reference callouts (detail bubble pointing at another sheet) are merged
+ *      into stored OCR as `source: 'vector_callout'` word boxes so the existing
+ *      detection layer picks them up.
+ *   2) The full callout payload (including detail-title bubbles on target
+ *      sheets) is returned to the client for the review table and for
+ *      auto-setting hyperlink target views.
+ *
+ * Seconds per document — safe to run on every Auto-hyperlink invocation.
+ */
+router.post(
+  '/vector-callouts/:documentId',
+  requireAuth,
+  validateUUIDParam('documentId'),
+  async (req, res) => {
+    req.setTimeout(15 * 60 * 1000);
+    res.setTimeout(15 * 60 * 1000);
+
+    const { documentId } = req.params;
+    const { projectId } = req.body ?? {};
+
+    if (!projectId) {
+      return res.status(400).json({ error: 'Project ID is required' });
+    }
+
+    const userIsAdmin = await isAdmin(req.user!.id);
+    if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+      return res.status(404).json({ error: 'Project not found or access denied' });
+    }
+
+    const { data: documentData, error: documentError } = await supabase
+      .from('takeoff_files')
+      .select('filename, path')
+      .eq('id', documentId)
+      .eq('project_id', projectId)
+      .single();
+
+    if (documentError || !documentData?.path) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    const { data: fileData, error: downloadError } = await supabase.storage
+      .from('project-files')
+      .download(documentData.path);
+
+    if (downloadError || !fileData) {
+      console.error('vector-callouts: failed to download PDF', downloadError);
+      return res.status(500).json({ error: 'Failed to download PDF for vector callout pass' });
+    }
+
+    const tempDir = path.join(process.cwd(), 'server', 'temp', 'pdf-processing');
+    await fs.ensureDir(tempDir);
+    const tempPath = path.join(tempDir, `${documentId}-veccallout-${uuidv4()}.pdf`);
+    await fs.writeFile(tempPath, Buffer.from(await fileData.arrayBuffer()));
+
+    try {
+      const extraction = await vectorCalloutExtractor.extractAllPages(tempPath);
+
+      // Merge reference callouts into stored OCR so the existing detection
+      // layer (detectSheetRefsFromIsolatedBoxes) sees them as isolated,
+      // trusted boxes. Callout bbox (not the tiny word bbox) is used as the
+      // clickable source rect.
+      let referenceCallouts = 0;
+      for (const page of extraction.pages) {
+        const wordBoxes: OCRWordBox[] = (page.callouts || [])
+          .filter((c) => c.kind === 'reference' && c.sheetRef)
+          .map((c, idx): OCRWordBox => {
+            referenceCallouts += 1;
+            return {
+              index: idx,
+              text: c.sheetRef as string,
+              // Direct vector text, not OCR — authoritative.
+              confidence: 100,
+              bbox: c.bbox,
+              source: 'vector_callout',
+            };
+          });
+        if (wordBoxes.length === 0) continue;
+
+        await simpleOcrService.mergeWordBoxesForPage(
+          projectId,
+          documentId,
+          {
+            pageNumber: page.pageNumber,
+            // Keep text_content clean (same rationale as bubble OCR merge).
+            text: '',
+            confidence: 0,
+            processingTime: 0,
+            wordBoxes,
+          },
+          'vector_callout',
+        );
+      }
+
+      devLog(
+        `📐 Vector callouts: ${extraction.totalPages} pages, ${extraction.calloutsFound} callouts (${referenceCallouts} references merged into stored OCR)`
+      );
+
+      res.json({
+        documentId,
+        totalPages: extraction.totalPages,
+        calloutsFound: extraction.calloutsFound,
+        referenceCallouts,
+        pages: extraction.pages,
+      });
+    } catch (error) {
+      console.error('vector-callouts failed:', error);
+      res.status(500).json({
+        error: 'Vector callout pass failed',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    } finally {
+      try {
+        await fs.remove(tempPath);
+      } catch (cleanupErr) {
+        devWarn('vector-callouts: failed to remove temp PDF', cleanupErr);
+      }
+    }
+  },
+);
+
+/**
+ * Schedule→takeoff: reconstruct a table from a user-boxed region of a vector
+ * sheet (line-grid geometry + exact text; word-alignment clustering fallback
+ * for borderless schedules). Deterministic, sub-second — no OCR, no LLM.
+ */
+router.post(
+  '/table-extract/:documentId',
+  requireAuth,
+  validateUUIDParam('documentId'),
+  async (req, res) => {
+    const { documentId } = req.params;
+    const { projectId, pageNumber, region } = req.body ?? {};
+
+    if (!projectId) {
+      return res.status(400).json({ error: 'Project ID is required' });
+    }
+    const pageNum = Number(pageNumber);
+    if (!Number.isInteger(pageNum) || pageNum < 1) {
+      return res.status(400).json({ error: 'Valid pageNumber is required' });
+    }
+    const r = region as { x?: unknown; y?: unknown; width?: unknown; height?: unknown } | undefined;
+    const isNorm = (v: unknown): v is number => typeof v === 'number' && v >= 0 && v <= 1;
+    if (!r || !isNorm(r.x) || !isNorm(r.y) || !isNorm(r.width) || !isNorm(r.height) || r.width === 0 || r.height === 0) {
+      return res.status(400).json({ error: 'Valid normalized region {x, y, width, height} is required' });
+    }
+
+    const userIsAdmin = await isAdmin(req.user!.id);
+    if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+      return res.status(404).json({ error: 'Project not found or access denied' });
+    }
+
+    const { data: documentData, error: documentError } = await supabase
+      .from('takeoff_files')
+      .select('filename, path')
+      .eq('id', documentId)
+      .eq('project_id', projectId)
+      .single();
+
+    if (documentError || !documentData?.path) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    const { data: fileData, error: downloadError } = await supabase.storage
+      .from('project-files')
+      .download(documentData.path);
+
+    if (downloadError || !fileData) {
+      console.error('table-extract: failed to download PDF', downloadError);
+      return res.status(500).json({ error: 'Failed to download PDF for table extraction' });
+    }
+
+    const tempDir = path.join(process.cwd(), 'server', 'temp', 'pdf-processing');
+    await fs.ensureDir(tempDir);
+    const tempPath = path.join(tempDir, `${documentId}-table-${uuidv4()}.pdf`);
+    await fs.writeFile(tempPath, Buffer.from(await fileData.arrayBuffer()));
+
+    try {
+      const table = await tableExtractor.extract(tempPath, pageNum, {
+        x: r.x, y: r.y, width: r.width, height: r.height,
+      });
+      res.json({ documentId, pageNumber: pageNum, ...table });
+    } catch (error) {
+      console.error('table-extract failed:', error);
+      res.status(500).json({
+        error: 'Table extraction failed',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    } finally {
+      try {
+        await fs.remove(tempPath);
+      } catch (cleanupErr) {
+        devWarn('table-extract: failed to remove temp PDF', cleanupErr);
       }
     }
   },

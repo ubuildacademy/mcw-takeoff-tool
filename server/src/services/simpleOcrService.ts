@@ -9,7 +9,7 @@ export interface OCRBoundingBox {
   height: number;
 }
 
-export type OCRWordBoxSource = 'pdfjs' | 'tesseract' | 'pymupdf' | 'bubble_ocr';
+export type OCRWordBoxSource = 'pdfjs' | 'tesseract' | 'pymupdf' | 'bubble_ocr' | 'vector_callout';
 
 export interface OCRWordBox {
   index: number;
@@ -433,7 +433,7 @@ class SimpleOCRService {
       processingTime: number;
       wordBoxes: OCRWordBox[];
     },
-    method: 'tesseract' | 'pymupdf' | 'bubble_ocr'
+    method: 'tesseract' | 'pymupdf' | 'bubble_ocr' | 'vector_callout'
   ): Promise<void> {
     if (!page || !Number.isFinite(page.pageNumber) || page.pageNumber < 1) {
       console.warn('mergeWordBoxesForPage: invalid page payload');
@@ -451,6 +451,7 @@ class SimpleOCRService {
     // Auto-hyperlink preflight reads to decide whether a doc still needs each pass.
     const persistedMethod: string =
       method === 'pymupdf' ? 'direct_extraction'
+      : method === 'vector_callout' ? 'direct_extraction'
       : method === 'bubble_ocr' ? 'tesseract'
       : method;
 
