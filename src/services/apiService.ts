@@ -573,6 +573,30 @@ export const hyperlinkService = {
   },
 };
 
+/** Condition templates: DB-persisted per-user library, optionally team-shared. */
+export const conditionTemplateService = {
+  async list() {
+    const response = await apiClient.get('/condition-templates');
+    return response.data as { templates: import('../store/slices/conditionTemplatesSlice').ConditionTemplate[] };
+  },
+
+  async save(template: import('../store/slices/conditionTemplatesSlice').ConditionTemplate) {
+    const response = await apiClient.post('/condition-templates', template);
+    return response.data as { success: boolean; template: import('../store/slices/conditionTemplatesSlice').ConditionTemplate };
+  },
+
+  async update(
+    id: string,
+    updates: Partial<Pick<import('../store/slices/conditionTemplatesSlice').ConditionTemplate, 'name' | 'shared' | 'conditions'>>
+  ) {
+    await apiClient.put(`/condition-templates/${id}`, updates);
+  },
+
+  async remove(id: string) {
+    await apiClient.delete(`/condition-templates/${id}`);
+  },
+};
+
 export const calibrationService = {
   async getCalibration(projectId: string, sheetId: string, pageNumber?: number) {
     const params = pageNumber !== undefined ? `?pageNumber=${pageNumber}` : '';

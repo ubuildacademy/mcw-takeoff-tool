@@ -3,18 +3,20 @@
  * reusable template, or apply a saved template to seed the current project.
  * New-project setup drops from re-creating dozens of conditions to one click.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { BaseDialog } from '../ui/base-dialog';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
+import { Checkbox } from '../ui/checkbox';
 import { Trash2 } from 'lucide-react';
 import {
   useConditionTemplatesStore,
   type ConditionTemplate,
 } from '../../store/slices/conditionTemplatesSlice';
 import { useConditionStore } from '../../store/slices/conditionSlice';
+import { authHelpers } from '../../lib/supabase';
 import type { TakeoffCondition } from '../../types';
 
 interface ConditionTemplatesDialogProps {
@@ -32,11 +34,20 @@ export function ConditionTemplatesDialog({
   conditions,
 }: ConditionTemplatesDialogProps) {
   const templates = useConditionTemplatesStore((s) => s.templates);
+  const loadConditionTemplates = useConditionTemplatesStore((s) => s.loadConditionTemplates);
   const saveTemplate = useConditionTemplatesStore((s) => s.saveTemplate);
   const deleteTemplate = useConditionTemplatesStore((s) => s.deleteTemplate);
+  const setTemplateShared = useConditionTemplatesStore((s) => s.setTemplateShared);
 
   const [newName, setNewName] = useState('');
   const [applyingId, setApplyingId] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    loadConditionTemplates();
+    authHelpers.getCurrentUser().then((user) => setCurrentUserId(user?.id ?? null));
+  }, [open, loadConditionTemplates]);
 
   const handleSave = () => {
     const name = newName.trim();
@@ -45,7 +56,11 @@ export function ConditionTemplatesDialog({
       toast.error('This project has no conditions to save.');
       return;
     }
-    saveTemplate(name, conditions);
+    if (!currentUserId) {
+      toast.error('Still confirming your account — try again in a moment.');
+      return;
+    }
+    saveTemplate(name, conditions, currentUserId);
     setNewName('');
     toast.success(`Template "${name}" saved (${conditions.length} conditions)`);
   };
@@ -129,38 +144,59 @@ export function ConditionTemplatesDialog({
             </p>
           ) : (
             <div className="max-h-64 overflow-y-auto rounded-md border divide-y">
-              {templates.map((template) => (
-                <div key={template.id} className="flex items-center gap-3 px-3 py-2">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{template.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {template.conditions.length} condition
-                      {template.conditions.length === 1 ? '' : 's'} ·{' '}
-                      {new Date(template.createdAt).toLocaleDateString()}
-                    </p>
+              {templates.map((template) => {
+                const isOwner = currentUserId != null && template.userId === currentUserId;
+                return (
+                  <div key={template.id} className="flex items-center gap-3 px-3 py-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium truncate">{template.name}</p>
+                        {!isOwner && (
+                          <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                            Shared
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {template.conditions.length} condition
+                        {template.conditions.length === 1 ? '' : 's'} ·{' '}
+                        {new Date(template.createdAt).toLocaleDateString()}
+                      </p>
+                    </div>
+                    {isOwner && (
+                      <label className="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
+                        <Checkbox
+                          checked={template.shared}
+                          onCheckedChange={(checked) => setTemplateShared(template.id, checked)}
+                        />
+                        Share
+                      </label>
+                    )}
+                    <Button
+                      size="sm"
+                      onClick={() => handleApply(template)}
+                      disabled={applyingId !== null}
+                    >
+                      {applyingId === template.id ? 'Applying…' : 'Apply'}
+                    </Button>
+                    {isOwner && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-red-600 hover:text-red-700"
+                        title="Delete template"
+                        onClick={() => {
+                          deleteTemplate(template.id);
+                          toast.success(`Template "${template.name}" deleted`);
+                        }}
+                        disabled={applyingId !== null}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    )}
                   </div>
-                  <Button
-                    size="sm"
-                    onClick={() => handleApply(template)}
-                    disabled={applyingId !== null}
-                  >
-                    {applyingId === template.id ? 'Applying…' : 'Apply'}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-red-600 hover:text-red-700"
-                    title="Delete template"
-                    onClick={() => {
-                      deleteTemplate(template.id);
-                      toast.success(`Template "${template.name}" deleted`);
-                    }}
-                    disabled={applyingId !== null}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

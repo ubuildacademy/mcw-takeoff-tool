@@ -367,6 +367,49 @@ function mapHyperlinkToDbRow(h: StoredSheetHyperlink): Record<string, unknown> {
   };
 }
 
+export interface StoredConditionTemplate {
+  id: string;
+  userId: string;
+  name: string;
+  shared: boolean;
+  conditions: unknown[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface ConditionTemplateRow {
+  id: string;
+  user_id: string;
+  name: string;
+  shared: boolean;
+  conditions: unknown;
+  created_at: string;
+  updated_at: string;
+}
+
+function mapConditionTemplateRow(item: ConditionTemplateRow): StoredConditionTemplate {
+  return {
+    id: item.id,
+    userId: item.user_id,
+    name: item.name,
+    shared: item.shared,
+    conditions: Array.isArray(item.conditions) ? item.conditions : [],
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+  };
+}
+
+function mapConditionTemplateToDbRow(t: StoredConditionTemplate): Record<string, unknown> {
+  return {
+    id: t.id,
+    user_id: t.userId,
+    name: t.name,
+    shared: t.shared,
+    conditions: t.conditions,
+    updated_at: new Date().toISOString(),
+  };
+}
+
 export interface StoredCalibration {
   id?: string;
   projectId: string;
@@ -2008,6 +2051,61 @@ class SupabaseStorage {
       .select('id');
     if (error) throw new DatabaseError('Failed to clear hyperlinks', error, { projectId });
     return data?.length ?? 0;
+  }
+
+  // ── Condition templates (per-user library, optionally team-shared) ──────
+
+  /** Own templates plus any other user's shared templates. */
+  async getConditionTemplatesForUser(userId: string): Promise<StoredConditionTemplate[]> {
+    const { data, error } = await supabase
+      .from('condition_templates')
+      .select('*')
+      .or(`user_id.eq.${userId},shared.eq.true`);
+    if (error) throw new DatabaseError('Failed to fetch condition templates', error, { userId });
+    return (data || []).map(mapConditionTemplateRow);
+  }
+
+  /** Single row lookup for ownership checks before update/delete. */
+  async getConditionTemplateById(id: string): Promise<StoredConditionTemplate | null> {
+    const { data, error } = await supabase
+      .from('condition_templates')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    if (error) throw new DatabaseError('Failed to fetch condition template', error, { id });
+    return data ? mapConditionTemplateRow(data) : null;
+  }
+
+  async saveConditionTemplate(template: StoredConditionTemplate): Promise<void> {
+    const row = mapConditionTemplateToDbRow(template);
+    row.created_at = template.createdAt;
+    const { error } = await supabase
+      .from('condition_templates')
+      .upsert(row, { onConflict: 'id' });
+    if (error) throw new DatabaseError('Failed to save condition template', error, { id: template.id });
+  }
+
+  async updateConditionTemplate(
+    id: string,
+    updates: Partial<Pick<StoredConditionTemplate, 'name' | 'shared' | 'conditions'>>
+  ): Promise<void> {
+    const row: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (updates.name !== undefined) row.name = updates.name;
+    if (updates.shared !== undefined) row.shared = updates.shared;
+    if (updates.conditions !== undefined) row.conditions = updates.conditions;
+    const { error } = await supabase
+      .from('condition_templates')
+      .update(row)
+      .eq('id', id);
+    if (error) throw new DatabaseError('Failed to update condition template', error, { id });
+  }
+
+  async deleteConditionTemplate(id: string): Promise<void> {
+    const { error } = await supabase
+      .from('condition_templates')
+      .delete()
+      .eq('id', id);
+    if (error) throw new DatabaseError('Failed to delete condition template', error, { id });
   }
 
   // Seed initial data if empty
