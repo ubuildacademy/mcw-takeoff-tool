@@ -806,8 +806,17 @@ router.post(
       // layer (detectSheetRefsFromIsolatedBoxes) sees them as isolated,
       // trusted boxes. Callout bbox (not the tiny word bbox) is used as the
       // clickable source rect.
+      //
+      // This pass is AUTHORITATIVE for supplemental callout boxes on vector
+      // PDFs: prior vector_callout and bubble_ocr boxes for the page are
+      // replaced, not appended to. Stale boxes from earlier runs (including
+      // mis-normalized ones written before the rotated-page fixes) otherwise
+      // survive every re-run and keep producing hyperlinks on blank space.
+      // Runs on every successfully scanned page — pages where the pass now
+      // finds nothing still get purged.
       let referenceCallouts = 0;
       for (const page of extraction.pages) {
+        if (page.error) continue; // scan failed — leave stored boxes alone
         const wordBoxes: OCRWordBox[] = (page.callouts || [])
           .filter((c) => c.kind === 'reference' && c.sheetRef)
           .map((c, idx): OCRWordBox => {
@@ -821,7 +830,6 @@ router.post(
               source: 'vector_callout',
             };
           });
-        if (wordBoxes.length === 0) continue;
 
         await simpleOcrService.mergeWordBoxesForPage(
           projectId,
@@ -835,6 +843,7 @@ router.post(
             wordBoxes,
           },
           'vector_callout',
+          { replaceSources: ['vector_callout', 'bubble_ocr'] },
         );
       }
 

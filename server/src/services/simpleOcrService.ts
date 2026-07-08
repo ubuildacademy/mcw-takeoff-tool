@@ -69,15 +69,23 @@ function isSentinelBox(box: OCRWordBox): boolean {
  * when no callouts were detected. We dedupe sentinels by `source` only (since their IoU is
  * either 0 or undefined) so re-running bubble OCR on an already-processed page doesn't pile up
  * duplicate markers.
+ *
+ * `replaceSources`: existing boxes from these sources are dropped before merging. A pass that is
+ * authoritative for its sources (vector callout pass) must replace, not append — stale boxes from
+ * earlier runs (including mis-normalized ones written before the rotated-page fixes) are otherwise
+ * preserved forever and keep producing hyperlinks on blank page space.
  */
 export function mergeWordBoxesPreservingExisting(
   existing: OCRWordBox[],
-  incoming: OCRWordBox[]
+  incoming: OCRWordBox[],
+  options?: { replaceSources?: OCRWordBoxSource[] }
 ): OCRWordBox[] {
+  const replace = options?.replaceSources?.length ? new Set(options.replaceSources) : null;
   const merged: OCRWordBox[] = [];
   let nextIndex = 0;
   for (const box of existing) {
     if (!box || !box.bbox) continue;
+    if (replace && box.source != null && replace.has(box.source)) continue;
     merged.push({ ...box, index: nextIndex++ });
   }
   for (const candidate of incoming) {
@@ -433,7 +441,8 @@ class SimpleOCRService {
       processingTime: number;
       wordBoxes: OCRWordBox[];
     },
-    method: 'tesseract' | 'pymupdf' | 'bubble_ocr' | 'vector_callout'
+    method: 'tesseract' | 'pymupdf' | 'bubble_ocr' | 'vector_callout',
+    options?: { replaceSources?: OCRWordBoxSource[] }
   ): Promise<void> {
     if (!page || !Number.isFinite(page.pageNumber) || page.pageNumber < 1) {
       console.warn('mergeWordBoxesForPage: invalid page payload');
@@ -469,6 +478,8 @@ class SimpleOCRService {
     }
 
     if (!existing) {
+      // Nothing stored and nothing incoming (purge-only call): no row to create.
+      if (incomingBoxes.length === 0 && incomingText.trim().length === 0) return;
       // No prior row for this page — insert fresh with the supplied method.
       const { error: insertError } = await supabase.from('ocr_results').insert({
         project_id: projectId,
@@ -488,7 +499,7 @@ class SimpleOCRService {
     }
 
     const existingBoxesRaw = Array.isArray(existing.word_boxes) ? (existing.word_boxes as OCRWordBox[]) : [];
-    const mergedBoxes = mergeWordBoxesPreservingExisting(existingBoxesRaw, incomingBoxes);
+    const mergedBoxes = mergeWordBoxesPreservingExisting(existingBoxesRaw, incomingBoxes, options);
     const existingText = typeof existing.text_content === 'string' ? existing.text_content : '';
     const combinedText = existingText.trim().length > 0 && incomingText.trim().length > 0
       ? `${existingText}\n\n${incomingText}`
