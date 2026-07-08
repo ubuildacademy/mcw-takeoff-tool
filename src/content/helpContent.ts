@@ -212,6 +212,12 @@ const WORKSPACE_FAQ = DEFAULT_HELP_FAQ_CONFIG.workspace;
 
 const DASHBOARD_GUIDES: HelpGuideLink[] = [
   {
+    id: 'whats-new',
+    label: "What's new",
+    href: '/help/whats-new',
+    description: 'Every update, newest first',
+  },
+  {
     id: 'workspace',
     label: 'Workspace guide',
     href: '/help/workspace',
@@ -227,6 +233,12 @@ const DASHBOARD_GUIDES: HelpGuideLink[] = [
 
 const WORKSPACE_GUIDES: HelpGuideLink[] = [
   {
+    id: 'whats-new',
+    label: "What's new",
+    href: '/help/whats-new',
+    description: 'Every update, newest first',
+  },
+  {
     id: 'workspace',
     label: 'Workspace guide',
     href: '/help/workspace',
@@ -240,7 +252,7 @@ const WORKSPACE_GUIDES: HelpGuideLink[] = [
   },
 ];
 
-export const HELP_GUIDE_SLUGS = ['workspace', 'shortcuts'] as const;
+export const HELP_GUIDE_SLUGS = ['whats-new', 'workspace', 'shortcuts'] as const;
 export type HelpGuideSlug = (typeof HELP_GUIDE_SLUGS)[number];
 
 export const HELP_SEEN_STORAGE_KEY = 'meridian-help-seen-v1';
@@ -264,6 +276,16 @@ export const HELP_HUB_CARDS: Array<{
   description: string;
   highlights: string[];
 }> = [
+  {
+    slug: 'whats-new',
+    title: "What's new",
+    description: 'Every update to Meridian Takeoff, newest first.',
+    highlights: [
+      'Latest: templates sync, AI chat, schedule fixes',
+      'The full 6-phase initial beta build',
+      'Updated alongside every release',
+    ],
+  },
   {
     slug: 'workspace',
     title: 'Workspace & features',
@@ -321,6 +343,7 @@ export function isHelpGuideSlug(slug: string | undefined): slug is HelpGuideSlug
 }
 
 export const HELP_GUIDE_TITLES: Record<HelpGuideSlug, string> = {
+  'whats-new': "What's new",
   workspace: 'Workspace & features',
   shortcuts: 'Quick start & keyboard reference',
 };

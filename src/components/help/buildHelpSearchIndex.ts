@@ -15,6 +15,7 @@ export type HelpSearchEntry = {
 };
 
 const guideLoaders: Record<HelpGuideSlug, () => Promise<{ default: string }>> = {
+  'whats-new': () => import('../../../docs/WHATS_NEW.md?raw'),
   workspace: () => import('../../../docs/WORKSPACE_GUIDE.md?raw'),
   shortcuts: () => import('../../../docs/QUICKSTART_AND_HOTKEYS.md?raw'),
 };
@@ -79,7 +80,7 @@ let indexPromise: Promise<HelpSearchEntry[]> | null = null;
 export function loadHelpSearchIndex(): Promise<HelpSearchEntry[]> {
   if (!indexPromise) {
     indexPromise = (async () => {
-      const slugs: HelpGuideSlug[] = ['workspace', 'shortcuts'];
+      const slugs: HelpGuideSlug[] = ['whats-new', 'workspace', 'shortcuts'];
       const sections = await Promise.all(
         slugs.map(async (slug) => {
           const mod = await guideLoaders[slug]();

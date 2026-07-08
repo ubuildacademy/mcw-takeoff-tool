@@ -13,6 +13,7 @@ import {
 import { scrollToHelpHash } from './scrollToHelpHash';
 
 const guideLoaders: Record<HelpGuideSlug, () => Promise<{ default: string }>> = {
+  'whats-new': () => import('../../../docs/WHATS_NEW.md?raw'),
   workspace: () => import('../../../docs/WORKSPACE_GUIDE.md?raw'),
   shortcuts: () => import('../../../docs/QUICKSTART_AND_HOTKEYS.md?raw'),
 };
