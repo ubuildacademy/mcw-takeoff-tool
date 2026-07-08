@@ -28,7 +28,7 @@ Living list of **larger features**, **quality improvements**, and **outstanding 
 
 | Item | Notes |
 |------|--------|
-| **Schedule → takeoff** | "Very strange" results on real sets per beta test. Gated behind dev builds (palette entry hidden in prod). Needs: repro assets from real schedules, header-detection hardening, merged-cell handling. |
+| **Schedule → takeoff** | Still dev-only (palette entry hidden in prod). Review dialog now handles real shapes: multi-row grouped headers, "count filled cells across level columns" quantity mode (door-number-per-level schedules with no QTY column), and same-name row grouping into one door-type condition (`utils/scheduleTableMapping.ts` + tests). **Key finding on the beta test set ("Architectural Combined.pdf" p53): the door schedule body is OUTLINED to vector paths by the CAD export — only header/titleblock text is in the text layer (345 words, ~1% of grid cells filled).** Vector extraction fundamentally cannot read that schedule; `table_extract.py` now detects the outlined-body case (real grid, <12% cells filled) and returns a precise "needs OCR" error instead of garbage rows. **Open decision: build a raster-OCR fallback (Tesseract per cell, deterministic — no LLM) for outlined schedules, or leave as vector-only.** Schedules WITH a real text layer work now. |
 | **Room proposals** | Gated with schedule tool. See dial-in section below. |
 
 ### AI chat overhaul

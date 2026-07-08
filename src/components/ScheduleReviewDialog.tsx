@@ -1,17 +1,33 @@
 /**
  * ScheduleReviewDialog
  *
- * Lets an estimator review a door/window schedule table parsed from a PDF
- * region (via the server's schedule-table endpoint), map which column holds
- * the item name and which holds the quantity, pick which rows to bring into
- * the takeoff, and apply them. Each applied row becomes a count condition
- * with the resolved name and the number of markers to place.
+ * Review a door/window schedule parsed from a PDF region and turn it into
+ * takeoff conditions. Handles real schedule shapes:
+ *  - multi-row headers (group header over sub-columns) via a header-row count
+ *  - implied quantities: "count filled cells across the level columns" mode
+ *    for schedules with a door number per level and no QTY column
+ *  - door-type grouping: rows with the same name merge into ONE condition
+ *    with the summed count (markers still land beside every source row)
  */
 import React, { useState } from 'react';
 import { BaseDialog } from './ui/base-dialog';
 import { Button } from './ui/button';
 import { Checkbox } from './ui/checkbox';
 import { Label } from './ui/label';
+import {
+  buildColumnLabels,
+  computeRowQty,
+  detectHeaderRowCount,
+  detectInstanceColumns,
+  groupScheduleRows,
+  guessNameColumn,
+  guessQtyMapping,
+  type QtyMapping,
+  type ScheduleApplyGroup,
+  type ScheduleRowMapping,
+} from '../utils/scheduleTableMapping';
+
+export type { ScheduleApplyGroup } from '../utils/scheduleTableMapping';
 
 export interface ScheduleTableData {
   mode: 'ruled' | 'clustered';
@@ -19,58 +35,23 @@ export interface ScheduleTableData {
   rowBoxes: Array<{ y0: number; y1: number }>;
 }
 
-export interface ScheduleApplyRow {
-  rowIndex: number; // index into table.rows
-  name: string; // condition name for this row
-  qty: number; // count markers to create (>= 1)
-}
-
 export interface ScheduleReviewDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   table: ScheduleTableData | null;
-  /** Apply the selected rows; parent creates conditions + markers. May be async; show "Applying…" disabled state until it resolves. */
-  onApply: (rows: ScheduleApplyRow[]) => void | Promise<void>;
+  /** Apply the grouped conditions; parent creates conditions + markers. */
+  onApply: (groups: ScheduleApplyGroup[]) => void | Promise<void>;
 }
 
-const NAME_HEADER_RE = /mark|type|desc|item|fixture|door|window/i;
-const QTY_HEADER_RE = /qty|quan|count|no\.?$|ea\b/i;
-
-const NONE_QTY_VALUE = '__none__';
-
-function guessNameColumn(table: ScheduleTableData, firstRowIsHeader: boolean): number {
-  if (firstRowIsHeader && table.rows.length > 0) {
-    const header = table.rows[0];
-    const idx = header.findIndex((cell) => NAME_HEADER_RE.test(cell));
-    if (idx >= 0) return idx;
-  }
-  return 0;
-}
-
-function guessQtyColumn(table: ScheduleTableData, firstRowIsHeader: boolean): number | null {
-  if (firstRowIsHeader && table.rows.length > 0) {
-    const header = table.rows[0];
-    const idx = header.findIndex((cell) => QTY_HEADER_RE.test(cell));
-    if (idx >= 0) return idx;
-  }
-  return null;
-}
-
-function parseQty(cell: string | undefined): number {
-  if (cell === undefined) return 1;
-  const parsed = parseInt(cell, 10);
-  if (isNaN(parsed) || parsed < 1) return 1;
-  return parsed;
-}
+type QtyModeChoice = 'onePerRow' | 'column' | 'countColumns';
 
 function resolveName(row: string[], nameCol: number): string {
   const direct = (row[nameCol] ?? '').trim();
   if (direct) return direct;
-  const fallback = row
+  return row
     .map((cell) => cell.trim())
     .filter((cell) => cell.length > 0)
     .join(' ');
-  return fallback;
 }
 
 export function ScheduleReviewDialog({
@@ -80,115 +61,146 @@ export function ScheduleReviewDialog({
   onApply,
 }: ScheduleReviewDialogProps): JSX.Element | null {
   const [seenTable, setSeenTable] = useState<ScheduleTableData | null>(null);
-  const [firstRowIsHeader, setFirstRowIsHeader] = useState(true);
+  const [headerRows, setHeaderRows] = useState(1);
   const [nameCol, setNameCol] = useState(0);
-  const [qtyCol, setQtyCol] = useState<number | null>(null);
+  const [qtyMode, setQtyMode] = useState<QtyModeChoice>('onePerRow');
+  const [qtyColumn, setQtyColumn] = useState(0);
+  const [countColumns, setCountColumns] = useState<Set<number>>(new Set());
+  const [groupByName, setGroupByName] = useState(true);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [applying, setApplying] = useState(false);
 
-  // Render-phase reset: re-derive all local state whenever the dialog opens
-  // with a new table, instead of doing this in a useEffect (banned in this repo).
+  const columnCount = table ? table.rows.reduce((max, row) => Math.max(max, row.length), 0) : 0;
+
+  const reseedFromHeaderRows = (t: ScheduleTableData, nextHeaderRows: number, colCount: number) => {
+    const labels = buildColumnLabels(t.rows, nextHeaderRows, colCount);
+    const instanceCols = detectInstanceColumns(t.rows, nextHeaderRows, colCount);
+    setNameCol(guessNameColumn(labels, instanceCols));
+    const mapping = guessQtyMapping(labels, instanceCols);
+    setQtyMode(mapping.mode);
+    setQtyColumn(mapping.mode === 'column' ? mapping.column : 0);
+    setCountColumns(new Set(mapping.mode === 'countColumns' ? mapping.columns : instanceCols));
+    const nextSelected = new Set<number>();
+    for (let i = nextHeaderRows; i < t.rows.length; i++) nextSelected.add(i);
+    setSelected(nextSelected);
+  };
+
+  // Render-phase reset: re-derive local state when the dialog opens with a new
+  // table, instead of a useEffect (banned in this repo).
   if (open && table !== seenTable) {
     setSeenTable(table);
-    const nextFirstRowIsHeader = true;
-    setFirstRowIsHeader(nextFirstRowIsHeader);
+    setGroupByName(true);
+    setApplying(false);
     if (table) {
-      const guessedName = guessNameColumn(table, nextFirstRowIsHeader);
-      const guessedQty = guessQtyColumn(table, nextFirstRowIsHeader);
-      setNameCol(guessedName);
-      setQtyCol(guessedQty);
-      const dataStart = nextFirstRowIsHeader ? 1 : 0;
-      const initialSelected = new Set<number>();
-      for (let i = dataStart; i < table.rows.length; i++) {
-        initialSelected.add(i);
-      }
-      setSelected(initialSelected);
+      const colCount = table.rows.reduce((max, row) => Math.max(max, row.length), 0);
+      const detected = detectHeaderRowCount(table.rows);
+      setHeaderRows(detected);
+      reseedFromHeaderRows(table, detected, colCount);
     } else {
+      setHeaderRows(1);
       setNameCol(0);
-      setQtyCol(null);
+      setQtyMode('onePerRow');
+      setQtyColumn(0);
+      setCountColumns(new Set());
       setSelected(new Set());
     }
-    setApplying(false);
   }
 
   if (!table) {
     return null;
   }
 
-  const handleFirstRowIsHeaderChange = (checked: boolean) => {
-    setFirstRowIsHeader(checked);
-    const guessedName = guessNameColumn(table, checked);
-    const guessedQty = guessQtyColumn(table, checked);
-    setNameCol(guessedName);
-    setQtyCol(guessedQty);
-    const dataStart = checked ? 1 : 0;
-    const nextSelected = new Set<number>();
-    for (let i = dataStart; i < table.rows.length; i++) {
-      nextSelected.add(i);
-    }
-    setSelected(nextSelected);
+  const labels = buildColumnLabels(table.rows, headerRows, columnCount);
+
+  const handleHeaderRowsChange = (next: number) => {
+    setHeaderRows(next);
+    reseedFromHeaderRows(table, next, columnCount);
   };
 
-  const columnCount = table.rows.reduce((max, row) => Math.max(max, row.length), 0);
-  const dataStartIndex = firstRowIsHeader ? 1 : 0;
-  const headerRow = firstRowIsHeader ? table.rows[0] : undefined;
+  const activeMapping: QtyMapping =
+    qtyMode === 'onePerRow'
+      ? { mode: 'onePerRow' }
+      : qtyMode === 'column'
+        ? { mode: 'column', column: qtyColumn }
+        : { mode: 'countColumns', columns: [...countColumns].sort((a, b) => a - b) };
 
   const toggleRow = (rowIndex: number, checked: boolean) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (checked) {
-        next.add(rowIndex);
-      } else {
-        next.delete(rowIndex);
-      }
+      if (checked) next.add(rowIndex);
+      else next.delete(rowIndex);
       return next;
     });
   };
 
-  const applyRows: ScheduleApplyRow[] = [];
-  for (let i = dataStartIndex; i < table.rows.length; i++) {
+  const toggleCountColumn = (col: number, checked: boolean) => {
+    setCountColumns((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(col);
+      else next.delete(col);
+      return next;
+    });
+  };
+
+  const isMappedColumn = (col: number): boolean =>
+    col === nameCol ||
+    (qtyMode === 'column' && col === qtyColumn) ||
+    (qtyMode === 'countColumns' && countColumns.has(col));
+
+  const mappedRows: ScheduleRowMapping[] = [];
+  for (let i = headerRows; i < table.rows.length; i++) {
     if (!selected.has(i)) continue;
     const row = table.rows[i];
     const name = resolveName(row, nameCol);
     if (!name) continue;
-    const qty = qtyCol === null ? 1 : parseQty(row[qtyCol]);
-    applyRows.push({ rowIndex: i, name, qty });
+    const qty = computeRowQty(row, activeMapping);
+    if (qty < 1) continue; // all-dash row under count mode — nothing to count
+    mappedRows.push({ rowIndex: i, name, qty });
   }
+  const groups = groupScheduleRows(mappedRows, groupByName);
+  const totalMarkers = groups.reduce((sum, g) => sum + g.totalQty, 0);
 
   const handleApply = async () => {
-    if (applyRows.length === 0 || applying) return;
+    if (groups.length === 0 || applying) return;
     setApplying(true);
     try {
-      await onApply(applyRows);
+      await onApply(groups);
       onOpenChange(false);
     } finally {
       setApplying(false);
     }
   };
 
-  const handleCancel = () => {
-    onOpenChange(false);
+  const columnLabel = (col: number): string => {
+    const label = labels[col];
+    return label ? `${col}: ${label}` : `Column ${col}`;
   };
 
-  const columnLabel = (col: number): string => {
-    if (headerRow && headerRow[col]) return `${col}: ${headerRow[col]}`;
-    return `Column ${col}`;
-  };
+  const maxHeaderChoices = Math.min(3, Math.max(0, table.rows.length - 1));
 
   return (
     <BaseDialog
       open={open}
       onOpenChange={onOpenChange}
       title="Schedule → takeoff"
-      maxWidth="2xl"
+      maxWidth="5xl"
       footer={
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={handleCancel} disabled={applying}>
-            Cancel
-          </Button>
-          <Button onClick={handleApply} disabled={applyRows.length === 0 || applying}>
-            {applying ? 'Applying…' : `Apply ${applyRows.length} conditions`}
-          </Button>
+        <div className="flex w-full items-center justify-between gap-2">
+          <span className="text-sm text-muted-foreground">
+            {groups.length > 0
+              ? `→ ${groups.length} condition${groups.length === 1 ? '' : 's'}, ${totalMarkers} markers`
+              : 'Nothing to apply yet'}
+          </span>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={applying}>
+              Cancel
+            </Button>
+            <Button onClick={handleApply} disabled={groups.length === 0 || applying}>
+              {applying
+                ? 'Applying…'
+                : `Apply ${groups.length} condition${groups.length === 1 ? '' : 's'}`}
+            </Button>
+          </div>
         </div>
       }
     >
@@ -197,18 +209,23 @@ export function ScheduleReviewDialog({
           Parsed {table.rows.length} rows ({table.mode === 'ruled' ? 'ruled grid' : 'text alignment'})
         </p>
 
-        <div className="flex items-center gap-2">
-          <Checkbox
-            id="schedule-first-row-header"
-            checked={firstRowIsHeader}
-            onCheckedChange={handleFirstRowIsHeaderChange}
-          />
-          <Label htmlFor="schedule-first-row-header" className="cursor-pointer font-normal">
-            First row is a header
-          </Label>
-        </div>
+        <div className="grid grid-cols-3 gap-4">
+          <div className="space-y-1">
+            <Label htmlFor="schedule-header-rows">Header rows</Label>
+            <select
+              id="schedule-header-rows"
+              className="w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
+              value={headerRows}
+              onChange={(e) => handleHeaderRowsChange(Number(e.target.value))}
+            >
+              {Array.from({ length: maxHeaderChoices + 1 }, (_, n) => (
+                <option key={n} value={n}>
+                  {n === 0 ? 'None (data starts at row 1)' : n}
+                </option>
+              ))}
+            </select>
+          </div>
 
-        <div className="grid grid-cols-2 gap-4">
           <div className="space-y-1">
             <Label htmlFor="schedule-name-col">Name column</Label>
             <select
@@ -226,16 +243,29 @@ export function ScheduleReviewDialog({
           </div>
 
           <div className="space-y-1">
+            <Label htmlFor="schedule-qty-mode">Quantity</Label>
+            <select
+              id="schedule-qty-mode"
+              className="w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
+              value={qtyMode}
+              onChange={(e) => setQtyMode(e.target.value as QtyModeChoice)}
+            >
+              <option value="onePerRow">1 per row</option>
+              <option value="column">From a column</option>
+              <option value="countColumns">Count filled cells across columns</option>
+            </select>
+          </div>
+        </div>
+
+        {qtyMode === 'column' && (
+          <div className="space-y-1">
             <Label htmlFor="schedule-qty-col">Qty column</Label>
             <select
               id="schedule-qty-col"
               className="w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
-              value={qtyCol === null ? NONE_QTY_VALUE : qtyCol}
-              onChange={(e) =>
-                setQtyCol(e.target.value === NONE_QTY_VALUE ? null : Number(e.target.value))
-              }
+              value={qtyColumn}
+              onChange={(e) => setQtyColumn(Number(e.target.value))}
             >
-              <option value={NONE_QTY_VALUE}>None (1 per row)</option>
               {Array.from({ length: columnCount }, (_, col) => (
                 <option key={col} value={col}>
                   {columnLabel(col)}
@@ -243,22 +273,48 @@ export function ScheduleReviewDialog({
               ))}
             </select>
           </div>
+        )}
+
+        {qtyMode === 'countColumns' && (
+          <div className="space-y-1">
+            <Label>Count these columns (e.g. one door number per level)</Label>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 rounded-md border border-input p-2">
+              {Array.from({ length: columnCount }, (_, col) => (
+                <label key={col} className="flex items-center gap-1.5 text-sm cursor-pointer">
+                  <Checkbox
+                    checked={countColumns.has(col)}
+                    onCheckedChange={(checked) => toggleCountColumn(col, checked === true)}
+                  />
+                  {columnLabel(col)}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="schedule-group-by-name"
+            checked={groupByName}
+            onCheckedChange={(checked) => setGroupByName(checked === true)}
+          />
+          <Label htmlFor="schedule-group-by-name" className="cursor-pointer font-normal">
+            Group rows with the same name into one condition (door types)
+          </Label>
         </div>
 
         <div className="max-h-[45vh] overflow-y-auto rounded-md border border-input">
           <table className="w-full text-sm">
             <thead>
-              {headerRow && (
+              {headerRows > 0 && (
                 <tr className="bg-popover">
                   <th className="w-8 px-2 py-1" />
-                  {headerRow.map((cell, col) => (
+                  {Array.from({ length: columnCount }, (_, col) => (
                     <th
                       key={col}
-                      className={`px-2 py-1 text-left font-medium ${
-                        col === nameCol || col === qtyCol ? 'bg-primary/10' : ''
-                      }`}
+                      className={`px-2 py-1 text-left font-medium ${isMappedColumn(col) ? 'bg-primary/10' : ''}`}
                     >
-                      {cell}
+                      {labels[col]}
                     </th>
                   ))}
                   <th className="px-2 py-1 text-left font-medium text-muted-foreground">Result</th>
@@ -266,27 +322,25 @@ export function ScheduleReviewDialog({
               )}
             </thead>
             <tbody>
-              {table.rows.slice(dataStartIndex).map((row, offset) => {
-                const rowIndex = dataStartIndex + offset;
+              {table.rows.slice(headerRows).map((row, offset) => {
+                const rowIndex = headerRows + offset;
                 const name = resolveName(row, nameCol);
-                const qty = qtyCol === null ? 1 : parseQty(row[qtyCol]);
-                const disabled = !name;
+                const qty = computeRowQty(row, activeMapping);
+                const disabled = !name || qty < 1;
                 return (
                   <tr key={rowIndex} className="border-t border-input">
                     <td className="px-2 py-1 align-top">
                       <Checkbox
                         checked={!disabled && selected.has(rowIndex)}
-                        onCheckedChange={(checked) => toggleRow(rowIndex, checked)}
+                        onCheckedChange={(checked) => toggleRow(rowIndex, checked === true)}
                         disabled={disabled}
-                        title={disabled ? 'No usable name' : undefined}
+                        title={disabled ? (name ? 'No filled quantity cells' : 'No usable name') : undefined}
                       />
                     </td>
                     {Array.from({ length: columnCount }, (_, col) => (
                       <td
                         key={col}
-                        className={`px-2 py-1 align-top ${
-                          col === nameCol || col === qtyCol ? 'bg-primary/10' : ''
-                        }`}
+                        className={`px-2 py-1 align-top ${isMappedColumn(col) ? 'bg-primary/10' : ''}`}
                       >
                         {row[col] ?? ''}
                       </td>

@@ -6,7 +6,7 @@ import PDFViewer from './PDFViewer';
 import { TakeoffSidebar } from './TakeoffSidebar';
 import { Button } from './ui/button';
 import { CommandPalette, type CommandItem } from './CommandPalette';
-import { ScheduleReviewDialog } from './ScheduleReviewDialog';
+import { ScheduleReviewDialog, type ScheduleApplyGroup } from './ScheduleReviewDialog';
 import { RevisionCompareDialog } from './RevisionCompareDialog';
 import { generateDistinctColor } from '../utils/commonUtils';
 
@@ -188,7 +188,7 @@ export function TakeoffWorkspace() {
   );
 
   const handleScheduleApply = useCallback(
-    async (rowsToApply: Array<{ rowIndex: number; name: string; qty: number }>) => {
+    async (groups: ScheduleApplyGroup[]) => {
       if (!projectId || !scheduleTable) return;
       const conditionStore = useConditionStore.getState();
       const { addTakeoffMeasurement } = useMeasurementStore.getState();
@@ -199,12 +199,12 @@ export function TakeoffWorkspace() {
       let conditionsCreated = 0;
       let markersCreated = 0;
       try {
-        for (const row of rowsToApply) {
+        for (const group of groups) {
           const color = generateDistinctColor(existingColors);
           existingColors.push(color);
           const conditionId = await conditionStore.addCondition({
             projectId,
-            name: row.name,
+            name: group.name,
             type: 'count',
             unit: 'EA',
             wasteFactor: 0,
@@ -213,28 +213,34 @@ export function TakeoffWorkspace() {
           });
           conditionsCreated += 1;
 
-          // Markers sit ON the schedule row: auditable against the printed
-          // QTY, movable to real plan locations afterwards.
-          const rowBox = scheduleTable.rowBoxes[row.rowIndex];
-          const y = rowBox ? (rowBox.y0 + rowBox.y1) / 2 : scheduleTable.region.y0;
-          const xStart = Math.min(0.98, scheduleTable.region.x1 + 0.006);
-          const qty = Math.min(row.qty, 200); // sanity cap
-          for (let i = 0; i < qty; i++) {
-            const point = { x: Math.min(0.995, xStart + i * 0.007), y };
-            await addTakeoffMeasurement({
-              projectId,
-              sheetId: scheduleTable.documentId,
-              conditionId,
-              type: 'count',
-              points: [point],
-              calculatedValue: 1,
-              unit: 'EA',
-              pdfPage: scheduleTable.pageNumber,
-              pdfCoordinates: [point],
-              conditionColor: color,
-              conditionName: row.name,
-            });
-            markersCreated += 1;
+          // Markers sit ON the schedule rows: auditable against the printed
+          // schedule, movable to real plan locations afterwards. A grouped
+          // condition (door type) drops its markers beside every source row.
+          let groupBudget = 200; // sanity cap per condition
+          for (const markerRow of group.markerRows) {
+            const rowBox = scheduleTable.rowBoxes[markerRow.rowIndex];
+            const y = rowBox ? (rowBox.y0 + rowBox.y1) / 2 : scheduleTable.region.y0;
+            const xStart = Math.min(0.98, scheduleTable.region.x1 + 0.006);
+            const qty = Math.min(markerRow.qty, groupBudget);
+            groupBudget -= qty;
+            for (let i = 0; i < qty; i++) {
+              const point = { x: Math.min(0.995, xStart + i * 0.007), y };
+              await addTakeoffMeasurement({
+                projectId,
+                sheetId: scheduleTable.documentId,
+                conditionId,
+                type: 'count',
+                points: [point],
+                calculatedValue: 1,
+                unit: 'EA',
+                pdfPage: scheduleTable.pageNumber,
+                pdfCoordinates: [point],
+                conditionColor: color,
+                conditionName: group.name,
+              });
+              markersCreated += 1;
+            }
+            if (groupBudget <= 0) break;
           }
         }
         toast.success(

@@ -232,6 +232,32 @@ def extract_table(pdf_path: str, page_number: int, nx0: float, ny0: float, nx1: 
                 for c in row_centers
             ]
 
+        # Outlined-body guard: some CAD exports convert the schedule's data
+        # cells to vector outlines (curves), leaving only header labels and
+        # titleblock text extractable. The grid is real but nearly every data
+        # cell is empty — deterministic vector extraction cannot read it, and
+        # proceeding would emit garbage rows. Detect a real grid whose interior
+        # is mostly empty and fail with a precise, actionable hint instead.
+        if mode == "ruled" and n_rows >= 6 and n_cols >= 3:
+            data_cells = n_rows * n_cols
+            filled_cells = sum(
+                1 for row in grid for cell in row if cell
+            )
+            if data_cells > 0 and filled_cells / data_cells < 0.12:
+                return {
+                    "success": False,
+                    "error": (
+                        "The schedule grid was found, but its cells have no selectable "
+                        "text — the body appears to be outlined/flattened to graphics by "
+                        "the CAD export. Vector extraction can't read it; this schedule "
+                        "needs OCR."
+                    ),
+                    "reason": "outlined_body",
+                    "gridRows": n_rows,
+                    "gridCols": n_cols,
+                    "filledCells": filled_cells,
+                }
+
         # Drop fully-empty rows (grid lines beyond the data).
         keep = [i for i, r in enumerate(rows) if any(cell for cell in r)]
         rows = [rows[i] for i in keep]
