@@ -10,6 +10,7 @@ import { useAnnotationStore } from '../../store/slices/annotationSlice';
 import { useDocumentViewStore } from '../../store/slices/documentViewSlice';
 import { toast } from 'sonner';
 import { sheetService } from '../../services/apiService';
+import { buildDataSheet } from './export/buildDataSheet';
 import type { TakeoffCondition, TakeoffMeasurement, PDFDocument, ProjectCostBreakdown, Sheet } from '../../types';
 
 export interface UseTakeoffExportOptions {
@@ -748,6 +749,9 @@ export function useTakeoffExport({
       uniquePageKeys.forEach((k, idx) => {
         calcSheet.getCell(idx + 1, 1).value = k;
       });
+
+      // Flat pivot-ready sheet, added last so existing sheet order is untouched.
+      await buildDataSheet(workbook, allMeasurements, projectId, headerStyle);
 
       executiveSheet.getColumn(1).width = 28;
       executiveSheet.getColumn(2).width = 50;
