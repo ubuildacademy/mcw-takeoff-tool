@@ -31,7 +31,7 @@ Press **Cmd/Ctrl+K** anywhere in the workspace to open the command palette. Type
 
 - **Sheets** — jump to any page by sheet number or sheet name.
 - **Conditions** — activate a condition for drawing.
-- **Actions** — **Calibrate scale** / **Recalibrate scale**, **Magic wand**, **Schedule → takeoff**, **Propose rooms on this sheet**, **Compare sheet revisions…**, **Fit sheet to window**.
+- **Actions** — **Calibrate scale** / **Recalibrate scale**, **Magic wand**, **Schedule → takeoff**, **Compare sheet revisions…**, **Fit sheet to window**.
 
 Use **Arrow Up/Down** to move the highlight, **Enter** to run the highlighted item, and **Escape** to close the palette without doing anything.
 
@@ -115,7 +115,7 @@ Escape **backs out** of the current mode or selection, usually one step at a tim
 
 | Action | Shortcut |
 |--------|-----------|
-| **Command palette** | Cmd/Ctrl+**K** — jump to a sheet, activate a condition, or run an action (calibrate, magic wand, schedule takeoff, room proposals, revision compare, fit to window). Arrow keys + Enter to run, Escape to close. |
+| **Command palette** | Cmd/Ctrl+**K** — jump to a sheet, activate a condition, or run an action (calibrate, magic wand, schedule takeoff, revision compare, fit to window). Arrow keys + Enter to run, Escape to close. |
 | **Undo** | Cmd/Ctrl+**Z** |
 | **Redo** | Cmd/Ctrl+**Shift**+**Z** or Cmd/Ctrl+**Y** |
 | **Copy** selected markups | Cmd/Ctrl+**C** (when markups are selected in selection mode) |

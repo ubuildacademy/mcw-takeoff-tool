@@ -361,7 +361,7 @@ Press **Cmd/Ctrl+K** anywhere in the workspace to open a searchable palette (`sr
 
 - **Sheets** — jump to any page by sheet number or sheet name; opens it in a new tab.
 - **Conditions** — activate a condition for drawing, same as clicking it in the left sidebar.
-- **Actions** — **Calibrate scale** / **Recalibrate scale**, **Magic wand**, **Schedule → takeoff**, **Propose rooms on this sheet**, **Compare sheet revisions…**, **Fit sheet to window**.
+- **Actions** — **Calibrate scale** / **Recalibrate scale**, **Magic wand**, **Schedule → takeoff**, **Compare sheet revisions…**, **Fit sheet to window**.
 
 **Arrow Up/Down** move the highlight, **Enter** runs the highlighted item (and closes the palette), **Escape** closes without doing anything.
 
@@ -372,12 +372,6 @@ The **Wand** button lives in the top command bar. Select an **area** or **volume
 - Requires the sheet to be **calibrated** first.
 - If the region is not fully enclosed (an open doorway, a gap in linework), the wand **refuses** and shows a message instead of guessing at a boundary.
 - **Escape** exits wand mode; the resulting measurement **undoes** like any other.
-
-### Propose rooms on this sheet
-
-Open from ⌘K → **"Propose rooms on this sheet."** Instead of clicking room-by-room, this scans the **entire sheet** for enclosed regions in one pass and opens a review list with computed areas, **biggest first**. Uncheck anything you don't want (legends, title block cells, and other non-room enclosed shapes can show up), then apply to add the remaining rooms to the selected area/volume condition. Same calibration requirement as the magic wand.
-
-**Known limitation:** the sweep currently proposes **every** enclosed region it finds, so always review the list before applying rather than accepting it wholesale.
 
 ### Schedule → takeoff
 
