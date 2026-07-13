@@ -266,32 +266,56 @@ otherwise iterate. Do not merge on green tests alone.
 
 ## Workstream C — Assemblies (Stage 1 bridge)
 
-**STOP: design-review session with Jeff required before any C task.**
-Read `docs/ASSEMBLIES_DESIGN.md` in full. It defines Stage 1 (send takeoff quantity into
-a company's existing assembly workbook via surgical OOXML write) vs Stage 2 (native
-engine). Jeff has confirmed (2026-07-13) that substantial logic lives in MCW's Excel
-assemblies and must port in a way *any* company finds valuable — i.e. the per-org
-workbook registry + cell-mapping approach, no MCW-specific assumptions.
+**Design review COMPLETE (2026-07-13). Decisions locked — C tasks are executable.**
+Read `docs/ASSEMBLIES_DESIGN.md` for full background (Stage 1 workbook bridge vs
+Stage 2 native engine; per-org registry, no MCW-specific assumptions).
 
-The review session must answer the doc's 4 open questions (single vs multiple input
-cells; write job-info fields?; per-condition vs summed workbooks; refresh Pricing DB at
-generate time?) plus one more: **hosting the OOXML writer** — it must run server-side
-(Node) or as a Python script like `table_extract.py`; the Pricing Manager's proven
-implementation is Python, so a `server/src/scripts/` port is the low-risk path.
+**Locked decisions:**
+1. **Input cells:** a workbook maps to a **list** of `(label, cellAddress)` quantity
+   inputs. Audit of all 235 live 2026 MCW workbooks: 227 have exactly one "Job Quantity"
+   input, 3 have two (`Cover plates.xlsx`, `Eucopoxy Tufcoat and BM Corotech on
+   walls.xlsx`), 5 have none detectable (manual mapping). Label cell address varies
+   (C13×170, C12×30, C14×11, A12/A13/A14) — per-workbook mapping is mandatory, no
+   default address.
+2. **Job info:** yes — mapping optionally includes job-info cells (project name, client,
+   address); generate writes them.
+3. **Multi-condition, same workbook:** **sum** the mapped conditions' net quantities into
+   the input cell — one priced workbook per product line per project. (Jeff 2026-07-13:
+   "same product/assembly with two quantities → combined.") Show the per-condition
+   breakdown in the generate confirmation so the sum is auditable.
+4. **Pricing DB sheet:** never touched by the app; workbooks stay current via MCW's
+   Pricing Manager.
+5. **Runtime:** Python OOXML writer at `server/src/scripts/assembly_write.py`, invoked
+   like `table_extract.py` (execFile wrapper service). Zip-level surgical rewrite —
+   **never openpyxl for writing** (mangles formatting/charts). openpyxl is also broken
+   in the current venv (pip ImportError) — pure stdlib zipfile+ElementTree works and is
+   already proven by the audit script.
 
-Pre-scoped tasks (do not start until the review happens):
-- **C1** Schema: `assembly_workbooks` (org-scoped file refs) + `assembly_mappings`
-  (workbook ↔ condition, input-cell address(es), optional job-info cell map). RLS
-  mirrors `condition_templates` sharing model.
+**Direction note (Jeff, 2026-07-13):** long-term convergence with condition templates —
+"open an assembly as a condition template" so the template creates the condition already
+wired to its assembly mapping. That is Stage 2 (ASSEMBLIES_DESIGN.md already plans
+assembly-linked templates / trade packs). Stage 1 keeps registry and templates separate,
+but **C1's schema must not preclude it**: `assembly_mappings` keys on condition *name
+pattern or template id*, not only concrete condition ids.
+
+Tasks (execute in order, one per session):
+- **C1** Schema: `assembly_workbooks` (org-scoped file refs: filename, storage path,
+  uploaded_by, org) + `assembly_mappings` (workbook id ↔ condition ref, `inputs` jsonb
+  array of {label, cell}, optional `job_info_cells` jsonb map). RLS mirrors
+  `condition_templates` sharing model. Migration file + typed service.
 - **C2** Server: upload/list/delete endpoints (reuse project-file storage patterns);
-  `POST /assemblies/generate` — copy workbook, write quantity into mapped cell(s) via
-  zip-level OOXML rewrite (port the Pricing Manager technique; **never openpyxl** — it
-  mangles formatting), return download.
-- **C3** Client: registry UI (upload + map to condition + cell address) in a new sidebar
-  Costs-tab section; "Generate assembly" button on mapped conditions.
-- **C4** E2E test against a copy of `Aquafin-2K M.xlsx`: generated workbook opens in
-  Excel with quantity in the right cell and every other byte identical (compare zip
-  entries).
+  `server/src/scripts/assembly_write.py` (stdlib zip/OOXML: replace cell values in the
+  ASSEMBLY sheet XML, drop calcChain, leave every other zip entry byte-identical);
+  `POST /assemblies/generate` — resolve mapped conditions' net quantities (sum per
+  decision 3), copy workbook, invoke writer, return download.
+- **C3** Client: registry UI (upload + map to condition + input cells + job-info cells)
+  in a new sidebar Costs-tab section; "Generate assembly" button on mapped conditions
+  with a confirmation showing the per-condition quantity breakdown and the sum.
+- **C4** E2E test against a copy of `Aquafin-2K M.xlsx` (path in ASSEMBLIES_DESIGN.md;
+  live set at `~/Library/Mobile Documents/com~apple~CloudDocs/Business/MCW/Assembly
+  Work/4.14.26 Assembly Update/2026 Assemblies 4-14-26/`): generated workbook opens in
+  Excel without repair, quantity + job info in the right cells, every other zip entry
+  byte-identical (compare entry-by-entry).
 
 ---
 
