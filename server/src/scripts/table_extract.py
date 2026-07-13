@@ -37,7 +37,6 @@ CLUSTER_TOL_PT = 2.5        # merge nearby parallel lines into one boundary
 WORD_ROW_TOL_FACTOR = 0.7   # row clustering: fraction of median word height
 COL_TOL_PT = 9.0            # column clustering tolerance on x-starts
 OCR_ZOOM = 4.0              # render scale for OCR fallback (72*4 ≈ 288 DPI)
-OCR_BINARIZE_THRESHOLD = 190  # grayscale cutoff: outlined strokes -> solid black
 
 
 def _cluster(values: list[float], tol: float) -> list[float]:
@@ -110,10 +109,12 @@ def _ocr_words(page: "fitz.Page", x0: float, y0: float, x1: float, y1: float):
     vis_clip.normalize()
 
     pix = page.get_pixmap(matrix=fitz.Matrix(OCR_ZOOM, OCR_ZOOM), clip=vis_clip, alpha=False)
+    # Feed grayscale straight to Tesseract and let it Otsu-threshold internally.
+    # A manual global binarize flips the schedule's gray SHADED rows (level
+    # grouping bands) to solid black, erasing their text and wrecking layout
+    # analysis for the whole region — measurably worse (≈half the confident
+    # words) than raw grayscale on the real outlined door schedule.
     img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples).convert("L")
-    # Binarize: outlined glyphs are thin vector strokes — flatten to solid black
-    # on white so Tesseract sees filled letterforms, not hollow outlines.
-    img = img.point(lambda p: 0 if p < OCR_BINARIZE_THRESHOLD else 255)
 
     data = pytesseract.image_to_data(
         img,

@@ -357,8 +357,12 @@ export function ScheduleReviewDialog({
                     </td>
                     {Array.from({ length: columnCount }, (_, col) => {
                       const conf = table.cellConfidence?.[rowIndex]?.[col];
+                      // Only flag cells with real alphanumeric content — dashes
+                      // and punctuation aren't values worth "verifying".
                       const lowConf =
-                        conf !== undefined && (row[col] ?? '') !== '' && conf <= OCR_REVIEW_THRESHOLD;
+                        conf !== undefined &&
+                        /[a-z0-9]/i.test(row[col] ?? '') &&
+                        conf <= OCR_REVIEW_THRESHOLD;
                       return (
                         <td
                           key={col}
