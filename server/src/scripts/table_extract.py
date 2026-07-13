@@ -116,9 +116,14 @@ def _ocr_words(page: "fitz.Page", x0: float, y0: float, x1: float, y1: float):
     # words) than raw grayscale on the real outlined door schedule.
     img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples).convert("L")
 
+    # PSM 11 (sparse text: find every word regardless of layout). We do NOT want
+    # Tesseract to infer the table — the vector lattice already provides the grid,
+    # and we only need words + positions to drop into cells. PSM 6 ("uniform
+    # block") mis-segments the dense schedule grid and door-number ovals into
+    # near-garbage; sparse mode is dramatically more robust on a loose box.
     data = pytesseract.image_to_data(
         img,
-        config="--psm 6 -c preserve_interword_spaces=1",
+        config="--psm 11 -c preserve_interword_spaces=1",
         output_type=pytesseract.Output.DICT,
     )
 
