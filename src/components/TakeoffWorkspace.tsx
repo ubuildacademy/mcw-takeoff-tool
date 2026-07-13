@@ -1402,9 +1402,12 @@ export function TakeoffWorkspace() {
         keywords: 'zoom reset view',
         action: handleResetView,
       },
-      // Held from production per beta feedback (2026-07): schedule parsing is
-      // unreliable on real sets and room proposals need footprint constraints.
-      // Both stay available in dev builds for continued dial-in.
+      // Schedule → takeoff stays dev-only while OCR extraction is dialed in
+      // (reads real text + outlined bodies via Tesseract; door-number ovals and
+      // vertical headers still weak). The whole-sheet "Propose rooms" sweep was
+      // shelved 2026-07: it flood-filled every enclosed region (text boxes,
+      // schedule cells, hatches), not just rooms, with no way to preview before
+      // applying — the click-to-fill Magic Wand covers rooms reliably instead.
       ...(import.meta.env.DEV
         ? [
             {
@@ -1413,13 +1416,6 @@ export function TakeoffWorkspace() {
               group: 'actions' as const,
               keywords: 'schedule table door window count import',
               action: handleStartScheduleSelect,
-            },
-            {
-              id: 'action-rooms',
-              label: 'Propose rooms on this sheet',
-              group: 'actions' as const,
-              keywords: 'rooms auto measure suggest wand all',
-              action: () => triggerRoomProposals(),
             },
           ]
         : []),
