@@ -35,8 +35,7 @@ import {
 } from './pdf-viewer/pdfViewerRenderers';
 import { useVertexEditMode } from './pdf-viewer/useVertexEditMode';
 import { getMarkupIdsFromElementsFromPoint } from '../utils/markupHitTest';
-import { magicWandPolygon, proposeRooms } from '../utils/floodFillRoom';
-import { RoomProposalsDialog } from './RoomProposalsDialog';
+import { magicWandPolygon } from '../utils/floodFillRoom';
 import {
   ensureMarkupLayerGroups,
   clearCommittedMarkupLayer,
@@ -78,7 +77,6 @@ import {
   setTriggerCalibration,
   setTriggerFitToWindow,
   setCenterViewportOnPoint,
-  setTriggerRoomProposals,
   setGetNormalizedViewportCenter,
   type NormalizedViewportTarget,
 } from '../lib/windowBridge';
@@ -1720,118 +1718,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     requestRepaint: repaintCommittedMarkups,
     getRotation: useCallback(() => viewRotationRef.current, []),
   });
-
-  // ── Room proposals: whole-sheet magic wand ─────────────────────────────
-  const [roomProposals, setRoomProposals] = useState<{
-    items: Array<{ id: string; areaDisplay: string; vertexCount: number }>;
-    polygons: Map<string, Array<{ x: number; y: number }>>;
-    conditionId: string;
-    conditionName: string;
-  } | null>(null);
-  const [roomProposalsOpen, setRoomProposalsOpen] = useState(false);
-
-  const handleProposeRooms = useCallback(async () => {
-    if (wandBusyRef.current) return;
-    const condition = useConditionStore.getState().getSelectedCondition();
-    if (!condition || (condition.type !== 'area' && condition.type !== 'volume')) {
-      toast.error('Select an area or volume condition first, then run room proposals.');
-      return;
-    }
-    const scaleInfo = getVertexEditScaleInfo();
-    if (!scaleInfo?.viewportWidth || !scaleInfo.viewportHeight) {
-      toast.error('Calibrate the sheet scale before proposing rooms.');
-      return;
-    }
-    wandBusyRef.current = true;
-    const scanning = toast.loading('Scanning sheet for enclosed rooms…');
-    try {
-      const raster = await getWandRaster();
-      if (!raster) return;
-      const found = proposeRooms(raster);
-      const items: Array<{ id: string; areaDisplay: string; vertexCount: number }> = [];
-      const polygons = new Map<string, Array<{ x: number; y: number }>>();
-      for (let i = 0; i < found.length; i++) {
-        const polygon = found[i].polygon.map((p) => ({
-          x: p.x / raster.width,
-          y: p.y / raster.height,
-        }));
-        const calc =
-          condition.type === 'area'
-            ? MeasurementCalculator.calculateArea(polygon, scaleInfo, 1.0)
-            : MeasurementCalculator.calculateVolume(polygon, scaleInfo, condition.depth || 1, 1.0);
-        if (!calc.validation.isValid) continue;
-        const id = `room-${i}`;
-        items.push({
-          id,
-          areaDisplay: `${Math.round(calc.calculatedValue).toLocaleString()} ${calc.unit}`,
-          vertexCount: polygon.length,
-        });
-        polygons.set(id, polygon);
-      }
-      setRoomProposals({ items, polygons, conditionId: condition.id, conditionName: condition.name });
-      setRoomProposalsOpen(true);
-    } catch (error) {
-      console.error('Room proposals failed:', error);
-      toast.error('Room proposal scan failed on this page.');
-    } finally {
-      toast.dismiss(scanning);
-      wandBusyRef.current = false;
-    }
-  }, [getWandRaster, getVertexEditScaleInfo]);
-
-  useEffect(() => {
-    setTriggerRoomProposals(() => {
-      void handleProposeRooms();
-    });
-    return () => setTriggerRoomProposals(undefined);
-  }, [handleProposeRooms]);
-
-  const handleApplyRoomProposals = useCallback(
-    async (selectedIds: string[]) => {
-      const data = roomProposals;
-      if (!data || !effectiveProjectId || !file.id) return;
-      const condition = useConditionStore.getState().getConditionById(data.conditionId);
-      const scaleInfo = getVertexEditScaleInfo();
-      if (!condition || !scaleInfo?.viewportWidth || !scaleInfo.viewportHeight) return;
-      const addTakeoffMeasurement = useMeasurementStore.getState().addTakeoffMeasurement;
-      let created = 0;
-      try {
-        for (const id of selectedIds) {
-          const polygon = data.polygons.get(id);
-          if (!polygon) continue;
-          const calc =
-            condition.type === 'area'
-              ? MeasurementCalculator.calculateArea(polygon, scaleInfo, 1.0)
-              : MeasurementCalculator.calculateVolume(polygon, scaleInfo, condition.depth || 1, 1.0);
-          if (!calc.validation.isValid) continue;
-          const createPayload = {
-            projectId: effectiveProjectId,
-            sheetId: file.id,
-            conditionId: condition.id,
-            type: condition.type as 'area' | 'volume',
-            points: polygon,
-            calculatedValue: calc.calculatedValue,
-            unit: calc.unit,
-            pdfPage: currentPage,
-            pdfCoordinates: polygon,
-            conditionColor: condition.color,
-            conditionName: condition.name,
-            ...(condition.includePerimeter && calc.perimeterValue != null
-              ? { perimeterValue: calc.perimeterValue }
-              : {}),
-          };
-          const savedId = await addTakeoffMeasurement(createPayload);
-          useUndoStore.getState().push({ type: 'measurement_add', id: savedId, createPayload });
-          created += 1;
-        }
-        toast.success(`Added ${created} room${created === 1 ? '' : 's'} to ${condition.name}`);
-      } catch (error) {
-        console.error('Applying room proposals failed:', error);
-        toast.error(`Added ${created} rooms before an error — check connection and re-run for the rest.`);
-      }
-    },
-    [roomProposals, effectiveProjectId, file.id, currentPage, getVertexEditScaleInfo]
-  );
 
   // Magic wand click pipeline (wrapper ref assigned each render; see declaration above).
   const handleMagicWandClick = useCallback(
@@ -4294,14 +4180,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         magnifierEnabled={magnifierEnabled}
         magnifierZoom={magnifierZoom}
         isActive={isMeasuring || isCalibrating || !!annotationTool}
-      />
-
-      <RoomProposalsDialog
-        open={roomProposalsOpen}
-        onOpenChange={setRoomProposalsOpen}
-        proposals={roomProposals?.items ?? null}
-        conditionName={roomProposals?.conditionName ?? ''}
-        onApply={handleApplyRoomProposals}
       />
 
       <PDFViewerDialogs
