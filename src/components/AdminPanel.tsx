@@ -18,11 +18,12 @@ import {
   RotateCcw,
   Send,
   KeyRound,
+  BarChart3,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ollamaService, type OllamaModel } from '../services/ollamaService';
 import { authHelpers, supabase, UserMetadata, UserInvitation } from '../lib/supabase';
-import { settingsService } from '../services/apiService';
+import { settingsService, usageService, type AiTokenUsageSummary } from '../services/apiService';
 import { extractErrorMessage } from '../utils/commonUtils';
 import { AdminHelpFaqTab } from './help/AdminHelpFaqTab';
 import { CHAT_PRESET_CONFIGS, CHAT_PRESET_SETTING_KEY } from '../constants/chatPresets';
@@ -57,8 +58,12 @@ interface AdminPanelProps {
 
 export function AdminPanel({ isOpen, onClose, projectId: _projectId }: AdminPanelProps) {
   const [activeTab, setActiveTab] = useState<
-    'ai-prompt' | 'ai-settings' | 'user-management' | 'help-faq' | 'knowledge-base'
+    'ai-prompt' | 'ai-settings' | 'user-management' | 'help-faq' | 'knowledge-base' | 'usage'
   >('user-management');
+  // AI token usage (provider-decision data)
+  const [usage, setUsage] = useState<AiTokenUsageSummary | null>(null);
+  const [usageDays, setUsageDays] = useState(30);
+  const [usageLoading, setUsageLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [availableModels, setAvailableModels] = useState<OllamaModel[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>('gpt-oss:120b');
@@ -494,6 +499,25 @@ When answering questions:
     }
   }, [activeTab, isOpen]);
 
+  const loadUsage = async (days: number) => {
+    setUsageLoading(true);
+    try {
+      setUsage(await usageService.getTokenUsage(days));
+    } catch (error) {
+      toast.error(extractErrorMessage(error, 'Failed to load token usage'));
+    } finally {
+      setUsageLoading(false);
+    }
+  };
+
+  // Load token usage when the Usage tab (or its window) changes
+  useEffect(() => {
+    if (isOpen && activeTab === 'usage') {
+      loadUsage(usageDays);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, isOpen, usageDays]);
+
   const loadUsers = async () => {
     try {
       const userList = await authHelpers.getAllUsers();
@@ -617,6 +641,7 @@ When answering questions:
     { id: 'help-faq', label: 'Help & FAQ', icon: BookOpen },
     { id: 'ai-prompt', label: 'AI Prompt Editor', icon: Brain },
     { id: 'ai-settings', label: 'AI Settings', icon: Brain },
+    { id: 'usage', label: 'AI Usage', icon: BarChart3 },
   ];
 
   if (!isOpen) return null;
@@ -668,6 +693,133 @@ When answering questions:
             {/* Main Content */}
             <div className="flex-1 overflow-y-auto bg-background">
               {activeTab === 'help-faq' && <AdminHelpFaqTab />}
+
+              {activeTab === 'usage' && (
+                <div className="p-6 space-y-6">
+                  <div className="flex items-start justify-between gap-4 flex-wrap">
+                    <div>
+                      <h2 className="text-2xl font-bold flex items-center gap-2">
+                        <BarChart3 className="w-6 h-6" />
+                        AI Token Usage
+                      </h2>
+                      <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
+                        Real token consumption from the chat, straight from Ollama's per-request
+                        counts. Data to pick the cheapest provider (Ollama Cloud vs OpenRouter vs
+                        direct) once beta usage is clear — not a guess.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={usageDays}
+                        onChange={(e) => setUsageDays(Number(e.target.value))}
+                        className="h-9 rounded-md border border-border bg-background px-2 text-sm"
+                      >
+                        <option value={7}>Last 7 days</option>
+                        <option value={30}>Last 30 days</option>
+                        <option value={90}>Last 90 days</option>
+                      </select>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => loadUsage(usageDays)}
+                        disabled={usageLoading}
+                      >
+                        {usageLoading ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="w-4 h-4" />
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {usageLoading && !usage ? (
+                    <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                      <Loader2 className="w-4 h-4 animate-spin" /> Loading usage…
+                    </div>
+                  ) : !usage || usage.totals.requests === 0 ? (
+                    <div className={adminPanelSection}>
+                      <p className="text-sm text-muted-foreground">
+                        No chat activity recorded in this window yet. Once testers use the chat,
+                        totals appear here.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Totals */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        {[
+                          { l: 'Total tokens', v: usage.totals.totalTokens },
+                          { l: 'Prompt tokens', v: usage.totals.promptTokens },
+                          { l: 'Completion tokens', v: usage.totals.completionTokens },
+                          { l: 'Requests', v: usage.totals.requests },
+                        ].map((s) => (
+                          <div key={s.l} className={adminNestedSection}>
+                            <div className="text-2xl font-semibold tabular-nums">
+                              {s.v.toLocaleString()}
+                            </div>
+                            <div className="text-xs text-muted-foreground mt-1">{s.l}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* By model */}
+                      <div className={adminPanelSection}>
+                        <h3 className="font-medium mb-3">By model</h3>
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="text-left text-muted-foreground border-b border-border">
+                              <th className="py-2 font-medium">Model</th>
+                              <th className="py-2 font-medium text-right">Total tokens</th>
+                              <th className="py-2 font-medium text-right">Requests</th>
+                              <th className="py-2 font-medium text-right">Avg / req</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {usage.byModel.map((m) => (
+                              <tr key={m.model} className="border-b border-border/50">
+                                <td className="py-2 font-mono text-xs">{m.model}</td>
+                                <td className="py-2 text-right tabular-nums">
+                                  {m.totalTokens.toLocaleString()}
+                                </td>
+                                <td className="py-2 text-right tabular-nums">{m.requests}</td>
+                                <td className="py-2 text-right tabular-nums">
+                                  {Math.round(m.totalTokens / Math.max(1, m.requests)).toLocaleString()}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* By day */}
+                      <div className={adminPanelSection}>
+                        <h3 className="font-medium mb-3">By day</h3>
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="text-left text-muted-foreground border-b border-border">
+                              <th className="py-2 font-medium">Day</th>
+                              <th className="py-2 font-medium text-right">Total tokens</th>
+                              <th className="py-2 font-medium text-right">Requests</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {usage.byDay.map((d) => (
+                              <tr key={d.day} className="border-b border-border/50">
+                                <td className="py-2 font-mono text-xs">{d.day}</td>
+                                <td className="py-2 text-right tabular-nums">
+                                  {d.totalTokens.toLocaleString()}
+                                </td>
+                                <td className="py-2 text-right tabular-nums">{d.requests}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
 
               {activeTab === 'knowledge-base' && (
                 <div className="flex flex-col h-full">
