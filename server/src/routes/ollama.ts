@@ -1,7 +1,11 @@
 import express from 'express';
 import axios from 'axios';
-import { aiChatBurstRateLimit, requireAuth } from '../middleware';
-import { checkAndIncrementAiChatDailyQuota } from '../services/aiUsageService';
+import { aiChatBurstRateLimit, requireAuth, requireAdmin } from '../middleware';
+import {
+  checkAndIncrementAiChatDailyQuota,
+  logAiTokenUsage,
+  getAiTokenUsageSummary,
+} from '../services/aiUsageService';
 import { evaluateAiChatGuardrails } from '../services/aiGuardrails';
 
 const router = express.Router();
@@ -71,7 +75,7 @@ router.post('/chat', requireAuth, (req, res, next) => {
   return aiChatBurstRateLimit(req, res, next);
 }, async (req, res) => {
   try {
-    const { model, messages, stream, options } = req.body;
+    const { model, messages, stream, options, projectId } = req.body;
 
     if (!OLLAMA_API_KEY) {
       return res.status(400).json({ error: 'Ollama API key not configured' });
@@ -159,13 +163,47 @@ router.post('/chat', requireAuth, (req, res, next) => {
           }
         });
 
+        // Tee the stream to the client while scanning NDJSON for the final
+        // `done:true` object, which carries the authoritative token counts.
+        let ndjsonBuffer = '';
+        let usageStats: { prompt: number; completion: number } | null = null;
+
         response.data.on('data', (chunk: Buffer) => {
           // Ensure immediate flush of streamed chunks
           res.write(chunk);
+
+          ndjsonBuffer += chunk.toString('utf8');
+          let nl: number;
+          while ((nl = ndjsonBuffer.indexOf('\n')) >= 0) {
+            const line = ndjsonBuffer.slice(0, nl).trim();
+            ndjsonBuffer = ndjsonBuffer.slice(nl + 1);
+            if (!line) continue;
+            try {
+              const obj = JSON.parse(line);
+              if (obj && obj.done) {
+                usageStats = {
+                  prompt: Number(obj.prompt_eval_count) || 0,
+                  completion: Number(obj.eval_count) || 0,
+                };
+              }
+            } catch {
+              // Partial/non-JSON line — ignore; next chunk completes it.
+            }
+          }
         });
 
         response.data.on('end', () => {
           res.end();
+          if (usageStats) {
+            void logAiTokenUsage({
+              userId: user.id,
+              model,
+              promptTokens: usageStats.prompt,
+              completionTokens: usageStats.completion,
+              projectId: projectId ?? null,
+              streamed: true,
+            });
+          }
         });
 
         response.data.on('error', (error: Error) => {
@@ -196,7 +234,17 @@ router.post('/chat', requireAuth, (req, res, next) => {
         }
       );
 
-      res.json(response.data);
+      const body = response.data;
+      void logAiTokenUsage({
+        userId: user.id,
+        model,
+        promptTokens: Number(body?.prompt_eval_count) || 0,
+        completionTokens: Number(body?.eval_count) || 0,
+        projectId: projectId ?? null,
+        streamed: false,
+      });
+
+      res.json(body);
     }
   } catch (error) {
     console.error('Error in chat endpoint:', error);
@@ -212,5 +260,17 @@ router.post('/chat', requireAuth, (req, res, next) => {
   }
 });
 
+
+// Token usage summary (admin only) — powers the Usage tab in the admin panel.
+router.get('/usage', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const days = Number(req.query.days) || 30;
+    const summary = await getAiTokenUsageSummary(days);
+    res.json(summary);
+  } catch (error) {
+    console.error('[Ollama /usage] Error:', error);
+    res.status(500).json({ error: 'Failed to load usage summary' });
+  }
+});
 
 export default router;

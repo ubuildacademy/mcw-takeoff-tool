@@ -885,6 +885,22 @@ export const settingsService = {
   }
 };
 
+// AI token usage summary (admin only)
+export interface AiTokenUsageSummary {
+  sinceDays: number;
+  totals: { promptTokens: number; completionTokens: number; totalTokens: number; requests: number };
+  byModel: Array<{ model: string; totalTokens: number; requests: number }>;
+  byDay: Array<{ day: string; totalTokens: number; requests: number }>;
+  byUser: Array<{ userId: string; totalTokens: number; requests: number }>;
+}
+
+export const usageService = {
+  async getTokenUsage(days = 30): Promise<AiTokenUsageSummary> {
+    const response = await apiClient.get('/ollama/usage', { params: { days } });
+    return response.data;
+  },
+};
+
 // OCR API (server-side REST endpoints)
 export const ocrApiService = {
   async processDocument(documentId: string, projectId: string) {
