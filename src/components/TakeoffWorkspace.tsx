@@ -124,9 +124,10 @@ export function TakeoffWorkspace() {
   const [scheduleTable, setScheduleTable] = useState<{
     documentId: string;
     pageNumber: number;
-    mode: 'ruled' | 'clustered';
+    mode: 'ruled' | 'clustered' | 'ruled_ocr';
     rows: string[][];
-    rowBoxes: Array<{ y0: number; y1: number }>;
+    rowBoxes: Array<{ y0: number; y1: number; x0?: number; x1?: number }>;
+    cellConfidence?: number[][];
     region: { x0: number; y0: number; x1: number; y1: number };
   } | null>(null);
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
@@ -167,8 +168,12 @@ export function TakeoffWorkspace() {
           mode: result.mode,
           rows: result.rows,
           rowBoxes: result.rowBoxes,
+          cellConfidence: result.cellConfidence,
           region: result.region,
         });
+        if (result.mode === 'ruled_ocr') {
+          toast.info('Outlined schedule read via OCR — verify highlighted cells before applying.');
+        }
         setScheduleDialogOpen(true);
       } catch (e) {
         toast.dismiss(parsing);
@@ -220,7 +225,14 @@ export function TakeoffWorkspace() {
           for (const markerRow of group.markerRows) {
             const rowBox = scheduleTable.rowBoxes[markerRow.rowIndex];
             const y = rowBox ? (rowBox.y0 + rowBox.y1) / 2 : scheduleTable.region.y0;
-            const xStart = Math.min(0.98, scheduleTable.region.x1 + 0.006);
+            // OCR rows carry a full x-range (x0/x1): the visual row is not a
+            // horizontal band in unrotated space (rotated sheets), so anchor the
+            // marker at the row's own center. Vector rows keep the beside-region
+            // placement (markers to the right of the boxed schedule).
+            const xStart =
+              rowBox && rowBox.x0 !== undefined && rowBox.x1 !== undefined
+                ? (rowBox.x0 + rowBox.x1) / 2
+                : Math.min(0.98, scheduleTable.region.x1 + 0.006);
             const qty = Math.min(markerRow.qty, groupBudget);
             groupBudget -= qty;
             for (let i = 0; i < qty; i++) {

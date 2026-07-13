@@ -30,10 +30,15 @@ import {
 export type { ScheduleApplyGroup } from '../utils/scheduleTableMapping';
 
 export interface ScheduleTableData {
-  mode: 'ruled' | 'clustered';
+  mode: 'ruled' | 'clustered' | 'ruled_ocr';
   rows: string[][];
-  rowBoxes: Array<{ y0: number; y1: number }>;
+  rowBoxes: Array<{ y0: number; y1: number; x0?: number; x1?: number }>;
+  /** Per-cell OCR confidence 0..100 (ruled_ocr only); low values flag review. */
+  cellConfidence?: number[][];
 }
+
+/** Cells at or below this OCR confidence are flagged for the user to verify. */
+const OCR_REVIEW_THRESHOLD = 70;
 
 export interface ScheduleReviewDialogProps {
   open: boolean;
@@ -206,7 +211,20 @@ export function ScheduleReviewDialog({
     >
       <div className="space-y-4">
         <p className="text-sm text-muted-foreground">
-          Parsed {table.rows.length} rows ({table.mode === 'ruled' ? 'ruled grid' : 'text alignment'})
+          Parsed {table.rows.length} rows (
+          {table.mode === 'ruled'
+            ? 'ruled grid'
+            : table.mode === 'ruled_ocr'
+              ? 'ruled grid · OCR'
+              : 'text alignment'}
+          )
+          {table.mode === 'ruled_ocr' && (
+            <>
+              {' — '}
+              <span className="text-amber-600 dark:text-amber-500">amber</span> cells read below{' '}
+              {OCR_REVIEW_THRESHOLD}% confidence; verify before applying.
+            </>
+          )}
         </p>
 
         <div className="grid grid-cols-3 gap-4">
@@ -337,14 +355,26 @@ export function ScheduleReviewDialog({
                         title={disabled ? (name ? 'No filled quantity cells' : 'No usable name') : undefined}
                       />
                     </td>
-                    {Array.from({ length: columnCount }, (_, col) => (
-                      <td
-                        key={col}
-                        className={`px-2 py-1 align-top ${isMappedColumn(col) ? 'bg-primary/10' : ''}`}
-                      >
-                        {row[col] ?? ''}
-                      </td>
-                    ))}
+                    {Array.from({ length: columnCount }, (_, col) => {
+                      const conf = table.cellConfidence?.[rowIndex]?.[col];
+                      const lowConf =
+                        conf !== undefined && (row[col] ?? '') !== '' && conf <= OCR_REVIEW_THRESHOLD;
+                      return (
+                        <td
+                          key={col}
+                          className={`px-2 py-1 align-top ${
+                            lowConf
+                              ? 'bg-amber-500/20 underline decoration-amber-500 decoration-dotted underline-offset-2'
+                              : isMappedColumn(col)
+                                ? 'bg-primary/10'
+                                : ''
+                          }`}
+                          title={lowConf ? `Low OCR confidence (${conf}%) — verify this value` : undefined}
+                        >
+                          {row[col] ?? ''}
+                        </td>
+                      );
+                    })}
                     <td className="px-2 py-1 align-top text-muted-foreground whitespace-nowrap">
                       {disabled ? '—' : `→ ${name} ×${qty}`}
                     </td>

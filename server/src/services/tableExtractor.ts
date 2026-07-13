@@ -11,16 +11,34 @@ import * as path from 'path';
 import { devLog } from '../lib/devLog';
 
 export interface ExtractedTable {
-  mode: 'ruled' | 'clustered';
+  mode: 'ruled' | 'clustered' | 'ruled_ocr';
   rows: string[][];
-  /** Normalized page-space y-range per row (marker placement + traceability). */
-  rowBoxes: Array<{ y0: number; y1: number }>;
+  /**
+   * Normalized page-space box per row (marker placement + traceability).
+   * Vector modes emit a y-range only; the OCR mode also emits x0/x1 so markers
+   * place correctly on rotated schedules (where a visual row is not a simple
+   * horizontal band in unrotated space).
+   */
+  rowBoxes: Array<{ y0: number; y1: number; x0?: number; x1?: number }>;
+  /** Per-cell OCR confidence 0..100 (ruled_ocr only). Low values flag review. */
+  cellConfidence?: number[][];
   region: { x0: number; y0: number; x1: number; y1: number };
 }
 
 interface TableScriptOutput extends Partial<ExtractedTable> {
   success: boolean;
   error?: string;
+  reason?: string;
+}
+
+/** Thrown for expected, reportable extraction outcomes (not server faults),
+ *  e.g. an outlined/flattened schedule with no selectable text. The route maps
+ *  these to a 4xx so a genuine 500 stays distinguishable from a known limit. */
+export class TableExtractError extends Error {
+  constructor(message: string, readonly reason?: string) {
+    super(message);
+    this.name = 'TableExtractError';
+  }
 }
 
 const TABLE_EXTRACT_TIMEOUT_MS = 60 * 1000;
@@ -57,7 +75,8 @@ class TableExtractor {
   async extract(
     pdfPath: string,
     pageNumber: number,
-    region: { x: number; y: number; width: number; height: number }
+    region: { x: number; y: number; width: number; height: number },
+    opts: { ocr?: boolean } = {}
   ): Promise<ExtractedTable> {
     if (!(await fs.pathExists(pdfPath))) {
       throw new Error(`PDF file not found: ${pdfPath}`);
@@ -76,6 +95,7 @@ class TableExtractor {
       String(region.x + region.width),
       String(region.y + region.height),
     ];
+    if (opts.ocr) args.push('ocr');
 
     devLog(`📋 Running table extract: page ${pageNumber}`);
     const start = Date.now();
@@ -112,7 +132,10 @@ class TableExtractor {
       throw new Error(`Failed to parse table extract output: ${stdout.slice(0, 300)}`);
     }
     if (!parsed.success) {
-      throw new Error(parsed.error || 'Table extract script reported failure');
+      throw new TableExtractError(
+        parsed.error || 'Table extract script reported failure',
+        parsed.reason
+      );
     }
 
     devLog(
@@ -122,6 +145,7 @@ class TableExtractor {
       mode: parsed.mode ?? 'clustered',
       rows: parsed.rows ?? [],
       rowBoxes: parsed.rowBoxes ?? [],
+      cellConfidence: parsed.cellConfidence,
       region: parsed.region ?? { x0: region.x, y0: region.y, x1: region.x + region.width, y1: region.y + region.height },
     };
   }

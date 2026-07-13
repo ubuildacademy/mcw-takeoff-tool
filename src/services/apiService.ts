@@ -1029,9 +1029,10 @@ export const ocrApiService = {
     return response.data as {
       documentId: string;
       pageNumber: number;
-      mode: 'ruled' | 'clustered';
+      mode: 'ruled' | 'clustered' | 'ruled_ocr';
       rows: string[][];
-      rowBoxes: Array<{ y0: number; y1: number }>;
+      rowBoxes: Array<{ y0: number; y1: number; x0?: number; x1?: number }>;
+      cellConfidence?: number[][];
       region: { x0: number; y0: number; x1: number; y1: number };
     };
   },
