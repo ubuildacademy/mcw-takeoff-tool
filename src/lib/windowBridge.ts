@@ -15,7 +15,6 @@ export interface PDFViewerWindowGlobals {
   triggerFitToWindow?: () => void;
   centerViewportOnPoint?: (target: NormalizedViewportTarget) => void;
   getNormalizedViewportCenter?: () => NormalizedViewportTarget | null;
-  triggerRoomProposals?: () => void;
 }
 
 declare global {
@@ -87,22 +86,6 @@ export function setGetNormalizedViewportCenter(
 /** Read the current view center (normalized point + zoom) from the mounted viewer */
 export function getNormalizedViewportCenter(): NormalizedViewportTarget | null {
   return window.getNormalizedViewportCenter?.() ?? null;
-}
-
-// --- Room proposals (whole-sheet magic wand) ---
-
-/** Set triggerRoomProposals (called from PDFViewer on mount, cleared on unmount) */
-export function setTriggerRoomProposals(fn: (() => void) | undefined): void {
-  if (fn === undefined) {
-    delete window.triggerRoomProposals;
-  } else {
-    window.triggerRoomProposals = fn;
-  }
-}
-
-/** Run the whole-sheet room proposal pass in the mounted viewer */
-export function triggerRoomProposals(): void {
-  window.triggerRoomProposals?.();
 }
 
 // --- Calibration / fit ---
