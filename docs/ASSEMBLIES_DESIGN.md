@@ -43,8 +43,45 @@ Multi-tenant: registry is per-organization; each company uploads its own workboo
 - Replicating WORK ORDER / P.O. / budget paperwork sheets (Excel keeps that job indefinitely).
 - Replacing the Pricing Manager's supplier-diff workflow near-term (it works; integrate by import).
 
-## Open questions for Jeff
-1. Input cell(s) per workbook: is job quantity always a single cell on ASSEMBLY (e.g. D13), or do some workbooks take multiple quantities?
-2. Should Stage 1 write BASIC JOB INFO fields too (project name, client)?
-3. Multi-condition jobs: one workbook per condition, or one workbook fed the sum?
-4. Pricing DB inside bridged copies: leave as-is (already updated by Pricing Manager), or refresh from the app at generate time?
+## Open questions for Jeff — ANSWERED (design review 2026-07-13)
+1. Input cell(s): audit of all 235 live 2026 workbooks — 227 have exactly one "Job Quantity"
+   input, 3 have two, 5 undetectable; label cell address varies (C13×170, C12×30, C14×11,
+   A12/A13/A14). → mapping stores a **list** of {label, cell}; per-workbook, no default.
+2. Job info: **yes** — mapping optionally includes job-info cells; generate writes them.
+3. Multi-condition, same workbook: **sum** into one input cell, one priced workbook per
+   product line per project; the generate confirmation shows the per-condition breakdown.
+4. Pricing DB: **never touched** by the app; Pricing Manager keeps it current.
+5. (added) Writer runtime: Python stdlib zip/XML at `server/src/scripts/assembly_write.py`
+   (pattern of `table_extract.py`). Never openpyxl for writing.
+
+Task breakdown C1–C4 with success criteria: `docs/IMPLEMENTATION_PLAN.md` Workstream C.
+C1 (schema + registry service) landed 2026-07-13 (46c908a0). RLS note: policy is
+authenticated-only (no organizations table yet) — acceptable single-tenant; MUST tighten
+to org scoping before multi-tenant sale.
+
+## Stage 1 UX (agreed 2026-07-13)
+
+**One-time setup (admin, per company):** Costs tab → "Assembly Workbooks" section →
+upload the company's own priced workbooks (Aquafin-2K, Dow 790, …) → map each one:
+which conditions feed it (a condition **name pattern** like "Aquafin*" or a template id —
+never a concrete condition id, so Stage 2 template convergence stays open), which cell(s)
+take the job quantity, optional job-info cells (project name, client, address). MCW's
+235 workbooks work day one; any other company uploads theirs — nothing MCW-shaped.
+
+**Per project (estimator):**
+1. Takeoff as normal; condition "Aquafin 2K deck" ends at, say, 6,200 SF.
+2. Conditions matching a mapping show a **"Generate assembly"** button.
+3. Click → confirmation: `Pool deck 5,000 + Balcony 1,200 = 6,200 SF → Aquafin-2K M.xlsx
+   (cell C13)` plus the job-info fields being written.
+4. Confirm → download the priced workbook. Every byte identical to the uploaded original
+   except the mapped cells (quantity + job info); formulas, margins, macros, formatting
+   untouched. Excel remains the cost engine.
+5. **"Generate all"** at project level → one zip, every mapped condition.
+
+Pitch line: takeoff → priced bid in one click, using the company's *own trusted
+workbooks* — vs. STACK-style assemblies that force the vendor's database and math.
+
+**Stage 2 hook (Jeff's direction):** assemblies become openable as condition templates —
+pick "Aquafin 2K" from templates, the condition arrives pre-wired to its mapping, and the
+Costs tab prices live in-app. The C1 schema (`condition_ref` = name pattern/template id)
+was designed so this requires no rebuild.
