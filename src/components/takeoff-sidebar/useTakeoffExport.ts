@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import { sheetService } from '../../services/apiService';
 import { buildDataSheet } from './export/buildDataSheet';
 import { buildBySheetSheet } from './export/buildBySheetSheet';
+import { getReportBranding } from './export/branding';
 import type { TakeoffCondition, TakeoffMeasurement, PDFDocument, ProjectCostBreakdown, Sheet } from '../../types';
 
 export interface UseTakeoffExportOptions {
@@ -306,6 +307,7 @@ export function useTakeoffExport({
       const currentProject = useProjectStore.getState().getCurrentProject();
       const hiddenCostIds = getHiddenMarkupConditionIdsSet(projectId);
       const costBreakdown = filterCostBreakdownForExport(getProjectCostBreakdown(projectId), hiddenCostIds);
+      const branding = await getReportBranding();
 
       const formatDate = (dateString: string | undefined): string => {
         if (!dateString) return 'N/A';
@@ -764,13 +766,21 @@ export function useTakeoffExport({
       row += 2;
       executiveSheet.mergeCells(`A${row}:B${row}`);
       const titleCell = executiveSheet.getCell(`A${row}`);
-      titleCell.value = 'MERIDIAN TAKEOFF - TAKEOFF REPORT';
+      titleCell.value = `${branding.name} — TAKEOFF REPORT`;
       titleCell.style = {
         font: { bold: true, size: 18, color: { argb: 'FF1F2937' } },
         alignment: { horizontal: 'center', vertical: 'middle' },
         fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } },
       };
       executiveSheet.getRow(row).height = 35;
+      if (branding.logoBase64) {
+        try {
+          const logoImageId = workbook.addImage({ extension: 'png', base64: branding.logoBase64 });
+          executiveSheet.addImage(logoImageId, { tl: { col: 0, row: 0 }, ext: { width: 60, height: 45 } });
+        } catch (logoError) {
+          console.error('Failed to embed report logo, continuing without it:', logoError);
+        }
+      }
       row += 2;
       executiveSheet.mergeCells(`A${row}:B${row}`);
       const summaryHeaderCell = executiveSheet.getCell(`A${row}`);
@@ -779,7 +789,7 @@ export function useTakeoffExport({
         font: { bold: true, size: 14, color: { argb: 'FF111827' } },
         alignment: { horizontal: 'left', vertical: 'middle' },
         fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F4F6' } },
-        border: { bottom: { style: 'medium', color: { argb: 'FF3B82F6' } } },
+        border: { bottom: { style: 'medium', color: { argb: branding.accentARGB } } },
       };
       executiveSheet.getRow(row).height = 25;
       row += 2;
@@ -988,8 +998,8 @@ export function useTakeoffExport({
           alignment: { horizontal: 'left', vertical: 'middle' },
           fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: isTotalRow ? 'FFE5E7EB' : (isEven ? 'FFFFFFFF' : 'FFF9FAFB') } },
           border: {
-            top: { style: isTotalRow ? 'medium' : 'thin', color: { argb: isTotalRow ? 'FF3B82F6' : 'FFE5E7EB' } },
-            bottom: { style: isTotalRow ? 'medium' : 'thin', color: { argb: isTotalRow ? 'FF3B82F6' : 'FFE5E7EB' } },
+            top: { style: isTotalRow ? 'medium' : 'thin', color: { argb: isTotalRow ? branding.accentARGB : 'FFE5E7EB' } },
+            bottom: { style: isTotalRow ? 'medium' : 'thin', color: { argb: isTotalRow ? branding.accentARGB : 'FFE5E7EB' } },
             left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
             right: { style: 'thin', color: { argb: 'FFE5E7EB' } },
           },
@@ -1007,8 +1017,8 @@ export function useTakeoffExport({
           alignment: { horizontal: 'right', vertical: 'middle' },
           fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: isTotalRow ? 'FFE5E7EB' : (isEven ? 'FFFFFFFF' : 'FFF9FAFB') } },
           border: {
-            top: { style: isTotalRow ? 'medium' : 'thin', color: { argb: isTotalRow ? 'FF3B82F6' : 'FFE5E7EB' } },
-            bottom: { style: isTotalRow ? 'medium' : 'thin', color: { argb: isTotalRow ? 'FF3B82F6' : 'FFE5E7EB' } },
+            top: { style: isTotalRow ? 'medium' : 'thin', color: { argb: isTotalRow ? branding.accentARGB : 'FFE5E7EB' } },
+            bottom: { style: isTotalRow ? 'medium' : 'thin', color: { argb: isTotalRow ? branding.accentARGB : 'FFE5E7EB' } },
             left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
             right: { style: 'thin', color: { argb: 'FFE5E7EB' } },
           },

@@ -30,6 +30,14 @@ import { CHAT_PRESET_CONFIGS, CHAT_PRESET_SETTING_KEY } from '../constants/chatP
 import { knowledgeBaseService } from '../services/knowledgeBaseService';
 import { KB_CHAR_BUDGET } from '../constants/chatPresets';
 import { cn } from '@/lib/utils';
+import {
+  REPORT_COMPANY_NAME_KEY,
+  REPORT_ACCENT_COLOR_KEY,
+  REPORT_LOGO_KEY,
+  REPORT_LOGO_MAX_BYTES,
+  DEFAULT_REPORT_BRANDING,
+  hexToARGB,
+} from './takeoff-sidebar/export/branding';
 
 // Fallback when /api/ollama/models fails (https://ollama.com/search?c=cloud)
 const FALLBACK_OLLAMA_MODELS: OllamaModel[] = [
@@ -72,6 +80,11 @@ export function AdminPanel({ isOpen, onClose, projectId: _projectId }: AdminPane
   const [sheetNumberPrompt, setSheetNumberPrompt] = useState<string>('');
   const [sheetNamePrompt, setSheetNamePrompt] = useState<string>('');
   const [chatPrompt, setChatPrompt] = useState<string>('');
+  // Report branding (white-label Excel export)
+  const [reportCompanyName, setReportCompanyName] = useState<string>('');
+  const [reportAccentColor, setReportAccentColor] = useState<string>(`#${DEFAULT_REPORT_BRANDING.accentARGB.slice(2)}`);
+  const [reportLogoBase64, setReportLogoBase64] = useState<string | null>(null);
+  const [isBrandingSaving, setIsBrandingSaving] = useState(false);
   // Chat preset prompts — keyed by preset id, loaded from server
   const [presetPromptDrafts, setPresetPromptDrafts] = useState<Record<string, string>>(() =>
     Object.fromEntries(CHAT_PRESET_CONFIGS.map((p) => [p.id, p.defaultPrompt]))
@@ -404,6 +417,64 @@ When answering questions:
     setKbDraft(defaultContent);
   };
 
+  // Load report branding (white-label Excel export) settings
+  const loadReportBranding = async () => {
+    try {
+      const hasSession = await ensureSession();
+      if (!hasSession) return;
+      const [nameRes, colorRes, logoRes] = await Promise.allSettled([
+        settingsService.getSetting(REPORT_COMPANY_NAME_KEY),
+        settingsService.getSetting(REPORT_ACCENT_COLOR_KEY),
+        settingsService.getSetting(REPORT_LOGO_KEY),
+      ]);
+      if (nameRes.status === 'fulfilled' && nameRes.value?.value) setReportCompanyName(nameRes.value.value);
+      if (colorRes.status === 'fulfilled' && colorRes.value?.value) {
+        const argb = hexToARGB(colorRes.value.value);
+        if (argb) setReportAccentColor(`#${argb.slice(2)}`);
+      }
+      if (logoRes.status === 'fulfilled' && logoRes.value?.value) setReportLogoBase64(logoRes.value.value);
+    } catch (error) {
+      console.error('Error loading report branding:', error);
+    }
+  };
+
+  const handleReportLogoFile = (file: File | undefined) => {
+    if (!file) return;
+    if (file.type !== 'image/png') {
+      toast.error('Logo must be a PNG file');
+      return;
+    }
+    if (file.size > REPORT_LOGO_MAX_BYTES) {
+      toast.error(`Logo must be ${Math.round(REPORT_LOGO_MAX_BYTES / 1024)}KB or smaller`);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => setReportLogoBase64(reader.result as string);
+    reader.onerror = () => toast.error('Failed to read logo file');
+    reader.readAsDataURL(file);
+  };
+
+  const saveReportBranding = async () => {
+    try {
+      setIsBrandingSaving(true);
+      const argb = hexToARGB(reportAccentColor);
+      if (reportAccentColor.trim() !== '' && !argb) {
+        toast.error('Accent color must be a hex value like #3B82F6');
+        return;
+      }
+      await settingsService.updateSettings({
+        [REPORT_COMPANY_NAME_KEY]: reportCompanyName,
+        [REPORT_ACCENT_COLOR_KEY]: reportAccentColor,
+        [REPORT_LOGO_KEY]: reportLogoBase64 ?? '',
+      });
+      toast.success('Report branding saved!');
+    } catch (error) {
+      toast.error(extractErrorMessage(error, 'Failed to save report branding'));
+    } finally {
+      setIsBrandingSaving(false);
+    }
+  };
+
   // Load available models and saved settings when AI settings tab is opened
   const loadAvailableModels = async () => {
     try {
@@ -477,6 +548,7 @@ When answering questions:
   useEffect(() => {
     if (isOpen && activeTab === 'ai-settings') {
       loadAvailableModels();
+      loadReportBranding();
     }
     if (isOpen && activeTab === 'ai-prompt') {
       loadSheetNumberPrompt();
@@ -1279,6 +1351,73 @@ When answering questions:
                           />
                           <p className={`${adminHelpText} mt-1`}>Maximum requests per minute</p>
                         </div>
+                      </div>
+                    </div>
+
+                    <div className={adminPanelSection}>
+                      <h3 className="text-lg font-semibold mb-4">Report Branding</h3>
+                      <p className={`${adminHelpText} mb-4`}>
+                        White-label the Excel export's Executive Summary title block. Leave blank to keep the
+                        default Meridian Takeoff branding.
+                      </p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <Label>Company Name</Label>
+                          <Input
+                            type="text"
+                            placeholder={DEFAULT_REPORT_BRANDING.name}
+                            value={reportCompanyName}
+                            onChange={(e) => setReportCompanyName(e.target.value)}
+                          />
+                          <p className={`${adminHelpText} mt-1`}>Shown as "{'{Name}'} — TAKEOFF REPORT"</p>
+                        </div>
+                        <div>
+                          <Label>Accent Color</Label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              className="h-9 w-12 rounded border border-input bg-background"
+                              value={hexToARGB(reportAccentColor) ? `#${hexToARGB(reportAccentColor)!.slice(2)}` : '#3B82F6'}
+                              onChange={(e) => setReportAccentColor(e.target.value)}
+                            />
+                            <Input
+                              type="text"
+                              placeholder="#3B82F6"
+                              value={reportAccentColor}
+                              onChange={(e) => setReportAccentColor(e.target.value)}
+                            />
+                          </div>
+                          <p className={`${adminHelpText} mt-1`}>Hex color used for report borders/accents</p>
+                        </div>
+                      </div>
+                      <div className="mt-4">
+                        <Label>Logo (PNG, max {Math.round(REPORT_LOGO_MAX_BYTES / 1024)}KB)</Label>
+                        <div className="flex items-center gap-3 mt-1">
+                          <input
+                            type="file"
+                            accept="image/png"
+                            onChange={(e) => handleReportLogoFile(e.target.files?.[0])}
+                            className="text-sm text-foreground"
+                          />
+                          {reportLogoBase64 && (
+                            <>
+                              <img src={reportLogoBase64} alt="Report logo preview" className="h-10 w-auto rounded border border-border" />
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setReportLogoBase64(null)}
+                              >
+                                Remove
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <div className="mt-4">
+                        <Button onClick={saveReportBranding} disabled={isBrandingSaving}>
+                          <CheckCircle className="w-4 h-4 mr-2" />
+                          Save Report Branding
+                        </Button>
                       </div>
                     </div>
 
