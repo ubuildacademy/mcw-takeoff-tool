@@ -261,6 +261,30 @@ good mapping with zero manual dropdown changes.
 **Ship gate for Workstream B:** after B1+B2 land, Jeff runs both beta schedules end-to-end.
 If output requires < ~1 min of cleanup, remove the dev gate and merge the branch;
 otherwise iterate. Do not merge on green tests alone.
+*Gate result 2026-07-13: "works decently — maybe OK for beta, still room for improvement;
+some OCR characters wrong." → B4 queued; dev gate stays on until B4 + re-test.*
+
+### Task B4 — OCR character-accuracy pass (queued from beta feedback 2026-07-13)
+
+**Goal:** cut per-character OCR errors on outlined schedules ("some OCR characters wrong").
+
+**Files:** `server/src/scripts/table_extract.py` (`_ocr_words`, `_ocr_fill_grid`).
+
+**Do (measure each step against the Tru Hilton page-53 door schedule before keeping it):**
+1. Low-confidence cell retry: for cells whose min token confidence ≤ 70, re-OCR just that
+   cell's crop at 2× the region DPI with `--psm 7` (single line) and keep whichever read
+   has higher confidence. Bounded: only retry cells that had text, cap ~100 retries/region.
+2. Domain normalization pass (deterministic, post-OCR, per cell): common CAD-schedule
+   confusions — `O↔0` in door numbers, `l/I↔1`, `S↔5` only when the rest of the cell is
+   digits; normalize quote glyphs (`”→"`, `’→'`) in dimension cells matching
+   /^\d+['-‐–]/; strip lone trailing `.` after integers.
+3. Optional per-column charset hints: after mapping, dimension-like columns
+   (/width|height|thickness/i header) re-validated against /^[\d'"‐–\-⁄/ .]+$/ — mismatch
+   lowers cellConfidence so the amber flag fires, never silently rewrites.
+
+**Success criteria:** on the page-53 schedule, high-confidence (>70) cell share increases
+and dimension columns read >90% correct by manual spot-check of 20 cells; extraction time
+stays under ~20s/region; existing tests pass. Jeff re-runs the ship gate after this lands.
 
 ---
 
