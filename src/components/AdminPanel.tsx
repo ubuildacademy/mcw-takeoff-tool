@@ -18,17 +18,26 @@ import {
   RotateCcw,
   Send,
   KeyRound,
+  BarChart3,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ollamaService, type OllamaModel } from '../services/ollamaService';
 import { authHelpers, supabase, UserMetadata, UserInvitation } from '../lib/supabase';
-import { settingsService } from '../services/apiService';
+import { settingsService, usageService, type AiTokenUsageSummary } from '../services/apiService';
 import { extractErrorMessage } from '../utils/commonUtils';
 import { AdminHelpFaqTab } from './help/AdminHelpFaqTab';
 import { CHAT_PRESET_CONFIGS, CHAT_PRESET_SETTING_KEY } from '../constants/chatPresets';
 import { knowledgeBaseService } from '../services/knowledgeBaseService';
 import { KB_CHAR_BUDGET } from '../constants/chatPresets';
 import { cn } from '@/lib/utils';
+import {
+  REPORT_COMPANY_NAME_KEY,
+  REPORT_ACCENT_COLOR_KEY,
+  REPORT_LOGO_KEY,
+  REPORT_LOGO_MAX_BYTES,
+  DEFAULT_REPORT_BRANDING,
+  hexToARGB,
+} from './takeoff-sidebar/export/branding';
 
 // Fallback when /api/ollama/models fails (https://ollama.com/search?c=cloud)
 const FALLBACK_OLLAMA_MODELS: OllamaModel[] = [
@@ -57,8 +66,12 @@ interface AdminPanelProps {
 
 export function AdminPanel({ isOpen, onClose, projectId: _projectId }: AdminPanelProps) {
   const [activeTab, setActiveTab] = useState<
-    'ai-prompt' | 'ai-settings' | 'user-management' | 'help-faq' | 'knowledge-base'
+    'ai-prompt' | 'ai-settings' | 'user-management' | 'help-faq' | 'knowledge-base' | 'usage'
   >('user-management');
+  // AI token usage (provider-decision data)
+  const [usage, setUsage] = useState<AiTokenUsageSummary | null>(null);
+  const [usageDays, setUsageDays] = useState(30);
+  const [usageLoading, setUsageLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [availableModels, setAvailableModels] = useState<OllamaModel[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>('gpt-oss:120b');
@@ -67,6 +80,11 @@ export function AdminPanel({ isOpen, onClose, projectId: _projectId }: AdminPane
   const [sheetNumberPrompt, setSheetNumberPrompt] = useState<string>('');
   const [sheetNamePrompt, setSheetNamePrompt] = useState<string>('');
   const [chatPrompt, setChatPrompt] = useState<string>('');
+  // Report branding (white-label Excel export)
+  const [reportCompanyName, setReportCompanyName] = useState<string>('');
+  const [reportAccentColor, setReportAccentColor] = useState<string>(`#${DEFAULT_REPORT_BRANDING.accentARGB.slice(2)}`);
+  const [reportLogoBase64, setReportLogoBase64] = useState<string | null>(null);
+  const [isBrandingSaving, setIsBrandingSaving] = useState(false);
   // Chat preset prompts — keyed by preset id, loaded from server
   const [presetPromptDrafts, setPresetPromptDrafts] = useState<Record<string, string>>(() =>
     Object.fromEntries(CHAT_PRESET_CONFIGS.map((p) => [p.id, p.defaultPrompt]))
@@ -399,6 +417,64 @@ When answering questions:
     setKbDraft(defaultContent);
   };
 
+  // Load report branding (white-label Excel export) settings
+  const loadReportBranding = async () => {
+    try {
+      const hasSession = await ensureSession();
+      if (!hasSession) return;
+      const [nameRes, colorRes, logoRes] = await Promise.allSettled([
+        settingsService.getSetting(REPORT_COMPANY_NAME_KEY),
+        settingsService.getSetting(REPORT_ACCENT_COLOR_KEY),
+        settingsService.getSetting(REPORT_LOGO_KEY),
+      ]);
+      if (nameRes.status === 'fulfilled' && nameRes.value?.value) setReportCompanyName(nameRes.value.value);
+      if (colorRes.status === 'fulfilled' && colorRes.value?.value) {
+        const argb = hexToARGB(colorRes.value.value);
+        if (argb) setReportAccentColor(`#${argb.slice(2)}`);
+      }
+      if (logoRes.status === 'fulfilled' && logoRes.value?.value) setReportLogoBase64(logoRes.value.value);
+    } catch (error) {
+      console.error('Error loading report branding:', error);
+    }
+  };
+
+  const handleReportLogoFile = (file: File | undefined) => {
+    if (!file) return;
+    if (file.type !== 'image/png') {
+      toast.error('Logo must be a PNG file');
+      return;
+    }
+    if (file.size > REPORT_LOGO_MAX_BYTES) {
+      toast.error(`Logo must be ${Math.round(REPORT_LOGO_MAX_BYTES / 1024)}KB or smaller`);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => setReportLogoBase64(reader.result as string);
+    reader.onerror = () => toast.error('Failed to read logo file');
+    reader.readAsDataURL(file);
+  };
+
+  const saveReportBranding = async () => {
+    try {
+      setIsBrandingSaving(true);
+      const argb = hexToARGB(reportAccentColor);
+      if (reportAccentColor.trim() !== '' && !argb) {
+        toast.error('Accent color must be a hex value like #3B82F6');
+        return;
+      }
+      await settingsService.updateSettings({
+        [REPORT_COMPANY_NAME_KEY]: reportCompanyName,
+        [REPORT_ACCENT_COLOR_KEY]: reportAccentColor,
+        [REPORT_LOGO_KEY]: reportLogoBase64 ?? '',
+      });
+      toast.success('Report branding saved!');
+    } catch (error) {
+      toast.error(extractErrorMessage(error, 'Failed to save report branding'));
+    } finally {
+      setIsBrandingSaving(false);
+    }
+  };
+
   // Load available models and saved settings when AI settings tab is opened
   const loadAvailableModels = async () => {
     try {
@@ -472,6 +548,7 @@ When answering questions:
   useEffect(() => {
     if (isOpen && activeTab === 'ai-settings') {
       loadAvailableModels();
+      loadReportBranding();
     }
     if (isOpen && activeTab === 'ai-prompt') {
       loadSheetNumberPrompt();
@@ -493,6 +570,25 @@ When answering questions:
       loadInvitations();
     }
   }, [activeTab, isOpen]);
+
+  const loadUsage = async (days: number) => {
+    setUsageLoading(true);
+    try {
+      setUsage(await usageService.getTokenUsage(days));
+    } catch (error) {
+      toast.error(extractErrorMessage(error, 'Failed to load token usage'));
+    } finally {
+      setUsageLoading(false);
+    }
+  };
+
+  // Load token usage when the Usage tab (or its window) changes
+  useEffect(() => {
+    if (isOpen && activeTab === 'usage') {
+      loadUsage(usageDays);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, isOpen, usageDays]);
 
   const loadUsers = async () => {
     try {
@@ -617,6 +713,7 @@ When answering questions:
     { id: 'help-faq', label: 'Help & FAQ', icon: BookOpen },
     { id: 'ai-prompt', label: 'AI Prompt Editor', icon: Brain },
     { id: 'ai-settings', label: 'AI Settings', icon: Brain },
+    { id: 'usage', label: 'AI Usage', icon: BarChart3 },
   ];
 
   if (!isOpen) return null;
@@ -668,6 +765,133 @@ When answering questions:
             {/* Main Content */}
             <div className="flex-1 overflow-y-auto bg-background">
               {activeTab === 'help-faq' && <AdminHelpFaqTab />}
+
+              {activeTab === 'usage' && (
+                <div className="p-6 space-y-6">
+                  <div className="flex items-start justify-between gap-4 flex-wrap">
+                    <div>
+                      <h2 className="text-2xl font-bold flex items-center gap-2">
+                        <BarChart3 className="w-6 h-6" />
+                        AI Token Usage
+                      </h2>
+                      <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
+                        Real token consumption from the chat, straight from Ollama's per-request
+                        counts. Data to pick the cheapest provider (Ollama Cloud vs OpenRouter vs
+                        direct) once beta usage is clear — not a guess.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={usageDays}
+                        onChange={(e) => setUsageDays(Number(e.target.value))}
+                        className="h-9 rounded-md border border-border bg-background px-2 text-sm"
+                      >
+                        <option value={7}>Last 7 days</option>
+                        <option value={30}>Last 30 days</option>
+                        <option value={90}>Last 90 days</option>
+                      </select>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => loadUsage(usageDays)}
+                        disabled={usageLoading}
+                      >
+                        {usageLoading ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="w-4 h-4" />
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {usageLoading && !usage ? (
+                    <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                      <Loader2 className="w-4 h-4 animate-spin" /> Loading usage…
+                    </div>
+                  ) : !usage || usage.totals.requests === 0 ? (
+                    <div className={adminPanelSection}>
+                      <p className="text-sm text-muted-foreground">
+                        No chat activity recorded in this window yet. Once testers use the chat,
+                        totals appear here.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Totals */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        {[
+                          { l: 'Total tokens', v: usage.totals.totalTokens },
+                          { l: 'Prompt tokens', v: usage.totals.promptTokens },
+                          { l: 'Completion tokens', v: usage.totals.completionTokens },
+                          { l: 'Requests', v: usage.totals.requests },
+                        ].map((s) => (
+                          <div key={s.l} className={adminNestedSection}>
+                            <div className="text-2xl font-semibold tabular-nums">
+                              {s.v.toLocaleString()}
+                            </div>
+                            <div className="text-xs text-muted-foreground mt-1">{s.l}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* By model */}
+                      <div className={adminPanelSection}>
+                        <h3 className="font-medium mb-3">By model</h3>
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="text-left text-muted-foreground border-b border-border">
+                              <th className="py-2 font-medium">Model</th>
+                              <th className="py-2 font-medium text-right">Total tokens</th>
+                              <th className="py-2 font-medium text-right">Requests</th>
+                              <th className="py-2 font-medium text-right">Avg / req</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {usage.byModel.map((m) => (
+                              <tr key={m.model} className="border-b border-border/50">
+                                <td className="py-2 font-mono text-xs">{m.model}</td>
+                                <td className="py-2 text-right tabular-nums">
+                                  {m.totalTokens.toLocaleString()}
+                                </td>
+                                <td className="py-2 text-right tabular-nums">{m.requests}</td>
+                                <td className="py-2 text-right tabular-nums">
+                                  {Math.round(m.totalTokens / Math.max(1, m.requests)).toLocaleString()}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* By day */}
+                      <div className={adminPanelSection}>
+                        <h3 className="font-medium mb-3">By day</h3>
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="text-left text-muted-foreground border-b border-border">
+                              <th className="py-2 font-medium">Day</th>
+                              <th className="py-2 font-medium text-right">Total tokens</th>
+                              <th className="py-2 font-medium text-right">Requests</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {usage.byDay.map((d) => (
+                              <tr key={d.day} className="border-b border-border/50">
+                                <td className="py-2 font-mono text-xs">{d.day}</td>
+                                <td className="py-2 text-right tabular-nums">
+                                  {d.totalTokens.toLocaleString()}
+                                </td>
+                                <td className="py-2 text-right tabular-nums">{d.requests}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
 
               {activeTab === 'knowledge-base' && (
                 <div className="flex flex-col h-full">
@@ -1127,6 +1351,73 @@ When answering questions:
                           />
                           <p className={`${adminHelpText} mt-1`}>Maximum requests per minute</p>
                         </div>
+                      </div>
+                    </div>
+
+                    <div className={adminPanelSection}>
+                      <h3 className="text-lg font-semibold mb-4">Report Branding</h3>
+                      <p className={`${adminHelpText} mb-4`}>
+                        White-label the Excel export's Executive Summary title block. Leave blank to keep the
+                        default Meridian Takeoff branding.
+                      </p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <Label>Company Name</Label>
+                          <Input
+                            type="text"
+                            placeholder={DEFAULT_REPORT_BRANDING.name}
+                            value={reportCompanyName}
+                            onChange={(e) => setReportCompanyName(e.target.value)}
+                          />
+                          <p className={`${adminHelpText} mt-1`}>Shown as "{'{Name}'} — TAKEOFF REPORT"</p>
+                        </div>
+                        <div>
+                          <Label>Accent Color</Label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              className="h-9 w-12 rounded border border-input bg-background"
+                              value={hexToARGB(reportAccentColor) ? `#${hexToARGB(reportAccentColor)!.slice(2)}` : '#3B82F6'}
+                              onChange={(e) => setReportAccentColor(e.target.value)}
+                            />
+                            <Input
+                              type="text"
+                              placeholder="#3B82F6"
+                              value={reportAccentColor}
+                              onChange={(e) => setReportAccentColor(e.target.value)}
+                            />
+                          </div>
+                          <p className={`${adminHelpText} mt-1`}>Hex color used for report borders/accents</p>
+                        </div>
+                      </div>
+                      <div className="mt-4">
+                        <Label>Logo (PNG, max {Math.round(REPORT_LOGO_MAX_BYTES / 1024)}KB)</Label>
+                        <div className="flex items-center gap-3 mt-1">
+                          <input
+                            type="file"
+                            accept="image/png"
+                            onChange={(e) => handleReportLogoFile(e.target.files?.[0])}
+                            className="text-sm text-foreground"
+                          />
+                          {reportLogoBase64 && (
+                            <>
+                              <img src={reportLogoBase64} alt="Report logo preview" className="h-10 w-auto rounded border border-border" />
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setReportLogoBase64(null)}
+                              >
+                                Remove
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <div className="mt-4">
+                        <Button onClick={saveReportBranding} disabled={isBrandingSaving}>
+                          <CheckCircle className="w-4 h-4 mr-2" />
+                          Save Report Branding
+                        </Button>
                       </div>
                     </div>
 

@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   floodFillMask,
   magicWandPolygon,
-  proposeRooms,
   rdpSimplify,
   traceBoundary,
   type RasterLike,
@@ -166,54 +165,5 @@ describe('magicWandPolygon', () => {
     const r = makeRaster(50, 50);
     expect(magicWandPolygon(r, -5, 10).ok).toBe(false);
     expect(magicWandPolygon(r, 10, 500).ok).toBe(false);
-  });
-});
-
-describe('proposeRooms', () => {
-  it('finds every enclosed room once, background excluded, biggest first', () => {
-    const r = makeRaster(500, 400);
-    // Three rooms of different sizes; the rest of the page is open background.
-    r.drawRect(20, 20, 219, 179);   // big: ~196×156
-    r.drawRect(300, 20, 419, 99);   // medium: ~116×76
-    r.drawRect(300, 200, 369, 259); // small: ~66×56
-    const proposals = proposeRooms(r, { seedSpacing: 16 });
-    expect(proposals).toHaveLength(3);
-    expect(proposals[0].regionPixels).toBeGreaterThan(proposals[1].regionPixels);
-    expect(proposals[1].regionPixels).toBeGreaterThan(proposals[2].regionPixels);
-    for (const p of proposals) {
-      expect(p.polygon.length).toBeGreaterThanOrEqual(4);
-    }
-  });
-
-  it('is deterministic across runs', () => {
-    const r = makeRaster(300, 300);
-    r.drawRect(30, 30, 149, 149);
-    r.drawRect(180, 180, 269, 269);
-    const a = proposeRooms(r, { seedSpacing: 16 });
-    const b = proposeRooms(r, { seedSpacing: 16 });
-    expect(a).toEqual(b);
-  });
-
-  it('skips dust-sized enclosures below minRegionFraction', () => {
-    const r = makeRaster(400, 400);
-    r.drawRect(50, 50, 199, 199); // real room
-    r.drawRect(300, 300, 312, 312, 1); // dust pocket ~11×11 = 121 px < 0.0008·160000
-    const proposals = proposeRooms(r, { seedSpacing: 8 });
-    expect(proposals).toHaveLength(1);
-  });
-
-  it('returns nothing for a blank page (background touches edges)', () => {
-    const r = makeRaster(200, 200);
-    expect(proposeRooms(r, { seedSpacing: 16 })).toHaveLength(0);
-  });
-
-  it('nested rooms: inner room proposed separately from outer ring area', () => {
-    // Page large relative to the rooms so the outer ring stays under the
-    // leak guard's max-region fraction (as on real sheets).
-    const r = makeRaster(800, 800);
-    r.drawRect(40, 40, 359, 359);   // outer room
-    r.drawRect(150, 150, 249, 249); // room-within-room (e.g. closet)
-    const proposals = proposeRooms(r, { seedSpacing: 12 });
-    expect(proposals).toHaveLength(2);
   });
 });

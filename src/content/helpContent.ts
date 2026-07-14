@@ -136,19 +136,13 @@ export const DEFAULT_HELP_FAQ_CONFIG: HelpFaqConfig = {
     id: 'command-palette',
     question: 'What does the ⌘K command palette do?',
     answer:
-      'Press ⌘K (Ctrl+K on Windows) to open a searchable palette. Type to jump to any sheet by number or name, activate a condition, or run an action like Calibrate, Magic wand, Schedule → takeoff, Propose rooms, Compare sheet revisions, or Fit to window. Use the arrow keys and Enter to run the highlighted item; Escape closes the palette.',
+      'Press ⌘K (Ctrl+K on Windows) to open a searchable palette. Type to jump to any sheet by number or name, activate a condition, or run an action like Calibrate, Magic wand, Schedule → takeoff, Compare sheet revisions, or Fit to window. Use the arrow keys and Enter to run the highlighted item; Escape closes the palette.',
   },
   {
     id: 'magic-wand',
     question: 'How does the magic wand measure a room automatically?',
     answer:
       'Click Wand in the top command bar (or find it in ⌘K), select an area or volume condition, then click inside an enclosed room — the app fills to the inside face of the walls and adds the measurement for you. The sheet must be calibrated first. If the room is not fully enclosed (an open doorway, for example) the wand refuses and tells you why instead of guessing. Escape exits wand mode, and the result undoes like any other measurement.',
-  },
-  {
-    id: 'room-proposals',
-    question: 'What does "Propose rooms on this sheet" do?',
-    answer:
-      'Open it from ⌘K. It scans the whole sheet for enclosed regions and lists them with computed areas, biggest first, so you can uncheck anything you do not want before adding the rest to the selected area/volume condition. It requires the same calibration as the magic wand. It currently proposes every enclosed region it finds — including legends or titleblock cells — so review the list before applying.',
   },
   {
     id: 'schedule-to-takeoff',

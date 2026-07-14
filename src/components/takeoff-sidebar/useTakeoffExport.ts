@@ -10,7 +10,10 @@ import { useAnnotationStore } from '../../store/slices/annotationSlice';
 import { useDocumentViewStore } from '../../store/slices/documentViewSlice';
 import { toast } from 'sonner';
 import { sheetService } from '../../services/apiService';
-import type { TakeoffCondition, TakeoffMeasurement, PDFDocument, ProjectCostBreakdown, Sheet } from '../../types';
+import { buildDataSheet } from './export/buildDataSheet';
+import { buildBySheetSheet } from './export/buildBySheetSheet';
+import { getReportBranding } from './export/branding';
+import type { TakeoffCondition, TakeoffMeasurement, PDFDocument, ProjectCostBreakdown, Sheet, ConditionFolder } from '../../types';
 
 export interface UseTakeoffExportOptions {
   projectId: string;
@@ -304,6 +307,7 @@ export function useTakeoffExport({
       const currentProject = useProjectStore.getState().getCurrentProject();
       const hiddenCostIds = getHiddenMarkupConditionIdsSet(projectId);
       const costBreakdown = filterCostBreakdownForExport(getProjectCostBreakdown(projectId), hiddenCostIds);
+      const branding = await getReportBranding();
 
       const formatDate = (dateString: string | undefined): string => {
         if (!dateString) return 'N/A';
@@ -356,8 +360,15 @@ export function useTakeoffExport({
         alignment: { horizontal: 'left' as const, vertical: 'middle' as const, wrapText: true },
       };
 
-      const _sectionHeaderStyle = {
+      const sectionHeaderStyle = {
         font: { bold: true, size: 12, color: { argb: 'FF374151' } },
+        fill: { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFD1D5DB' } },
+        border: {
+          top: { style: 'thin' as const, color: { argb: 'FF9CA3AF' } },
+          bottom: { style: 'medium' as const, color: { argb: 'FF9CA3AF' } },
+          left: { style: 'thin' as const, color: { argb: 'FF9CA3AF' } },
+          right: { style: 'thin' as const, color: { argb: 'FF9CA3AF' } },
+        },
         alignment: { horizontal: 'left' as const, vertical: 'middle' as const },
       };
 
@@ -609,9 +620,69 @@ export function useTakeoffExport({
         }
       };
 
+      // Folder (category) lookup — same lazy-load pattern as buildDataSheet's Data tab;
+      // a failed load just means every condition renders as "Uncategorized".
+      let conditionFolders: ConditionFolder[] = [];
+      try {
+        const { useConditionFolderStore } = await import('../../store/slices/conditionFolderSlice');
+        await useConditionFolderStore.getState().ensureFoldersLoaded(projectId);
+        conditionFolders = useConditionFolderStore.getState().getFolders(projectId);
+      } catch {
+        // fall through with empty folder list
+      }
+      const folderNameById = new Map(conditionFolders.map((f) => [f.id, f.name]));
+      const folderNameFor = (condition: TakeoffCondition): string =>
+        condition.folderId ? folderNameById.get(condition.folderId) ?? 'Uncategorized' : 'Uncategorized';
+
+      // Order by folder name (Uncategorized last), then condition name within the folder.
+      const sortedConditionGroups = Object.entries(conditionGroups).sort(([, a], [, b]) => {
+        const folderA = folderNameFor(a.condition);
+        const folderB = folderNameFor(b.condition);
+        if (folderA !== folderB) {
+          if (folderA === 'Uncategorized') return 1;
+          if (folderB === 'Uncategorized') return -1;
+          return folderA.localeCompare(folderB);
+        }
+        return a.condition.name.localeCompare(b.condition.name);
+      });
+
       let detailRowNum = 2;
-      Object.entries(conditionGroups).forEach(([_conditionId, conditionGroup]) => {
+
+      // Folder header rows use isTotalRow helper = 2, a sentinel distinct from the
+      // measurement (0) and condition-TOTAL (1) values so the SUMPRODUCT/COUNTIF formulas
+      // below (which test `=0`/`=1` explicitly) skip them automatically.
+      let currentFolderName: string | null = null;
+      let folderHeaderRow: number | null = null;
+      let folderConditionTotalRows: number[] = [];
+      const folderQtyColLetter = colIndexToLetter(COL.quantity);
+      const finalizeFolderSubtotal = () => {
+        if (folderHeaderRow == null || folderConditionTotalRows.length === 0) return;
+        const qtyCell = detailSheet.getCell(folderHeaderRow, COL.quantity);
+        qtyCell.value = {
+          formula: `SUM(${folderConditionTotalRows.map((r) => `${folderQtyColLetter}${r}`).join(',')})`,
+        };
+        qtyCell.numFmt = '#,##0.00';
+        qtyCell.style = sectionHeaderStyle;
+      };
+
+      sortedConditionGroups.forEach(([_conditionId, conditionGroup]) => {
         const condition = conditionGroup.condition;
+        const folderName = folderNameFor(condition);
+        if (folderName !== currentFolderName) {
+          finalizeFolderSubtotal();
+          currentFolderName = folderName;
+          folderConditionTotalRows = [];
+          const headerRow = detailRowNum;
+          detailSheet.getCell(headerRow, COL.condition).value = folderName;
+          for (let c = 1; c <= detailHeaders.length; c++) {
+            detailSheet.getCell(headerRow, c).style = sectionHeaderStyle;
+          }
+          detailSheet.getCell(headerRow, COL.isTotalRow).value = 2;
+          detailSheet.getCell(headerRow, COL.pageKey).value = '';
+          detailSheet.getRow(headerRow).outlineLevel = 0;
+          detailRowNum++;
+          folderHeaderRow = headerRow;
+        }
         const conditionStartRow = detailRowNum;
         let col = 1;
         detailSheet.getCell(detailRowNum, col++).value = `${condition.name} - TOTAL`;
@@ -672,9 +743,11 @@ export function useTakeoffExport({
         totalEquipCostCell.numFmt = '"$"#,##0.00';
         totalEquipCostCell.style = { ...conditionSummaryStyle, ...inputStyle };
         (totalEquipCostCell as unknown as { protection?: { locked?: boolean } }).protection = { locked: false };
-        // Helpers (hidden)
-        detailSheet.getCell(detailRowNum, col++).value = 1;
-        detailSheet.getCell(detailRowNum, col++).value = '';
+        // Helpers (hidden). Written by explicit column, not col++: the TOTAL row has no
+        // description/timestamp cells (unlike writeMeasurementRow), so a sequential col++
+        // here would land two columns short of COL.isTotalRow/COL.pageKey.
+        detailSheet.getCell(detailRowNum, COL.isTotalRow).value = 1;
+        detailSheet.getCell(detailRowNum, COL.pageKey).value = '';
         for (let c = 1; c <= detailHeaders.length; c++) {
           const cell = detailSheet.getCell(detailRowNum, c);
           if (!cell.style || Object.keys(cell.style).length === 0) cell.style = conditionSummaryStyle;
@@ -720,7 +793,9 @@ export function useTakeoffExport({
           wasteAmountCell.value = { formula: `${quantityColLetter}${conditionStartRow}*${wasteFactorColLetter}${conditionStartRow}/100` };
           wasteAmountCell.numFmt = '#,##0.00';
         }
+        folderConditionTotalRows.push(conditionStartRow);
       });
+      finalizeFolderSubtotal();
 
       const quantitiesLastRow = detailRowNum - 1;
       const qL = quantitiesLastRow;
@@ -749,6 +824,12 @@ export function useTakeoffExport({
         calcSheet.getCell(idx + 1, 1).value = k;
       });
 
+      // Flat pivot-ready sheet, added last so existing sheet order is untouched.
+      await buildDataSheet(workbook, allMeasurements, projectId, headerStyle);
+
+      // Per-sheet rollup, after Data so existing sheet order is untouched.
+      buildBySheetSheet(workbook, reportData, headerStyle, conditionSummaryStyle);
+
       executiveSheet.getColumn(1).width = 28;
       executiveSheet.getColumn(2).width = 50;
       let row = 1;
@@ -756,13 +837,21 @@ export function useTakeoffExport({
       row += 2;
       executiveSheet.mergeCells(`A${row}:B${row}`);
       const titleCell = executiveSheet.getCell(`A${row}`);
-      titleCell.value = 'MERIDIAN TAKEOFF - TAKEOFF REPORT';
+      titleCell.value = `${branding.name} — TAKEOFF REPORT`;
       titleCell.style = {
         font: { bold: true, size: 18, color: { argb: 'FF1F2937' } },
         alignment: { horizontal: 'center', vertical: 'middle' },
         fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } },
       };
       executiveSheet.getRow(row).height = 35;
+      if (branding.logoBase64) {
+        try {
+          const logoImageId = workbook.addImage({ extension: 'png', base64: branding.logoBase64 });
+          executiveSheet.addImage(logoImageId, { tl: { col: 0, row: 0 }, ext: { width: 60, height: 45 } });
+        } catch (logoError) {
+          console.error('Failed to embed report logo, continuing without it:', logoError);
+        }
+      }
       row += 2;
       executiveSheet.mergeCells(`A${row}:B${row}`);
       const summaryHeaderCell = executiveSheet.getCell(`A${row}`);
@@ -771,7 +860,7 @@ export function useTakeoffExport({
         font: { bold: true, size: 14, color: { argb: 'FF111827' } },
         alignment: { horizontal: 'left', vertical: 'middle' },
         fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F4F6' } },
-        border: { bottom: { style: 'medium', color: { argb: 'FF3B82F6' } } },
+        border: { bottom: { style: 'medium', color: { argb: branding.accentARGB } } },
       };
       executiveSheet.getRow(row).height = 25;
       row += 2;
@@ -980,8 +1069,8 @@ export function useTakeoffExport({
           alignment: { horizontal: 'left', vertical: 'middle' },
           fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: isTotalRow ? 'FFE5E7EB' : (isEven ? 'FFFFFFFF' : 'FFF9FAFB') } },
           border: {
-            top: { style: isTotalRow ? 'medium' : 'thin', color: { argb: isTotalRow ? 'FF3B82F6' : 'FFE5E7EB' } },
-            bottom: { style: isTotalRow ? 'medium' : 'thin', color: { argb: isTotalRow ? 'FF3B82F6' : 'FFE5E7EB' } },
+            top: { style: isTotalRow ? 'medium' : 'thin', color: { argb: isTotalRow ? branding.accentARGB : 'FFE5E7EB' } },
+            bottom: { style: isTotalRow ? 'medium' : 'thin', color: { argb: isTotalRow ? branding.accentARGB : 'FFE5E7EB' } },
             left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
             right: { style: 'thin', color: { argb: 'FFE5E7EB' } },
           },
@@ -999,8 +1088,8 @@ export function useTakeoffExport({
           alignment: { horizontal: 'right', vertical: 'middle' },
           fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: isTotalRow ? 'FFE5E7EB' : (isEven ? 'FFFFFFFF' : 'FFF9FAFB') } },
           border: {
-            top: { style: isTotalRow ? 'medium' : 'thin', color: { argb: isTotalRow ? 'FF3B82F6' : 'FFE5E7EB' } },
-            bottom: { style: isTotalRow ? 'medium' : 'thin', color: { argb: isTotalRow ? 'FF3B82F6' : 'FFE5E7EB' } },
+            top: { style: isTotalRow ? 'medium' : 'thin', color: { argb: isTotalRow ? branding.accentARGB : 'FFE5E7EB' } },
+            bottom: { style: isTotalRow ? 'medium' : 'thin', color: { argb: isTotalRow ? branding.accentARGB : 'FFE5E7EB' } },
             left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
             right: { style: 'thin', color: { argb: 'FFE5E7EB' } },
           },

@@ -42,7 +42,6 @@ import {
   getCurrentScrollPosition,
   centerViewportOnPoint,
   getNormalizedViewportCenter,
-  triggerRoomProposals,
 } from '../lib/windowBridge';
 import { fileService } from '../services/apiService';
 import { MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL_MB } from '../constants/deliveryLimits';
