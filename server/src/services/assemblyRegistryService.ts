@@ -130,6 +130,16 @@ export async function createAssemblyMapping(params: {
   return mapMappingRow(data);
 }
 
+export async function getAssemblyMappingById(id: string): Promise<AssemblyMapping | null> {
+  const { data, error } = await supabase
+    .from('assembly_mappings')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw wrapDatabaseError('Get assembly mapping', error, { id });
+  return data ? mapMappingRow(data) : null;
+}
+
 export async function listAssemblyMappings(workbookId?: string): Promise<AssemblyMapping[]> {
   let query = supabase.from('assembly_mappings').select('*').order('created_at', { ascending: false });
   if (workbookId) query = query.eq('workbook_id', workbookId);
