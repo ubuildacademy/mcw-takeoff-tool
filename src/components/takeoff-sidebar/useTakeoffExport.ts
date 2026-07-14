@@ -1161,25 +1161,12 @@ export function useTakeoffExport({
         repeatRows: '1:1',
       };
 
-      // Protect the Quantities sheet so derived formulas stay intact while allowing edits
-      // to the intended input cells (waste %, material cost/unit, equipment cost).
-      try {
-        await detailSheet.protect('', {
-          selectLockedCells: true,
-          selectUnlockedCells: true,
-          formatCells: true,
-          formatColumns: false,
-          formatRows: false,
-          insertColumns: false,
-          insertRows: false,
-          deleteColumns: false,
-          deleteRows: false,
-          sort: false,
-          autoFilter: false,
-        } as Record<string, unknown>);
-      } catch {
-        // If protection isn't supported in the current ExcelJS build, skip silently.
-      }
+      // Quantities is deliberately UNPROTECTED (beta feedback 2026-07): Excel
+      // disables the outline +/- roll-up buttons on any protected sheet — no
+      // protect option exempts them — and estimators live in these cells anyway.
+      // Only the Executive Summary stays locked (protected above, with the
+      // profit-rate cell unlocked); the amber input styling on Quantities
+      // remains as guidance rather than enforcement.
       onExportStatusUpdate?.('excel', 90);
 
       const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
