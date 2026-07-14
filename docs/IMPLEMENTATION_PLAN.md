@@ -343,6 +343,28 @@ Tasks (execute in order, one per session):
 
 ---
 
+### Task D0 — Knowledge-base section-aware packing (queued from beta feedback 2026-07-13)
+
+**Problem:** a trade KB over the 25,000-char context budget is tail-truncated at chat time
+(observed: 29,191-char waterproofing KB — the ASTM standards section never reaches the
+model). The admin UI warns, but the runtime fix is selection, not a bigger dump.
+
+**Files:** find the KB injection point first (grep `KB_CHAR_BUDGET` — defined in
+`src/constants/chatPresets.ts`, consumed where chat context is assembled) and
+`knowledgeBaseService`. Pure packing function + unit tests in a new util module.
+
+**Do:** split KB content on its existing `=== SECTION ===` / `---SECTION---` header
+convention (tolerate both, and content with no headers = one section). Score each section
+against the user's question with the same rare-term style scoring the page retrieval uses
+(read that implementation and reuse/extract, don't reinvent). Pack highest-scoring
+sections into the budget whole (never mid-section cuts); always include a section whose
+header matches the question directly; if everything fits, behavior is identical to today.
+
+**Success criteria:** unit tests: over-budget KB + dimension question → the relevant
+section survives packing even when it lives at the tail; under-budget KB → byte-identical
+to current behavior. tsc + npm test clean. No change to admin UI (its truncation warning
+stays as the authoring signal).
+
 ## Workstream D — AI provider fallback (data-gated)
 
 **Trigger:** ≥2 weeks of AI Usage data in the admin tab (merged to main 2026-07-13;
