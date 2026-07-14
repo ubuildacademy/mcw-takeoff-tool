@@ -75,6 +75,8 @@ export function ScheduleReviewDialog({
   const [countColumns, setCountColumns] = useState<Set<number>>(new Set());
   const [groupByName, setGroupByName] = useState(true);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  /** Per-row name overrides (keyed by row index); unedited rows fall back to the cleaned default. */
+  const [editedNames, setEditedNames] = useState<Map<number, string>>(new Map());
   const [applying, setApplying] = useState(false);
 
   const columnCount = table ? table.rows.reduce((max, row) => Math.max(max, row.length), 0) : 0;
@@ -93,6 +95,9 @@ export function ScheduleReviewDialog({
       if (!isJunkRow(t.rows[i], guessedNameCol)) nextSelected.add(i);
     }
     setSelected(nextSelected);
+    // Row indices change meaning when the header split moves, so stale
+    // overrides would rename the wrong rows.
+    setEditedNames(new Map());
   };
 
   // Render-phase reset: re-derive local state when the dialog opens with a new
@@ -113,6 +118,7 @@ export function ScheduleReviewDialog({
       setQtyColumn(0);
       setCountColumns(new Set());
       setSelected(new Set());
+      setEditedNames(new Map());
     }
   }
 
@@ -157,11 +163,26 @@ export function ScheduleReviewDialog({
     (qtyMode === 'column' && col === qtyColumn) ||
     (qtyMode === 'countColumns' && countColumns.has(col));
 
+  // Default cleaned name, unless the user typed an override in the Result column.
+  const rowConditionName = (rowIndex: number, row: string[]): string => {
+    const edited = editedNames.get(rowIndex);
+    if (edited !== undefined) return edited.trim();
+    return cleanConditionName(resolveName(row, nameCol));
+  };
+
+  const setEditedName = (rowIndex: number, value: string) => {
+    setEditedNames((prev) => {
+      const next = new Map(prev);
+      next.set(rowIndex, value);
+      return next;
+    });
+  };
+
   const mappedRows: ScheduleRowMapping[] = [];
   for (let i = headerRows; i < table.rows.length; i++) {
     if (!selected.has(i)) continue;
     const row = table.rows[i];
-    const name = cleanConditionName(resolveName(row, nameCol));
+    const name = rowConditionName(i, row);
     if (!name) continue;
     const qty = computeRowQty(row, activeMapping);
     if (qty < 1) continue; // all-dash row under count mode — nothing to count
@@ -347,8 +368,7 @@ export function ScheduleReviewDialog({
             <tbody>
               {table.rows.slice(headerRows).map((row, offset) => {
                 const rowIndex = headerRows + offset;
-                const rawName = resolveName(row, nameCol);
-                const name = cleanConditionName(rawName);
+                const name = rowConditionName(rowIndex, row);
                 const qty = computeRowQty(row, activeMapping);
                 const disabled = !name || qty < 1;
                 const junk = isJunkRow(row, nameCol);
@@ -398,8 +418,19 @@ export function ScheduleReviewDialog({
                         </td>
                       );
                     })}
-                    <td className="px-2 py-1 align-top text-muted-foreground whitespace-nowrap">
-                      {disabled ? '—' : `→ ${name} ×${qty}`}
+                    <td className="px-2 py-1 align-top whitespace-nowrap">
+                      <span className="flex items-center gap-1 text-muted-foreground">
+                        →
+                        <input
+                          type="text"
+                          className="h-7 w-40 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                          aria-label={`Condition name for row ${rowIndex}`}
+                          value={editedNames.get(rowIndex) ?? name}
+                          placeholder={name || 'Condition name'}
+                          onChange={(e) => setEditedName(rowIndex, e.target.value)}
+                        />
+                        {qty < 1 ? '—' : `×${qty}`}
+                      </span>
                     </td>
                   </tr>
                 );
