@@ -16,12 +16,14 @@ import { Checkbox } from './ui/checkbox';
 import { Label } from './ui/label';
 import {
   buildColumnLabels,
+  cleanConditionName,
   computeRowQty,
   detectHeaderRowCount,
   detectInstanceColumns,
   groupScheduleRows,
   guessNameColumn,
   guessQtyMapping,
+  isJunkRow,
   type QtyMapping,
   type ScheduleApplyGroup,
   type ScheduleRowMapping,
@@ -80,13 +82,16 @@ export function ScheduleReviewDialog({
   const reseedFromHeaderRows = (t: ScheduleTableData, nextHeaderRows: number, colCount: number) => {
     const labels = buildColumnLabels(t.rows, nextHeaderRows, colCount);
     const instanceCols = detectInstanceColumns(t.rows, nextHeaderRows, colCount);
-    setNameCol(guessNameColumn(labels, instanceCols));
+    const guessedNameCol = guessNameColumn(labels, instanceCols, t.rows, nextHeaderRows);
+    setNameCol(guessedNameCol);
     const mapping = guessQtyMapping(labels, instanceCols);
     setQtyMode(mapping.mode);
     setQtyColumn(mapping.mode === 'column' ? mapping.column : 0);
     setCountColumns(new Set(mapping.mode === 'countColumns' ? mapping.columns : instanceCols));
     const nextSelected = new Set<number>();
-    for (let i = nextHeaderRows; i < t.rows.length; i++) nextSelected.add(i);
+    for (let i = nextHeaderRows; i < t.rows.length; i++) {
+      if (!isJunkRow(t.rows[i], guessedNameCol)) nextSelected.add(i);
+    }
     setSelected(nextSelected);
   };
 
@@ -156,7 +161,7 @@ export function ScheduleReviewDialog({
   for (let i = headerRows; i < table.rows.length; i++) {
     if (!selected.has(i)) continue;
     const row = table.rows[i];
-    const name = resolveName(row, nameCol);
+    const name = cleanConditionName(resolveName(row, nameCol));
     if (!name) continue;
     const qty = computeRowQty(row, activeMapping);
     if (qty < 1) continue; // all-dash row under count mode — nothing to count
@@ -342,17 +347,30 @@ export function ScheduleReviewDialog({
             <tbody>
               {table.rows.slice(headerRows).map((row, offset) => {
                 const rowIndex = headerRows + offset;
-                const name = resolveName(row, nameCol);
+                const rawName = resolveName(row, nameCol);
+                const name = cleanConditionName(rawName);
                 const qty = computeRowQty(row, activeMapping);
                 const disabled = !name || qty < 1;
+                const junk = isJunkRow(row, nameCol);
                 return (
-                  <tr key={rowIndex} className="border-t border-input">
+                  <tr
+                    key={rowIndex}
+                    className={`border-t border-input ${junk ? 'text-muted-foreground opacity-60' : ''}`}
+                  >
                     <td className="px-2 py-1 align-top">
                       <Checkbox
                         checked={!disabled && selected.has(rowIndex)}
                         onCheckedChange={(checked) => toggleRow(rowIndex, checked === true)}
                         disabled={disabled}
-                        title={disabled ? (name ? 'No filled quantity cells' : 'No usable name') : undefined}
+                        title={
+                          disabled
+                            ? name
+                              ? 'No filled quantity cells'
+                              : 'No usable name'
+                            : junk
+                              ? 'Looks like junk — unchecked by default, verify before including'
+                              : undefined
+                        }
                       />
                     </td>
                     {Array.from({ length: columnCount }, (_, col) => {
@@ -363,6 +381,7 @@ export function ScheduleReviewDialog({
                         conf !== undefined &&
                         /[a-z0-9]/i.test(row[col] ?? '') &&
                         conf <= OCR_REVIEW_THRESHOLD;
+                      const cellText = col === nameCol ? cleanConditionName(row[col] ?? '') : (row[col] ?? '');
                       return (
                         <td
                           key={col}
@@ -375,7 +394,7 @@ export function ScheduleReviewDialog({
                           }`}
                           title={lowConf ? `Low OCR confidence (${conf}%) — verify this value` : undefined}
                         >
-                          {row[col] ?? ''}
+                          {cellText}
                         </td>
                       );
                     })}
