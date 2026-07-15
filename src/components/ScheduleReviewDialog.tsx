@@ -133,6 +133,15 @@ export function ScheduleReviewDialog({
     reseedFromHeaderRows(table, next, columnCount);
   };
 
+  const handleNameColChange = (next: number) => {
+    setNameCol(next);
+    const nextSelected = new Set<number>();
+    for (let i = headerRows; i < table.rows.length; i++) {
+      if (!isJunkRow(table.rows[i], next)) nextSelected.add(i);
+    }
+    setSelected(nextSelected);
+  };
+
   const activeMapping: QtyMapping =
     qtyMode === 'onePerRow'
       ? { mode: 'onePerRow' }
@@ -247,8 +256,9 @@ export function ScheduleReviewDialog({
           {table.mode === 'ruled_ocr' && (
             <>
               {' — '}
-              <span className="text-amber-600 dark:text-amber-500">amber</span> cells read below{' '}
-              {OCR_REVIEW_THRESHOLD}% confidence; verify before applying.
+              <span className="text-amber-600 dark:text-amber-500">amber</span> = low OCR
+              confidence (below {OCR_REVIEW_THRESHOLD}%) — click the row&apos;s name to fix it
+              before applying.
             </>
           )}
         </p>
@@ -276,7 +286,7 @@ export function ScheduleReviewDialog({
               id="schedule-name-col"
               className="w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
               value={nameCol}
-              onChange={(e) => setNameCol(Number(e.target.value))}
+              onChange={(e) => handleNameColChange(Number(e.target.value))}
             >
               {Array.from({ length: columnCount }, (_, col) => (
                 <option key={col} value={col}>

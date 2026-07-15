@@ -128,11 +128,27 @@ function alphaDominantShare(rows: string[][], headerRows: number, col: number): 
   return nonEmpty === 0 ? 0 : alphaDominant / nonEmpty;
 }
 
+/** Share of body rows (after headerRows) with non-empty (trimmed) content in `col`. */
+function nonEmptyShare(rows: string[][], headerRows: number, col: number): number {
+  const dataRows = rows.slice(headerRows);
+  if (dataRows.length === 0) return 1; // no data to judge by — don't disqualify on label alone
+  const filled = dataRows.filter((r) => (r[col] ?? '').trim().length > 0).length;
+  return filled / dataRows.length;
+}
+
+const MIN_NAME_COLUMN_FILL_SHARE = 0.6;
+
 /**
  * Name-column pick: prefer a header matching /room|name|mark|type|desc/i;
  * otherwise the non-instance column with the highest share of alpha-dominant
  * cells (rows/headerRows let this fallback see actual data — omit them to
  * skip straight to the first non-instance column).
+ *
+ * A column only qualifies (for either the header match or the fallback) if
+ * at least 60% of its body rows are non-empty — otherwise a column that's
+ * blank except for one OCR-noise cell can look "alpha-dominant" (100% of its
+ * one non-empty cell is alpha) and out-rank the real name column, inverting
+ * which rows end up checked (gate #2).
  */
 export function guessNameColumn(
   labels: string[],
@@ -142,13 +158,19 @@ export function guessNameColumn(
 ): number {
   const instanceSet = new Set(instanceColumns);
   const candidates = labels.map((_, i) => i).filter((i) => !instanceSet.has(i));
-  const headerMatch = candidates.find((i) => NAME_HEADER_RE.test(labels[i]));
-  if (headerMatch !== undefined) return headerMatch;
   if (candidates.length === 0) return 0;
 
-  let best = candidates[0];
+  const qualifying = candidates.filter(
+    (col) => nonEmptyShare(rows, headerRows, col) >= MIN_NAME_COLUMN_FILL_SHARE
+  );
+  const pool = qualifying.length > 0 ? qualifying : candidates;
+
+  const headerMatch = pool.find((i) => NAME_HEADER_RE.test(labels[i]));
+  if (headerMatch !== undefined) return headerMatch;
+
+  let best = pool[0];
   let bestShare = -1;
-  for (const col of candidates) {
+  for (const col of pool) {
     const share = alphaDominantShare(rows, headerRows, col);
     if (share > bestShare) {
       bestShare = share;

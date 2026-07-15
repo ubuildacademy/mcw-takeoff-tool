@@ -142,6 +142,29 @@ describe('scheduleTableMapping', () => {
       ];
       expect(guessNameColumn(noHeaderLabels, [], rows, 1)).toBe(0);
     });
+
+    it('does not pick a mostly-empty column over the real name column (gate #2 regression)', () => {
+      // Real failure shape: door numbers live in oval bubbles OCR can't read,
+      // so col 0 is empty on every clean row; the one non-empty col-0 cell is
+      // OCR noise ("Vai va"). Room names live in col 2. Neither header matches
+      // /room|name|mark|type|desc/i (both are OCR-garbled), so the pick falls
+      // through to alpha-dominance — where col 0's single noise cell used to
+      // score 100% (1 alpha-dominant cell / 1 non-empty cell) and beat col 2,
+      // inverting selection: the noise row was the only one checked.
+      const labels = ['Door', 'Qty', 'Loc'];
+      const rows = [
+        labels,
+        ['', '1', 'EMPLOYEE KITCHEN'],
+        ['', '1', 'LAUNDRY'],
+        ['Vai va', '1', 'FITNESS ROOM'],
+        ['', '1', 'STORAGE'],
+      ];
+      const nameCol = guessNameColumn(labels, [], rows, 1);
+      expect(nameCol).toBe(2);
+
+      const bodyRows = rows.slice(1);
+      expect(bodyRows.map((r) => isJunkRow(r, nameCol))).toEqual([false, false, false, false]);
+    });
   });
 
   describe('computeRowQty', () => {
