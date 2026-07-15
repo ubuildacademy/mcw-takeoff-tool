@@ -1257,14 +1257,21 @@ export interface AssemblyMapping {
   jobInfoCells?: Record<string, string>;
 }
 
+export interface AssemblyScanProposal {
+  quantityLabelCell: string;
+  quantityCell: string;
+  quantityLabel: string;
+  jobInfoCells: Record<string, string> | null;
+}
+
 export const assemblyService = {
-  async uploadWorkbook(file: File): Promise<AssemblyWorkbook> {
+  async uploadWorkbook(file: File): Promise<{ workbook: AssemblyWorkbook; proposal: AssemblyScanProposal | null }> {
     const formData = new FormData();
     formData.append('file', file);
     const response = await apiClient.post('/assemblies/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
-    return response.data.workbook;
+    return { workbook: response.data.workbook, proposal: response.data.proposal ?? null };
   },
 
   async listWorkbooks(): Promise<AssemblyWorkbook[]> {

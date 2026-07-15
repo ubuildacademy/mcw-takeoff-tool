@@ -105,9 +105,8 @@ router.post('/upload', requireAuth, requireAdmin, handleUpload, async (req, res)
         upsert: false,
       });
 
-    await fs.remove(req.file.path);
-
     if (uploadError) {
+      await fs.remove(req.file.path);
       console.error('Assembly workbook storage upload error:', uploadError);
       return res.status(500).json({ error: 'Failed to upload workbook to storage', details: uploadError.message });
     }
@@ -118,7 +117,18 @@ router.post('/upload', requireAuth, requireAdmin, handleUpload, async (req, res)
       uploadedBy: req.user!.id,
     });
 
-    return res.json({ success: true, workbook });
+    // C5 auto-map: scan the ASSEMBLY sheet before the temp file is removed.
+    // Scan failure must never fail the upload — the manual mapping form is the fallback.
+    let proposal = null;
+    try {
+      proposal = await assemblyWriter.scan(req.file.path);
+    } catch (scanError) {
+      console.error('Assembly workbook scan error:', scanError);
+    }
+
+    await fs.remove(req.file.path);
+
+    return res.json({ success: true, workbook, proposal });
   } catch (error) {
     console.error('Error uploading assembly workbook:', error);
     if (req.file?.path) {
