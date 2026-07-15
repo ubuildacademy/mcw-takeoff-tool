@@ -505,18 +505,142 @@ client bundle.
 detail, and elevation tags. Mostly works on matchlines and easier things not in
 bubbles/symbols — which are the high value auto-hyperlink targets."
 
-**Shape of the work (needs a scoping pass before chipping):** detail/section/elevation
-callouts are vector symbols — a circle (or circle+triangle for sections) with a
-horizontal diameter line, detail number above, sheet number below (e.g. 15/A9.03).
-The text is often present in the PDF text layer even when the door-schedule body is
-outlined — verify on the beta set first. Approach candidate: detect candidate circles in
-the drawing vectors (get_drawings arcs/circles within a radius band), pair each with
-text-layer tokens inside its bbox matching /^\d+\s*[/|]\s*[A-Z]+\d/ or a two-line
-number-over-sheet pattern, then reuse the existing hyperlink creation path (see
-`create_sheet_hyperlinks_table.sql` service + existing matchline linker for target-sheet
-resolution). First session: READ-ONLY scoping against the beta PDFs — measure how many
-bubbles exist, how many have text-layer text, and write F1/F2 task specs with real
-numbers before any code.
+**Scoping verdict (2026-07-15, READ-ONLY session, no product code changed):** the app
+already has two bubble-detection passes wired into Auto-hyperlink —
+`server/src/scripts/vector_callout_pass.py` (circle/hexagon geometry via
+`get_drawings()`, paired with PDF text-layer words) and
+`server/src/scripts/bubble_ocr_pass.py` (HoughCircles on a raster render + Tesseract,
+for bubbles whose glyphs are vector strokes with no text layer). Both are real and
+already merged — the gap isn't "no bubble detection exists," it's that neither pass
+resolves real cross-sheet references on an actual beta set. Measured against the 80-page
+"Architectural Combined" beta PDF (`server/temp/pdf-processing/`, doc
+`b12fc9c4-1c4c-47bd-a27e-ed520b9c7453.pdf`) with a new scoping script
+(`server/src/scripts/scope_bubble_callouts.py`, reproduces `vector_callout_pass`'s own
+shape/dedupe heuristic read-only):
+
+- **Geometry detection is not the bottleneck.** 6,756 circle/hexagon-shaped candidates
+  in the callout size/aspect band, found across all 80 pages in ~28s — cheap, already
+  fast enough to run on every Auto-hyperlink invocation (`vector_callout_pass.py`
+  already does this).
+- **91.0% of those candidates (6,145/6,756) have zero PDF text-layer words inside them.**
+  Confirmed both by the aggregate count and by rendering crops of specific bubbles
+  (`bubble_crop_0.png`-style checks): a bubble's detail number is drawn as vector-stroke
+  glyphs, not an embedded text object, on the large majority of real callouts in this
+  set. A coordinate-space bug (text-layer vs. drawing-layer using different
+  rotated/unrotated coordinate spaces on this rotation=270 document) was checked and
+  ruled out — both APIs share the same unrotated coordinate space here.
+- **Of the 611 candidates that DO have text-layer words, only 8 (0.1% of all
+  candidates) cleanly parse as a genuine sheet-ref pattern**, and 265 (43% of the
+  text-bearing set) are single short alpha tags (`SD`, `HS`, `J`, `USB`, `D`) —
+  visually confirmed as MEP/life-safety equipment symbols (smoke detector, heat sensor,
+  junction box), not detail/section/elevation callouts. They happen to land in the same
+  circle size/aspect band and are false positives for this feature.
+- **`vector_callout_pass.py`'s own classification finds only 9 "reference" (cross-sheet)
+  callouts in the entire 80-page doc, and 8 of those 9 are false positives**: a
+  wall-type/fire-rating tag ("F1", rendered with a leader line to a wall, real text-layer
+  word) trivially matches the same permissive `SHEET_REF_RE` used to accept genuine sheet
+  refs like "A9.31". Only **1 genuine cross-sheet detail reference was correctly
+  resolved via the text layer in the whole document.**
+- **The existing raster fallback (`bubble_ocr_pass.py`, unmodified) was run directly
+  against a real "Details" sheet (page 65 / A9.51) via a single-page PDF extract**:
+  HoughCircles found 95 circles, 87 were OCR'd, and only 6 passed the sheet-ref accept
+  regex — all 6 were false-positive misreads of nearby furniture/fixture legend text
+  (e.g. `"FRAMED HEADBOAR GR-216"`, where `GR-216` coincidentally matches the
+  `[A-Z]{1,3}-\d{2,3}` accept pattern). **Zero genuine hyperlink targets were recovered
+  on that page by the raster pass either.**
+- **Section/elevation triangle markers (circle+triangle) have no detection at all
+  today** — `vector_callout_pass.py` only recognizes `circle` and `hexagon` shapes. A
+  naive geometric triangle heuristic (3-4 line-segment closed paths in the same 8-90pt
+  band) was tried during scoping and produced 4,623 candidates doc-wide — completely
+  swamped by arrowheads, hatch ticks, and other line-art noise. Not usable as a cheap
+  signal without expensive angle-based filtering, and any real section marker found this
+  way would hit the identical "vector-glyph, no text layer" problem for its number/sheet
+  content (same as circles above).
+
+**Conclusion:** this is not a detection-coverage gap, it's a precision/OCR gap. Bubble
+shapes are already found cheaply and accurately; the blocker is reading the number and
+sheet-ref glyphs *inside* them (91% have no text layer) without also matching unrelated
+same-shaped symbols (equipment tags, fixture legends, wall-type tags). F1 targets that
+precision gap directly, scoped to circles only (the dominant shape, and where the raster
+pass already has working plumbing). F2 (triangle/section support) is explicitly gated on
+F1's results, since it depends on the same OCR precision work and isn't worth doing
+first against 4,623 mostly-noise candidates.
+
+### Task F1 — Precision-targeted bubble OCR (replace independent Hough scan)
+
+**Goal:** recover real cross-sheet references from circle callouts whose glyphs are
+vector-only (91% of candidates per the scoping numbers above), without reintroducing the
+false-positive rate the current raster pass has (6/6 false positives on the page-65
+test).
+
+**Files:** `server/src/scripts/bubble_ocr_pass.py` (replace `_detect_circles` /
+`_process_single_page`'s independent HoughCircles scan), `server/src/scripts/
+vector_callout_pass.py` (expose its deduped circle candidate list for reuse — the two
+scripts currently duplicate shape-candidate logic independently), `server/src/services/
+bubbleOcrExtractor.ts` (no interface change expected, but confirm output shape survives).
+
+**Do:**
+1. Feed `vector_callout_pass.py`'s geometry-qualified, deduped circle list (candidates
+   that pass shape/size but resolve to `kind: unlabeled` or find zero words — i.e.
+   already-classified `reference`/`detail_title` callouts don't need OCR, they're
+   already correctly resolved from the text layer) as the crop targets for OCR, instead
+   of `bubble_ocr_pass.py`'s independent `HoughCircles` pass. On the page-65 test this
+   drops the candidate set from 95 (Hough, noisy) to 32 (vector geometry, precise) —
+   fewer OCR calls and fewer chances for an unrelated circle (furniture tag, fixture
+   symbol) to produce a false-positive match.
+2. Render each candidate's crop in isolation at a much higher effective resolution than
+   today's full-page `RENDER_SCALE = 1.5` (e.g. render just that bubble's bbox, padded,
+   at 8-12x PDF points) — affordable because there are only ~500-1,000 candidates in an
+   80-page set, not a full-page raster; today's fixed low-res full-page render is why
+   Tesseract has so little signal on a ~20pt bubble.
+3. Tighten the accept filter from "OCR text contains a substring matching a sheet-ref
+   regex anywhere" (today's bug — lets `"FRAMED HEADBOAR GR-216"` through) to a
+   structural check: the crop's OCR output must decompose into a top token (detail
+   label: digits/letters, short) and a bottom token (sheet ref: matches the stricter
+   pattern) with nothing else recognized in between — reject multi-word prose matches.
+4. Keep the existing single-letter-tag exclusion implicit: candidates already resolved
+   via the text layer as a short alpha-only word (`SD`, `HS`, `J`, etc.) must not be
+   re-sent through OCR at all — they already have text, so they're skipped by step 1's
+   "already-classified" filter.
+
+**Success criteria:** hand-label ground truth on pages 31-38 (elevations) + 55-68
+(details) of the beta doc — every real circle-with-sheet-ref bubble Jeff would expect
+linked. Re-run against that ground truth: recall on genuine cross-sheet references
+measurably higher than today's 1/80-page-doc baseline, and zero false positives from
+equipment-tag/fixture-legend circles (vs. today's 6/6 false-positive rate on the page-65
+sample). `server` `npx tsc --noEmit` clean; `scope_bubble_callouts.py`'s numbers
+re-measured post-change and reported in the session's follow-up.
+
+### Task F2 — Section/elevation triangle marker support (gated on F1)
+
+**Goal:** extend detection to circle+triangle section/elevation callouts. **Do not start
+until F1 lands and its OCR precision is proven** — scoping showed naive triangle
+geometry alone produces ~13x more noise than signal (4,623 candidates doc-wide vs. 582
+even loosely-classified circle callouts), and any real section marker still needs the
+same OCR precision work F1 builds.
+
+**Files:** `server/src/scripts/vector_callout_pass.py` (`_shape_candidates` — add a
+compound-shape case), F1's new targeted-crop OCR path (reuse, don't duplicate).
+
+**Do:**
+1. Instead of an independent triangle-shape regex (proven noisy in scoping), detect
+   triangles only as a *proximity check against an already-qualified circle*: a 3-4
+   line-segment closed path whose bbox touches or sits within ~1 circle-radius of a
+   circle candidate's bbox edge. This uses the circle pass (precise, low-noise) as the
+   anchor and the triangle as a secondary signal, instead of scanning for triangles
+   doc-wide.
+2. Route the combined circle+triangle bbox through F1's targeted-crop OCR path
+   unchanged — same crop/OCR/structural-accept logic, just a different candidate
+   source.
+3. Re-run `scope_bubble_callouts.py` (extended to tally circle+adjacent-triangle pairs)
+   against the beta doc to get a real candidate count before writing detection code
+   further than the proximity check.
+
+**Success criteria:** measured candidate count for circle+triangle pairs on the beta doc
+before deciding scope further; if real section/elevation markers are rare in this
+particular beta set, say so plainly rather than over-building — recommend against
+further investment if the hand-labeled true-positive count is in the single digits.
+`server` `npx tsc --noEmit` clean.
 
 ---
 
