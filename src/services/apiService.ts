@@ -1233,3 +1233,72 @@ export const feedbackService = {
     await apiClient.post('/feedback', formData);
   },
 };
+
+// --- Assemblies (Stage 1 workbook bridge; see docs/ASSEMBLIES_DESIGN.md) ---
+
+export interface AssemblyWorkbook {
+  id: string;
+  filename: string;
+  storagePath: string;
+  uploadedBy: string;
+  createdAt: string;
+}
+
+export interface AssemblyMappingInputField {
+  label: string;
+  cell: string;
+}
+
+export interface AssemblyMapping {
+  id: string;
+  workbookId: string;
+  conditionRef: string;
+  inputs: AssemblyMappingInputField[];
+  jobInfoCells?: Record<string, string>;
+}
+
+export const assemblyService = {
+  async uploadWorkbook(file: File): Promise<AssemblyWorkbook> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await apiClient.post('/assemblies/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data.workbook;
+  },
+
+  async listWorkbooks(): Promise<AssemblyWorkbook[]> {
+    const response = await apiClient.get('/assemblies/workbooks');
+    return response.data.workbooks;
+  },
+
+  async deleteWorkbook(id: string): Promise<void> {
+    await apiClient.delete(`/assemblies/workbooks/${id}`);
+  },
+
+  async createMapping(params: {
+    workbookId: string;
+    conditionRef: string;
+    inputs: AssemblyMappingInputField[];
+    jobInfoCells?: Record<string, string>;
+  }): Promise<AssemblyMapping> {
+    const response = await apiClient.post('/assemblies/mappings', params);
+    return response.data.mapping;
+  },
+
+  async listMappings(workbookId: string): Promise<AssemblyMapping[]> {
+    const response = await apiClient.get('/assemblies/mappings', { params: { workbookId } });
+    return response.data.mappings;
+  },
+
+  async deleteMapping(id: string): Promise<void> {
+    await apiClient.delete(`/assemblies/mappings/${id}`);
+  },
+
+  async generate(params: { projectId: string; mappingId: string; conditionIds: string[] }): Promise<Blob> {
+    const response = await apiClient.post('/assemblies/generate', params, {
+      responseType: 'blob',
+    });
+    return response.data;
+  },
+};
