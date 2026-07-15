@@ -316,6 +316,15 @@ inverted selection from one bad column guess. Jeff also confused by amber afford
 **Success criteria:** unit test reproducing gate #2 passes (clean rows checked, noise row
 unchecked); changing name column visibly re-derives checks; tsc + all tests green.
 Jeff runs gate #3 after this lands.
+*B5 DONE 2026-07-15 (6078154d, schedule branch).*
+
+**WORKSTREAM B PARKED (Jeff, 2026-07-15):** "put a pin in the schedule tool for now —
+still wonky, not helpful still." Dev gate stays on; `feat/schedule-ocr-fallback` stays
+unmerged to main. All B1–B5 work is preserved on that branch. Do not spend further
+sessions here unless Jeff re-opens it. Real-schedule variety may make this tool hard to
+ever generalize — revisit only with a fundamentally better extraction idea, not more
+incremental OCR tuning. Effort redirects to Workstream F (hyperlink bubbles) and
+assemblies Stage 2 planning.
 
 *DONE 2026-07-14 (branch feat/schedule-ocr-fallback, on top of 42b0433d). All 3 steps
 implemented as specified. Measured against the real page-53 door schedule (rotated
