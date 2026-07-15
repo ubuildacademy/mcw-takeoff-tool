@@ -344,6 +344,11 @@ Tasks (execute in order, one per session):
 - **C3** Client: registry UI (upload + map to condition + input cells + job-info cells)
   in a new sidebar Costs-tab section; "Generate assembly" button on mapped conditions
   with a confirmation showing the per-condition quantity breakdown and the sum.
+  *DONE 2026-07-14 (65ee764b). Review: tsc clean, 7 matching-util tests green,
+  admin gating via authHelpers.isAdmin, multi-input note shown, job-info limited
+  to the 3 server-resolved fields, Generate All sequential. Not yet exercised
+  against live Supabase — tables from create_assembly_workbooks_tables.sql must
+  be applied before the upload flow works (C4 covers E2E).*
 - **C4** E2E test against a copy of `Aquafin-2K M.xlsx` (path in ASSEMBLIES_DESIGN.md;
   live set at `~/Library/Mobile Documents/com~apple~CloudDocs/Business/MCW/Assembly
   Work/4.14.26 Assembly Update/2026 Assemblies 4-14-26/`): generated workbook opens in
