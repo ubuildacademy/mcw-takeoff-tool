@@ -393,6 +393,24 @@ Tasks (execute in order, one per session):
   Work/4.14.26 Assembly Update/2026 Assemblies 4-14-26/`): generated workbook opens in
   Excel without repair, quantity + job info in the right cells, every other zip entry
   byte-identical (compare entry-by-entry).
+  *DONE 2026-07-15. `server/src/scripts/test_assembly_e2e.py`, stdlib-only, skips
+  gracefully unless `ASSEMBLY_E2E_WORKBOOK` points at a real copy (never committed —
+  contains MCW pricing). Real cells verified by reading the workbook first: C13/A13
+  from the illustrative example don't hold user data in this file (C13 is the label
+  itself, no A13) — used the actual input cells instead, D13 (numeric "Job Quantity",
+  no formula) and C8 (empty "Notes" text field). Entry-by-entry zip diff confirms only
+  the ASSEMBLY sheet changes (this workbook has no calcChain.xml, so that drop path
+  isn't exercised here — covered by `--selftest`); dest zip CRC-checks clean and both
+  workbook.xml and the touched sheet parse as XML. Manually opened the generated file
+  in Numbers (via computer-use, user-approved): ASSEMBLY tab showed Notes="E2E Test
+  Job", Job Quantity=6,200, and the dependent TOTAL/Total Job Cost formulas
+  recalculated correctly (6,510 = 6200×1.05) — no repair dialog, only Numbers' routine
+  "unsupported formulas replaced by last calculated value" notice that appears on
+  every complex xlsx opened there, unrelated to this write. Did not test in real
+  Excel (not available in this environment) — Numbers opening cleanly with correct
+  values and live recalculation is the visual evidence obtained. No bugs found in
+  assembly_write.py; zero server/src changes. server tsc skipped — no node_modules in
+  this worktree.*
 
 ---
 
