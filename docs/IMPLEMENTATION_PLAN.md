@@ -286,6 +286,37 @@ some OCR characters wrong." → B4 queued; dev gate stays on until B4 + re-test.
 and dimension columns read >90% correct by manual spot-check of 20 cells; extraction time
 stays under ~20s/region; existing tests pass. Jeff re-runs the ship gate after this lands.
 
+*Gate result #2 (2026-07-15): FAIL — but root cause is selection logic, not OCR. Dialog
+auto-picked "0: Door" as name column; door numbers live in oval bubbles OCR can't read,
+so col 0 is empty on every clean row → all clean rows flagged junk/unchecked, while the
+one OCR-garbage row ("Vai va") had noise in col 0 → the ONLY row checked. Perfectly
+inverted selection from one bad column guess. Jeff also confused by amber affordance
+("am I supposed to fix it?"). Dev gate stays. → B5.*
+
+### Task B5 — Fix name-column guess + selection re-derive (queued 2026-07-15)
+
+**Goal:** the review dialog must never invert selection like gate #2. No OCR changes.
+
+**Files:** `src/utils/scheduleTableMapping.ts` (`guessNameColumn`),
+`src/components/ScheduleReviewDialog.tsx` (selection reset), tests alongside existing ones.
+
+**Do:**
+1. `guessNameColumn`: a column only qualifies if ≥60% of its body rows are non-empty
+   (after trim). Among qualifying columns, keep the current header-regex-then-
+   alpha-dominance logic. Add tests: the gate-#2 shape (col 0 empty except one noise row,
+   room names in a later column) must pick the room-name column.
+2. `ScheduleReviewDialog`: when the user changes the Name column dropdown, re-derive the
+   junk flags AND the checked set (same render-phase reset pattern already used for
+   table/headerRows — no useEffect). Manual toggles reset on column change; that is
+   acceptable and predictable.
+3. Amber affordance copy: change the subtitle to explain the action, e.g. "amber = low
+   OCR confidence — click the row's name to fix it before applying". One sentence, no
+   new UI.
+
+**Success criteria:** unit test reproducing gate #2 passes (clean rows checked, noise row
+unchecked); changing name column visibly re-derives checks; tsc + all tests green.
+Jeff runs gate #3 after this lands.
+
 *DONE 2026-07-14 (branch feat/schedule-ocr-fallback, on top of 42b0433d). All 3 steps
 implemented as specified. Measured against the real page-53 door schedule (rotated
 /Rotate 270, 87×23 `ruled_ocr` grid, 1094 non-empty cells):
@@ -456,6 +487,27 @@ parsing must keep working for whichever provider; OpenRouter returns OpenAI-styl
 **Success criteria:** chat works with either provider by env switch; token logging rows
 appear for both; streaming unchanged in the client; no provider key ever reaches the
 client bundle.
+
+---
+
+## Workstream F — Batch hyperlinking: bubble targets (queued from beta feedback 2026-07-15)
+
+**Problem (Jeff):** batch hyperlinking improved, but "still doesnt grab all the sections,
+detail, and elevation tags. Mostly works on matchlines and easier things not in
+bubbles/symbols — which are the high value auto-hyperlink targets."
+
+**Shape of the work (needs a scoping pass before chipping):** detail/section/elevation
+callouts are vector symbols — a circle (or circle+triangle for sections) with a
+horizontal diameter line, detail number above, sheet number below (e.g. 15/A9.03).
+The text is often present in the PDF text layer even when the door-schedule body is
+outlined — verify on the beta set first. Approach candidate: detect candidate circles in
+the drawing vectors (get_drawings arcs/circles within a radius band), pair each with
+text-layer tokens inside its bbox matching /^\d+\s*[/|]\s*[A-Z]+\d/ or a two-line
+number-over-sheet pattern, then reuse the existing hyperlink creation path (see
+`create_sheet_hyperlinks_table.sql` service + existing matchline linker for target-sheet
+resolution). First session: READ-ONLY scoping against the beta PDFs — measure how many
+bubbles exist, how many have text-layer text, and write F1/F2 task specs with real
+numbers before any code.
 
 ---
 
