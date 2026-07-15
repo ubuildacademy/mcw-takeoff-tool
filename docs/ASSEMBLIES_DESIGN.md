@@ -85,3 +85,30 @@ workbooks* — vs. STACK-style assemblies that force the vendor's database and m
 pick "Aquafin 2K" from templates, the condition arrives pre-wired to its mapping, and the
 Costs tab prices live in-app. The C1 schema (`condition_ref` = name pattern/template id)
 was designed so this requires no rebuild.
+
+## Stage 1 verdict + next-level ladder (Jeff beta feedback, 2026-07-15)
+
+C1–C4 shipped and E2E-proven, but Jeff's read after real use: **for a single condition,
+manually typing the quantity into Excel is fewer clicks than upload→map→generate** — as
+built, it adds work instead of removing it. Stage 1 only pays off at batch scale
+("Generate All" across 10–15 product lines, zero transcription errors, auditable
+breakdown). Treat Stage 1 as plumbing, not product. Direction confirmed by Jeff: goal is
+everything in-system, eventually replacing the 200+ workbooks with beautified in-app
+reports/downloads.
+
+Agreed ladder:
+- **C5 — auto-map on upload** (next, small): on workbook upload, scan the ASSEMBLY sheet
+  XML for the "Job Quantity" label (audit: detectable in 227/235 workbooks), propose the
+  adjacent VALUE cell (e.g. label C13 → input D13 — C4 proved the label/value split) and
+  a name-derived condition pattern. Upload → one confirm dialog → mapped. Kills the
+  manual form for the common case; form remains as fallback for the 8 odd workbooks.
+- **C6 — kill the pattern box**: replace free-text pattern with a multi-select dropdown
+  of the project's actual conditions; plus assembly-as-condition-template (the Stage 2
+  hook) so new conditions are born pre-wired.
+- **Stage 2 — native engine** (own planning session; break into chip-sized tasks like
+  Workstreams A–C before any code): bootstrap importer parses all ASSEMBLY sheets
+  (consistent INDEX/MATCH + ROUNDUP(qty/yield) patterns) → native assemblies
+  (components, yields, labor params, divide-through margin chain) → Costs tab prices
+  live during takeoff → branded in-app report downloads. The workbook library becomes a
+  one-time import source, not a runtime dependency. Registry + writer stay as the escape
+  hatch for companies that keep Excel.
