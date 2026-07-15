@@ -24,7 +24,7 @@ import { CreateConditionDialog } from './CreateConditionDialog';
 import { SendReportModal } from './SendReportModal';
 import { formatFeetAndInches } from '../lib/utils';
 import { extractErrorMessage } from '../utils/commonUtils';
-import { useTakeoffExport, TakeoffSidebarConditionList } from './takeoff-sidebar';
+import { useTakeoffExport, TakeoffSidebarConditionList, AssemblyWorkbooksSection } from './takeoff-sidebar';
 import { PDFExportOptionsDialog } from './takeoff-sidebar/PDFExportOptionsDialog';
 import { ConditionTemplatesDialog } from './takeoff-sidebar/ConditionTemplatesDialog';
 import { supabase } from '../lib/supabase';
@@ -762,6 +762,10 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                 </div>
               );
             })()}
+
+            <div className="mt-6 pt-4 border-t border-border">
+              <AssemblyWorkbooksSection projectId={projectId} />
+            </div>
           </div>
         )}
       </div>
