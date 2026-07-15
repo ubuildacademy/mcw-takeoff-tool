@@ -286,6 +286,76 @@ some OCR characters wrong." → B4 queued; dev gate stays on until B4 + re-test.
 and dimension columns read >90% correct by manual spot-check of 20 cells; extraction time
 stays under ~20s/region; existing tests pass. Jeff re-runs the ship gate after this lands.
 
+*Gate result #2 (2026-07-15): FAIL — but root cause is selection logic, not OCR. Dialog
+auto-picked "0: Door" as name column; door numbers live in oval bubbles OCR can't read,
+so col 0 is empty on every clean row → all clean rows flagged junk/unchecked, while the
+one OCR-garbage row ("Vai va") had noise in col 0 → the ONLY row checked. Perfectly
+inverted selection from one bad column guess. Jeff also confused by amber affordance
+("am I supposed to fix it?"). Dev gate stays. → B5.*
+
+### Task B5 — Fix name-column guess + selection re-derive (queued 2026-07-15)
+
+**Goal:** the review dialog must never invert selection like gate #2. No OCR changes.
+
+**Files:** `src/utils/scheduleTableMapping.ts` (`guessNameColumn`),
+`src/components/ScheduleReviewDialog.tsx` (selection reset), tests alongside existing ones.
+
+**Do:**
+1. `guessNameColumn`: a column only qualifies if ≥60% of its body rows are non-empty
+   (after trim). Among qualifying columns, keep the current header-regex-then-
+   alpha-dominance logic. Add tests: the gate-#2 shape (col 0 empty except one noise row,
+   room names in a later column) must pick the room-name column.
+2. `ScheduleReviewDialog`: when the user changes the Name column dropdown, re-derive the
+   junk flags AND the checked set (same render-phase reset pattern already used for
+   table/headerRows — no useEffect). Manual toggles reset on column change; that is
+   acceptable and predictable.
+3. Amber affordance copy: change the subtitle to explain the action, e.g. "amber = low
+   OCR confidence — click the row's name to fix it before applying". One sentence, no
+   new UI.
+
+**Success criteria:** unit test reproducing gate #2 passes (clean rows checked, noise row
+unchecked); changing name column visibly re-derives checks; tsc + all tests green.
+Jeff runs gate #3 after this lands.
+
+*DONE 2026-07-14 (branch feat/schedule-ocr-fallback, on top of 42b0433d). All 3 steps
+implemented as specified. Measured against the real page-53 door schedule (rotated
+/Rotate 270, 87×23 `ruled_ocr` grid, 1094 non-empty cells):
+- High-confidence (>70) share: 82.6% → 82.8% (904/1094 → 906/1094). Small, not the clear
+  jump the criterion implies.
+- Time: ~19.3s/region, under the ~20s budget — but only after the retry step (1) got a
+  wall-clock cap on top of the ~100-retry count cap. Per-retry cost is dominated by
+  pytesseract spawning a fresh `tesseract` subprocess (~120ms fixed overhead) — at a full
+  100 retries this pushed a single region to ~27s. Added `OCR_RETRY_TIME_BUDGET_SEC`
+  (4.5s) so the retry pass stops early under load; the ~100 cap is now a ceiling, not a
+  target.
+- Dimension columns, 20-cell manual spot-check (WIDTH/HEIGHT/THICKNESS, straight-vs-curly
+  quote treated as equivalent): **10/20 (50%) both before and after — criterion not met.**
+  Cause: on this page the dominant errors are Tesseract confidently misreading glyphs
+  outside the spec'd confusion set — `¾` read as `%`, digit substitutions like `1`→`4`,
+  and HEIGHT-column reads (`6'-8"`) losing characters down to `6-8` or `8"`. These land at
+  78-94% confidence, so step 1's retry never fires on them (not ≤70) and step 2's
+  normalization list doesn't cover them (spec scoped it to `O↔0`, `l/I↔1`, `S↔5`, quote
+  glyphs, trailing dot). Step 3 (charset validation) is implemented and unit-tested but
+  never fires on this specific page either — the grouped header row OCRs as pure garbage
+  (`"° > Ww"`, `"an S65"`, etc.), so the `/width|height|thickness/i` header match never
+  finds the WIDTH/HEIGHT/THICKNESS columns to validate.
+- What step 2 *did* fix, verified: curly quote/apostrophe glyphs in dimension cells now
+  come out straight (`3'-0"` instead of `3'-0"`/`3'-0"` mixed), consistently across the
+  region.
+- `existing tests pass`: no prior Python tests existed for this file; added
+  `server/src/scripts/test_table_extract.py` (stdlib `unittest`, no PDF/Tesseract needed)
+  covering `_normalize_cell_text` and `_validate_dimension_columns` — 8/8 pass. `server`
+  `npx tsc --noEmit` was not re-verified clean in this worktree (node_modules was never
+  installed here — pre-existing, unrelated to this change; no .ts files touched).
+
+**Recommendation before Jeff re-runs the ship gate:** the 3 steps as spec'd don't move
+page-53's dimension-column accuracy. Worth a follow-up task to either (a) widen the
+normalization list once more real confusions are catalogued (¾/%, digit-for-digit
+misreads), or (b) accept that the outlined/rotated schedule's HEIGHT column and header
+row need a different approach (e.g. a header-position heuristic instead of header-text
+matching, since header OCR is unreliable here) — flagging rather than deciding, since
+scope was fixed to the 3 listed steps.*
+
 ---
 
 ## Workstream C — Assemblies (Stage 1 bridge)
@@ -417,6 +487,27 @@ parsing must keep working for whichever provider; OpenRouter returns OpenAI-styl
 **Success criteria:** chat works with either provider by env switch; token logging rows
 appear for both; streaming unchanged in the client; no provider key ever reaches the
 client bundle.
+
+---
+
+## Workstream F — Batch hyperlinking: bubble targets (queued from beta feedback 2026-07-15)
+
+**Problem (Jeff):** batch hyperlinking improved, but "still doesnt grab all the sections,
+detail, and elevation tags. Mostly works on matchlines and easier things not in
+bubbles/symbols — which are the high value auto-hyperlink targets."
+
+**Shape of the work (needs a scoping pass before chipping):** detail/section/elevation
+callouts are vector symbols — a circle (or circle+triangle for sections) with a
+horizontal diameter line, detail number above, sheet number below (e.g. 15/A9.03).
+The text is often present in the PDF text layer even when the door-schedule body is
+outlined — verify on the beta set first. Approach candidate: detect candidate circles in
+the drawing vectors (get_drawings arcs/circles within a radius band), pair each with
+text-layer tokens inside its bbox matching /^\d+\s*[/|]\s*[A-Z]+\d/ or a two-line
+number-over-sheet pattern, then reuse the existing hyperlink creation path (see
+`create_sheet_hyperlinks_table.sql` service + existing matchline linker for target-sheet
+resolution). First session: READ-ONLY scoping against the beta PDFs — measure how many
+bubbles exist, how many have text-layer text, and write F1/F2 task specs with real
+numbers before any code.
 
 ---
 
