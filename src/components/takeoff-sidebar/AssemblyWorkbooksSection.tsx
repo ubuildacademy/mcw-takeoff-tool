@@ -8,11 +8,12 @@ import { authHelpers } from '../../lib/supabase';
 import { useConditionStore } from '../../store/slices/conditionSlice';
 import { useMeasurementStore } from '../../store/slices/measurementSlice';
 import type { TakeoffCondition } from '../../types';
-import { assemblyService, type AssemblyWorkbook, type AssemblyMapping } from '../../services/apiService';
+import { assemblyService, type AssemblyWorkbook, type AssemblyMapping, type AssemblyScanProposal } from '../../services/apiService';
 import { extractErrorMessage } from '../../utils/commonUtils';
 import { matchConditionsToMapping } from '../../utils/assemblyMatching';
 import { AssemblyMappingForm } from './AssemblyMappingForm';
 import { AssemblyGenerateConfirmDialog, type AssemblyGenerateItem } from './AssemblyGenerateConfirmDialog';
+import { AssemblyProposalConfirmDialog } from './AssemblyProposalConfirmDialog';
 
 export interface AssemblyWorkbooksSectionProps {
   projectId: string;
@@ -49,6 +50,12 @@ export function AssemblyWorkbooksSection({ projectId }: AssemblyWorkbooksSection
 
   const [generateConfirmItems, setGenerateConfirmItems] = useState<AssemblyGenerateItem[] | null>(null);
   const [generating, setGenerating] = useState(false);
+
+  const [proposalTarget, setProposalTarget] = useState<{
+    workbookId: string;
+    filename: string;
+    proposal: AssemblyScanProposal;
+  } | null>(null);
 
   useEffect(() => {
     authHelpers.isAdmin().then(setIsAdmin).catch(() => setIsAdmin(false));
@@ -120,9 +127,12 @@ export function AssemblyWorkbooksSection({ projectId }: AssemblyWorkbooksSection
     if (!file) return;
     setUploading(true);
     try {
-      const workbook = await assemblyService.uploadWorkbook(file);
+      const { workbook, proposal } = await assemblyService.uploadWorkbook(file);
       setWorkbooks((prev) => [workbook, ...prev]);
       toast.success('Workbook uploaded');
+      if (proposal) {
+        setProposalTarget({ workbookId: workbook.id, filename: workbook.filename, proposal });
+      }
     } catch (err) {
       toast.error(extractErrorMessage(err, 'Failed to upload workbook'));
     } finally {
@@ -370,6 +380,24 @@ export function AssemblyWorkbooksSection({ projectId }: AssemblyWorkbooksSection
         onConfirm={handleConfirmGenerate}
         confirming={generating}
       />
+
+      {proposalTarget && (
+        <AssemblyProposalConfirmDialog
+          open={proposalTarget !== null}
+          onOpenChange={(open) => {
+            if (!open) setProposalTarget(null);
+          }}
+          workbookId={proposalTarget.workbookId}
+          filename={proposalTarget.filename}
+          proposal={proposalTarget.proposal}
+          onSaved={(mapping) => {
+            setMappings((prev) => ({
+              ...prev,
+              [mapping.workbookId]: [...(prev[mapping.workbookId] ?? []), mapping],
+            }));
+          }}
+        />
+      )}
     </div>
   );
 }

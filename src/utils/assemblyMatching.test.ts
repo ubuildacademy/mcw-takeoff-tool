@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { matchConditionsToMapping, type MatchableCondition } from './assemblyMatching';
+import { matchConditionsToMapping, deriveConditionPattern, type MatchableCondition } from './assemblyMatching';
 
 const conditions: MatchableCondition[] = [
   { id: '1', name: 'Aquafin 2K deck' },
@@ -42,5 +42,19 @@ describe('matchConditionsToMapping', () => {
   it('bare "*" matches every condition', () => {
     const result = matchConditionsToMapping(conditions, '*');
     expect(result).toHaveLength(conditions.length);
+  });
+});
+
+describe('deriveConditionPattern', () => {
+  it('strips extension and a trailing short revision token', () => {
+    expect(deriveConditionPattern('Aquafin-2K M.xlsx')).toBe('Aquafin-2K*');
+  });
+
+  it('keeps longer trailing tokens', () => {
+    expect(deriveConditionPattern('Dow 790.xlsx')).toBe('Dow 790*');
+  });
+
+  it('handles filenames with no spaces', () => {
+    expect(deriveConditionPattern('CoverPlates.xlsm')).toBe('CoverPlates*');
   });
 });
