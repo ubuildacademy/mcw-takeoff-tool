@@ -9,6 +9,8 @@ import {
   groupScheduleRows,
   isBlankOrDashCell,
   isInstanceCode,
+  cleanConditionName,
+  isJunkRow,
 } from './scheduleTableMapping';
 
 /**
@@ -126,6 +128,20 @@ describe('scheduleTableMapping', () => {
       const labels = ['DOOR NUMBER 2nd LEVEL', '3rd LEVEL', 'ROOM NAME'];
       expect(guessNameColumn(labels, [0, 1])).toBe(2);
     });
+
+    it('falls back to the most alpha-dominant column when no header matches', () => {
+      // Glazing-schedule shape: no header word matches /room|name|mark|type|desc/i,
+      // so the pick must come from actual cell content — column 1 (remarks/NOA,
+      // mostly digits and punctuation) must lose to column 0 (real descriptions).
+      const noHeaderLabels = ['GLASS SPEC', 'REF'];
+      const rows = [
+        noHeaderLabels,
+        ['TEMPERED LAMINATED', '#190002-R1'],
+        ['INSULATED GLASS', '17-1102.02'],
+        ['LAMINATED SAFETY', '0.70'],
+      ];
+      expect(guessNameColumn(noHeaderLabels, [], rows, 1)).toBe(0);
+    });
   });
 
   describe('computeRowQty', () => {
@@ -174,6 +190,71 @@ describe('scheduleTableMapping', () => {
       const groups = groupScheduleRows(mapped, false);
       expect(groups).toHaveLength(5);
       expect(groups.map((g) => g.totalQty)).toEqual([5, 5, 5, 5, 1]);
+    });
+  });
+
+  describe('cleanConditionName', () => {
+    it('leaves a good door-schedule name untouched', () => {
+      expect(cleanConditionName('LINEN STORAGE')).toBe('LINEN STORAGE');
+    });
+
+    it('collapses whitespace and strips a leading stray quote', () => {
+      const raw = '"D NOA # EXPIRATION DATE ZONE 4 ZONE 5';
+      const cleaned = cleanConditionName(raw);
+      expect(cleaned.startsWith('"')).toBe(false);
+      expect(cleaned).toBe('D NOA # EXPIRATION DATE ZONE 4 ZONE 5');
+    });
+
+    it('caps long remarks/spec text at 60 chars on a word boundary', () => {
+      const raw =
+        'STC—42 0.70 0.60 #190002-R1 FL 30, EXPIRES JUNE 2019 —50.2 —50.2 -92.0 +50.2';
+      const cleaned = cleanConditionName(raw);
+      expect(cleaned.length).toBeLessThanOrEqual(61); // 60 chars + ellipsis
+      expect(cleaned.endsWith('…')).toBe(true);
+      expect(cleaned.endsWith(' …')).toBe(false); // cut on a word boundary, no trailing space
+    });
+
+    it('passes short garbage through unchanged when there is nothing to strip', () => {
+      expect(cleanConditionName('e')).toBe('e');
+      expect(cleanConditionName('Z2e oS Ow')).toBe('Z2e oS Ow');
+    });
+
+    it('strips stray pipes and brackets anywhere in the cell', () => {
+      expect(cleanConditionName('LINEN | STORAGE')).toBe('LINEN STORAGE');
+      expect(cleanConditionName('[LINEN STORAGE]')).toBe('LINEN STORAGE');
+    });
+  });
+
+  describe('isJunkRow', () => {
+    it('keeps a good door-schedule row', () => {
+      const row = ['201A', '301A', 'LINEN STORAGE', 'WD.', '#16.0', 'YES'];
+      expect(isJunkRow(row, 2)).toBe(false);
+    });
+
+    it('flags a single-letter name as junk (too few alphabetic chars)', () => {
+      const row = ['e', '2', 'WD.'];
+      expect(isJunkRow(row, 0)).toBe(true);
+    });
+
+    it('flags a name cell dominated by non-alphanumeric characters (3+ alpha chars, but mostly noise)', () => {
+      const row = ['A#B#C#---', '1'];
+      expect(isJunkRow(row, 0)).toBe(true);
+    });
+
+    it('flags an all-blank/dash row', () => {
+      const row = ['–', '-', '', undefined as unknown as string];
+      expect(isJunkRow(row, 0)).toBe(true);
+    });
+
+    it('does not flag real remarks/spec text just for looking messy', () => {
+      // These beta-test garbage names have plenty of alpha chars and a
+      // low non-alnum ratio — they aren't junk by these mechanical rules,
+      // so hygiene here comes from cleanConditionName + better column pick,
+      // not junk-row suppression.
+      const row1 = ['"D NOA # EXPIRATION DATE ZONE 4 ZONE 5'];
+      const row2 = ['Z2e oS Ow'];
+      expect(isJunkRow(row1, 0)).toBe(false);
+      expect(isJunkRow(row2, 0)).toBe(false);
     });
   });
 });

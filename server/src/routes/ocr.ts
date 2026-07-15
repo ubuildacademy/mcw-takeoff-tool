@@ -7,7 +7,7 @@ import { simpleOcrService, type OCRWordBox, type SimpleOCRResult } from '../serv
 import { pymupdfTextExtractor } from '../services/pymupdfTextExtractor';
 import { bubbleOcrExtractor } from '../services/bubbleOcrExtractor';
 import { vectorCalloutExtractor } from '../services/vectorCalloutExtractor';
-import { tableExtractor } from '../services/tableExtractor';
+import { tableExtractor, TableExtractError } from '../services/tableExtractor';
 import { requireAuth, hasProjectAccess, isAdmin, validateUUIDParam, isValidUUID } from '../middleware';
 import { devLog, devWarn } from '../lib/devLog';
 
@@ -931,11 +931,23 @@ router.post(
     await fs.writeFile(tempPath, Buffer.from(await fileData.arrayBuffer()));
 
     try {
-      const table = await tableExtractor.extract(tempPath, pageNum, {
-        x: r.x, y: r.y, width: r.width, height: r.height,
-      });
+      const table = await tableExtractor.extract(
+        tempPath,
+        pageNum,
+        { x: r.x, y: r.y, width: r.width, height: r.height },
+        { ocr: true }
+      );
       res.json({ documentId, pageNumber: pageNum, ...table });
     } catch (error) {
+      // Expected, reportable outcomes (e.g. an outlined schedule OCR still
+      // couldn't read) return 422 so the client shows the precise guidance and
+      // a genuine server fault stays a distinguishable 500.
+      if (error instanceof TableExtractError) {
+        return res.status(422).json({
+          error: error.message,
+          reason: error.reason ?? 'extract_failed',
+        });
+      }
       console.error('table-extract failed:', error);
       res.status(500).json({
         error: 'Table extraction failed',

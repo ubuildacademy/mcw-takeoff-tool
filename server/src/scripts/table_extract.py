@@ -9,22 +9,27 @@ Reconstructs a table from a user-boxed region of a CAD-exported sheet:
      rows and x-starts into columns.
 
 Usage:
-    python3 table_extract.py <pdf_path> <page_number_1based> <x0> <y0> <x1> <y1>
+    python3 table_extract.py <pdf_path> <page_number_1based> <x0> <y0> <x1> <y1> [ocr]
     (region in 0..1 normalized page coordinates, top-left origin)
+    Pass a 7th arg "ocr" to enable the per-cell Tesseract fallback for
+    outlined/flattened schedules whose data cells have no selectable text.
 
 Output (stdout JSON):
     {
       "success": true,
-      "mode": "ruled" | "clustered",
+      "mode": "ruled" | "clustered" | "ruled_ocr",
       "rows": [["MARK", "WIDTH", ...], ["W1", "3'-0\"", ...]],
       "rowBoxes": [{"y0": 0.31, "y1": 0.33}, ...],   # normalized, per row
+      "cellConfidence": [[97, 88, ...], ...],         # ruled_ocr only, 0..100 per cell
       "region": {"x0":..., "y0":..., "x1":..., "y1":...}
     }
 """
 from __future__ import annotations
 
 import json
+import re
 import sys
+import time
 
 import fitz  # PyMuPDF
 
@@ -33,6 +38,25 @@ MIN_LINE_LEN_PT = 12.0      # ignore tick marks / glyph strokes
 CLUSTER_TOL_PT = 2.5        # merge nearby parallel lines into one boundary
 WORD_ROW_TOL_FACTOR = 0.7   # row clustering: fraction of median word height
 COL_TOL_PT = 9.0            # column clustering tolerance on x-starts
+OCR_ZOOM = 4.0              # render scale for OCR fallback (72*4 ≈ 288 DPI)
+OCR_RETRY_ZOOM = OCR_ZOOM * 2       # 2x DPI re-read for low-confidence cells
+OCR_RETRY_CONF_THRESHOLD = 70       # cells at/below this confidence get retried
+OCR_RETRY_MAX_PER_REGION = 100      # bound worst-case extra Tesseract calls
+# Each retry shells out to a separate `tesseract` process (~0.1-0.15s of fixed
+# process-spawn overhead per call, dwarfing the actual OCR work on a tiny cell
+# crop) — on a dense schedule the count cap alone can blow the ~20s/region
+# budget, so also stop early once this much wall-clock time has gone to
+# retries specifically.
+OCR_RETRY_TIME_BUDGET_SEC = 4.5
+
+_QUOTE_GLYPH_MAP = {
+    "”": '"', "″": '"',            # ” ″ -> "
+    "’": "'", "‘": "'", "′": "'",  # ’ ‘ ′ -> '
+}
+_DIM_CELL_RE = re.compile(r"^\d+['‘’′\-‐–—]")
+_DIGIT_CONFUSION_TABLE = str.maketrans({"O": "0", "o": "0", "I": "1", "l": "1", "S": "5"})
+_DIM_HEADER_RE = re.compile(r"width|height|thickness", re.IGNORECASE)
+_DIM_CHARSET_RE = re.compile(r"^[\d'\"‘’“”′″‐–—\-⁄/ .]+$")
 
 
 def _cluster(values: list[float], tol: float) -> list[float]:
@@ -84,7 +108,291 @@ def _segments_in_region(page: "fitz.Page", x0: float, y0: float, x1: float, y1: 
     return horizontals, verticals
 
 
-def extract_table(pdf_path: str, page_number: int, nx0: float, ny0: float, nx1: float, ny1: float) -> dict:
+def _ocr_words(page: "fitz.Page", x0: float, y0: float, x1: float, y1: float):
+    """OCR the boxed region ONCE; return words as (wx0, wy0, wx1, wy1, text, conf)
+    in unrotated PAGE-point coordinates so they slot into the same cell lattice
+    the vector path uses. One Tesseract pass over the region — not per cell —
+    keeps this fast and reuses the proven grid-assignment logic.
+
+    The region (x0..y1) is in UNROTATED page space, where the lattice lives.
+    But OCR needs visually-upright pixels, so we render at the page's NATIVE
+    rotation (get_pixmap works in rotated/visible space) and map each word's
+    pixel box back to unrotated space via the page's derotation matrix. This is
+    what makes rotated CAD sheets (e.g. /Rotate 270 landscape plots) read
+    correctly instead of sideways. The doc is closed by the caller.
+    """
+    from PIL import Image
+    import pytesseract
+
+    # Unrotated region -> visible (rotated) clip that get_pixmap understands.
+    vis_clip = fitz.Rect(x0, y0, x1, y1) * page.rotation_matrix
+    vis_clip.normalize()
+
+    pix = page.get_pixmap(matrix=fitz.Matrix(OCR_ZOOM, OCR_ZOOM), clip=vis_clip, alpha=False)
+    # Feed grayscale straight to Tesseract and let it Otsu-threshold internally.
+    # A manual global binarize flips the schedule's gray SHADED rows (level
+    # grouping bands) to solid black, erasing their text and wrecking layout
+    # analysis for the whole region — measurably worse (≈half the confident
+    # words) than raw grayscale on the real outlined door schedule.
+    img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples).convert("L")
+
+    # PSM 11 (sparse text: find every word regardless of layout). We do NOT want
+    # Tesseract to infer the table — the vector lattice already provides the grid,
+    # and we only need words + positions to drop into cells. PSM 6 ("uniform
+    # block") mis-segments the dense schedule grid and door-number ovals into
+    # near-garbage; sparse mode is dramatically more robust on a loose box.
+    data = pytesseract.image_to_data(
+        img,
+        config="--psm 11 -c preserve_interword_spaces=1",
+        output_type=pytesseract.Output.DICT,
+    )
+
+    derot = page.derotation_matrix  # visible (rotated) -> unrotated
+    words = []
+    for i in range(len(data["text"])):
+        text = (data["text"][i] or "").strip()
+        try:
+            conf = float(data["conf"][i])
+        except (TypeError, ValueError):
+            conf = -1.0
+        if not text or conf < 0:
+            continue
+        px, py = data["left"][i], data["top"][i]
+        pw2, ph2 = data["width"][i], data["height"][i]
+        # pixel -> visible page point (pixmap origin = vis_clip top-left)
+        v0 = fitz.Point(vis_clip.x0 + px / OCR_ZOOM, vis_clip.y0 + py / OCR_ZOOM) * derot
+        v1 = fitz.Point(
+            vis_clip.x0 + (px + pw2) / OCR_ZOOM, vis_clip.y0 + (py + ph2) / OCR_ZOOM
+        ) * derot
+        ux0, ux1 = sorted((v0.x, v1.x))
+        uy0, uy1 = sorted((v0.y, v1.y))
+        words.append((ux0, uy0, ux1, uy1, text, conf))
+    return words
+
+
+def _ocr_cell(page: "fitz.Page", x0: float, y0: float, x1: float, y1: float):
+    """Re-OCR a single lattice cell's crop at 2x the region DPI, single-line
+    PSM 7. Same unrotated-space -> visible-render -> derotate handling as
+    `_ocr_words`, just scoped to one small cell instead of the whole region.
+    Returns (text, conf) or None if nothing recognized.
+    """
+    from PIL import Image
+    import pytesseract
+
+    vis_clip = fitz.Rect(x0, y0, x1, y1) * page.rotation_matrix
+    vis_clip.normalize()
+    if vis_clip.width < 1 or vis_clip.height < 1:
+        return None
+
+    pix = page.get_pixmap(matrix=fitz.Matrix(OCR_RETRY_ZOOM, OCR_RETRY_ZOOM), clip=vis_clip, alpha=False)
+    img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples).convert("L")
+
+    data = pytesseract.image_to_data(
+        img,
+        config="--psm 7 -c preserve_interword_spaces=1",
+        output_type=pytesseract.Output.DICT,
+    )
+    tokens = []
+    for i in range(len(data["text"])):
+        text = (data["text"][i] or "").strip()
+        try:
+            conf = float(data["conf"][i])
+        except (TypeError, ValueError):
+            conf = -1.0
+        if text and conf >= 0:
+            tokens.append((text, conf))
+    if not tokens:
+        return None
+    return " ".join(t for t, _ in tokens), round(min(c for _, c in tokens))
+
+
+def _normalize_cell_text(text: str) -> str:
+    """Deterministic post-OCR fixes for common CAD-schedule character
+    confusions. Never invents or drops characters — only remaps glyphs
+    Tesseract is known to misread on these sheets.
+    """
+    if not text:
+        return text
+
+    # Quote glyph normalization, dimension cells only (e.g. 3'-0" / 2’-6”).
+    if _DIM_CELL_RE.match(text):
+        for glyph, straight in _QUOTE_GLYPH_MAP.items():
+            text = text.replace(glyph, straight)
+
+    # O/0, l/I/1, S/5 confusions — only when the cell is otherwise a digit
+    # string (door numbers, dimensions), so real words (ROOM NAME, "STAIRS")
+    # are never touched. A single trailing letter suffix (e.g. "201A") is
+    # allowed and left as-is.
+    if re.search(r"\d", text):
+        body, suffix = text, ""
+        m = re.match(r"^(.*\d)([A-Za-z])$", text)
+        if m:
+            body, suffix = m.group(1), m.group(2)
+        residue = re.sub(r"[\d\s#.\-]", "", re.sub(r"[OoIlS]", "", body))
+        if not residue:
+            text = body.translate(_DIGIT_CONFUSION_TABLE) + suffix
+
+    # Strip a lone trailing "." after an integer (spurious OCR punctuation).
+    text = re.sub(r"(?<=\d)\.$", "", text)
+    return text
+
+
+def _validate_dimension_columns(rows: list[list[str]], conf_matrix: list[list[int]]) -> None:
+    """Per-column charset check for dimension-like columns (header matches
+    width/height/thickness). Mismatches LOWER cellConfidence so the amber
+    review flag fires — text is never rewritten. Mutates conf_matrix in place.
+    """
+    if not rows:
+        return
+    header_rows = rows[: min(3, len(rows))]
+    dim_cols: set[int] = set()
+    for hr in header_rows:
+        for c, cell in enumerate(hr):
+            if cell and _DIM_HEADER_RE.search(cell):
+                dim_cols.add(c)
+    if not dim_cols:
+        return
+
+    n_header_rows = len(header_rows)
+    for r in range(n_header_rows, len(rows)):
+        for c in dim_cols:
+            if c >= len(rows[r]):
+                continue
+            cell = rows[r][c]
+            if cell and not _DIM_CHARSET_RE.match(cell):
+                conf_matrix[r][c] = min(conf_matrix[r][c], OCR_RETRY_CONF_THRESHOLD - 1)
+
+
+def _drop_empty(rows, row_boxes, conf=None):
+    """Drop fully-empty rows and columns, keeping row_boxes and an optional
+    per-cell confidence matrix aligned. Returns (rows, row_boxes, conf)."""
+    keep = [i for i, r in enumerate(rows) if any(cell for cell in r)]
+    rows = [rows[i] for i in keep]
+    row_boxes = [row_boxes[i] for i in keep]
+    if conf is not None:
+        conf = [conf[i] for i in keep]
+
+    if rows:
+        n = max(len(r) for r in rows)
+        rows = [r + [""] * (n - len(r)) for r in rows]
+        if conf is not None:
+            conf = [c + [0] * (n - len(c)) for c in conf]
+        keep_cols = [j for j in range(n) if any(r[j] for r in rows)]
+        rows = [[r[j] for j in keep_cols] for r in rows]
+        if conf is not None:
+            conf = [[c[j] for j in keep_cols] for c in conf]
+    return rows, row_boxes, conf
+
+
+def _ocr_fill_grid(page, row_edges, col_edges, x0, y0, x1, y1, pw, ph):
+    """Build table rows from OCR words assigned to the vector lattice, oriented
+    for VISIBLE reading order (doors as rows) regardless of page rotation.
+
+    The lattice (row_edges × col_edges) is in unrotated space. On a rotated
+    sheet (e.g. /Rotate 270 landscape plots) the unrotated rows are the
+    schedule's visual columns, so we re-index every cell by its VISIBLE center
+    (unrotated center × rotation_matrix). Each output row also carries its
+    UNROTATED bounding box (normalized) so the app can place count markers in
+    the coordinate space it uses — visible reading, unrotated placement.
+
+    Returns (rows, row_boxes, cell_confidence) or None if OCR read nothing.
+    row_boxes entries are {x0, y0, x1, y1} normalized (unrotated).
+    """
+    ocr_words = _ocr_words(page, x0, y0, x1, y1)
+    if not ocr_words:
+        return None
+
+    n_rows = len(row_edges) - 1
+    n_cols = len(col_edges) - 1
+    cells: list[list[list[tuple[float, str, float]]]] = [
+        [[] for _ in range(n_cols)] for _ in range(n_rows)
+    ]
+    for (wx0, wy0, wx1, wy1, text, conf) in ocr_words:
+        cx = (wx0 + wx1) / 2
+        cy = (wy0 + wy1) / 2
+        ri = next((i for i in range(n_rows) if row_edges[i] <= cy <= row_edges[i + 1]), None)
+        ci = next((j for j in range(n_cols) if col_edges[j] <= cx <= col_edges[j + 1]), None)
+        if ri is not None and ci is not None:
+            cells[ri][ci].append((wx0, text, conf))
+
+    rot_matrix = page.rotation_matrix  # unrotated -> visible
+
+    # Project every lattice cell to its visible center; cluster those into the
+    # visible row/column bands so output reads the way a person sees the sheet.
+    retries_left = OCR_RETRY_MAX_PER_REGION
+    retry_deadline = time.monotonic() + OCR_RETRY_TIME_BUDGET_SEC
+    infos = []  # (vis_y, vis_x, unrot_box, text, conf)
+    for i in range(n_rows):
+        uy0, uy1 = row_edges[i], row_edges[i + 1]
+        for j in range(n_cols):
+            ux0, ux1 = col_edges[j], col_edges[j + 1]
+            vc = fitz.Point((ux0 + ux1) / 2, (uy0 + uy1) / 2) * rot_matrix
+            toks = sorted(cells[i][j], key=lambda t: t[0])
+            text = " ".join(t for _, t, _ in toks)
+            # Cell confidence = weakest token (min): one shaky glyph flags the cell.
+            conf = round(min((c for _, _, c in toks), default=0))
+            # Low-confidence cells that had text: one re-read at 2x DPI,
+            # single-line PSM 7, keep whichever pass scored higher. Bounded
+            # by both a retry count cap and a wall-clock budget.
+            if (
+                toks and conf <= OCR_RETRY_CONF_THRESHOLD and retries_left > 0
+                and time.monotonic() < retry_deadline
+            ):
+                retries_left -= 1
+                retried = _ocr_cell(page, ux0, uy0, ux1, uy1)
+                if retried is not None and retried[1] > conf:
+                    text, conf = retried
+            infos.append((vc.y, vc.x, (ux0, uy0, ux1, uy1), text, conf))
+
+    row_centers = _cluster(sorted(inf[0] for inf in infos), CLUSTER_TOL_PT)
+    col_centers = _cluster(sorted(inf[1] for inf in infos), CLUSTER_TOL_PT)
+
+    def nearest(values: list[float], v: float) -> int:
+        return min(range(len(values)), key=lambda k: abs(values[k] - v))
+
+    v_rows = len(row_centers)
+    v_cols = len(col_centers)
+    rows = [["" for _ in range(v_cols)] for _ in range(v_rows)]
+    conf_matrix = [[0 for _ in range(v_cols)] for _ in range(v_rows)]
+    # Per visible row: accumulate the unrotated extent for marker placement.
+    extent = [[float("inf"), float("inf"), float("-inf"), float("-inf")] for _ in range(v_rows)]
+
+    for (vy, vx, (bx0, by0, bx1, by1), text, conf) in infos:
+        r = nearest(row_centers, vy)
+        c = nearest(col_centers, vx)
+        if text:
+            rows[r][c] = f"{rows[r][c]} {text}".strip() if rows[r][c] else text
+            conf_matrix[r][c] = conf if conf_matrix[r][c] == 0 else min(conf_matrix[r][c], conf)
+        e = extent[r]
+        e[0], e[1] = min(e[0], bx0), min(e[1], by0)
+        e[2], e[3] = max(e[2], bx1), max(e[3], by1)
+
+    row_boxes = [
+        {
+            "x0": extent[r][0] / pw, "y0": extent[r][1] / ph,
+            "x1": extent[r][2] / pw, "y1": extent[r][3] / ph,
+        }
+        for r in range(v_rows)
+    ]
+
+    for r in range(v_rows):
+        for c in range(v_cols):
+            if rows[r][c]:
+                rows[r][c] = _normalize_cell_text(rows[r][c])
+    _validate_dimension_columns(rows, conf_matrix)
+
+    return _drop_empty(rows, row_boxes, conf_matrix)
+
+
+def extract_table(
+    pdf_path: str,
+    page_number: int,
+    nx0: float,
+    ny0: float,
+    nx1: float,
+    ny1: float,
+    ocr: bool = False,
+) -> dict:
     try:
         doc = fitz.open(pdf_path)
     except Exception as exc:  # noqa: BLE001
@@ -244,6 +552,25 @@ def extract_table(pdf_path: str, page_number: int, nx0: float, ny0: float, nx1: 
                 1 for row in grid for cell in row if cell
             )
             if data_cells > 0 and filled_cells / data_cells < 0.12:
+                # The lattice (row_edges × col_edges) is real and fully known —
+                # only the glyphs are missing. If OCR is enabled, read the cells
+                # with a single Tesseract pass over the region; otherwise report
+                # the condition precisely so the caller can guide the user.
+                if ocr:
+                    ocr_result = _ocr_fill_grid(
+                        page, row_edges, col_edges, x0, y0, x1, y1, pw, ph
+                    )
+                    if ocr_result is not None:
+                        ocr_rows, ocr_boxes, ocr_conf = ocr_result
+                        if ocr_rows:
+                            return {
+                                "success": True,
+                                "mode": "ruled_ocr",
+                                "rows": ocr_rows,
+                                "rowBoxes": ocr_boxes,
+                                "cellConfidence": ocr_conf,
+                                "region": {"x0": nx0, "y0": ny0, "x1": nx1, "y1": ny1},
+                            }
                 return {
                     "success": False,
                     "error": (
@@ -258,17 +585,7 @@ def extract_table(pdf_path: str, page_number: int, nx0: float, ny0: float, nx1: 
                     "filledCells": filled_cells,
                 }
 
-        # Drop fully-empty rows (grid lines beyond the data).
-        keep = [i for i, r in enumerate(rows) if any(cell for cell in r)]
-        rows = [rows[i] for i in keep]
-        row_boxes = [row_boxes[i] for i in keep]
-
-        # Drop fully-empty columns (region edges past the drawn grid create gutters).
-        if rows:
-            n = max(len(r) for r in rows)
-            rows = [r + [""] * (n - len(r)) for r in rows]
-            keep_cols = [j for j in range(n) if any(r[j] for r in rows)]
-            rows = [[r[j] for j in keep_cols] for r in rows]
+        rows, row_boxes, _ = _drop_empty(rows, row_boxes)
 
         return {
             "success": True,
@@ -288,6 +605,7 @@ def main() -> None:
     if len(sys.argv) < 7:
         print(json.dumps({"success": False, "error": "Usage: table_extract.py <pdf> <page> <x0> <y0> <x1> <y1>"}))
         sys.exit(1)
+    ocr = len(sys.argv) > 7 and str(sys.argv[7]).strip().lower() == "ocr"
     result = extract_table(
         sys.argv[1],
         int(sys.argv[2]),
@@ -295,6 +613,7 @@ def main() -> None:
         float(sys.argv[4]),
         float(sys.argv[5]),
         float(sys.argv[6]),
+        ocr,
     )
     sys.stdout.write(json.dumps(result))
     sys.stdout.flush()

@@ -16,12 +16,14 @@ import { Checkbox } from './ui/checkbox';
 import { Label } from './ui/label';
 import {
   buildColumnLabels,
+  cleanConditionName,
   computeRowQty,
   detectHeaderRowCount,
   detectInstanceColumns,
   groupScheduleRows,
   guessNameColumn,
   guessQtyMapping,
+  isJunkRow,
   type QtyMapping,
   type ScheduleApplyGroup,
   type ScheduleRowMapping,
@@ -30,10 +32,15 @@ import {
 export type { ScheduleApplyGroup } from '../utils/scheduleTableMapping';
 
 export interface ScheduleTableData {
-  mode: 'ruled' | 'clustered';
+  mode: 'ruled' | 'clustered' | 'ruled_ocr';
   rows: string[][];
-  rowBoxes: Array<{ y0: number; y1: number }>;
+  rowBoxes: Array<{ y0: number; y1: number; x0?: number; x1?: number }>;
+  /** Per-cell OCR confidence 0..100 (ruled_ocr only); low values flag review. */
+  cellConfidence?: number[][];
 }
+
+/** Cells at or below this OCR confidence are flagged for the user to verify. */
+const OCR_REVIEW_THRESHOLD = 70;
 
 export interface ScheduleReviewDialogProps {
   open: boolean;
@@ -68,6 +75,8 @@ export function ScheduleReviewDialog({
   const [countColumns, setCountColumns] = useState<Set<number>>(new Set());
   const [groupByName, setGroupByName] = useState(true);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  /** Per-row name overrides (keyed by row index); unedited rows fall back to the cleaned default. */
+  const [editedNames, setEditedNames] = useState<Map<number, string>>(new Map());
   const [applying, setApplying] = useState(false);
 
   const columnCount = table ? table.rows.reduce((max, row) => Math.max(max, row.length), 0) : 0;
@@ -75,14 +84,20 @@ export function ScheduleReviewDialog({
   const reseedFromHeaderRows = (t: ScheduleTableData, nextHeaderRows: number, colCount: number) => {
     const labels = buildColumnLabels(t.rows, nextHeaderRows, colCount);
     const instanceCols = detectInstanceColumns(t.rows, nextHeaderRows, colCount);
-    setNameCol(guessNameColumn(labels, instanceCols));
+    const guessedNameCol = guessNameColumn(labels, instanceCols, t.rows, nextHeaderRows);
+    setNameCol(guessedNameCol);
     const mapping = guessQtyMapping(labels, instanceCols);
     setQtyMode(mapping.mode);
     setQtyColumn(mapping.mode === 'column' ? mapping.column : 0);
     setCountColumns(new Set(mapping.mode === 'countColumns' ? mapping.columns : instanceCols));
     const nextSelected = new Set<number>();
-    for (let i = nextHeaderRows; i < t.rows.length; i++) nextSelected.add(i);
+    for (let i = nextHeaderRows; i < t.rows.length; i++) {
+      if (!isJunkRow(t.rows[i], guessedNameCol)) nextSelected.add(i);
+    }
     setSelected(nextSelected);
+    // Row indices change meaning when the header split moves, so stale
+    // overrides would rename the wrong rows.
+    setEditedNames(new Map());
   };
 
   // Render-phase reset: re-derive local state when the dialog opens with a new
@@ -103,6 +118,7 @@ export function ScheduleReviewDialog({
       setQtyColumn(0);
       setCountColumns(new Set());
       setSelected(new Set());
+      setEditedNames(new Map());
     }
   }
 
@@ -147,11 +163,26 @@ export function ScheduleReviewDialog({
     (qtyMode === 'column' && col === qtyColumn) ||
     (qtyMode === 'countColumns' && countColumns.has(col));
 
+  // Default cleaned name, unless the user typed an override in the Result column.
+  const rowConditionName = (rowIndex: number, row: string[]): string => {
+    const edited = editedNames.get(rowIndex);
+    if (edited !== undefined) return edited.trim();
+    return cleanConditionName(resolveName(row, nameCol));
+  };
+
+  const setEditedName = (rowIndex: number, value: string) => {
+    setEditedNames((prev) => {
+      const next = new Map(prev);
+      next.set(rowIndex, value);
+      return next;
+    });
+  };
+
   const mappedRows: ScheduleRowMapping[] = [];
   for (let i = headerRows; i < table.rows.length; i++) {
     if (!selected.has(i)) continue;
     const row = table.rows[i];
-    const name = resolveName(row, nameCol);
+    const name = rowConditionName(i, row);
     if (!name) continue;
     const qty = computeRowQty(row, activeMapping);
     if (qty < 1) continue; // all-dash row under count mode — nothing to count
@@ -206,7 +237,20 @@ export function ScheduleReviewDialog({
     >
       <div className="space-y-4">
         <p className="text-sm text-muted-foreground">
-          Parsed {table.rows.length} rows ({table.mode === 'ruled' ? 'ruled grid' : 'text alignment'})
+          Parsed {table.rows.length} rows (
+          {table.mode === 'ruled'
+            ? 'ruled grid'
+            : table.mode === 'ruled_ocr'
+              ? 'ruled grid · OCR'
+              : 'text alignment'}
+          )
+          {table.mode === 'ruled_ocr' && (
+            <>
+              {' — '}
+              <span className="text-amber-600 dark:text-amber-500">amber</span> cells read below{' '}
+              {OCR_REVIEW_THRESHOLD}% confidence; verify before applying.
+            </>
+          )}
         </p>
 
         <div className="grid grid-cols-3 gap-4">
@@ -324,29 +368,69 @@ export function ScheduleReviewDialog({
             <tbody>
               {table.rows.slice(headerRows).map((row, offset) => {
                 const rowIndex = headerRows + offset;
-                const name = resolveName(row, nameCol);
+                const name = rowConditionName(rowIndex, row);
                 const qty = computeRowQty(row, activeMapping);
                 const disabled = !name || qty < 1;
+                const junk = isJunkRow(row, nameCol);
                 return (
-                  <tr key={rowIndex} className="border-t border-input">
+                  <tr
+                    key={rowIndex}
+                    className={`border-t border-input ${junk ? 'text-muted-foreground opacity-60' : ''}`}
+                  >
                     <td className="px-2 py-1 align-top">
                       <Checkbox
                         checked={!disabled && selected.has(rowIndex)}
                         onCheckedChange={(checked) => toggleRow(rowIndex, checked === true)}
                         disabled={disabled}
-                        title={disabled ? (name ? 'No filled quantity cells' : 'No usable name') : undefined}
+                        title={
+                          disabled
+                            ? name
+                              ? 'No filled quantity cells'
+                              : 'No usable name'
+                            : junk
+                              ? 'Looks like junk — unchecked by default, verify before including'
+                              : undefined
+                        }
                       />
                     </td>
-                    {Array.from({ length: columnCount }, (_, col) => (
-                      <td
-                        key={col}
-                        className={`px-2 py-1 align-top ${isMappedColumn(col) ? 'bg-primary/10' : ''}`}
-                      >
-                        {row[col] ?? ''}
-                      </td>
-                    ))}
-                    <td className="px-2 py-1 align-top text-muted-foreground whitespace-nowrap">
-                      {disabled ? '—' : `→ ${name} ×${qty}`}
+                    {Array.from({ length: columnCount }, (_, col) => {
+                      const conf = table.cellConfidence?.[rowIndex]?.[col];
+                      // Only flag cells with real alphanumeric content — dashes
+                      // and punctuation aren't values worth "verifying".
+                      const lowConf =
+                        conf !== undefined &&
+                        /[a-z0-9]/i.test(row[col] ?? '') &&
+                        conf <= OCR_REVIEW_THRESHOLD;
+                      const cellText = col === nameCol ? cleanConditionName(row[col] ?? '') : (row[col] ?? '');
+                      return (
+                        <td
+                          key={col}
+                          className={`px-2 py-1 align-top ${
+                            lowConf
+                              ? 'bg-amber-500/20 underline decoration-amber-500 decoration-dotted underline-offset-2'
+                              : isMappedColumn(col)
+                                ? 'bg-primary/10'
+                                : ''
+                          }`}
+                          title={lowConf ? `Low OCR confidence (${conf}%) — verify this value` : undefined}
+                        >
+                          {cellText}
+                        </td>
+                      );
+                    })}
+                    <td className="px-2 py-1 align-top whitespace-nowrap">
+                      <span className="flex items-center gap-1 text-muted-foreground">
+                        →
+                        <input
+                          type="text"
+                          className="h-7 w-40 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                          aria-label={`Condition name for row ${rowIndex}`}
+                          value={editedNames.get(rowIndex) ?? name}
+                          placeholder={name || 'Condition name'}
+                          onChange={(e) => setEditedName(rowIndex, e.target.value)}
+                        />
+                        {qty < 1 ? '—' : `×${qty}`}
+                      </span>
                     </td>
                   </tr>
                 );

@@ -111,18 +111,51 @@ export function detectInstanceColumns(rows: string[][], headerRows: number, colu
   return cols.length >= 2 ? cols : [];
 }
 
-const NAME_HEADER_PRIMARY_RE = /room|name|desc/i;
-const NAME_HEADER_SECONDARY_RE = /mark|type|item|fixture|door|window/i;
+const NAME_HEADER_RE = /room|name|mark|type|desc/i;
 const QTY_HEADER_RE = /qty|quan|count|no\.?$|ea\b/i;
 
-export function guessNameColumn(labels: string[], instanceColumns: number[]): number {
+/** Share of non-empty data-row cells in `col` with 3+ alphabetic characters. */
+function alphaDominantShare(rows: string[][], headerRows: number, col: number): number {
+  const dataRows = rows.slice(headerRows);
+  let nonEmpty = 0;
+  let alphaDominant = 0;
+  for (const row of dataRows) {
+    const cell = (row[col] ?? '').trim();
+    if (!cell) continue;
+    nonEmpty++;
+    if ((cell.match(/[A-Za-z]/g) ?? []).length >= 3) alphaDominant++;
+  }
+  return nonEmpty === 0 ? 0 : alphaDominant / nonEmpty;
+}
+
+/**
+ * Name-column pick: prefer a header matching /room|name|mark|type|desc/i;
+ * otherwise the non-instance column with the highest share of alpha-dominant
+ * cells (rows/headerRows let this fallback see actual data — omit them to
+ * skip straight to the first non-instance column).
+ */
+export function guessNameColumn(
+  labels: string[],
+  instanceColumns: number[],
+  rows: string[][] = [],
+  headerRows = 0
+): number {
   const instanceSet = new Set(instanceColumns);
-  const primary = labels.findIndex((l, i) => !instanceSet.has(i) && NAME_HEADER_PRIMARY_RE.test(l));
-  if (primary >= 0) return primary;
-  const secondary = labels.findIndex((l, i) => !instanceSet.has(i) && NAME_HEADER_SECONDARY_RE.test(l));
-  if (secondary >= 0) return secondary;
-  const firstNonInstance = labels.findIndex((_, i) => !instanceSet.has(i));
-  return firstNonInstance >= 0 ? firstNonInstance : 0;
+  const candidates = labels.map((_, i) => i).filter((i) => !instanceSet.has(i));
+  const headerMatch = candidates.find((i) => NAME_HEADER_RE.test(labels[i]));
+  if (headerMatch !== undefined) return headerMatch;
+  if (candidates.length === 0) return 0;
+
+  let best = candidates[0];
+  let bestShare = -1;
+  for (const col of candidates) {
+    const share = alphaDominantShare(rows, headerRows, col);
+    if (share > bestShare) {
+      bestShare = share;
+      best = col;
+    }
+  }
+  return best;
 }
 
 /**
@@ -207,4 +240,40 @@ export function groupScheduleRows(rows: ScheduleRowMapping[], groupByName: boole
     if (!group) throw new Error('unreachable: group key without group');
     return group;
   });
+}
+
+const MAX_NAME_LENGTH = 60;
+/** Table-border OCR noise that can leak into a cell anywhere, not just the edges. */
+const STRAY_BORDER_CHARS_RE = /[|[\]{}]/g;
+/** Punctuation/quote noise worth trimming only when it wraps the name. */
+const EDGE_PUNCT_RE = /^[\s"'`.,;:!?()<>*_~^]+|[\s"'`.,;:!?()<>*_~^]+$/g;
+
+/**
+ * Turn a raw schedule cell into a presentable condition name: collapse
+ * whitespace, drop stray table-border characters, trim wrapping punctuation,
+ * and cap length at a word boundary so long remarks/spec cells don't blow up
+ * the sidebar.
+ */
+export function cleanConditionName(raw: string): string {
+  let s = raw.replace(STRAY_BORDER_CHARS_RE, ' ').replace(/\s+/g, ' ').trim();
+  s = s.replace(EDGE_PUNCT_RE, '').trim();
+  if (s.length <= MAX_NAME_LENGTH) return s;
+  const truncated = s.slice(0, MAX_NAME_LENGTH);
+  const lastSpace = truncated.lastIndexOf(' ');
+  const boundary = lastSpace > 0 ? truncated.slice(0, lastSpace) : truncated;
+  return `${boundary.trimEnd()}…`;
+}
+
+/**
+ * True when the name cell is too thin or too noisy to be a real condition
+ * name, or the whole row is blank — extraction found nothing usable here.
+ */
+export function isJunkRow(row: string[], nameCol: number): boolean {
+  const nameCell = (row[nameCol] ?? '').trim();
+  const alphaCount = (nameCell.match(/[A-Za-z]/g) ?? []).length;
+  if (alphaCount < 3) return true;
+  const nonAlnumCount = (nameCell.match(/[^A-Za-z0-9]/g) ?? []).length;
+  if (nonAlnumCount / nameCell.length > 0.5) return true;
+  if (row.every((cell) => isBlankOrDashCell(cell))) return true;
+  return false;
 }
