@@ -332,6 +332,15 @@ Tasks (execute in order, one per session):
   ASSEMBLY sheet XML, drop calcChain, leave every other zip entry byte-identical);
   `POST /assemblies/generate` — resolve mapped conditions' net quantities (sum per
   decision 3), copy workbook, invoke writer, return download.
+  *DONE 2026-07-14 (eaca0e4a). Review: `--selftest` passes; real-file smoke vs
+  `Aquafin-2K M.xlsx` → exactly one zip entry changed (ASSEMBLY sheet, style
+  preserved, `t="s"` correctly dropped for numeric write), all others
+  byte-identical; server tsc clean. Two flags for C3/C4: (a) sheet name is
+  hardcoded `ASSEMBLY` — non-MCW workbooks may differ, add optional
+  `sheetName` to mapping when a real case appears; (b) a mapping with multiple
+  quantity inputs writes the SAME summed total to every input cell — fine for
+  the 227 single-input workbooks, wrong for the 3 dual-input ones; C3 UI
+  should either restrict to one input per mapping or map conditions→inputs.*
 - **C3** Client: registry UI (upload + map to condition + input cells + job-info cells)
   in a new sidebar Costs-tab section; "Generate assembly" button on mapped conditions
   with a confirmation showing the per-condition quantity breakdown and the sum.
