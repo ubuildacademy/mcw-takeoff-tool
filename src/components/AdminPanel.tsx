@@ -587,7 +587,6 @@ When answering questions:
     if (isOpen && activeTab === 'usage') {
       loadUsage(usageDays);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, isOpen, usageDays]);
 
   const loadUsers = async () => {
