@@ -286,6 +286,45 @@ some OCR characters wrong." → B4 queued; dev gate stays on until B4 + re-test.
 and dimension columns read >90% correct by manual spot-check of 20 cells; extraction time
 stays under ~20s/region; existing tests pass. Jeff re-runs the ship gate after this lands.
 
+*DONE 2026-07-14 (branch feat/schedule-ocr-fallback, on top of 42b0433d). All 3 steps
+implemented as specified. Measured against the real page-53 door schedule (rotated
+/Rotate 270, 87×23 `ruled_ocr` grid, 1094 non-empty cells):
+- High-confidence (>70) share: 82.6% → 82.8% (904/1094 → 906/1094). Small, not the clear
+  jump the criterion implies.
+- Time: ~19.3s/region, under the ~20s budget — but only after the retry step (1) got a
+  wall-clock cap on top of the ~100-retry count cap. Per-retry cost is dominated by
+  pytesseract spawning a fresh `tesseract` subprocess (~120ms fixed overhead) — at a full
+  100 retries this pushed a single region to ~27s. Added `OCR_RETRY_TIME_BUDGET_SEC`
+  (4.5s) so the retry pass stops early under load; the ~100 cap is now a ceiling, not a
+  target.
+- Dimension columns, 20-cell manual spot-check (WIDTH/HEIGHT/THICKNESS, straight-vs-curly
+  quote treated as equivalent): **10/20 (50%) both before and after — criterion not met.**
+  Cause: on this page the dominant errors are Tesseract confidently misreading glyphs
+  outside the spec'd confusion set — `¾` read as `%`, digit substitutions like `1`→`4`,
+  and HEIGHT-column reads (`6'-8"`) losing characters down to `6-8` or `8"`. These land at
+  78-94% confidence, so step 1's retry never fires on them (not ≤70) and step 2's
+  normalization list doesn't cover them (spec scoped it to `O↔0`, `l/I↔1`, `S↔5`, quote
+  glyphs, trailing dot). Step 3 (charset validation) is implemented and unit-tested but
+  never fires on this specific page either — the grouped header row OCRs as pure garbage
+  (`"° > Ww"`, `"an S65"`, etc.), so the `/width|height|thickness/i` header match never
+  finds the WIDTH/HEIGHT/THICKNESS columns to validate.
+- What step 2 *did* fix, verified: curly quote/apostrophe glyphs in dimension cells now
+  come out straight (`3'-0"` instead of `3'-0"`/`3'-0"` mixed), consistently across the
+  region.
+- `existing tests pass`: no prior Python tests existed for this file; added
+  `server/src/scripts/test_table_extract.py` (stdlib `unittest`, no PDF/Tesseract needed)
+  covering `_normalize_cell_text` and `_validate_dimension_columns` — 8/8 pass. `server`
+  `npx tsc --noEmit` was not re-verified clean in this worktree (node_modules was never
+  installed here — pre-existing, unrelated to this change; no .ts files touched).
+
+**Recommendation before Jeff re-runs the ship gate:** the 3 steps as spec'd don't move
+page-53's dimension-column accuracy. Worth a follow-up task to either (a) widen the
+normalization list once more real confusions are catalogued (¾/%, digit-for-digit
+misreads), or (b) accept that the outlined/rotated schedule's HEIGHT column and header
+row need a different approach (e.g. a header-position heuristic instead of header-text
+matching, since header OCR is unreliable here) — flagging rather than deciding, since
+scope was fixed to the 3 listed steps.*
+
 ---
 
 ## Workstream C — Assemblies (Stage 1 bridge)
