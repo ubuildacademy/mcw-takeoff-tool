@@ -333,71 +333,75 @@ export function ToolsDialog({
               </Button>
 
               {showAutoHyperlink && (
-                <>
-                  <div className="ml-0 space-y-2 rounded-md border border-border p-3 bg-muted/30">
-                    <div className="space-y-1.5">
-                      <Label className="text-sm font-normal">Which files to scan</Label>
-                      <div className="flex flex-col gap-2">
-                        <label className="flex items-center gap-2 text-sm cursor-pointer">
-                          <input
-                            type="radio"
-                            name="auto-hyperlink-scope"
-                            checked={autoScope === 'project'}
-                            onChange={() => setAutoScope('project')}
-                            className="accent-primary"
-                          />
-                          Entire project
-                        </label>
-                        <label
-                          className={`flex items-center gap-2 text-sm ${currentDocumentId ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
-                        >
-                          <input
-                            type="radio"
-                            name="auto-hyperlink-scope"
-                            checked={autoScope === 'current'}
-                            onChange={() => currentDocumentId && setAutoScope('current')}
-                            disabled={!currentDocumentId}
-                            className="accent-primary"
-                          />
-                          Current document
-                        </label>
-                      </div>
+                <div className="ml-0 space-y-3 rounded-md border border-border p-3 bg-muted/30">
+                  <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                    <Sparkles className="w-4 h-4 shrink-0" />
+                    Auto-hyperlink
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-normal">Which files to scan</Label>
+                    <div className="flex flex-col gap-2">
+                      <label className="flex items-center gap-2 text-sm cursor-pointer">
+                        <input
+                          type="radio"
+                          name="auto-hyperlink-scope"
+                          checked={autoScope === 'project'}
+                          onChange={() => setAutoScope('project')}
+                          className="accent-primary"
+                        />
+                        Entire project
+                      </label>
+                      <label
+                        className={`flex items-center gap-2 text-sm ${currentDocumentId ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
+                      >
+                        <input
+                          type="radio"
+                          name="auto-hyperlink-scope"
+                          checked={autoScope === 'current'}
+                          onChange={() => currentDocumentId && setAutoScope('current')}
+                          disabled={!currentDocumentId}
+                          className="accent-primary"
+                        />
+                        Current document
+                      </label>
                     </div>
                   </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="justify-start"
-                    disabled={!autoHyperlinkAvailable || preflightLoading || executeRunning}
-                    onClick={async () => {
-                      if (!onPreflightAutoHyperlink) return;
-                      setPreflightLoading(true);
-                      try {
-                        const stats = await onPreflightAutoHyperlink({ scope: autoScope });
-                        setPreflightResult(stats);
-                        setPreflightOpen(true);
-                      } catch (e) {
-                        console.error(e);
-                        toast.error(e instanceof Error ? e.message : 'Preflight failed');
-                      } finally {
-                        setPreflightLoading(false);
-                      }
-                    }}
-                  >
-                    <Sparkles className="w-4 h-4 mr-2 shrink-0" />
-                    {preflightLoading ? 'Checking…' : 'Auto-hyperlink'}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="justify-start text-muted-foreground"
-                    disabled={!onClearBatchHyperlinks || !autoHyperlinkAvailable}
-                    onClick={() => onClearBatchHyperlinks?.()}
-                  >
-                    <Eraser className="w-4 h-4 mr-2 shrink-0" />
-                    Clear auto-hyperlinks
-                  </Button>
-                </>
+                  <div className="flex flex-col gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="justify-start"
+                      disabled={!autoHyperlinkAvailable || preflightLoading || executeRunning}
+                      onClick={async () => {
+                        if (!onPreflightAutoHyperlink) return;
+                        setPreflightLoading(true);
+                        try {
+                          const stats = await onPreflightAutoHyperlink({ scope: autoScope });
+                          setPreflightResult(stats);
+                          setPreflightOpen(true);
+                        } catch (e) {
+                          console.error(e);
+                          toast.error(e instanceof Error ? e.message : 'Preflight failed');
+                        } finally {
+                          setPreflightLoading(false);
+                        }
+                      }}
+                    >
+                      <Sparkles className="w-4 h-4 mr-2 shrink-0" />
+                      {preflightLoading ? 'Checking…' : 'Run auto-hyperlink'}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="justify-start text-muted-foreground"
+                      disabled={!onClearBatchHyperlinks || !autoHyperlinkAvailable}
+                      onClick={() => onClearBatchHyperlinks?.()}
+                    >
+                      <Eraser className="w-4 h-4 mr-2 shrink-0" />
+                      Clear auto-hyperlinks
+                    </Button>
+                  </div>
+                </div>
               )}
 
               <Button
