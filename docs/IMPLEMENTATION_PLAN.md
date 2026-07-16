@@ -22,6 +22,12 @@ instructions sized for a cheaper model to execute **one task at a time**. Read t
    (`COL.isTotalRow`, `COL.pageKey`). If you add worksheets, add them **after** the existing
    ones and never rename existing sheets.
 7. Commit messages: conventional commits, explain *why* in the body.
+8. **Help docs ship with the code (Jeff, 2026-07-16).** The in-app Help renders
+   `docs/WHATS_NEW.md`, `docs/WORKSPACE_GUIDE.md`, and `docs/QUICKSTART_AND_HOTKEYS.md`
+   (bundled via `?raw` imports in `src/components/help/HelpGuidePage.tsx`). Any task that
+   changes user-facing behavior MUST update the relevant sections of those files in the
+   same commit — a WHATS_NEW entry at minimum, WORKSPACE_GUIDE when a workflow changes,
+   QUICKSTART_AND_HOTKEYS when keys/buttons change. Leaving help stale = task not done.
 
 ---
 
@@ -761,6 +767,29 @@ NOT balloon. List every dialog touched in the commit message.
 **Success criteria:** the previously crowded dialogs show content without horizontal
 squeeze on a 13" laptop; no dialog fills the whole screen; visual spot-check screenshots
 in the session; tsc + tests green.
+
+---
+
+## Task H0 — Help-docs catch-up sweep (run AFTER Workstream G lands)
+
+**Problem:** the 2026-07 sprint changed user-facing behavior faster than the help docs:
+Excel export (new Data/By Sheet sheets, folder grouping, branding, Quantities now
+unprotected/editable), Assembly Workbooks (entire new Costs-tab feature incl. C5
+auto-mapping on upload), Auto-hyperlink (simplified dialog, automatic bubble/callout
+scanning, nested scope group), AI chat KB packing. None of it is reflected in
+`docs/WHATS_NEW.md`, `docs/WORKSPACE_GUIDE.md`, or `docs/QUICKSTART_AND_HOTKEYS.md`.
+
+**Do:** one sweep session after G1–G3 merge (so the auto-hyperlink + dialog behavior is
+stable): read the three help files fully, read the current UI for each changed feature
+(don't document from this plan — document what the app actually shows), update all three
+files. WHATS_NEW gets a dated section per feature; WORKSPACE_GUIDE gets the Assembly
+Workbooks workflow + updated hyperlink/export sections; QUICKSTART gets any changed
+buttons/flows. Verify rendering in the in-app Help (SimpleMarkdown — check tables/lists
+render; `npx vitest run src/components/help` for the markdown tests).
+
+**Success criteria:** every feature listed above appears correctly in Help; help search
+finds "assembly", "auto-hyperlink", "Data sheet"; markdown tests green. Going forward
+rule 8 (execution rules) keeps docs in sync per-task — this sweep clears the backlog.
 
 ---
 
