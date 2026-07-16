@@ -1638,7 +1638,11 @@ export function TakeoffWorkspace() {
               magicWandMode={magicWandMode}
               onMagicWandModeChange={setMagicWandMode}
               onHyperlinkClick={(sheetId, pageNumber, targetViewport) => {
-                tabsResult.handlePageOpenInNewTab(sheetId, pageNumber);
+                // deepLinkTarget suppresses the post-render fit/scroll-restore so it
+                // can't stomp the centered view applied below.
+                tabsResult.handlePageOpenInNewTab(sheetId, pageNumber, {
+                  deepLinkTarget: !!targetViewport,
+                });
                 if (targetViewport) {
                   // After the tab switch's own scroll restore (200ms one-shot); the
                   // centering call retries internally while the page renders.

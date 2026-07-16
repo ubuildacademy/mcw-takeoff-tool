@@ -87,7 +87,12 @@ export interface UseTakeoffWorkspaceTabsResult {
   currentPage: number;
   sheetId: string | null;
   handlePageSelect: (documentId: string, pageNumber: number) => void;
-  handlePageOpenInNewTab: (documentId: string, pageNumber: number) => void;
+  /** `deepLinkTarget`: caller lands a precise view (centerViewportOnPoint), so skip the auto fit/scroll-restore. */
+  handlePageOpenInNewTab: (
+    documentId: string,
+    pageNumber: number,
+    options?: { deepLinkTarget?: boolean }
+  ) => void;
   handlePageChange: (page: number) => void;
   handleTabSelect: (tabId: string) => void;
   handleTabClose: (tabId: string) => void;
@@ -148,6 +153,14 @@ export function useTakeoffWorkspaceTabs({
   /** Bumped when `activeTab` changes so pending scroll/fit work can no-op (fast tab switching). */
   const viewportSessionRef = useRef(0);
 
+  /**
+   * Sheet a hyperlink deep-link is landing on: its click handler centers the target
+   * view itself, so the post-render fit/scroll-restore must stand down for that one
+   * landing (a late fit retry would stomp the deep-link zoom). Any other navigation
+   * clears it.
+   */
+  const pendingDeepLinkSheetRef = useRef<string | null>(null);
+
   const currentPdfFile =
     activeTab != null
       ? projectFiles.find((f) => f.id === activeTab.documentId) ?? null
@@ -161,6 +174,7 @@ export function useTakeoffWorkspaceTabs({
   const handlePageSelect = useCallback(
     (documentId: string, pageNumber: number) => {
       if (!projectId) return;
+      pendingDeepLinkSheetRef.current = null;
       const label = getSheetLabel(documents, projectFiles, documentId, pageNumber);
       replaceActiveTab(projectId, documentId, pageNumber, label);
       setSelectedDocumentId(documentId);
@@ -201,6 +215,7 @@ export function useTakeoffWorkspaceTabs({
   const handlePageChange = useCallback(
     (page: number) => {
       if (!projectId || !activeTab || !currentPdfFile) return;
+      pendingDeepLinkSheetRef.current = null;
       const doc = documents.find((d) => d.id === activeTab.documentId);
       const totalPages = doc?.totalPages ?? 1;
       if (page < 1 || page > totalPages) return;
@@ -238,8 +253,11 @@ export function useTakeoffWorkspaceTabs({
   );
 
   const handlePageOpenInNewTab = useCallback(
-    (documentId: string, pageNumber: number) => {
+    (documentId: string, pageNumber: number, options?: { deepLinkTarget?: boolean }) => {
       if (!projectId) return;
+      pendingDeepLinkSheetRef.current = options?.deepLinkTarget
+        ? getSheetId(documentId, pageNumber)
+        : null;
       const label = getSheetLabel(documents, projectFiles, documentId, pageNumber);
       addTab(projectId, {
         documentId,
@@ -268,6 +286,7 @@ export function useTakeoffWorkspaceTabs({
   const handleTabSelect = useCallback(
     (tabId: string) => {
       if (!projectId) return;
+      pendingDeepLinkSheetRef.current = null;
       setActiveTab(projectId, tabId);
       const tab = openTabs.find((t) => t.id === tabId);
       if (tab) {
@@ -387,13 +406,25 @@ export function useTakeoffWorkspaceTabs({
 
       const session = viewportSessionRef.current;
       const isStale = () => session !== viewportSessionRef.current;
-      const saved = getDocumentLocationBySheet(sheetId);
-      const hasExplicit = useDocumentViewStore.getState().hasExplicitViewStateForSheet(sheetId);
 
-      if (saved.x !== 0 || saved.y !== 0) {
-        runScrollRestoreWithRetries(saved, isStale);
-      } else if (!hasExplicit) {
+      if (pendingDeepLinkSheetRef.current === sheetId) {
+        // Hyperlink deep-link landing: the click handler owns the view
+        // (centerViewportOnPoint); fit/scroll-restore would stomp its zoom.
+        pendingDeepLinkSheetRef.current = null;
+        isInitialRenderRef.current = false;
+        return;
+      }
+
+      // Fit vs restore hinges on a saved ZOOM, not any stray view state: a saved
+      // location without a scale (legacy document-level entries, scroll-save
+      // races) is pixel offsets at an unknown zoom — fitting wins. The rendered
+      // scale itself comes from getDocumentScaleBySheet via the parent, so a
+      // saved zoom is already applied; here we only pick scroll restore vs fit.
+      const saved = getDocumentLocationBySheet(sheetId);
+      if (!useDocumentViewStore.getState().hasExplicitScaleForSheet(sheetId)) {
         runFitToWindowWithRetries(isStale);
+      } else if (saved.x !== 0 || saved.y !== 0) {
+        runScrollRestoreWithRetries(saved, isStale);
       }
       isInitialRenderRef.current = false;
     };
