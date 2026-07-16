@@ -698,6 +698,72 @@ further investment if the hand-labeled true-positive count is in the single digi
 
 ---
 
+## Workstream G — Navigation & dialog polish (queued from beta feedback 2026-07-16)
+
+### Task G1 — Hyperlink landing: zoom-to-detail + fit-to-window regression
+
+**Problem (Jeff):** clicking a link to "detail 26 on A9.8" should land on that detail
+blown up; if not feasible, at least fit the target page to the window. Currently BROKEN:
+"my fit to window logic has drifted — when I click through the sheets my pages are
+appearing at 100% even though that doesn't fit in my window."
+
+**Files:** `src/components/PDFViewer.tsx` (fitToWindow ~line 3198; the suspicious
+default is ~line 3356 `zoom: viewState.scale || 1` — no saved per-page view state falls
+back to literal 100% instead of a fit computation), `usePDFViewerInteractions.ts`,
+hyperlink click/navigation path (`onHyperlinkClick` wiring), hyperlink records (check
+whether the stored link carries the source/target bubble bbox — F1's pass captures
+bubble bboxes at scan time).
+
+**Do:**
+1. Fix the regression first: navigating to a page with no saved view state must fit to
+   window, never default to 100%. Keep saved per-page zoom when the user set one.
+2. Zoom-to-detail: at CLICK time (zero added scan cost — the data already exists), if
+   the hyperlink record (or the F1 emission it came from) carries a target region for
+   the destination detail, land with that region centered at a sensible zoom (e.g.
+   region + padding filling ~60% of viewport). If no region data exists on the link,
+   fall back to fit-to-window. Do NOT add work to the scan/link-creation pass.
+3. If target-region data is NOT currently persisted on hyperlink records, scope what a
+   minimal schema/pass change costs and report back before building it — don't silently
+   grow the scan.
+
+**Success criteria:** clicking through 10 sheet links on the beta project: every landing
+either fits the window or centers the target detail; zero 100% landings on
+larger-than-window pages; existing zoom controls unaffected; tsc + tests green.
+
+### Task G2 — Auto-hyperlink progress bar
+
+**Problem (Jeff):** the run dialog "doesn't really tell much" during a ~5-minute scan.
+The python passes already emit per-page stderr progress lines (see
+vectorCalloutExtractor.ts / bubbleOcrExtractor.ts stream handling).
+
+**Do:** surface real progress to the client: per-doc + per-page counts (e.g. "Doc 2/6 —
+page 41/80 — 137 links found so far"), streamed (SSE or polling an in-memory job status
+keyed by run id — match existing patterns in the codebase for long jobs). Progress bar
+fills by pages-processed/total-pages across the run. Keep the existing completion
+summary. No fake/indeterminate animation posing as progress.
+
+**Success criteria:** full-project run on the beta set shows a bar that moves page-by-
+page and a live link count; cancel (if it exists today) still works; tsc both sides.
+
+### Task G3 — Adaptive dialog sizing
+
+**Problem (Jeff):** "pop up dialog windows are sometimes a bit small/crowded. If there's
+room on the screen they should take advantage — not the whole space, but if they only
+need to stretch side to side a little to show the entire content, they should."
+
+**Do:** audit the shared dialog primitives (ui/base-dialog and whatever Radix/shadcn
+wrapper the app uses) — introduce a size variant (or content-driven max-width, e.g.
+`max-w-[min(90vw,64rem)]` with width fitting content) applied to the crowded dialogs
+first: Schedule review, assembly generate confirm, preflight, template pickers. Dialogs
+must never exceed ~90vw/85vh, keep internal scroll for overflow, and small dialogs must
+NOT balloon. List every dialog touched in the commit message.
+
+**Success criteria:** the previously crowded dialogs show content without horizontal
+squeeze on a 13" laptop; no dialog fills the whole screen; visual spot-check screenshots
+in the session; tsc + tests green.
+
+---
+
 ## Final QA checklist (run before any production deploy)
 
 - [ ] `npm run ci:local` passes (typecheck, build, lint, test, server build).
