@@ -1638,10 +1638,13 @@ export function TakeoffWorkspace() {
               magicWandMode={magicWandMode}
               onMagicWandModeChange={setMagicWandMode}
               onHyperlinkClick={(sheetId, pageNumber, targetViewport) => {
-                // deepLinkTarget suppresses the post-render fit/scroll-restore so it
-                // can't stomp the centered view applied below.
+                // Link view always wins: deepLinkTarget suppresses the post-render
+                // fit/scroll-restore so it can't stomp the centered view applied below.
+                // No stored view → forceFit: a bare link click fits-to-window and does
+                // NOT inherit this page's saved plain-navigation position/zoom.
                 tabsResult.handlePageOpenInNewTab(sheetId, pageNumber, {
                   deepLinkTarget: !!targetViewport,
+                  forceFit: !targetViewport,
                 });
                 if (targetViewport) {
                   // After the tab switch's own scroll restore (200ms one-shot); the
