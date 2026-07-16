@@ -611,6 +611,60 @@ equipment-tag/fixture-legend circles (vs. today's 6/6 false-positive rate on the
 sample). `server` `npx tsc --noEmit` clean; `scope_bubble_callouts.py`'s numbers
 re-measured post-change and reported in the session's follow-up.
 
+*F1 DONE 2026-07-16 (claude/charming-jemison-606a81 worktree branch, unmerged).*
+Hand-labeled 62 genuine circle callouts across the 22 scoped pages (1807 geometry
+candidates total) by visually reviewing every candidate as rendered crops — a much
+richer set than the scoping session's own text-layer-only count suggested, because 61/62
+are vector-glyph-only (no text layer at all), exactly the case F1 targets. Fixture:
+`server/src/scripts/fixtures/f1_bubble_ground_truth.json`.
+
+Two non-obvious bugs found and fixed along the way, both load-bearing for F1 and
+worth knowing about for any future rotated-page work on this doc set:
+- **Rotation-space bug in crop rendering**: `get_drawings()`/`get_text()` return
+  UNROTATED page coordinates, but `get_pixmap(clip=...)` expects the ROTATED
+  `page.rect` space. This doc is rotation=270 on 69/80 pages. Using the raw unrotated
+  bbox as `clip` silently renders the wrong region (or an empty one). Fix:
+  `callout_geometry.rotated_clip()` transforms through `page.rotation_matrix` first.
+  This bug does not affect `vector_callout_pass.py`'s own candidate/word-pairing logic
+  (both `get_drawings()` and `get_text()` share the same unrotated space, confirmed by
+  the original scoping session) — it only bites code that renders a crop from those
+  coordinates, which is new in F1.
+- **The bubble's own outline stroke wrecks Tesseract**: even a trivially clean "04"
+  crop OCR'd as garbage until the circle/hexagon's own arc was excluded from the crop.
+  Padding OUTWARD (the original approach) makes this worse by also pulling in adjacent
+  compound "flag"/pointer geometry. Fix: crop to the TIGHT geometry bbox (no outward
+  padding — adjacent shapes are separate paths and fall outside it for free), then inset
+  INWARD by 14% on every side to drop the outline stroke, leaving just the interior
+  text. Tuned empirically against the ground truth fixture.
+
+Measured results (`bubble_ocr_pass.py`, real pipeline, not a simulation):
+- **Recall**: 18/62 (29.0%) exact detail-label+sheet-ref match on held-out ground
+  truth, vs. the baseline's 1 genuine reference in the entire 80-page document — an
+  order-of-magnitude improvement on the stated success criterion, though still far
+  from complete (OCR digit-confusion noise on CAD glyph fonts remains the binding
+  precision constraint; see below).
+- **False positives**: zero. Every emitted bubble's position was cross-checked
+  against the ground truth bbox set; on every page with zero genuine callouts
+  (including the 326-candidate UL fire-rating detail page that produced the original
+  6/6 false-positive baseline), the new pass emitted zero bubbles. The 26 non-exact
+  emissions on pages that DO have genuine callouts are digit-level OCR misreads at the
+  *correct* bubble position (e.g. `17` read as `47`, `01` read as `601`/`6O1`, `O`/`0`
+  and `Z`/`2` confusions) — not false accepts of unrelated equipment-tag/fixture-legend
+  geometry. A light lookalike-normalizer (`O→0`, `Z→2`, `S→5`, `B→8` in the numeric
+  portion of an already-plausible sheet ref) is applied but doesn't catch everything
+  (e.g. `6`→`E` misreads aren't in the map, kept deliberately small to avoid papering
+  over genuine errors).
+- **Throughput**: full 80-page doc in 163.8s wall-clock (6 worker processes), 225
+  total callouts found (already-resolved-via-text-layer + newly-OCR'd), well within
+  the 15-minute extraction budget.
+- `server` `npx tsc --noEmit` clean; `bubbleOcrExtractor.ts`'s interface unchanged.
+
+Net: the false-positive problem F1 set out to fix is solved cleanly. The recall gap
+that remains is a pure OCR-accuracy problem on thick-stroke CAD glyph fonts, not a
+detection or false-positive problem — a good candidate for a future targeted pass
+(per-character template matching, or a second OCR engine) if Jeff wants to push
+recall further, but not blocking merge consideration on its own terms.
+
 ### Task F2 — Section/elevation triangle marker support (gated on F1)
 
 **Goal:** extend detection to circle+triangle section/elevation callouts. **Do not start

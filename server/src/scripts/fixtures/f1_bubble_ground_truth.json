@@ -1,0 +1,909 @@
+{
+  "_meta": {
+    "description": "Hand-labeled ground truth for Workstream F1 (precision-targeted bubble OCR). Genuine circle/hexagon callout bubbles that resolve to a cross-sheet detail reference (top=detail label, bottom=sheet ref), found by visually reviewing every geometry-qualified candidate on pages 31-38 (elevations) + 55-68 (details) of the beta doc.",
+    "pdf": "b12fc9c4-1c4c-47bd-a27e-ed520b9c7453.pdf",
+    "pdfLabel": "Architectural Combined (beta), 80 pages",
+    "pagesReviewed": [
+      31,
+      32,
+      33,
+      34,
+      35,
+      36,
+      37,
+      38,
+      55,
+      56,
+      57,
+      58,
+      59,
+      60,
+      61,
+      62,
+      63,
+      64,
+      65,
+      66,
+      67,
+      68
+    ],
+    "totalGeometryCandidatesInRange": 1807,
+    "genuineCount": 62,
+    "labeledBy": "visual review of per-candidate high-res crops (contact sheets), 2026-07-16",
+    "coordinateSpace": "bbox_pt is in UNROTATED PDF point space (fitz.get_drawings()/get_text() convention). This doc is mostly rotation=270 (69/80 pages) -- rendering a crop from bbox_pt requires transforming through page.rotation_matrix before use as a get_pixmap clip rect, or the crop will be misaligned/empty. (Discovered the hard way while building this fixture.)",
+    "candidateIndex": "Index into vector_callout_pass-equivalent shape_candidates() output at labeling time; NOT stable across code changes -- match ground truth to live candidates by (page, bbox overlap), not by index."
+  },
+  "candidates": [
+    {
+      "page": 31,
+      "candidateIndex": 29,
+      "shape": "circle",
+      "bbox_pt": [
+        563.760009765625,
+        289.67999267578125,
+        599.6400146484375,
+        325.79998779296875
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "04",
+      "expectedSheetRef": "A6.02"
+    },
+    {
+      "page": 31,
+      "candidateIndex": 30,
+      "shape": "circle",
+      "bbox_pt": [
+        1899.8399658203125,
+        1363.3199462890625,
+        1935.7198486328125,
+        1399.4400634765625
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "02",
+      "expectedSheetRef": "A6.01"
+    },
+    {
+      "page": 31,
+      "candidateIndex": 31,
+      "shape": "circle",
+      "bbox_pt": [
+        1899.8399658203125,
+        1711.5599365234375,
+        1935.7198486328125,
+        1747.6800537109375
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "03",
+      "expectedSheetRef": "A6.01"
+    },
+    {
+      "page": 31,
+      "candidateIndex": 32,
+      "shape": "circle",
+      "bbox_pt": [
+        1899.8399658203125,
+        1935.1199951171875,
+        1935.7198486328125,
+        1971.2401123046875
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "01",
+      "expectedSheetRef": "A6.01"
+    },
+    {
+      "page": 31,
+      "candidateIndex": 49,
+      "shape": "circle",
+      "bbox_pt": [
+        918.5999755859375,
+        1805.159912109375,
+        954.47998046875,
+        1841.280029296875
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "16A",
+      "expectedSheetRef": "A4.53"
+    },
+    {
+      "page": 31,
+      "candidateIndex": 64,
+      "shape": "circle",
+      "bbox_pt": [
+        1009.5599975585938,
+        442.67999267578125,
+        1045.43994140625,
+        478.79998779296875
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "16E",
+      "expectedSheetRef": "A4.51"
+    },
+    {
+      "page": 32,
+      "candidateIndex": 253,
+      "shape": "circle",
+      "bbox_pt": [
+        1890.719970703125,
+        1353.8399658203125,
+        1926.599853515625,
+        1389.9600830078125
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "02",
+      "expectedSheetRef": "A6.02"
+    },
+    {
+      "page": 32,
+      "candidateIndex": 254,
+      "shape": "circle",
+      "bbox_pt": [
+        1890.719970703125,
+        1702.199951171875,
+        1926.599853515625,
+        1738.320068359375
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "03",
+      "expectedSheetRef": "A6.03"
+    },
+    {
+      "page": 32,
+      "candidateIndex": 255,
+      "shape": "circle",
+      "bbox_pt": [
+        1890.719970703125,
+        1925.6400146484375,
+        1926.599853515625,
+        1961.7601318359375
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "01",
+      "expectedSheetRef": "A6.01"
+    },
+    {
+      "page": 32,
+      "candidateIndex": 270,
+      "shape": "circle",
+      "bbox_pt": [
+        1298.280029296875,
+        822.8401489257812,
+        1334.159912109375,
+        858.9601440429688
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "10",
+      "expectedSheetRef": "A9.31"
+    },
+    {
+      "page": 32,
+      "candidateIndex": 271,
+      "shape": "circle",
+      "bbox_pt": [
+        1203.840087890625,
+        1328.52001953125,
+        1239.719970703125,
+        1364.64013671875
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "17",
+      "expectedSheetRef": "A9.31"
+    },
+    {
+      "page": 32,
+      "candidateIndex": 272,
+      "shape": "circle",
+      "bbox_pt": [
+        1203.840087890625,
+        1471.0799560546875,
+        1239.719970703125,
+        1507.2000732421875
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "17",
+      "expectedSheetRef": "A9.31"
+    },
+    {
+      "page": 32,
+      "candidateIndex": 273,
+      "shape": "circle",
+      "bbox_pt": [
+        1149.1199951171875,
+        1025.760009765625,
+        1184.9998779296875,
+        1061.880126953125
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "05",
+      "expectedSheetRef": "A9.31"
+    },
+    {
+      "page": 32,
+      "candidateIndex": 274,
+      "shape": "circle",
+      "bbox_pt": [
+        1189.2000732421875,
+        948.8401489257812,
+        1225.0799560546875,
+        984.9601440429688
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "06",
+      "expectedSheetRef": "A9.31"
+    },
+    {
+      "page": 32,
+      "candidateIndex": 275,
+      "shape": "circle",
+      "bbox_pt": [
+        1442.6400146484375,
+        1545.719970703125,
+        1478.5198974609375,
+        1581.840087890625
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "08",
+      "expectedSheetRef": "A9.31"
+    },
+    {
+      "page": 32,
+      "candidateIndex": 276,
+      "shape": "circle",
+      "bbox_pt": [
+        848.6399536132812,
+        630.2400512695312,
+        884.5199584960938,
+        666.3600463867188
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "09",
+      "expectedSheetRef": "A9.31"
+    },
+    {
+      "page": 32,
+      "candidateIndex": 277,
+      "shape": "circle",
+      "bbox_pt": [
+        891.3599853515625,
+        1746.9599609375,
+        927.239990234375,
+        1783.080078125
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "15",
+      "expectedSheetRef": "A9.31"
+    },
+    {
+      "page": 32,
+      "candidateIndex": 278,
+      "shape": "circle",
+      "bbox_pt": [
+        981.8218383789062,
+        1509.3006591796875,
+        1021.5780639648438,
+        1549.1395263671875
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "07",
+      "expectedSheetRef": "A9.31"
+    },
+    {
+      "page": 32,
+      "candidateIndex": 279,
+      "shape": "circle",
+      "bbox_pt": [
+        989.265625,
+        1509.3006591796875,
+        1021.5780639648438,
+        1542.31787109375
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "07",
+      "expectedSheetRef": "A9.31"
+    },
+    {
+      "page": 32,
+      "candidateIndex": 280,
+      "shape": "circle",
+      "bbox_pt": [
+        987.94189453125,
+        1305.420654296875,
+        1027.6981201171875,
+        1345.259521484375
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "07",
+      "expectedSheetRef": "A9.31"
+    },
+    {
+      "page": 32,
+      "candidateIndex": 281,
+      "shape": "circle",
+      "bbox_pt": [
+        987.94189453125,
+        1305.420654296875,
+        1020.2543334960938,
+        1338.4378662109375
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "07",
+      "expectedSheetRef": "A9.31"
+    },
+    {
+      "page": 32,
+      "candidateIndex": 282,
+      "shape": "circle",
+      "bbox_pt": [
+        1612.9200439453125,
+        1140.8399658203125,
+        1648.7999267578125,
+        1176.9600830078125
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "29",
+      "expectedSheetRef": "A9.31"
+    },
+    {
+      "page": 33,
+      "candidateIndex": 38,
+      "shape": "circle",
+      "bbox_pt": [
+        1899.8399658203125,
+        1378.679931640625,
+        1935.7198486328125,
+        1414.800048828125
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "02",
+      "expectedSheetRef": "A6.02"
+    },
+    {
+      "page": 33,
+      "candidateIndex": 39,
+      "shape": "circle",
+      "bbox_pt": [
+        1899.8399658203125,
+        1726.919921875,
+        1935.7198486328125,
+        1763.0400390625
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "03",
+      "expectedSheetRef": "A6.03"
+    },
+    {
+      "page": 33,
+      "candidateIndex": 40,
+      "shape": "circle",
+      "bbox_pt": [
+        1899.8399658203125,
+        1951.679931640625,
+        1935.7198486328125,
+        1987.800048828125
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "01",
+      "expectedSheetRef": "A6.01"
+    },
+    {
+      "page": 34,
+      "candidateIndex": 67,
+      "shape": "circle",
+      "bbox_pt": [
+        1899.8399658203125,
+        1359.239990234375,
+        1935.7198486328125,
+        1395.360107421875
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "02",
+      "expectedSheetRef": "A6.02"
+    },
+    {
+      "page": 34,
+      "candidateIndex": 68,
+      "shape": "circle",
+      "bbox_pt": [
+        1899.8399658203125,
+        1707.47998046875,
+        1935.7198486328125,
+        1743.60009765625
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "03",
+      "expectedSheetRef": "A6.03"
+    },
+    {
+      "page": 34,
+      "candidateIndex": 69,
+      "shape": "circle",
+      "bbox_pt": [
+        1899.8399658203125,
+        1932.239990234375,
+        1935.7198486328125,
+        1968.360107421875
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "01",
+      "expectedSheetRef": "A6.01"
+    },
+    {
+      "page": 35,
+      "candidateIndex": 35,
+      "shape": "circle",
+      "bbox_pt": [
+        1419.5999755859375,
+        1768.3199462890625,
+        1455.4798583984375,
+        1804.4400634765625
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "04",
+      "expectedSheetRef": "A6.04"
+    },
+    {
+      "page": 35,
+      "candidateIndex": 45,
+      "shape": "circle",
+      "bbox_pt": [
+        1419.5999755859375,
+        926.6399536132812,
+        1455.4798583984375,
+        962.7599487304688
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "05",
+      "expectedSheetRef": "A6.05"
+    },
+    {
+      "page": 35,
+      "candidateIndex": 60,
+      "shape": "circle",
+      "bbox_pt": [
+        402.3599853515625,
+        419.52008056640625,
+        438.239990234375,
+        455.64007568359375
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "16A",
+      "expectedSheetRef": "A4.52"
+    },
+    {
+      "page": 35,
+      "candidateIndex": 61,
+      "shape": "circle",
+      "bbox_pt": [
+        1102.800048828125,
+        1300.679931640625,
+        1138.679931640625,
+        1336.800048828125
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "16A",
+      "expectedSheetRef": "A4.13"
+    },
+    {
+      "page": 35,
+      "candidateIndex": 64,
+      "shape": "circle",
+      "bbox_pt": [
+        503.27996826171875,
+        1527.5999755859375,
+        539.1599731445312,
+        1563.7200927734375
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "16G",
+      "expectedSheetRef": "A4.51"
+    },
+    {
+      "page": 35,
+      "candidateIndex": 69,
+      "shape": "circle",
+      "bbox_pt": [
+        1335.239990234375,
+        1885.919921875,
+        1371.119873046875,
+        1922.0400390625
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "16A",
+      "expectedSheetRef": "A4.41"
+    },
+    {
+      "page": 36,
+      "candidateIndex": 161,
+      "shape": "circle",
+      "bbox_pt": [
+        1577.159912109375,
+        804.2400512695312,
+        1613.280029296875,
+        840.3600463867188
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "05",
+      "expectedSheetRef": "A6.02"
+    },
+    {
+      "page": 36,
+      "candidateIndex": 162,
+      "shape": "circle",
+      "bbox_pt": [
+        1577.159912109375,
+        1646.0399169921875,
+        1613.280029296875,
+        1682.1600341796875
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "04",
+      "expectedSheetRef": "A6.02"
+    },
+    {
+      "page": 37,
+      "candidateIndex": 31,
+      "shape": "circle",
+      "bbox_pt": [
+        1586.52001953125,
+        822.1199340820312,
+        1622.39990234375,
+        858.2399291992188
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "05",
+      "expectedSheetRef": "A6.05"
+    },
+    {
+      "page": 37,
+      "candidateIndex": 32,
+      "shape": "circle",
+      "bbox_pt": [
+        1586.52001953125,
+        1675.5599365234375,
+        1622.39990234375,
+        1711.6800537109375
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "04",
+      "expectedSheetRef": "A6.04"
+    },
+    {
+      "page": 38,
+      "candidateIndex": 61,
+      "shape": "circle",
+      "bbox_pt": [
+        1577.1600341796875,
+        1651.320068359375,
+        1613.0399169921875,
+        1687.199951171875
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "04",
+      "expectedSheetRef": "A6.04"
+    },
+    {
+      "page": 38,
+      "candidateIndex": 62,
+      "shape": "circle",
+      "bbox_pt": [
+        1577.1600341796875,
+        797.9999389648438,
+        1613.0399169921875,
+        833.8799438476562
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "05",
+      "expectedSheetRef": "A6.05"
+    },
+    {
+      "page": 55,
+      "candidateIndex": 12,
+      "shape": "circle",
+      "bbox_pt": [
+        1794.3599853515625,
+        596.1600952148438,
+        1830.2398681640625,
+        632.0401000976562
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "12",
+      "expectedSheetRef": "A9.06"
+    },
+    {
+      "page": 55,
+      "candidateIndex": 18,
+      "shape": "circle",
+      "bbox_pt": [
+        1794.3599853515625,
+        749.1600952148438,
+        1830.2398681640625,
+        785.0401000976562
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "12",
+      "expectedSheetRef": "A9.06"
+    },
+    {
+      "page": 55,
+      "candidateIndex": 19,
+      "shape": "circle",
+      "bbox_pt": [
+        1794.3599853515625,
+        1361.64013671875,
+        1830.2398681640625,
+        1397.52001953125
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "12",
+      "expectedSheetRef": "A9.06"
+    },
+    {
+      "page": 55,
+      "candidateIndex": 20,
+      "shape": "circle",
+      "bbox_pt": [
+        1794.3599853515625,
+        1205.0400390625,
+        1830.2398681640625,
+        1240.919921875
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "12",
+      "expectedSheetRef": "A9.06"
+    },
+    {
+      "page": 56,
+      "candidateIndex": 4,
+      "shape": "circle",
+      "bbox_pt": [
+        1157.0400390625,
+        1149.8399658203125,
+        1192.919921875,
+        1185.9600830078125
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "28",
+      "expectedSheetRef": "A9.02"
+    },
+    {
+      "page": 56,
+      "candidateIndex": 5,
+      "shape": "circle",
+      "bbox_pt": [
+        1157.0400390625,
+        360.00006103515625,
+        1192.919921875,
+        396.12005615234375
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "27",
+      "expectedSheetRef": "A9.02"
+    },
+    {
+      "page": 56,
+      "candidateIndex": 8,
+      "shape": "circle",
+      "bbox_pt": [
+        208.79998779296875,
+        1149.5999755859375,
+        244.67999267578125,
+        1185.7200927734375
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "25",
+      "expectedSheetRef": "A9.02"
+    },
+    {
+      "page": 56,
+      "candidateIndex": 9,
+      "shape": "circle",
+      "bbox_pt": [
+        459.7200012207031,
+        1802.760009765625,
+        495.6000061035156,
+        1838.880126953125
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "25",
+      "expectedSheetRef": "A9.02"
+    },
+    {
+      "page": 56,
+      "candidateIndex": 20,
+      "shape": "circle",
+      "bbox_pt": [
+        1807.5599365234375,
+        610.9199829101562,
+        1843.6800537109375,
+        647.0399780273438
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "28",
+      "expectedSheetRef": "A9.02"
+    },
+    {
+      "page": 56,
+      "candidateIndex": 21,
+      "shape": "circle",
+      "bbox_pt": [
+        1423.5599365234375,
+        342.12017822265625,
+        1459.6800537109375,
+        378.24017333984375
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "27",
+      "expectedSheetRef": "A9.02"
+    },
+    {
+      "page": 63,
+      "candidateIndex": 32,
+      "shape": "circle",
+      "bbox_pt": [
+        807.0,
+        485.39996337890625,
+        843.1199951171875,
+        521.5199584960938
+      ],
+      "textLayerWords": [
+        "29",
+        "A9.31"
+      ],
+      "expectedDetailLabel": "29",
+      "expectedSheetRef": "A9.31"
+    },
+    {
+      "page": 63,
+      "candidateIndex": 34,
+      "shape": "circle",
+      "bbox_pt": [
+        797.3999633789062,
+        835.6799926757812,
+        833.5199584960938,
+        871.7999877929688
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "26",
+      "expectedSheetRef": "A9.31"
+    },
+    {
+      "page": 63,
+      "candidateIndex": 35,
+      "shape": "circle",
+      "bbox_pt": [
+        768.719970703125,
+        2103.239990234375,
+        804.8399658203125,
+        2139.360107421875
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "28",
+      "expectedSheetRef": "A9.31"
+    },
+    {
+      "page": 63,
+      "candidateIndex": 36,
+      "shape": "circle",
+      "bbox_pt": [
+        588.47998046875,
+        2368.7998046875,
+        624.5999755859375,
+        2404.919921875
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "27",
+      "expectedSheetRef": "A9.31"
+    },
+    {
+      "page": 66,
+      "candidateIndex": 4,
+      "shape": "circle",
+      "bbox_pt": [
+        631.02001953125,
+        816.2100830078125,
+        666.989990234375,
+        852.1800537109375
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "26",
+      "expectedSheetRef": "A6.05"
+    },
+    {
+      "page": 66,
+      "candidateIndex": 7,
+      "shape": "circle",
+      "bbox_pt": [
+        586.2899780273438,
+        1243.050048828125,
+        595.3200073242188,
+        1252.02001953125
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "26",
+      "expectedSheetRef": "A6.05"
+    },
+    {
+      "page": 66,
+      "candidateIndex": 10,
+      "shape": "circle",
+      "bbox_pt": [
+        1886.159912109375,
+        1767.4200439453125,
+        1940.1298828125,
+        1821.3900146484375
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "21",
+      "expectedSheetRef": "A6.05"
+    },
+    {
+      "page": 66,
+      "candidateIndex": 13,
+      "shape": "circle",
+      "bbox_pt": [
+        1638.6600341796875,
+        1788.090087890625,
+        1692.6300048828125,
+        1842.06005859375
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "21",
+      "expectedSheetRef": "A6.05"
+    },
+    {
+      "page": 66,
+      "candidateIndex": 21,
+      "shape": "circle",
+      "bbox_pt": [
+        556.469970703125,
+        1570.9200439453125,
+        570.0,
+        1584.3900146484375
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "29",
+      "expectedSheetRef": "A9.02"
+    },
+    {
+      "page": 66,
+      "candidateIndex": 23,
+      "shape": "circle",
+      "bbox_pt": [
+        739.5,
+        1821.030029296875,
+        775.469970703125,
+        1857.0
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "30",
+      "expectedSheetRef": "A9.02"
+    },
+    {
+      "page": 68,
+      "candidateIndex": 5,
+      "shape": "circle",
+      "bbox_pt": [
+        249.24000549316406,
+        1551.719970703125,
+        261.6000061035156,
+        1564.080078125
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "04",
+      "expectedSheetRef": "A9.81"
+    },
+    {
+      "page": 68,
+      "candidateIndex": 27,
+      "shape": "circle",
+      "bbox_pt": [
+        1263.945556640625,
+        2050.008544921875,
+        1275.2392578125,
+        2058.6630859375
+      ],
+      "textLayerWords": [],
+      "expectedDetailLabel": "17",
+      "expectedSheetRef": "A9.81"
+    }
+  ]
+}
