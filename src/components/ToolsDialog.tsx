@@ -17,6 +17,12 @@ import { isAutoHyperlinkUiEnabled } from '../services/batchHyperlink/batchHyperl
 import type { BatchHyperlinkPreflightResult } from '../services/batchHyperlink/batchHyperlinkPreflight';
 import type { DocumentOCRData } from '../services/serverOcrService';
 
+/**
+ * Detection mode is a dev-side default, not a user-facing choice.
+ * 'loose' = broader callout detection; 'strict' = only near SEE/DET/REF cues.
+ */
+const AUTO_HYPERLINK_MODE: 'strict' | 'loose' = 'loose';
+
 export interface ToolsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -121,12 +127,10 @@ export function ToolsDialog({
 
   const showAutoHyperlink = isAutoHyperlinkUiEnabled() && Boolean(onPreflightAutoHyperlink && onExecuteAutoHyperlink);
   const [autoScope, setAutoScope] = useState<'project' | 'current'>('project');
-  const [autoMode, setAutoMode] = useState<'strict' | 'loose'>('loose');
   const [preflightLoading, setPreflightLoading] = useState(false);
   const [preflightOpen, setPreflightOpen] = useState(false);
   const [preflightResult, setPreflightResult] = useState<BatchHyperlinkPreflightResult | null>(null);
   const [executeRunning, setExecuteRunning] = useState(false);
-  const [runPymupdfFirst, setRunPymupdfFirst] = useState(true);
 
   useEffect(() => {
     if (!open) {
@@ -141,6 +145,24 @@ export function ToolsDialog({
     onOpenChange(false);
     onAddHyperlink?.();
   };
+
+  // Pages in scope = pages with saved text + full page counts of docs that have none yet.
+  const preflightPages = preflightResult
+    ? preflightResult.totalOcrPages +
+      preflightResult.documentsNeedingPymupdf
+        .filter((d) => d.hasNoStoredOcr)
+        .reduce((n, d) => n + d.totalPages, 0)
+    : 0;
+  // Bubble OCR ~2s/page on docs that still need it; PyMuPDF re-extract a few seconds per doc.
+  const preflightSeconds = preflightResult
+    ? preflightResult.documentsNeedingBubbleOcr.reduce((n, d) => n + d.totalPages, 0) * 2 +
+      preflightResult.documentsNeedingPymupdf.length * 5
+    : 0;
+  const preflightSummary = preflightResult
+    ? `Will scan ${preflightResult.documentsInScope} PDF${preflightResult.documentsInScope === 1 ? '' : 's'} (${preflightPages} page${preflightPages === 1 ? '' : 's'}) — ${
+        preflightSeconds < 60 ? 'usually under a minute' : `about ${Math.ceil(preflightSeconds / 60)} minutes`
+      }.`
+    : '';
 
   return (
     <>
@@ -294,8 +316,8 @@ export function ToolsDialog({
             <h3 className="text-sm font-medium text-foreground">Hyperlinks</h3>
             <p className="text-sm text-muted-foreground">
               Draw a box to link by hand, or use <span className="font-medium text-foreground">Auto-hyperlink</span> to
-              turn sheet callouts into taps that jump to the right page. Detected links open in a review table before
-              anything is applied; section/detail tags read from vector geometry can land zoomed on the exact detail.
+              scan sheet callouts and detail bubbles and turn them into links — you review everything before it&rsquo;s
+              applied.
             </p>
 
             <div className="flex flex-col gap-2">
@@ -338,31 +360,6 @@ export function ToolsDialog({
                             className="accent-primary"
                           />
                           Current document
-                        </label>
-                      </div>
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-sm font-normal">Detection mode</Label>
-                      <div className="flex flex-col gap-2">
-                        <label className="flex items-center gap-2 text-sm cursor-pointer">
-                          <input
-                            type="radio"
-                            name="auto-hyperlink-mode"
-                            checked={autoMode === 'loose'}
-                            onChange={() => setAutoMode('loose')}
-                            className="accent-primary"
-                          />
-                          Loose (recommended) — finds more callouts
-                        </label>
-                        <label className="flex items-center gap-2 text-sm cursor-pointer">
-                          <input
-                            type="radio"
-                            name="auto-hyperlink-mode"
-                            checked={autoMode === 'strict'}
-                            onChange={() => setAutoMode('strict')}
-                            className="accent-primary"
-                          />
-                          Strict — only near SEE / DET / REF cues
                         </label>
                       </div>
                     </div>
@@ -426,87 +423,17 @@ export function ToolsDialog({
         <DialogContent className="sm:max-w-md" aria-describedby="auto-hyperlink-preflight-desc">
           <DialogHeader>
             <DialogTitle>Auto-hyperlink</DialogTitle>
-            <DialogDescription id="auto-hyperlink-preflight-desc">
-              Here’s what we found from your saved searchable text. We can also re-read each PDF with a more permissive
-              text engine before linking so callout-bubble text isn’t missed. Your hand-drawn links stay put.
-            </DialogDescription>
+            <DialogDescription id="auto-hyperlink-preflight-desc">{preflightSummary}</DialogDescription>
           </DialogHeader>
-          {preflightResult && (
-            <ul className="text-sm space-y-1.5 list-disc pl-5 text-foreground">
-              <li>
-                PDFs in this run: {preflightResult.documentsInScope} ({preflightResult.documentsWithStoredOcr} with saved
-                text)
-              </li>
-              <li>Pages of saved text: {preflightResult.totalOcrPages}</li>
-              <li>
-                Pages where we know each word’s position: {preflightResult.pagesWithWordBoxes}
-                {preflightResult.pagesWithoutWordBoxes > 0
-                  ? ` (another ${preflightResult.pagesWithoutWordBoxes} only have plain text — links may be fewer)`
-                  : ''}
-              </li>
-              <li>
-                Pages with a sheet number in the sidebar: {preflightResult.pagesWithSheetNumber} (out of{' '}
-                {preflightResult.totalPagesInProject} total pages)
-              </li>
-              {preflightResult.ambiguousSheetNumberKeys.length > 0 && (
-                <li className="text-amber-700 dark:text-amber-400">
-                  Same sheet number on more than one page — we’ll skip jumping to these:{' '}
-                  {preflightResult.ambiguousSheetNumberKeys.join(', ')}
-                </li>
-              )}
-              {preflightResult.documentsMissingOcrNames.length > 0 && (
-                <li className="text-amber-700 dark:text-amber-400">
-                  No saved text yet for: {preflightResult.documentsMissingOcrNames.join(', ')}
-                </li>
-              )}
-              {preflightResult.pagesWithSheetNumber === 0 && (
-                <li className="text-amber-700 dark:text-amber-400">
-                  No sheet numbers in the sidebar yet — set them or run title block extract first.
-                </li>
-              )}
-            </ul>
+          <p className="text-sm text-foreground">
+            Finds callout bubbles, matchlines, and sheet references and turns them into links. You review everything
+            before it&rsquo;s applied; hand-drawn links stay put.
+          </p>
+          {preflightResult && preflightResult.pagesWithSheetNumber === 0 && (
+            <p className="text-sm text-amber-700 dark:text-amber-400">
+              No sheet numbers in the sidebar yet — set them or run title block extract first.
+            </p>
           )}
-          {preflightResult &&
-            (preflightResult.documentsNeedingPymupdf.length > 0 ||
-              preflightResult.documentsNeedingBubbleOcr.length > 0) && (
-              <div className="rounded-md border border-border bg-muted/40 p-3 space-y-2">
-                <div className="text-sm font-medium text-foreground">
-                  Re-scan text & bubbles first (recommended)
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {preflightResult.documentsNeedingPymupdf.length > 0 && (
-                    <>
-                      The browser's PDF text reader misses text on{' '}
-                      {preflightResult.documentsNeedingPymupdf.length === 1
-                        ? '1 PDF'
-                        : `${preflightResult.documentsNeedingPymupdf.length} PDFs`}
-                      . We'll re-read each PDF with a more permissive engine (PyMuPDF, seconds per
-                      doc).{' '}
-                    </>
-                  )}
-                  {preflightResult.documentsNeedingBubbleOcr.length > 0 && (
-                    <>
-                      We'll also OCR the round callout bubbles on{' '}
-                      {preflightResult.documentsNeedingBubbleOcr.length === 1
-                        ? '1 PDF'
-                        : `${preflightResult.documentsNeedingBubbleOcr.length} PDFs`}
-                      , since they're usually drawn as line art instead of text
-                      (~1–2&nbsp;seconds per page). With re-scan we also template-match split-circle
-                      and cloud callout shapes.
-                    </>
-                  )}
-                </p>
-                <label className="flex items-start gap-2 text-sm cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={runPymupdfFirst}
-                    onChange={(e) => setRunPymupdfFirst(e.target.checked)}
-                    className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
-                  />
-                  <span>Re-extract searchable text and scan callout bubbles before adding links</span>
-                </label>
-              </div>
-            )}
           <DialogFooter className="gap-2 sm:gap-0">
             <Button type="button" variant="outline" onClick={() => setPreflightOpen(false)} disabled={executeRunning}>
               Cancel
@@ -518,28 +445,25 @@ export function ToolsDialog({
                 executeRunning ||
                 !onExecuteAutoHyperlink ||
                 (preflightResult.documentsWithStoredOcr === 0 &&
-                  (!runPymupdfFirst ||
-                    (preflightResult.documentsNeedingPymupdf.length === 0 &&
-                      preflightResult.documentsNeedingBubbleOcr.length === 0)))
+                  preflightResult.documentsNeedingPymupdf.length === 0 &&
+                  preflightResult.documentsNeedingBubbleOcr.length === 0)
               }
               onClick={async () => {
                 if (!preflightResult || !onExecuteAutoHyperlink) return;
                 setExecuteRunning(true);
                 try {
-                  const runPymupdfFor =
-                    runPymupdfFirst && preflightResult.documentsNeedingPymupdf.length > 0
-                      ? preflightResult.documentsNeedingPymupdf
-                      : undefined;
-                  const runBubbleOcrFor =
-                    runPymupdfFirst && preflightResult.documentsNeedingBubbleOcr.length > 0
-                      ? preflightResult.documentsNeedingBubbleOcr
-                      : undefined;
                   await onExecuteAutoHyperlink({
                     scope: autoScope,
-                    mode: autoMode,
+                    mode: AUTO_HYPERLINK_MODE,
                     ocrByDocumentId: preflightResult.ocrByDocumentId,
-                    runPymupdfFor,
-                    runBubbleOcrFor,
+                    runPymupdfFor:
+                      preflightResult.documentsNeedingPymupdf.length > 0
+                        ? preflightResult.documentsNeedingPymupdf
+                        : undefined,
+                    runBubbleOcrFor:
+                      preflightResult.documentsNeedingBubbleOcr.length > 0
+                        ? preflightResult.documentsNeedingBubbleOcr
+                        : undefined,
                   });
                   setPreflightOpen(false);
                   onOpenChange(false);
@@ -550,11 +474,7 @@ export function ToolsDialog({
                 }
               }}
             >
-              {executeRunning
-                ? runPymupdfFirst && preflightResult && preflightResult.documentsNeedingPymupdf.length > 0
-                  ? 'Scanning text & bubbles…'
-                  : 'Running…'
-                : 'Add links'}
+              {executeRunning ? 'Running…' : 'Run'}
             </Button>
           </DialogFooter>
         </DialogContent>
