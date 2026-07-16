@@ -732,9 +732,17 @@ bubble bboxes at scan time).
    minimal schema/pass change costs and report back before building it — don't silently
    grow the scan.
 
+**Landing precedence (Jeff, 2026-07-16 — binding for review):**
+1. Link WITH stored view (region/zoom) → that view wins, zoom inherited.
+2. Link WITHOUT stored view → fit-to-window.
+3. Plain navigation (no link): user's last position+zoom on that sheet persists — this
+   existing behavior must NOT regress while fixing the fit bug.
+4. Fit-to-window is the default only when neither a link view nor saved page state exists.
+
 **Success criteria:** clicking through 10 sheet links on the beta project: every landing
 either fits the window or centers the target detail; zero 100% landings on
-larger-than-window pages; existing zoom controls unaffected; tsc + tests green.
+larger-than-window pages; plain-navigation position memory still works; existing zoom
+controls unaffected; tsc + tests green.
 
 ### Task G2 — Auto-hyperlink progress bar
 
