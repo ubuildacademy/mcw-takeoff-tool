@@ -10,6 +10,8 @@
  *     only include the most relevant ones.
  */
 
+import { tokenize, computeDocFrequency, scoreTextForTokens } from './textScoring';
+
 // ---------------------------------------------------------------------------
 // Static project context
 // ---------------------------------------------------------------------------
@@ -135,8 +137,6 @@ export function buildStaticProjectContext(params: BuildStaticProjectContextParam
 export const RETRIEVAL_TOTAL_CHAR_BUDGET = 24000;
 /** Character budget for a single page's text before it gets cut. */
 export const RETRIEVAL_PER_PAGE_CHAR_BUDGET = 6000;
-/** Occurrence count of a question token within a page is capped at this before weighting. */
-const MAX_TOKEN_OCCURRENCE_WEIGHT = 5;
 /** Flat score boost applied to a page that contains a sheet-number reference also present in the question. */
 const SHEET_REF_BOOST = 100000;
 
@@ -151,27 +151,8 @@ export interface ChatSourceDoc {
   pages: ChatSourcePage[];
 }
 
-const STOPWORDS = new Set([
-  'the', 'and', 'for', 'are', 'with', 'that', 'this', 'from', 'have', 'has',
-  'had', 'will', 'would', 'could', 'should', 'what', 'which', 'where', 'when',
-  'how', 'why', 'who', 'whom', 'can', 'does', 'did', 'not', 'you', 'your',
-  'yours', 'all', 'any', 'but', 'was', 'were', 'been', 'being', 'into', 'out',
-  'about', 'over', 'under', 'than', 'then', 'them', 'they', 'their', 'its',
-  'about', 'there', 'here', 'these', 'those', 'such', 'some', 'each', 'every',
-  'much', 'many', 'more', 'most', 'need', 'want', 'like', 'just', 'also',
-  'tell', 'show', 'give', 'let', 'per', 'via', 'our', 'ours', 'me', 'my',
-  'please', 'thanks', 'okay', 'yes', 'sheet', 'page', 'document',
-]);
-
 /** Sheet-number-ish patterns, e.g. A-101, S1.2, M-100, E101. */
 const SHEET_REF_REGEX = /\b[A-Z]{1,3}[-.]?\d{1,4}(?:\.\d+)?\b/gi;
-
-function tokenize(text: string): string[] {
-  return text
-    .toLowerCase()
-    .split(/[^a-z0-9]+/i)
-    .filter((token) => token.length >= 3 && !STOPWORDS.has(token));
-}
 
 function normalizeSheetRef(ref: string): string {
   return ref.toUpperCase().replace(/[-.]/g, '');
@@ -180,16 +161,6 @@ function normalizeSheetRef(ref: string): string {
 function extractSheetRefs(text: string): Set<string> {
   const matches = text.match(SHEET_REF_REGEX) ?? [];
   return new Set(matches.map(normalizeSheetRef));
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function countOccurrences(token: string, text: string): number {
-  const re = new RegExp(`\\b${escapeRegExp(token)}\\b`, 'gi');
-  const matches = text.match(re);
-  return matches ? matches.length : 0;
 }
 
 /** Cuts text to at most maxLen chars, breaking on a whitespace boundary rather than mid-word. */
@@ -237,28 +208,11 @@ export function retrieveRelevantPages(question: string, docs: ChatSourceDoc[]): 
   const questionSheetRefs = extractSheetRefs(question);
 
   // Document frequency per question token, for IDF weighting (rare terms score higher).
-  const docFrequency = new Map<string, number>();
-  if (questionTokens.length > 0) {
-    for (const token of questionTokens) {
-      let df = 0;
-      for (const { page } of allPages) {
-        if (countOccurrences(token, page.text) > 0) df++;
-      }
-      docFrequency.set(token, df);
-    }
-  }
+  const docFrequency = computeDocFrequency(questionTokens, allPages.map(({ page }) => page.text));
   const totalPages = allPages.length;
-  const idf = (token: string): number => {
-    const df = docFrequency.get(token) ?? 0;
-    return Math.log((totalPages + 1) / (df + 1)) + 1;
-  };
 
   const scored: ScoredPage[] = allPages.map(({ docId, docName, page }) => {
-    let score = 0;
-    for (const token of questionTokens) {
-      const occurrences = Math.min(countOccurrences(token, page.text), MAX_TOKEN_OCCURRENCE_WEIGHT);
-      if (occurrences > 0) score += occurrences * idf(token);
-    }
+    let score = scoreTextForTokens(page.text, questionTokens, docFrequency, totalPages);
     if (questionSheetRefs.size > 0) {
       const pageRefs = extractSheetRefs(page.text);
       for (const ref of pageRefs) {
