@@ -27,9 +27,10 @@ import { useConditionStore } from '../store/slices/conditionSlice';
 import { useMeasurementStore } from '../store/slices/measurementSlice';
 import { authHelpers } from '../lib/supabase';
 import { settingsService } from '../services/apiService';
-import { CHAT_PRESET_CONFIGS, CHAT_PRESET_MAP, CHAT_PRESET_SETTING_KEY } from '../constants/chatPresets';
+import { CHAT_PRESET_CONFIGS, CHAT_PRESET_MAP, CHAT_PRESET_SETTING_KEY, KB_CHAR_BUDGET } from '../constants/chatPresets';
 import { knowledgeBaseService } from '../services/knowledgeBaseService';
 import { buildStaticProjectContext, retrieveRelevantPages, type ChatSourceDoc } from '../utils/chatContext';
+import { packKnowledgeBase } from '../utils/kbPacking';
 import type { PDFDocument } from '../types';
 
 /** Strip markdown to plain text (pure, no closure — safe to define outside component). */
@@ -387,7 +388,11 @@ export function ChatTab({ projectId, documents }: ChatTabProps) {
         ? `\n\n=== RELEVANT SHEET TEXT (auto-selected for this question) ===\n${relevantPages}`
         : '';
 
-      const kbContent = kbCache[selectedPresetId] ?? '';
+      const rawKbContent = kbCache[selectedPresetId] ?? '';
+      // Over-budget KBs are packed section-by-section (highest-relevance-to-the-question
+      // first, whole sections only) instead of tail-truncated, so a section near the end
+      // of a long trade KB (e.g. an ASTM standards section) still reaches the model.
+      const kbContent = rawKbContent ? packKnowledgeBase(rawKbContent, content, KB_CHAR_BUDGET) : '';
       const kbSection = kbContent
         ? `\n\n=== KNOWLEDGE BASE ===\nUse the following reference material to answer technical questions about materials, installation methods, specifications, and standards. Cite the section when referencing it.\n\n${kbContent}\n=== END KNOWLEDGE BASE ===`
         : '';
