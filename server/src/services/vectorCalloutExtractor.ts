@@ -105,7 +105,10 @@ class VectorCalloutExtractor {
    * Throws on script failure (e.g. PyMuPDF missing); callers treat that as a
    * soft fail and fall back to the raster passes.
    */
-  async extractAllPages(pdfPath: string): Promise<VectorCalloutExtractionResult> {
+  async extractAllPages(
+    pdfPath: string,
+    onPage?: (page: number, totalPages: number) => void
+  ): Promise<VectorCalloutExtractionResult> {
     if (!(await fs.pathExists(pdfPath))) {
       throw new Error(`PDF file not found: ${pdfPath}`);
     }
@@ -124,7 +127,8 @@ class VectorCalloutExtractor {
     const { stdout, stderrTail } = await this.runScript(
       pythonCommand,
       [this.pythonScriptPath, pdfPath],
-      enhancedPath
+      enhancedPath,
+      onPage
     );
 
     let parsed: VectorCalloutScriptOutput;
@@ -166,7 +170,8 @@ class VectorCalloutExtractor {
   private runScript(
     command: string,
     args: string[],
-    enhancedPath: string
+    enhancedPath: string,
+    onPage?: (page: number, totalPages: number) => void
   ): Promise<{ stdout: string; stderrTail: string }> {
     return new Promise((resolve, reject) => {
       const child = spawn(command, args, {
@@ -208,6 +213,11 @@ class VectorCalloutExtractor {
           stderrLineBuf = stderrLineBuf.slice(nlIdx + 1);
           if (!line) continue;
           devLog(`📐 ${line}`);
+          // Surface per-page progress. Format: `[vector-callout] page N/M: ...`.
+          if (onPage) {
+            const m = line.match(/\bpage (\d+)\/(\d+)\b/);
+            if (m) onPage(parseInt(m[1], 10), parseInt(m[2], 10));
+          }
           stderrTail.push(line);
           if (stderrTail.length > STDERR_TAIL_LINES) stderrTail.shift();
         }

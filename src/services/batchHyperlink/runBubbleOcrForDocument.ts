@@ -3,6 +3,8 @@ import { ocrApiService } from '../apiService';
 export interface RunBubbleOcrOptions {
   documentId: string;
   projectId: string;
+  /** Optional Auto-hyperlink run id so the server streams per-page progress. */
+  runId?: string;
 }
 
 export interface RunBubbleOcrResult {
@@ -28,9 +30,9 @@ export interface RunBubbleOcrResult {
 export async function runBubbleOcrForDocument(
   options: RunBubbleOcrOptions,
 ): Promise<RunBubbleOcrResult> {
-  const { documentId, projectId } = options;
+  const { documentId, projectId, runId } = options;
 
-  const result = await ocrApiService.runBubbleOcrExtract(documentId, projectId);
+  const result = await ocrApiService.runBubbleOcrExtract(documentId, projectId, runId);
 
   return {
     documentId,

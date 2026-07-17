@@ -43,7 +43,8 @@ import {
   centerViewportOnPoint,
   getNormalizedViewportCenter,
 } from '../lib/windowBridge';
-import { fileService } from '../services/apiService';
+import { fileService, ocrApiService } from '../services/apiService';
+import type { AutoHyperlinkPhase, AutoHyperlinkRunProgress } from '../services/batchHyperlink/autoHyperlinkProgress';
 import { MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL_MB } from '../constants/deliveryLimits';
 import { SidebarEdgeToggle } from './takeoff-workspace/SidebarEdgeToggle';
 import { TakeoffWorkspaceHeader } from './takeoff-workspace/TakeoffWorkspaceHeader';
@@ -968,10 +969,34 @@ export function TakeoffWorkspace() {
       ocrByDocumentId: Map<string, DocumentOCRData>;
       runPymupdfFor?: Array<{ id: string; name: string; totalPages: number; hasNoStoredOcr: boolean }>;
       runBubbleOcrFor?: Array<{ id: string; name: string; totalPages: number; hasNoStoredOcr: boolean }>;
+      /** Live progress sink for the run dialog's bar. Optional; called throughout the run. */
+      onProgress?: (progress: AutoHyperlinkRunProgress) => void;
     }) => {
       if (!projectId) return;
       const freshDocs = (await loadProjectDocuments()) ?? documents;
-      let progressToast: string | number | undefined;
+
+      // --- Live progress plumbing --------------------------------------------
+      // The pre-passes emit per-page progress to the server keyed by this runId;
+      // we poll it and feed a page-by-page bar to the dialog. The client owns the
+      // denominator (total pages queued across every pass); the server owns the
+      // monotonic pagesDone counter. See services/batchHyperlink/autoHyperlinkProgress.
+      const runId = crypto.randomUUID();
+      let phase: AutoHyperlinkPhase = 'scanning-callouts';
+      let calloutsSoFar = 0;
+      const latest = { pagesDone: 0, currentDoc: '', currentDocPage: 0, currentDocTotal: 0 };
+      const emitProgress = (totalPages: number) => {
+        const done = Math.min(latest.pagesDone, totalPages);
+        opts.onProgress?.({
+          phase,
+          pagesDone: done,
+          totalPages,
+          fraction: totalPages > 0 ? Math.min(1, latest.pagesDone / totalPages) : 0,
+          currentDoc: latest.currentDoc,
+          currentDocPage: latest.currentDocPage,
+          currentDocTotal: latest.currentDocTotal,
+          calloutsFound: calloutsSoFar,
+        });
+      };
       try {
         // Pre-step A: re-extract text with PyMuPDF (MuPDF) for any document whose stored OCR is
         // missing PyMuPDF-sourced word boxes. PDF.js silently drops glyphs in Type-3 fonts and
@@ -1010,8 +1035,36 @@ export function TakeoffWorkspace() {
             : freshDocs;
         let vectorReferenceCallouts = 0;
 
-        progressToast = toast.loading(`Scanning callouts 0/${vectorDocs.length}…`);
-        let vectorDocsDone = 0;
+        // Denominator for the bar: every page every pass will touch. Vector runs
+        // on all in-scope docs; pymupdf/bubble only on their preflight targets.
+        const pageCountOfDoc = (d: (typeof freshDocs)[number]) =>
+          Math.max(d.totalPages ?? 0, d.pages?.length ?? 0) || 1;
+        const totalRunPages = Math.max(
+          1,
+          vectorDocs.reduce((sum, d) => sum + pageCountOfDoc(d), 0) +
+            pymupdfTargets.reduce((sum, t) => sum + (t.totalPages || 1), 0) +
+            bubbleOcrTargets.reduce((sum, t) => sum + (t.totalPages || 1), 0),
+        );
+
+        // Poll server-side per-page progress and push a fresh bar to the dialog.
+        // 700 ms is fine-grained enough for a ~1-2 s/page pass without hammering.
+        emitProgress(totalRunPages);
+        const pollTimer = window.setInterval(async () => {
+          try {
+            const p = await ocrApiService.getAutoHyperlinkProgress(runId);
+            latest.pagesDone = p.pagesDone;
+            latest.currentDoc = p.currentDoc;
+            latest.currentDocPage = p.currentDocPage;
+            latest.currentDocTotal = p.currentDocTotal;
+            emitProgress(totalRunPages);
+          } catch {
+            // Transient poll failure — keep the last bar; next tick retries.
+          }
+        }, 700);
+
+        try {
+        phase = 'scanning-callouts';
+        emitProgress(totalRunPages);
         let vectorCursor = 0;
         const vectorWorker = async () => {
           while (vectorCursor < vectorDocs.length) {
@@ -1021,30 +1074,31 @@ export function TakeoffWorkspace() {
               const vec = await runVectorCalloutsForDocument({
                 documentId: doc.id,
                 projectId,
+                runId,
               });
               if (vec.referenceCallouts > 0) touchedDocIds.add(doc.id);
               vectorReferenceCallouts += vec.referenceCallouts;
+              calloutsSoFar += vec.calloutsFound;
               for (const [k, v] of vec.calloutsByPageKey) calloutsByPageKey.set(k, v);
             } catch (err) {
               console.error(`[auto-hyperlink] Vector callout pass failed for ${doc.name}:`, err);
               // Soft fail: raster passes below still cover this document.
-            } finally {
-              vectorDocsDone += 1;
-              toast.loading(`Scanning callouts ${vectorDocsDone}/${vectorDocs.length}…`, {
-                id: progressToast,
-              });
             }
           }
         };
         await Promise.all(Array.from({ length: Math.min(3, vectorDocs.length) }, vectorWorker));
 
-        let pymupdfDocsDone = 0;
+        if (pymupdfTargets.length > 0) {
+          phase = 'reextracting-text';
+          emitProgress(totalRunPages);
+        }
         for (const target of pymupdfTargets) {
           touchedDocIds.add(target.id);
           try {
             const result = await runPymupdfExtractForDocument({
               documentId: target.id,
               projectId,
+              runId,
             });
             pymupdfDocsRan += 1;
             pymupdfPagesExtracted += result.pagesExtracted;
@@ -1053,34 +1107,29 @@ export function TakeoffWorkspace() {
             toast.error(
               `Re-extracting text from ${target.name} failed; continuing with saved text only.`,
             );
-          } finally {
-            pymupdfDocsDone += 1;
-            toast.loading(`Re-extracting text ${pymupdfDocsDone}/${pymupdfTargets.length}…`, {
-              id: progressToast,
-            });
           }
         }
 
-        let bubbleOcrDocsDone = 0;
+        if (bubbleOcrTargets.length > 0) {
+          phase = 'scanning-bubbles';
+          emitProgress(totalRunPages);
+        }
         for (const target of bubbleOcrTargets) {
           touchedDocIds.add(target.id);
           try {
             const bubbleResult = await runBubbleOcrForDocument({
               documentId: target.id,
               projectId,
+              runId,
             });
             bubbleOcrDocsRan += 1;
             bubbleOcrCalloutsFound += bubbleResult.calloutsFound;
+            calloutsSoFar += bubbleResult.calloutsFound;
           } catch (err) {
             console.error(`[auto-hyperlink] Bubble OCR failed for ${target.name}:`, err);
             toast.error(
               `Scanning bubbles in ${target.name} failed; continuing with text-only matches.`,
             );
-          } finally {
-            bubbleOcrDocsDone += 1;
-            toast.loading(`Scanning bubbles ${bubbleOcrDocsDone}/${bubbleOcrTargets.length}…`, {
-              id: progressToast,
-            });
           }
         }
 
@@ -1118,7 +1167,12 @@ export function TakeoffWorkspace() {
           }
         }
 
-        toast.loading('Matching sheet references…', { id: progressToast });
+        // Pre-passes done — stop polling so a late tick can't drag the bar back
+        // down. Matching isn't page-based; peg the bar full and relabel it.
+        window.clearInterval(pollTimer);
+        phase = 'matching';
+        latest.pagesDone = totalRunPages;
+        emitProgress(totalRunPages);
         const run = await runBatchHyperlinks({
           projectId,
           documents: freshDocs,
@@ -1180,19 +1234,20 @@ export function TakeoffWorkspace() {
             calloutPassPagesMatched,
             calloutPassWordBoxCount,
           });
-          if (progressToast !== undefined) toast.dismiss(progressToast);
           toast.success(title, description ? { description } : undefined);
         } else {
           // Nothing is written yet — the review dialog applies on confirm.
-          if (progressToast !== undefined) toast.dismiss(progressToast);
           setBatchReview({
             links: run.created,
             noTargetRefs: run.topNoTargetRefs,
             ambiguousRefs: run.topAmbiguousRefs,
           });
         }
+        } finally {
+          // Stop polling once the run settles (success, review, or throw).
+          window.clearInterval(pollTimer);
+        }
       } catch (e) {
-        if (progressToast !== undefined) toast.dismiss(progressToast);
         console.error(e);
         toast.error(e instanceof Error ? e.message : 'Auto-hyperlink failed');
         throw e;

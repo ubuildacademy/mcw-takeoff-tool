@@ -29,9 +29,11 @@ export interface RunVectorCalloutsResult {
 export async function runVectorCalloutsForDocument(options: {
   documentId: string;
   projectId: string;
+  /** Optional Auto-hyperlink run id so the server streams per-page progress. */
+  runId?: string;
 }): Promise<RunVectorCalloutsResult> {
-  const { documentId, projectId } = options;
-  const result = await ocrApiService.runVectorCalloutExtract(documentId, projectId);
+  const { documentId, projectId, runId } = options;
+  const result = await ocrApiService.runVectorCalloutExtract(documentId, projectId, runId);
 
   const calloutsByPageKey = new Map<string, VectorCalloutClient[]>();
   for (const page of result.pages ?? []) {

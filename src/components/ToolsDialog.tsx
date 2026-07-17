@@ -15,6 +15,11 @@ import { useUserPreferencesStore } from '../store/slices/userPreferencesSlice';
 import type { ThemeMode } from '../lib/theme';
 import { isAutoHyperlinkUiEnabled } from '../services/batchHyperlink/batchHyperlinkFeature';
 import type { BatchHyperlinkPreflightResult } from '../services/batchHyperlink/batchHyperlinkPreflight';
+import {
+  type AutoHyperlinkRunProgress,
+  phaseLabel,
+} from '../services/batchHyperlink/autoHyperlinkProgress';
+import { Progress } from './ui/progress';
 import type { DocumentOCRData } from '../services/serverOcrService';
 
 /**
@@ -51,6 +56,8 @@ export interface ToolsDialogProps {
      * inside detail/section bubbles.
      */
     runBubbleOcrFor?: BatchHyperlinkPreflightResult['documentsNeedingBubbleOcr'];
+    /** Live progress sink so the run dialog can render a page-by-page bar. */
+    onProgress?: (progress: AutoHyperlinkRunProgress) => void;
   }) => Promise<void>;
   /** Remove only auto-generated (batch) hyperlinks for this project. */
   onClearBatchHyperlinks?: () => void;
@@ -131,6 +138,8 @@ export function ToolsDialog({
   const [preflightOpen, setPreflightOpen] = useState(false);
   const [preflightResult, setPreflightResult] = useState<BatchHyperlinkPreflightResult | null>(null);
   const [executeRunning, setExecuteRunning] = useState(false);
+  /** Live run progress for the bar; null until the first tick arrives. */
+  const [runProgress, setRunProgress] = useState<AutoHyperlinkRunProgress | null>(null);
 
   useEffect(() => {
     if (!open) {
@@ -438,6 +447,31 @@ export function ToolsDialog({
               No sheet numbers in the sidebar yet — set them or run title block extract first.
             </p>
           )}
+          {executeRunning && (
+            <div className="space-y-1.5" aria-live="polite">
+              <div className="flex items-center justify-between text-sm">
+                <span className="font-medium text-foreground">
+                  {runProgress ? phaseLabel(runProgress.phase) : 'Starting…'}
+                </span>
+                <span className="tabular-nums text-muted-foreground">
+                  {runProgress ? Math.round(runProgress.fraction * 100) : 0}%
+                </span>
+              </div>
+              <Progress value={runProgress ? Math.round(runProgress.fraction * 100) : 0} className="h-2" />
+              <p className="text-xs text-muted-foreground tabular-nums">
+                {runProgress ? `${runProgress.pagesDone}/${runProgress.totalPages} pages` : 'Preparing…'}
+                {runProgress?.currentDoc && runProgress.currentDocTotal > 0 && (
+                  <>
+                    {' · '}
+                    {runProgress.currentDoc} p{runProgress.currentDocPage}/{runProgress.currentDocTotal}
+                  </>
+                )}
+                {runProgress && runProgress.calloutsFound > 0 && (
+                  <> · {runProgress.calloutsFound} callouts found</>
+                )}
+              </p>
+            </div>
+          )}
           <DialogFooter className="gap-2 sm:gap-0">
             <Button type="button" variant="outline" onClick={() => setPreflightOpen(false)} disabled={executeRunning}>
               Cancel
@@ -455,6 +489,7 @@ export function ToolsDialog({
               onClick={async () => {
                 if (!preflightResult || !onExecuteAutoHyperlink) return;
                 setExecuteRunning(true);
+                setRunProgress(null);
                 try {
                   await onExecuteAutoHyperlink({
                     scope: autoScope,
@@ -468,6 +503,7 @@ export function ToolsDialog({
                       preflightResult.documentsNeedingBubbleOcr.length > 0
                         ? preflightResult.documentsNeedingBubbleOcr
                         : undefined,
+                    onProgress: setRunProgress,
                   });
                   setPreflightOpen(false);
                   onOpenChange(false);
@@ -475,6 +511,7 @@ export function ToolsDialog({
                   console.error(e);
                 } finally {
                   setExecuteRunning(false);
+                  setRunProgress(null);
                 }
               }}
             >
