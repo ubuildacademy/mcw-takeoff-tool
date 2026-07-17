@@ -56,10 +56,12 @@ interface DocumentViewState {
   setDocumentLocationBySheet: (sheetId: string, location: { x: number; y: number }) => void;
   getDocumentLocationBySheet: (sheetId: string) => { x: number; y: number };
   /**
-   * True if this sheet has persisted per-sheet location or scale (not only document-level fallbacks).
-   * Used to tell “never positioned” from “saved at default-looking values”.
+   * True if this sheet has a persisted zoom (per-sheet, or the document-level legacy
+   * fallback getDocumentScaleBySheet would return). Used to tell “never zoomed — fit
+   * to window” from “user set a zoom — honor it”. Saved locations/rotations alone
+   * don't count: pixel scroll offsets without a scale are meaningless.
    */
-  hasExplicitViewStateForSheet: (sheetId: string) => boolean;
+  hasExplicitScaleForSheet: (sheetId: string) => boolean;
 }
 
 export const useDocumentViewStore = create<DocumentViewState>()(
@@ -242,17 +244,12 @@ export const useDocumentViewStore = create<DocumentViewState>()(
         return state.documentLocations[parseDocumentIdFromSheetId(sheetId)] ?? { x: 0, y: 0 };
       },
 
-      hasExplicitViewStateForSheet: (sheetId) => {
+      hasExplicitScaleForSheet: (sheetId) => {
         const state = get();
-        const documentId = parseDocumentIdFromSheetId(sheetId);
+        // Mirror getDocumentScaleBySheet's fallback chain exactly.
         return (
-          state.documentLocationsBySheet[sheetId] != null ||
           state.documentScalesBySheet[sheetId] != null ||
-          state.documentRotationsBySheet[sheetId] != null ||
-          state.documentLocations[documentId] != null ||
-          state.documentScales[documentId] != null ||
-          (state.documentRotations[documentId] != null &&
-            state.documentRotations[documentId] !== 0)
+          state.documentScales[parseDocumentIdFromSheetId(sheetId)] != null
         );
       },
     }),
