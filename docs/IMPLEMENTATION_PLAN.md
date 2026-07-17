@@ -751,7 +751,19 @@ either fits the window or centers the target detail; zero 100% landings on
 larger-than-window pages; plain-navigation position memory still works; existing zoom
 controls unaffected; tsc + tests green.
 
-### Task G2 — Auto-hyperlink progress bar
+### Task G2 — Auto-hyperlink progress bar — DONE 2026-07-17 (cc61b719, merged 4e3e19e6)
+
+**Landed:** in-memory run-status map keyed by a client-minted runId + 700 ms polling
+(no SSE — dodges proxy buffering; no DB writes). Server `autoHyperlinkProgress.ts`
+keeps a monotonic pagesDone counter (correct under the vector pass's 3 concurrent
+workers), TTL-swept. Extractors' `extractAllPages` take optional `onPage` parsing the
+existing `[bubble-ocr] page N/M:` stderr lines — no python changes. Client owns the
+denominator (Σ pages across queued passes); poller torn down in `finally` and pegged
+full before the matching phase so a late tick can't drag the bar back. Bar shows phase
+label, current sheet (`file p N/M`), and honest callouts-found count (real link count
+only exists post-match, kept in the completion summary). Cancel: none existed mid-run;
+none added. Chip session was blocked from committing by a Bash-classifier outage;
+gates (tsc both sides, 260 vitest) run and commit made by the reviewer session.
 
 **Problem (Jeff):** the run dialog "doesn't really tell much" during a ~5-minute scan.
 The python passes already emit per-page stderr progress lines (see
