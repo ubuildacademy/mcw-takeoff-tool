@@ -68,7 +68,7 @@ def extract_text(pdf_path: str) -> dict:
                 # PyMuPDF word coordinates are in UNROTATED page space, but
                 # page.rect is the ROTATED visible box — swap the normalization
                 # dims on /Rotate 90/270 pages or every box lands misplaced
-                # (same fix as table_extract.py; verified empirically).
+                # (same fix as archived table_extract.py; verified empirically).
                 rotation = int(getattr(page, "rotation", 0) or 0) % 360
                 rect = page.rect  # In PDF points; origin top-left
                 if rotation in (90, 270):

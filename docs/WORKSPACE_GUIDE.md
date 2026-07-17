@@ -361,7 +361,7 @@ Press **Cmd/Ctrl+K** anywhere in the workspace to open a searchable palette (`sr
 
 - **Sheets** — jump to any page by sheet number or sheet name; opens it in a new tab.
 - **Conditions** — activate a condition for drawing, same as clicking it in the left sidebar.
-- **Actions** — **Calibrate scale** / **Recalibrate scale**, **Magic wand**, **Schedule → takeoff**, **Compare sheet revisions…**, **Fit sheet to window**.
+- **Actions** — **Calibrate scale** / **Recalibrate scale**, **Magic wand**, **Compare sheet revisions…**, **Fit sheet to window**.
 
 **Arrow Up/Down** move the highlight, **Enter** runs the highlighted item (and closes the palette), **Escape** closes without doing anything.
 
@@ -372,16 +372,6 @@ The **Wand** button lives in the top command bar. Select an **area** or **volume
 - Requires the sheet to be **calibrated** first.
 - If the region is not fully enclosed (an open doorway, a gap in linework), the wand **refuses** and shows a message instead of guessing at a boundary.
 - **Escape** exits wand mode; the resulting measurement **undoes** like any other.
-
-### Schedule → takeoff
-
-Open from ⌘K → **"Schedule → takeoff."** Drag a box around a door/window/fixture schedule table on the sheet, including its header row. The table is reconstructed from the sheet's **vector text** (no OCR) — this only works on **vector PDFs**; scanned sheets are refused with a message.
-
-A review dialog follows:
-
-- **Name column** and **Qty column** are auto-guessed from the header text and can be remapped.
-- Uncheck any row you don't want.
-- Applying creates **one count condition per row**, with **QTY markers** placed beside that row on the schedule itself — so the count is auditable against the printed quantity, and the markers can be dragged onto the plan afterward.
 
 ### Compare sheet revisions
 

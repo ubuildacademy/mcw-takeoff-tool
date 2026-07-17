@@ -4,7 +4,7 @@ Every update to Meridian Takeoff since the beta program started, newest first. C
 
 ---
 
-## Templates, AI Chat, and schedule takeoff fixes — 2026-07
+## Templates, AI Chat, and dialog fixes — 2026-07
 
 **Condition templates now sync to your account.**
 Templates you save under **Templates** (Conditions tab) follow you to any device you sign in on — no longer tied to one browser. Turn on **Shared** on a template to publish it to your whole team; teammates see a **Shared** badge and can apply it, while only you (or an admin) can edit it. Templates you saved before this update import automatically the first time you open the dialog.
@@ -19,10 +19,7 @@ A bug caused batch-generated hyperlinks to sometimes land on an empty part of a 
 Running auto-hyperlink across a whole project used to sit on "Running…" with no sense of how far along it was. Now the run dialog shows a bar that fills page-by-page, the current sheet being scanned, and a running count of callouts found — so you can see it working through a long scan.
 
 **Dialogs now size to their content.**
-Dialogs with a lot to show — like Schedule → takeoff's review table — now stretch to use available screen space instead of squeezing everything into a fixed small window. Simple dialogs stay compact.
-
-**Schedule → takeoff (dev preview) now handles real door/window schedules.**
-Multi-row headers (like "Door Number" split across five level columns) are understood automatically, and a new "count filled cells across columns" mode reads schedules that show one door number per level with no separate quantity column. Rows with the same name — every unit's entrance door, for example — can be grouped into a single condition with the total count. Note: a schedule whose entire body was converted to non-text graphics by the PDF export can't be read by this tool yet — you'll get a clear message instead of bad data if that happens.
+Dialogs with a lot to show — like the auto-hyperlink review table — now stretch to use available screen space instead of squeezing everything into a fixed small window. Simple dialogs stay compact.
 
 ---
 

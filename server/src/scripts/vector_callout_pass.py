@@ -92,7 +92,7 @@ def extract_callouts(pdf_path: str) -> dict:
             try:
                 page = doc[page_index]
                 # Drawing/word coords are in UNROTATED space; page.rect is the
-                # rotated box — swap dims on /Rotate 90/270 (see table_extract.py).
+                # rotated box — swap dims on /Rotate 90/270 (see archive/schedule-ocr-fallback: table_extract.py).
                 rotation = int(getattr(page, "rotation", 0) or 0) % 360
                 rect = page.rect
                 if rotation in (90, 270):
