@@ -324,13 +324,20 @@ unchecked); changing name column visibly re-derives checks; tsc + all tests gree
 Jeff runs gate #3 after this lands.
 *B5 DONE 2026-07-15 (6078154d, schedule branch).*
 
-**WORKSTREAM B PARKED (Jeff, 2026-07-15):** "put a pin in the schedule tool for now —
-still wonky, not helpful still." Dev gate stays on; `feat/schedule-ocr-fallback` stays
-unmerged to main. All B1–B5 work is preserved on that branch. Do not spend further
-sessions here unless Jeff re-opens it. Real-schedule variety may make this tool hard to
-ever generalize — revisit only with a fundamentally better extraction idea, not more
-incremental OCR tuning. Effort redirects to Workstream F (hyperlink bubbles) and
-assemblies Stage 2 planning.
+**WORKSTREAM B CUT (Jeff, 2026-07-17):** "The schedule tool is terrible and not useful
+still — I think we need to cut it. Even if it successfully read a schedule, it's not
+going to go through the whole set and apply those window/door types to auto count them
+in the drawings... I don't see that happening quickly and accurately enough to trust."
+Decision: feature removed, not parked. All B/OCR work preserved under git tag
+`archive/schedule-ocr-fallback` (38 commits, pushed to origin); branch retired; live
+dev checkout moved back to `main`. The dev-gated remnants on main (ScheduleReviewDialog,
+scheduleTableMapping utils + tests, table_extract.py, tableExtractor.ts, the
+/table-extract route, the workspace entry point) are dead weight → removal task below.
+**Far-future idea worth keeping (Jeff's bar for ever reviving this):** schedule row →
+auto-count placement across the whole drawing set (marry schedule types to the existing
+Auto Count/visual search) — that's the version that would actually help estimators; pure
+table extraction was never the valuable part. Requires trust-level accuracy that doesn't
+exist yet; do not attempt without a fundamentally different approach.
 
 *DONE 2026-07-14 (branch feat/schedule-ocr-fallback, on top of 42b0433d). All 3 steps
 implemented as specified. Measured against the real page-53 door schedule (rotated
