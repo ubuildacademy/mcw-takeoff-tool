@@ -15,6 +15,9 @@ Chat now picks out the most relevant pages of your uploaded sheets for each ques
 **Auto-hyperlink stopped placing links on blank space.**
 A bug caused batch-generated hyperlinks to sometimes land on an empty part of a sheet instead of the actual callout bubble. Fixed — re-run auto-hyperlink on an affected project and the bad links clean themselves up.
 
+**Dialogs now size to their content.**
+Dialogs with a lot to show — like Schedule → takeoff's review table — now stretch to use available screen space instead of squeezing everything into a fixed small window. Simple dialogs stay compact.
+
 **Schedule → takeoff (dev preview) now handles real door/window schedules.**
 Multi-row headers (like "Door Number" split across five level columns) are understood automatically, and a new "count filled cells across columns" mode reads schedules that show one door number per level with no separate quantity column. Rows with the same name — every unit's entrance door, for example — can be grouped into a single condition with the total count. Note: a schedule whose entire body was converted to non-text graphics by the PDF export can't be read by this tool yet — you'll get a clear message instead of bad data if that happens.
 
