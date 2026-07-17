@@ -44,6 +44,25 @@ function sweep(now: number): void {
   }
 }
 
+/** Fetch a run's state, creating it (and sweeping stale runs) if absent. */
+function ensureRun(runId: string): AutoHyperlinkProgress {
+  let state = runs.get(runId);
+  if (!state) {
+    const now = Date.now();
+    sweep(now);
+    state = {
+      runId,
+      pagesDone: 0,
+      currentDoc: '',
+      currentDocPage: 0,
+      currentDocTotal: 0,
+      updatedAt: now,
+    };
+    runs.set(runId, state);
+  }
+  return state;
+}
+
 /** Begin (or reset) tracking for a run. Idempotent. */
 export function startRun(runId: string): void {
   const now = Date.now();
@@ -69,11 +88,7 @@ export function reportPage(
   page: number,
   docTotal: number,
 ): void {
-  let state = runs.get(runId);
-  if (!state) {
-    startRun(runId);
-    state = runs.get(runId)!;
-  }
+  const state = ensureRun(runId);
   state.pagesDone += 1;
   state.currentDoc = docLabel;
   state.currentDocPage = page;
@@ -87,11 +102,7 @@ export function reportPage(
  * the pass finishes a document.
  */
 export function addPages(runId: string, count: number, docLabel: string): void {
-  let state = runs.get(runId);
-  if (!state) {
-    startRun(runId);
-    state = runs.get(runId)!;
-  }
+  const state = ensureRun(runId);
   state.pagesDone += Math.max(0, count);
   if (docLabel) state.currentDoc = docLabel;
   state.updatedAt = Date.now();
