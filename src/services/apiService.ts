@@ -1024,34 +1024,6 @@ export const ocrApiService = {
    * OCR (`source: 'vector_callout'`); the full callout payload comes back for the review
    * table and auto target views. Seconds per document — runs on every Auto-hyperlink.
    */
-  /**
-   * Schedule→takeoff: reconstruct a table from a boxed region of a vector sheet
-   * (server-side line-grid geometry + exact text; clustering fallback for
-   * borderless schedules). Deterministic — no OCR, no LLM.
-   */
-  async runTableExtract(
-    documentId: string,
-    projectId: string,
-    pageNumber: number,
-    region: { x: number; y: number; width: number; height: number }
-  ) {
-    const response = await apiClient.post(`/ocr/table-extract/${documentId}`, {
-      projectId,
-      pageNumber,
-      region,
-    }, {
-      timeout: 2 * 60 * 1000,
-    });
-    return response.data as {
-      documentId: string;
-      pageNumber: number;
-      mode: 'ruled' | 'clustered';
-      rows: string[][];
-      rowBoxes: Array<{ y0: number; y1: number }>;
-      region: { x0: number; y0: number; x1: number; y1: number };
-    };
-  },
-
   async runVectorCalloutExtract(documentId: string, projectId: string) {
     const response = await apiClient.post(`/ocr/vector-callouts/${documentId}`, {
       projectId,

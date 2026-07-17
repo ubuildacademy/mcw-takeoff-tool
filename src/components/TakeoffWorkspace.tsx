@@ -6,9 +6,7 @@ import PDFViewer from './PDFViewer';
 import { TakeoffSidebar } from './TakeoffSidebar';
 import { Button } from './ui/button';
 import { CommandPalette, type CommandItem } from './CommandPalette';
-import { ScheduleReviewDialog, type ScheduleApplyGroup } from './ScheduleReviewDialog';
 import { RevisionCompareDialog } from './RevisionCompareDialog';
-import { generateDistinctColor } from '../utils/commonUtils';
 
 import { useShallow } from 'zustand/react/shallow';
 import { useProjectStore } from '../store/slices/projectSlice';
@@ -115,146 +113,6 @@ export function TakeoffWorkspace() {
       );
     }
   }, [magicWandMode]);
-
-  // Schedule→takeoff: box a schedule on the sheet → parsed table review →
-  // count conditions with markers on the schedule rows. The box-draw phase
-  // piggybacks the hyperlink draw path (same interaction, different callback).
-  const [scheduleSelectMode, setScheduleSelectMode] = useState(false);
-  const [scheduleTable, setScheduleTable] = useState<{
-    documentId: string;
-    pageNumber: number;
-    mode: 'ruled' | 'clustered';
-    rows: string[][];
-    rowBoxes: Array<{ y0: number; y1: number }>;
-    region: { x0: number; y0: number; x1: number; y1: number };
-  } | null>(null);
-  const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
-
-  const handleStartScheduleSelect = useCallback(() => {
-    setScheduleSelectMode(true);
-    setHyperlinkMode(false);
-    setMagicWandMode(false);
-    setAnnotationTool(null);
-    toast.info('Drag a box around the schedule table (headers included).', { duration: 5000 });
-  }, []);
-
-  const handleScheduleRegionDrawn = useCallback(
-    async (
-      rect: { x: number; y: number; width: number; height: number },
-      sourceSheetId: string,
-      sourcePageNumber: number
-    ) => {
-      setScheduleSelectMode(false);
-      if (!projectId) return;
-      const parsing = toast.loading('Reading schedule…');
-      try {
-        const { ocrApiService } = await import('../services/apiService');
-        const result = await ocrApiService.runTableExtract(
-          sourceSheetId,
-          projectId,
-          sourcePageNumber,
-          rect
-        );
-        toast.dismiss(parsing);
-        if (!result.rows || result.rows.length === 0) {
-          toast.error('No table found in that box. Include the whole schedule and try again.');
-          return;
-        }
-        setScheduleTable({
-          documentId: sourceSheetId,
-          pageNumber: sourcePageNumber,
-          mode: result.mode,
-          rows: result.rows,
-          rowBoxes: result.rowBoxes,
-          region: result.region,
-        });
-        setScheduleDialogOpen(true);
-      } catch (e) {
-        toast.dismiss(parsing);
-        console.error('Schedule extract failed:', e);
-        // Surface the server's details field (axios wraps it) — "no vector
-        // text on this page" beats "Request failed with status code 500".
-        const responseData = (e as { response?: { data?: { details?: string; error?: string } } })
-          .response?.data;
-        toast.error(
-          responseData?.details ||
-            responseData?.error ||
-            (e instanceof Error ? e.message : 'Schedule extraction failed')
-        );
-      }
-    },
-    [projectId]
-  );
-
-  const handleScheduleApply = useCallback(
-    async (groups: ScheduleApplyGroup[]) => {
-      if (!projectId || !scheduleTable) return;
-      const conditionStore = useConditionStore.getState();
-      const { addTakeoffMeasurement } = useMeasurementStore.getState();
-      const existingColors = conditionStore
-        .getProjectConditions(projectId)
-        .map((c) => c.color)
-        .filter((c): c is string => typeof c === 'string');
-      let conditionsCreated = 0;
-      let markersCreated = 0;
-      try {
-        for (const group of groups) {
-          const color = generateDistinctColor(existingColors);
-          existingColors.push(color);
-          const conditionId = await conditionStore.addCondition({
-            projectId,
-            name: group.name,
-            type: 'count',
-            unit: 'EA',
-            wasteFactor: 0,
-            color,
-            description: 'From schedule takeoff',
-          });
-          conditionsCreated += 1;
-
-          // Markers sit ON the schedule rows: auditable against the printed
-          // schedule, movable to real plan locations afterwards. A grouped
-          // condition (door type) drops its markers beside every source row.
-          let groupBudget = 200; // sanity cap per condition
-          for (const markerRow of group.markerRows) {
-            const rowBox = scheduleTable.rowBoxes[markerRow.rowIndex];
-            const y = rowBox ? (rowBox.y0 + rowBox.y1) / 2 : scheduleTable.region.y0;
-            const xStart = Math.min(0.98, scheduleTable.region.x1 + 0.006);
-            const qty = Math.min(markerRow.qty, groupBudget);
-            groupBudget -= qty;
-            for (let i = 0; i < qty; i++) {
-              const point = { x: Math.min(0.995, xStart + i * 0.007), y };
-              await addTakeoffMeasurement({
-                projectId,
-                sheetId: scheduleTable.documentId,
-                conditionId,
-                type: 'count',
-                points: [point],
-                calculatedValue: 1,
-                unit: 'EA',
-                pdfPage: scheduleTable.pageNumber,
-                pdfCoordinates: [point],
-                conditionColor: color,
-                conditionName: group.name,
-              });
-              markersCreated += 1;
-            }
-            if (groupBudget <= 0) break;
-          }
-        }
-        toast.success(
-          `Schedule applied: ${conditionsCreated} condition${conditionsCreated === 1 ? '' : 's'}, ${markersCreated} count markers`,
-          { description: 'Markers sit beside their schedule rows — drag them onto the plan if needed.' }
-        );
-      } catch (e) {
-        console.error('Schedule apply failed:', e);
-        toast.error(
-          `Schedule partially applied (${conditionsCreated} conditions, ${markersCreated} markers). Check connection and retry remaining rows.`
-        );
-      }
-    },
-    [projectId, scheduleTable]
-  );
 
   // Revision compare (old rev vs new rev overlay + takeoff carry)
   const [revisionCompareOpen, setRevisionCompareOpen] = useState(false);
@@ -1389,23 +1247,10 @@ export function TakeoffWorkspace() {
         keywords: 'zoom reset view',
         action: handleResetView,
       },
-      // Schedule → takeoff stays dev-only while OCR extraction is dialed in
-      // (reads real text + outlined bodies via Tesseract; door-number ovals and
-      // vertical headers still weak). The whole-sheet "Propose rooms" sweep was
-      // shelved 2026-07: it flood-filled every enclosed region (text boxes,
-      // schedule cells, hatches), not just rooms, with no way to preview before
-      // applying — the click-to-fill Magic Wand covers rooms reliably instead.
-      ...(import.meta.env.DEV
-        ? [
-            {
-              id: 'action-schedule',
-              label: 'Schedule → takeoff (box a schedule table)',
-              group: 'actions' as const,
-              keywords: 'schedule table door window count import',
-              action: handleStartScheduleSelect,
-            },
-          ]
-        : []),
+      // The whole-sheet "Propose rooms" sweep was shelved 2026-07: it
+      // flood-filled every enclosed region (text boxes, schedule cells,
+      // hatches), not just rooms, with no way to preview before applying —
+      // the click-to-fill Magic Wand covers rooms reliably instead.
       {
         id: 'action-revision-compare',
         label: 'Compare sheet revisions…',
@@ -1624,17 +1469,9 @@ export function TakeoffWorkspace() {
               // but sends regions back through a separate callback.
               titleblockSelectionMode={titleblock.titleblockSelectionMode}
               onTitleblockSelectionComplete={titleblock.handleTitleblockSelectionComplete}
-              // Schedule box-select piggybacks the hyperlink draw interaction:
-              // same drag-a-box mechanics, different completion handler.
-              hyperlinkMode={hyperlinkMode || scheduleSelectMode}
-              onHyperlinkRegionDrawn={(rect, sheetId, pageNumber) => {
-                if (scheduleSelectMode) void handleScheduleRegionDrawn(rect, sheetId, pageNumber);
-                else handleHyperlinkRegionDrawn(rect, sheetId, pageNumber);
-              }}
-              onHyperlinkModeChange={(active) => {
-                if (scheduleSelectMode) setScheduleSelectMode(active);
-                else setHyperlinkMode(active);
-              }}
+              hyperlinkMode={hyperlinkMode}
+              onHyperlinkRegionDrawn={handleHyperlinkRegionDrawn}
+              onHyperlinkModeChange={setHyperlinkMode}
               magicWandMode={magicWandMode}
               onMagicWandModeChange={setMagicWandMode}
               onHyperlinkClick={(sheetId, pageNumber, targetViewport) => {
@@ -1820,13 +1657,6 @@ export function TakeoffWorkspace() {
       )}
 
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} items={paletteItems} />
-
-      <ScheduleReviewDialog
-        open={scheduleDialogOpen}
-        onOpenChange={setScheduleDialogOpen}
-        table={scheduleTable}
-        onApply={handleScheduleApply}
-      />
 
       {projectId && (
         <RevisionCompareDialog

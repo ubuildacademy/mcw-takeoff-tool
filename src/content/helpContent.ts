@@ -136,19 +136,13 @@ export const DEFAULT_HELP_FAQ_CONFIG: HelpFaqConfig = {
     id: 'command-palette',
     question: 'What does the ⌘K command palette do?',
     answer:
-      'Press ⌘K (Ctrl+K on Windows) to open a searchable palette. Type to jump to any sheet by number or name, activate a condition, or run an action like Calibrate, Magic wand, Schedule → takeoff, Compare sheet revisions, or Fit to window. Use the arrow keys and Enter to run the highlighted item; Escape closes the palette.',
+      'Press ⌘K (Ctrl+K on Windows) to open a searchable palette. Type to jump to any sheet by number or name, activate a condition, or run an action like Calibrate, Magic wand, Compare sheet revisions, or Fit to window. Use the arrow keys and Enter to run the highlighted item; Escape closes the palette.',
   },
   {
     id: 'magic-wand',
     question: 'How does the magic wand measure a room automatically?',
     answer:
       'Click Wand in the top command bar (or find it in ⌘K), select an area or volume condition, then click inside an enclosed room — the app fills to the inside face of the walls and adds the measurement for you. The sheet must be calibrated first. If the room is not fully enclosed (an open doorway, for example) the wand refuses and tells you why instead of guessing. Escape exits wand mode, and the result undoes like any other measurement.',
-  },
-  {
-    id: 'schedule-to-takeoff',
-    question: 'How does Schedule → takeoff work?',
-    answer:
-      'Open "Schedule → takeoff" from ⌘K, then drag a box around a schedule table on the sheet, including its headers. The table is read directly from the sheet\'s vector text (no OCR), and a review dialog guesses the name and QTY columns for you to remap or uncheck rows. Applying creates one count condition per row with QTY markers placed beside that row so you can audit against the printed number and drag markers onto the plan afterward. It only works on vector PDFs — scanned sheets are refused with a message.',
   },
   {
     id: 'revision-compare',
@@ -275,7 +269,7 @@ export const HELP_HUB_CARDS: Array<{
     title: "What's new",
     description: 'Every update to Meridian Takeoff, newest first.',
     highlights: [
-      'Latest: templates sync, AI chat, schedule fixes',
+      'Latest: templates sync, AI chat, dialog fixes',
       'The full 6-phase initial beta build',
       'Updated alongside every release',
     ],

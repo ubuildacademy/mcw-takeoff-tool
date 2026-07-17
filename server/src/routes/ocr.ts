@@ -7,7 +7,6 @@ import { simpleOcrService, type OCRWordBox, type SimpleOCRResult } from '../serv
 import { pymupdfTextExtractor } from '../services/pymupdfTextExtractor';
 import { bubbleOcrExtractor } from '../services/bubbleOcrExtractor';
 import { vectorCalloutExtractor } from '../services/vectorCalloutExtractor';
-import { tableExtractor } from '../services/tableExtractor';
 import { requireAuth, hasProjectAccess, isAdmin, validateUUIDParam, isValidUUID } from '../middleware';
 import { devLog, devWarn } from '../lib/devLog';
 
@@ -869,83 +868,6 @@ router.post(
         await fs.remove(tempPath);
       } catch (cleanupErr) {
         devWarn('vector-callouts: failed to remove temp PDF', cleanupErr);
-      }
-    }
-  },
-);
-
-/**
- * Schedule→takeoff: reconstruct a table from a user-boxed region of a vector
- * sheet (line-grid geometry + exact text; word-alignment clustering fallback
- * for borderless schedules). Deterministic, sub-second — no OCR, no LLM.
- */
-router.post(
-  '/table-extract/:documentId',
-  requireAuth,
-  validateUUIDParam('documentId'),
-  async (req, res) => {
-    const { documentId } = req.params;
-    const { projectId, pageNumber, region } = req.body ?? {};
-
-    if (!projectId) {
-      return res.status(400).json({ error: 'Project ID is required' });
-    }
-    const pageNum = Number(pageNumber);
-    if (!Number.isInteger(pageNum) || pageNum < 1) {
-      return res.status(400).json({ error: 'Valid pageNumber is required' });
-    }
-    const r = region as { x?: unknown; y?: unknown; width?: unknown; height?: unknown } | undefined;
-    const isNorm = (v: unknown): v is number => typeof v === 'number' && v >= 0 && v <= 1;
-    if (!r || !isNorm(r.x) || !isNorm(r.y) || !isNorm(r.width) || !isNorm(r.height) || r.width === 0 || r.height === 0) {
-      return res.status(400).json({ error: 'Valid normalized region {x, y, width, height} is required' });
-    }
-
-    const userIsAdmin = await isAdmin(req.user!.id);
-    if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
-      return res.status(404).json({ error: 'Project not found or access denied' });
-    }
-
-    const { data: documentData, error: documentError } = await supabase
-      .from('takeoff_files')
-      .select('filename, path')
-      .eq('id', documentId)
-      .eq('project_id', projectId)
-      .single();
-
-    if (documentError || !documentData?.path) {
-      return res.status(404).json({ error: 'Document not found' });
-    }
-
-    const { data: fileData, error: downloadError } = await supabase.storage
-      .from('project-files')
-      .download(documentData.path);
-
-    if (downloadError || !fileData) {
-      console.error('table-extract: failed to download PDF', downloadError);
-      return res.status(500).json({ error: 'Failed to download PDF for table extraction' });
-    }
-
-    const tempDir = path.join(process.cwd(), 'server', 'temp', 'pdf-processing');
-    await fs.ensureDir(tempDir);
-    const tempPath = path.join(tempDir, `${documentId}-table-${uuidv4()}.pdf`);
-    await fs.writeFile(tempPath, Buffer.from(await fileData.arrayBuffer()));
-
-    try {
-      const table = await tableExtractor.extract(tempPath, pageNum, {
-        x: r.x, y: r.y, width: r.width, height: r.height,
-      });
-      res.json({ documentId, pageNumber: pageNum, ...table });
-    } catch (error) {
-      console.error('table-extract failed:', error);
-      res.status(500).json({
-        error: 'Table extraction failed',
-        details: error instanceof Error ? error.message : 'Unknown error',
-      });
-    } finally {
-      try {
-        await fs.remove(tempPath);
-      } catch (cleanupErr) {
-        devWarn('table-extract: failed to remove temp PDF', cleanupErr);
       }
     }
   },

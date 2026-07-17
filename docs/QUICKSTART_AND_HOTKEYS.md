@@ -31,7 +31,7 @@ Press **Cmd/Ctrl+K** anywhere in the workspace to open the command palette. Type
 
 - **Sheets** — jump to any page by sheet number or sheet name.
 - **Conditions** — activate a condition for drawing.
-- **Actions** — **Calibrate scale** / **Recalibrate scale**, **Magic wand**, **Schedule → takeoff**, **Compare sheet revisions…**, **Fit sheet to window**.
+- **Actions** — **Calibrate scale** / **Recalibrate scale**, **Magic wand**, **Compare sheet revisions…**, **Fit sheet to window**.
 
 Use **Arrow Up/Down** to move the highlight, **Enter** to run the highlighted item, and **Escape** to close the palette without doing anything.
 
@@ -115,7 +115,7 @@ Escape **backs out** of the current mode or selection, usually one step at a tim
 
 | Action | Shortcut |
 |--------|-----------|
-| **Command palette** | Cmd/Ctrl+**K** — jump to a sheet, activate a condition, or run an action (calibrate, magic wand, schedule takeoff, revision compare, fit to window). Arrow keys + Enter to run, Escape to close. |
+| **Command palette** | Cmd/Ctrl+**K** — jump to a sheet, activate a condition, or run an action (calibrate, magic wand, revision compare, fit to window). Arrow keys + Enter to run, Escape to close. |
 | **Undo** | Cmd/Ctrl+**Z** |
 | **Redo** | Cmd/Ctrl+**Shift**+**Z** or Cmd/Ctrl+**Y** |
 | **Copy** selected markups | Cmd/Ctrl+**C** (when markups are selected in selection mode) |
@@ -237,7 +237,7 @@ With an **external keyboard**, desktop shortcuts apply. Touch gestures still wor
 - Keep **calibration** on a clear, known dimension for best accuracy.
 - The **Calibrate** dialog auto-detects printed scale notations and flags half-size or fit-to-page reprints, but it never applies a scale for you — always click both ends of a printed dimension to confirm before it's used.
 - **Count conditions** can carry a fixed measurement per marker — set **Quantity per Count** (type, unit, value) in the condition form. Example: 5 windows × 10 LF each = 50 LF tracked in Reports and priced in Costs. See the workspace guide for details.
-- Not sure where a feature lives? Press **Cmd/Ctrl+K** and type — sheets, conditions, and actions like Magic wand or Schedule → takeoff are all reachable from the palette.
+- Not sure where a feature lives? Press **Cmd/Ctrl+K** and type — sheets, conditions, and actions like Magic wand or Compare sheet revisions are all reachable from the palette.
 
 ---
 
