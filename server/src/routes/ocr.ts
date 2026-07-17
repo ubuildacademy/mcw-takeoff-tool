@@ -8,6 +8,11 @@ import { pymupdfTextExtractor } from '../services/pymupdfTextExtractor';
 import { bubbleOcrExtractor } from '../services/bubbleOcrExtractor';
 import { vectorCalloutExtractor } from '../services/vectorCalloutExtractor';
 import { tableExtractor } from '../services/tableExtractor';
+import {
+  reportPage as reportHyperlinkPage,
+  addPages as addHyperlinkPages,
+  getProgress as getHyperlinkProgress,
+} from '../services/autoHyperlinkProgress';
 import { requireAuth, hasProjectAccess, isAdmin, validateUUIDParam, isValidUUID } from '../middleware';
 import { devLog, devWarn } from '../lib/devLog';
 
@@ -526,10 +531,18 @@ router.post(
     const tempPath = path.join(tempDir, `${documentId}-pymupdf-${uuidv4()}.pdf`);
     await fs.writeFile(tempPath, Buffer.from(await fileData.arrayBuffer()));
 
+    // Optional Auto-hyperlink run id: when present, advance the shared run
+    // progress so the client's live bar moves through this pass too. PyMuPDF
+    // runs buffered (no per-page stream), so we bump one page per merged page.
+    const runId: string | undefined =
+      typeof req.body?.runId === 'string' ? req.body.runId : undefined;
+    const docLabel = documentData.filename || documentId;
+
     try {
       const extraction = await pymupdfTextExtractor.extractAllPages(tempPath);
       let pagesWithText = 0;
       for (const page of extraction.pages) {
+        if (runId) addHyperlinkPages(runId, 1, docLabel);
         const wordBoxes: OCRWordBox[] = (page.words || [])
           .map((word, idx): OCRWordBox | null => {
             const w = word?.width ?? 0;
@@ -645,8 +658,19 @@ router.post(
     const tempPath = path.join(tempDir, `${documentId}-bubble-${uuidv4()}.pdf`);
     await fs.writeFile(tempPath, Buffer.from(await fileData.arrayBuffer()));
 
+    // Optional Auto-hyperlink run id: stream per-page progress into the shared
+    // run-status map so the client's live bar moves through this (slow) pass.
+    const runId: string | undefined =
+      typeof req.body?.runId === 'string' ? req.body.runId : undefined;
+    const docLabel = documentData.filename || documentId;
+
     try {
-      const extraction = await bubbleOcrExtractor.extractAllPages(tempPath);
+      const extraction = await bubbleOcrExtractor.extractAllPages(
+        tempPath,
+        runId
+          ? (page, total) => reportHyperlinkPage(runId, docLabel, page, total)
+          : undefined,
+      );
       let pagesWithCallouts = 0;
       let pagesMarked = 0;
       // Group merges per page so we hit `mergeWordBoxesForPage` once per page
@@ -799,8 +823,20 @@ router.post(
     const tempPath = path.join(tempDir, `${documentId}-veccallout-${uuidv4()}.pdf`);
     await fs.writeFile(tempPath, Buffer.from(await fileData.arrayBuffer()));
 
+    // Optional Auto-hyperlink run id: stream per-page progress into the shared
+    // run-status map. The vector pass runs up to 3 documents concurrently on
+    // the client; the map's page counter is monotonic so that stays correct.
+    const runId: string | undefined =
+      typeof req.body?.runId === 'string' ? req.body.runId : undefined;
+    const docLabel = documentData.filename || documentId;
+
     try {
-      const extraction = await vectorCalloutExtractor.extractAllPages(tempPath);
+      const extraction = await vectorCalloutExtractor.extractAllPages(
+        tempPath,
+        runId
+          ? (page, total) => reportHyperlinkPage(runId, docLabel, page, total)
+          : undefined,
+      );
 
       // Merge reference callouts into stored OCR so the existing detection
       // layer (detectSheetRefsFromIsolatedBoxes) sees them as isolated,
@@ -873,6 +909,30 @@ router.post(
     }
   },
 );
+
+/**
+ * Auto-hyperlink live progress. The client generates a `runId`, threads it into
+ * every pre-pass request (vector / bubble / pymupdf), and polls this endpoint to
+ * drive the progress bar in the run dialog. `pagesDone` is a cumulative page
+ * counter across the whole run; the client owns the denominator (total pages it
+ * queued) and divides. Returns `pagesDone: 0` for an unknown/expired run so the
+ * client can poll before the first pass has emitted anything.
+ */
+router.get('/auto-hyperlink-progress/:runId', requireAuth, (req, res) => {
+  const { runId } = req.params;
+  const progress = getHyperlinkProgress(runId);
+  if (!progress) {
+    return res.json({
+      runId,
+      pagesDone: 0,
+      currentDoc: '',
+      currentDocPage: 0,
+      currentDocTotal: 0,
+      known: false,
+    });
+  }
+  return res.json({ ...progress, known: true });
+});
 
 /**
  * Schedule→takeoff: reconstruct a table from a user-boxed region of a vector

@@ -979,9 +979,10 @@ export const ocrApiService = {
    * `source: 'pymupdf'`. This catches callout-bubble glyphs that PDF.js silently drops, and
    * is fast enough (seconds-per-document) to run inline before each Auto-hyperlink run.
    */
-  async runPymupdfExtract(documentId: string, projectId: string) {
+  async runPymupdfExtract(documentId: string, projectId: string, runId?: string) {
     const response = await apiClient.post(`/ocr/pymupdf-extract/${documentId}`, {
       projectId,
+      runId,
     }, {
       // Large multi-page PDFs can take 30-60s; bump above the default 30s.
       timeout: 15 * 60 * 1000,
@@ -1002,9 +1003,10 @@ export const ocrApiService = {
    * before each Auto-hyperlink run. Survivors are merged into stored OCR rows as
    * `source: 'tesseract'`.
    */
-  async runBubbleOcrExtract(documentId: string, projectId: string) {
+  async runBubbleOcrExtract(documentId: string, projectId: string, runId?: string) {
     const response = await apiClient.post(`/ocr/bubble-ocr-extract/${documentId}`, {
       projectId,
+      runId,
     }, {
       // Sized for an 80-page set at ~2 s/page worst case + render overhead.
       timeout: 15 * 60 * 1000,
@@ -1052,9 +1054,10 @@ export const ocrApiService = {
     };
   },
 
-  async runVectorCalloutExtract(documentId: string, projectId: string) {
+  async runVectorCalloutExtract(documentId: string, projectId: string, runId?: string) {
     const response = await apiClient.post(`/ocr/vector-callouts/${documentId}`, {
       projectId,
+      runId,
     }, {
       timeout: 15 * 60 * 1000,
     });
@@ -1079,6 +1082,24 @@ export const ocrApiService = {
         }>;
         error?: string;
       }>;
+    };
+  },
+
+  /**
+   * Poll live Auto-hyperlink run progress. The server tracks a cumulative
+   * per-page counter (`pagesDone`) keyed by the client-generated `runId`,
+   * updated as each pre-pass streams page-completion lines. `known` is false
+   * until the first pass reports (or after the run's TTL expires).
+   */
+  async getAutoHyperlinkProgress(runId: string) {
+    const response = await apiClient.get(`/ocr/auto-hyperlink-progress/${runId}`);
+    return response.data as {
+      runId: string;
+      pagesDone: number;
+      currentDoc: string;
+      currentDocPage: number;
+      currentDocTotal: number;
+      known: boolean;
     };
   },
 };

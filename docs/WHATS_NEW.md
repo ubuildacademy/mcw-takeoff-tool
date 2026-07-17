@@ -15,6 +15,9 @@ Chat now picks out the most relevant pages of your uploaded sheets for each ques
 **Auto-hyperlink stopped placing links on blank space.**
 A bug caused batch-generated hyperlinks to sometimes land on an empty part of a sheet instead of the actual callout bubble. Fixed — re-run auto-hyperlink on an affected project and the bad links clean themselves up.
 
+**Auto-hyperlink now shows a real progress bar.**
+Running auto-hyperlink across a whole project used to sit on "Running…" with no sense of how far along it was. Now the run dialog shows a bar that fills page-by-page, the current sheet being scanned, and a running count of callouts found — so you can see it working through a long scan.
+
 **Dialogs now size to their content.**
 Dialogs with a lot to show — like Schedule → takeoff's review table — now stretch to use available screen space instead of squeezing everything into a fixed small window. Simple dialogs stay compact.
 

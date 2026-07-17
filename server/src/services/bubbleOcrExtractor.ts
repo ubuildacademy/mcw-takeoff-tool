@@ -98,7 +98,10 @@ class BubbleOcrExtractor {
    * should treat that as a soft fail and continue with whatever text-based
    * extraction already produced.
    */
-  async extractAllPages(pdfPath: string): Promise<BubbleOcrExtractionResult> {
+  async extractAllPages(
+    pdfPath: string,
+    onPage?: (page: number, totalPages: number) => void
+  ): Promise<BubbleOcrExtractionResult> {
     if (!(await fs.pathExists(pdfPath))) {
       throw new Error(`PDF file not found: ${pdfPath}`);
     }
@@ -117,7 +120,8 @@ class BubbleOcrExtractor {
     const { stdout, stderrTail } = await this.runScript(
       pythonCommand,
       [this.pythonScriptPath, pdfPath],
-      enhancedPath
+      enhancedPath,
+      onPage
     );
 
     let parsed: BubbleOcrScriptOutput;
@@ -171,7 +175,8 @@ class BubbleOcrExtractor {
   private runScript(
     command: string,
     args: string[],
-    enhancedPath: string
+    enhancedPath: string,
+    onPage?: (page: number, totalPages: number) => void
   ): Promise<{ stdout: string; stderrTail: string }> {
     return new Promise((resolve, reject) => {
       const child = spawn(command, args, {
@@ -217,6 +222,12 @@ class BubbleOcrExtractor {
           // Forward script progress straight to the server log; the user can
           // tail this terminal during an Auto-hyperlink run and see live N/M.
           devLog(`🫧 ${line}`);
+          // Surface per-page progress to the caller (e.g. the run-status map
+          // the client polls). Format: `[bubble-ocr] page N/M: ...`.
+          if (onPage) {
+            const m = line.match(/\bpage (\d+)\/(\d+)\b/);
+            if (m) onPage(parseInt(m[1], 10), parseInt(m[2], 10));
+          }
           stderrTail.push(line);
           if (stderrTail.length > STDERR_TAIL_LINES) stderrTail.shift();
         }

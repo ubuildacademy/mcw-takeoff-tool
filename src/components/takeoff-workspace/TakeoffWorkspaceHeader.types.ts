@@ -4,6 +4,7 @@
 
 import type { ProjectFile, Sheet, TakeoffCondition, PDFDocument, SearchResult } from '../../types';
 import type { BatchHyperlinkPreflightResult } from '../../services/batchHyperlink/batchHyperlinkPreflight';
+import type { AutoHyperlinkRunProgress } from '../../services/batchHyperlink/autoHyperlinkProgress';
 import type { DocumentOCRData } from '../../services/serverOcrService';
 
 export interface TitleblockExtractionStatus {
@@ -67,6 +68,7 @@ export interface TakeoffWorkspaceHeaderProps {
     ocrByDocumentId: Map<string, DocumentOCRData>;
     runPymupdfFor?: BatchHyperlinkPreflightResult['documentsNeedingPymupdf'];
     runBubbleOcrFor?: BatchHyperlinkPreflightResult['documentsNeedingBubbleOcr'];
+    onProgress?: (progress: AutoHyperlinkRunProgress) => void;
   }) => Promise<void>;
   onClearBatchHyperlinks?: () => void;
   autoHyperlinkAvailable?: boolean;

@@ -3,6 +3,8 @@ import { ocrApiService } from '../apiService';
 export interface RunPymupdfExtractOptions {
   documentId: string;
   projectId: string;
+  /** Optional Auto-hyperlink run id so the server advances shared run progress. */
+  runId?: string;
 }
 
 export interface RunPymupdfExtractResult {
@@ -25,9 +27,9 @@ export interface RunPymupdfExtractResult {
 export async function runPymupdfExtractForDocument(
   options: RunPymupdfExtractOptions,
 ): Promise<RunPymupdfExtractResult> {
-  const { documentId, projectId } = options;
+  const { documentId, projectId, runId } = options;
 
-  const result = await ocrApiService.runPymupdfExtract(documentId, projectId);
+  const result = await ocrApiService.runPymupdfExtract(documentId, projectId, runId);
 
   return {
     documentId,
