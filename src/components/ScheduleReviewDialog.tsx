@@ -183,7 +183,7 @@ export function ScheduleReviewDialog({
       open={open}
       onOpenChange={onOpenChange}
       title="Schedule → takeoff"
-      maxWidth="5xl"
+      maxWidth="fit"
       footer={
         <div className="flex w-full items-center justify-between gap-2">
           <span className="text-sm text-muted-foreground">
@@ -303,8 +303,8 @@ export function ScheduleReviewDialog({
           </Label>
         </div>
 
-        <div className="max-h-[45vh] overflow-y-auto rounded-md border border-input">
-          <table className="w-full text-sm">
+        <div className="max-h-[45vh] overflow-auto rounded-md border border-input">
+          <table className="w-full text-sm min-w-max">
             <thead>
               {headerRows > 0 && (
                 <tr className="bg-popover">

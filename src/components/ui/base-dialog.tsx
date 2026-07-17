@@ -1,5 +1,5 @@
 import React from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, type DialogSize } from './dialog';
 import { Button } from './button';
 
 interface BaseDialogProps {
@@ -9,20 +9,10 @@ interface BaseDialogProps {
   description?: string;
   children?: React.ReactNode;
   footer?: React.ReactNode;
-  maxWidth?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '5xl' | 'screen';
+  maxWidth?: DialogSize;
   showCloseButton?: boolean;
   className?: string;
 }
-
-const maxWidthClasses = {
-  sm: 'sm:max-w-sm',
-  md: 'sm:max-w-md',
-  lg: 'sm:max-w-lg',
-  xl: 'sm:max-w-xl',
-  '2xl': 'sm:max-w-2xl',
-  '5xl': 'sm:max-w-5xl',
-  screen: 'sm:max-w-[95vw]'
-};
 
 export function BaseDialog({
   open,
@@ -40,7 +30,8 @@ export function BaseDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={showCloseButton}
-        className={`${maxWidthClasses[maxWidth]} max-h-[90vh] overflow-y-auto ${className}`}
+        size={maxWidth}
+        className={`max-h-[90vh] overflow-y-auto ${className}`}
         aria-describedby={descriptionId}
       >
         <DialogHeader>

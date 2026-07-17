@@ -424,7 +424,7 @@ export function ToolsDialog({
     </Dialog>
 
       <Dialog open={preflightOpen} onOpenChange={setPreflightOpen}>
-        <DialogContent className="sm:max-w-md" aria-describedby="auto-hyperlink-preflight-desc">
+        <DialogContent size="fit" aria-describedby="auto-hyperlink-preflight-desc">
           <DialogHeader>
             <DialogTitle>Auto-hyperlink</DialogTitle>
             <DialogDescription id="auto-hyperlink-preflight-desc">{preflightSummary}</DialogDescription>

@@ -42,7 +42,7 @@ export function AssemblyGenerateConfirmDialog({
           ? 'Each mapped workbook below will be priced and downloaded.'
           : 'Review the quantity being written before downloading the priced workbook.'
       }
-      maxWidth="md"
+      maxWidth="fit"
       footer={
         <div className="flex gap-2 justify-end">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={confirming}>
