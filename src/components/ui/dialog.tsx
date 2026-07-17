@@ -28,14 +28,32 @@ const DialogOverlay = React.forwardRef<
 ));
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
+// Fixed sizes match the dialog's current default (max-w-lg) at every step up
+// to '5xl'/'screen'. 'fit' is content-driven: the dialog shrinks to its
+// content's natural width and only stretches as wide as that content needs,
+// capped at 90vw so it never gets close to filling a wide monitor.
+export type DialogSize = 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '5xl' | 'screen' | 'fit';
+
+const dialogSizeClasses: Record<DialogSize, string> = {
+  sm: 'sm:max-w-sm',
+  md: 'sm:max-w-md',
+  lg: 'sm:max-w-lg',
+  xl: 'sm:max-w-xl',
+  '2xl': 'sm:max-w-2xl',
+  '5xl': 'sm:max-w-5xl',
+  screen: 'sm:max-w-[95vw]',
+  fit: 'sm:w-fit sm:max-w-[min(90vw,72rem)]',
+};
+
 type DialogContentProps = React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean;
+  size?: DialogSize;
 };
 
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   DialogContentProps
->(({ className, children, showCloseButton = true, style, ...props }, ref) => {
+>(({ className, children, showCloseButton = true, size, style, ...props }, ref) => {
   const keyboardHeight = useKeyboardHeight();
   // Shift the dialog upward by half the keyboard height so it stays centred
   // in the visible area when the software keyboard is open on iOS/Android.
@@ -49,6 +67,7 @@ const DialogContent = React.forwardRef<
         ref={ref}
         className={cn(
           "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
+          size ? dialogSizeClasses[size] : undefined,
           className
         )}
         style={{ ...keyboardStyle, ...style }}
