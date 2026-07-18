@@ -797,7 +797,15 @@ in the session; tsc + tests green.
 
 ---
 
-## Task H0 — Help-docs catch-up sweep (run AFTER Workstream G lands)
+## Task H0 — Help-docs catch-up sweep — DONE 2026-07-17 (4fd34485, merged d1bb6ee8)
+
+**Landed:** WHATS_NEW gained four entries (Assembly Workbooks, Excel Data/By Sheet +
+branding, unprotected Quantities sheet, one-click Auto-hyperlink setup) and the
+section header updated; WORKSPACE_GUIDE gained an Excel-export sheet table, a full
+Assembly Workbooks section, and a Running Auto-hyperlink walkthrough (incl. the
+progress bar); QUICKSTART got an Auto-hyperlink line; helpContent.ts gained three
+FAQ entries + refreshed hub-card highlights. Documented from live UI/source, plain
+language, no internal codenames. tsc both sides + 243 vitest green.
 
 **Problem:** the 2026-07 sprint changed user-facing behavior faster than the help docs:
 Excel export (new Data/By Sheet sheets, folder grouping, branding, Quantities now
