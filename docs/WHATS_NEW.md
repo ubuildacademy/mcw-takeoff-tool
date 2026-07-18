@@ -24,6 +24,12 @@ Templates you save under **Templates** (Conditions tab) follow you to any device
 **AI Chat gives better answers.**
 Chat now picks out the most relevant pages of your uploaded sheets for each question instead of skimming everything at once — ask about a specific sheet number (like **A-101**) and it focuses there. Answers come back with real tables for quantity breakdowns and cite the sheet/page they came from. New: **Stop** and **Copy** buttons, and suggested questions to get you started.
 
+**Auto-hyperlink now reads detail and section bubbles.**
+The scan reads the number inside circled detail/section callouts — the tags estimators actually navigate by — even when the drawing's text isn't selectable, and links them to the right sheet. It only creates a link when it's confident in the read, so you won't get links pointing at the wrong sheet; matchlines and plain text references still work like before.
+
+**Sheet links land the right way.**
+Clicking a hyperlink now fits the whole target page to your window (or jumps to the link's saved view and zoom, when one is set) instead of sometimes opening at 100% zoom on a page too big to fit. Plain navigation is untouched: leave a sheet zoomed into a corner, come back, and you're still there.
+
 **Auto-hyperlink stopped placing links on blank space.**
 A bug caused batch-generated hyperlinks to sometimes land on an empty part of a sheet instead of the actual callout bubble. Fixed — re-run auto-hyperlink on an affected project and the bad links clean themselves up.
 
