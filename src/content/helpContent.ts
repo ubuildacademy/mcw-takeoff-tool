@@ -169,6 +169,24 @@ export const DEFAULT_HELP_FAQ_CONFIG: HelpFaqConfig = {
       'Yes. When creating or editing a link, use "Create & set view…" or "Update & set view…" (or right-click an existing link → "Set target view…"), then navigate to the target page, position the view, and click "Save target view." Clicking the link afterward lands on that exact spot and zoom with a highlight pulse. Auto-hyperlink can set these automatically when it matches a detail callout to the detail title on the target sheet.',
   },
   {
+    id: 'auto-hyperlink-run',
+    question: 'How do I run Auto-hyperlink across my project?',
+    answer:
+      'Open Tools (wrench) → Auto-hyperlink, pick Entire project or Current document, then click Run auto-hyperlink. After a one-line time estimate, click Run — a progress bar tracks the phase, page count, and callouts found as it scans. When it finishes, a review table lets you accept or skip each proposed link before anything is applied; your existing manual links are left untouched.',
+  },
+  {
+    id: 'assembly-workbooks',
+    question: 'What are Assembly Workbooks?',
+    answer:
+      'Assembly Workbooks (Costs tab) let you upload your own pricing spreadsheet (.xlsx or .xlsm) and have Meridian fill in your takeoff quantities automatically. On upload, the app proposes a mapping; map a workbook to a condition by exact name or a wildcard pattern (e.g. "Aquafin*"), then click Generate assembly to download a priced copy. Generate All runs every mapped workbook at once.',
+  },
+  {
+    id: 'excel-export-sheets',
+    question: 'What sheets are in the Excel export?',
+    answer:
+      'Excel Report exports include Executive Summary, Quantities (grouped by folder, and fully editable — waste %, material $, equipment $), a flat Data sheet with one row per measurement ready for a PivotTable, and a By Sheet summary with quantities grouped by drawing sheet. Admins can add a company name, logo, and accent color under report branding, and those apply to every export.',
+  },
+  {
     id: 'condition-templates',
     question: 'How do I reuse conditions across projects, and can I share them with my team?',
     answer:
@@ -269,7 +287,7 @@ export const HELP_HUB_CARDS: Array<{
     title: "What's new",
     description: 'Every update to Meridian Takeoff, newest first.',
     highlights: [
-      'Latest: templates sync, AI chat, dialog fixes',
+      'Latest: Assembly Workbooks, Excel export, AI chat',
       'The full 6-phase initial beta build',
       'Updated alongside every release',
     ],
@@ -280,6 +298,7 @@ export const HELP_HUB_CARDS: Array<{
     description: 'Where everything lives and how panels work together.',
     highlights: [
       'Three-column layout and sidebars',
+      'Assembly Workbooks and Excel export',
       'Documents, Search, and AI Chat',
       'Titleblock extraction and status bar',
       'Tablet & touch (iPad) gestures',

@@ -71,6 +71,7 @@ Settings are split between **your account** (on the project list) and **takeoff 
 **Hyperlinks** (same dialog)
 
 - **Add hyperlink** — Same as pressing **Shift+H** (draw a region and pick a destination sheet).
+- **Auto-hyperlink** — Pick a scope (entire project or current document) and click **Run auto-hyperlink**; after a one-line time estimate, a progress bar tracks the scan and a review table lets you accept or skip each proposed link before anything is applied. See the [Workspace guide](/help/workspace) for the full flow.
 - **Clear all hyperlinks** — Removes manual links on the current scope as implemented in the app.
 
 ---

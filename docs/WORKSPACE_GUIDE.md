@@ -203,6 +203,19 @@ Reuse a set of conditions across projects instead of rebuilding trade packs by h
 - **Export** menu: **Excel**, **PDF**, and **Email report** (opens the send flow).
 - When cost data exists, a **project cost summary** may appear at the top of this tab.
 
+#### Excel export
+
+**Export Excel Report** downloads a workbook with these tabs:
+
+| Sheet | What it shows |
+|-------|----------------|
+| **Executive Summary** | Project totals, costs, and profit margin. Protected against structural edits, except the **profit-margin rate** cell, which stays editable. |
+| **Quantities** | One row per condition, grouped into **folder** subtotals when you use condition folders, with waste %, material $, and equipment $ as open input cells. **Not** protected — Excel disables its outline +/- collapse buttons on any protected sheet, so this tab stays fully editable to keep that grouping usable. |
+| **Data** | One flat row per **measurement** — condition, category/folder, quantity, sheet, cost fields — ready to drop into a PivotTable. |
+| **By Sheet** | Quantities grouped by **drawing sheet**, collapsible so you can see everything on one sheet without scrolling the full Quantities tab. |
+
+If your deployment has set a company name, logo, or accent color (**Admin → report branding**), the Executive Summary uses those instead of the stock Meridian look.
+
 #### PDF export options
 
 **Export PDF Report…** opens a **PDF Export Options** dialog before generating anything:
@@ -221,6 +234,17 @@ Your choices are **saved per project** and reused automatically the next time yo
 - **Project cost summary** — Subtotals, margin, total (when data exists).
 - **Profit Margin** — Opens the project profit-margin flow.
 - **Per-condition** breakdown when conditions have **material / equipment / waste** cost fields.
+
+#### Assembly Workbooks
+
+Turn your own pricing spreadsheets into filled-in assembly takeoffs without re-typing quantities by hand.
+
+- **Where it lives:** Bottom of the **Costs** tab, below the cost breakdown.
+- **Uploading a workbook** (admins only): Click **Upload workbook** and choose an **.xlsx** or **.xlsm** file. On upload, the app scans it for a likely quantity cell and offers a mapping — confirm or edit the **condition pattern** in the "Map this workbook?" dialog, then **Save** (or **Skip** to map it by hand later).
+- **Condition pattern matching:** A mapping's pattern matches condition names **exactly** (case-insensitive), or use a trailing **`*`** as a prefix wildcard — e.g. `Aquafin*` matches "Aquafin 2K Deck," "Aquafin-2K M," and any other condition starting with "Aquafin."
+- **Manual mapping** (admins only): Click **Add mapping** on a workbook to set the condition pattern, one or more **quantity input cells** (label + cell address, e.g. `C13`), and optional **job info cells** (project name, client, address) by hand.
+- **Generating a priced workbook:** Any user can click **Generate assembly** on a mapping that has matching conditions to download a copy of the workbook with quantities filled in. When **two or more** mappings across your workbooks have matching conditions, a **Generate All (N)** button appears to download all of them at once.
+- **Deleting:** Admins can delete a workbook (removes all its mappings) or a single mapping; both ask for confirmation first.
 
 ---
 
@@ -342,6 +366,15 @@ Sheet hyperlinks can land on an **exact spot at an exact zoom**, not just "open 
 - Clicking the link afterward jumps straight to that position and zoom level, with a brief **highlight pulse** so you know you've arrived.
 
 **Auto-hyperlink can set target views for you.** When it can match a detail callout on the source sheet to the matching detail title on the target sheet, it captures that detail's view automatically — no manual positioning needed for those links.
+
+**Running Auto-hyperlink**
+
+Open **Tools** (wrench, top command bar) → **Auto-hyperlink**:
+
+1. Pick **which files to scan** — Entire project, or just the Current document.
+2. Click **Run auto-hyperlink**. It checks the project and shows a one-line estimate (e.g. "Will scan 12 PDFs (340 pages) — about 2 minutes"), then click **Run** to start.
+3. A progress bar tracks the scan: the current phase (scanning callouts, re-extracting text, scanning bubbles, matching sheet references), a page count, the current sheet being read, and a running count of callouts found.
+4. When it finishes, the review table below opens automatically.
 
 **Auto-hyperlink review**
 
