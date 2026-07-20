@@ -678,7 +678,52 @@ detection or false-positive problem — a good candidate for a future targeted p
 (per-character template matching, or a second OCR engine) if Jeff wants to push
 recall further, but not blocking merge consideration on its own terms.
 
-### Task F2 — Section/elevation triangle marker support (gated on F1)
+### Task F2 — Section/elevation triangle marker support — **CLOSED, NO-BUILD (2026-07-20)**
+
+**Decision: do not build. Measured and rejected on evidence.** F2-SCOPE ran the
+proximity measurement this task called for (merged; `scope_bubble_callouts.py` carries
+the triangle-proximity code, dev-only, reproducible). Do NOT re-open this without a
+fundamentally different detection mechanism — re-running the same proximity idea will
+reproduce the numbers below.
+
+**The measurement.** Anchor on already-qualified circles, count a pair when a closed
+3-4-segment path sits within N circle-radii. Against the 62 hand-labeled genuine
+callouts in `fixtures/f1_bubble_ground_truth.json` (pages 31-38 + 55-68):
+
+| radius | pairs in GT range | genuine among them | precision |
+|--------|-------------------|--------------------|-----------|
+| x0.5   | 305               | 18                 | 5.9%      |
+| x1.0   | 358               | 25                 | 7.0%      |
+| x1.5   | 406               | 28                 | 6.9%      |
+
+Doc-wide: 6,756 qualified circles, 53,783 triangle-shaped paths (8x more triangles than
+circles — hatching, arrowheads, leader tips all match), 2,005 pairs.
+
+**Why this kills it — two independent reasons:**
+
+1. **Precision is flat (~6-7%) across every radius.** A real structural relationship
+   would show precision *falling* as the window widens (true pairs captured at small
+   radius, junk accumulating after). Flat means proximity adds noise and signal at the
+   same rate — i.e. triangles near genuine callouts are there by coincidence, at the
+   same density as anywhere else on the sheet. The circle anchor did NOT tame the noise;
+   333 of 358 GT-range pairs are junk, the same ~13x ratio the naive doc-wide scan had.
+
+2. **The mechanism structurally cannot add recall.** It anchors on circles
+   `shape_candidates()` already qualifies, so a triangle beside a found circle
+   re-describes an existing detection rather than producing a new one. Finding markers
+   F1 *misses* would require triangle-anchored detection — which is exactly the
+   4,623-candidate doc-wide scan already ruled out. The fallback value (reclassifying an
+   unlabeled circle as a section marker) still yields no link, because a link needs a
+   readable number and read accuracy is ~35% (see F1.5 ceiling above).
+
+**Caveat, stated honestly:** this beta set may simply be light on true section markers,
+so the absolute counts are doc-dependent. The flat-precision finding is not — it says
+the *method* fails to discriminate regardless of how many markers exist.
+
+---
+
+<details>
+<summary>Original F2 spec (superseded by the no-build decision above — kept for context)</summary>
 
 **Goal:** extend detection to circle+triangle section/elevation callouts. **Do not start
 until F1 lands and its OCR precision is proven** — scoping showed naive triangle
@@ -708,6 +753,8 @@ before deciding scope further; if real section/elevation markers are rare in thi
 particular beta set, say so plainly rather than over-building — recommend against
 further investment if the hand-labeled true-positive count is in the single digits.
 `server` `npx tsc --noEmit` clean.
+
+</details>
 
 ---
 
