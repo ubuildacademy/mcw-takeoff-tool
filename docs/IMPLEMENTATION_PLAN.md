@@ -875,6 +875,156 @@ rule 8 (execution rules) keeps docs in sync per-task — this sweep clears the b
 
 ---
 
+## Workstream I — Assemblies Stage 2: native assembly engine (planned 2026-07-21)
+
+**Background:** `docs/ASSEMBLIES_DESIGN.md` (Stage 2 section + the 2026-07-21 viability
+measurement, verdict GO). Stage 1 (C1–C5) shipped and is treated as plumbing, not
+product. Read the design doc fully before starting any I task.
+
+**Scope decision (Jeff, 2026-07-21):** Stage 2 is shippable at **live cost + branded
+in-app report** — the Costs tab prices conditions live from native assemblies, and the
+app produces the Material/Labor budget report that replaces the workbook for bidding.
+WORK ORDER / P.O. paperwork stays in Excel indefinitely (standing non-goal). The
+registry + writer (C1–C5) remain the escape hatch for companies that keep Excel.
+
+**The real risk is fidelity, not parsing.** Parsing was measured (~90% of 236 workbooks
+usable). What is unmeasured is whether a native engine reproduces MCW's totals exactly —
+divide-through margins, ROUNDUP packaging, labor rounding. If native totals differ from
+the books, the engine is unusable however good the UI is. Hence I4 is a hard gate: no
+UI work until the engine matches real workbooks.
+
+**Two schema constraints carried from the measurement (non-negotiable):**
+1. `assembly_components` gets a surrogate PK + sequence. **Never** a natural/unique key
+   on `(assembly_id, product_code)` — `Aquafin-2K M.xlsx` rows 19/20 are the same code
+   at two coverage yields (two coats); collapsing them silently halves material qty.
+2. Margins are applied **divide-through and chained** (`cost ÷ (1−m)` per margin in
+   order), never `× (1+m)`.
+
+**Order:** I0 → I1 → (I2, I3) → **I4 gate** → I5 → I6 → I7 → I8. C6 (kill the
+free-text pattern box) folds into I8 and is not run separately.
+
+### Task I0 — Parse-accuracy spot-check (measurement only, NO BUILD)
+
+**Why:** the viability measurement recorded two open caveats — packaging unit is read at
+a **hardcoded column F**, and extraction *accuracy* was hand-verified on exactly one
+workbook. Extraction rate ≠ correctness; a parser that reads confidently and wrongly is
+worse than one that fails loudly. Cheap to close now, expensive to discover in I5.
+
+**Do:** using `server/src/scripts/scope_assembly_parse.py` (read-only, already written)
+against the live set, hand-compare extracted output to the actual ASSEMBLY sheets for
+~10 workbooks: the ~12 genuine zero-component cases, ~5 PARTIALs, ~3 FULLs across
+different layout signatures. For each: do component codes, yields, packaging units and
+labor params match the sheet? Is packaging really in column F in every one?
+
+**Success criteria:** written verdict appended to ASSEMBLIES_DESIGN.md — per-field error
+rate, whether column F holds, and any correction the extractor must make. No production
+code changes. If accuracy is materially worse than extraction rate, say so and stop —
+that changes I3/I5 from "import + review" to "assisted data entry".
+
+### Task I1 — Schema + org scoping migration
+
+**Do:** one migration adding `organizations` + `org_id` + the 3 role tiers (assemblies
+and products are **company-level**, not project-level), and the Stage 2 tables:
+- `products` — mirrors the Pricing Manager: CODE (PK per org), ITEM, DESCRIPTION,
+  NET PRICE, DATE, org_id.
+- `assemblies` — org_id, name, unit, labor params (production rate, day rate/man, crew
+  size, labor burden %), waste %, escalation %, tax %, margin chain (ordered jsonb, e.g.
+  `[{name:"Safety",rate:0.02},…]`), source workbook ref (nullable).
+- `assembly_components` — **surrogate uuid PK**, assembly_id, `seq` int, product_code,
+  coverage yield, packaging unit. Unique on `(assembly_id, seq)` only.
+- `conditions.assembly_id` (nullable FK).
+
+Same migration tightens Stage 1's authenticated-only RLS on `assembly_workbooks` /
+`assembly_mappings` to org scoping (the note recorded at C1). Cost visibility is gated
+by role tier — pricing is company-confidential.
+
+**Success criteria:** migration applies clean on a fresh DB and on the live schema;
+typed service module mirroring `assemblyRegistryService.ts`; a test proves two rows with
+the same product_code and different yields survive insert and both count toward
+material qty; RLS denies cross-org reads; tsc both sides.
+
+### Task I2 — Products import
+
+**Do:** import the Pricing Manager's "Export DB" (xlsx/csv) into `products` — column
+auto-mapping by alias like the Pricing Manager does, upsert on CODE, admin-panel list
+with a last-imported timestamp. Pricing Manager stays the system of record; do **not**
+port its supplier-diff workflow (recorded non-goal).
+
+**Success criteria:** a real export imports with counts shown (new / updated /
+unchanged); re-importing the same file is a no-op; unmapped columns reported, never
+silently dropped; tsc + tests green.
+
+### Task I3 — Extractor library (gated on I0)
+
+**Do:** promote the measurement code in `scope_assembly_parse.py` into a real parser
+(`server/src/scripts/assembly_extract.py` + a service wrapper in the pattern of
+`assemblyWriter.ts`). Stdlib zip/XML only — **never openpyxl**. Input: a workbook.
+Output: an assembly proposal JSON (components with code/yield/packaging/seq, labor
+params, margin chain, job-quantity cell) plus per-field confidence and explicit gap
+flags. Apply whatever column corrections I0 found.
+
+**Success criteria:** fails loudly (flag, not guess) on ambiguity; golden-file tests
+against committed *synthetic* fixtures — never commit a real MCW workbook or any
+pricing data; re-running the I0 sample reproduces the hand-verified values exactly.
+
+### Task I4 — Costing engine — **HARD GATE**
+
+**Do:** pure TS module + unit tests, no UI, no DB. Given assembly + components +
+product prices + takeoff quantity, compute the full breakdown: adjusted qty (waste,
+escalation), per component `ROUNDUP(adjQty / yield)` packages → extended material cost,
+labor = `qty ÷ production rate` days × day rate × crew × (1 + burden), equipment, tax,
+then the **divide-through margin chain** in order.
+
+**Success criteria (gate — do not start I5 until green):** engine output matches the
+real workbook's own totals on **≥5 workbooks across different layout signatures**,
+material / labor / each margin step / grand total, to the cent. Any mismatch gets
+diagnosed and documented, not tolerated. Test fixtures carry no real pricing (parametrize
+the expected values from a local, uncommitted file, skipping gracefully when absent —
+same pattern as `test_assembly_e2e.py`).
+
+### Task I5 — Import review screen
+
+**Do:** upload one or many workbooks → I3 proposal → review UI showing components,
+yields, packaging, labor params with gaps and low-confidence fields flagged → edit →
+save as native assemblies. The Stage 1 registry becomes the import source.
+
+**Success criteria:** a real workbook imports to a native assembly whose I4-computed
+total matches the workbook; flagged gaps are visibly unmissable; batch import reports
+per-file status. Help docs updated (execution rule 8).
+
+### Task I6 — Condition ↔ assembly + live Costs tab
+
+**Do:** pick an assembly on a condition; the Costs tab prices it live from takeoff
+quantity — material / labor / margins / total, refreshing as measurements change.
+Per UX rule: scope + one-liner + go — no threshold dials in the user-facing dialog.
+
+**Success criteria:** a real beta project prices a condition live and matches the
+generated workbook for the same quantity; role tiers without cost access see no dollars;
+tsc + tests; help docs updated.
+
+### Task I7 — Branded in-app assembly report
+
+**Do:** downloadable report mirroring the workbook's Material/Labor budget shapes
+(accounting cost codes, Davis-Bacon toggle where present), using the existing branding
+settings. This is the deliverable that retires the workbook for bidding.
+
+**Success criteria:** side-by-side with the Excel budget sheets for the same assembly and
+quantity — same line items, same totals; branding applied; help docs updated.
+
+### Task I8 — Assembly as condition template (absorbs C6)
+
+**Do:** assemblies become openable as condition templates — pick "Aquafin 2K" from
+templates and the condition arrives pre-wired to its assembly (and, for Excel holdouts,
+its Stage 1 mapping). Replaces the free-text condition-pattern box with a multi-select of
+the project's actual conditions (this is the old C6). Trade packs = shareable assembly
+templates with costs.
+
+**Success criteria:** new condition from an assembly template prices immediately with no
+manual wiring; existing name-pattern mappings keep working (migrate, don't break); help
+docs updated.
+
+---
+
 ## Final QA checklist (run before any production deploy)
 
 - [ ] `npm run ci:local` passes (typecheck, build, lint, test, server build).
@@ -902,3 +1052,7 @@ rule 8 (execution rules) keeps docs in sync per-task — this sweep clears the b
 - 2026-07-13: token-usage instrumentation merged to main; provider decision deferred to data.
 - 2026-07-13: schedule branch held from main pending B1/B2 + Jeff's ship gate.
 - 2026-07-13: assemblies Stage 1 approach confirmed in principle; blocked on design review.
+- 2026-07-21: assemblies Stage 2 planned as Workstream I. Shippable bar = live cost +
+  branded in-app report (paperwork stays in Excel). Org/RLS migration lands inside I1,
+  not as a separate task. I4 (engine matches real workbook totals) is a hard gate before
+  any Stage 2 UI.
