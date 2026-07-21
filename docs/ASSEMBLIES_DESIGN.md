@@ -112,3 +112,57 @@ Agreed ladder:
   live during takeoff → branded in-app report downloads. The workbook library becomes a
   one-time import source, not a runtime dependency. Registry + writer stay as the escape
   hatch for companies that keep Excel.
+
+## Stage 2 viability — MEASURED 2026-07-21, verdict GO
+
+The bootstrap importer was the load-bearing assumption of Stage 2: if the ASSEMBLY
+sheets don't parse, the workspace is a data-entry surface rather than an import-review
+surface — a materially different product. Measured before designing, via
+`server/src/scripts/scope_assembly_parse.py` (dev-only, read-only, reproducible) against
+all 236 workbooks in "2026 Assemblies 7-14-26".
+
+**Result: the importer is viable.** Raw classification is FULL 130 (55.1%) / PARTIAL 101
+(42.8%) / FAILED 5 (2.1%), but the raw split understates it:
+
+- **No genuine workbook failed.** The 5 FAILED are `Composite clean up`, `Off site
+  parking`, `Subcontractor`, `Submittals` — administrative, non-material line items with
+  no ASSEMBLY sheet — plus one stray non-assembly file that was sitting in the folder.
+- **PARTIAL decomposes into unlike things:** ~8 missing only a day rate (effectively
+  complete), ~74 missing 1–2 components out of 4–9 (importable with the gap flagged), and
+  19 with zero components — of which 7 sit in folders named "…Need to request pricing by
+  Project" and are *expected* to be empty.
+- Effective: **~138 clean, ~212 usable (90%), ~12 genuinely needing manual entry (5%)**.
+
+Field-level support is near-universal: margin chain 232/232, crew size / labor burden /
+production rate 231/232, day rate 215/232, job-quantity cell 225/232. Of 1162 detected
+component rows, 1053 (90.6%) yield code + yield + packaging.
+
+Structural variance: 19 layout signatures, but 158 workbooks (68.1%) share one, and
+several clusters' signature previews are identical for their visible prefix — the
+clustering likely over-splits on trivia. Not a long tail of bespoke sheets.
+
+The documented formula hypothesis holds literally (verified in `Aquafin-2K M.xlsx`):
+`ROUNDUP(D15/G19,)` paired with `IFERROR(INDEX(INDIRECT("'Pricing DB'!c:c"), MATCH(...`.
+
+### SCHEMA CONSTRAINT — the same product can appear multiple times in one assembly
+
+`Aquafin-2K M.xlsx` rows 19 and 20 carry the **same product code** (`AQU2KMG46`) with
+**different yield cells** (`ROUNDUP(D15/G19,)` vs `ROUNDUP(D15/G20,)`) — one product
+applied in two coats at two coverage rates. If `assembly_components` is uniquely keyed on
+`(assembly_id, product_code)`, those two rows collapse into one and the material quantity
+**silently halves**, underpricing every bid that uses the assembly. Components need their
+own identity (surrogate PK + sequence/coat), never a natural key on the product code.
+
+### Known caveats on the measurement
+
+- Packaging unit is detected at a **hardcoded column F** ("in every sampled vendor this
+  sits in column F"). It is one of the three fields gating "fully extractable", so a
+  vendor that differs would skew the number either way. Untested assumption.
+- Extraction *accuracy* was hand-verified on one workbook (component count matched the
+  sheet exactly). Extraction rate is not the same as correctness — before building, spot-
+  check the ~12 real zero-component cases and a few PARTIALs. A parser that reads
+  confidently and wrongly is worse than one that fails loudly.
+
+An internal review workbook listing every flagged file (not an assembly / needs manual
+entry / missing labor fields / incomplete components) was generated for the estimating
+team on 2026-07-21; it contains file paths and counts only, no pricing data.
