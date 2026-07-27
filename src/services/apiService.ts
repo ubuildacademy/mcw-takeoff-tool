@@ -1302,3 +1302,57 @@ export const assemblyService = {
     return response.data;
   },
 };
+
+// ── Product price list (Stage 2) ─────────────────────────────────────────
+
+export interface Product {
+  id: string;
+  orgId: string;
+  code: string;
+  item: string | null;
+  description: string | null;
+  netPrice: number | null;
+  priceDate: string | null;
+}
+
+export interface ProductListSummary {
+  count: number;
+  lastImportedAt: string | null;
+  latestPriceDate: string | null;
+}
+
+export interface ProductImportStats {
+  sourceFile: string;
+  headerRow: number;
+  mappedColumns: Record<string, string>;
+  unmappedColumns: string[];
+  productRows: number;
+  duplicateCodesInFile: number;
+  skippedNoCode: number;
+  skippedAfterSeparator: number;
+  missingPrice: number;
+}
+
+export interface ProductImportResult {
+  inserted: number;
+  updated: number;
+  unchanged: number;
+  stats: ProductImportStats;
+  summary: ProductListSummary;
+}
+
+export const productService = {
+  async list(): Promise<{ products: Product[]; summary: ProductListSummary; organization: { id: string; name: string } }> {
+    const response = await apiClient.get('/products');
+    return response.data;
+  },
+
+  async importPriceList(file: File): Promise<ProductImportResult> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await apiClient.post('/products/import', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  },
+};

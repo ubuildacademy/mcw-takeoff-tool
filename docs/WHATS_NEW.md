@@ -4,6 +4,19 @@ Every update to Meridian Takeoff since the beta program started, newest first. C
 
 ---
 
+## Product pricing list — 2026-07
+
+**New: your price list now lives in Meridian, under Admin → Product Pricing.**
+Import the **Export DB** file from the MCW Pricing Manager and the app keeps a copy of every product code, description, price, and price date. The table shows what it holds and when it was last imported, with a filter box for finding a code quickly.
+
+The Pricing Manager stays in charge of prices — change one there and re-import here. Because of that, the tab is read-only apart from the import, and dropping in a raw *supplier* price list is refused with a note telling you to run it through the Pricing Manager's diff-and-confirm step first.
+
+Importing tells you exactly what changed — "42 new, 7 updated, 1,102 unchanged" — and re-importing the same file changes nothing. Rows the file can't be read from are reported rather than skipped quietly: unrecognised columns, rows with no product code, and the category-header rows at the bottom of the export are each counted back to you.
+
+This is the price list assemblies will be costed against as the native assembly engine lands.
+
+---
+
 ## Assembly Workbooks, Excel export, and dialog fixes — 2026-07
 
 **New: Assembly Workbooks turn takeoff quantities into priced assemblies.**

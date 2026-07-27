@@ -19,6 +19,7 @@ import {
   Send,
   KeyRound,
   BarChart3,
+  DollarSign,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ollamaService, type OllamaModel } from '../services/ollamaService';
@@ -26,6 +27,7 @@ import { authHelpers, supabase, UserMetadata, UserInvitation } from '../lib/supa
 import { settingsService, usageService, type AiTokenUsageSummary } from '../services/apiService';
 import { extractErrorMessage } from '../utils/commonUtils';
 import { AdminHelpFaqTab } from './help/AdminHelpFaqTab';
+import { ProductPricingTab } from './admin/ProductPricingTab';
 import { CHAT_PRESET_CONFIGS, CHAT_PRESET_SETTING_KEY } from '../constants/chatPresets';
 import { knowledgeBaseService } from '../services/knowledgeBaseService';
 import { KB_CHAR_BUDGET } from '../constants/chatPresets';
@@ -66,7 +68,13 @@ interface AdminPanelProps {
 
 export function AdminPanel({ isOpen, onClose, projectId: _projectId }: AdminPanelProps) {
   const [activeTab, setActiveTab] = useState<
-    'ai-prompt' | 'ai-settings' | 'user-management' | 'help-faq' | 'knowledge-base' | 'usage'
+    | 'ai-prompt'
+    | 'ai-settings'
+    | 'user-management'
+    | 'help-faq'
+    | 'knowledge-base'
+    | 'usage'
+    | 'product-pricing'
   >('user-management');
   // AI token usage (provider-decision data)
   const [usage, setUsage] = useState<AiTokenUsageSummary | null>(null);
@@ -713,6 +721,7 @@ When answering questions:
     { id: 'ai-prompt', label: 'AI Prompt Editor', icon: Brain },
     { id: 'ai-settings', label: 'AI Settings', icon: Brain },
     { id: 'usage', label: 'AI Usage', icon: BarChart3 },
+    { id: 'product-pricing', label: 'Product Pricing', icon: DollarSign },
   ];
 
   if (!isOpen) return null;
@@ -764,6 +773,8 @@ When answering questions:
             {/* Main Content */}
             <div className="flex-1 overflow-y-auto bg-background">
               {activeTab === 'help-faq' && <AdminHelpFaqTab />}
+
+              {activeTab === 'product-pricing' && <ProductPricingTab />}
 
               {activeTab === 'usage' && (
                 <div className="p-6 space-y-6">

@@ -508,6 +508,24 @@ When a dialog asks for text (e.g. calibration distance), the sheet shifts up so 
 
 ---
 
+## 9b. Product pricing (admin)
+
+**Admin → Product Pricing** holds your company's price list — the product codes, descriptions, net prices, and price dates that assemblies are costed against.
+
+**Importing.** Click **Import price list** and choose the **Export DB** file from the MCW Pricing Manager (`.xlsx`; `.csv` also works). The import reports what it did:
+
+- **new / updated / unchanged** counts, so you can see at a glance whether anything moved.
+- How many rows it read, and how many it deliberately left out — the category-header rows below the price list, and any row with no product code.
+- Any column it did not recognise, listed by name. Nothing is ignored silently.
+
+Re-importing the same file changes nothing, so it is safe to re-run if you are unsure whether an import completed.
+
+**The Pricing Manager stays the system of record.** Prices are changed there and re-imported here, which is why this tab has no editing. If you import a raw **supplier** price list by mistake, the app refuses it and tells you to run it through the Pricing Manager's Upload & Diff step first — that is where supplier changes get reviewed and confirmed before they reach your master list.
+
+**Reading the table.** The header line shows how many products are stored, the newest price date in the list, and when it was last imported. The filter box matches on code, item number, or description.
+
+---
+
 ## 10. Related documentation
 
 - **[Quick start & shortcuts](/help/shortcuts)** — Shortcuts, Space/Escape, Profile, Tools dialog.

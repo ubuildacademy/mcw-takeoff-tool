@@ -905,8 +905,8 @@ UI work until the engine matches real workbooks.
 4. Component prices are **either** a product-code reference **or** a fixed literal —
    19 workbooks are priced entirely by hand with no Pricing DB lookup (I0 finding 4).
 
-**Order:** ~~I0~~ → ~~I1~~ → ~~I3~~ (done; I1's migration applied to Supabase 2026-07-27)
-→ I2 → **I4 gate** → I5 → I6 → I7 → I8. C6
+**Order:** ~~I0~~ → ~~I1~~ → ~~I3~~ → ~~I2~~ (all done; I1's migration applied to Supabase
+2026-07-27) → **I4 gate** → I5 → I6 → I7 → I8. C6
 (kill the free-text pattern box) folds into I8 and is not run separately.
 
 **Migration verification (established in I1, reuse it):** a local Postgres 15 runs on
@@ -1059,7 +1059,43 @@ reads; tsc both sides.
 
 </details>
 
-### Task I2 — Products import
+### Task I2 — Products import — DONE 2026-07-27
+
+**Landed:** `server/src/scripts/products_import.py` (+ selftest, 33 checks),
+`productsImport.ts` (pure diff) with 7 tests, `productsImportService.ts`,
+`routes/products.ts` (registered at `/api/products`), client `productService`, and an
+**Admin → Product Pricing** tab (`src/components/admin/ProductPricingTab.tsx` — new file,
+AdminPanel gained only the tab entry and one render line). Help docs updated.
+
+**Verified against the real thing.** Generated an actual `Export DB` from the live
+Pricing Manager (1,151 products) and parsed it: 1,151 product rows, 29 category-header
+rows correctly skipped, every column mapped, no missing prices — matching the SQLite
+counts exactly. Exercised the full TS→Python path too: parse returns 1,151 rows, a first
+import diffs to 1,151 inserts, and re-importing the identical file diffs to **0 writes /
+1,151 unchanged** (the task's no-op criterion, on real data).
+
+**Two properties of the real export drove the design:**
+
+1. **The file does not end where the products do.** `export_clean_master()` writes the
+   products, a blank separator row, then the preserved category-header rows — manufacturer
+   names like "AQUAFIN" carried in the master DB, which have a populated CODE column.
+   Imported blind, those become one phantom priced-at-null product per manufacturer.
+   Parsing stops at the separator and reports the count it left behind. A synthetic
+   fixture then caught that the parser relied on the blank row being *physically present*;
+   a row-number gap means the same thing, so the reader now fills gaps.
+2. **A raw supplier price list must be refused, not mapped.** MCW's supplier exports carry
+   the CPC code under "Product Number" and would map cleanly — but importing one here
+   bypasses the Pricing Manager's diff-and-confirm review, which is the system of record,
+   and could regress prices with no human in the loop. Detected and rejected with a
+   message naming the right workflow. Verified against a real supplier file in Downloads.
+
+**Not verified:** the admin tab rendering and a live import against Supabase. Both need a
+signed-in session, and entering credentials is out of scope for me. Routes were confirmed
+registered and auth-gated (401 without a token); everything below the route is covered by
+the tests and the real-file run above.
+
+<details>
+<summary>Original I2 spec</summary>
 
 **Do:** import the Pricing Manager's "Export DB" (xlsx/csv) into `products` — column
 auto-mapping by alias like the Pricing Manager does, upsert on CODE, admin-panel list
@@ -1069,6 +1105,8 @@ port its supplier-diff workflow (recorded non-goal).
 **Success criteria:** a real export imports with counts shown (new / updated /
 unchanged); re-importing the same file is a no-op; unmapped columns reported, never
 silently dropped; tsc + tests green.
+
+</details>
 
 ### Task I3 — Extractor library — DONE 2026-07-27
 
