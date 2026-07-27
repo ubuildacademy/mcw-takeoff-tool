@@ -905,7 +905,8 @@ UI work until the engine matches real workbooks.
 4. Component prices are **either** a product-code reference **or** a fixed literal —
    19 workbooks are priced entirely by hand with no Pricing DB lookup (I0 finding 4).
 
-**Order:** ~~I0~~ → ~~I1~~ (both done) → (I2, I3) → **I4 gate** → I5 → I6 → I7 → I8. C6
+**Order:** ~~I0~~ → ~~I1~~ → ~~I3~~ (done; I1's migration applied to Supabase 2026-07-27)
+→ I2 → **I4 gate** → I5 → I6 → I7 → I8. C6
 (kill the free-text pattern box) folds into I8 and is not run separately.
 
 **Migration verification (established in I1, reuse it):** a local Postgres 15 runs on
@@ -969,7 +970,7 @@ that changes I3/I5 from "import + review" to "assisted data entry".
 ### Task I1 — Schema + org scoping migration — DONE 2026-07-27
 
 **Landed:** `server/migrations/create_organizations_and_assembly_engine_tables.sql`
-(not yet applied to Supabase — Jeff runs it in the SQL editor),
+(**applied to Supabase by Jeff 2026-07-27**),
 `server/src/services/assemblyLibrary.ts` (pure shaping + integrity rules),
 `server/src/services/assemblyLibraryService.ts` (DB access, mirrors
 `assemblyRegistryService.ts`), `assemblyLibrary.test.ts` (18 tests).
@@ -1021,11 +1022,9 @@ platform admin sees everything. tsc clean both sides; 261 tests green (243 + 18)
   the Stage 1 routes supply it.
 - Consolidate the two "admin" notions (`user_metadata.role` vs `org_role`) and teach
   `isAdmin()` about company admins.
-- **Question for Jeff (blocks nothing yet, needed by I6):** the I6 criterion "role tiers
-  without cost access see no dollars" does not map onto the agreed three tiers — a
-  regular user *consumes* assemblies during takeoff, which implies seeing the cost.
-  Either there is a fourth "no pricing" tier, or every member sees dollars and only
-  editing is gated. I1 shipped the latter (read = member, write = company admin).
+- ~~Question for Jeff about a no-pricing tier~~ — **answered 2026-07-27: every member sees
+  dollars, no fourth tier.** What I1 shipped is correct: read = any org member, write =
+  company admin. I6's "role tiers without cost access see no dollars" criterion is void.
 
 <details>
 <summary>Original I1 spec</summary>
@@ -1071,7 +1070,44 @@ port its supplier-diff workflow (recorded non-goal).
 unchanged); re-importing the same file is a no-op; unmapped columns reported, never
 silently dropped; tsc + tests green.
 
-### Task I3 — Extractor library
+### Task I3 — Extractor library — DONE 2026-07-27
+
+**Landed:** `server/src/scripts/assembly_extract.py` (+ `assembly_extract_selftest.py`,
+52 checks over synthetic fixtures) and `server/src/services/assemblyExtractor.ts`
+(execFile wrapper in the `assemblyWriter.ts` pattern). All five I0 corrections
+implemented.
+
+**Measured the same way I0 was — the parse gap is closed.** Structural component count
+versus parser output across all 232 workbooks: **1239 structural / 1243 extracted / 1
+missed / 5 extra; 226 of 232 workbooks exact (97.4%)**, against 1162 / 81 missed / 202
+exact before. The 5 extras are rows the structural baseline missed (real components with
+a blank code cell *and* blank description), not parser inventions. The 1 miss is a coded
+row with no quantity formula anywhere — one such row exists in the whole library, so it
+is left to manual entry rather than widening the detector. 90 workbooks extract with no
+flag at all; the common flags (hand-priced 77, conditional 69, no day rate 17) are
+properties of the workbooks, not failures.
+
+**Four further sheet behaviours found while building it** (detail in
+ASSEMBLIES_DESIGN.md "I3 — extractor built"): components divide compound *expressions*,
+not just cells; a sheet can have more than one quantity block and a block need not have
+a "Job Quantity" row; 26 component quantities are not yield-driven at all; and three
+layout traps that misread silently rather than failing — the production-rate block's
+terminator sits outside its header column, "Labor Burden" appears twice with the summary
+copy first, and margins are whole percents while waste and tax in the same sheet are
+fractions.
+
+**Follow-up this created:** `assembly_components` assumes `ROUNDUP(quantity / yield)`.
+The 26 non-yield rows need a quantity *rule* column ("same as component N", "fixed").
+They import flagged and cannot price until it exists — add it in I5 rather than migrating
+again mid-stream.
+
+Worth noting for future tasks: the fixture suite caught the production-rate over-read
+that the 232-workbook sweep did not. The sweep only compares component counts, so a
+wrong *value* in a field it does not count reads as success. Synthetic fixtures assert
+values; the live sweep asserts coverage. Both were needed.
+
+<details>
+<summary>Original I3 spec</summary>
 
 **Do:** promote the measurement code in `scope_assembly_parse.py` into a real parser
 (`server/src/scripts/assembly_extract.py` + a service wrapper in the pattern of
@@ -1100,6 +1136,8 @@ margin chain) plus per-field confidence and explicit gap flags.
 structural-vs-detected component diff from I0 closes to zero missed rows (spot-check the
 16 flattened-lookup workbooks and `Emseal/EJ.xlsx` explicitly); golden-file tests against
 committed *synthetic* fixtures — never commit a real MCW workbook or any pricing data.
+
+</details>
 
 ### Task I4 — Costing engine — **HARD GATE**
 
@@ -1136,7 +1174,8 @@ Per UX rule: scope + one-liner + go — no threshold dials in the user-facing di
 when an assembly has exactly one input, don't ask.
 
 **Success criteria:** a real beta project prices a condition live and matches the
-generated workbook for the same quantity; role tiers without cost access see no dollars;
+generated workbook for the same quantity; every org member sees the dollars (Jeff
+2026-07-27: no no-pricing tier — only *editing* the library is gated, to company admins);
 tsc + tests; help docs updated.
 
 ### Task I7 — Branded in-app assembly report

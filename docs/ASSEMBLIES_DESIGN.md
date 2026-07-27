@@ -265,3 +265,66 @@ inputs with per-input waste (Finding 2).
 
 Not checked here: whether extracted yields and prices produce the workbook's own totals.
 That is I4's job and remains the real gate.
+
+## I3 — extractor built 2026-07-27; the parse gap is closed
+
+`server/src/scripts/assembly_extract.py` implements the five I0 corrections and was
+measured the same way I0 was — structural component count (what a human reads off the
+sheet) versus what the parser returns, across all 232 workbooks.
+
+**1239 structural rows, 1243 extracted, 1 missed, 5 "extra"; 226/232 workbooks (97.4%)
+match exactly** — against 1162 / 81 missed / 202 exact before. The five extras are rows
+the *structural* baseline missed, not parser inventions: real components whose code cell
+and description are both blank (e.g. the backer-rod line in the Dow open-yield sheets).
+The single remaining miss is `Tremco EWS - Vehicular.xlsx` row 29, a coded line with no
+quantity formula anywhere — exactly one such row exists in the whole library, so it is
+left for manual entry rather than widening the detector to admit stray coded rows.
+
+Building it surfaced four more sheet behaviours that measurement alone had not:
+
+### Compound quantity numerators
+
+Components divide expressions, not just cells: `ROUNDUP((D23+D17)/G27,)` (a base area
+plus a pile-collar area) and `ROUNDUP(((I11*D11)/G27),)` (count x circumference). The
+parser now splits on the *last top-level* division, so the numerator may be arbitrary and
+the denominator must be a single cell. This also keeps production-rate formulas out
+without a special case: `ROUNDUP(IF(D30,B13/D30,),)` has no top-level division.
+
+### A sheet can have more than one quantity block, and a block need not have a "Job Quantity" row
+
+Grace's Preprufe sheets carry a pile-geometry block — its own "Unit of Measurement" names,
+its own waste row, a derived total computed from pile count and circumference — *above*
+the ordinary block, and components divide both. Anchoring on "Job Quantity" makes those
+inputs invisible, so the reader anchors on "Unit of Measurement" and walks each block.
+
+### Some component quantities are not yield-driven at all
+
+26 rows take their quantity from somewhere else: `I19=I18` (a tape that ships one-to-one
+with the membrane above it, 9 rows) or `I20=M14` (an initiator counted per pail of another
+product, 17 rows). They are unmistakably components — code, price lookup, line total — so
+they are emitted with a null yield and a flag rather than dropped.
+
+**Schema implication, not yet built:** `assembly_components` assumes
+`ROUNDUP(quantity / yield)`. These rows need a quantity *rule* ("same as component N",
+"fixed", "per unit of component N"). Until that exists they import flagged and cannot
+price, which is the honest state. Add the rule column in I5 rather than migrating again
+mid-stream.
+
+### Layout traps that silently misread rather than fail
+
+- The production-rate block's closing "Total" is **not in the block header's column**
+  (Aquafin heads at C28, closes at E33). Terminating on the header column alone runs the
+  scan into the labor and margin blocks and reads *their* inputs as production rates.
+  Caught by a synthetic fixture, not by the live sweep — the numbers looked plausible.
+- "Labor Burden" appears **twice**: once as an input and once as a summary line whose
+  value cell is a formula. Taking the first match reads an empty value, so label lookups
+  try every occurrence and keep the first that yields a number.
+- Margins are stored as **whole percents** (2, 22, 20) while waste and tax in the same
+  sheet are **fractions** (0.05, 0.07). Both are normalised to fractions on the way out.
+- **Insurance is not part of the divide-through chain** — it has its own base cell and is
+  applied differently per workbook. Captured as `insuranceMarginPct` and left for I4.
+
+90 of 232 workbooks now extract with no flag of any kind. The rest flag rather than guess;
+the most common flags are hand-priced components (77), conditional/optional quantities
+(69) and missing day rates (17), all of which are properties of the workbooks rather than
+parser failures.
