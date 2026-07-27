@@ -893,17 +893,52 @@ divide-through margins, ROUNDUP packaging, labor rounding. If native totals diff
 the books, the engine is unusable however good the UI is. Hence I4 is a hard gate: no
 UI work until the engine matches real workbooks.
 
-**Two schema constraints carried from the measurement (non-negotiable):**
+**Schema constraints carried from the measurements (non-negotiable):**
 1. `assembly_components` gets a surrogate PK + sequence. **Never** a natural/unique key
    on `(assembly_id, product_code)` — `Aquafin-2K M.xlsx` rows 19/20 are the same code
    at two coverage yields (two coats); collapsing them silently halves material qty.
 2. Margins are applied **divide-through and chained** (`cost ÷ (1−m)` per margin in
    order), never `× (1+m)`.
+3. An assembly has **N named quantity inputs**, each with its own waste %, and every
+   component divides one of them by name (I0 finding 2: 74% of the library). One
+   quantity per assembly misprices three quarters of the workbooks.
+4. Component prices are **either** a product-code reference **or** a fixed literal —
+   19 workbooks are priced entirely by hand with no Pricing DB lookup (I0 finding 4).
 
-**Order:** I0 → I1 → (I2, I3) → **I4 gate** → I5 → I6 → I7 → I8. C6 (kill the
+**Order:** ~~I0~~ (done) → I1 → (I2, I3) → **I4 gate** → I5 → I6 → I7 → I8. C6 (kill the
 free-text pattern box) folds into I8 and is not run separately.
 
-### Task I0 — Parse-accuracy spot-check (measurement only, NO BUILD)
+### Task I0 — Parse-accuracy spot-check — DONE 2026-07-27, verdict GO WITH CORRECTIONS
+
+**Landed:** full verdict in `docs/ASSEMBLIES_DESIGN.md` ("I0 — parse-accuracy
+spot-check"). Went wider than the planned 10-workbook sample: derived a structural
+component count independent of the detectors and diffed it against `scan_components()`
+across all 232 workbooks, then hand-read every mismatch class. 1162 detected vs 1239
+structural rows; 202/232 workbooks (87.1%) exact. Five findings, three of which change
+downstream tasks:
+
+- **Blocking, I3:** 60 rows in 16 workbooks are silently dropped because their price
+  lookup was flattened to a pasted literal, while the workbook still classifies FULL —
+  a silent material undercount. Anchor component rows on the `ROUNDUP(qty/yield)`
+  formula, not on the `INDEX/MATCH`.
+- **Blocking, I1:** 171/231 workbooks (74%) have components dividing several *named*
+  quantity inputs, each with its own waste % — see constraint 3 above.
+- **I3:** resolve the block's columns by header text; column F is 99.8% populated but
+  means "packaging unit" in the 218-workbook layout and "yield unit" in the 13-workbook
+  shifted layout. Packaging must also stop gating "fully extractable" — it isn't used
+  in the cost math.
+- Two PARTIAL classes are by design, not failures: 19 manual-priced workbooks (complete,
+  just no Pricing DB link) and 8 open-yield templates (`*Enter yield here*`). The
+  earlier "~12 needing manual entry" was pessimistic.
+- 55 conditional quantity rows across 38 workbooks (include toggles, capacity gates) —
+  import with an `optional` flag, don't port the toggle logic.
+
+Accuracy is *not* materially worse than extraction rate and every miss traced to a
+detector rule rather than sheet chaos, so Stage 2 proceeds. Zero production code
+changes; audit scripts were session-scratch and deliberately not committed.
+
+<details>
+<summary>Original I0 spec</summary>
 
 **Why:** the viability measurement recorded two open caveats — packaging unit is read at
 a **hardcoded column F**, and extraction *accuracy* was hand-verified on exactly one
@@ -921,18 +956,26 @@ rate, whether column F holds, and any correction the extractor must make. No pro
 code changes. If accuracy is materially worse than extraction rate, say so and stop —
 that changes I3/I5 from "import + review" to "assisted data entry".
 
+</details>
+
 ### Task I1 — Schema + org scoping migration
 
 **Do:** one migration adding `organizations` + `org_id` + the 3 role tiers (assemblies
 and products are **company-level**, not project-level), and the Stage 2 tables:
 - `products` — mirrors the Pricing Manager: CODE (PK per org), ITEM, DESCRIPTION,
   NET PRICE, DATE, org_id.
-- `assemblies` — org_id, name, unit, labor params (production rate, day rate/man, crew
-  size, labor burden %), waste %, escalation %, tax %, margin chain (ordered jsonb, e.g.
+- `assemblies` — org_id, name, labor params (production rate, day rate/man, crew size,
+  labor burden %), escalation %, tax %, margin chain (ordered jsonb, e.g.
   `[{name:"Safety",rate:0.02},…]`), source workbook ref (nullable).
-- `assembly_components` — **surrogate uuid PK**, assembly_id, `seq` int, product_code,
-  coverage yield, packaging unit. Unique on `(assembly_id, seq)` only.
-- `conditions.assembly_id` (nullable FK).
+- `assembly_quantity_inputs` — assembly_id, `seq`, name (`SF-Floor`, `Joint LF`, …),
+  unit, waste %. **Required by I0 finding 2** — 74% of workbooks have more than one, and
+  waste % is per input, not per assembly. Single-input assemblies are just N=1.
+- `assembly_components` — **surrogate uuid PK**, assembly_id, `seq` int,
+  `quantity_input_id` FK (which input this component divides), coverage yield, packaging
+  unit (informational), `optional` bool, and a price that is *either* `product_code`
+  *or* a literal `unit_price` (I0 findings 4/5). Unique on `(assembly_id, seq)` only.
+- `conditions.assembly_quantity_input_id` (nullable FK) — a condition feeds a *named
+  input*, so several conditions can feed different inputs of one assembly.
 
 Same migration tightens Stage 1's authenticated-only RLS on `assembly_workbooks` /
 `assembly_mappings` to org scoping (the note recorded at C1). Cost visibility is gated
@@ -941,7 +984,9 @@ by role tier — pricing is company-confidential.
 **Success criteria:** migration applies clean on a fresh DB and on the live schema;
 typed service module mirroring `assemblyRegistryService.ts`; a test proves two rows with
 the same product_code and different yields survive insert and both count toward
-material qty; RLS denies cross-org reads; tsc both sides.
+material qty; a test proves a 4-input assembly (the `SF-Floor / LF / SF-Walls / Sand`
+shape) keeps each component bound to its own input and waste %; RLS denies cross-org
+reads; tsc both sides.
 
 ### Task I2 — Products import
 
@@ -954,18 +999,35 @@ port its supplier-diff workflow (recorded non-goal).
 unchanged); re-importing the same file is a no-op; unmapped columns reported, never
 silently dropped; tsc + tests green.
 
-### Task I3 — Extractor library (gated on I0)
+### Task I3 — Extractor library
 
 **Do:** promote the measurement code in `scope_assembly_parse.py` into a real parser
 (`server/src/scripts/assembly_extract.py` + a service wrapper in the pattern of
 `assemblyWriter.ts`). Stdlib zip/XML only — **never openpyxl**. Input: a workbook.
-Output: an assembly proposal JSON (components with code/yield/packaging/seq, labor
-params, margin chain, job-quantity cell) plus per-field confidence and explicit gap
-flags. Apply whatever column corrections I0 found.
+Output: an assembly proposal JSON (named quantity inputs with their waste %, components
+with seq / input ref / yield / price-source / packaging / optional flag, labor params,
+margin chain) plus per-field confidence and explicit gap flags.
 
-**Success criteria:** fails loudly (flag, not guess) on ambiguity; golden-file tests
-against committed *synthetic* fixtures — never commit a real MCW workbook or any
-pricing data; re-running the I0 sample reproduces the hand-verified values exactly.
+**Corrections I0 requires (each one is a measured bug in the scoping detectors):**
+1. **Anchor on the quantity formula, not the price lookup.** Find component rows by
+   `ROUNDUP(<qty>/<yield>)` anywhere in the row; a missing `INDEX/MATCH` means the price
+   is a literal, which is a flag — not a reason to skip the row. Without this, 60 rows
+   in 16 workbooks vanish while the workbook still reads as complete.
+2. **Match `IF(...)`/`IFERROR(...)`-wrapped quantity formulas** (55 rows / 38 workbooks)
+   and mark those components `optional`.
+3. **Resolve columns by header text** (`Cost / Packaging / Yield / Quantity / Total`) off
+   the located `MATERIALS :` header row. No fixed letters — column F is the packaging
+   unit in the 218-workbook layout and the yield unit in the 13-workbook shifted one.
+4. **Read the quantity-input block** — the header row above `Job Quantity` names each
+   input, the waste row below gives each its own waste %, and the TOTAL row is what
+   components divide. Bind each component to the input its formula references.
+5. **Packaging no longer gates completeness** — it is informational; code-or-literal
+   price, yield, and quantity-input binding are what matter.
+
+**Success criteria:** fails loudly (flag, not guess) on ambiguity; on the live set the
+structural-vs-detected component diff from I0 closes to zero missed rows (spot-check the
+16 flattened-lookup workbooks and `Emseal/EJ.xlsx` explicitly); golden-file tests against
+committed *synthetic* fixtures — never commit a real MCW workbook or any pricing data.
 
 ### Task I4 — Costing engine — **HARD GATE**
 
@@ -994,9 +1056,12 @@ per-file status. Help docs updated (execution rule 8).
 
 ### Task I6 — Condition ↔ assembly + live Costs tab
 
-**Do:** pick an assembly on a condition; the Costs tab prices it live from takeoff
-quantity — material / labor / margins / total, refreshing as measurements change.
-Per UX rule: scope + one-liner + go — no threshold dials in the user-facing dialog.
+**Do:** pick an assembly **and one of its named quantity inputs** on a condition (I0
+finding 2 — "Aquafin 2K → SF-Floor"); the Costs tab prices it live from takeoff
+quantity — material / labor / margins / total, refreshing as measurements change. An
+assembly whose other inputs are unfed prices those components at zero and says so.
+Per UX rule: scope + one-liner + go — no threshold dials in the user-facing dialog;
+when an assembly has exactly one input, don't ask.
 
 **Success criteria:** a real beta project prices a condition live and matches the
 generated workbook for the same quantity; role tiers without cost access see no dollars;
