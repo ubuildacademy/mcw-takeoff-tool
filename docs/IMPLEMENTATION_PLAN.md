@@ -905,8 +905,16 @@ UI work until the engine matches real workbooks.
 4. Component prices are **either** a product-code reference **or** a fixed literal —
    19 workbooks are priced entirely by hand with no Pricing DB lookup (I0 finding 4).
 
-**Order:** ~~I0~~ (done) → I1 → (I2, I3) → **I4 gate** → I5 → I6 → I7 → I8. C6 (kill the
-free-text pattern box) folds into I8 and is not run separately.
+**Order:** ~~I0~~ → ~~I1~~ (both done) → (I2, I3) → **I4 gate** → I5 → I6 → I7 → I8. C6
+(kill the free-text pattern box) folds into I8 and is not run separately.
+
+**Migration verification (established in I1, reuse it):** a local Postgres 15 runs on
+this machine, so schema migrations do not have to be reviewed by reading. Apply them to
+a throwaway database on top of a stub of the pre-existing tables, apply a second time to
+prove idempotency, assert the constraints with a `DO` block that RAISEs on failure, and
+re-check RLS as a **non-superuser** role — superuser bypasses row security, so an
+assertion run as superuser proves constraints only. Scratch SQL stays in the session
+scratchpad; drop the database and any probe role afterwards.
 
 ### Task I0 — Parse-accuracy spot-check — DONE 2026-07-27, verdict GO WITH CORRECTIONS
 
@@ -958,7 +966,69 @@ that changes I3/I5 from "import + review" to "assisted data entry".
 
 </details>
 
-### Task I1 — Schema + org scoping migration
+### Task I1 — Schema + org scoping migration — DONE 2026-07-27
+
+**Landed:** `server/migrations/create_organizations_and_assembly_engine_tables.sql`
+(not yet applied to Supabase — Jeff runs it in the SQL editor),
+`server/src/services/assemblyLibrary.ts` (pure shaping + integrity rules),
+`server/src/services/assemblyLibraryService.ts` (DB access, mirrors
+`assemblyRegistryService.ts`), `assemblyLibrary.test.ts` (18 tests).
+
+**Verified for real, not by inspection.** A local Postgres 15 is available on this
+machine, so the migration was applied to a throwaway database on top of a stub of the
+pre-existing schema, then re-applied to prove idempotency, then asserted: the backfill
+seeds one org named from `user_metadata.company` with both users as members and the
+existing admin promoted to company admin; Stage 1 registry rows adopt the org; the old
+authenticated-only policies are gone; RLS is on for all six new tables; two components
+sharing a product code at different yields both survive insert; a component resolves its
+own input's waste %; duplicate `(assembly_id, seq)` is rejected; a component carrying
+both a product code and a literal price is rejected; product codes are unique per org
+but not globally; deleting an assembly cascades. RLS was then re-proved as a
+**non-superuser** role (superuser bypasses row security, so the first pass proved
+constraints, not policies): a rival org's company admin sees only its own assembly,
+products, components and zero MCW workbooks; a plain member cannot write to the library;
+a company admin cannot write into another org; an anonymous session sees nothing; the
+platform admin sees everything. tsc clean both sides; 261 tests green (243 + 18).
+
+**Decisions taken during the build (each one changed the shape of the migration):**
+
+1. **The org model is additive; `user_metadata.role` is untouched.** There was no
+   `organizations` table and the role model was two-tier (`admin` | `user`) read by
+   `isAdmin()` in `server/src/middleware/auth.ts`. Mapping existing admins onto a new
+   three-tier column would have meant editing auth middleware from a migration task
+   (execution rule 4) and would have locked every current admin out of the admin panel
+   until that edit shipped. So `user_metadata.role = 'admin'` remains the **platform
+   admin** flag, and the new `organization_members.org_role` carries **company_admin |
+   user**. Consolidating the two notions of "admin" is a later task.
+2. **Backfill seeds the org from `user_metadata.company`** — a free-text field already
+   collected at signup and invite — falling back to "Default Organization".
+3. **`assembly_components.product_code` is deliberately not an FK to `products`.**
+   Workbooks legitimately reference codes that have not been imported into the price
+   list yet; a hard FK turns "price not on file" into "import failed". Resolution happens
+   at costing time against `products (org_id, code)`.
+4. **Org scoping is enforced in the service, not by RLS.** The backend holds the
+   service_role key, which bypasses row security, so every query in
+   `assemblyLibraryService.ts` filters `org_id` explicitly — a missing filter is a
+   cross-tenant leak that the policies will not catch on that path. RLS is defence in
+   depth for direct frontend access, the same posture as the Stage 1 registry.
+5. **`org_id` is nullable on the two Stage 1 tables.** The backend writes them through
+   service_role today; making the column NOT NULL at migration time would break inserts
+   in the window between applying the migration and deploying a service that supplies
+   `org_id`. Tighten once the app writes it.
+
+**Follow-ups this created (not in the original I-list):**
+- Tighten `assembly_workbooks.org_id` / `assembly_mappings.org_id` to NOT NULL, and make
+  the Stage 1 routes supply it.
+- Consolidate the two "admin" notions (`user_metadata.role` vs `org_role`) and teach
+  `isAdmin()` about company admins.
+- **Question for Jeff (blocks nothing yet, needed by I6):** the I6 criterion "role tiers
+  without cost access see no dollars" does not map onto the agreed three tiers — a
+  regular user *consumes* assemblies during takeoff, which implies seeing the cost.
+  Either there is a fourth "no pricing" tier, or every member sees dollars and only
+  editing is gated. I1 shipped the latter (read = member, write = company admin).
+
+<details>
+<summary>Original I1 spec</summary>
 
 **Do:** one migration adding `organizations` + `org_id` + the 3 role tiers (assemblies
 and products are **company-level**, not project-level), and the Stage 2 tables:
@@ -987,6 +1057,8 @@ the same product_code and different yields survive insert and both count toward
 material qty; a test proves a 4-input assembly (the `SF-Floor / LF / SF-Walls / Sand`
 shape) keeps each component bound to its own input and waste %; RLS denies cross-org
 reads; tsc both sides.
+
+</details>
 
 ### Task I2 — Products import
 
@@ -1117,6 +1189,11 @@ docs updated.
 - 2026-07-13: token-usage instrumentation merged to main; provider decision deferred to data.
 - 2026-07-13: schedule branch held from main pending B1/B2 + Jeff's ship gate.
 - 2026-07-13: assemblies Stage 1 approach confirmed in principle; blocked on design review.
+- 2026-07-27: org model is additive — `user_metadata.role='admin'` stays the platform-admin
+  flag `isAdmin()` reads; `organization_members.org_role` carries company_admin/user.
+  Consolidating the two "admin" notions is a later task.
+- 2026-07-27: assembly library read = any org member, write = company admin. Whether a
+  tier exists that sees no dollars is an open question for Jeff (see I1 follow-ups).
 - 2026-07-21: assemblies Stage 2 planned as Workstream I. Shippable bar = live cost +
   branded in-app report (paperwork stays in Excel). Org/RLS migration lands inside I1,
   not as a separate task. I4 (engine matches real workbook totals) is a hard gate before
