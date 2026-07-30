@@ -117,7 +117,7 @@ export function ProductPricingTab() {
     : products;
 
   return (
-    <div className="space-y-4">
+    <div className="p-6 space-y-4">
       <div>
         <h3 className="text-lg font-semibold">Product Pricing</h3>
         <p className="text-sm text-muted-foreground">

@@ -162,7 +162,7 @@ export function CostDefaultsTab() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="p-6 max-w-5xl space-y-6">
       <div>
         <h3 className="text-lg font-semibold">Cost Defaults</h3>
         <p className="text-sm text-muted-foreground">
