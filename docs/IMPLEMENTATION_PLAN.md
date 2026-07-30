@@ -905,8 +905,8 @@ UI work until the engine matches real workbooks.
 4. Component prices are **either** a product-code reference **or** a fixed literal —
    19 workbooks are priced entirely by hand with no Pricing DB lookup (I0 finding 4).
 
-**Order:** ~~I0~~ → ~~I1~~ → ~~I3~~ → ~~I2~~ (all done; I1's migration applied to Supabase
-2026-07-27) → **I4 gate** → I5 → I6 → I7 → I8. C6
+**Order:** ~~I0~~ → ~~I1~~ → ~~I3~~ → ~~I2~~ → ~~I4 (gate PASSED)~~ → I5 → I6 → I7 → I8.
+I1's migration is applied to Supabase. C6
 (kill the free-text pattern box) folds into I8 and is not run separately.
 
 **Migration verification (established in I1, reuse it):** a local Postgres 15 runs on
@@ -1177,7 +1177,54 @@ committed *synthetic* fixtures — never commit a real MCW workbook or any prici
 
 </details>
 
-### Task I4 — Costing engine — **HARD GATE**
+### Task I4 — Costing engine — **GATE PASSED 2026-07-27**
+
+**Landed:** `server/src/services/assemblyCosting.ts` (pure engine), its unit tests (20),
+`server/src/scripts/assembly_costing_golden.py` (golden-case builder) and
+`assemblyCosting.golden.test.ts` (the gate). Extractor gained per-line rounding flags,
+production-rate quantity bases, insurance rate-per-thousand, and two label fixes.
+
+**Bar was five workbooks matching to the cent. Result: 144 of 165 comparable workbooks
+(87%) match on every figure** — material, labor, cost of material+labor+equipment,
+margins, insurance and job total. Labor 159/165, material 147/165. Full detail in
+ASSEMBLIES_DESIGN.md "I4 — the costing engine reproduces the books".
+
+Nothing had to be supplied by hand: a priced workbook carries both the inputs and the
+answer, because Excel caches each formula's last result. Cases contain real prices and are
+never committed; the gate skips unless `ASSEMBLY_GOLDEN_CASES` names a generated file:
+
+```bash
+python3 server/src/scripts/assembly_costing_golden.py "<assemblies folder>" --out /tmp/golden.json && ASSEMBLY_GOLDEN_CASES=/tmp/golden.json npx vitest run server/src/services/assemblyCosting.golden.test.ts
+```
+
+**The comparison was wrong before the engine was.** The first run matched 41/165, mostly
+because the workbooks' cached totals are stale against their own Pricing DB sheet — the
+Pricing Manager rewrites only that sheet, so everything else keeps its last-calculated
+values. Pricing from the DB sheet measures staleness, not correctness. Using each
+component's cached cost cell took material from 52 to 145. (That staleness is itself an
+argument for the native engine: a workbook can display a total that no longer matches its
+own prices until someone opens it.)
+
+**Five engine bugs the gate caught**, each producing a plausible wrong number rather than
+an error: labor billed man-days instead of calendar days (`ROUNDUP(manDays / crew)`, which
+counts the crew twice — 1344 vs 1210 on Aquafin); per-line day rounding is not universal
+(Aquafin rounds each line, Henry rounds only the sum); waste applied twice on blocks whose
+value cell is already the total; compound numerators divide the SUM of several inputs, each
+with its own waste %; and the margin chain swallowing the insurance block in workbooks with
+no closing Total row, reading "Insurance cost at 79 Dollars per Thousand" as a 79% margin.
+
+**Remaining 21 are extraction gaps, not arithmetic gaps** — geometry-driven quantities
+(`(I11*D11)/G27`, needing the I5 quantity-rule column) and a residual waste-attribution
+case in a few multi-block sheets. Every case whose cost is right has a correct job total,
+margins and insurance: 144/144.
+
+**Follow-ups for I5's migration** (bundle into one, do not migrate twice): the
+quantity-rule column from I3, plus `additional_quantity_input_ids` for components that
+divide several inputs, plus `insurance_rate_per_thousand` / `insurance_margin_pct` on
+`assemblies` — all four are currently carried in memory or by the caller.
+
+<details>
+<summary>Original I4 spec</summary>
 
 **Do:** pure TS module + unit tests, no UI, no DB. Given assembly + components +
 product prices + takeoff quantity, compute the full breakdown: adjusted qty (waste,
@@ -1191,6 +1238,8 @@ material / labor / each margin step / grand total, to the cent. Any mismatch get
 diagnosed and documented, not tolerated. Test fixtures carry no real pricing (parametrize
 the expected values from a local, uncommitted file, skipping gracefully when absent —
 same pattern as `test_assembly_e2e.py`).
+
+</details>
 
 ### Task I5 — Import review screen
 

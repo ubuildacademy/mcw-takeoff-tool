@@ -328,3 +328,74 @@ mid-stream.
 the most common flags are hand-priced components (77), conditional/optional quantities
 (69) and missing day rates (17), all of which are properties of the workbooks rather than
 parser failures.
+
+## I4 — the costing engine reproduces the books. GATE PASSED 2026-07-27
+
+The question Stage 2 actually rested on: does a native engine produce the same numbers
+MCW's workbooks do? The task's bar was **five** workbooks matching to the cent.
+
+**Result: 144 of 165 comparable workbooks (87%) match on every figure** — material total,
+labor, cost of material+labor+equipment, margins, insurance, and the job total.
+Labor matches on 159/165 and material on 147/165.
+
+Nobody had to supply expected values. A priced workbook carries both the inputs and the
+answer: Excel stores each formula's last-calculated result, so the workbook's own
+"TOTAL Job COST" is the number to reproduce. `assembly_costing_golden.py` extracts each
+workbook, reads its entered quantities and cached totals, and emits a case; the engine
+runs against it in `assemblyCosting.golden.test.ts`. Cases hold real prices, so they are
+never committed — the test skips unless `ASSEMBLY_GOLDEN_CASES` points at a generated file.
+
+### The comparison was wrong before the engine was
+
+The first run matched 41/165. Most of that was not an engine fault: **the workbooks'
+cached totals are stale with respect to their own Pricing DB sheet.** The Pricing Manager
+updates a workbook by rewriting only the sheet named "Pricing DB", so every other sheet
+keeps the values Excel last calculated. Pricing components from the DB sheet and comparing
+against those totals measures how out-of-date the workbook is, not whether the engine is
+right. Reading each component's own cached cost cell instead took material from 52 to 145.
+
+That staleness is itself an argument for the native engine: a workbook can show a total
+that no longer reflects its own prices until someone opens it in Excel.
+
+### What the gate found in the engine
+
+Five real bugs, each of which produced a plausible wrong number rather than an error:
+
+1. **Labor billed man-days instead of calendar days.** The workbook computes
+   `crewCost x ROUNDUP(manDays / crewSize)` — its hidden helper is labelled "Job Duration
+   is N Days with N Man/Men". Billing `crewCost x manDays` counts the crew twice; Aquafin
+   came out at 1344 instead of 1210.
+2. **Per-line day rounding is not universal.** Aquafin wraps every production-rate line in
+   ROUNDUP; Henry's Blueskin sheets wrap none and round only the summed total. Assuming
+   either way misprices the other family, so the flag is read per line.
+3. **Waste was applied twice** on quantity blocks that have no "Job Quantity" row — their
+   value cell IS the block total, with waste already folded in.
+4. **Compound numerators divide the SUM of several inputs**, each carrying its own waste %
+   (17% and 5% in the same component). Binding to the first input alone under-bought.
+5. **The margin chain swallowed the insurance block** in workbooks whose margin block has
+   no closing Total row, reading "Insurance cost at 79 Dollars per Thousand" as a 79%
+   margin and inflating totals by an order of magnitude.
+
+Insurance also turned out to be fully determined rather than workbook-specific:
+`ROUNDUP(ratePerThousand x cost / 1000)`, then its own divide-through margin, added
+alongside the chain — `F77 = ROUNDUP(F59 + insurance + margins)`.
+
+Two extractor bugs surfaced too: the day rate's label cell is empty in a family of
+workbooks (the caption beside it reads "Standard Labor rate" in some and "Davis Bacon" in
+others, so the rate is found positionally, directly above the crew size), and
+`Cover plates.xlsx` labels its waste row "Job Quantity" and its total row "Warranty" — so
+the waste cell is now read from the TOTAL FORMULA (`total = qty + qty * waste`), which
+names it regardless of what the labels say.
+
+### The remaining 21, and why they are not being chased
+
+- **Geometry-driven quantities.** `ROUNDUP((I11*D11)/G27)` — collar area times pile count,
+  cells that are not quantity inputs at all. These need the quantity-rule column already
+  recorded as an I5 follow-up; until it exists they cannot be expressed.
+- **A residual waste-attribution edge case** in a handful of multi-block sheets, where a
+  third block's quantity row is not being found and its waste therefore reads as zero.
+
+Both are extraction gaps, not arithmetic gaps: every case whose cost of
+material+labor+equipment is right has a correct job total, margins and insurance —
+144/144. The margin, insurance and rounding rules are exactly right wherever the inputs
+reach them.

@@ -82,6 +82,12 @@ HEADER_ROLES = [
 ]
 
 DAY_RATE_RE = re.compile(r"day\s*rate\s*per\s*man", re.I)
+# In some workbooks the "Day rate per man" label cell is simply empty, leaving
+# the rate stranded with only the "Standard Labor rate" caption to its RIGHT
+# (e.g. Grace's Bituthene sheets: D49 holds the rate, E49 the caption, C49 is
+# blank). Without a fallback the whole labor cost reads as zero, which is a
+# silent underprice of the entire job rather than a visible gap.
+DAY_RATE_FALLBACK_RE = re.compile(r"standard\s*labor\s*rate", re.I)
 CREW_SIZE_RE = re.compile(r"how\s*many\s*men", re.I)
 LABOR_BURDEN_RE = re.compile(r"^\s*labor\s*burden\s*$", re.I)
 PROD_RATE_HDR_RE = re.compile(r"production\s*rate\s*breakdown", re.I)
@@ -323,6 +329,33 @@ def as_rate(value, flags: list, label: str):
 # ── quantity inputs (rule 4) ───────────────────────────────────────────
 
 
+def _resolve_total_and_waste(sheet: Sheet, col_idx: int, qty_row: int, limit: int):
+    """Find a column's TOTAL cell and its waste cell from the total formula.
+
+    The total is written `qty + (qty * waste)`, so the formula names both cells.
+    Reading it beats reading row labels, which are wrong in some workbooks.
+    Returns (total row, waste cell) with either part None when not found.
+    """
+    qty_ref = f"{index_to_col(col_idx)}{qty_row}"
+    for row_num in range(qty_row + 1, min(limit, qty_row + 5) + 1):
+        cell = sheet.at(row_num, col_idx)
+        if not cell or not cell["has_formula"]:
+            continue
+        refs = refs_in(cell["formula"])
+        if qty_ref not in refs:
+            continue
+        for ref in refs:
+            if ref == qty_ref:
+                continue
+            ref_col, ref_row = split_ref(ref)
+            # The waste cell sits in the same column, between the quantity row
+            # and the total row.
+            if ref_col == index_to_col(col_idx) and qty_row < ref_row < row_num:
+                return row_num, sheet.cell(ref)
+        return row_num, None
+    return None, None
+
+
 def extract_quantity_inputs(sheet: Sheet, flags: list):
     """The named quantity inputs of the assembly.
 
@@ -391,9 +424,30 @@ def extract_quantity_inputs(sheet: Sheet, flags: list):
             col_idx = cell["col_idx"]
             col = index_to_col(col_idx)
             name_cell = sheet.at(name_row, col_idx)
-            waste_cell = sheet.at(waste_row, col_idx) if waste_row else None
             name = (name_cell["text"].strip() if name_cell else "") or col
+
+            # Prefer the TOTAL formula over the row labels. It reads
+            # `total = qty + (qty * waste)`, so it names the waste cell
+            # directly — which survives sheets whose labels are wrong.
+            # `Cover plates.xlsx` labels its waste row "Job Quantity" and its
+            # total row "Warranty"; trusting those labels loses the waste
+            # entirely and under-buys every component.
+            col_total_row, waste_from_formula = _resolve_total_and_waste(
+                sheet, col_idx, value_row, limit
+            )
+            waste_cell = waste_from_formula
+            if waste_cell is None and waste_row:
+                waste_cell = sheet.at(waste_row, col_idx)
+            if col_total_row is not None:
+                total_row = col_total_row
             waste = cell_numeric(waste_cell["raw"]) if waste_cell else None
+            # When a block has no "Job Quantity" row, the value cell IS the
+            # block's total — which already has the waste folded in (Grace's
+            # pile block computes `(count * collar) + ((count * collar) *
+            # waste)` in one cell). Reporting the waste again would apply it
+            # twice and over-buy every component on that input.
+            if qty_row is None:
+                waste = 0.0
 
             entry = {
                 "seq": len(inputs) + 1,
@@ -516,6 +570,7 @@ def _fallback_component(sheet: Sheet, row_num: int, row_cells: dict, roles: dict
     return {
         "sourceRow": row_num,
         "quantityInputSeq": None,
+        "additionalQuantityInputSeqs": [],
         "quantityBasis": formula,
         "description": _row_description(sheet, row_num, roles.get("description", header_col)) or None,
         "productCode": code,
@@ -587,15 +642,14 @@ def extract_components(sheet: Sheet, block, col_to_input, flags: list):
                     break
 
         quantity_input_seq = matched[0] if matched else None
+        additional_input_seqs = matched[1:]
         if quantity_input_seq is None:
             row_flags.append(
                 f"quantity is based on {basis_expr.strip()}, which is not one of the inputs"
             )
         elif len(matched) > 1:
             names = ", ".join(str(s) for s in matched)
-            row_flags.append(
-                f"quantity combines inputs {names}; bound to the first — check before pricing"
-            )
+            row_flags.append(f"quantity is the sum of inputs {names}")
 
         # --- yield ---
         coverage_yield = sheet.numeric_at(yield_ref)
@@ -667,6 +721,7 @@ def extract_components(sheet: Sheet, block, col_to_input, flags: list):
                 "seq": len(components) + 1,
                 "sourceRow": row_num,
                 "quantityInputSeq": quantity_input_seq,
+                "additionalQuantityInputSeqs": additional_input_seqs,
                 "quantityBasis": basis_expr.strip(),
                 "description": description or None,
                 "productCode": product_code,
@@ -687,7 +742,50 @@ def extract_components(sheet: Sheet, block, col_to_input, flags: list):
 # ── labor, margins, material adjustments ───────────────────────────────
 
 
-def extract_labor(sheet: Sheet, flags: list):
+def _resolve_input_for_ref(ref, col_to_input: dict):
+    """Which quantity input a cell reference belongs to: exact address first,
+    then any address in the same column."""
+    if not ref:
+        return None
+    seq = col_to_input.get(ref)
+    if seq is not None:
+        return seq
+    ref_col, _ = split_ref(ref)
+    for known_ref, known_seq in col_to_input.items():
+        if split_ref(known_ref)[0] == ref_col:
+            return known_seq
+    return None
+
+
+def _labelled_value_cell(sheet: Sheet, pattern: "re.Pattern"):
+    """The value cell belonging to a label, trying every occurrence."""
+    for row_num, col_idx, _text in sheet.find_labels(pattern):
+        cell = sheet.value_right_of(row_num, col_idx)
+        if cell is not None and cell_numeric(cell["raw"]) is not None:
+            return cell
+    return None
+
+
+def _day_rate_fallback(sheet: Sheet):
+    """The day rate when its own label cell is blank.
+
+    Position, not text: the labor block stacks day rate / crew size / burden in
+    one column, so the rate is the cell directly ABOVE the crew-size value.
+    The caption beside it is not dependable — it reads "Standard Labor rate" in
+    some workbooks and "Davis Bacon" in others, and the label cell to its left
+    is empty in both. Without this the entire labor cost reads as zero, which
+    underprices the job silently.
+    """
+    crew_cell = _labelled_value_cell(sheet, CREW_SIZE_RE)
+    if crew_cell is None:
+        return None
+    above = sheet.at(crew_cell["row"] - 1, crew_cell["col_idx"])
+    if above is None or above["has_formula"]:
+        return None
+    return cell_numeric(above["raw"])
+
+
+def extract_labor(sheet: Sheet, col_to_input: dict, flags: list):
     labor = {"dayRatePerMan": None, "crewSize": None, "laborBurdenPct": None, "productionRates": []}
 
     for key, pattern in (
@@ -695,12 +793,16 @@ def extract_labor(sheet: Sheet, flags: list):
         ("crewSize", CREW_SIZE_RE),
         ("laborBurdenPct", LABOR_BURDEN_RE),
     ):
-        if not sheet.find_labels(pattern):
-            flags.append(f"{key} label not found")
-            continue
-        value, _row, _col = sheet.labelled_value(pattern)
+        value, _row, _col = (
+            sheet.labelled_value(pattern) if sheet.find_labels(pattern) else (None, None, None)
+        )
+        if value is None and key == "dayRatePerMan":
+            value = _day_rate_fallback(sheet)
         if value is None:
-            flags.append(f"{key} label found but its value cell is empty")
+            if not sheet.find_labels(pattern):
+                flags.append(f"{key} label not found")
+            else:
+                flags.append(f"{key} label found but its value cell is empty")
             continue
         if key == "laborBurdenPct":
             labor[key] = as_rate(value, flags, key)
@@ -733,11 +835,48 @@ def extract_labor(sheet: Sheet, flags: list):
             if rate is None:
                 continue
             unit_cell = sheet.at(row_num, hdr_col + 2)
+            # Which quantity does this line's crew work through? The days cell
+            # divides some quantity by this row's rate — e.g.
+            # `ROUNDUP(IF(D31,D15/D31,),)` works D15. Lines in one sheet can
+            # work DIFFERENT inputs (Penetron paces floor and wall separately),
+            # so the basis is captured per line rather than assumed.
+            basis = None
+            rounds_up = False
+            is_optional = False
+            for cell in sorted(cells.values(), key=lambda c: c["col_idx"]):
+                if not cell["has_formula"] or cell["col_idx"] <= rate_cell["col_idx"]:
+                    continue
+                m = re.search(
+                    rf"(\$?[A-Za-z]{{1,3}}\$?\d+)\s*/\s*\$?{re.escape(rate_cell['addr'])}\b",
+                    cell["formula"],
+                    re.I,
+                )
+                if m:
+                    basis = norm_ref(m.group(1))
+                    # Whether THIS line rounds up to a whole day is a property
+                    # of the workbook, not a universal rule: Aquafin wraps
+                    # every line in ROUNDUP, Henry's Blueskin sheets wrap none
+                    # and round only the summed total. Assuming either way
+                    # misprices labor on the other family, so it is read.
+                    rounds_up = bool(ROUNDUP_START_RE.search(cell["formula"]))
+                    # A rate line can sit behind an include toggle just like a
+                    # component: `IF(K19=VALUES!Y1, ROUNDUP(...), 0)`. The
+                    # plain `IF(D31, ...)` guard against a zero rate is NOT a
+                    # toggle, so the test is for a COMPARISON inside the IF.
+                    is_optional = bool(re.search(r"IF\(\s*[^,()]*=", cell["formula"], re.I))
+                    break
             labor["productionRates"].append(
                 {
                     "description": label or None,
                     "ratePerDay": rate,
                     "unit": (unit_cell["text"].strip() or None) if unit_cell else None,
+                    "quantityBasis": basis,
+                    "roundsUp": rounds_up,
+                    "isOptional": is_optional,
+                    # Same column fallback the components use: a rate line may
+                    # divide a different ROW of an input's column (the entered
+                    # quantity rather than the waste-adjusted total).
+                    "quantityInputSeq": _resolve_input_for_ref(basis, col_to_input),
                     "sourceRow": row_num,
                 }
             )
@@ -765,7 +904,12 @@ def extract_margin_chain(sheet: Sheet, flags: list):
         if not label_cell or not label_cell["text"].strip():
             continue
         label = label_cell["text"].strip()
-        if BLOCK_END_RE.match(label):
+        # The chain ends at its Total row — but some workbooks have no Total
+        # there, and the scan then runs straight into the insurance block and
+        # reads "Insurance cost at 79 Dollars per Thousand" as a 79% MARGIN.
+        # That produced totals an order of magnitude too high, so insurance
+        # terminates the chain as well.
+        if BLOCK_END_RE.match(label) or "insurance" in label.lower():
             break
         rate_cell = sheet.at(row_num, hdr_col + 1)
         rate = cell_numeric(rate_cell["raw"]) if rate_cell and not rate_cell["has_formula"] else None
@@ -778,22 +922,37 @@ def extract_margin_chain(sheet: Sheet, flags: list):
     if not chain:
         flags.append("Margins block found but no rates could be read")
 
-    # Insurance sits below the chain with its own base cell and is applied
-    # differently per workbook. Captured, never folded into the chain.
+    # Insurance sits below the chain and is NOT part of it: the workbook
+    # charges a dollars-per-thousand rate on the material+labor+equipment cost,
+    # applies insurance's own divide-through margin to that, and adds the
+    # result to the job total alongside the chain
+    # (`F69=ROUNDUP(D69*F59/1000)`, `F71=F69/(1-margin)`,
+    # `F77=ROUNDUP(F59+F71+margins)`). Both numbers are captured; folding
+    # insurance into the chain would misprice every assembly that has one.
     insurance_pct = None
+    insurance_per_thousand = None
     ins_hit = sheet.find_label(INSURANCE_RE, after_row=hdr_row)
     if ins_hit:
         for row_num in range(ins_hit[0], ins_hit[0] + 5):
             label_cell = sheet.at(row_num, ins_hit[1])
-            if not label_cell or "margin" not in label_cell["text"].lower():
+            if not label_cell:
                 continue
+            label = label_cell["text"].lower()
             rate_cell = sheet.at(row_num, ins_hit[1] + 1)
             rate = cell_numeric(rate_cell["raw"]) if rate_cell else None
-            insurance_pct = as_rate(rate, flags, "insurance margin")
-            break
+            if "margin" in label and insurance_pct is None:
+                insurance_pct = as_rate(rate, flags, "insurance margin")
+            elif rate is not None and insurance_per_thousand is None and "margin" not in label:
+                # The dollars-per-thousand row: its label is built by a formula
+                # ("Insurance cost at N Dollars per Thousand"), so it is
+                # identified by position — the first numeric row of the
+                # insurance block that is not the margin.
+                insurance_per_thousand = rate
         if insurance_pct is None:
             flags.append("Insurance block found but its margin rate could not be read")
-    return chain, insurance_pct
+        if insurance_per_thousand is None:
+            flags.append("Insurance block found but its dollars-per-thousand rate could not be read")
+    return chain, insurance_pct, insurance_per_thousand
 
 
 def extract_material_adjustments(sheet: Sheet, block, flags: list):
@@ -844,8 +1003,8 @@ def extract_assembly(path: Path) -> dict:
     quantity_inputs, col_to_input = extract_quantity_inputs(sheet, flags)
     block = find_materials_block(sheet, flags)
     components = extract_components(sheet, block, col_to_input, flags) if block else []
-    labor = extract_labor(sheet, flags)
-    margin_chain, insurance_pct = extract_margin_chain(sheet, flags)
+    labor = extract_labor(sheet, col_to_input, flags)
+    margin_chain, insurance_pct, insurance_per_thousand = extract_margin_chain(sheet, flags)
     adjustments = extract_material_adjustments(sheet, block, flags)
 
     # Inputs nothing divides are usually derived totals sitting in the same row
@@ -867,6 +1026,7 @@ def extract_assembly(path: Path) -> dict:
         "productionRates": labor["productionRates"],
         "marginChain": margin_chain,
         "insuranceMarginPct": insurance_pct,
+        "insuranceRatePerThousand": insurance_per_thousand,
         "escalationPct": adjustments["escalationPct"],
         "surchargePct": adjustments["surchargePct"],
         "taxPct": adjustments["taxPct"],

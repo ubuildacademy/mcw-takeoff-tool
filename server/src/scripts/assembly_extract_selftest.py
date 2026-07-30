@@ -437,17 +437,24 @@ def check_multi_block(c: Checker, tmp_dir: str) -> None:
         f"multi-block: geometry block with no Job Quantity row must be read, got {names}",
     )
     c.equal(names, ["Preprufe 300R Piles", "Preprufe 300R+", "BLM"], "multi-block: input names")
+    # The geometry block has no Job Quantity row, so its value cell IS the
+    # block total — which already has waste folded in. Reporting the waste
+    # again would apply it twice, so it is reported as zero for that input.
     c.equal(
-        [i["wastePct"] for i in r["quantityInputs"]], [0.05, 0.17, 0.07], "multi-block: waste"
+        [i["wastePct"] for i in r["quantityInputs"]], [0.0, 0.17, 0.07], "multi-block: waste"
     )
 
     c.equal(len(r["components"]), 3, "multi-block: component count")
     compound, copied, gated = r["components"]
 
-    # Compound numerator (D18+D12) binds to an input and says it combines two.
-    c.equal(compound["quantityInputSeq"], 2, "multi-block: compound numerator binds to first input")
+    # A compound numerator (D18+D12) divides the SUM of both inputs, so both
+    # are recorded — binding to only the first under-buys the component.
+    c.equal(compound["quantityInputSeq"], 2, "multi-block: compound numerator's primary input")
+    c.equal(
+        compound["additionalQuantityInputSeqs"], [1], "multi-block: compound numerator's other input"
+    )
     c.check(
-        any("combines inputs" in f for f in compound["flags"]),
+        any("sum of inputs" in f for f in compound["flags"]),
         f"multi-block: compound numerator should be flagged, got {compound['flags']}",
     )
 

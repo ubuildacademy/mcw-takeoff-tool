@@ -35,6 +35,12 @@ export interface AssemblyComponent {
   assemblyId: string;
   seq: number;
   quantityInputId: string | null;
+  /**
+   * Further inputs this component's quantity ALSO divides. Some components
+   * divide the sum of several named inputs (a deck area plus the pile-collar
+   * area wrapping it); each keeps its own waste %.
+   */
+  additionalQuantityInputIds?: string[];
   description: string | null;
   productCode: string | null;
   unitPrice: number | null;
@@ -115,6 +121,8 @@ export interface AssemblyComponentRow {
   assembly_id: string;
   seq: number;
   quantity_input_id: string | null;
+  /** Not a database column yet — see the I5 follow-up in the plan. */
+  additional_quantity_input_ids?: string[] | null;
   description: string | null;
   product_code: string | null;
   unit_price: number | string | null;
@@ -179,6 +187,7 @@ export function mapComponentRow(row: AssemblyComponentRow): AssemblyComponent {
     assemblyId: row.assembly_id,
     seq: row.seq,
     quantityInputId: row.quantity_input_id,
+    additionalQuantityInputIds: row.additional_quantity_input_ids ?? [],
     description: row.description,
     productCode: row.product_code,
     unitPrice: num(row.unit_price),
