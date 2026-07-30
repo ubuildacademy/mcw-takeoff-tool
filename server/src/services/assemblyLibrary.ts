@@ -73,6 +73,146 @@ export interface AssemblyDetail extends Assembly {
   components: AssemblyComponent[];
 }
 
+/**
+ * Company-wide costing rates. An assembly field left NULL inherits from here.
+ *
+ * Measured across MCW's 232 workbooks: labor burden, tax and insurance margin
+ * are identical in all of them; the day rate, insurance rate, margin chain and
+ * escalation hold in 86-99%. Crew size and production rates deliberately are
+ * NOT here — they vary per assembly and are the pacing itself.
+ */
+export interface CostDefaults {
+  dayRatePerMan: number | null;
+  laborBurdenPct: number | null;
+  escalationPct: number | null;
+  surchargePct: number | null;
+  taxPct: number | null;
+  marginChain: Margin[];
+  insuranceRatePerThousand: number | null;
+  insuranceMarginPct: number | null;
+}
+
+export const EMPTY_COST_DEFAULTS: CostDefaults = {
+  dayRatePerMan: null,
+  laborBurdenPct: null,
+  escalationPct: null,
+  surchargePct: null,
+  taxPct: null,
+  marginChain: [],
+  insuranceRatePerThousand: null,
+  insuranceMarginPct: null,
+};
+
+/** Where each effective value came from — what the UI shows as "inherited". */
+export type SettingSource = 'assembly' | 'company' | 'unset';
+
+export interface ResolvedCostSettings extends CostDefaults {
+  sources: Record<keyof CostDefaults, SettingSource>;
+}
+
+/**
+ * Merge an assembly's own values over the company defaults.
+ *
+ * NULL on an assembly means INHERIT, not zero — that distinction is the whole
+ * point of the defaults. A company that raises its day rate reprices every
+ * assembly that has not deliberately overridden it; one that has is untouched.
+ *
+ * An explicit ZERO on the assembly is an override, not an absence: a job with
+ * no escalation must be able to say so and not silently pick up the company's
+ * 3%. That is why this checks for null rather than falsiness.
+ */
+export function resolveAssemblyCostSettings(
+  assembly: Pick<
+    Assembly,
+    'dayRatePerMan' | 'laborBurdenPct' | 'escalationPct' | 'surchargePct' | 'taxPct' | 'marginChain'
+  > & {
+    insuranceRatePerThousand?: number | null;
+    insuranceMarginPct?: number | null;
+  },
+  defaults: CostDefaults = EMPTY_COST_DEFAULTS
+): ResolvedCostSettings {
+  const sources = {} as Record<keyof CostDefaults, SettingSource>;
+
+  const pick = (key: keyof CostDefaults, own: number | null | undefined): number | null => {
+    if (own !== null && own !== undefined) {
+      sources[key] = 'assembly';
+      return own;
+    }
+    const fallback = defaults[key] as number | null;
+    sources[key] = fallback === null || fallback === undefined ? 'unset' : 'company';
+    return fallback ?? null;
+  };
+
+  // The margin chain is a list, so "overridden" means non-empty rather than
+  // non-null — an assembly with no chain of its own inherits the company's.
+  const marginChain = assembly.marginChain.length > 0 ? assembly.marginChain : defaults.marginChain;
+  sources.marginChain =
+    assembly.marginChain.length > 0 ? 'assembly' : defaults.marginChain.length > 0 ? 'company' : 'unset';
+
+  return {
+    dayRatePerMan: pick('dayRatePerMan', assembly.dayRatePerMan),
+    laborBurdenPct: pick('laborBurdenPct', assembly.laborBurdenPct),
+    escalationPct: pick('escalationPct', assembly.escalationPct),
+    surchargePct: pick('surchargePct', assembly.surchargePct),
+    taxPct: pick('taxPct', assembly.taxPct),
+    marginChain,
+    insuranceRatePerThousand: pick(
+      'insuranceRatePerThousand',
+      assembly.insuranceRatePerThousand ?? null
+    ),
+    insuranceMarginPct: pick('insuranceMarginPct', assembly.insuranceMarginPct ?? null),
+    sources,
+  };
+}
+
+/**
+ * What to STORE on an assembly given the values read from a workbook: only the
+ * fields that genuinely differ from the company defaults.
+ *
+ * This is what makes centralising the rates worth anything. Persisting every
+ * extracted value would freeze 232 copies of the same day rate, and raising it
+ * later would mean editing 232 assemblies.
+ */
+export function overridesAgainstDefaults(
+  extracted: Partial<CostDefaults>,
+  defaults: CostDefaults = EMPTY_COST_DEFAULTS
+): Partial<CostDefaults> {
+  const overrides: Partial<CostDefaults> = {};
+  const numericKeys: (keyof CostDefaults)[] = [
+    'dayRatePerMan',
+    'laborBurdenPct',
+    'escalationPct',
+    'surchargePct',
+    'taxPct',
+    'insuranceRatePerThousand',
+    'insuranceMarginPct',
+  ];
+
+  for (const key of numericKeys) {
+    const value = extracted[key] as number | null | undefined;
+    if (value === null || value === undefined) continue;
+    const fallback = defaults[key] as number | null;
+    // Compared with a tolerance: these arrive from spreadsheet floats, where
+    // 0.07 can read as 0.07000000000000001 and would otherwise look like an
+    // override on every single import.
+    if (fallback === null || fallback === undefined || Math.abs(value - fallback) > 1e-9) {
+      (overrides as Record<string, unknown>)[key] = value;
+    }
+  }
+
+  if (extracted.marginChain && extracted.marginChain.length > 0) {
+    const same =
+      defaults.marginChain.length === extracted.marginChain.length &&
+      extracted.marginChain.every((margin, index) => {
+        const other = defaults.marginChain[index];
+        return other && other.name === margin.name && Math.abs(other.rate - margin.rate) < 1e-9;
+      });
+    if (!same) overrides.marginChain = extracted.marginChain;
+  }
+
+  return overrides;
+}
+
 export type IntegrityIssueCode =
   | 'component_without_quantity_input'
   | 'component_without_price_source'

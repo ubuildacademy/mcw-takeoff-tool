@@ -16,6 +16,8 @@ import { supabase } from '../supabase';
 import { wrapDatabaseError } from '../errors';
 import {
   Assembly,
+  CostDefaults,
+  EMPTY_COST_DEFAULTS,
   AssemblyComponent,
   AssemblyComponentRow,
   AssemblyDetail,
@@ -26,6 +28,7 @@ import {
   buildAssemblyDetail,
   mapAssemblyRow,
   mapComponentRow,
+  mapMarginChain,
   mapQuantityInputRow,
 } from './assemblyLibrary';
 
@@ -71,6 +74,128 @@ export async function getOrgRole(userId: string, orgId: string): Promise<OrgRole
     .maybeSingle();
   if (error) throw wrapDatabaseError('Get org role', error, { userId, orgId });
   return (data?.org_role as OrgRole | undefined) ?? null;
+}
+
+// ── Company cost defaults ──────────────────────────────────────────────
+
+interface CostDefaultsRow {
+  org_id: string;
+  day_rate_per_man: number | string | null;
+  labor_burden_pct: number | string | null;
+  escalation_pct: number | string | null;
+  surcharge_pct: number | string | null;
+  tax_pct: number | string | null;
+  margin_chain: unknown;
+  insurance_rate_per_thousand: number | string | null;
+  insurance_margin_pct: number | string | null;
+  updated_at: string;
+}
+
+export interface CostDefaultsRecord extends CostDefaults {
+  orgId: string;
+  updatedAt: string | null;
+}
+
+function toNumber(value: number | string | null): number | null {
+  if (value === null || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function mapCostDefaultsRow(row: CostDefaultsRow): CostDefaultsRecord {
+  return {
+    orgId: row.org_id,
+    dayRatePerMan: toNumber(row.day_rate_per_man),
+    laborBurdenPct: toNumber(row.labor_burden_pct),
+    escalationPct: toNumber(row.escalation_pct),
+    surchargePct: toNumber(row.surcharge_pct),
+    taxPct: toNumber(row.tax_pct),
+    marginChain: mapMarginChain(row.margin_chain),
+    insuranceRatePerThousand: toNumber(row.insurance_rate_per_thousand),
+    insuranceMarginPct: toNumber(row.insurance_margin_pct),
+    updatedAt: row.updated_at ?? null,
+  };
+}
+
+/**
+ * The company's costing rates. A company with no row yet inherits nothing —
+ * every assembly then relies on its own values, which is exactly how imports
+ * behaved before this existed.
+ */
+export async function getCostDefaults(orgId: string): Promise<CostDefaultsRecord> {
+  const { data, error } = await supabase
+    .from('organization_cost_defaults')
+    .select('*')
+    .eq('org_id', orgId)
+    .maybeSingle();
+  if (error) throw wrapDatabaseError('Get cost defaults', error, { orgId });
+  if (!data) {
+    return { orgId, ...EMPTY_COST_DEFAULTS, updatedAt: null };
+  }
+  return mapCostDefaultsRow(data as CostDefaultsRow);
+}
+
+export interface UpdateCostDefaultsParams extends Partial<CostDefaults> {
+  updatedBy?: string | null;
+}
+
+export async function updateCostDefaults(
+  orgId: string,
+  params: UpdateCostDefaultsParams
+): Promise<CostDefaultsRecord> {
+  const patch: Record<string, unknown> = { org_id: orgId, updated_at: new Date().toISOString() };
+  if (params.updatedBy !== undefined) patch.updated_by = params.updatedBy;
+  // Only fields the caller actually sent are written, so a form that edits one
+  // rate cannot blank the others.
+  if (params.dayRatePerMan !== undefined) patch.day_rate_per_man = params.dayRatePerMan;
+  if (params.laborBurdenPct !== undefined) patch.labor_burden_pct = params.laborBurdenPct;
+  if (params.escalationPct !== undefined) patch.escalation_pct = params.escalationPct;
+  if (params.surchargePct !== undefined) patch.surcharge_pct = params.surchargePct;
+  if (params.taxPct !== undefined) patch.tax_pct = params.taxPct;
+  if (params.marginChain !== undefined) patch.margin_chain = params.marginChain;
+  if (params.insuranceRatePerThousand !== undefined) {
+    patch.insurance_rate_per_thousand = params.insuranceRatePerThousand;
+  }
+  if (params.insuranceMarginPct !== undefined) patch.insurance_margin_pct = params.insuranceMarginPct;
+
+  const { data, error } = await supabase
+    .from('organization_cost_defaults')
+    .upsert(patch, { onConflict: 'org_id' })
+    .select('*')
+    .single();
+  if (error) throw wrapDatabaseError('Update cost defaults', error, { orgId });
+  return mapCostDefaultsRow(data as CostDefaultsRow);
+}
+
+/** How many assemblies override a given field — what the UI warns about before a change. */
+export async function countAssembliesOverriding(orgId: string): Promise<Record<string, number>> {
+  const { data, error } = await supabase
+    .from('assemblies')
+    .select('day_rate_per_man, labor_burden_pct, escalation_pct, surcharge_pct, tax_pct, margin_chain, insurance_rate_per_thousand, insurance_margin_pct')
+    .eq('org_id', orgId);
+  if (error) throw wrapDatabaseError('Count overriding assemblies', error, { orgId });
+
+  const counts: Record<string, number> = {
+    dayRatePerMan: 0,
+    laborBurdenPct: 0,
+    escalationPct: 0,
+    surchargePct: 0,
+    taxPct: 0,
+    marginChain: 0,
+    insuranceRatePerThousand: 0,
+    insuranceMarginPct: 0,
+  };
+  for (const row of data || []) {
+    if (row.day_rate_per_man !== null) counts.dayRatePerMan += 1;
+    if (row.labor_burden_pct !== null) counts.laborBurdenPct += 1;
+    if (row.escalation_pct !== null) counts.escalationPct += 1;
+    if (row.surcharge_pct !== null) counts.surchargePct += 1;
+    if (row.tax_pct !== null) counts.taxPct += 1;
+    if (Array.isArray(row.margin_chain) && row.margin_chain.length > 0) counts.marginChain += 1;
+    if (row.insurance_rate_per_thousand !== null) counts.insuranceRatePerThousand += 1;
+    if (row.insurance_margin_pct !== null) counts.insuranceMarginPct += 1;
+  }
+  return counts;
 }
 
 // ── Products ───────────────────────────────────────────────────────────

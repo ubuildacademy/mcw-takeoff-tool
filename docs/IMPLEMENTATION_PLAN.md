@@ -1276,6 +1276,46 @@ settings. This is the deliverable that retires the workbook for bidding.
 **Success criteria:** side-by-side with the Excel budget sheets for the same assembly and
 quantity — same line items, same totals; branding applied; help docs updated.
 
+### Task I10 — Company cost defaults (queued 2026-07-30, do before I5 persistence)
+
+**Jeff, 2026-07-30:** the rates that repeat across every workbook should live in one place
+rather than being frozen into 232 copies. Agreed, and measured across all 232 workbooks
+to find which fields actually qualify:
+
+| Field | Value | Consistency | Verdict |
+|---|---|---|---|
+| Labor burden | 0.35 | 231/231 | company default |
+| Tax | 0.07 | 231/231 | company default |
+| Insurance margin | 0.15 | 231/232 | company default |
+| Day rate per man | 224 | 98% (200, 275) | default + override |
+| Insurance $/thousand | 79 | 99% (one at 35) | default + override |
+| Margin chain | Safety 2 / OH 22 / Profit 20 | 98% (4 variants) | default + override |
+| Escalation | 0.03 | 86% (4/5/6/10%, 0%) | default + override |
+| **Crew size** | 2 (79%), 1 (16%), 3 (4%) | varies by trade | **stays per assembly** |
+| **Production rates** | 36 distinct; up to 10 *within one workbook* | — | **stays per assembly** |
+
+Production rates are the pacing itself (350 SF/day for detail work vs 5,000 for pressure
+cleaning); hoisting them to Admin would flatten the thing that drives labor.
+
+**Do:**
+1. `organization_cost_defaults` — one row per org: day rate, labor burden, tax, escalation,
+   surcharge, insurance rate-per-thousand, insurance margin, margin chain. Seed MCW's row
+   with the modal values above.
+2. **NULL on an assembly means "inherit"**, not "missing". The columns are already
+   nullable, so this is a semantics change, not a migration: a pure
+   `resolveAssemblyCostSettings(assembly, defaults)` feeds the engine, and the engine
+   stops treating a null day rate as zero.
+3. Admin → **Cost Defaults** tab (company-scoped, so it belongs to the company-admin tier
+   from I9).
+4. The importer stores a value **only where it differs** from the default. This is the
+   part that makes "change it in one place" actually work — otherwise every imported
+   assembly freezes its own copy of 224 and nothing is centralised.
+
+**Success criteria:** changing the company day rate reprices every assembly that has not
+overridden it; an assembly that HAS overridden it is untouched; the golden gate still
+passes (defaults seeded from the workbooks must reproduce the same totals); tsc + tests;
+help docs updated.
+
 ### Task I9 — Company-admin tier (queued 2026-07-30)
 
 **Problem (Jeff, 2026-07-30):** a company admin cannot manage their own company's

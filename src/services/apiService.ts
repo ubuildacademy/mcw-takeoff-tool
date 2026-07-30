@@ -1341,6 +1341,35 @@ export interface ProductImportResult {
   summary: ProductListSummary;
 }
 
+export interface CostDefaults {
+  dayRatePerMan: number | null;
+  laborBurdenPct: number | null;
+  escalationPct: number | null;
+  surchargePct: number | null;
+  taxPct: number | null;
+  marginChain: { name: string; rate: number }[];
+  insuranceRatePerThousand: number | null;
+  insuranceMarginPct: number | null;
+  updatedAt?: string | null;
+}
+
+/** How many assemblies set their own value for each field, keyed by field name. */
+export type CostDefaultOverrides = Record<string, number>;
+
+export const costDefaultsService = {
+  async get(): Promise<{ defaults: CostDefaults; overrides: CostDefaultOverrides }> {
+    const response = await apiClient.get('/products/cost-defaults');
+    return { defaults: response.data.defaults, overrides: response.data.overrides };
+  },
+
+  async update(
+    patch: Partial<CostDefaults>
+  ): Promise<{ defaults: CostDefaults; overrides: CostDefaultOverrides }> {
+    const response = await apiClient.put('/products/cost-defaults', patch);
+    return { defaults: response.data.defaults, overrides: response.data.overrides };
+  },
+};
+
 export const productService = {
   async list(): Promise<{ products: Product[]; summary: ProductListSummary; organization: { id: string; name: string } }> {
     const response = await apiClient.get('/products');

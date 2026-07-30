@@ -26,7 +26,14 @@
  *     is not `cost / 0.78`, and the gap compounds across Safety, Overhead and
  *     Profit.
  */
-import { AssemblyComponent, AssemblyDetail, Margin } from './assemblyLibrary';
+import {
+  AssemblyComponent,
+  AssemblyDetail,
+  CostDefaults,
+  EMPTY_COST_DEFAULTS,
+  Margin,
+  resolveAssemblyCostSettings,
+} from './assemblyLibrary';
 
 /** Excel's ROUNDUP(value, 0) — away from zero, not toward positive infinity. */
 export function roundUp(value: number): number {
@@ -52,6 +59,13 @@ export interface CostingInputs {
    */
   equipmentCost?: number;
   miscCost?: number;
+  /**
+   * Company-wide rates. Any field the assembly leaves NULL is taken from here,
+   * so raising the company day rate reprices every assembly that has not
+   * deliberately overridden it. Omitted means "no defaults", which is how the
+   * golden gate runs — each workbook carries its own values.
+   */
+  costDefaults?: CostDefaults;
 }
 
 export interface ComponentCost {
@@ -331,20 +345,25 @@ export function computeAssemblyCost(
     components.reduce((sum, component) => sum + component.extendedCost, 0)
   );
 
-  const escalation = materialSubtotal * (assembly.escalationPct ?? 0);
-  const surcharge = materialSubtotal * (assembly.surchargePct ?? 0);
+  // Resolve the assembly's own values over the company defaults FIRST: a null
+  // here means "inherit", not zero, and treating it as zero would quietly
+  // price labor and tax at nothing.
+  const settings = resolveAssemblyCostSettings(assembly, inputs.costDefaults ?? EMPTY_COST_DEFAULTS);
+
+  const escalation = materialSubtotal * (settings.escalationPct ?? 0);
+  const surcharge = materialSubtotal * (settings.surchargePct ?? 0);
   // Tax applies to the escalated, surcharged subtotal, not to the raw one.
-  const tax = (materialSubtotal + escalation + surcharge) * (assembly.taxPct ?? 0);
+  const tax = (materialSubtotal + escalation + surcharge) * (settings.taxPct ?? 0);
   const materialTotal = roundUp(materialSubtotal + escalation + surcharge + tax);
 
   const laborManDays = computeLaborDays(labor.rates);
-  const dayRate = assembly.dayRatePerMan ?? 0;
+  const dayRate = settings.dayRatePerMan ?? 0;
   const crewSize = assembly.crewSize ?? 0;
   const jobDurationDays = computeJobDurationDays(laborManDays, crewSize);
   // dayRate x crew is the crew's cost for ONE day; multiply by calendar days,
   // never by man-days, or the crew size counts twice.
   const laborBase = dayRate * crewSize * jobDurationDays;
-  const laborBurden = laborBase * (assembly.laborBurdenPct ?? 0);
+  const laborBurden = laborBase * (settings.laborBurdenPct ?? 0);
   const laborTotal = roundUp(laborBase + laborBurden);
   if (laborManDays > 0 && (dayRate === 0 || crewSize === 0)) {
     issues.push('labor days computed but the day rate or crew size is missing');
@@ -355,7 +374,7 @@ export function computeAssemblyCost(
   const costBeforeMargins = materialTotal + laborTotal + equipmentCost + miscCost;
 
   // Rule 4: divide-through, chained, in order.
-  const marginSteps = applyMarginChain(costBeforeMargins, assembly.marginChain);
+  const marginSteps = applyMarginChain(costBeforeMargins, settings.marginChain);
   for (const step of marginSteps) {
     if (Number.isNaN(step.amount)) {
       issues.push(`margin "${step.name}" has a rate of ${step.rate}, which cannot be applied`);
@@ -366,7 +385,7 @@ export function computeAssemblyCost(
     0
   );
 
-  if (assembly.marginChain.length === 0) {
+  if (settings.marginChain.length === 0) {
     issues.push('assembly has no margin chain');
   }
 
@@ -374,9 +393,13 @@ export function computeAssemblyCost(
   // the job total alongside the margins.
   let insuranceBase = 0;
   let insuranceTotal = 0;
-  if (insurance.ratePerThousand) {
-    insuranceBase = roundUp((insurance.ratePerThousand * costBeforeMargins) / 1000);
-    const marginPct = insurance.marginPct ?? 0;
+  // An explicit insurance argument wins; otherwise take the resolved values,
+  // so an assembly inherits its company's insurance like everything else.
+  const insuranceRate = insurance.ratePerThousand ?? settings.insuranceRatePerThousand;
+  const insuranceMargin = insurance.marginPct ?? settings.insuranceMarginPct;
+  if (insuranceRate) {
+    insuranceBase = roundUp((insuranceRate * costBeforeMargins) / 1000);
+    const marginPct = insuranceMargin ?? 0;
     if (marginPct >= 1) {
       issues.push(`insurance margin of ${marginPct} cannot be applied`);
       insuranceTotal = insuranceBase;
