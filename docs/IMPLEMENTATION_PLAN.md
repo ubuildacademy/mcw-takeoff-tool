@@ -905,8 +905,10 @@ UI work until the engine matches real workbooks.
 4. Component prices are **either** a product-code reference **or** a fixed literal —
    19 workbooks are priced entirely by hand with no Pricing DB lookup (I0 finding 4).
 
-**Order:** ~~I0~~ → ~~I1~~ → ~~I3~~ → ~~I2~~ → ~~I4 (gate PASSED)~~ → I5 → I6 → I7 → I8.
-I1's migration is applied to Supabase. C6
+**Order:** ~~I0~~ → ~~I1~~ → ~~I3~~ → ~~I2~~ → ~~I4 (gate PASSED)~~ → I5 → I6 → I7 → I8,
+with **I9 (company-admin tier)** before any assembly-management UI reaches a second
+company. I1's migration is applied to Supabase and MCW's 1,151-product price list is
+imported. C6
 (kill the free-text pattern box) folds into I8 and is not run separately.
 
 **Migration verification (established in I1, reuse it):** a local Postgres 15 runs on
@@ -1274,6 +1276,41 @@ settings. This is the deliverable that retires the workbook for bidding.
 **Success criteria:** side-by-side with the Excel budget sheets for the same assembly and
 quantity — same line items, same totals; branding applied; help docs updated.
 
+### Task I9 — Company-admin tier (queued 2026-07-30)
+
+**Problem (Jeff, 2026-07-30):** a company admin cannot manage their own company's
+library. I1 shipped `organization_members.org_role` and RLS that honours it, but the
+server routes still gate on the *platform* flag (`user_metadata.role = 'admin'` via
+`requireAdmin`), so today only the platform admin can import a price list. This is the
+"two notions of admin coexist" follow-up I1 recorded, now with a user-visible consequence.
+
+**Already correct, do not redo:** org scoping. Every service query resolves the caller's
+org and filters `org_id`, and I1's cross-org RLS test proved a company admin cannot read
+or write another company's rows. This task is about *authorization*, not isolation.
+
+**Do:**
+1. `requireCompanyAdmin` middleware in `server/src/middleware/auth.ts` — passes for a
+   platform admin OR the `company_admin` of the org being acted on. Replace
+   `requireAdmin` on company-scoped routes (`POST /api/products/import` today; the
+   assembly-library routes as I5–I8 land). **This is the task that is allowed to touch
+   auth middleware** (execution rule 4), so consolidate `isAdmin()` here too.
+2. **Tier-aware Admin panel.** Today's panel mixes platform concerns (AI Settings, AI
+   Prompt Editor, Knowledge Base, AI Usage, User Management) with company concerns
+   (Product Pricing, and Assemblies later). A company admin sees ONLY the company tabs —
+   the platform tabs are Jeff's alone and must not be sellable. Drive tab visibility off
+   the tier rather than hiding individual controls.
+3. User management: a company admin may invite and manage users **within their own org
+   only**, and may not grant the platform tier.
+
+**Success criteria:** a company_admin account can import a price list and sees only the
+company tabs; a regular member sees no admin panel but still reads prices; a company
+admin of org A provably cannot read or write org B (extend I1's non-superuser RLS proof
+with a route-level test); the platform admin keeps every tab it has today — nobody loses
+access on deploy; tsc + tests; help docs updated.
+
+**Blocks multi-tenant sale.** Also wanted by I6/I8, so do it before shipping any
+assembly-management UI to a second company.
+
 ### Task I8 — Assembly as condition template (absorbs C6)
 
 **Do:** assemblies become openable as condition templates — pick "Aquafin 2K" from
@@ -1315,6 +1352,9 @@ docs updated.
 - 2026-07-13: token-usage instrumentation merged to main; provider decision deferred to data.
 - 2026-07-13: schedule branch held from main pending B1/B2 + Jeff's ship gate.
 - 2026-07-13: assemblies Stage 1 approach confirmed in principle; blocked on design review.
+- 2026-07-30: company admins must manage their own company's library and see a
+  company-scoped Admin panel; platform tabs (AI, KB, usage) stay platform-only. Queued as
+  I9 — the one task permitted to edit auth middleware.
 - 2026-07-27: org model is additive — `user_metadata.role='admin'` stays the platform-admin
   flag `isAdmin()` reads; `organization_members.org_role` carries company_admin/user.
   Consolidating the two "admin" notions is a later task.
