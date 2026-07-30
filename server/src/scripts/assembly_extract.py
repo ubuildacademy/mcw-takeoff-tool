@@ -89,6 +89,10 @@ DAY_RATE_RE = re.compile(r"day\s*rate\s*per\s*man", re.I)
 # silent underprice of the entire job rather than a visible gap.
 DAY_RATE_FALLBACK_RE = re.compile(r"standard\s*labor\s*rate", re.I)
 CREW_SIZE_RE = re.compile(r"how\s*many\s*men", re.I)
+# Above this, the "crew size" cell is holding something that is not a crew.
+MAX_PLAUSIBLE_CREW = 20
+# The library's modal crew: 2 in 79% of workbooks, 1 in 16%, 3 in 4%.
+ASSUMED_CREW_SIZE = 2
 LABOR_BURDEN_RE = re.compile(r"^\s*labor\s*burden\s*$", re.I)
 PROD_RATE_HDR_RE = re.compile(r"production\s*rate\s*breakdown", re.I)
 PROD_RATE_END_RE = re.compile(r"^(total|day\(s\)\s*required)$", re.I)
@@ -807,7 +811,20 @@ def extract_labor(sheet: Sheet, col_to_input: dict, flags: list):
         if key == "laborBurdenPct":
             labor[key] = as_rate(value, flags, key)
         elif key == "crewSize":
-            labor[key] = int(value) if float(value).is_integer() else value
+            crew = int(value) if float(value).is_integer() else value
+            # A crew of more than ~20 is a data-entry error, not a crew.
+            # `Preprufe 300R+ for piles.xlsx` has 224 in this cell — the day
+            # rate typed one row too low — and bills a 224-man crew, which is
+            # about 29% of that job's total. Fall back to the library's modal
+            # crew of 2 and say so, rather than importing an absurd number that
+            # would then price quietly.
+            if isinstance(crew, (int, float)) and crew > MAX_PLAUSIBLE_CREW:
+                flags.append(
+                    f"crew size of {crew:g} is implausible (the day rate is likely in this "
+                    f"cell); assuming {ASSUMED_CREW_SIZE} — confirm before quoting"
+                )
+                crew = ASSUMED_CREW_SIZE
+            labor[key] = crew
         else:
             labor[key] = value
 

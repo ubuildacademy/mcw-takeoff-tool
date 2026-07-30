@@ -472,6 +472,35 @@ def check_multi_block(c: Checker, tmp_dir: str) -> None:
     c.equal(gated["quantityInputSeq"], 3, "multi-block: gated component binds to BLM")
 
 
+def check_implausible_crew(c: Checker, tmp_dir: str) -> None:
+    """`Preprufe 300R+ for piles.xlsx` holds 224 in the crew cell — the day rate
+    typed one row too low — and its own labor total is ~29% of the job as a
+    result. Importing that verbatim would price a 224-man crew quietly, so an
+    absurd crew falls back to the library's modal 2 and is flagged."""
+    cells = fixture_majority()
+    crew_row = next(
+        addr for addr, value in cells.items() if value == 'How many Men on the job'
+    )
+    row_num = int(''.join(ch for ch in crew_row if ch.isdigit()))
+    cells[f'D{row_num}'] = 224
+
+    r = extract_assembly(build(tmp_dir, 'bad_crew.xlsx', cells))
+    c.equal(r['crewSize'], 2, 'implausible crew falls back to the modal crew')
+    c.check(
+        any('implausible' in f for f in r['flags']),
+        f"implausible crew should be flagged, got {r['flags']}",
+    )
+
+    # A crew of 3 is real and must survive untouched.
+    cells[f'D{row_num}'] = 3
+    r = extract_assembly(build(tmp_dir, 'ok_crew.xlsx', cells))
+    c.equal(r['crewSize'], 3, 'a plausible crew is left alone')
+    c.check(
+        not any('implausible' in f for f in r['flags']),
+        'a plausible crew must not be flagged',
+    )
+
+
 def check_rejects_non_components(c: Checker, tmp_dir: str) -> None:
     """A production-rate row divides a quantity too — `ROUNDUP(IF(D30,B13/D30,),)`
     — but is not a component. It has no top-level division, so it must not
@@ -513,6 +542,7 @@ def run_selftest() -> bool:
         check_majority(c, tmp_dir)
         check_shifted(c, tmp_dir)
         check_multi_block(c, tmp_dir)
+        check_implausible_crew(c, tmp_dir)
         check_rejects_non_components(c, tmp_dir)
     except Exception as exc:  # noqa: BLE001 - a crash is a failure, report it as one
         import traceback

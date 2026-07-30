@@ -6,6 +6,12 @@ instructions sized for a cheaper model to execute **one task at a time**. Read t
 
 ---
 
+**Parking lot:** `docs/OPEN_ITEMS.md` holds small unknowns, deferred decisions and
+defects found in passing (Jeff 2026-07-30: "make an unknowns or issues list to revisit
+when we're all wrapped up instead of letting it slow us down"). Park it there, assume
+something sensible, say what was assumed, and move on. Anything with a real deadline or
+blast radius becomes a task here instead.
+
 ## Execution rules (read first, every session)
 
 1. **One task per session.** Finish it, verify it, commit it. Do not start the next task.
