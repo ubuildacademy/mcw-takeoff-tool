@@ -1018,6 +1018,9 @@ class SupabaseStorage {
       ...(data.sub_quantity_type != null && { subQuantityType: data.sub_quantity_type as StoredCondition['subQuantityType'] }),
       ...(data.sub_quantity_unit != null && { subQuantityUnit: data.sub_quantity_unit }),
       ...(data.sub_quantity_per_count != null && { subQuantityPerCount: data.sub_quantity_per_count }),
+      // Written above and mapped by all three read paths; omitting it here made
+      // a freshly saved condition read as 1x until the next load.
+      ...(data.multiplier != null && { multiplier: data.multiplier }),
       ...(data.assembly_id != null && { assemblyId: data.assembly_id }),
       ...(data.assembly_quantity_input_id != null && { assemblyQuantityInputId: data.assembly_quantity_input_id }),
       createdAt: data.created_at,
