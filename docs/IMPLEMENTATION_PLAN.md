@@ -937,12 +937,9 @@ that order is required rather than incidental. I1's migration is applied to Supa
 imported. C6
 (kill the free-text pattern box) folds into I8 and is not run separately.
 
-**Three more migrations landed after that batch and are NOT yet applied to Supabase —
-needs Jeff:** `add_brand_to_assemblies.sql` (I8b), `add_org_to_user_invitations.sql`
-(I9), and `add_job_number_to_projects.sql` (I11). All verified on local Postgres per the
-established convention. The I9 one matters sooner than it looks: until it runs, every
-newly invited user still lands with no company membership at all — the exact bug I9's
-code fix closes, but the column it writes to doesn't exist in production yet.
+**Three more migrations landed after that batch: `add_brand_to_assemblies.sql` (I8b),
+`add_org_to_user_invitations.sql` (I9), and `add_job_number_to_projects.sql` (I11). All
+applied to Supabase (Jeff, 2026-07-31, no errors).**
 
 **Migration verification (established in I1, reuse it):** a local Postgres 15 runs on
 this machine, so schema migrations do not have to be reviewed by reading. Apply them to
