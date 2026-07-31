@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { supabase, TABLES } from '../supabase';
 import { devLog, devWarn } from '../lib/devLog';
+import { getOrganizationForUser, getOrgRole } from '../services/assemblyLibraryService';
 
 // Extend Express Request type to include user
 declare global {
@@ -173,6 +174,54 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction) {
     } catch (error) {
       console.error('Admin middleware error:', error);
       return res.status(500).json({ error: 'Authentication error' });
+    }
+  })();
+}
+
+/**
+ * Middleware that requires company-admin authorization (task I9).
+ *
+ * Passes for a platform admin (`user_metadata.role = 'admin'`, unchanged) OR the
+ * `company_admin` of the org the caller belongs to. Every route this guards derives
+ * its org from the caller (`getOrganizationForUser`), never from a request param, so
+ * "the org being acted on" is always the caller's own org — there is nothing to
+ * cross-check.
+ *
+ * This is about *authorization* only. Org *isolation* (a company admin cannot touch
+ * another org's rows) is already enforced by every service function filtering on
+ * org_id, and by RLS as defence in depth — see I1.
+ */
+export function requireCompanyAdmin(req: Request, res: Response, next: NextFunction) {
+  (async () => {
+    try {
+      if (!req.user) {
+        const user = await getAuthenticatedUser(req);
+        if (!user) {
+          return res.status(401).json({ error: 'Unauthorized - authentication required' });
+        }
+        const userIsAdmin = await isAdmin(user.id);
+        req.user = { id: user.id, email: user.email, role: userIsAdmin ? 'admin' : 'user' };
+      }
+
+      if (req.user.role === 'admin') return next();
+
+      const org = await getOrganizationForUser(req.user.id);
+      if (!org) {
+        return res.status(409).json({
+          error: 'No organization',
+          message: 'This account is not a member of any company yet.',
+        });
+      }
+
+      const orgRole = await getOrgRole(req.user.id, org.id);
+      if (orgRole !== 'company_admin') {
+        return res.status(403).json({ error: 'Forbidden - company admin access required' });
+      }
+
+      next();
+    } catch (error) {
+      console.error('Company admin middleware error:', error);
+      return res.status(500).json({ error: 'Authorization error' });
     }
   })();
 }

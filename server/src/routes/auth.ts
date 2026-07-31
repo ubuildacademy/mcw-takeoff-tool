@@ -151,7 +151,7 @@ router.post('/accept-invitation', requireAuth, async (req: Request, res: Respons
 
     const { data: invitation, error: invError } = await supabase
       .from('user_invitations')
-      .select('id, email, role')
+      .select('id, email, role, org_id, org_role')
       .eq('invite_token', token)
       .eq('status', 'pending')
       .single();
@@ -180,6 +180,23 @@ router.post('/accept-invitation', requireAuth, async (req: Request, res: Respons
     if (metadataError) {
       console.error('[Auth] Error creating user metadata:', metadataError);
       return res.status(500).json({ error: 'Failed to complete account setup' });
+    }
+
+    // The actual I9 fix: an invited user has always gotten user_metadata and
+    // NOTHING else — no organization_members row, so the assembly library and
+    // product list both read them as belonging to no company at all. org_id is
+    // null for invites issued before this column existed; nothing to join then.
+    if (invitation.org_id) {
+      const { error: membershipError } = await supabase
+        .from('organization_members')
+        .upsert(
+          { org_id: invitation.org_id, user_id: userId, org_role: invitation.org_role ?? 'user' },
+          { onConflict: 'org_id,user_id', ignoreDuplicates: true }
+        );
+      if (membershipError) {
+        console.error('[Auth] Error creating organization membership:', membershipError);
+        return res.status(500).json({ error: 'Failed to complete account setup' });
+      }
     }
 
     await supabase

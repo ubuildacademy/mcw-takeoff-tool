@@ -14,7 +14,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs-extra';
 import { v4 as uuidv4 } from 'uuid';
-import { requireAuth, requireAdmin } from '../middleware';
+import { requireAuth, requireCompanyAdmin } from '../middleware';
 import {
   countAssembliesOverriding,
   getCostDefaults,
@@ -149,7 +149,7 @@ router.get('/cost-defaults', requireAuth, async (req, res) => {
   }
 });
 
-router.put('/cost-defaults', requireAuth, requireAdmin, async (req, res) => {
+router.put('/cost-defaults', requireAuth, requireCompanyAdmin, async (req, res) => {
   try {
     const org = await requireOrg(req, res);
     if (!org) return;
@@ -214,7 +214,7 @@ router.put('/cost-defaults', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
-router.post('/import', requireAuth, requireAdmin, handleUpload, async (req, res) => {
+router.post('/import', requireAuth, requireCompanyAdmin, handleUpload, async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });

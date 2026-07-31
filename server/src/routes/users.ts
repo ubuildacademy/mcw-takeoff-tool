@@ -3,17 +3,49 @@ import { Router } from 'express';
 import { supabase, TABLES } from '../supabase';
 import { storage } from '../storage';
 import { emailService } from '../services/emailService';
-import { requireAuth, requireAdmin, validateUUIDParam } from '../middleware';
+import { requireAuth, requireAdmin, requireCompanyAdmin, validateUUIDParam } from '../middleware';
+import { getOrganizationForUser, getOrgRole, listOrgMemberIds } from '../services/assemblyLibraryService';
 
 const router = Router();
 
-// Get all users (admin only)
-router.get('/', requireAuth, requireAdmin, async (req, res) => {
+/**
+ * Who am I, tier-wise (task I9). The frontend's one source for whether to show the
+ * Admin panel at all and which tabs to show inside it.
+ */
+router.get('/me', requireAuth, async (req, res) => {
   try {
-    const { data: metadata, error: metaError } = await supabase
-      .from('user_metadata')
-      .select('*')
-      .order('created_at', { ascending: false });
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
+    const platformAdmin = caller.role === 'admin';
+    const org = await getOrganizationForUser(caller.id);
+    const orgRole = org ? await getOrgRole(caller.id, org.id) : null;
+    res.json({
+      platformAdmin,
+      organization: org ? { id: org.id, name: org.name } : null,
+      orgRole,
+    });
+  } catch (error) {
+    console.error('Error in get current user tier:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get users — platform admin sees everyone, a company admin sees only their own org (I9)
+router.get('/', requireAuth, requireCompanyAdmin, async (req, res) => {
+  try {
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
+    const platformAdmin = caller.role === 'admin';
+    let scopeIds: string[] | null = null;
+    if (!platformAdmin) {
+      const org = await getOrganizationForUser(caller.id);
+      // requireCompanyAdmin already 409'd if org is missing, but stay defensive.
+      scopeIds = org ? await listOrgMemberIds(org.id) : [];
+    }
+
+    let query = supabase.from('user_metadata').select('*').order('created_at', { ascending: false });
+    if (scopeIds) query = query.in('id', scopeIds.length > 0 ? scopeIds : ['00000000-0000-0000-0000-000000000000']);
+    const { data: metadata, error: metaError } = await query;
 
     if (metaError) {
       console.error('Error fetching user metadata:', metaError);
@@ -38,19 +70,32 @@ router.get('/', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
-// Create user invitation (admin only)
-router.post('/invitations', requireAuth, requireAdmin, async (req, res) => {
+// Create user invitation — a company admin may only invite into their own org, and
+// may never grant the platform tier (task I9).
+router.post('/invitations', requireAuth, requireCompanyAdmin, async (req, res) => {
   try {
-    const { email: rawEmail, role } = req.body;
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
+    const { email: rawEmail, role: rawRole, orgRole: rawOrgRole } = req.body;
     const email = typeof rawEmail === 'string' ? rawEmail.trim().toLowerCase() : rawEmail;
+    const platformAdmin = caller.role === 'admin';
 
-    if (!email || !role) {
-      return res.status(400).json({ error: 'Email and role are required' });
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
     }
 
+    const role = rawRole ?? 'user';
     if (!['admin', 'user'].includes(role)) {
       return res.status(400).json({ error: 'Invalid role' });
     }
+    if (role === 'admin' && !platformAdmin) {
+      return res.status(403).json({ error: 'Only a platform admin may grant the platform tier' });
+    }
+
+    const orgRole = rawOrgRole === 'company_admin' ? 'company_admin' : 'user';
+    const org = await getOrganizationForUser(caller.id);
+    // A platform admin with no org (rare — org creation is a separate, manual step
+    // today) still sends a platform-tier invite with no company attached.
 
     // Check if user already exists — page through all users to avoid the
     // default 50-user page limit silently missing accounts.
@@ -113,8 +158,10 @@ router.post('/invitations', requireAuth, requireAdmin, async (req, res) => {
         email,
         role,
         invite_token: inviteToken,
-        invited_by: req.user!.id,
-        expires_at: expiresAt.toISOString()
+        invited_by: caller.id,
+        expires_at: expiresAt.toISOString(),
+        org_id: org?.id ?? null,
+        org_role: orgRole,
       })
       .select()
       .single();
@@ -131,7 +178,7 @@ router.post('/invitations', requireAuth, requireAdmin, async (req, res) => {
       email,
       role,
       inviteUrl,
-      invitedBy: req.user!.email || 'Admin',
+      invitedBy: caller.email || 'Admin',
       expiresAt: expiresAt.toISOString()
     });
 
@@ -154,9 +201,37 @@ router.post('/invitations', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
-// Resend invitation email (admin only)
-router.post('/invitations/:id/resend', requireAuth, requireAdmin, validateUUIDParam('id'), async (req, res) => {
+type AuthedCaller = { id: string; email?: string; role: 'admin' | 'user' };
+
+/**
+ * Whether the caller may act on a row that belongs to `rowOrgId` (I9). A platform
+ * admin always may; a company admin only within their own org, mirroring
+ * `hasProjectAccess`'s ownership check. `rowOrgId` of `null` (a legacy, pre-I9 row)
+ * is only reachable by a platform admin, same as today.
+ */
+async function callerMayActOnOrg(caller: AuthedCaller, rowOrgId: string | null): Promise<boolean> {
+  if (caller.role === 'admin') return true;
+  if (!rowOrgId) return false;
+  const org = await getOrganizationForUser(caller.id);
+  return !!org && org.id === rowOrgId;
+}
+
+/** Same idea, keyed on a target user id rather than a stored org_id — for routes
+ *  (reset-password, delete-user) that act on a `user_metadata` row, which carries no
+ *  org_id of its own. */
+async function callerMayActOnUser(caller: AuthedCaller, targetUserId: string): Promise<boolean> {
+  if (caller.role === 'admin') return true;
+  const org = await getOrganizationForUser(caller.id);
+  if (!org) return false;
+  const role = await getOrgRole(targetUserId, org.id);
+  return role !== null;
+}
+
+// Resend invitation email — a company admin only for their own org's invitations (I9)
+router.post('/invitations/:id/resend', requireAuth, requireCompanyAdmin, validateUUIDParam('id'), async (req, res) => {
   try {
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
     const { id } = req.params;
 
     const { data: invitation, error: fetchError } = await supabase
@@ -167,6 +242,9 @@ router.post('/invitations/:id/resend', requireAuth, requireAdmin, validateUUIDPa
       .single();
 
     if (fetchError || !invitation) {
+      return res.status(404).json({ error: 'Invitation not found or no longer pending' });
+    }
+    if (!(await callerMayActOnOrg(caller, invitation.org_id ?? null))) {
       return res.status(404).json({ error: 'Invitation not found or no longer pending' });
     }
 
@@ -184,7 +262,7 @@ router.post('/invitations/:id/resend', requireAuth, requireAdmin, validateUUIDPa
       email: invitation.email,
       role: invitation.role,
       inviteUrl,
-      invitedBy: req.user!.email || 'Admin',
+      invitedBy: caller.email || 'Admin',
       expiresAt: newExpiry.toISOString(),
     });
 
@@ -195,8 +273,9 @@ router.post('/invitations/:id/resend', requireAuth, requireAdmin, validateUUIDPa
   }
 });
 
-// Get all invitations (admin only)
-router.get('/invitations', requireAuth, requireAdmin, async (req, res) => {
+// Get invitations — platform admin sees everyone, a company admin sees only their
+// own org's invitations (I9)
+router.get('/invitations', requireAuth, requireCompanyAdmin, async (req, res) => {
   try {
     // Auto-expire stale pending rows before returning the list so the UI
     // never shows an "active" invitation that has already passed its deadline.
@@ -207,10 +286,14 @@ router.get('/invitations', requireAuth, requireAdmin, async (req, res) => {
       .eq('status', 'pending')
       .lt('expires_at', fetchNow);
 
-    const { data, error } = await supabase
-      .from('user_invitations')
-      .select('*')
-      .order('created_at', { ascending: false });
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
+    let query = supabase.from('user_invitations').select('*').order('created_at', { ascending: false });
+    if (caller.role !== 'admin') {
+      const org = await getOrganizationForUser(caller.id);
+      query = query.eq('org_id', org?.id ?? '00000000-0000-0000-0000-000000000000');
+    }
+    const { data, error } = await query;
 
     if (error) {
       console.error('Error fetching invitations:', error);
@@ -224,10 +307,23 @@ router.get('/invitations', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
-// Delete invitation (admin only)
-router.delete('/invitations/:id', requireAuth, requireAdmin, validateUUIDParam('id'), async (req, res) => {
+// Delete invitation — a company admin only for their own org's invitations (I9)
+router.delete('/invitations/:id', requireAuth, requireCompanyAdmin, validateUUIDParam('id'), async (req, res) => {
   try {
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
     const { id } = req.params;
+
+    if (caller.role !== 'admin') {
+      const { data: invitation } = await supabase
+        .from('user_invitations')
+        .select('org_id')
+        .eq('id', id)
+        .maybeSingle();
+      if (!invitation || !(await callerMayActOnOrg(caller, invitation.org_id ?? null))) {
+        return res.status(404).json({ error: 'Invitation not found' });
+      }
+    }
 
     const { error } = await supabase
       .from('user_invitations')
@@ -246,10 +342,17 @@ router.delete('/invitations/:id', requireAuth, requireAdmin, validateUUIDParam('
   }
 });
 
-// Send password reset email for a user (admin only)
-router.post('/:id/reset-password', requireAuth, requireAdmin, validateUUIDParam('id'), async (req, res) => {
+// Send password reset email for a user — a company admin only for their own org's
+// members (I9)
+router.post('/:id/reset-password', requireAuth, requireCompanyAdmin, validateUUIDParam('id'), async (req, res) => {
   try {
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
     const { id } = req.params;
+
+    if (caller.role !== 'admin' && !(await callerMayActOnUser(caller, id))) {
+      return res.status(404).json({ error: 'User not found' });
+    }
 
     const { data: userData, error: userError } = await supabase.auth.admin.getUserById(id);
     if (userError || !userData.user?.email) {
@@ -298,7 +401,9 @@ router.post('/:id/reset-password', requireAuth, requireAdmin, validateUUIDParam(
   }
 });
 
-// Update user role (admin only)
+// Update PLATFORM role (admin only, deliberately not requireCompanyAdmin — this is the
+// platform tier itself, and I9's "Do" #3 is explicit that a company admin may not
+// grant it). A company's own org_role has no editing route yet.
 router.patch('/:id/role', requireAuth, requireAdmin, validateUUIDParam('id'), async (req, res) => {
   try {
     const { id } = req.params;
@@ -367,10 +472,15 @@ router.delete('/me', requireAuth, async (req, res) => {
   }
 });
 
-// Delete user (admin only)
-router.delete('/:id', requireAuth, requireAdmin, validateUUIDParam('id'), async (req, res) => {
+// Delete user — a company admin only for their own org's members (I9)
+router.delete('/:id', requireAuth, requireCompanyAdmin, validateUUIDParam('id'), async (req, res) => {
   try {
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
     const { id } = req.params;
+    if (caller.role !== 'admin' && !(await callerMayActOnUser(caller, id))) {
+      return res.status(404).json({ error: 'User not found' });
+    }
     const result = await deleteUserAndData(id);
     if (result.error) {
       return res.status(500).json({ error: result.error });

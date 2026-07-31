@@ -554,6 +554,17 @@ Re-importing the same file changes nothing, so it is safe to re-run if you are u
 
 ---
 
+## 9c. Who can see the Admin panel
+
+Two tiers can open **Admin**, and see different things inside it:
+
+- **Company admin** — manages their own company: User Management (invite, reset password, or remove people on their team — never anyone outside it), Product Pricing, Cost Defaults, Assemblies, and Help & FAQ. Cannot grant anyone the platform tier, and never sees another company's data or settings.
+- **Platform admin** — everything a company admin sees, plus the platform-only tabs (Knowledge Base, AI Prompt Editor, AI Settings, AI Usage) that configure Meridian itself, not one company's data.
+
+Everyone else sees no Admin button at all, but still reads prices and assembly costs normally — reading dollars and editing the library are gated separately.
+
+---
+
 ## 10. Related documentation
 
 - **[Quick start & shortcuts](/help/shortcuts)** — Shortcuts, Space/Escape, Profile, Tools dialog.

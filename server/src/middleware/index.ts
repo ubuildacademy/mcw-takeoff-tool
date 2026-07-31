@@ -5,6 +5,7 @@ export {
   hasProjectAccess,
   requireAuth,
   requireAdmin,
+  requireCompanyAdmin,
   requireProjectAccess,
   optionalAuth
 } from './auth';

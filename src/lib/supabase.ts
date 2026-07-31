@@ -224,10 +224,10 @@ export const authHelpers = {
   },
 
   // Create user invitation (now uses backend API to send email)
-  async createInvitation(email: string, role: 'admin' | 'user') {
+  async createInvitation(email: string, role: 'admin' | 'user', orgRole?: 'company_admin' | 'user') {
     // Use backend API which handles email sending
     const { userService } = await import('../services/apiService')
-    return await userService.createInvitation(email, role)
+    return await userService.createInvitation(email, role, orgRole)
   },
 
   // Get invitation by token

@@ -636,9 +636,21 @@ export const calibrationService = {
 };
 
 // User management service (for admin functions)
+export interface MyTier {
+  platformAdmin: boolean;
+  organization: { id: string; name: string } | null;
+  orgRole: 'company_admin' | 'user' | null;
+}
+
 export const userService = {
-  async createInvitation(email: string, role: 'admin' | 'user') {
-    const response = await apiClient.post('/users/invitations', { email, role });
+  async createInvitation(email: string, role: 'admin' | 'user', orgRole?: 'company_admin' | 'user') {
+    const response = await apiClient.post('/users/invitations', { email, role, orgRole });
+    return response.data;
+  },
+
+  /** Platform vs. company tier for the current user — gates the Admin panel and its tabs. */
+  async getMyTier(): Promise<MyTier> {
+    const response = await apiClient.get('/users/me');
     return response.data;
   },
 

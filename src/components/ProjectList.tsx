@@ -18,7 +18,7 @@ import {
   Search
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { projectService } from '../services/apiService';
+import { projectService, userService } from '../services/apiService';
 import { ProjectCreationDialog } from './ProjectCreationDialog';
 import { ProjectSettingsDialog } from './ProjectSettingsDialog';
 import { BackupDialog } from './BackupDialog';
@@ -241,6 +241,7 @@ export function ProjectList() {
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [showUserProfile, setShowUserProfile] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isCompanyAdmin, setIsCompanyAdmin] = useState(false);
   const [users, setUsers] = useState<UserMetadata[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [collapsedUserIds, setCollapsedUserIds] = useState<Set<string>>(new Set());
@@ -277,12 +278,14 @@ export function ProjectList() {
         }
         if (mounted) setCurrentUserId(user.id);
 
-        const [adminStatus] = await Promise.all([
+        const [adminStatus, tier] = await Promise.all([
           authHelpers.isAdmin(user.id),
+          userService.getMyTier().catch(() => null),
           loadInitialData()
         ]);
         if (mounted) {
           setIsAdmin(adminStatus);
+          setIsCompanyAdmin(tier?.orgRole === 'company_admin');
           if (adminStatus) {
             const userList = await authHelpers.getAllUsers();
             if (mounted) setUsers(userList ?? []);
@@ -402,7 +405,7 @@ export function ProjectList() {
                 <User className="w-5 h-5 mr-2" />
                 Profile
               </Button>
-              {isAdmin && (
+              {(isAdmin || isCompanyAdmin) && (
                 <Button variant="outline" size="lg" onClick={() => setShowAdminPanel(true)}>
                   <Settings className="w-5 h-5 mr-2" />
                   Admin
@@ -591,12 +594,14 @@ export function ProjectList() {
         />
       )}
 
-      {isAdmin && showAdminPanel && (
+      {(isAdmin || isCompanyAdmin) && showAdminPanel && (
         <Suspense fallback={<AdminPanelFallback />}>
           <AdminPanel
             isOpen={showAdminPanel}
             onClose={() => setShowAdminPanel(false)}
             projectId="global" // Global admin panel, not project-specific
+            isPlatformAdmin={isAdmin}
+            isCompanyAdmin={isCompanyAdmin}
           />
         </Suspense>
       )}

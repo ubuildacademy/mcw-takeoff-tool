@@ -68,9 +68,17 @@ interface AdminPanelProps {
   isOpen: boolean;
   onClose: () => void;
   projectId: string;
+  /** Platform admin (Jeff's tier) — sees every tab and every control, unchanged from before I9. */
+  isPlatformAdmin: boolean;
+  /** Company admin (I9) — sees only the company-scoped tabs, and never the platform-role controls. */
+  isCompanyAdmin: boolean;
 }
 
-export function AdminPanel({ isOpen, onClose, projectId: _projectId }: AdminPanelProps) {
+// Tabs that manage Meridian itself, not a single company's data. Never shown to a
+// company admin — those settings are Jeff's alone and must not be sellable (I9).
+const PLATFORM_ONLY_TAB_IDS = new Set(['knowledge-base', 'ai-prompt', 'ai-settings', 'usage']);
+
+export function AdminPanel({ isOpen, onClose, projectId: _projectId, isPlatformAdmin, isCompanyAdmin: _isCompanyAdmin }: AdminPanelProps) {
   const [activeTab, setActiveTab] = useState<
     | 'ai-prompt'
     | 'ai-settings'
@@ -720,7 +728,7 @@ When answering questions:
     }
   };
 
-  const tabs = [
+  const allTabs = [
     { id: 'user-management', label: 'User Management', icon: Users },
     { id: 'knowledge-base', label: 'Knowledge Base', icon: Database },
     { id: 'help-faq', label: 'Help & FAQ', icon: BookOpen },
@@ -731,6 +739,16 @@ When answering questions:
     { id: 'cost-defaults', label: 'Cost Defaults', icon: SlidersHorizontal },
     { id: 'assemblies', label: 'Assemblies', icon: Layers },
   ];
+  const tabs = isPlatformAdmin ? allTabs : allTabs.filter((tab) => !PLATFORM_ONLY_TAB_IDS.has(tab.id));
+
+  // A company admin landing on a tab they can no longer see (stale state, or the
+  // panel reopened at a platform-only default) falls back to the first tab they can.
+  useEffect(() => {
+    if (isOpen && !tabs.some((tab) => tab.id === activeTab)) {
+      setActiveTab(tabs[0].id as typeof activeTab);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, isPlatformAdmin]);
 
   if (!isOpen) return null;
 
@@ -1545,19 +1563,21 @@ When answering questions:
                             placeholder="user@example.com"
                           />
                         </div>
-                        <div>
-                          <Label htmlFor="invite-role">Role</Label>
-                          <select
-                            id="invite-role"
-                            name="invite-role"
-                            className={adminSelect}
-                            value={inviteRole}
-                            onChange={(e) => setInviteRole(e.target.value as 'admin' | 'user')}
-                          >
-                            <option value="user" className="bg-background text-foreground">User</option>
-                            <option value="admin" className="bg-background text-foreground">Admin</option>
-                          </select>
-                        </div>
+                        {isPlatformAdmin && (
+                          <div>
+                            <Label htmlFor="invite-role">Role</Label>
+                            <select
+                              id="invite-role"
+                              name="invite-role"
+                              className={adminSelect}
+                              value={inviteRole}
+                              onChange={(e) => setInviteRole(e.target.value as 'admin' | 'user')}
+                            >
+                              <option value="user" className="bg-background text-foreground">User</option>
+                              <option value="admin" className="bg-background text-foreground">Admin</option>
+                            </select>
+                          </div>
+                        )}
                         <div className="flex items-end">
                           <Button
                             onClick={handleInviteUser}
@@ -1654,14 +1674,16 @@ When answering questions:
                                     ? <Loader2 className="w-4 h-4 animate-spin" />
                                     : <KeyRound className="w-4 h-4" />}
                                 </Button>
-                                <select
-                                  value={user.role}
-                                  onChange={(e) => handleUpdateUserRole(user.id, e.target.value as 'admin' | 'user')}
-                                  className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                >
-                                  <option value="user" className="bg-background text-foreground">User</option>
-                                  <option value="admin" className="bg-background text-foreground">Admin</option>
-                                </select>
+                                {isPlatformAdmin && (
+                                  <select
+                                    value={user.role}
+                                    onChange={(e) => handleUpdateUserRole(user.id, e.target.value as 'admin' | 'user')}
+                                    className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                  >
+                                    <option value="user" className="bg-background text-foreground">User</option>
+                                    <option value="admin" className="bg-background text-foreground">Admin</option>
+                                  </select>
+                                )}
                                 <Button
                                   variant="outline"
                                   size="sm"

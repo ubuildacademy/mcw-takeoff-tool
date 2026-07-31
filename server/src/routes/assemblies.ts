@@ -15,7 +15,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs-extra';
 import { v4 as uuidv4 } from 'uuid';
-import { requireAuth, requireAdmin, hasProjectAccess, isValidUUIDAnyVersion, validateUUIDParam } from '../middleware';
+import { requireAuth, requireCompanyAdmin, hasProjectAccess, isValidUUIDAnyVersion, validateUUIDParam } from '../middleware';
 import { assemblyExtractor } from '../services/assemblyExtractor';
 import {
   deleteAssembly,
@@ -120,7 +120,7 @@ async function requireLibraryOrg(req: express.Request, res: express.Response) {
 }
 
 /** Parse a workbook into a proposal. Writes nothing. */
-router.post('/extract', requireAuth, requireAdmin, handleUpload, async (req, res) => {
+router.post('/extract', requireAuth, requireCompanyAdmin, handleUpload, async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     const org = await requireLibraryOrg(req, res);
@@ -148,7 +148,7 @@ router.post('/extract', requireAuth, requireAdmin, handleUpload, async (req, res
 });
 
 /** Save a reviewed proposal as a native assembly. */
-router.post('/import', requireAuth, requireAdmin, async (req, res) => {
+router.post('/import', requireAuth, requireCompanyAdmin, async (req, res) => {
   try {
     const org = await requireLibraryOrg(req, res);
     if (!org) return;
@@ -198,7 +198,7 @@ router.get('/library/:id', requireAuth, validateUUIDParam('id'), async (req, res
 /**
  * Price linked conditions live from their takeoff quantities (task I6).
  *
- * `requireAuth`, deliberately not `requireAdmin`: every org member sees the
+ * `requireAuth`, deliberately not `requireCompanyAdmin`: every org member sees the
  * dollars (Jeff, 2026-07-27). Only *editing* the library is gated.
  *
  * The client sends quantities because it already has them — the measurement
@@ -392,7 +392,7 @@ router.post('/report', requireAuth, async (req, res) => {
  * carried an upload UUID in front of the name — the migration strips those,
  * and this is the escape hatch for anything left over.
  */
-router.patch('/library/:id', requireAuth, requireAdmin, validateUUIDParam('id'), async (req, res) => {
+router.patch('/library/:id', requireAuth, requireCompanyAdmin, validateUUIDParam('id'), async (req, res) => {
   try {
     const org = await requireLibraryOrg(req, res);
     if (!org) return;
@@ -428,7 +428,7 @@ router.patch('/library/:id', requireAuth, requireAdmin, validateUUIDParam('id'),
   }
 });
 
-router.delete('/library/:id', requireAuth, requireAdmin, validateUUIDParam('id'), async (req, res) => {
+router.delete('/library/:id', requireAuth, requireCompanyAdmin, validateUUIDParam('id'), async (req, res) => {
   try {
     const org = await requireLibraryOrg(req, res);
     if (!org) return;

@@ -77,6 +77,16 @@ export async function getOrgRole(userId: string, orgId: string): Promise<OrgRole
   return (data?.org_role as OrgRole | undefined) ?? null;
 }
 
+/** User ids belonging to an org — the scoping filter for company-admin user management (I9). */
+export async function listOrgMemberIds(orgId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('organization_members')
+    .select('user_id')
+    .eq('org_id', orgId);
+  if (error) throw wrapDatabaseError('List org member ids', error, { orgId });
+  return (data ?? []).map((row) => row.user_id as string);
+}
+
 // ── Company cost defaults ──────────────────────────────────────────────
 
 interface CostDefaultsRow {

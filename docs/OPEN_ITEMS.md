@@ -9,6 +9,41 @@ Each item says what is known, what was assumed in the meantime, and what would s
 
 ---
 
+### 16. Reconsidering the WORK ORDER / P.O. standing non-goal — needs Jeff, big if yes
+
+**Raised:** 2026-07-31, by Jeff, after testing the I7 budget export against a real assembly
+workbook. The 2026-07-21 scope decision (`IMPLEMENTATION_PLAN.md` line 893) explicitly
+kept WORK ORDER / P.O. paperwork in Excel — the design doc called replicating those sheets
+"months to replicate, low differentiation." Jeff's read after using the export: the budget
+sheet is a good start but an MCW assembly workbook is more than a cost report — it *is*
+the PO to the supplier and *is* the work order, and the app doesn't do either yet.
+
+**Also raised in the same conversation, related but separate:**
+- What actually distinguishes an "assembly" (MCW, workbook-sourced, full costing detail)
+  from a "template" a non-MCW company would build directly in the app? Working guess:
+  level of detail + what reports/paperwork can be pulled from a takeoff (POs, work
+  orders) — i.e. this question and item 16 are the same fork, not two.
+- Non-MCW companies won't have workbooks to import. They need an in-app assembly/template
+  *builder* — create from scratch, not upload-and-extract. That's new UI, not covered by
+  I1–I8b (which are all import-shaped). Likely sits on top of I9 (company-admin tier),
+  since only a company admin should edit that company's library.
+- MCW's full current workbook library (232 files) should be bulk-loaded into the native
+  library once, by hand/with Claude assistance — explicitly **not** a dedicated bulk-import
+  tool (Jeff declined building one). One-time job. Re-import only if the workbooks
+  themselves are hand-edited later; normal path going forward is editing pricing/assemblies
+  directly in the app.
+
+**Assumed for now:** nothing built yet. This item exists to hold the discussion, not to
+record a decision.
+
+**To settle:** Jeff scopes what "the app can do everything the workbook can" actually
+requires — a PO document generator and a work-order document generator are two distinct
+features, each closer in size to a Workstream than a task. Needs its own design pass
+before an I-numbered task is written, the way Workstream I itself got `ASSEMBLIES_DESIGN.md`
+before I0.
+
+---
+
 ## Source-data defects in MCW's assembly workbooks
 
 These are errors in the live Excel files, not in Meridian. They are recorded rather than
