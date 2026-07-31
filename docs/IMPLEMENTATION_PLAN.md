@@ -1539,6 +1539,25 @@ rows and still excludes assembly pricing, so a list total can trail the project'
 that project is opened. Recorded as open item 15 rather than fixed here — doing it properly
 means pricing every project server-side, which is I9's territory.
 
+### Task I8b — Searchable, brand-grouped assembly library — DONE 2026-07-31
+
+**Why:** three assemblies look fine in a plain Select; 200+ do not. MCW's source folder is
+organised by manufacturer, and the picker needed to match.
+
+**Landed:**
+- `assemblies.brand` (`add_brand_to_assemblies.sql`) — nullable; NULL = uncategorised.
+  Same migration strips UUID prefixes from already-imported names and brands the three
+  existing Tremco 250 GC rows.
+- `assemblyListFilter.ts` — search (any word, brand + name), natural-order sort, brand
+  grouping. 15 tests.
+- `AssemblyCombobox.tsx` — searchable popover with brand section headers; wired into the
+  condition dialog. Templates dialog and Admin → Assemblies use the same filter/group.
+- `PATCH /api/assemblies/library/:id` — rename and/or rebrand without re-importing.
+- Brand field editable on the import review screen.
+
+**Bulk import deferred.** Jeff is importing the library with Claude rather than a dedicated
+script; the Admin one-at-a-time path (with brand) is enough for that.
+
 ---
 
 ## Final QA checklist (run before any production deploy)

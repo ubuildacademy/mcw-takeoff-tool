@@ -1303,6 +1303,7 @@ export interface ProposalProductionRate {
 export interface AssemblyProposal {
   sourceFile: string;
   name: string;
+  brand?: string | null;
   quantityInputs: ProposalQuantityInput[];
   components: ProposalComponent[];
   productionRates: ProposalProductionRate[];
@@ -1321,7 +1322,13 @@ export interface AssemblyProposal {
 }
 
 export interface AssemblyImportPreview {
-  assembly: { name: string; crewSize: number | null; overrides: Record<string, unknown>; importFlags: string[] };
+  assembly: {
+    name: string;
+    brand: string | null;
+    crewSize: number | null;
+    overrides: Record<string, unknown>;
+    importFlags: string[];
+  };
   components: { seq: number; quantityRule: string; importFlags: string[] }[];
   productionRates: { seq: number; ratePerDay: number | null }[];
   /** Why this assembly cannot price yet. Empty means ready. */
@@ -1331,6 +1338,7 @@ export interface AssemblyImportPreview {
 export interface ImportedAssemblySummary {
   id: string;
   name: string;
+  brand: string | null;
   componentCount: number;
   quantityInputCount: number;
   productionRateCount: number;
@@ -1341,6 +1349,7 @@ export interface ImportedAssemblySummary {
 export interface AssemblyListItem {
   id: string;
   name: string;
+  brand: string | null;
   crewSize: number | null;
   dayRatePerMan: number | null;
   createdAt: string;
@@ -1395,6 +1404,15 @@ export const assemblyLibraryService = {
   ): Promise<{ report: AssemblyReport }> {
     const response = await apiClient.post('/assemblies/report', { projectId, items, workType });
     return response.data;
+  },
+
+  /** Correct an assembly's name and/or brand without re-importing its workbook. */
+  async rename(
+    id: string,
+    patch: { name?: string; brand?: string | null }
+  ): Promise<AssemblyListItem> {
+    const response = await apiClient.patch(`/assemblies/library/${id}`, patch);
+    return response.data.assembly;
   },
 
   async remove(id: string): Promise<void> {

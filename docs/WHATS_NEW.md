@@ -10,7 +10,7 @@ Every update to Meridian Takeoff since the beta program started, newest first. C
 
 The same three lines are in the **Reports** tab, the **Excel** export and the **PDF** summary. Your project profit margin still applies only to the flat costs: each assembly already carries the margin chain from the workbook it came from, and applying yours on top would quote the job high.
 
-**Assembly names no longer arrive with a long ID in front of them.** Anything already imported that way can be renamed in the library.
+**Assemblies are searchable and grouped by brand.** In the condition dialog, Templates, and **Admin → Assemblies**, type to filter by name or brand, and the list groups under Aquafin / Tremco / Sika and so on — the same shape as the source folder. Rename and rebrand an assembly in Admin without re-importing. Existing names that still carry a long ID in front of them are cleaned by a one-shot migration.
 
 **Retired: Assembly Workbooks.** The upload-and-map section at the bottom of the Costs tab is gone. It existed to price a takeoff by writing quantities into a copy of your own spreadsheet, which is what the assembly library now does in the app — with live totals, budget reports, and conditions you can start from an assembly. Importing a workbook into the library (**Admin → Assemblies**) is unaffected.
 

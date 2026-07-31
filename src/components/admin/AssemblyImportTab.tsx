@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from 'react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
-import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, Trash2, Upload } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Loader2, Pencil, RefreshCw, Trash2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   assemblyLibraryService,
@@ -11,6 +11,7 @@ import {
   type AssemblyProposal,
 } from '../../services/apiService';
 import { extractErrorMessage } from '../../utils/commonUtils';
+import { filterAssemblies, groupAssembliesByBrand } from '../../utils/assemblyListFilter';
 
 /**
  * Assemblies tab — import a priced workbook into the native library.
@@ -47,10 +48,12 @@ function ProposalReview({
   proposal,
   preview,
   onNameChange,
+  onBrandChange,
 }: {
   proposal: AssemblyProposal;
   preview: AssemblyImportPreview;
   onNameChange: (name: string) => void;
+  onBrandChange: (brand: string) => void;
 }) {
   const inputName = (seq: number | null) =>
     proposal.quantityInputs.find((i) => i.seq === seq)?.name ?? '—';
@@ -67,6 +70,15 @@ function ProposalReview({
             value={proposal.name}
             onChange={(event) => onNameChange(event.target.value)}
             className="w-[22rem]"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-sm">Brand</Label>
+          <Input
+            value={proposal.brand ?? ''}
+            onChange={(event) => onBrandChange(event.target.value)}
+            placeholder="e.g. Tremco"
+            className="w-48"
           />
         </div>
         <div className="text-sm text-muted-foreground pb-2">from {proposal.sourceFile}</div>
@@ -241,7 +253,16 @@ export function AssemblyImportTab() {
   const [saving, setSaving] = useState(false);
   const [proposal, setProposal] = useState<AssemblyProposal | null>(null);
   const [preview, setPreview] = useState<AssemblyImportPreview | null>(null);
+  const [libraryQuery, setLibraryQuery] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editBrand, setEditBrand] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const libraryGroups = useMemo(
+    () => groupAssembliesByBrand(filterAssemblies(assemblies, libraryQuery)),
+    [assemblies, libraryQuery]
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -304,6 +325,32 @@ export function AssemblyImportTab() {
     }
   };
 
+  const beginEdit = (assembly: AssemblyListItem) => {
+    setEditingId(assembly.id);
+    setEditName(assembly.name);
+    setEditBrand(assembly.brand ?? '');
+  };
+
+  const saveEdit = async () => {
+    if (!editingId) return;
+    const name = editName.trim();
+    if (!name) {
+      toast.error('The assembly needs a name');
+      return;
+    }
+    try {
+      await assemblyLibraryService.rename(editingId, {
+        name,
+        brand: editBrand.trim() || null,
+      });
+      toast.success('Assembly updated');
+      setEditingId(null);
+      await load();
+    } catch (error) {
+      toast.error(extractErrorMessage(error, 'Failed to update assembly'));
+    }
+  };
+
   return (
     <div className="p-6 max-w-5xl space-y-6">
       <div>
@@ -349,6 +396,7 @@ export function AssemblyImportTab() {
             proposal={proposal}
             preview={preview}
             onNameChange={(name) => setProposal({ ...proposal, name })}
+            onBrandChange={(brand) => setProposal({ ...proposal, brand })}
           />
           <div className="flex items-center gap-3 border-t border-border pt-4">
             <Button onClick={() => void save()} disabled={saving || !proposal.name.trim()}>
@@ -370,11 +418,20 @@ export function AssemblyImportTab() {
       )}
 
       <div>
-        <h4 className="text-sm font-semibold mb-2">Library</h4>
-        <div className="border border-border rounded-md overflow-x-auto">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
+          <h4 className="text-sm font-semibold">Library</h4>
+          <Input
+            value={libraryQuery}
+            onChange={(event) => setLibraryQuery(event.target.value)}
+            placeholder="Search by name or brand…"
+            className="h-8 w-64"
+          />
+        </div>
+        <div className="border border-border rounded-md overflow-x-auto max-h-[28rem] overflow-y-auto">
           <table className="w-full text-sm">
-            <thead className="bg-muted text-left">
+            <thead className="bg-muted text-left sticky top-0">
               <tr>
+                <th className="px-3 py-2 font-medium">Brand</th>
                 <th className="px-3 py-2 font-medium">Assembly</th>
                 <th className="px-3 py-2 font-medium text-right">Crew</th>
                 <th className="px-3 py-2 font-medium">Imported</th>
@@ -384,26 +441,94 @@ export function AssemblyImportTab() {
             <tbody>
               {assemblies.length === 0 && (
                 <tr>
-                  <td className="px-3 py-6 text-center text-muted-foreground" colSpan={4}>
+                  <td className="px-3 py-6 text-center text-muted-foreground" colSpan={5}>
                     {loading ? 'Loading…' : 'No assemblies yet — read a workbook to get started.'}
                   </td>
                 </tr>
               )}
-              {assemblies.map((assembly) => (
-                <tr key={assembly.id} className="border-t border-border">
-                  <td className="px-3 py-1.5">{assembly.name}</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums">
-                    {formatNumber(assembly.crewSize)}
-                  </td>
-                  <td className="px-3 py-1.5 text-muted-foreground">
-                    {assembly.createdAt ? new Date(assembly.createdAt).toLocaleDateString() : '—'}
-                  </td>
-                  <td className="px-3 py-1.5 text-right">
-                    <Button variant="ghost" size="sm" onClick={() => void remove(assembly)}>
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+              {assemblies.length > 0 && libraryGroups.length === 0 && (
+                <tr>
+                  <td className="px-3 py-6 text-center text-muted-foreground" colSpan={5}>
+                    No assembly matches “{libraryQuery.trim()}”.
                   </td>
                 </tr>
+              )}
+              {libraryGroups.map((group) => (
+                <Fragment key={`brand-${group.label}`}>
+                  <tr className="border-t border-border bg-muted/40">
+                    <td className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground" colSpan={5}>
+                      {group.label}
+                      <span className="ml-2 font-normal normal-case tracking-normal">
+                        ({group.assemblies.length})
+                      </span>
+                    </td>
+                  </tr>
+                  {group.assemblies.map((assembly) => (
+                    <tr key={assembly.id} className="border-t border-border">
+                      <td className="px-3 py-1.5 text-muted-foreground">
+                        {editingId === assembly.id ? (
+                          <Input
+                            value={editBrand}
+                            onChange={(event) => setEditBrand(event.target.value)}
+                            className="h-8 w-36"
+                            placeholder="Brand"
+                          />
+                        ) : (
+                          assembly.brand ?? '—'
+                        )}
+                      </td>
+                      <td className="px-3 py-1.5">
+                        {editingId === assembly.id ? (
+                          <Input
+                            value={editName}
+                            onChange={(event) => setEditName(event.target.value)}
+                            className="h-8"
+                          />
+                        ) : (
+                          assembly.name
+                        )}
+                      </td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">
+                        {formatNumber(assembly.crewSize)}
+                      </td>
+                      <td className="px-3 py-1.5 text-muted-foreground">
+                        {assembly.createdAt ? new Date(assembly.createdAt).toLocaleDateString() : '—'}
+                      </td>
+                      <td className="px-3 py-1.5 text-right">
+                        <div className="flex justify-end gap-1">
+                          {editingId === assembly.id ? (
+                            <>
+                              <Button size="sm" onClick={() => void saveEdit()}>
+                                Save
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setEditingId(null)}
+                              >
+                                Cancel
+                              </Button>
+                            </>
+                          ) : (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => beginEdit(assembly)}
+                                aria-label="Rename assembly"
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </Button>
+                              <Button variant="ghost" size="sm" onClick={() => void remove(assembly)}>
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </Fragment>
               ))}
             </tbody>
           </table>

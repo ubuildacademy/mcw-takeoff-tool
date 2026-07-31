@@ -241,7 +241,7 @@ Your choices are **saved per project** and reused automatically the next time yo
 
 Price a condition through one of your imported assemblies instead of a flat per-unit cost. The number updates as you measure.
 
-- **Linking a condition:** In the condition dialog (create or edit), pick one under **Price with assembly**. If that assembly prices more than one quantity — "SF-Floor," "SF-Wall," "LF-Cove" — a second dropdown asks which one this condition measures. When it prices only one, nothing is asked.
+- **Linking a condition:** In the condition dialog (create or edit), pick one under **Price with assembly**. The list is searchable (name or brand) and grouped by brand. If that assembly prices more than one quantity — "SF-Floor," "SF-Wall," "LF-Cove" — a second dropdown asks which one this condition measures. When it prices only one, nothing is asked.
 - **What you get:** Materials by coverage yield against your imported price list, labor from the assembly's production rates and crew size, then its margin chain and insurance. Expand a condition to see every component line, package counts, and each margin step.
 - **Waste** comes from the assembly, not the condition. The assembly already carries a waste percentage for each quantity it prices, taken from your workbook; the condition's own waste factor is not applied on top of it.
 - **Unmeasured quantities are called out.** Link a condition to "SF-Floor" on an assembly that also prices "SF-Wall," and the wall components price at $0 with a note saying so — until another condition measures them. A total that quietly omits part of an assembly is the thing this is built to prevent.

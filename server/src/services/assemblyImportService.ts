@@ -26,6 +26,7 @@ import { getCostDefaults } from './assemblyLibraryService';
 export interface ImportedAssemblySummary {
   id: string;
   name: string;
+  brand: string | null;
   componentCount: number;
   quantityInputCount: number;
   productionRateCount: number;
@@ -130,6 +131,7 @@ export async function saveAssemblyFromProposal(
     .insert({
       org_id: orgId,
       name: records.assembly.name,
+      brand: records.assembly.brand,
       crew_size: records.assembly.crewSize,
       // Only overrides are written; everything else stays NULL and inherits.
       day_rate_per_man: overrides.dayRatePerMan ?? null,
@@ -144,7 +146,7 @@ export async function saveAssemblyFromProposal(
       import_flags: records.assembly.importFlags,
       imported_at: new Date().toISOString(),
     })
-    .select('id, name')
+    .select('id, name, brand')
     .single();
   if (assemblyError) {
     throw wrapDatabaseError('Insert assembly', assemblyError, { orgId, name: proposal.name });
@@ -171,6 +173,7 @@ export async function saveAssemblyFromProposal(
   return {
     id: assemblyId,
     name: assemblyRow.name as string,
+    brand: (assemblyRow.brand as string | null) ?? null,
     componentCount: records.components.length,
     quantityInputCount: records.quantityInputs.length,
     productionRateCount: records.productionRates.length,

@@ -14,6 +14,7 @@ function assembly(overrides: Partial<AssemblyDetail> = {}): AssemblyDetail {
   return {
     id: 'asm-1',
     name: 'Aquafin 2K',
+    brand: null,
     crewSize: 2,
     dayRatePerMan: 224,
     createdAt: '2026-07-31T00:00:00.000Z',

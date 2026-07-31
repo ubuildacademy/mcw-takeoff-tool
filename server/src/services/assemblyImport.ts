@@ -58,6 +58,8 @@ export interface ProposalProductionRate {
 
 export interface AssemblyProposalInput {
   name: string;
+  /** Manufacturer / product line. Optional — bulk import sets it from the folder. */
+  brand?: string | null;
   sourceFile?: string;
   quantityInputs: ProposalQuantityInput[];
   components: ProposalComponent[];
@@ -80,6 +82,7 @@ export type QuantityRule = 'coverage_yield' | 'same_as_component' | 'fixed' | 'm
 
 export interface AssemblyRecord {
   name: string;
+  brand: string | null;
   /** Crew size is per-assembly, never a company default. */
   crewSize: number | null;
   /** Only the fields that differ from the company defaults. */
@@ -237,9 +240,12 @@ export function buildAssemblyRecords(
       isOptional: rate.isOptional ?? false,
     }));
 
+  const brand = (proposal.brand ?? '').trim() || null;
+
   const withoutBlockers = {
     assembly: {
       name: proposal.name,
+      brand,
       crewSize: proposal.crewSize,
       overrides,
       importFlags: proposal.flags ?? [],

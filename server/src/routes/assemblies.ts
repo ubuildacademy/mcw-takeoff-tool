@@ -25,6 +25,7 @@ import {
   getOrganizationForUser,
   getProductsByCodes,
   listAssemblies,
+  renameAssembly,
 } from '../services/assemblyLibraryService';
 import {
   priceCondition,
@@ -379,6 +380,51 @@ router.post('/report', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('Error building assembly report:', error);
     return res.status(500).json({ error: 'Failed to build the report', details: String(error) });
+  }
+});
+
+/**
+ * Rename / rebrand an assembly. Same gate as import and delete: editing the
+ * library is admin-only, reading it is not.
+ *
+ * The name and brand are the only things an estimator can correct after an
+ * import without re-importing. Everything imported before 2026-07-31 also
+ * carried an upload UUID in front of the name — the migration strips those,
+ * and this is the escape hatch for anything left over.
+ */
+router.patch('/library/:id', requireAuth, requireAdmin, validateUUIDParam('id'), async (req, res) => {
+  try {
+    const org = await requireLibraryOrg(req, res);
+    if (!org) return;
+
+    const body = req.body ?? {};
+    const patch: { name?: string; brand?: string | null } = {};
+
+    if ('name' in body) {
+      const name = String(body.name ?? '').trim();
+      if (!name) return res.status(400).json({ error: 'The assembly needs a name' });
+      if (name.length > 200) {
+        return res.status(400).json({ error: 'That name is too long (200 characters max)' });
+      }
+      patch.name = name;
+    }
+    if ('brand' in body) {
+      const brand = body.brand === null || body.brand === undefined ? null : String(body.brand).trim();
+      if (brand && brand.length > 100) {
+        return res.status(400).json({ error: 'That brand is too long (100 characters max)' });
+      }
+      patch.brand = brand || null;
+    }
+    if (!('name' in patch) && !('brand' in patch)) {
+      return res.status(400).json({ error: 'Provide a name and/or brand to update' });
+    }
+
+    const assembly = await renameAssembly(org.id, req.params.id, patch);
+    if (!assembly) return res.status(404).json({ error: 'Assembly not found' });
+    return res.json({ success: true, assembly });
+  } catch (error) {
+    console.error('Error renaming assembly:', error);
+    return res.status(500).json({ error: 'Failed to rename assembly', details: String(error) });
   }
 });
 

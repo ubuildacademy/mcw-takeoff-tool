@@ -413,6 +413,7 @@ export async function getAssemblyDetails(
 export interface CreateAssemblyParams {
   orgId: string;
   name: string;
+  brand?: string | null;
   dayRatePerMan?: number | null;
   crewSize?: number | null;
   laborBurdenPct?: number | null;
@@ -430,6 +431,7 @@ export async function createAssembly(params: CreateAssemblyParams): Promise<Asse
     .insert({
       org_id: params.orgId,
       name: params.name,
+      brand: params.brand?.trim() ? params.brand.trim() : null,
       day_rate_per_man: params.dayRatePerMan ?? null,
       crew_size: params.crewSize ?? null,
       labor_burden_pct: params.laborBurdenPct ?? null,
@@ -444,6 +446,37 @@ export async function createAssembly(params: CreateAssemblyParams): Promise<Asse
     .single();
   if (error) throw wrapDatabaseError('Create assembly', error, { orgId: params.orgId, name: params.name });
   return mapAssemblyRow(data as AssemblyRow);
+}
+
+/**
+ * Update an assembly's name and/or brand. Null when the id is not in `orgId`.
+ *
+ * Only identity fields: the costing fields are what the workbook said, and
+ * letting a rename carry them would make a typo fix a repricing.
+ */
+export async function renameAssembly(
+  orgId: string,
+  assemblyId: string,
+  patch: { name?: string; brand?: string | null }
+): Promise<Assembly | null> {
+  const update: Record<string, unknown> = {};
+  if (patch.name !== undefined) update.name = patch.name;
+  if (patch.brand !== undefined) {
+    update.brand = patch.brand?.trim() ? patch.brand.trim() : null;
+  }
+  if (Object.keys(update).length === 0) {
+    return (await getAssemblyDetail(orgId, assemblyId)) ?? null;
+  }
+
+  const { data, error } = await supabase
+    .from('assemblies')
+    .update(update)
+    .eq('org_id', orgId)
+    .eq('id', assemblyId)
+    .select('*')
+    .maybeSingle();
+  if (error) throw wrapDatabaseError('Rename assembly', error, { orgId, assemblyId });
+  return data ? mapAssemblyRow(data as AssemblyRow) : null;
 }
 
 /** Cascades to quantity inputs and components (FK ON DELETE CASCADE). */

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { assemblyNameFromFilename } from './assemblyExtractor';
+import { assemblyNameFromFilename, brandFromFolderName } from './assemblyExtractor';
 
 describe('assemblyNameFromFilename', () => {
   it('drops the extension', () => {
@@ -28,5 +28,18 @@ describe('assemblyNameFromFilename', () => {
 
   it('returns empty for a filename that is nothing but an extension', () => {
     expect(assemblyNameFromFilename('.xlsx')).toBe('');
+  });
+});
+
+describe('brandFromFolderName', () => {
+  it('keeps a plain brand folder', () => {
+    expect(brandFromFolderName('Tremco')).toEqual({ brand: 'Tremco', qualifier: null });
+  });
+
+  it('splits a pricing-holdout qualifier off the brand', () => {
+    expect(brandFromFolderName('Laticrete - Need to request pricing by Project')).toEqual({
+      brand: 'Laticrete',
+      qualifier: 'Need to request pricing by Project',
+    });
   });
 });

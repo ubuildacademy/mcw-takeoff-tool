@@ -71,9 +71,28 @@ export function assemblyNameFromFilename(filename: string): string {
     .trim();
 }
 
+/**
+ * Pull a brand label out of a source-folder name.
+ *
+ * "Tremco" stays "Tremco". "Laticrete - Need to request pricing by Project"
+ * becomes "Laticrete", with the qualifier returned separately so the importer
+ * can flag it rather than bake a sentence into every assembly's brand.
+ */
+export function brandFromFolderName(folderName: string): {
+  brand: string;
+  qualifier: string | null;
+} {
+  const trimmed = folderName.trim();
+  const split = trimmed.match(/^(.+?)\s+-\s+(.+)$/);
+  if (!split) return { brand: trimmed, qualifier: null };
+  return { brand: split[1].trim(), qualifier: split[2].trim() };
+}
+
 export interface AssemblyProposal {
   sourceFile: string;
   name: string;
+  /** Manufacturer / product line. Set by bulk import from the folder tree. */
+  brand?: string | null;
   quantityInputs: ExtractedQuantityInput[];
   components: ExtractedComponent[];
   dayRatePerMan: number | null;

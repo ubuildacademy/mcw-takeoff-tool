@@ -7,10 +7,14 @@
  * silently. Only a multi-quantity assembly — "SF-Floor / SF-Wall / LF-Cove" —
  * puts a second dropdown on screen, because there the choice changes which
  * components the measurement drives.
+ *
+ * The assembly chooser is a searchable combobox grouped by brand — a plain
+ * Select was fine at three assemblies and unusable at two hundred.
  */
 import { useEffect, useState } from 'react';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { AssemblyCombobox } from './AssemblyCombobox';
 import { assemblyLibraryService, type AssemblyDetail, type AssemblyListItem } from '../services/apiService';
 import { extractErrorMessage } from '../utils/commonUtils';
 
@@ -53,8 +57,6 @@ export function ConditionAssemblyPicker({
     };
   }, []);
 
-  // Load the chosen assembly's inputs so the second dropdown (and the
-  // auto-pick) knows what there is.
   useEffect(() => {
     if (!assemblyId) {
       setDetail(null);
@@ -80,8 +82,6 @@ export function ConditionAssemblyPicker({
   }, [assemblyId]);
 
   if (loading) return null;
-  // Nothing to link to yet. Showing an empty dropdown would only raise a
-  // question the estimator cannot answer from here.
   if (assemblies.length === 0) return null;
 
   const inputs = detail?.quantityInputs ?? [];
@@ -91,30 +91,21 @@ export function ConditionAssemblyPicker({
     <div className="rounded-lg border border-border p-3 space-y-3">
       <div>
         <Label htmlFor="assembly">Price with assembly</Label>
-        <Select
-          value={assemblyId ?? NONE}
-          onValueChange={(value) =>
+        <AssemblyCombobox
+          id="assembly"
+          assemblies={assemblies}
+          value={assemblyId}
+          onChange={(nextId) =>
             onChange({
-              assemblyId: value === NONE ? null : value,
+              assemblyId: nextId,
               quantityInputId: null,
             })
           }
-        >
-          <SelectTrigger id="assembly">
-            <SelectValue placeholder="None — use the costs below" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={NONE}>None — use the costs below</SelectItem>
-            {assemblies.map((assembly) => (
-              <SelectItem key={assembly.id} value={assembly.id}>
-                {assembly.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          noneLabel="None — use the costs below"
+        />
         <p className="text-xs text-muted-foreground mt-1">
           {assemblyId
-            ? 'This condition’s quantity prices the whole assembly — materials, labor, margins — on the Costs tab.'
+            ? "This condition’s quantity prices the whole assembly — materials, labor, margins — on the Costs tab."
             : 'Leave as None to price this condition with the per-unit costs below.'}
         </p>
       </div>

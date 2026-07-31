@@ -75,6 +75,8 @@ export interface Assembly {
   id: string;
   orgId: string;
   name: string;
+  /** Manufacturer / product line for picker grouping. Null = uncategorised. */
+  brand: string | null;
   dayRatePerMan: number | null;
   crewSize: number | null;
   laborBurdenPct: number | null;
@@ -265,6 +267,7 @@ export interface AssemblyRow {
   id: string;
   org_id: string;
   name: string;
+  brand?: string | null;
   day_rate_per_man: number | string | null;
   crew_size: number | null;
   labor_burden_pct: number | string | null;
@@ -341,6 +344,7 @@ export function mapAssemblyRow(row: AssemblyRow): Assembly {
     id: row.id,
     orgId: row.org_id,
     name: row.name,
+    brand: row.brand?.trim() ? row.brand.trim() : null,
     dayRatePerMan: num(row.day_rate_per_man),
     crewSize: row.crew_size ?? null,
     laborBurdenPct: num(row.labor_burden_pct),

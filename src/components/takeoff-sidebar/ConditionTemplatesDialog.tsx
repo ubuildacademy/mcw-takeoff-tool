@@ -7,7 +7,7 @@
  * picking one creates the conditions it needs measured, already wired to the
  * assembly, so the Costs tab prices them the moment anything is drawn.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { BaseDialog } from '../ui/base-dialog';
 import { Button } from '../ui/button';
@@ -25,6 +25,7 @@ import type { TakeoffCondition } from '../../types';
 import { assemblyLibraryService, type AssemblyListItem } from '../../services/apiService';
 import { buildConditionsFromAssembly } from '../../utils/assemblyConditionTemplate';
 import { generateDistinctColor, extractErrorMessage } from '../../utils/commonUtils';
+import { filterAssemblies, groupAssembliesByBrand } from '../../utils/assemblyListFilter';
 
 interface ConditionTemplatesDialogProps {
   open: boolean;
@@ -50,6 +51,12 @@ export function ConditionTemplatesDialog({
   const [applyingId, setApplyingId] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [assemblies, setAssemblies] = useState<AssemblyListItem[]>([]);
+  const [assemblyQuery, setAssemblyQuery] = useState('');
+
+  const assemblyGroups = useMemo(
+    () => groupAssembliesByBrand(filterAssemblies(assemblies, assemblyQuery)),
+    [assemblies, assemblyQuery]
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -169,18 +176,38 @@ export function ConditionTemplatesDialog({
         {assemblies.length > 0 && (
           <div className="space-y-2">
             <Label>Start from a priced assembly</Label>
-            <div className="max-h-48 overflow-y-auto rounded-md border divide-y">
-              {assemblies.map((assembly) => (
-                <div key={assembly.id} className="flex items-center gap-3 px-3 py-2">
-                  <p className="flex-1 min-w-0 truncate text-sm font-medium">{assembly.name}</p>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleApplyAssembly(assembly)}
-                    disabled={applyingId !== null}
-                  >
-                    {applyingId === assembly.id ? 'Adding…' : 'Add condition'}
-                  </Button>
+            <Input
+              value={assemblyQuery}
+              onChange={(e) => setAssemblyQuery(e.target.value)}
+              placeholder="Search by name or brand…"
+              className="h-8"
+            />
+            <div className="max-h-56 overflow-y-auto rounded-md border divide-y">
+              {assemblyGroups.length === 0 && (
+                <p className="px-3 py-4 text-center text-xs text-muted-foreground">
+                  No assembly matches “{assemblyQuery.trim()}”.
+                </p>
+              )}
+              {assemblyGroups.map((group) => (
+                <div key={group.label}>
+                  {assemblyGroups.length > 1 && (
+                    <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground bg-muted/40">
+                      {group.label}
+                    </div>
+                  )}
+                  {group.assemblies.map((assembly) => (
+                    <div key={assembly.id} className="flex items-center gap-3 px-3 py-2">
+                      <p className="flex-1 min-w-0 truncate text-sm font-medium">{assembly.name}</p>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleApplyAssembly(assembly)}
+                        disabled={applyingId !== null}
+                      >
+                        {applyingId === assembly.id ? 'Adding…' : 'Add condition'}
+                      </Button>
+                    </div>
+                  ))}
                 </div>
               ))}
             </div>
