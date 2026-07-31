@@ -16,6 +16,7 @@ import {
   buildAssemblyReport,
   buildLaborRow,
   buildMaterialBudget,
+  buildPurchaseOrderLines,
   formatUom,
   ratesForWorkType,
   sumLaborRows,
@@ -185,6 +186,101 @@ describe('buildMaterialBudget', () => {
       } as ConditionPricing['breakdown'],
     });
     expect(buildMaterialBudget([priced], sources, 0.07)).toHaveLength(0);
+  });
+});
+
+describe('buildPurchaseOrderLines', () => {
+  const sources = new Map<string, MaterialLineSource>([
+    [
+      'component-1',
+      { description: null, productCode: '1000', yieldUnit: '77lb', packagingUnit: '/bag' },
+    ],
+  ]);
+
+  it('sums quantity across every assembly in the project that buys the same product', () => {
+    // Two different conditions (different assemblies), same product code — the
+    // whole point of a consolidated P.O. over the per-assembly workbook shape.
+    const priced1 = pricing({
+      conditionId: 'cond-1',
+      breakdown: { components: [component({ packages: 10 })] } as ConditionPricing['breakdown'],
+    });
+    const priced2 = pricing({
+      conditionId: 'cond-2',
+      assemblyId: 'asm-2',
+      breakdown: { components: [component({ packages: 4 })] } as ConditionPricing['breakdown'],
+    });
+    const lines = buildPurchaseOrderLines([priced1, priced2], sources);
+    expect(lines).toHaveLength(1);
+    expect(lines[0].qty).toBe(14);
+    expect(lines[0].costCode).toBe('1000');
+    expect(lines[0].uom).toBe('77lb/bag');
+  });
+
+  it('keeps two different products as separate lines', () => {
+    const priced = pricing({
+      breakdown: {
+        components: [
+          component({ componentId: 'component-1', productCode: '1000', packages: 10 }),
+          component({ componentId: 'component-2', productCode: '2000', description: 'Primer', packages: 3 }),
+        ],
+      } as ConditionPricing['breakdown'],
+    });
+    const lines = buildPurchaseOrderLines([priced], sources);
+    expect(lines).toHaveLength(2);
+    expect(lines.map((l) => l.qty)).toEqual([10, 3]);
+  });
+
+  it('falls back to description when a component has no product code, without merging unrelated fixed-price lines', () => {
+    const priced = pricing({
+      breakdown: {
+        components: [
+          component({ componentId: 'component-1', productCode: null, description: 'Hand-priced sundry A', packages: 2 }),
+          component({ componentId: 'component-2', productCode: null, description: 'Hand-priced sundry B', packages: 5 }),
+        ],
+      } as ConditionPricing['breakdown'],
+    });
+    const lines = buildPurchaseOrderLines([priced], sources);
+    expect(lines).toHaveLength(2);
+    expect(lines.map((l) => l.product)).toEqual(['Hand-priced sundry A', 'Hand-priced sundry B']);
+  });
+
+  it('never carries price — the P.O. leaves it blank like the source workbooks', () => {
+    const priced = pricing({
+      breakdown: { components: [component()] } as ConditionPricing['breakdown'],
+    });
+    const [line] = buildPurchaseOrderLines([priced], sources);
+    expect(line).not.toHaveProperty('amountPlusTax');
+    expect(line).not.toHaveProperty('unitPrice');
+  });
+
+  it('surfaces an issue from any contributing line', () => {
+    const priced = pricing({
+      breakdown: {
+        components: [
+          component({ packages: 10, issue: null }),
+        ],
+      } as ConditionPricing['breakdown'],
+    });
+    const flagged = pricing({
+      conditionId: 'cond-2',
+      breakdown: {
+        components: [
+          component({ packages: 0, included: false, issue: 'no price for code 1000' }),
+        ],
+      } as ConditionPricing['breakdown'],
+    });
+    const lines = buildPurchaseOrderLines([priced, flagged], sources);
+    expect(lines).toHaveLength(1);
+    expect(lines[0].issue).toBe('no price for code 1000');
+  });
+
+  it('omits a component that contributed nothing and had nothing wrong', () => {
+    const priced = pricing({
+      breakdown: {
+        components: [component({ included: false, extendedCost: 0, packages: 0, issue: null })],
+      } as ConditionPricing['breakdown'],
+    });
+    expect(buildPurchaseOrderLines([priced], sources)).toHaveLength(0);
   });
 });
 

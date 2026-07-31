@@ -20,6 +20,7 @@ interface ProjectFormData {
   name: string;
   client: string;
   location: string;
+  jobNumber: string;
   description: string;
   projectType: string;
   startDate: string;
@@ -38,6 +39,7 @@ export function ProjectSettingsDialog({ open, onOpenChange, project, onUpdated }
     name: project?.name || '',
     client: project?.client || '',
     location: project?.location || '',
+    jobNumber: project?.jobNumber || '',
     description: project?.description || '',
     projectType: project?.projectType || '',
     startDate: project?.startDate || '',
@@ -92,6 +94,7 @@ export function ProjectSettingsDialog({ open, onOpenChange, project, onUpdated }
         name: formData.name.trim(),
         client: formData.client.trim(),
         location: formData.location.trim(),
+        jobNumber: formData.jobNumber.trim(),
         description: formData.description.trim(),
         projectType: formData.projectType || 'Commercial',
         startDate: formData.startDate,
@@ -200,6 +203,18 @@ export function ProjectSettingsDialog({ open, onOpenChange, project, onUpdated }
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="jobNumber">Job #</Label>
+              <Input
+                id="jobNumber"
+                value={formData.jobNumber}
+                onChange={(e) => handleInputChange('jobNumber', e.target.value)}
+                placeholder="e.g. 24-1234"
+              />
             </div>
           </div>
 

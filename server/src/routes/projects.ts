@@ -618,7 +618,7 @@ router.get('/:id/conditions', requireAuth, validateUUIDParam('id'), (_req, res) 
 });
 
 // Update a project - requires auth and project access
-router.put('/:id', requireAuth, validateUUIDParam('id'), sanitizeBody('name', 'client', 'location', 'description', 'contactPerson'), async (req, res) => {
+router.put('/:id', requireAuth, validateUUIDParam('id'), sanitizeBody('name', 'client', 'location', 'jobNumber', 'description', 'contactPerson'), async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user?.id;

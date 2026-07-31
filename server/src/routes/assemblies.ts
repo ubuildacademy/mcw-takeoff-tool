@@ -35,10 +35,12 @@ import {
 } from '../services/conditionAssemblyPricing';
 import {
   buildAssemblyReport,
+  buildPurchaseOrderLines,
   ratesForWorkType,
   type MaterialLineSource,
   type WorkType,
 } from '../services/assemblyReport';
+import { storage } from '../storage';
 import {
   resolveAssemblyCostSettings,
   type AssemblyDetail,
@@ -380,6 +382,59 @@ router.post('/report', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('Error building assembly report:', error);
     return res.status(500).json({ error: 'Failed to build the report', details: String(error) });
+  }
+});
+
+/**
+ * Purchase order material list — consolidated across every assembly in the request,
+ * not one per assembly like the source workbooks (Jeff, 2026-07-31: fewer documents to
+ * send out beats matching the workbook shape exactly). Price is left blank, same as
+ * the workbook's own P.O. sheet — the estimator confirms it live with the supplier
+ * rather than Meridian's price list going out on a document to a vendor.
+ *
+ * Needs a projectId (unlike /price and /report, which work without one) because a P.O.
+ * without a job name on it is not a usable document.
+ */
+router.post('/purchase-order', requireAuth, async (req, res) => {
+  try {
+    const projectId = req.body?.projectId;
+    if (!projectId || !isValidUUIDAnyVersion(String(projectId))) {
+      return res.status(400).json({ error: 'projectId is required' });
+    }
+
+    const priced = await priceRequestedConditions(req, res);
+    if (!priced) return;
+
+    const sourcesByComponentId = new Map<string, MaterialLineSource>();
+    for (const assembly of priced.assemblies.values()) {
+      for (const component of assembly.components) {
+        sourcesByComponentId.set(component.id, {
+          description: component.description,
+          productCode: component.productCode,
+          yieldUnit: component.yieldUnit,
+          packagingUnit: component.packagingUnit,
+        });
+      }
+    }
+
+    const lines = buildPurchaseOrderLines(priced.pricings, sourcesByComponentId);
+    const project = await storage.getProject(String(projectId));
+    const warnings: string[] = [];
+    if (priced.unknownAssemblyIds.length > 0) {
+      warnings.push(
+        `${priced.unknownAssemblyIds.length} condition(s) are linked to an assembly that is no longer in the library and are missing from this purchase order.`
+      );
+    }
+
+    return res.json({
+      jobName: project?.name ?? '',
+      jobNumber: project?.jobNumber ?? '',
+      lines,
+      warnings,
+    });
+  } catch (error) {
+    console.error('Error building purchase order:', error);
+    return res.status(500).json({ error: 'Failed to build the purchase order', details: String(error) });
   }
 });
 

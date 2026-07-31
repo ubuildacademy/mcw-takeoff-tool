@@ -1424,6 +1424,19 @@ export const assemblyLibraryService = {
     return response.data;
   },
 
+  /**
+   * Consolidated purchase-order material list across every assembly in the request
+   * (task: PO generator). Requires a projectId — a P.O. without a job name is not a
+   * usable document.
+   */
+  async purchaseOrder(
+    projectId: string,
+    items: AssemblyPriceRequestItem[]
+  ): Promise<PurchaseOrder> {
+    const response = await apiClient.post('/assemblies/purchase-order', { projectId, items });
+    return response.data;
+  },
+
   /** Correct an assembly's name and/or brand without re-importing its workbook. */
   async rename(
     id: string,
@@ -1476,6 +1489,21 @@ export interface AssemblyReport {
   rates: { payrollTaxPct: number; workersCompPct: number; generalLiabilityPct: number };
   /** Non-zero means the buckets do not sum to the job total; do not file it. */
   reconciliationError: number;
+  warnings: string[];
+}
+
+export interface PurchaseOrderLine {
+  product: string;
+  costCode: string | null;
+  qty: number;
+  uom: string;
+  issue: string | null;
+}
+
+export interface PurchaseOrder {
+  jobName: string;
+  jobNumber: string;
+  lines: PurchaseOrderLine[];
   warnings: string[];
 }
 

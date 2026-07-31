@@ -258,6 +258,10 @@ Price a condition through one of your imported assemblies instead of a flat per-
 - **Restoration liability rate** — tick this before downloading for restoration work. It swaps the general-liability rate; everything else is unchanged.
 - **The three accounting rates** live under **Admin → Cost Defaults → Accounting rates**. They only affect how this report splits a total — never what a job is priced at.
 
+#### Purchase order (download)
+
+**Download P.O. (.xlsx)**, next to the budget download, produces one material list consolidated across every assembly-priced condition on the job — a product three different assemblies use shows up once, at the combined quantity, not as three separate lines. The header carries the project's **Job Name** and **Job #** (set the latter in Project Settings, next to Location — it doesn't exist until you set it). **Price and supplier are left blank on purpose**, the same as MCW's own P.O. sheets: confirm pricing live with the supplier rather than sending Meridian's price list out on a document.
+
 #### How the two kinds of cost add up
 
 A project can carry both flat per-unit costs and assembly-priced conditions, and they are totalled separately before being added together:

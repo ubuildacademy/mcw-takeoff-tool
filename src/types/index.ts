@@ -5,6 +5,8 @@ export interface Project {
   name: string;
   client: string;
   location: string;
+  /** Job/project number for paperwork (P.O., work order). Distinct from `id`. */
+  jobNumber?: string;
   status: string;
   description?: string;
   projectType?: string;

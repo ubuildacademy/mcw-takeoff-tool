@@ -176,6 +176,56 @@ export function buildMaterialBudget(
   return lines;
 }
 
+export interface PurchaseOrderLine {
+  /** Component description, as the workbook's MATERIALS column. */
+  product: string;
+  /** The workbook's "Product Codes and Cost codes" column. */
+  costCode: string | null;
+  /** Whole packages to buy, summed across every assembly in the request that uses this product. */
+  qty: number;
+  /** Packaging, e.g. "5gal/pail". */
+  uom: string;
+  /** Set when at least one contributing line could not be trusted (no price, no yield). */
+  issue: string | null;
+}
+
+/**
+ * One purchase line per PRODUCT, not per component instance — this is the actual
+ * difference from `buildMaterialBudget`. A real P.O. is what gets called in to a
+ * supplier: the same primer bought by three different assemblies on the same job is
+ * one order for three times the quantity, not three separate lines. Grouped by
+ * product code, falling back to description when a component is priced by a fixed
+ * literal rather than a Pricing DB lookup (I0 finding 4 — 19 workbooks have no code
+ * at all for some lines).
+ */
+export function buildPurchaseOrderLines(
+  pricings: ConditionPricing[],
+  sourcesByComponentId: Map<string, MaterialLineSource>
+): PurchaseOrderLine[] {
+  const byKey = new Map<string, PurchaseOrderLine>();
+  for (const pricing of pricings) {
+    for (const component of pricing.breakdown.components) {
+      if (!component.included && component.extendedCost === 0 && !component.issue) continue;
+      const source = sourcesByComponentId.get(component.componentId);
+      const key = component.productCode ?? `desc:${component.description ?? component.seq}`;
+      const existing = byKey.get(key);
+      if (existing) {
+        existing.qty += component.packages;
+        if (component.issue && !existing.issue) existing.issue = component.issue;
+      } else {
+        byKey.set(key, {
+          product: component.description || component.productCode || `Line ${component.seq}`,
+          costCode: component.productCode,
+          qty: component.packages,
+          uom: formatUom(source?.yieldUnit ?? null, source?.packagingUnit ?? null),
+          issue: component.issue,
+        });
+      }
+    }
+  }
+  return Array.from(byKey.values());
+}
+
 /**
  * Decompose one priced condition into the accounting buckets.
  *

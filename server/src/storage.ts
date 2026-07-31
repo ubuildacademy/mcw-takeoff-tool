@@ -7,6 +7,7 @@ export interface StoredProject {
   name: string;
   client?: string;
   location?: string;
+  jobNumber?: string;
   status?: 'active' | 'completed' | 'on-hold';
   description?: string;
   projectType?: string;
@@ -101,6 +102,7 @@ interface ProjectRow {
   name: string;
   client?: string;
   location?: string;
+  job_number?: string;
   status?: string;
   description?: string;
   project_type?: string;
@@ -449,6 +451,7 @@ class SupabaseStorage {
       name: item.name,
       client: item.client,
       location: item.location,
+      jobNumber: item.job_number,
       status: (item.status as StoredProject['status']) ?? 'active',
       description: item.description,
       projectType: item.project_type,
@@ -485,6 +488,7 @@ class SupabaseStorage {
       name: data.name,
       client: data.client,
       location: data.location,
+      jobNumber: data.job_number,
       status: data.status,
       description: data.description,
       projectType: data.project_type,
@@ -527,6 +531,7 @@ class SupabaseStorage {
       name: project.name,
       client: project.client,
       location: project.location,
+      job_number: project.jobNumber,
       status: project.status,
       description: project.description,
       project_type: project.projectType,
@@ -541,23 +546,36 @@ class SupabaseStorage {
     };
 
     // Always include user_id in payload - Supabase upsert omits nothing; we never clear ownership
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from(TABLES.PROJECTS)
       .upsert(dbProject, { onConflict: 'id' })
       .select()
       .single();
-    
+
+    // A deployment that has not yet run add_job_number_to_projects.sql keeps saving,
+    // minus the job number, rather than failing every project save.
+    if (error && hasColumnNotFoundError(error) && dbProject.job_number !== undefined) {
+      console.warn('⚠️ job_number column not found. Run migration: server/migrations/add_job_number_to_projects.sql');
+      delete dbProject.job_number;
+      ({ data, error } = await supabase
+        .from(TABLES.PROJECTS)
+        .upsert(dbProject, { onConflict: 'id' })
+        .select()
+        .single());
+    }
+
     if (error) {
       console.error('Error saving project:', error);
       throw error;
     }
-    
+
     // Map snake_case back to camelCase
     return {
       id: data.id,
       name: data.name,
       client: data.client,
       location: data.location,
+      jobNumber: data.job_number,
       status: data.status,
       description: data.description,
       projectType: data.project_type,

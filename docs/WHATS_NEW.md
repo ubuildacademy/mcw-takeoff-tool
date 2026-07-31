@@ -4,6 +4,14 @@ Every update to Meridian Takeoff since the beta program started, newest first. C
 
 ---
 
+## Download a purchase order straight from the Costs tab — 2026-07
+
+**New: "Download P.O. (.xlsx)" next to the budget download.** Every material across every assembly on the job, consolidated into one list — the same product bought by three different assemblies shows up as one line at the combined quantity, not three separate ones. Price is left blank on purpose, same as the source workbooks: confirm it live with the supplier rather than sending out Meridian's price list on a document.
+
+A project needs a **Job #** for this (new field in Project Settings, next to Location) — the job name was already there.
+
+---
+
 ## Company admins can manage their own team — 2026-07
 
 **New: a company admin (not just the platform admin) can open the Admin panel.** They see only their company's tabs — User Management, Product Pricing, Cost Defaults, Assemblies, Help & FAQ — and can invite, reset the password for, and remove people on their own team, plus promote or demote an existing teammate to company admin. They cannot grant anyone the platform tier, and never see another company's settings or people.

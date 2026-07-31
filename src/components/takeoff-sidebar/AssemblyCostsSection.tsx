@@ -27,6 +27,7 @@ import {
 } from '../../services/apiService';
 import { getReportBranding } from './export/branding';
 import { buildAssemblyBudgetWorkbook } from './export/buildAssemblyBudgetWorkbook';
+import { buildPurchaseOrderWorkbook } from './export/buildPurchaseOrderWorkbook';
 import { extractErrorMessage } from '../../utils/commonUtils';
 
 const money = (value: number) =>
@@ -42,6 +43,7 @@ export function AssemblyCostsSection({ projectId }: AssemblyCostsSectionProps) {
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [downloading, setDownloading] = useState(false);
+  const [downloadingPO, setDownloadingPO] = useState(false);
   const [restorationBasis, setRestorationBasis] = useState(false);
   const currentProject = useProjectStore((s) => s.getCurrentProject());
 
@@ -104,6 +106,44 @@ export function AssemblyCostsSection({ projectId }: AssemblyCostsSectionProps) {
     },
     [projectId, currentProject?.name]
   );
+
+  /**
+   * Build and download the consolidated purchase order — one material list across
+   * every assembly on the job, price left blank for the estimator to fill in after
+   * calling the supplier (matches the source workbooks' own P.O. sheet).
+   */
+  const downloadPurchaseOrder = useCallback(async () => {
+    setDownloadingPO(true);
+    try {
+      const [po, branding] = await Promise.all([
+        assemblyLibraryService.purchaseOrder(projectId, itemsRef.current),
+        getReportBranding(),
+      ]);
+      const { buffer, filename } = await buildPurchaseOrderWorkbook(po, branding);
+      const url = URL.createObjectURL(
+        new Blob([buffer], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        })
+      );
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+
+      if (po.warnings.length > 0) {
+        toast.warning(`Purchase order downloaded with ${po.warnings.length} thing(s) to check.`);
+      } else {
+        toast.success('Purchase order downloaded.');
+      }
+    } catch (err) {
+      toast.error(extractErrorMessage(err));
+    } finally {
+      setDownloadingPO(false);
+    }
+  }, [projectId]);
 
   if (items.length === 0) return null;
 
@@ -184,6 +224,16 @@ export function AssemblyCostsSection({ projectId }: AssemblyCostsSectionProps) {
               >
                 <FileSpreadsheet className="w-4 h-4" />
                 {downloading ? 'Building…' : 'Download budgets (.xlsx)'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full flex items-center gap-2"
+                disabled={downloadingPO}
+                onClick={downloadPurchaseOrder}
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                {downloadingPO ? 'Building…' : 'Download P.O. (.xlsx)'}
               </Button>
               {/* The one dial worth showing: it moves real money between the
                   liability and OH&P columns of what accounting posts. */}

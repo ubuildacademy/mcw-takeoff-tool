@@ -913,9 +913,11 @@ UI work until the engine matches real workbooks.
 
 **Order:** ~~I0~~ → ~~I1~~ → ~~I3~~ → ~~I2~~ → ~~I4 (gate PASSED)~~ → ~~I5~~ → ~~I6~~ → ~~I7~~ →
 ~~I8~~ → ~~I8a (Stage 1 retired, assembly totals joined the project total)~~ → ~~I8b
-(searchable brand-grouped library)~~ → ~~I9 (company-admin tier)~~. Stage 2's shippable
-bar is met and the multi-tenant blocker is cleared; what's left is product scope, not
-plumbing — see open item 16 (PO/work-order parity, `docs/OPEN_ITEMS.md`).
+(searchable brand-grouped library)~~ → ~~I9 (company-admin tier)~~ → ~~I11 (purchase order
+generator, item 16's first slice)~~. Stage 2's shippable bar is met and the multi-tenant
+blocker is cleared; what's left of item 16 is the Work Order document (needs new job-info
+data Meridian doesn't capture yet — GC, superintendent, PM, warranty/permit/bond flags) and
+the template-builder question for non-MCW companies.
 
 **Stage 1 is gone as of 2026-07-31** (task I8a below). Its purpose was to price a takeoff
 before the native engine existed, by writing quantities into a copy of the customer's own
@@ -935,12 +937,12 @@ that order is required rather than incidental. I1's migration is applied to Supa
 imported. C6
 (kill the free-text pattern box) folds into I8 and is not run separately.
 
-**Two more migrations landed after that batch and are NOT yet applied to Supabase —
-needs Jeff:** `add_brand_to_assemblies.sql` (I8b) and `add_org_to_user_invitations.sql`
-(I9). Both verified on local Postgres per the established convention. The I9 one matters
-sooner than it looks: until it runs, every newly invited user still lands with no
-company membership at all — the exact bug I9's code fix closes, but the column it writes
-to doesn't exist in production yet.
+**Three more migrations landed after that batch and are NOT yet applied to Supabase —
+needs Jeff:** `add_brand_to_assemblies.sql` (I8b), `add_org_to_user_invitations.sql`
+(I9), and `add_job_number_to_projects.sql` (I11). All verified on local Postgres per the
+established convention. The I9 one matters sooner than it looks: until it runs, every
+newly invited user still lands with no company membership at all — the exact bug I9's
+code fix closes, but the column it writes to doesn't exist in production yet.
 
 **Migration verification (established in I1, reuse it):** a local Postgres 15 runs on
 this machine, so schema migrations do not have to be reviewed by reading. Apply them to
@@ -1626,6 +1628,45 @@ organised by manufacturer, and the picker needed to match.
 
 **Bulk import deferred.** Jeff is importing the library with Claude rather than a dedicated
 script; the Admin one-at-a-time path (with brand) is enough for that.
+
+### Task I11 — Purchase order generator — DONE 2026-07-31
+
+**Why:** first slice of open item 16 (`docs/OPEN_ITEMS.md`) — an MCW assembly workbook is
+also the PO to the supplier, and the app didn't do that yet. Scoped down from the full
+"does everything the workbook does" ask to just the P.O., since it turned out to need the
+least new data: the source sheet's header is JOB NAME + JOB #, nothing else — no GC,
+superintendent, warranty flags the way WORK ORDER needs. That's Work Order territory,
+correctly out of scope here.
+
+**Scoped with Jeff, 2026-07-31:** P.O. first (smallest build); **consolidated per project**
+rather than one-per-assembly like the source workbooks (fewer documents to send out beats
+matching the workbook shape exactly); **price left blank**, matching the workbook — the
+estimator confirms it live with the supplier, Meridian's price list does not go out on a
+document to a vendor.
+
+**Landed:**
+- `add_job_number_to_projects.sql` — nullable `takeoff_projects.job_number`. The one new
+  field the P.O. actually needs; job name is already `project.name`. Column-not-found
+  fallback in `storage.ts` (same pattern as `assembly_id`, `line_thickness`), so a
+  deployment that has not run the migration keeps saving projects, minus the job number.
+- `buildPurchaseOrderLines` (`assemblyReport.ts`) — the actual new logic. One line per
+  PRODUCT CODE, summed across every priced condition in the request, not one row per
+  component instance like `buildMaterialBudget`. A primer three different assemblies use
+  is one order at 3× quantity, not three lines. Falls back to a description-keyed group
+  when a component has no product code (I0 finding 4 — hand-priced lines). 6 tests.
+- `POST /api/assemblies/purchase-order` — mirrors `/report`'s shared
+  `priceRequestedConditions` helper, requires a `projectId` (unlike `/price` and
+  `/report`, which work without one — a P.O. without a job name on it is not a usable
+  document), returns `{ jobName, jobNumber, lines, warnings }`.
+- `buildPurchaseOrderWorkbook.ts` — client-side ExcelJS builder, one sheet, matching the
+  real P.O. sheet's shape: Job Name/Job # header, Materials | Product/Cost Codes | Qty |
+  Price (blank) | S/P (blank). 8 tests.
+- "Download P.O. (.xlsx)" button in `AssemblyCostsSection.tsx`, next to the existing
+  budget download.
+
+**Real workbook read to scope this:** dumped a live MCW workbook's WORK ORDER and P.O.
+sheets via the same pure-Python OOXML approach used for I0/I4 (scratch-only, nothing
+committed) to confirm the actual column shape and header fields before writing any code.
 
 ---
 

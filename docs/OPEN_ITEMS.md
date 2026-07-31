@@ -33,14 +33,20 @@ the PO to the supplier and *is* the work order, and the app doesn't do either ye
   themselves are hand-edited later; normal path going forward is editing pricing/assemblies
   directly in the app.
 
-**Assumed for now:** nothing built yet. This item exists to hold the discussion, not to
-record a decision.
+**P.O. generator shipped 2026-07-31 (Task I11).** Scoped with Jeff to the smaller half
+first: consolidated across the project (not one-per-assembly like the source workbooks),
+price left blank matching the source sheet. See I11 in `IMPLEMENTATION_PLAN.md` for what
+landed.
 
-**To settle:** Jeff scopes what "the app can do everything the workbook can" actually
-requires — a PO document generator and a work-order document generator are two distinct
-features, each closer in size to a Workstream than a task. Needs its own design pass
-before an I-numbered task is written, the way Workstream I itself got `ASSEMBLIES_DESIGN.md`
-before I0.
+**Still open — the bigger half:** the Work Order document needs job-info data Meridian
+does not capture anywhere today (GC name/address/phone, superintendent, PM, owner,
+architect, warranty/permit/bond/NTO flags, contract dates) — real new data model, not a
+templating exercise like the P.O. turned out to be. Also still open: the assembly-vs-
+template distinction for non-MCW companies, the in-app template builder, and the one-time
+MCW workbook bulk-load.
+
+**To settle:** whether/when to build the Work Order's job-info panel — a real feature
+with its own scope, not a detail to fold into another task.
 
 ---
 
