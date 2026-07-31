@@ -2,7 +2,7 @@
  * Product price-list import (Stage 2, task I2).
  *
  * Parses a price list with server/src/scripts/products_import.py (execFile
- * wrapper in the `assemblyWriter.ts` / `assemblyExtractor.ts` pattern), diffs
+ * wrapper in the `assemblyExtractor.ts` pattern), diffs
  * it against what the org already has, and applies the result as an upsert.
  *
  * The MCW Pricing Manager stays the system of record for pricing — this is a

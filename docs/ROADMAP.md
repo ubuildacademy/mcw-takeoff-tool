@@ -20,7 +20,7 @@ Living list of **larger features**, **quality improvements**, and **outstanding 
 
 | Item | Notes |
 |------|--------|
-| **Assemblies** | Two stages per `docs/ASSEMBLIES_DESIGN.md` (grounded in MCW Pricing Manager + Aquafin workbook analysis): **Stage 1** — workbook bridge: per-org assembly registry, condition→workbook mapping, one-click surgical write of takeoff quantity into workbook copies (days). **Stage 2** — native engine: org products table (Pricing Manager schema), assembly components w/ coverage yields, divide-through margin math, workbook bootstrap importer (weeks). |
+| **Assemblies** | Two stages per `docs/ASSEMBLIES_DESIGN.md` (grounded in MCW Pricing Manager + Aquafin workbook analysis). **Stage 1** — workbook bridge: shipped, then removed 2026-07-31 once Stage 2 replaced it. **Stage 2** — native engine: org products table (Pricing Manager schema), assembly components w/ coverage yields, divide-through margin math, workbook bootstrap importer, live condition pricing and branded budget reports. Shipped bar met; company-admin tier (I9) is what remains. |
 | **Live collaboration** | Supabase Realtime channels: measurement broadcast + presence cursors. Append-mostly conflict model. |
 | **AI chat infra overhaul** | Fallback chain, paid tier, rate-limit strategy (currently Ollama Cloud free; DeepSeek swap candidate). Explicitly deferred by owner. |
 

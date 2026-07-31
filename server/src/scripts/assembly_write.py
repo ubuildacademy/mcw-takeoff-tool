@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """
-assembly_write.py — surgical OOXML cell writer for assembly workbooks
-(Stage 1 workbook bridge, see docs/ASSEMBLIES_DESIGN.md).
+assembly_write.py — surgical OOXML cell writer, and the shared low-level
+xlsx toolkit the other scripts read workbooks with.
+
+Written for the Stage 1 workbook bridge, which was removed on 2026-07-31.
+The write CLI below has no caller now, but the module stays: its zip/XML
+primitives (`sheet_name_to_path`, shared-string handling, `_make_xlsx`)
+are imported by assembly_extract.py, products_import.py,
+assembly_costing_golden.py, scope_assembly_parse.py and both selftests.
 
 Pure stdlib (zipfile + regex-scoped XML surgery). NEVER openpyxl for
 writing — it mangles formatting/charts on the real MCW workbooks, and is

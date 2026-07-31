@@ -265,9 +265,21 @@ export interface ProjectCostBreakdown {
     subtotal: number;
     profitMarginPercent: number;
     profitMarginAmount: number;
+    /** Flat per-unit costs plus the project margin. Excludes assembly pricing. */
     totalCost: number;
     conditionsWithCosts: number;
     totalConditions: number;
+    /**
+     * Assembly-priced conditions, last known total from the costing engine.
+     *
+     * Kept apart from `totalCost` because the assembly carries its own margin
+     * chain from the source workbook — putting the project margin on top of it
+     * would mark the same job up twice.
+     */
+    assemblyTotal: number;
+    assemblyConditionCount: number;
+    /** What the job is worth: `totalCost` + `assemblyTotal`. */
+    projectTotal: number;
     /** Measurements whose condition is missing locally (not included in dollar totals). */
     excludedMeasurementsFromCost?: { count: number };
   };

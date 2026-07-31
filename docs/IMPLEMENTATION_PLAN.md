@@ -912,9 +912,19 @@ UI work until the engine matches real workbooks.
    19 workbooks are priced entirely by hand with no Pricing DB lookup (I0 finding 4).
 
 **Order:** ~~I0~~ → ~~I1~~ → ~~I3~~ → ~~I2~~ → ~~I4 (gate PASSED)~~ → ~~I5~~ → ~~I6~~ → ~~I7~~ →
-~~I8~~. Stage 2's shippable bar (live cost + branded in-app report) is met; **I9
-(company-admin tier)** is what remains before any assembly-management UI reaches a second
-company.
+~~I8~~ → ~~I8a (Stage 1 retired, assembly totals joined the project total)~~. Stage 2's
+shippable bar (live cost + branded in-app report) is met; **I9 (company-admin tier)** is
+what remains before any assembly-management UI reaches a second company.
+
+**Stage 1 is gone as of 2026-07-31** (task I8a below). Its purpose was to price a takeoff
+before the native engine existed, by writing quantities into a copy of the customer's own
+spreadsheet; the library it bootstrapped now does that in the app. What went: the workbook
+registry, the condition→cell mappings, `/upload`, `/workbooks`, `/mappings`, `/generate`,
+`assemblyRegistryService.ts`, `assemblyWriter.ts`, and the Costs-tab section that drove
+them. `assembly_write.py` **stays** — its zip/XML primitives are the toolkit
+`assembly_extract.py` and `products_import.py` read workbooks with. The
+`assembly_workbooks` / `assembly_mappings` tables are still in Supabase, holding data;
+dropping them is a separate, deliberate step (open item 14).
 
 **All five Stage 2 migrations are applied to Supabase** — `create_organizations_and_assembly_engine_tables`
 (2026-07-27), then `add_assembly_engine_completeness`, `add_assembly_link_to_conditions`,
@@ -1485,6 +1495,49 @@ If item 10 resolves the other way, this is the second place that changes.
 **Unrecognised units are surfaced, not guessed.** An input in GAL keeps its unit, is
 measured as an area, and the estimator gets a warning naming the condition to check —
 picking a measurement type silently would produce a plausible wrong number.
+
+### Task I8a — Retire Stage 1, join assembly cost to the project total — DONE 2026-07-31
+
+**Why:** first real use of I6–I8 on a live job turned up two things. The project cost
+summary read as though the job had no cost at all, because it only ever totalled flat
+per-unit conditions and could not see the assembly engine's answer. And the Stage 1
+Assembly Workbooks section was still sitting at the bottom of the same tab, now a second
+way to price the same job. Jeff confirmed Stage 1 had served its purpose.
+
+**Landed:**
+- **Stage 1 removed** — see the Stage 2 header above for the exact inventory. ~380 lines
+  of route, two services, five components, and the client service that called them.
+- `assemblyPricingSlice.ts` — the engine's answer, cached per project, so code that
+  cannot await can still read a server-computed total. De-dupes concurrent callers by
+  request signature, ignores a slow response a newer request has superseded, and keeps
+  the last good total when a refresh fails rather than blanking the summary. 6 tests.
+- `assemblyPricingItems.ts` — pure. Conditions + measurements → pricing request, with the
+  signature that decides when a re-price is worth a round trip. 5 tests.
+- `useAssemblyPricing.ts` — one owner of the refresh, called high in the sidebar.
+- `getProjectCostBreakdown` gained `assemblyTotal`, `assemblyConditionCount` and
+  `projectTotal`; `getProjectTotalCost` (the saved project value) now returns
+  `projectTotal`. Costs tab, Reports tab, Excel and PDF all show the three lines.
+- Assembly names no longer carry multer's UUID: `/extract` passes the original filename.
+  `assemblyNameFromFilename` + 8 tests.
+
+**Assembly cost is added AFTER the project margin, as its own line, with no project margin
+on top of it** (Jeff's call). Each assembly already applies the margin chain from its
+source workbook; compounding the project margin on that would quote every assembly job
+high, and the error would grow with the share of the job priced by assemblies. This is why
+`totalCost` kept its old meaning (flat costs + margin) and a new `projectTotal` was added
+rather than the total being redefined in place.
+
+**The cache is deliberately last-known-good.** `getProjectCostBreakdown` is synchronous and
+called from render, so it cannot await the engine; it reads whatever the sidebar's hook
+last stored. The failure mode is a summary that is a few hundred milliseconds stale, which
+beats the alternatives — a flash of zero on every measurement, or each of the four
+consumers firing its own request. A project whose Costs tab has never been open reads 0,
+same as before.
+
+**Known gap:** the projects *list* computes its own totals in `supabaseService.ts` from raw
+rows and still excludes assembly pricing, so a list total can trail the project's own until
+that project is opened. Recorded as open item 15 rather than fixed here — doing it properly
+means pricing every project server-side, which is I9's territory.
 
 ---
 

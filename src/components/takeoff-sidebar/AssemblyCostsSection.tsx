@@ -6,13 +6,11 @@
  * production rate and crew, then the assembly's margin chain and insurance.
  * The numbers move as the takeoff does.
  *
- * WASTE: the quantity sent is the measured value times the condition's
- * multiplier, deliberately WITHOUT the condition's own waste factor. The
- * assembly already carries a waste percentage per quantity input, taken from
- * the source workbook, and applying both would compound two allowances into a
- * silent over-order. One source of waste, and it is the assembly's.
+ * The pricing itself is not fetched here — `useAssemblyPricing`, called once in
+ * the sidebar, keeps the shared cache current so the project cost summary and
+ * the exports read the same total this section displays.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { AlertTriangle, ChevronDown, ChevronRight, FileSpreadsheet, Package } from 'lucide-react';
 import { toast } from 'sonner';
 import { useShallow } from 'zustand/react/shallow';
@@ -20,10 +18,10 @@ import { Button } from '../ui/button';
 import { useConditionStore } from '../../store/slices/conditionSlice';
 import { useMeasurementStore } from '../../store/slices/measurementSlice';
 import { useProjectStore } from '../../store/slices/projectSlice';
+import { useAssemblyPricingStore } from '../../store/slices/assemblyPricingSlice';
+import { buildAssemblyPriceItems } from '../../utils/assemblyPricingItems';
 import {
   assemblyLibraryService,
-  type AssemblyPriceRequestItem,
-  type AssemblyPriceResponse,
   type ConditionPricing,
   type WorkType,
 } from '../../services/apiService';
@@ -42,72 +40,21 @@ export function AssemblyCostsSection({ projectId }: AssemblyCostsSectionProps) {
   const conditions = useConditionStore(useShallow((s) => s.getProjectConditions(projectId)));
   const takeoffMeasurements = useMeasurementStore(useShallow((s) => s.takeoffMeasurements));
 
-  const [result, setResult] = useState<AssemblyPriceResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [pricing, setPricing] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [downloading, setDownloading] = useState(false);
   const [restorationBasis, setRestorationBasis] = useState(false);
   const currentProject = useProjectStore((s) => s.getCurrentProject());
 
-  // The request the server needs: one entry per linked condition, carrying that
-  // condition's live quantity.
-  const items = useMemo<AssemblyPriceRequestItem[]>(() => {
-    return conditions
-      .filter((condition) => condition.assemblyId && condition.assemblyQuantityInputId)
-      .map((condition) => {
-        const quantity = takeoffMeasurements
-          .filter((m) => m.conditionId === condition.id)
-          .reduce((sum, m) => sum + (m.netCalculatedValue ?? m.calculatedValue ?? 0), 0);
-        return {
-          conditionId: condition.id,
-          assemblyId: condition.assemblyId as string,
-          quantityInputId: condition.assemblyQuantityInputId as string,
-          quantity: quantity * (condition.multiplier ?? 1),
-        };
-      });
-  }, [conditions, takeoffMeasurements]);
+  const entry = useAssemblyPricingStore((s) => s.byProject[projectId]);
+  const result = entry?.result ?? null;
+  const pricing = entry?.pricing ?? false;
+  const error = entry?.error ?? null;
 
-  // Re-pricing on every vertex drag would be a request per mouse move. The
-  // signature collapses "same conditions, same quantities" into one string so
-  // the effect only fires when a number an estimator can see actually changed.
-  const signature = useMemo(
-    () =>
-      items
-        .map((item) => `${item.conditionId}:${item.quantityInputId}:${item.quantity.toFixed(4)}`)
-        .join('|'),
-    [items]
-  );
-
+  // The report is requested for exactly the conditions the section is showing,
+  // so it is rebuilt here rather than read from the cache's request.
+  const items = buildAssemblyPriceItems(conditions, takeoffMeasurements);
   const itemsRef = useRef(items);
   itemsRef.current = items;
-
-  const runPricing = useCallback(async () => {
-    const current = itemsRef.current;
-    if (current.length === 0) {
-      setResult(null);
-      setError(null);
-      return;
-    }
-    setPricing(true);
-    try {
-      setResult(await assemblyLibraryService.price(projectId, current));
-      setError(null);
-    } catch (err) {
-      setError(extractErrorMessage(err));
-    } finally {
-      setPricing(false);
-    }
-  }, [projectId]);
-
-  useEffect(() => {
-    if (!signature) {
-      setResult(null);
-      return;
-    }
-    const timer = setTimeout(runPricing, 400);
-    return () => clearTimeout(timer);
-  }, [signature, runPricing]);
 
   /**
    * Build and download the Material / Labor budget workbook.

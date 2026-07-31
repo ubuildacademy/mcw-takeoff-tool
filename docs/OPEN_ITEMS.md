@@ -82,14 +82,12 @@ quantities risks pulling in stray rows across the library for a single case.
 
 ## Deferred technical debt
 
-### 6. `org_id` is nullable on the Stage 1 registry tables
+### 6. `org_id` is nullable on the Stage 1 registry tables — CLOSED 2026-07-31
 
 `assembly_workbooks.org_id` and `assembly_mappings.org_id` were left nullable in the I1
-migration so inserts would not break between applying it and deploying a service that
-supplies the column. The service still does not supply it.
-
-**To settle:** have the Stage 1 upload/mapping routes set `org_id`, backfill any nulls, then
-tighten to `NOT NULL`.
+migration so inserts would not break before a service supplied the column. No service ever
+did, and at I8a the routes that would have were removed with the rest of Stage 1. Nothing
+writes these tables now; whether they are dropped is item 14.
 
 ### 6b. `server/src` sits just under its lint warning cap
 
@@ -110,16 +108,44 @@ CI red again for a reason unrelated to whatever change trips it.
 **To settle:** one session paying the older routes down, or a deliberate decision on what
 the cap is for. Worth checking why the pre-push hook let 152 through in the first place.
 
-### 7. Stage 1 writer hardcodes the sheet name `ASSEMBLY`
+### 7. Stage 1 writer hardcodes the sheet name `ASSEMBLY` — CLOSED 2026-07-31
 
-Flagged at C2. Every MCW workbook uses that name; a non-MCW customer may not. Add an
-optional `sheetName` to the mapping when a real case appears — not before.
+Retired with Stage 1 at I8a. Note that the *extractor* still looks for a sheet named
+`ASSEMBLY` when importing a workbook into the library, so the underlying assumption
+survives — it is just no longer this item's problem.
 
-### 8. Stage 1 multi-input mappings write the same total to every input cell
+### 8. Stage 1 multi-input mappings write the same total to every input cell — CLOSED 2026-07-31
 
-Flagged at C2 and confirmed by I0: the three dual-input workbooks receive the summed total
-in both cells. Stage 2's named quantity inputs are the real fix; Stage 1 is now the escape
-hatch rather than the main path, so this may simply retire.
+Flagged at C2, confirmed by I0, and fixed the way it was always going to be: Stage 2's
+named quantity inputs price each input separately, and Stage 1 was removed at I8a.
+
+### 14. `assembly_workbooks` / `assembly_mappings` still exist in Supabase — needs Jeff
+
+Stage 1's code was removed at I8a; its two tables and the workbook files under the
+`assembly-workbooks` storage prefix were left alone. Nothing reads or writes them.
+
+**Not dropped on purpose.** They hold MCW's real uploads and mappings, and a `DROP TABLE`
+is not a thing to run on a live database as the tail end of a refactor.
+
+**To settle:** Jeff confirms the mappings are of no further interest, then one migration
+drops both tables and one cleanup removes the storage prefix. Until then they are inert
+rows costing nothing.
+
+### 15. The projects list total does not include assembly pricing
+
+**Found:** 2026-07-31, at I8a. Two different things compute a project's worth. Inside a
+project, `getProjectCostBreakdown` now returns `projectTotal` (flat costs + assemblies).
+The projects *list* computes its own total in `supabaseService.ts`, straight from condition
+and measurement rows, and has no way to price an assembly — so a job priced through
+assemblies still shows its flat-cost total there until it is opened.
+
+**Why not fixed here:** the list would have to price every project it lists, which means
+the costing engine running server-side over N projects on a page load. That is a real
+endpoint with real caching, and it wants the org scoping I9 brings.
+
+**To settle:** either a server-side project-total endpoint (the honest fix) or persisting
+`projectTotal` on the project row whenever a project is priced and letting the list read
+the stored value.
 
 ---
 

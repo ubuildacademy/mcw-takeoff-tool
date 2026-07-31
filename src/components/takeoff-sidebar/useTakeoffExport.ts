@@ -5,6 +5,7 @@
 import { useShallow } from 'zustand/react/shallow';
 import { useConditionStore } from '../../store/slices/conditionSlice';
 import { useMeasurementStore } from '../../store/slices/measurementSlice';
+import { useAssemblyPricingStore } from '../../store/slices/assemblyPricingSlice';
 import { useProjectStore } from '../../store/slices/projectSlice';
 import { useAnnotationStore } from '../../store/slices/annotationSlice';
 import { useDocumentViewStore } from '../../store/slices/documentViewSlice';
@@ -35,21 +36,35 @@ function getHiddenMarkupConditionIdsSet(projectId: string): Set<string> {
   return new Set(map?.[projectId] ?? []);
 }
 
-/** Cost summary for exports: omit conditions the user hid from the canvas/reports. */
+/**
+ * Cost summary for exports: omit conditions the user hid from the canvas/reports.
+ *
+ * Assembly pricing is re-summed from the surviving conditions rather than taken
+ * from the breakdown, so hiding a condition removes its assembly cost from the
+ * exported total the same way it removes its flat cost.
+ */
 function filterCostBreakdownForExport(
   breakdown: ProjectCostBreakdown,
-  hiddenIds: Set<string>
+  hiddenIds: Set<string>,
+  assemblyConditionTotals: Record<string, number>
 ): ProjectCostBreakdown {
   const conditions = breakdown.conditions.filter((c) => !hiddenIds.has(c.condition.id));
   let totalMaterialCost = 0;
   let totalEquipmentCost = 0;
   let totalWasteCost = 0;
   let conditionsWithCosts = 0;
+  let assemblyTotal = 0;
+  let assemblyConditionCount = 0;
   conditions.forEach((b) => {
     totalMaterialCost += b.materialCost;
     totalEquipmentCost += b.equipmentCost;
     totalWasteCost += b.wasteCost;
     if (b.hasCosts) conditionsWithCosts++;
+    const assemblyCost = assemblyConditionTotals[b.condition.id];
+    if (assemblyCost != null) {
+      assemblyTotal += assemblyCost;
+      assemblyConditionCount++;
+    }
   });
   const subtotal = totalMaterialCost + totalEquipmentCost + totalWasteCost;
   const profitMarginPercent = breakdown.summary.profitMarginPercent;
@@ -67,6 +82,9 @@ function filterCostBreakdownForExport(
       totalCost,
       conditionsWithCosts,
       totalConditions: conditions.length,
+      assemblyTotal,
+      assemblyConditionCount,
+      projectTotal: totalCost + assemblyTotal,
       ...(breakdown.summary.excludedMeasurementsFromCost != null && {
         excludedMeasurementsFromCost: breakdown.summary.excludedMeasurementsFromCost,
       }),
@@ -306,7 +324,11 @@ export function useTakeoffExport({
       const workbook = new ExcelJS.Workbook();
       const currentProject = useProjectStore.getState().getCurrentProject();
       const hiddenCostIds = getHiddenMarkupConditionIdsSet(projectId);
-      const costBreakdown = filterCostBreakdownForExport(getProjectCostBreakdown(projectId), hiddenCostIds);
+      const costBreakdown = filterCostBreakdownForExport(
+        getProjectCostBreakdown(projectId),
+        hiddenCostIds,
+        useAssemblyPricingStore.getState().getConditionTotals(projectId)
+      );
       const branding = await getReportBranding();
 
       const formatDate = (dateString: string | undefined): string => {
@@ -1034,6 +1056,9 @@ export function useTakeoffExport({
       const subtotalRow = costStartRow + 4;
       const profitMarginRow = costStartRow + 5;
       const totalCostRow = costStartRow + 6;
+      const assemblyTotal = costBreakdown.summary.assemblyTotal;
+      const assemblyRow = totalCostRow + 1;
+      const projectTotalRow = totalCostRow + 2;
       const profitRateCellRef = `B${profitRateRow}`;
       const costInfo = [
         {
@@ -1054,7 +1079,35 @@ export function useTakeoffExport({
           percent: profitMarginPct,
           row: profitMarginRow,
         },
-        { label: 'Total Project Cost', formula: `B${subtotalRow}+B${profitMarginRow}`, value: null, isHighlighted: true, row: totalCostRow },
+        {
+          // Renamed when assemblies are in play: the rows below are what the
+          // job is actually worth, and two "totals" would be one too many.
+          label: assemblyTotal > 0 ? 'Flat Cost Total' : 'Total Project Cost',
+          formula: `B${subtotalRow}+B${profitMarginRow}`,
+          value: null,
+          isHighlighted: assemblyTotal === 0,
+          row: totalCostRow,
+        },
+        // Unlike every other cost cell here, the assembly figure is a value and
+        // not a formula: it comes from the server costing engine, so editing
+        // quantities in this workbook cannot recalculate it. Hence the label.
+        ...(assemblyTotal > 0
+          ? [
+              {
+                label: 'Assembly Pricing (as priced)',
+                formula: null as string | null,
+                value: assemblyTotal as number | null,
+                row: assemblyRow,
+              },
+              {
+                label: 'Project Total',
+                formula: `B${totalCostRow}+B${assemblyRow}`,
+                value: null as number | null,
+                isHighlighted: true,
+                row: projectTotalRow,
+              },
+            ]
+          : []),
       ];
 
       costInfo.forEach((item, index) => {
@@ -1255,7 +1308,16 @@ export function useTakeoffExport({
       const pdf = new jsPDF('p', 'mm', 'a4');
       const currentProject = useProjectStore.getState().getCurrentProject();
       const hiddenCostIds = getHiddenMarkupConditionIdsSet(projectId);
-      const costBreakdown = filterCostBreakdownForExport(getProjectCostBreakdown(projectId), hiddenCostIds);
+      const costBreakdown = filterCostBreakdownForExport(
+        getProjectCostBreakdown(projectId),
+        hiddenCostIds,
+        useAssemblyPricingStore.getState().getConditionTotals(projectId)
+      );
+      const costSummary = costBreakdown.summary;
+      // Cost lines are laid out with a running cursor rather than fixed
+      // offsets — the assembly rows are conditional, so the legend below has to
+      // start wherever they left off.
+      let costY = 105;
 
       pdf.setFontSize(20);
       pdf.setFont('helvetica', 'bold');
@@ -1267,37 +1329,44 @@ export function useTakeoffExport({
         pdf.text(`Generated: ${new Date().toLocaleString()}`, 20, 55);
         pdf.text(`Total Conditions: ${conditionIds.length}`, 20, 65);
         pdf.text(`Pages with Measurements: ${pagesWithMeasurements.size}`, 20, 75);
-        if (costBreakdown.summary.totalCost > 0) {
+        if (costSummary.projectTotal > 0) {
           pdf.setFontSize(14);
           pdf.setFont('helvetica', 'bold');
           pdf.text('Cost Summary', 20, 95);
           pdf.setFontSize(10);
           pdf.setFont('helvetica', 'normal');
-          pdf.text(`Total Project Cost: $${costBreakdown.summary.totalCost.toFixed(2)}`, 20, 105);
-          pdf.text(`Material Cost: $${costBreakdown.summary.totalMaterialCost.toFixed(2)}`, 20, 115);
-          pdf.text(`Equipment Cost: $${costBreakdown.summary.totalEquipmentCost.toFixed(2)}`, 20, 125);
-          pdf.text(`Waste Factor Cost: $${costBreakdown.summary.totalWasteCost.toFixed(2)}`, 20, 135);
-          pdf.text(`Profit Margin: ${costBreakdown.summary.profitMarginPercent}% ($${costBreakdown.summary.profitMarginAmount.toFixed(2)})`, 20, 155);
-          const excl = costBreakdown.summary.excludedMeasurementsFromCost;
+          const line = (text: string) => {
+            pdf.text(text, 20, costY);
+            costY += 10;
+          };
+          line(`Material Cost: $${costSummary.totalMaterialCost.toFixed(2)}`);
+          line(`Equipment Cost: $${costSummary.totalEquipmentCost.toFixed(2)}`);
+          line(`Waste Factor Cost: $${costSummary.totalWasteCost.toFixed(2)}`);
+          line(`Profit Margin: ${costSummary.profitMarginPercent}% ($${costSummary.profitMarginAmount.toFixed(2)})`);
+          if (costSummary.assemblyTotal > 0) {
+            line(`Flat Cost Total: $${costSummary.totalCost.toFixed(2)}`);
+            line(
+              `Assembly Pricing: $${costSummary.assemblyTotal.toFixed(2)} (${costSummary.assemblyConditionCount} condition${costSummary.assemblyConditionCount === 1 ? '' : 's'})`
+            );
+          }
+          pdf.setFont('helvetica', 'bold');
+          line(`Total Project Cost: $${costSummary.projectTotal.toFixed(2)}`);
+          pdf.setFont('helvetica', 'normal');
+          const excl = costSummary.excludedMeasurementsFromCost;
           if (excl && excl.count > 0) {
             pdf.setFontSize(8);
             pdf.setFont('helvetica', 'italic');
             pdf.text(
               `Note: ${excl.count} measurement(s) not included in cost totals (missing condition).`,
               20,
-              163
+              costY
             );
+            costY += 8;
           }
         }
       }
 
-      const costExcl = costBreakdown.summary.excludedMeasurementsFromCost;
-      let legendY =
-        costBreakdown.summary.totalCost > 0
-          ? costExcl && costExcl.count > 0
-            ? 178
-            : 170
-          : 90;
+      let legendY = costSummary.projectTotal > 0 ? costY + 7 : 90;
       pdf.setFontSize(14);
       pdf.setFont('helvetica', 'bold');
       pdf.text('Conditions Legend', 20, legendY);

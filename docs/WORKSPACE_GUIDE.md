@@ -233,7 +233,7 @@ Your choices are **saved per project** and reused automatically the next time yo
 ### Costs tab
 
 - **Assembly Pricing** — Live totals for every condition linked to an assembly (see below).
-- **Project cost summary** — Subtotals, margin, total (when data exists).
+- **Project cost summary** — Subtotals, margin, total (when data exists). When any condition is priced through an assembly, the summary ends with **Flat Cost Total**, **Assembly Pricing** and **Project Total** instead of a single total — see [How the two kinds of cost add up](#how-the-two-kinds-of-cost-add-up).
 - **Profit Margin** — Opens the project profit-margin flow.
 - **Per-condition** breakdown when conditions have **material / equipment / waste** cost fields.
 
@@ -250,7 +250,7 @@ Price a condition through one of your imported assemblies instead of a flat per-
 
 #### Assembly budgets (download)
 
-**Download budgets (.xlsx)** in the Assembly Pricing panel produces the two sheets your assembly workbooks hand to accounting, in your report branding.
+**Download budgets (.xlsx)** in the Assembly Pricing panel produces the two sheets your pricing workbooks hand to accounting, in your report branding.
 
 - **Material Budgets** — one purchase line per component: Product, CostCode, Qty, Amount + Tax, Uom, CostType, Extended. A line Meridian couldn't price is tinted and carries the reason as a cell note rather than being left out.
 - **Labor budgets** — the job total split into posting buckets: Reg. Pay, $P/R Tax, $W/Comp, $ Labor, Material, Equipment, Misc.Exp, $G/Liab, and OH&P as the remainder. Because it's a split of the total rather than a second estimate, the buckets always sum back to it; the sheet includes a live check cell that reads $0.00 unless a figure is edited.
@@ -258,17 +258,21 @@ Price a condition through one of your imported assemblies instead of a flat per-
 - **Restoration liability rate** — tick this before downloading for restoration work. It swaps the general-liability rate; everything else is unchanged.
 - **The three accounting rates** live under **Admin → Cost Defaults → Accounting rates**. They only affect how this report splits a total — never what a job is priced at.
 
-#### Assembly Workbooks
+#### How the two kinds of cost add up
 
-Turn your own pricing spreadsheets into filled-in assembly takeoffs without re-typing quantities by hand.
+A project can carry both flat per-unit costs and assembly-priced conditions, and they are totalled separately before being added together:
 
-- **Where it lives:** Bottom of the **Costs** tab, below the cost breakdown.
-- **Uploading a workbook** (admins only): Click **Upload workbook** and choose an **.xlsx** or **.xlsm** file. On upload, the app scans it for a likely quantity cell and offers a mapping — the "Map this workbook?" dialog **pre-ticks the conditions** whose names match the filename, so you confirm a list rather than type a pattern. **Save**, or **Skip** to map it by hand later.
-- **Choosing conditions:** A mapping is a **tick-list of this project's conditions**; their quantities are summed into the workbook's input cells. Mappings are saved **by condition name**, not by project, so the same mapping keeps working on the next job that uses the same names.
-- **Older mappings** created with a typed name pattern (including a trailing **`*`** wildcard, e.g. `Aquafin*`) keep matching exactly as they did — nothing needs re-mapping.
-- **Manual mapping** (admins only): Click **Add mapping** on a workbook to tick the conditions, set one or more **quantity input cells** (label + cell address, e.g. `C13`), and optional **job info cells** (project name, client, address).
-- **Generating a priced workbook:** Any user can click **Generate assembly** on a mapping that has matching conditions to download a copy of the workbook with quantities filled in. When **two or more** mappings across your workbooks have matching conditions, a **Generate All (N)** button appears to download all of them at once.
-- **Deleting:** Admins can delete a workbook (removes all its mappings) or a single mapping; both ask for confirmation first.
+| Line | What it is |
+| --- | --- |
+| **Flat Cost Total** | Material + equipment + waste from conditions with cost fields, **plus your project profit margin**. |
+| **Assembly Pricing** | Every assembly-priced condition, as the costing engine priced it. |
+| **Project Total** | The two added together. This is the number saved as the project's value and shown on the projects list. |
+
+**Your project profit margin is not applied to assembly pricing.** Each assembly already carries the margin chain from the workbook it came from, and marking that up a second time would quote the job high. Change the project margin and only the flat costs move.
+
+The same three lines appear on the **Reports** tab, in the **Excel** export's Cost Analysis Summary, and in the **PDF** summary page. When nothing is priced through an assembly, the summary reads **Total Cost** as it always has.
+
+One difference in the Excel export: every other cost cell there is a live formula, so editing quantities in the sheet recalculates it. The assembly figure is a fixed value — it comes from the costing engine, not from the sheet — which is why it is labelled **Assembly Pricing (as priced)**.
 
 ---
 

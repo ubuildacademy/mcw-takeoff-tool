@@ -2,8 +2,8 @@
  * Assembly Extractor — thin wrapper around server/src/scripts/assembly_extract.py.
  *
  * Stage 2 bootstrap importer (task I3): parses an uploaded assembly workbook's
- * ASSEMBLY sheet into a native assembly PROPOSAL. Mirrors `assemblyWriter.ts`
- * in shape — same execFile plumbing, same PATH handling, same JSON contract.
+ * ASSEMBLY sheet into a native assembly PROPOSAL. Same execFile plumbing, PATH
+ * handling and JSON contract as `productsImportService.ts`.
  *
  * The output is a proposal, never a saved assembly. Anything the sheet left
  * ambiguous arrives as a flag rather than a guess, and the import review screen
@@ -55,6 +55,20 @@ export interface ExtractedProductionRate {
   ratePerDay: number;
   unit: string | null;
   sourceRow: number;
+}
+
+/**
+ * The assembly name to propose for an uploaded workbook: its filename without
+ * the extension. Uploads reach the parser as a temp file named
+ * `${uuid}-${originalname}`, so the name it derives from the path it was handed
+ * carries that uuid — this is applied over the top from the original filename.
+ */
+export function assemblyNameFromFilename(filename: string): string {
+  return filename
+    .trim()
+    .replace(/\.[A-Za-z0-9]+$/, '')
+    .replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-/i, '')
+    .trim();
 }
 
 export interface AssemblyProposal {
@@ -114,8 +128,15 @@ class AssemblyExtractor {
       .join(':');
   }
 
-  /** Parses `srcPath`'s ASSEMBLY sheet into a native assembly proposal. */
-  async extract(srcPath: string): Promise<AssemblyProposal> {
+  /**
+   * Parses `srcPath`'s ASSEMBLY sheet into a native assembly proposal.
+   *
+   * `originalName` is the filename the user uploaded. The script names the
+   * assembly after the file it was handed, which for an upload is a temp file
+   * prefixed with a uuid — so the name has to come from the caller, or every
+   * imported assembly is called "0f249b88-…-Aquafin 2K".
+   */
+  async extract(srcPath: string, originalName?: string): Promise<AssemblyProposal> {
     if (!(await fs.pathExists(srcPath))) {
       throw new Error(`Workbook not found: ${srcPath}`);
     }
@@ -162,6 +183,10 @@ class AssemblyExtractor {
     }
 
     const proposal = parsed.proposal;
+    if (originalName) {
+      proposal.sourceFile = originalName;
+      proposal.name = assemblyNameFromFilename(originalName) || proposal.name;
+    }
     devLog(
       `📥 Assembly extract: ${proposal.components.length} component(s), ` +
         `${proposal.quantityInputs.length} input(s), ` +

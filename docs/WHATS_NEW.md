@@ -4,13 +4,23 @@ Every update to Meridian Takeoff since the beta program started, newest first. C
 
 ---
 
+## Assembly pricing reaches the project total — 2026-07
+
+**Fixed: the project cost summary now includes assembly pricing.** It used to show only conditions with flat per-unit costs, so a job priced through assemblies could read $0 while the Assembly Pricing panel right above it showed the real number. The summary now ends with three lines — **Flat Cost Total**, **Assembly Pricing**, and **Project Total** — and that Project Total is what gets saved as the project's value on the projects list.
+
+The same three lines are in the **Reports** tab, the **Excel** export and the **PDF** summary. Your project profit margin still applies only to the flat costs: each assembly already carries the margin chain from the workbook it came from, and applying yours on top would quote the job high.
+
+**Assembly names no longer arrive with a long ID in front of them.** Anything already imported that way can be renamed in the library.
+
+**Retired: Assembly Workbooks.** The upload-and-map section at the bottom of the Costs tab is gone. It existed to price a takeoff by writing quantities into a copy of your own spreadsheet, which is what the assembly library now does in the app — with live totals, budget reports, and conditions you can start from an assembly. Importing a workbook into the library (**Admin → Assemblies**) is unaffected.
+
+---
+
 ## Start a condition from an assembly — 2026-07
 
 **New: your assemblies are condition templates.** Open **Templates** at the top of the Conditions tab and your imported assemblies are listed there. Pick "Aquafin 2K" and the conditions it needs arrive ready to draw — linked to the assembly, with the right measurement type and unit, and no cost fields to fill in. Draw anything and the Costs tab prices the whole assembly.
 
 An assembly that prices several quantities adds one condition per quantity, named after it, so nothing is left unmeasured by accident. Waste stays at zero on the condition because the assembly carries its own.
-
-**Mapping a workbook is now a tick-list.** The **Condition pattern** box under Assembly Workbooks is gone — you tick the conditions the workbook prices instead of typing a name and hoping it matches. On upload, the conditions matching the filename come pre-ticked. Mappings you already made keep working, wildcards and all.
 
 ---
 

@@ -5,6 +5,7 @@ import { MeasurementCalculator } from '../../utils/measurementCalculation';
 import { samePdfPageKey } from '../../utils/takeoffMeasurementLookup';
 import { useConditionStore } from './conditionSlice';
 import { useProjectStore } from './projectSlice';
+import { useAssemblyPricingStore } from './assemblyPricingSlice';
 import { devLog, devWarn } from '../../lib/devLog';
 
 export function compareMeasurementsByStackOrder(a: TakeoffMeasurement, b: TakeoffMeasurement): number {
@@ -670,7 +671,7 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
     // Cost calculations
     getProjectTotalCost: (projectId) => {
       const costBreakdown = get().getProjectCostBreakdown(projectId);
-      return costBreakdown.summary.totalCost;
+      return costBreakdown.summary.projectTotal;
     },
     
     getConditionCostBreakdown: (conditionId) => {
@@ -755,7 +756,20 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
       const profitMarginPercent = currentProject?.profitMarginPercent || 15;
       const profitMarginAmount = subtotal * (profitMarginPercent / 100);
       const totalCost = subtotal + profitMarginAmount;
-      
+
+      // Assembly-priced conditions are added after the project margin, as their
+      // own line: the assembly already applied the margin chain its workbook
+      // carries, and marking that up again would inflate the quote. Read from
+      // the cache the sidebar keeps warm — 0 until the engine has answered once.
+      const assemblyConditionTotals = useAssemblyPricingStore.getState().getConditionTotals(projectId);
+      const assemblyTotal = conditions.reduce(
+        (sum, condition) => sum + (assemblyConditionTotals[condition.id] ?? 0),
+        0
+      );
+      const assemblyConditionCount = conditions.filter(
+        (condition) => assemblyConditionTotals[condition.id] != null
+      ).length;
+
       return {
         conditions: conditionBreakdowns,
         summary: {
@@ -768,6 +782,9 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
           totalCost,
           conditionsWithCosts,
           totalConditions: conditions.length,
+          assemblyTotal,
+          assemblyConditionCount,
+          projectTotal: totalCost + assemblyTotal,
           ...(excludedMeasurementsFromCost.count > 0 && { excludedMeasurementsFromCost }),
         }
       };

@@ -1,7 +1,7 @@
 /**
  * Database access for the native assembly library (Stage 2, task I1).
  *
- * Mirrors `assemblyRegistryService.ts` (the Stage 1 workbook registry) in
+ * Mirrors the retired `assemblyRegistryService.ts` (the Stage 1 workbook registry) in
  * shape: typed row mappers, `wrapDatabaseError` on every call, no business
  * logic. The rules that matter — component identity, per-input waste — live in
  * `assemblyLibrary.ts` so they can be tested without a database.

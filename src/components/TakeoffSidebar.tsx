@@ -24,7 +24,8 @@ import { CreateConditionDialog } from './CreateConditionDialog';
 import { SendReportModal } from './SendReportModal';
 import { formatFeetAndInches } from '../lib/utils';
 import { extractErrorMessage } from '../utils/commonUtils';
-import { useTakeoffExport, TakeoffSidebarConditionList, AssemblyWorkbooksSection, AssemblyCostsSection } from './takeoff-sidebar';
+import { useTakeoffExport, TakeoffSidebarConditionList, AssemblyCostsSection } from './takeoff-sidebar';
+import { useAssemblyPricing } from './takeoff-sidebar/useAssemblyPricing';
 import { PDFExportOptionsDialog } from './takeoff-sidebar/PDFExportOptionsDialog';
 import { ConditionTemplatesDialog } from './takeoff-sidebar/ConditionTemplatesDialog';
 import { supabase } from '../lib/supabase';
@@ -81,6 +82,10 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
   const getProjectCostBreakdown = useMeasurementStore((s) => s.getProjectCostBreakdown);
   const _getConditionCostBreakdown = useMeasurementStore((s) => s.getConditionCostBreakdown);
   const supportsWasteFactor = (type: TakeoffCondition['type']) => type !== 'count' && type !== 'auto-count';
+
+  // Owns the assembly pricing refresh for the whole sidebar: the summaries and
+  // the exports below all read the cache it keeps current.
+  useAssemblyPricing(projectId);
 
   const { getQuantityReportData, getCostAnalysisData: _getCostAnalysisData, exportToExcel, exportToPDF, generateExcelBuffer, generatePDFBuffer } = useTakeoffExport({
     projectId,
@@ -462,13 +467,13 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
               return (
                 <div className="space-y-4">
                   {/* Cost Summary Section */}
-                  {costBreakdown.summary.totalCost > 0 && (
+                  {costBreakdown.summary.projectTotal > 0 && (
                     <div className="bg-gradient-to-br from-blue-50 to-indigo-100 rounded-lg p-4 border border-blue-200">
                       <h3 className="text-lg font-semibold text-foreground mb-3">Project Cost Summary</h3>
                       <div className="grid grid-cols-2 gap-4 text-sm">
                         <div className="flex justify-between">
-                          <span className="text-muted-foreground">Total Cost:</span>
-                          <span className="font-semibold text-blue-600">${costBreakdown.summary.totalCost.toFixed(2)}</span>
+                          <span className="text-muted-foreground">Project Total:</span>
+                          <span className="font-semibold text-blue-600">${costBreakdown.summary.projectTotal.toFixed(2)}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">Profit Margin:</span>
@@ -482,6 +487,18 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                           <span className="text-muted-foreground">Conditions with Costs:</span>
                           <span className="font-medium">{costBreakdown.summary.conditionsWithCosts}</span>
                         </div>
+                        {costBreakdown.summary.assemblyTotal > 0 && (
+                          <>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Flat Cost Total:</span>
+                              <span className="font-medium">${costBreakdown.summary.totalCost.toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Assembly Pricing:</span>
+                              <span className="font-medium">${costBreakdown.summary.assemblyTotal.toFixed(2)}</span>
+                            </div>
+                          </>
+                        )}
                       </div>
                       {costBreakdown.summary.excludedMeasurementsFromCost &&
                         costBreakdown.summary.excludedMeasurementsFromCost.count > 0 && (
@@ -494,7 +511,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                     </div>
                   )}
                   {(costBreakdown.summary.excludedMeasurementsFromCost?.count ?? 0) > 0 &&
-                    costBreakdown.summary.totalCost <= 0 && (
+                    costBreakdown.summary.projectTotal <= 0 && (
                       <div className="rounded-lg p-4 border border-amber-200 bg-amber-50">
                         <p className="text-xs text-amber-900">
                           {costBreakdown.summary.excludedMeasurementsFromCost?.count ?? 0} measurement(s) are not
@@ -667,9 +684,32 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                           <span className="text-sm text-green-600 dark:text-green-400 font-medium">${summary.profitMarginAmount.toFixed(2)}</span>
                         </div>
                         <div className="flex justify-between items-center pt-2 border-t border-border">
-                          <span className="text-lg font-bold text-foreground">Total Cost</span>
-                          <span className="text-lg font-bold text-blue-600 dark:text-blue-400">${summary.totalCost.toFixed(2)}</span>
+                          <span className={summary.assemblyTotal > 0 ? 'text-sm text-muted-foreground' : 'text-lg font-bold text-foreground'}>
+                            {summary.assemblyTotal > 0 ? 'Flat Cost Total' : 'Total Cost'}
+                          </span>
+                          <span className={summary.assemblyTotal > 0 ? 'text-sm font-medium text-foreground' : 'text-lg font-bold text-blue-600 dark:text-blue-400'}>
+                            ${summary.totalCost.toFixed(2)}
+                          </span>
                         </div>
+                        {/* Assembly pricing lands after the project margin, on its
+                            own line: the assembly already applied the margin chain
+                            from its workbook, so the project margin must not compound
+                            on top of it. */}
+                        {summary.assemblyTotal > 0 && (
+                          <>
+                            <div className="flex justify-between items-center">
+                              <span className="text-sm text-muted-foreground">
+                                Assembly Pricing ({summary.assemblyConditionCount} condition
+                                {summary.assemblyConditionCount === 1 ? '' : 's'})
+                              </span>
+                              <span className="text-sm font-medium text-foreground">${summary.assemblyTotal.toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between items-center pt-2 border-t border-border">
+                              <span className="text-lg font-bold text-foreground">Project Total</span>
+                              <span className="text-lg font-bold text-blue-600 dark:text-blue-400">${summary.projectTotal.toFixed(2)}</span>
+                            </div>
+                          </>
+                        )}
                       </div>
                     </div>
                     {summary.excludedMeasurementsFromCost &&
@@ -775,10 +815,6 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                 </div>
               );
             })()}
-
-            <div className="mt-6 pt-4 border-t border-border">
-              <AssemblyWorkbooksSection projectId={projectId} />
-            </div>
           </div>
         )}
       </div>

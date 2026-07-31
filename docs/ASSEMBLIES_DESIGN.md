@@ -2,6 +2,12 @@
 
 *2026-07. Basis: read-only analysis of the MCW Pricing Manager (`/Users/jeff/Code/MCW Pricing Manager`) and a live assembly workbook (`Aquafin-2K M.xlsx`). Decision doc for the next-cycle assemblies flagship.*
 
+> **Status, 2026-07-31: Stage 1 shipped, served its purpose, and was removed.** It bought
+> real pricing months before the native engine existed and proved the seam below was the
+> right one. Stage 2 replaced it, so the workbook registry, the condition→cell mappings and
+> the one-click generate are gone from the codebase — the Stage 1 sections here are kept as
+> the record of why they existed. See `docs/IMPLEMENTATION_PLAN.md`, task I8a.
+
 ## What exists today (MCW side)
 
 **Pricing Manager** (Python/Dash desktop app, SQLite at `~/mcw_pricing/mcw_pricing.db`):
