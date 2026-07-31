@@ -21,6 +21,7 @@ import {
   BarChart3,
   DollarSign,
   SlidersHorizontal,
+  Layers,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ollamaService, type OllamaModel } from '../services/ollamaService';
@@ -30,6 +31,7 @@ import { extractErrorMessage } from '../utils/commonUtils';
 import { AdminHelpFaqTab } from './help/AdminHelpFaqTab';
 import { ProductPricingTab } from './admin/ProductPricingTab';
 import { CostDefaultsTab } from './admin/CostDefaultsTab';
+import { AssemblyImportTab } from './admin/AssemblyImportTab';
 import { CHAT_PRESET_CONFIGS, CHAT_PRESET_SETTING_KEY } from '../constants/chatPresets';
 import { knowledgeBaseService } from '../services/knowledgeBaseService';
 import { KB_CHAR_BUDGET } from '../constants/chatPresets';
@@ -78,6 +80,7 @@ export function AdminPanel({ isOpen, onClose, projectId: _projectId }: AdminPane
     | 'usage'
     | 'product-pricing'
     | 'cost-defaults'
+    | 'assemblies'
   >('user-management');
   // AI token usage (provider-decision data)
   const [usage, setUsage] = useState<AiTokenUsageSummary | null>(null);
@@ -726,6 +729,7 @@ When answering questions:
     { id: 'usage', label: 'AI Usage', icon: BarChart3 },
     { id: 'product-pricing', label: 'Product Pricing', icon: DollarSign },
     { id: 'cost-defaults', label: 'Cost Defaults', icon: SlidersHorizontal },
+    { id: 'assemblies', label: 'Assemblies', icon: Layers },
   ];
 
   if (!isOpen) return null;
@@ -781,6 +785,8 @@ When answering questions:
               {activeTab === 'product-pricing' && <ProductPricingTab />}
 
               {activeTab === 'cost-defaults' && <CostDefaultsTab />}
+
+              {activeTab === 'assemblies' && <AssemblyImportTab />}
 
               {activeTab === 'usage' && (
                 <div className="p-6 space-y-6">

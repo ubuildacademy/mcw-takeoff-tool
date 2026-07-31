@@ -4,6 +4,16 @@ Every update to Meridian Takeoff since the beta program started, newest first. C
 
 ---
 
+## Assemblies and cost defaults — 2026-07
+
+**New: import your priced workbooks into Meridian.** Under **Admin → Assemblies**, upload one of your assembly spreadsheets and Meridian reads it — components, coverage yields, the quantity inputs it prices against, production rates, crew and margins — and shows you everything it found *before* saving anything. Fix what it flags, name it, then import.
+
+It flags rather than guesses. A component whose price was pasted over the lookup, a quantity that copies another row, a crew size that's obviously a typo — all called out in the review, and an assembly with unresolved rows is saved flagged rather than quietly priced.
+
+**New: Cost Defaults.** The rates every assembly shares — day rate, labor burden, escalation, tax, insurance and your margin chain — now live once under **Admin → Cost Defaults**. Change the day rate there and every assembly reprices, except the ones that deliberately set their own; each field tells you how many those are. Crew size and production rates stay with the assembly, because they genuinely differ job to job.
+
+---
+
 ## Product pricing list — 2026-07
 
 **New: your price list now lives in Meridian, under Admin → Product Pricing.**

@@ -31,6 +31,14 @@ import {
   type AssemblyMappingInput,
 } from '../services/assemblyRegistryService';
 import { assemblyWriter, type AssemblyCellsBySheet } from '../services/assemblyWriter';
+import { assemblyExtractor } from '../services/assemblyExtractor';
+import {
+  deleteAssembly,
+  getAssemblyDetail,
+  getOrganizationForUser,
+  listAssemblies,
+} from '../services/assemblyLibraryService';
+import { previewAssemblyImport, saveAssemblyFromProposal } from '../services/assemblyImportService';
 
 const router = express.Router();
 
@@ -363,6 +371,113 @@ router.post('/generate', requireAuth, async (req, res) => {
     return res.status(500).json({ error: 'Failed to generate assembly workbook', details: String(error) });
   } finally {
     if (tmpDir) await fs.remove(tmpDir).catch(() => {});
+  }
+});
+
+// ── Stage 2: native assembly library ───────────────────────────────────
+// Import is deliberately TWO steps. `/extract` parses a workbook and returns a
+// proposal without writing anything; the reviewer fixes what the importer
+// flagged; `/import` saves the reviewed proposal. Saving straight from a parse
+// would bake in every gap the extractor could not resolve.
+
+/** The org that owns the library. A user outside one is a setup problem, not an empty list. */
+async function requireLibraryOrg(req: express.Request, res: express.Response) {
+  const org = await getOrganizationForUser(req.user!.id);
+  if (!org) {
+    res.status(409).json({
+      error: 'No organization',
+      message: 'This account is not a member of any company yet, so it has no assembly library.',
+    });
+    return null;
+  }
+  return org;
+}
+
+/** Parse a workbook into a proposal. Writes nothing. */
+router.post('/extract', requireAuth, requireAdmin, handleUpload, async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const org = await requireLibraryOrg(req, res);
+    if (!org) {
+      await fs.remove(req.file.path).catch(() => {});
+      return;
+    }
+
+    const proposal = await assemblyExtractor.extract(req.file.path);
+    await fs.remove(req.file.path).catch(() => {});
+
+    // Show the reviewer what saving WOULD produce — which fields inherit from
+    // the company defaults, and what still blocks pricing.
+    const preview = await previewAssemblyImport(org.id, proposal as never);
+    return res.json({ success: true, proposal, preview });
+  } catch (error) {
+    console.error('Error extracting assembly workbook:', error);
+    if (req.file?.path) await fs.remove(req.file.path).catch(() => {});
+    // A workbook we cannot parse is the file's problem, not the server's.
+    return res.status(400).json({
+      error: 'Failed to read workbook',
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+/** Save a reviewed proposal as a native assembly. */
+router.post('/import', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const org = await requireLibraryOrg(req, res);
+    if (!org) return;
+
+    const proposal = req.body?.proposal;
+    if (!proposal || typeof proposal !== 'object') {
+      return res.status(400).json({ error: 'A proposal is required' });
+    }
+    if (!String(proposal.name ?? '').trim()) {
+      return res.status(400).json({ error: 'The assembly needs a name' });
+    }
+
+    const summary = await saveAssemblyFromProposal(org.id, proposal, {
+      sourceWorkbookId: req.body?.sourceWorkbookId ?? null,
+    });
+    return res.json({ success: true, assembly: summary });
+  } catch (error) {
+    console.error('Error importing assembly:', error);
+    return res.status(500).json({ error: 'Failed to import assembly', details: String(error) });
+  }
+});
+
+router.get('/library', requireAuth, async (req, res) => {
+  try {
+    const org = await requireLibraryOrg(req, res);
+    if (!org) return;
+    return res.json({ assemblies: await listAssemblies(org.id) });
+  } catch (error) {
+    console.error('Error listing assemblies:', error);
+    return res.status(500).json({ error: 'Failed to list assemblies', details: String(error) });
+  }
+});
+
+router.get('/library/:id', requireAuth, validateUUIDParam('id'), async (req, res) => {
+  try {
+    const org = await requireLibraryOrg(req, res);
+    if (!org) return;
+    const assembly = await getAssemblyDetail(org.id, req.params.id);
+    if (!assembly) return res.status(404).json({ error: 'Assembly not found' });
+    return res.json({ assembly });
+  } catch (error) {
+    console.error('Error loading assembly:', error);
+    return res.status(500).json({ error: 'Failed to load assembly', details: String(error) });
+  }
+});
+
+router.delete('/library/:id', requireAuth, requireAdmin, validateUUIDParam('id'), async (req, res) => {
+  try {
+    const org = await requireLibraryOrg(req, res);
+    if (!org) return;
+    await deleteAssembly(org.id, req.params.id);
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting assembly:', error);
+    return res.status(500).json({ error: 'Failed to delete assembly', details: String(error) });
   }
 });
 

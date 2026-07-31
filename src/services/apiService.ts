@@ -1341,6 +1341,114 @@ export interface ProductImportResult {
   summary: ProductListSummary;
 }
 
+// ── Native assembly library (Stage 2) ────────────────────────────────────
+
+export interface ProposalQuantityInput {
+  seq: number;
+  name: string;
+  unit: string | null;
+  wastePct: number;
+  derived?: boolean;
+}
+
+export interface ProposalComponent {
+  seq: number;
+  sourceRow?: number;
+  quantityInputSeq: number | null;
+  additionalQuantityInputSeqs?: number[];
+  description: string | null;
+  productCode: string | null;
+  unitPrice: number | null;
+  coverageYield: number | null;
+  yieldUnit: string | null;
+  packagingUnit: string | null;
+  isOptional: boolean;
+  flags: string[];
+}
+
+export interface ProposalProductionRate {
+  description: string | null;
+  ratePerDay: number;
+  unit: string | null;
+  quantityInputSeq: number | null;
+  roundsUp: boolean;
+  isOptional?: boolean;
+  sourceRow?: number;
+}
+
+export interface AssemblyProposal {
+  sourceFile: string;
+  name: string;
+  quantityInputs: ProposalQuantityInput[];
+  components: ProposalComponent[];
+  productionRates: ProposalProductionRate[];
+  dayRatePerMan: number | null;
+  crewSize: number | null;
+  laborBurdenPct: number | null;
+  marginChain: { name: string; rate: number }[];
+  insuranceRatePerThousand: number | null;
+  insuranceMarginPct: number | null;
+  escalationPct: number | null;
+  surchargePct: number | null;
+  taxPct: number | null;
+  flags: string[];
+  componentFlagCount: number;
+  isClean: boolean;
+}
+
+export interface AssemblyImportPreview {
+  assembly: { name: string; crewSize: number | null; overrides: Record<string, unknown>; importFlags: string[] };
+  components: { seq: number; quantityRule: string; importFlags: string[] }[];
+  productionRates: { seq: number; ratePerDay: number | null }[];
+  /** Why this assembly cannot price yet. Empty means ready. */
+  blockers: string[];
+}
+
+export interface ImportedAssemblySummary {
+  id: string;
+  name: string;
+  componentCount: number;
+  quantityInputCount: number;
+  productionRateCount: number;
+  overriddenFields: string[];
+  blockers: string[];
+}
+
+export interface AssemblyListItem {
+  id: string;
+  name: string;
+  crewSize: number | null;
+  dayRatePerMan: number | null;
+  createdAt: string;
+}
+
+export const assemblyLibraryService = {
+  /** Parse a workbook into a proposal. Writes nothing. */
+  async extract(file: File): Promise<{ proposal: AssemblyProposal; preview: AssemblyImportPreview }> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await apiClient.post('/assemblies/extract', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return { proposal: response.data.proposal, preview: response.data.preview };
+  },
+
+  /** Save a reviewed proposal. */
+  async import(proposal: AssemblyProposal): Promise<ImportedAssemblySummary> {
+    const response = await apiClient.post('/assemblies/import', { proposal });
+    return response.data.assembly;
+  },
+
+  async list(): Promise<AssemblyListItem[]> {
+    const response = await apiClient.get('/assemblies/library');
+    return response.data.assemblies;
+  },
+
+  async remove(id: string): Promise<void> {
+    await apiClient.delete(`/assemblies/library/${id}`);
+  },
+};
+
 export interface CostDefaults {
   dayRatePerMan: number | null;
   laborBurdenPct: number | null;
