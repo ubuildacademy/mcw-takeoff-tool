@@ -399,3 +399,57 @@ Both are extraction gaps, not arithmetic gaps: every case whose cost of
 material+labor+equipment is right has a correct job total, margins and insurance —
 144/144. The margin, insurance and rounding rules are exactly right wherever the inputs
 reach them.
+
+## I7 — the budget report, and where the accounting rates were hiding
+
+The rates that split a job total for accounting are **not on the `ASSEMBLY` sheet**. They
+sit in the top-left corner of `Labor budgets`, which is why I0–I4 never saw them: every
+sweep to that point read `ASSEMBLY` and the pricing helpers around it.
+
+Swept across every workbook carrying the sheet: **P/R Tax 11.33%, W/Comp 7.72%,
+G/Liability 12.73% — 478 out of 478, on all three.** Not 98%, not 231/232. No exceptions
+whatsoever, which is a stronger signal than anything I10 measured, so they went straight
+into `organization_cost_defaults` rather than onto assemblies.
+
+### The labor budget is a reconciliation, not an estimate
+
+This is the thing to understand before reading the sheet. It does not price anything. It
+takes the total the engine already produced and carves it into buckets:
+
+```
+Reg. Pay        = manDays x dayRate          (manDays = crew x calendar days)
+$P/R Tax        = Reg. Pay x 11.33%
+$W/Comp         = Reg. Pay x 7.72%
+$ Labor         = Reg. Pay + $P/R Tax + $W/Comp
+$G/Liab         = TotalCost x 12.73%          <- on the TOTAL, not on pay
+OH&P            = TotalCost - $ Labor - Material - Equipment - Misc.Exp - $G/Liab
+```
+
+OH&P is the plug. That makes the sheet self-checking — the buckets must sum back to
+`TotalCost` — and `reconciliationError` asserts exactly that, in code and again as a live
+formula in the delivered file so the recipient can watch it too.
+
+The `manDays` subtlety is the same trap I4 hit from the other side: `Reg. Pay` has **no
+crew factor**, so the crew has to already be inside `manDays`. It is crew x calendar days,
+not the raw production-rate sum. Billing the production-rate figure would underpay a
+multi-man crew by exactly the crew size.
+
+### The Material column reads $0 in all 478 workbooks
+
+`Labor budgets` reads its Material column from `ASSEMBLY!K59`, and that cell is empty in
+every workbook in the library. So material cost is not lost — it falls through into the
+OH&P residual, because OH&P is whatever is left. The job total is right either way.
+
+Meridian posts the real material total there instead, and says so on the report's Notes
+sheet. Recorded as open item 12: if MCW's accounting has years of history with material
+inside OH&P, matching the workbook may matter more than being correct.
+
+### Davis-Bacon: a prompt with nothing behind it
+
+All 478 workbooks contain the literal string `*Enter DB Classification*` beside a day rate
+labelled "Standard Labor rate". **Not one has it filled in.** A prevailing-wage job is
+evidently handled by typing over the day rate.
+
+So there is no toggle to reproduce — the "Davis-Bacon toggle where present" in the task
+description turns out to describe an empty prompt cell. The report records the labor basis
+and stops there. Open item 13 covers what a real implementation would need.

@@ -44,8 +44,20 @@ import {
 import {
   priceCondition,
   sumConditionPricing,
+  type ConditionPricing,
   type ConditionPricingRequest,
 } from '../services/conditionAssemblyPricing';
+import {
+  buildAssemblyReport,
+  ratesForWorkType,
+  type MaterialLineSource,
+  type WorkType,
+} from '../services/assemblyReport';
+import {
+  resolveAssemblyCostSettings,
+  type AssemblyDetail,
+  type CostDefaultsRecord,
+} from '../services/assemblyLibraryService';
 import { previewAssemblyImport, saveAssemblyFromProposal } from '../services/assemblyImportService';
 
 const router = express.Router();
@@ -489,86 +501,175 @@ router.get('/library/:id', requireAuth, validateUUIDParam('id'), async (req, res
  * rates all come from the server, so a client cannot invent a price; the worst
  * a bad quantity does is misprice that caller's own screen.
  */
+/**
+ * Validate the shared request body and price it. Returns a 400/404 through
+ * `res` and null when the request is bad, so both /price and /report enforce
+ * the same rules — a second copy of this would be a second place for the
+ * project-access check to drift.
+ */
+async function priceRequestedConditions(
+  req: express.Request,
+  res: express.Response
+): Promise<{
+  orgId: string;
+  pricings: ConditionPricing[];
+  assemblies: Map<string, AssemblyDetail>;
+  costDefaults: CostDefaultsRecord;
+  unknownAssemblyIds: string[];
+} | null> {
+  const org = await requireLibraryOrg(req, res);
+  if (!org) return null;
+
+  const { projectId, items } = req.body ?? {};
+  if (!Array.isArray(items)) {
+    res.status(400).json({ error: 'items must be an array' });
+    return null;
+  }
+  if (items.length > 500) {
+    res.status(400).json({ error: 'Too many items in one request (max 500)' });
+    return null;
+  }
+  if (projectId !== undefined && projectId !== null) {
+    if (!isValidUUIDAnyVersion(String(projectId))) {
+      res.status(400).json({ error: 'Invalid projectId' });
+      return null;
+    }
+    const allowed = await hasProjectAccess(req.user!.id, String(projectId), req.user?.role === 'admin');
+    if (!allowed) {
+      res.status(404).json({ error: 'Project not found or access denied' });
+      return null;
+    }
+  }
+
+  const requests: (ConditionPricingRequest & { assemblyId: string })[] = [];
+  for (const item of items) {
+    const conditionId = String(item?.conditionId ?? '');
+    const assemblyId = String(item?.assemblyId ?? '');
+    const quantityInputId = String(item?.quantityInputId ?? '');
+    if (!isValidUUIDAnyVersion(assemblyId) || !isValidUUIDAnyVersion(quantityInputId)) {
+      res.status(400).json({ error: 'Each item needs a valid assemblyId and quantityInputId' });
+      return null;
+    }
+    requests.push({
+      conditionId,
+      assemblyId,
+      quantityInputId,
+      quantity: Number(item?.quantity) || 0,
+    });
+  }
+
+  const costDefaults = await getCostDefaults(org.id);
+  if (requests.length === 0) {
+    return {
+      orgId: org.id,
+      pricings: [],
+      assemblies: new Map(),
+      costDefaults,
+      unknownAssemblyIds: [],
+    };
+  }
+
+  const assemblies = await getAssemblyDetails(org.id, requests.map((r) => r.assemblyId));
+
+  // One price lookup for every code across every assembly asked for.
+  const codes = new Set<string>();
+  for (const assembly of assemblies.values()) {
+    for (const component of assembly.components) {
+      if (component.productCode) codes.add(component.productCode);
+    }
+  }
+  const products = await getProductsByCodes(org.id, [...codes]);
+  const pricesByCode: Record<string, number> = {};
+  for (const [code, product] of products) {
+    if (product.netPrice !== null) pricesByCode[code] = product.netPrice;
+  }
+
+  const pricings: ConditionPricing[] = [];
+  const unknownAssemblyIds: string[] = [];
+  for (const request of requests) {
+    const assembly = assemblies.get(request.assemblyId);
+    // An assembly deleted from the library after a condition was linked to it.
+    // Reported rather than skipped, so the UI can say the link is stale instead
+    // of quietly showing no cost.
+    if (!assembly) {
+      unknownAssemblyIds.push(request.assemblyId);
+      continue;
+    }
+    pricings.push(priceCondition({ assembly, request, pricesByCode, costDefaults }));
+  }
+
+  return { orgId: org.id, pricings, assemblies, costDefaults, unknownAssemblyIds };
+}
+
 router.post('/price', requireAuth, async (req, res) => {
   try {
-    const org = await requireLibraryOrg(req, res);
-    if (!org) return;
-
-    const { projectId, items } = req.body ?? {};
-    if (!Array.isArray(items)) {
-      return res.status(400).json({ error: 'items must be an array' });
-    }
-    if (items.length > 500) {
-      return res.status(400).json({ error: 'Too many items in one request (max 500)' });
-    }
-    if (projectId !== undefined && projectId !== null) {
-      if (!isValidUUIDAnyVersion(String(projectId))) {
-        return res.status(400).json({ error: 'Invalid projectId' });
-      }
-      const allowed = await hasProjectAccess(req.user!.id, String(projectId), req.user?.role === 'admin');
-      if (!allowed) return res.status(404).json({ error: 'Project not found or access denied' });
-    }
-
-    const requests: (ConditionPricingRequest & { assemblyId: string })[] = [];
-    for (const item of items) {
-      const conditionId = String(item?.conditionId ?? '');
-      const assemblyId = String(item?.assemblyId ?? '');
-      const quantityInputId = String(item?.quantityInputId ?? '');
-      if (!isValidUUIDAnyVersion(assemblyId) || !isValidUUIDAnyVersion(quantityInputId)) {
-        return res.status(400).json({ error: 'Each item needs a valid assemblyId and quantityInputId' });
-      }
-      requests.push({
-        conditionId,
-        assemblyId,
-        quantityInputId,
-        quantity: Number(item?.quantity) || 0,
-      });
-    }
-
-    if (requests.length === 0) {
-      return res.json({ pricings: [], totals: sumConditionPricing([]), unknownAssemblyIds: [] });
-    }
-
-    const [assemblies, costDefaults] = await Promise.all([
-      getAssemblyDetails(org.id, requests.map((r) => r.assemblyId)),
-      getCostDefaults(org.id),
-    ]);
-
-    // One price lookup for every code across every assembly asked for.
-    const codes = new Set<string>();
-    for (const assembly of assemblies.values()) {
-      for (const component of assembly.components) {
-        if (component.productCode) codes.add(component.productCode);
-      }
-    }
-    const products = await getProductsByCodes(org.id, [...codes]);
-    const pricesByCode: Record<string, number> = {};
-    for (const [code, product] of products) {
-      if (product.netPrice !== null) pricesByCode[code] = product.netPrice;
-    }
-
-    const pricings = [];
-    const unknownAssemblyIds: string[] = [];
-    for (const request of requests) {
-      const assembly = assemblies.get(request.assemblyId);
-      // An assembly deleted from the library after a condition was linked to
-      // it. Reported rather than skipped, so the UI can say the link is stale
-      // instead of quietly showing no cost.
-      if (!assembly) {
-        unknownAssemblyIds.push(request.assemblyId);
-        continue;
-      }
-      pricings.push(priceCondition({ assembly, request, pricesByCode, costDefaults }));
-    }
-
+    const priced = await priceRequestedConditions(req, res);
+    if (!priced) return;
     return res.json({
-      pricings,
-      totals: sumConditionPricing(pricings),
-      unknownAssemblyIds,
+      pricings: priced.pricings,
+      totals: sumConditionPricing(priced.pricings),
+      unknownAssemblyIds: priced.unknownAssemblyIds,
     });
   } catch (error) {
     console.error('Error pricing conditions:', error);
     return res.status(500).json({ error: 'Failed to price conditions', details: String(error) });
+  }
+});
+
+/**
+ * The Material / Labor budget report (task I7).
+ *
+ * Prices exactly as /price does, then decomposes the result into the buckets
+ * the accounting system posts against. Same auth: every org member may pull a
+ * report, because everyone sees the dollars.
+ */
+router.post('/report', requireAuth, async (req, res) => {
+  try {
+    const priced = await priceRequestedConditions(req, res);
+    if (!priced) return;
+
+    const workType: WorkType = req.body?.workType === 'restoration' ? 'restoration' : 'waterproofing';
+    const rates = ratesForWorkType(priced.costDefaults, workType);
+
+    // Packaging lives on the component, not on the priced line, so the report
+    // needs the assemblies to fill the Uom column.
+    const sourcesByComponentId = new Map<string, MaterialLineSource>();
+    const laborByAssemblyId = new Map<string, { crewSize: number; dayRatePerMan: number }>();
+    for (const assembly of priced.assemblies.values()) {
+      for (const component of assembly.components) {
+        sourcesByComponentId.set(component.id, {
+          description: component.description,
+          productCode: component.productCode,
+          yieldUnit: component.yieldUnit,
+          packagingUnit: component.packagingUnit,
+        });
+      }
+      const settings = resolveAssemblyCostSettings(assembly, priced.costDefaults);
+      laborByAssemblyId.set(assembly.id, {
+        crewSize: assembly.crewSize ?? 0,
+        dayRatePerMan: settings.dayRatePerMan ?? 0,
+      });
+    }
+
+    const report = buildAssemblyReport({
+      pricings: priced.pricings,
+      laborByAssemblyId,
+      sourcesByComponentId,
+      taxPct: priced.costDefaults.taxPct ?? 0,
+      rates,
+      workType,
+    });
+
+    if (priced.unknownAssemblyIds.length > 0) {
+      report.warnings.push(
+        `${priced.unknownAssemblyIds.length} condition(s) are linked to an assembly that is no longer in the library and are missing from this report.`
+      );
+    }
+
+    return res.json({ report, totals: sumConditionPricing(priced.pricings) });
+  } catch (error) {
+    console.error('Error building assembly report:', error);
+    return res.status(500).json({ error: 'Failed to build the report', details: String(error) });
   }
 });
 

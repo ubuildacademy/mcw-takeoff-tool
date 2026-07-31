@@ -157,6 +157,12 @@ router.put('/cost-defaults', requireAuth, requireAdmin, async (req, res) => {
       'taxPct',
       'insuranceRatePerThousand',
       'insuranceMarginPct',
+      // Accounting rates (task I7). They do not price anything — they split an
+      // already-priced total into the buckets the budget report posts against.
+      'payrollTaxPct',
+      'workersCompPct',
+      'generalLiabilityPct',
+      'generalLiabilityRestorationPct',
     ] as const;
 
     const patch: Record<string, unknown> = { updatedBy: req.user!.id };

@@ -247,6 +247,16 @@ Price a condition through one of your imported assemblies instead of a flat per-
 - **Everyone on your team sees the dollars.** Only *importing and editing* the assembly library is limited to admins.
 - **If an assembly is deleted** from the library, conditions linked to it keep their measurements and simply stop pricing, with a note to re-link them.
 
+#### Assembly budgets (download)
+
+**Download budgets (.xlsx)** in the Assembly Pricing panel produces the two sheets your assembly workbooks hand to accounting, in your report branding.
+
+- **Material Budgets** — one purchase line per component: Product, CostCode, Qty, Amount + Tax, Uom, CostType, Extended. A line Meridian couldn't price is tinted and carries the reason as a cell note rather than being left out.
+- **Labor budgets** — the job total split into posting buckets: Reg. Pay, $P/R Tax, $W/Comp, $ Labor, Material, Equipment, Misc.Exp, $G/Liab, and OH&P as the remainder. Because it's a split of the total rather than a second estimate, the buckets always sum back to it; the sheet includes a live check cell that reads $0.00 unless a figure is edited.
+- **Notes** — how to read the report, anything to check before filing, and the two places Meridian differs from the Excel workbook (it fills in Qty, and it posts the real material cost in the Material column instead of letting it fall into OH&P).
+- **Restoration liability rate** — tick this before downloading for restoration work. It swaps the general-liability rate; everything else is unchanged.
+- **The three accounting rates** live under **Admin → Cost Defaults → Accounting rates**. They only affect how this report splits a total — never what a job is priced at.
+
 #### Assembly Workbooks
 
 Turn your own pricing spreadsheets into filled-in assembly takeoffs without re-typing quantities by hand.

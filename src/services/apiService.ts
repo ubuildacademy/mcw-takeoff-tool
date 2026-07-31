@@ -1463,10 +1463,61 @@ export const assemblyLibraryService = {
     return response.data;
   },
 
+  /** Material / Labor budget report for the same linked conditions (task I7). */
+  async report(
+    projectId: string | null,
+    items: AssemblyPriceRequestItem[],
+    workType: WorkType
+  ): Promise<{ report: AssemblyReport }> {
+    const response = await apiClient.post('/assemblies/report', { projectId, items, workType });
+    return response.data;
+  },
+
   async remove(id: string): Promise<void> {
     await apiClient.delete(`/assemblies/library/${id}`);
   },
 };
+
+export type WorkType = 'waterproofing' | 'restoration';
+
+export interface MaterialBudgetLine {
+  product: string;
+  costCode: string | null;
+  qty: number;
+  amountPlusTax: number;
+  uom: string;
+  costType: string;
+  extendedCost: number;
+  issue: string | null;
+}
+
+export interface LaborBudgetRow {
+  description: string;
+  totalCost: number;
+  manDays: number;
+  dayRatePerMan: number;
+  manHours: number;
+  regularPay: number;
+  payrollTax: number;
+  workersComp: number;
+  laborTotal: number;
+  material: number;
+  equipment: number;
+  miscExpense: number;
+  generalLiability: number;
+  overheadAndProfit: number;
+}
+
+export interface AssemblyReport {
+  materialLines: MaterialBudgetLine[];
+  laborRows: LaborBudgetRow[];
+  laborTotals: LaborBudgetRow;
+  workType: WorkType;
+  rates: { payrollTaxPct: number; workersCompPct: number; generalLiabilityPct: number };
+  /** Non-zero means the buckets do not sum to the job total; do not file it. */
+  reconciliationError: number;
+  warnings: string[];
+}
 
 export interface AssemblyQuantityInput {
   id: string;
@@ -1565,6 +1616,12 @@ export interface CostDefaults {
   marginChain: { name: string; rate: number }[];
   insuranceRatePerThousand: number | null;
   insuranceMarginPct: number | null;
+  // Accounting rates (task I7). These do NOT change what a job is priced at —
+  // they carve an already-computed total into the buckets accounting posts.
+  payrollTaxPct: number | null;
+  workersCompPct: number | null;
+  generalLiabilityPct: number | null;
+  generalLiabilityRestorationPct: number | null;
   updatedAt?: string | null;
 }
 

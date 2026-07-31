@@ -142,3 +142,31 @@ already entered on existing conditions.
 
 **What would settle it:** watching a real bid. If the flat fields go unused on linked
 conditions, disable them with a note rather than hiding them.
+
+### 12. The Material column: reproduce the workbook's $0, or post the real cost? — needs Jeff
+
+Raised at I7. Every `Labor budgets` sheet in the library reads its Material column from
+`ASSEMBLY!K59`, which is empty — so material cost falls through into the OH&P residual and
+the Material column reads $0 on all 478 sheets. The job total is unaffected either way,
+because OH&P is the plug.
+
+**Assumed for now:** Meridian posts the real material total in the Material column. That is
+what the column is for, and the report's Notes sheet says explicitly that it differs from
+the workbook here.
+
+**What would settle it:** whether MCW's accounting system expects material under OH&P (in
+which case years of history are on that basis and changing it now creates a discontinuity)
+or has simply been receiving a $0 it ignores. One question to whoever posts these.
+
+### 13. Davis-Bacon is a prompt with no mechanism behind it
+
+Raised at I7. All 478 workbooks contain the literal text `*Enter DB Classification*` beside
+a day rate labelled "Standard Labor rate", and not one has it filled in. A prevailing-wage
+job appears to be handled by overriding the day rate by hand.
+
+**Assumed for now:** no toggle. The report records the labor basis and nothing else, since
+a mechanism that changed the arithmetic would be invented rather than observed.
+
+**What would settle it:** how Jeff actually bids a Davis-Bacon job today. If there is a
+classification table behind it, that is a real feature — per-classification day rates on the
+assembly — and worth its own task rather than a checkbox.

@@ -13,16 +13,22 @@
  * silent over-order. One source of waste, and it is the assembly's.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ChevronDown, ChevronRight, Package } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, FileSpreadsheet, Package } from 'lucide-react';
+import { toast } from 'sonner';
 import { useShallow } from 'zustand/react/shallow';
+import { Button } from '../ui/button';
 import { useConditionStore } from '../../store/slices/conditionSlice';
 import { useMeasurementStore } from '../../store/slices/measurementSlice';
+import { useProjectStore } from '../../store/slices/projectSlice';
 import {
   assemblyLibraryService,
   type AssemblyPriceRequestItem,
   type AssemblyPriceResponse,
   type ConditionPricing,
+  type WorkType,
 } from '../../services/apiService';
+import { getReportBranding } from './export/branding';
+import { buildAssemblyBudgetWorkbook } from './export/buildAssemblyBudgetWorkbook';
 import { extractErrorMessage } from '../../utils/commonUtils';
 
 const money = (value: number) =>
@@ -40,6 +46,9 @@ export function AssemblyCostsSection({ projectId }: AssemblyCostsSectionProps) {
   const [error, setError] = useState<string | null>(null);
   const [pricing, setPricing] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [downloading, setDownloading] = useState(false);
+  const [restorationBasis, setRestorationBasis] = useState(false);
+  const currentProject = useProjectStore((s) => s.getCurrentProject());
 
   // The request the server needs: one entry per linked condition, carrying that
   // condition's live quantity.
@@ -99,6 +108,55 @@ export function AssemblyCostsSection({ projectId }: AssemblyCostsSectionProps) {
     const timer = setTimeout(runPricing, 400);
     return () => clearTimeout(timer);
   }, [signature, runPricing]);
+
+  /**
+   * Build and download the Material / Labor budget workbook.
+   *
+   * The report is fetched fresh rather than derived from what is on screen:
+   * the accounting decomposition must come from the same server-side prices
+   * the total did, not from a response that may be a few edits stale.
+   */
+  const downloadReport = useCallback(
+    async (workType: WorkType) => {
+      setDownloading(true);
+      try {
+        const [{ report }, branding] = await Promise.all([
+          assemblyLibraryService.report(projectId, itemsRef.current, workType),
+          getReportBranding(),
+        ]);
+        const { buffer, filename } = await buildAssemblyBudgetWorkbook(
+          report,
+          branding,
+          currentProject?.name ?? 'project'
+        );
+        const url = URL.createObjectURL(
+          new Blob([buffer], {
+            type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          })
+        );
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = filename;
+        document.body.appendChild(anchor);
+        anchor.click();
+        document.body.removeChild(anchor);
+        URL.revokeObjectURL(url);
+
+        if (report.reconciliationError !== 0) {
+          toast.error('The report does not reconcile to the job total — see its Notes sheet.');
+        } else if (report.warnings.length > 0) {
+          toast.warning(`Report downloaded with ${report.warnings.length} thing(s) to check.`);
+        } else {
+          toast.success('Assembly budgets downloaded.');
+        }
+      } catch (err) {
+        toast.error(extractErrorMessage(err));
+      } finally {
+        setDownloading(false);
+      }
+    },
+    [projectId, currentProject?.name]
+  );
 
   if (items.length === 0) return null;
 
@@ -168,6 +226,29 @@ export function AssemblyCostsSection({ projectId }: AssemblyCostsSectionProps) {
                 conditions have something worth checking before this is quoted.
               </p>
             )}
+
+            <div className="pt-2 space-y-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full flex items-center gap-2"
+                disabled={downloading}
+                onClick={() => downloadReport(restorationBasis ? 'restoration' : 'waterproofing')}
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                {downloading ? 'Building…' : 'Download budgets (.xlsx)'}
+              </Button>
+              {/* The one dial worth showing: it moves real money between the
+                  liability and OH&P columns of what accounting posts. */}
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={restorationBasis}
+                  onChange={(event) => setRestorationBasis(event.target.checked)}
+                />
+                Restoration liability rate (default is waterproofing)
+              </label>
+            </div>
           </div>
 
           {result.unknownAssemblyIds.length > 0 && (

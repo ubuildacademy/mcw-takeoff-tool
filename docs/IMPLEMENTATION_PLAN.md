@@ -911,7 +911,7 @@ UI work until the engine matches real workbooks.
 4. Component prices are **either** a product-code reference **or** a fixed literal —
    19 workbooks are priced entirely by hand with no Pricing DB lookup (I0 finding 4).
 
-**Order:** ~~I0~~ → ~~I1~~ → ~~I3~~ → ~~I2~~ → ~~I4 (gate PASSED)~~ → ~~I5~~ → ~~I6~~ → I7 → I8,
+**Order:** ~~I0~~ → ~~I1~~ → ~~I3~~ → ~~I2~~ → ~~I4 (gate PASSED)~~ → ~~I5~~ → ~~I6~~ → ~~I7~~ → I8,
 with **I9 (company-admin tier)** before any assembly-management UI reaches a second
 company. I1's migration is applied to Supabase and MCW's 1,151-product price list is
 imported. C6
@@ -1305,7 +1305,7 @@ own waste factor: the assembly already carries a waste % per quantity input from
 source workbook, and applying both compounds two allowances into a silent over-order.
 Parked as open item 10 for Jeff to confirm against how he actually bids.
 
-### Task I7 — Branded in-app assembly report
+### Task I7 — Branded in-app assembly report — DONE 2026-07-31
 
 **Do:** downloadable report mirroring the workbook's Material/Labor budget shapes
 (accounting cost codes, Davis-Bacon toggle where present), using the existing branding
@@ -1313,6 +1313,54 @@ settings. This is the deliverable that retires the workbook for bidding.
 
 **Success criteria:** side-by-side with the Excel budget sheets for the same assembly and
 quantity — same line items, same totals; branding applied; help docs updated.
+
+**Measured first (2026-07-31), because the rates were not where I0–I4 looked.** The
+accounting rates live on the `Labor budgets` sheet, not on `ASSEMBLY`, which is why they
+had not surfaced until now. Swept every workbook that has the sheet:
+
+| Rate | Value | Consistency |
+|---|---|---|
+| P/R Tax | 11.33% | **478/478** |
+| W/Comp | 7.72% | **478/478** |
+| G/Liability | 12.73% | **478/478** |
+
+No exceptions at all, so they are company defaults (`add_accounting_rates_to_cost_defaults.sql`),
+not per-assembly. The restoration variant (5.337%) is documented in the sheets but used by
+none of them; stored so the report can offer the basis without anyone re-deriving it.
+
+**Landed:**
+- `assemblyReport.ts` — pure. Material lines and the labor decomposition, with
+  `reconciliationError` as a self-check. 24 tests.
+- `buildAssemblyBudgetWorkbook.ts` — the branded .xlsx: Material Budgets, Labor budgets,
+  Notes. 12 tests that render the file and read it back, asserting the 7- and 14-column
+  orders literally, because this feeds an accounting import.
+- `POST /api/assemblies/report`, sharing `priceRequestedConditions` with `/price` so the
+  project-access check cannot drift between them.
+- Accounting rates editable in Admin → Cost Defaults, in their own section that says
+  plainly they do not change what a job is priced at.
+
+**Side-by-side result:** every column of the Labor budget reproduces
+`Neogard Auto Gard FC.xlsx` and `Aquafin-2K M.xlsx` **to the cent** — man-days, man-hours,
+regular pay, P/R tax, W/comp, labor, G/liability and the OH&P residual — and both
+reconcile to $0.00. (Verified in the scratchpad; the figures are real MCW job numbers and
+are deliberately not committed, same rule as the golden cases.)
+
+**Two deliberate departures from the workbook**, both stated on the report's Notes sheet:
+1. **Qty is filled in.** The workbooks leave that column empty to be completed from the
+   P.O.; the engine already knows the package count.
+2. **Material carries the material cost.** The source sheets read that column from an
+   empty cell (`ASSEMBLY!K59`), so material falls through into the OH&P residual and the
+   Material column reads $0 on *every* sheet in the library. The job total is identical
+   either way — OH&P is the plug — but the split is what accounting posts. Open item 12.
+
+**Davis-Bacon is a prompt, not a mechanism.** All 478 workbooks carry the literal text
+`*Enter DB Classification*` beside a day rate labelled "Standard Labor rate", and **not one
+of them fills it in** — a prevailing-wage job is handled by overriding the day rate by hand.
+Building a toggle that changes the maths would have been inventing behaviour, so the report
+records the labor basis and nothing more. Open item 13.
+
+**Caught by the migration assertions:** `NUMERIC(6,4)`, matching the older rate columns,
+silently rounds the restoration rate 0.05337 → 0.0534. The new columns are `NUMERIC(8,6)`.
 
 ### Task I10 — Company cost defaults (queued 2026-07-30, do before I5 persistence)
 
