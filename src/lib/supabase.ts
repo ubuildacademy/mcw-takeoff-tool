@@ -27,6 +27,9 @@ export interface UserMetadata {
   email?: string
   created_at: string
   updated_at: string
+  /** Company (org) tier — set only when the user belongs to an organization. Task I9. */
+  orgId?: string | null
+  orgRole?: 'company_admin' | 'user' | null
 }
 
 export interface UserInvitation {
@@ -324,6 +327,12 @@ export const authHelpers = {
   async updateUserRole(userId: string, role: 'admin' | 'user') {
     const { userService } = await import('../services/apiService')
     return await userService.updateUserRole(userId, role)
+  },
+
+  // Promote/demote a member's org tier (company admin only, within their own org) - uses backend API
+  async updateOrgRole(userId: string, orgRole: 'company_admin' | 'user') {
+    const { userService } = await import('../services/apiService')
+    return await userService.updateOrgRole(userId, orgRole)
   },
 
   // Delete user (admin only) - uses backend API

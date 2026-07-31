@@ -674,6 +674,12 @@ export const userService = {
     return response.data;
   },
 
+  /** Promote/demote a member's org tier (company_admin vs user). Distinct from the platform role above. */
+  async updateOrgRole(userId: string, orgRole: 'company_admin' | 'user') {
+    const response = await apiClient.patch(`/users/${userId}/org-role`, { orgRole });
+    return response.data;
+  },
+
   async getUsers() {
     const response = await apiClient.get('/users');
     return response.data;

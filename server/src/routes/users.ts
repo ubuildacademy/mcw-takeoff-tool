@@ -4,7 +4,13 @@ import { supabase, TABLES } from '../supabase';
 import { storage } from '../storage';
 import { emailService } from '../services/emailService';
 import { requireAuth, requireAdmin, requireCompanyAdmin, validateUUIDParam } from '../middleware';
-import { getOrganizationForUser, getOrgRole, listOrgMemberIds } from '../services/assemblyLibraryService';
+import {
+  getOrganizationForUser,
+  getOrgRole,
+  listOrgMemberIds,
+  countCompanyAdmins,
+  setOrgRole,
+} from '../services/assemblyLibraryService';
 
 const router = Router();
 
@@ -62,7 +68,32 @@ router.get('/', requireAuth, requireCompanyAdmin, async (req, res) => {
       if (u.email) emailById[u.id] = u.email;
     }
 
-    const users = (metadata || []).map((u) => ({ ...u, email: emailById[u.id] ?? null }));
+    // org_role per listed user, so the panel can render/toggle it (task I9 follow-up —
+    // promoting an existing member was originally left out, then asked for the same day).
+    // A platform admin's list can span orgs even though today there is only one; a
+    // company admin's list is already all-one-org from the scoping above either way.
+    const listedIds = (metadata || []).map((u) => u.id as string);
+    const membershipById: Record<string, { orgId: string; orgRole: string }> = {};
+    if (listedIds.length > 0) {
+      const { data: memberships, error: memberError } = await supabase
+        .from('organization_members')
+        .select('user_id, org_id, org_role')
+        .in('user_id', listedIds);
+      if (memberError) {
+        console.error('Error fetching org memberships:', memberError);
+      } else {
+        for (const m of memberships ?? []) {
+          membershipById[m.user_id as string] = { orgId: m.org_id as string, orgRole: m.org_role as string };
+        }
+      }
+    }
+
+    const users = (metadata || []).map((u) => ({
+      ...u,
+      email: emailById[u.id] ?? null,
+      orgId: membershipById[u.id]?.orgId ?? null,
+      orgRole: membershipById[u.id]?.orgRole ?? null,
+    }));
     res.json(users);
   } catch (error) {
     console.error('Error in get users:', error);
@@ -401,9 +432,59 @@ router.post('/:id/reset-password', requireAuth, requireCompanyAdmin, validateUUI
   }
 });
 
+// Update a member's ORG role (company_admin / user) — a company admin may promote or
+// demote within their own org; a platform admin may act on any user who has one (I9,
+// added the same day as the rest of I9 — Jeff noticed there was no way to promote an
+// existing member, only to invite a new one as one).
+router.patch('/:id/org-role', requireAuth, requireCompanyAdmin, validateUUIDParam('id'), async (req, res) => {
+  try {
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
+    const { id } = req.params;
+    const { orgRole } = req.body;
+
+    if (!['company_admin', 'user'].includes(orgRole)) {
+      return res.status(400).json({ error: 'Invalid orgRole' });
+    }
+
+    // Which org this edit applies to: the caller's own org for a company admin (and the
+    // target must already be in it — reuse the same check as reset-password/delete-user);
+    // the target's own org for a platform admin, since they can act across orgs.
+    let orgId: string | null;
+    if (caller.role === 'admin') {
+      const targetOrg = await getOrganizationForUser(id);
+      orgId = targetOrg?.id ?? null;
+    } else {
+      if (!(await callerMayActOnUser(caller, id))) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      const org = await getOrganizationForUser(caller.id);
+      orgId = org?.id ?? null;
+    }
+    if (!orgId) {
+      return res.status(404).json({ error: 'This user has no organization' });
+    }
+
+    if (orgRole === 'user') {
+      // Don't let an org strand itself with zero company admins — a UX guard, not a
+      // data-integrity one, so it belongs here where the message can be specific.
+      const currentRole = await getOrgRole(id, orgId);
+      if (currentRole === 'company_admin' && (await countCompanyAdmins(orgId)) <= 1) {
+        return res.status(400).json({ error: 'This organization needs at least one company admin' });
+      }
+    }
+
+    await setOrgRole(orgId, id, orgRole);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error updating org role:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Update PLATFORM role (admin only, deliberately not requireCompanyAdmin — this is the
 // platform tier itself, and I9's "Do" #3 is explicit that a company admin may not
-// grant it). A company's own org_role has no editing route yet.
+// grant it). A company's own org_role has its own route, above.
 router.patch('/:id/role', requireAuth, requireAdmin, validateUUIDParam('id'), async (req, res) => {
   try {
     const { id } = req.params;

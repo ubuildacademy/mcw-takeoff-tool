@@ -715,6 +715,20 @@ When answering questions:
     }
   };
 
+  const handleUpdateOrgRole = async (userId: string, newOrgRole: 'company_admin' | 'user') => {
+    const label = newOrgRole === 'company_admin' ? 'company admin' : 'regular member';
+    if (!confirm(`Make this user a ${label}?`)) return;
+
+    try {
+      await authHelpers.updateOrgRole(userId, newOrgRole);
+      await loadUsers();
+      toast.success(`Updated to ${label}!`);
+    } catch (error) {
+      console.error('Error updating org role:', error);
+      toast.error(extractErrorMessage(error, 'Failed to update company role'));
+    }
+  };
+
   const handleDeleteUser = async (userId: string) => {
     if (!confirm('Are you sure you want to delete this user? This will permanently delete all their projects and data.')) return;
     
@@ -1660,6 +1674,7 @@ When answering questions:
                                   Role: {user.role} •
                                   Joined: {new Date(user.created_at).toLocaleDateString()}
                                   {user.company && ` • ${user.company}`}
+                                  {user.orgRole && ` • Company tier: ${user.orgRole === 'company_admin' ? 'Company Admin' : 'User'}`}
                                 </p>
                               </div>
                               <div className="flex items-center gap-2">
@@ -1674,6 +1689,17 @@ When answering questions:
                                     ? <Loader2 className="w-4 h-4 animate-spin" />
                                     : <KeyRound className="w-4 h-4" />}
                                 </Button>
+                                {user.orgId && (
+                                  <select
+                                    value={user.orgRole ?? 'user'}
+                                    onChange={(e) => handleUpdateOrgRole(user.id, e.target.value as 'company_admin' | 'user')}
+                                    className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                    title="Company tier"
+                                  >
+                                    <option value="user" className="bg-background text-foreground">Company: User</option>
+                                    <option value="company_admin" className="bg-background text-foreground">Company: Admin</option>
+                                  </select>
+                                )}
                                 {isPlatformAdmin && (
                                   <select
                                     value={user.role}

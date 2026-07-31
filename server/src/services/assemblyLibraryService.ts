@@ -87,6 +87,40 @@ export async function listOrgMemberIds(orgId: string): Promise<string[]> {
   return (data ?? []).map((row) => row.user_id as string);
 }
 
+/** org_role for every member of `orgId`, keyed by user id — one query for a whole user list. */
+export async function getOrgRolesByUserId(orgId: string): Promise<Record<string, OrgRole>> {
+  const { data, error } = await supabase
+    .from('organization_members')
+    .select('user_id, org_role')
+    .eq('org_id', orgId);
+  if (error) throw wrapDatabaseError('Get org roles by user id', error, { orgId });
+  const result: Record<string, OrgRole> = {};
+  for (const row of data ?? []) result[row.user_id as string] = row.org_role as OrgRole;
+  return result;
+}
+
+export async function countCompanyAdmins(orgId: string): Promise<number> {
+  const { count, error } = await supabase
+    .from('organization_members')
+    .select('user_id', { count: 'exact', head: true })
+    .eq('org_id', orgId)
+    .eq('org_role', 'company_admin');
+  if (error) throw wrapDatabaseError('Count company admins', error, { orgId });
+  return count ?? 0;
+}
+
+/** Promote/demote a member's org_role. Caller (the route) is responsible for the "at least
+ *  one company admin remains" check — that is a UX guard, not a data-integrity one, so it
+ *  belongs where the error message can be specific. */
+export async function setOrgRole(orgId: string, userId: string, orgRole: OrgRole): Promise<void> {
+  const { error } = await supabase
+    .from('organization_members')
+    .update({ org_role: orgRole })
+    .eq('org_id', orgId)
+    .eq('user_id', userId);
+  if (error) throw wrapDatabaseError('Set org role', error, { orgId, userId, orgRole });
+}
+
 // ── Company cost defaults ──────────────────────────────────────────────
 
 interface CostDefaultsRow {

@@ -6,7 +6,7 @@ Every update to Meridian Takeoff since the beta program started, newest first. C
 
 ## Company admins can manage their own team — 2026-07
 
-**New: a company admin (not just the platform admin) can open the Admin panel.** They see only their company's tabs — User Management, Product Pricing, Cost Defaults, Assemblies, Help & FAQ — and can invite, reset the password for, and remove people on their own team. They cannot grant anyone the platform tier, and never see another company's settings or people.
+**New: a company admin (not just the platform admin) can open the Admin panel.** They see only their company's tabs — User Management, Product Pricing, Cost Defaults, Assemblies, Help & FAQ — and can invite, reset the password for, and remove people on their own team, plus promote or demote an existing teammate to company admin. They cannot grant anyone the platform tier, and never see another company's settings or people.
 
 **Fixed: an invited user now actually joins their company.** Previously, accepting an invitation created an account but never added it to the inviting company — the assembly library and product list would tell a freshly invited teammate they belonged to no company at all until someone fixed it by hand. New invitations carry the company along; accepting one now works end to end.
 

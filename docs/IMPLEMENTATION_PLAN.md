@@ -1497,6 +1497,19 @@ assembly-management UI to a second company.
   (both grant the *platform* tier) render only for a platform admin — a company admin's
   invites go out as `role: 'user'` with no way to change that client-side, matching what
   the server now enforces either way.
+- **Promote/demote an existing member's org tier** — added same-day (Jeff noticed there
+  was no way to do this right after I9 shipped; originally scoped out as "invite-time
+  only," see below). `PATCH /users/:id/org-role`: a company admin may act within their own
+  org, a platform admin on any user who has one. Refuses to demote the last
+  `company_admin` of an org (400, not a silent no-op — an org with zero admins is a
+  self-inflicted lockout). `GET /users` now returns `orgId`/`orgRole` per listed user
+  (one extra `organization_members` query, joined by the ids already being returned) so
+  the panel has something to render. New select next to each user's platform-role
+  control, shown whenever they belong to an org.
+- **Confirmed the I1 backfill actually holds in production**, since "does the promote
+  control even have anyone to promote" depends on it: queried Supabase directly
+  (read-only) — all 6 existing users are members of "MCW Companies," 1 already
+  `company_admin`, 5 `user`. Nothing to fix there; the gap was purely the missing control.
 
 **Not done, on purpose:**
 - **No route-level RLS test** — the success criteria above asks to "extend I1's
@@ -1509,9 +1522,6 @@ assembly-management UI to a second company.
 - **No org-creation UI.** A second company still needs its `organizations` row created by
   hand (Jeff, in Supabase) before anyone can be invited into it as its first company admin.
   I9 makes company admins self-sufficient *after* that point, not before.
-- **No org-role editing route.** A company admin can name someone `company_admin` at
-  invite time (`orgRole` on the invite) but cannot promote/demote an existing member
-  afterward — no endpoint exists for it. Add one if this turns out to matter in practice.
 
 ### Task I8 — Assembly as condition template (absorbs C6) — DONE 2026-07-31
 
