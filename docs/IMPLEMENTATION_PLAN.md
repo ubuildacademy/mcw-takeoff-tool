@@ -914,7 +914,13 @@ UI work until the engine matches real workbooks.
 **Order:** ~~I0~~ → ~~I1~~ → ~~I3~~ → ~~I2~~ → ~~I4 (gate PASSED)~~ → ~~I5~~ → ~~I6~~ → ~~I7~~ →
 ~~I8~~. Stage 2's shippable bar (live cost + branded in-app report) is met; **I9
 (company-admin tier)** is what remains before any assembly-management UI reaches a second
-company. I1's migration is applied to Supabase and MCW's 1,151-product price list is
+company.
+
+**All five Stage 2 migrations are applied to Supabase** — `create_organizations_and_assembly_engine_tables`
+(2026-07-27), then `add_assembly_engine_completeness`, `add_assembly_link_to_conditions`,
+`create_organization_cost_defaults` and `add_accounting_rates_to_cost_defaults` in that order
+(Jeff, 2026-07-31, no errors). The last one alters the table the one before it creates, so
+that order is required rather than incidental. I1's migration is applied to Supabase and MCW's 1,151-product price list is
 imported. C6
 (kill the free-text pattern box) folds into I8 and is not run separately.
 
