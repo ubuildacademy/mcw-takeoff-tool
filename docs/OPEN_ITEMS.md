@@ -91,6 +91,25 @@ supplies the column. The service still does not supply it.
 **To settle:** have the Stage 1 upload/mapping routes set `org_id`, backfill any nulls, then
 tighten to `NOT NULL`.
 
+### 6b. `server/src` sits just under its lint warning cap
+
+**Found:** 2026-07-31, at I8 — `npm run ci:local` was failing on `lint:server`, 157 warnings
+against `--max-warnings 150`. Not caused by I8: the count was **152 before Workstream I
+started** (measured back through twelve commits), so the ratchet had been broken for some
+time and the pre-push hook was evidently not stopping it.
+
+**Done meanwhile:** cleaned the twelve warnings in the three files Workstream I owns
+(`routes/assemblies.ts`, `routes/products.ts`, `assemblyCosting.golden.test.ts`) — explicit
+`req.user` guards instead of `!`, `unknown` instead of `any` on the multer callbacks, and
+narrowing instead of assertions in the golden test. 157 → 146, so CI passes with margin.
+
+**Not done:** the other ~146 warnings, almost all `any` and `req.user!` across the older
+routes (`ocr.ts` 22, `files.ts` 16, `conditions.ts` 12…). Four more warnings anywhere puts
+CI red again for a reason unrelated to whatever change trips it.
+
+**To settle:** one session paying the older routes down, or a deliberate decision on what
+the cap is for. Worth checking why the pre-push hook let 152 through in the first place.
+
 ### 7. Stage 1 writer hardcodes the sheet name `ASSEMBLY`
 
 Flagged at C2. Every MCW workbook uses that name; a non-MCW customer may not. Add an
@@ -114,3 +133,61 @@ no longer matches its own price list until someone opens it in Excel.
 
 Not a defect to fix — it is an argument for the native engine, and worth saying out loud in
 sales material. Recorded so it is not rediscovered as a bug.
+
+### 10. Does a condition's waste factor apply on top of the assembly's? — needs Jeff
+
+Raised at I6. A condition carries a waste % and so does every assembly quantity input
+(read from the source workbook). Applying both compounds them: 10% on the condition and
+10% in the workbook orders 21% extra, quietly.
+
+**Assumed for now:** the assembly wins. The quantity sent to the engine is measured value
+× the condition's multiplier, *without* the condition's waste factor. One source of waste,
+and it is the one the workbook has always used. Confirmed by Jeff 2026-07-31, so I8's
+assembly-generated conditions are created with waste 0 — the second place that changes if
+this is ever revisited.
+
+**What would settle it:** how Jeff actually bids a job where the field allowance differs
+from the product's — is condition waste a second allowance on top (scaffold-dependent
+overage), or the same number entered in two places? If it is a genuine second allowance,
+the fix is to multiply it in and label both in the Costs panel.
+
+### 11. Assembly-linked conditions still show the flat cost fields
+
+Raised at I6. The condition dialog shows Material Cost and Equipment Cost below the
+assembly picker even once an assembly is chosen, and the Costs tab renders both the flat
+per-unit summary and the assembly total. Nothing double-counts — they are separate
+sections — but a condition could carry a stray $/SF that no longer means anything.
+
+**Assumed for now:** leave both visible. Hiding the flat fields would strand values
+already entered on existing conditions.
+
+**What would settle it:** watching a real bid. If the flat fields go unused on linked
+conditions, disable them with a note rather than hiding them.
+
+### 12. The Material column: reproduce the workbook's $0, or post the real cost? — needs Jeff
+
+Raised at I7. Every `Labor budgets` sheet in the library reads its Material column from
+`ASSEMBLY!K59`, which is empty — so material cost falls through into the OH&P residual and
+the Material column reads $0 on all 478 sheets. The job total is unaffected either way,
+because OH&P is the plug.
+
+**Assumed for now:** Meridian posts the real material total in the Material column. That is
+what the column is for, and the report's Notes sheet says explicitly that it differs from
+the workbook here.
+
+**What would settle it:** whether MCW's accounting system expects material under OH&P (in
+which case years of history are on that basis and changing it now creates a discontinuity)
+or has simply been receiving a $0 it ignores. One question to whoever posts these.
+
+### 13. Davis-Bacon is a prompt with no mechanism behind it
+
+Raised at I7. All 478 workbooks contain the literal text `*Enter DB Classification*` beside
+a day rate labelled "Standard Labor rate", and not one has it filled in. A prevailing-wage
+job appears to be handled by overriding the day rate by hand.
+
+**Assumed for now:** no toggle. The report records the labor basis and nothing else, since
+a mechanism that changed the arithmetic would be invented rather than observed.
+
+**What would settle it:** how Jeff actually bids a Davis-Bacon job today. If there is a
+classification table behind it, that is a real feature — per-classification day rates on the
+assembly — and worth its own task rather than a checkbox.

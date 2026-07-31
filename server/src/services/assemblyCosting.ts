@@ -292,8 +292,12 @@ export function computeJobDurationDays(manDays: number, crewSize: number): numbe
 }
 
 export interface LaborInputs {
-  /** One entry per production-rate line, with the quantity that line covers. */
-  rates: { ratePerDay: number; quantity: number }[];
+  /**
+   * One entry per production-rate line, with the quantity that line covers.
+   * `roundsUp` is the source workbook's per-line rounding behaviour and
+   * defaults to true (the majority layout) — see `computeLaborDays`.
+   */
+  rates: { ratePerDay: number; quantity: number; roundsUp?: boolean }[];
 }
 
 /**

@@ -2,6 +2,10 @@
  * Condition templates ("trade packs"): save this project's condition list as a
  * reusable template, or apply a saved template to seed the current project.
  * New-project setup drops from re-creating dozens of conditions to one click.
+ *
+ * Task I8 adds the library's priced assemblies as a second kind of template:
+ * picking one creates the conditions it needs measured, already wired to the
+ * assembly, so the Costs tab prices them the moment anything is drawn.
  */
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
@@ -18,6 +22,9 @@ import {
 import { useConditionStore } from '../../store/slices/conditionSlice';
 import { authHelpers } from '../../lib/supabase';
 import type { TakeoffCondition } from '../../types';
+import { assemblyLibraryService, type AssemblyListItem } from '../../services/apiService';
+import { buildConditionsFromAssembly } from '../../utils/assemblyConditionTemplate';
+import { generateDistinctColor, extractErrorMessage } from '../../utils/commonUtils';
 
 interface ConditionTemplatesDialogProps {
   open: boolean;
@@ -42,11 +49,18 @@ export function ConditionTemplatesDialog({
   const [newName, setNewName] = useState('');
   const [applyingId, setApplyingId] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [assemblies, setAssemblies] = useState<AssemblyListItem[]>([]);
 
   useEffect(() => {
     if (!open) return;
     loadConditionTemplates();
     authHelpers.getCurrentUser().then((user) => setCurrentUserId(user?.id ?? null));
+    // Having no library — or no org yet — is not an error worth a toast; the
+    // section simply doesn't render.
+    assemblyLibraryService
+      .list()
+      .then(setAssemblies)
+      .catch(() => setAssemblies([]));
   }, [open, loadConditionTemplates]);
 
   const handleSave = () => {
@@ -99,6 +113,44 @@ export function ConditionTemplatesDialog({
     }
   };
 
+  const handleApplyAssembly = async (assembly: AssemblyListItem) => {
+    if (applyingId) return;
+    setApplyingId(assembly.id);
+    try {
+      const detail = await assemblyLibraryService.detail(assembly.id);
+      if (detail.quantityInputs.length === 0) {
+        toast.error(`"${assembly.name}" has no quantity to measure — re-import it before using it here.`);
+        return;
+      }
+
+      const { drafts, unrecognizedUnits } = buildConditionsFromAssembly(detail, {
+        existingNames: conditions.map((c) => c.name),
+        existingColors: conditions.map((c) => c.color).filter(Boolean),
+        pickColor: generateDistinctColor,
+      });
+
+      const addCondition = useConditionStore.getState().addCondition;
+      for (const draft of drafts) {
+        await addCondition({ ...draft, projectId });
+      }
+
+      toast.success(
+        `Added ${drafts.length} condition${drafts.length === 1 ? '' : 's'} from "${assembly.name}" — ` +
+          'draw on a sheet and the Costs tab prices the assembly.'
+      );
+      if (unrecognizedUnits.length > 0) {
+        toast.warning(
+          `Check the measurement type on: ${unrecognizedUnits.join(', ')} — the assembly's unit isn't one Meridian measures.`
+        );
+      }
+      onOpenChange(false);
+    } catch (error) {
+      toast.error(extractErrorMessage(error, `Failed to add conditions from "${assembly.name}"`));
+    } finally {
+      setApplyingId(null);
+    }
+  };
+
   return (
     <BaseDialog
       open={open}
@@ -114,6 +166,31 @@ export function ConditionTemplatesDialog({
       }
     >
       <div className="space-y-5">
+        {assemblies.length > 0 && (
+          <div className="space-y-2">
+            <Label>Start from a priced assembly</Label>
+            <div className="max-h-48 overflow-y-auto rounded-md border divide-y">
+              {assemblies.map((assembly) => (
+                <div key={assembly.id} className="flex items-center gap-3 px-3 py-2">
+                  <p className="flex-1 min-w-0 truncate text-sm font-medium">{assembly.name}</p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleApplyAssembly(assembly)}
+                    disabled={applyingId !== null}
+                  >
+                    {applyingId === assembly.id ? 'Adding…' : 'Add condition'}
+                  </Button>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Creates the conditions this assembly needs measured, already priced by it — no
+              wiring, and no per-unit costs to enter. Waste comes from the assembly.
+            </p>
+          </div>
+        )}
+
         <div className="space-y-2">
           <Label htmlFor="template-name">Save current conditions as a template</Label>
           <div className="flex gap-2">

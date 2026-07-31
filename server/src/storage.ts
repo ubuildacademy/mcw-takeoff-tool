@@ -87,6 +87,10 @@ export interface StoredCondition {
   subQuantityType?: 'linear' | 'area' | 'volume';
   subQuantityUnit?: string;
   subQuantityPerCount?: number;
+  /** Assembly this condition is priced by (task I6). Null means flat costs. */
+  assemblyId?: string | null;
+  /** Which of that assembly's named quantity inputs the takeoff quantity feeds. */
+  assemblyQuantityInputId?: string | null;
   createdAt: string;
   aiGenerated?: boolean;
 }
@@ -155,6 +159,8 @@ interface ConditionRow {
   sub_quantity_type?: string;
   sub_quantity_unit?: string;
   sub_quantity_per_count?: number;
+  assembly_id?: string | null;
+  assembly_quantity_input_id?: string | null;
   created_at?: string;
   ai_generated?: boolean;
 }
@@ -740,6 +746,8 @@ class SupabaseStorage {
       ...(item.sub_quantity_type != null && { subQuantityType: item.sub_quantity_type as StoredCondition['subQuantityType'] }),
       ...(item.sub_quantity_unit != null && { subQuantityUnit: item.sub_quantity_unit }),
       ...(item.sub_quantity_per_count != null && { subQuantityPerCount: item.sub_quantity_per_count }),
+      ...(item.assembly_id != null && { assemblyId: item.assembly_id }),
+      ...(item.assembly_quantity_input_id != null && { assemblyQuantityInputId: item.assembly_quantity_input_id }),
       createdAt: item.created_at ?? '',
       ...(item.ai_generated !== undefined && { aiGenerated: item.ai_generated })
     }));
@@ -786,6 +794,8 @@ class SupabaseStorage {
       ...(item.sub_quantity_type != null && { subQuantityType: item.sub_quantity_type as StoredCondition['subQuantityType'] }),
       ...(item.sub_quantity_unit != null && { subQuantityUnit: item.sub_quantity_unit }),
       ...(item.sub_quantity_per_count != null && { subQuantityPerCount: item.sub_quantity_per_count }),
+      ...(item.assembly_id != null && { assemblyId: item.assembly_id }),
+      ...(item.assembly_quantity_input_id != null && { assemblyQuantityInputId: item.assembly_quantity_input_id }),
       createdAt: item.created_at ?? '',
       ...(item.ai_generated !== undefined && { aiGenerated: item.ai_generated }),
     };
@@ -843,6 +853,8 @@ class SupabaseStorage {
       ...(item.sub_quantity_type != null && { subQuantityType: item.sub_quantity_type as StoredCondition['subQuantityType'] }),
       ...(item.sub_quantity_unit != null && { subQuantityUnit: item.sub_quantity_unit }),
       ...(item.sub_quantity_per_count != null && { subQuantityPerCount: item.sub_quantity_per_count }),
+      ...(item.assembly_id != null && { assemblyId: item.assembly_id }),
+      ...(item.assembly_quantity_input_id != null && { assemblyQuantityInputId: item.assembly_quantity_input_id }),
       createdAt: item.created_at ?? '',
       ...(item.ai_generated !== undefined && { aiGenerated: item.ai_generated })
     }));
@@ -924,6 +936,18 @@ class SupabaseStorage {
     if (condition.subQuantityPerCount !== undefined) {
       dbCondition.sub_quantity_per_count = condition.subQuantityPerCount ?? null;
     }
+    // The assembly link is written as a pair. Clearing the assembly must clear
+    // the input with it, or the database trigger rejects the row (an input
+    // pointing at no assembly), and a stale input id would price the next
+    // assembly against the wrong components.
+    if (condition.assemblyId !== undefined) {
+      dbCondition.assembly_id = condition.assemblyId ?? null;
+      dbCondition.assembly_quantity_input_id = condition.assemblyId
+        ? condition.assemblyQuantityInputId ?? null
+        : null;
+    } else if (condition.assemblyQuantityInputId !== undefined) {
+      dbCondition.assembly_quantity_input_id = condition.assemblyQuantityInputId ?? null;
+    }
 
     let result = await supabase
       .from(TABLES.CONDITIONS)
@@ -943,7 +967,23 @@ class SupabaseStorage {
         .select()
         .single();
     }
-    
+
+    // Same fallback for the assembly link: a deployment that has not yet run
+    // add_assembly_link_to_conditions.sql keeps working, minus the link, rather
+    // than failing every condition save.
+    if (result.error && hasColumnNotFoundError(result.error) && dbCondition.assembly_id !== undefined) {
+      console.warn(
+        '⚠️ assembly_id column not found. Run migration: server/migrations/add_assembly_link_to_conditions.sql'
+      );
+      delete dbCondition.assembly_id;
+      delete dbCondition.assembly_quantity_input_id;
+      result = await supabase
+        .from(TABLES.CONDITIONS)
+        .upsert(dbCondition)
+        .select()
+        .single();
+    }
+
     if (result.error) {
       console.error('Error saving condition:', result.error);
       throw result.error;
@@ -978,6 +1018,11 @@ class SupabaseStorage {
       ...(data.sub_quantity_type != null && { subQuantityType: data.sub_quantity_type as StoredCondition['subQuantityType'] }),
       ...(data.sub_quantity_unit != null && { subQuantityUnit: data.sub_quantity_unit }),
       ...(data.sub_quantity_per_count != null && { subQuantityPerCount: data.sub_quantity_per_count }),
+      // Written above and mapped by all three read paths; omitting it here made
+      // a freshly saved condition read as 1x until the next load.
+      ...(data.multiplier != null && { multiplier: data.multiplier }),
+      ...(data.assembly_id != null && { assemblyId: data.assembly_id }),
+      ...(data.assembly_quantity_input_id != null && { assemblyQuantityInputId: data.assembly_quantity_input_id }),
       createdAt: data.created_at,
       ...(data.ai_generated !== undefined && { aiGenerated: data.ai_generated })
     };

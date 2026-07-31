@@ -192,6 +192,7 @@ Reuse a set of conditions across projects instead of rebuilding trade packs by h
 - **Where to open it:** **Templates** button next to the **Takeoff Conditions** heading, at the top of the Conditions tab.
 - **Save a template:** In the dialog, name the template (e.g. "Waterproofing — Div 7" or "Residential drywall") and save. It captures the **current project's** conditions — type, unit, color, waste factor, costs, multiplier, and sub-quantity settings.
 - **Apply a template:** Pick a saved template and apply it to seed conditions into the current project. Rows whose **name already exists** in the project are skipped, so applying a template twice (or into a project that already has some of those conditions) will not create duplicates.
+- **Start from a priced assembly:** The top of the dialog lists your imported assemblies. **Add condition** creates the conditions that assembly needs measured — already linked to it, so they price on the Costs tab as soon as you draw, with no cost fields to fill in. An assembly that prices several quantities ("SF-Floor," "SF-Wall," "LF-Cove") adds one condition per quantity, named after it. Measurement type and unit come from the assembly's own units; if it uses a unit Meridian doesn't measure (e.g. GAL), you're told which condition to check. **Waste** is left at zero on purpose — it comes from the assembly.
 - **What is not included:** Auto-count **search images** are not part of a template — auto-count conditions come back without their reference imagery and need it re-added.
 - **Where templates live:** Templates are saved to your **account**, so they follow you to any device you sign in on. (Templates created in an older version that lived in the browser are **imported automatically** the first time you open the dialog.)
 - **Sharing with your team:** Toggle a template to **Shared** to publish it to everyone in your deployment. Shared templates carry a **Shared** badge and are **read-only** to other users — only the owner (or an admin) can rename, edit sharing, or delete them. Anyone can **apply** a shared template to their own projects.
@@ -231,18 +232,41 @@ Your choices are **saved per project** and reused automatically the next time yo
 
 ### Costs tab
 
+- **Assembly Pricing** — Live totals for every condition linked to an assembly (see below).
 - **Project cost summary** — Subtotals, margin, total (when data exists).
 - **Profit Margin** — Opens the project profit-margin flow.
 - **Per-condition** breakdown when conditions have **material / equipment / waste** cost fields.
+
+#### Assembly Pricing
+
+Price a condition through one of your imported assemblies instead of a flat per-unit cost. The number updates as you measure.
+
+- **Linking a condition:** In the condition dialog (create or edit), pick one under **Price with assembly**. If that assembly prices more than one quantity — "SF-Floor," "SF-Wall," "LF-Cove" — a second dropdown asks which one this condition measures. When it prices only one, nothing is asked.
+- **What you get:** Materials by coverage yield against your imported price list, labor from the assembly's production rates and crew size, then its margin chain and insurance. Expand a condition to see every component line, package counts, and each margin step.
+- **Waste** comes from the assembly, not the condition. The assembly already carries a waste percentage for each quantity it prices, taken from your workbook; the condition's own waste factor is not applied on top of it.
+- **Unmeasured quantities are called out.** Link a condition to "SF-Floor" on an assembly that also prices "SF-Wall," and the wall components price at $0 with a note saying so — until another condition measures them. A total that quietly omits part of an assembly is the thing this is built to prevent.
+- **Everyone on your team sees the dollars.** Only *importing and editing* the assembly library is limited to admins.
+- **If an assembly is deleted** from the library, conditions linked to it keep their measurements and simply stop pricing, with a note to re-link them.
+
+#### Assembly budgets (download)
+
+**Download budgets (.xlsx)** in the Assembly Pricing panel produces the two sheets your assembly workbooks hand to accounting, in your report branding.
+
+- **Material Budgets** — one purchase line per component: Product, CostCode, Qty, Amount + Tax, Uom, CostType, Extended. A line Meridian couldn't price is tinted and carries the reason as a cell note rather than being left out.
+- **Labor budgets** — the job total split into posting buckets: Reg. Pay, $P/R Tax, $W/Comp, $ Labor, Material, Equipment, Misc.Exp, $G/Liab, and OH&P as the remainder. Because it's a split of the total rather than a second estimate, the buckets always sum back to it; the sheet includes a live check cell that reads $0.00 unless a figure is edited.
+- **Notes** — how to read the report, anything to check before filing, and the two places Meridian differs from the Excel workbook (it fills in Qty, and it posts the real material cost in the Material column instead of letting it fall into OH&P).
+- **Restoration liability rate** — tick this before downloading for restoration work. It swaps the general-liability rate; everything else is unchanged.
+- **The three accounting rates** live under **Admin → Cost Defaults → Accounting rates**. They only affect how this report splits a total — never what a job is priced at.
 
 #### Assembly Workbooks
 
 Turn your own pricing spreadsheets into filled-in assembly takeoffs without re-typing quantities by hand.
 
 - **Where it lives:** Bottom of the **Costs** tab, below the cost breakdown.
-- **Uploading a workbook** (admins only): Click **Upload workbook** and choose an **.xlsx** or **.xlsm** file. On upload, the app scans it for a likely quantity cell and offers a mapping — confirm or edit the **condition pattern** in the "Map this workbook?" dialog, then **Save** (or **Skip** to map it by hand later).
-- **Condition pattern matching:** A mapping's pattern matches condition names **exactly** (case-insensitive), or use a trailing **`*`** as a prefix wildcard — e.g. `Aquafin*` matches "Aquafin 2K Deck," "Aquafin-2K M," and any other condition starting with "Aquafin."
-- **Manual mapping** (admins only): Click **Add mapping** on a workbook to set the condition pattern, one or more **quantity input cells** (label + cell address, e.g. `C13`), and optional **job info cells** (project name, client, address) by hand.
+- **Uploading a workbook** (admins only): Click **Upload workbook** and choose an **.xlsx** or **.xlsm** file. On upload, the app scans it for a likely quantity cell and offers a mapping — the "Map this workbook?" dialog **pre-ticks the conditions** whose names match the filename, so you confirm a list rather than type a pattern. **Save**, or **Skip** to map it by hand later.
+- **Choosing conditions:** A mapping is a **tick-list of this project's conditions**; their quantities are summed into the workbook's input cells. Mappings are saved **by condition name**, not by project, so the same mapping keeps working on the next job that uses the same names.
+- **Older mappings** created with a typed name pattern (including a trailing **`*`** wildcard, e.g. `Aquafin*`) keep matching exactly as they did — nothing needs re-mapping.
+- **Manual mapping** (admins only): Click **Add mapping** on a workbook to tick the conditions, set one or more **quantity input cells** (label + cell address, e.g. `C13`), and optional **job info cells** (project name, client, address).
 - **Generating a priced workbook:** Any user can click **Generate assembly** on a mapping that has matching conditions to download a copy of the workbook with quantities filled in. When **two or more** mappings across your workbooks have matching conditions, a **Generate All (N)** button appears to download all of them at once.
 - **Deleting:** Admins can delete a workbook (removes all its mappings) or a single mapping; both ask for confirmation first.
 

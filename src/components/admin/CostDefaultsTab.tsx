@@ -94,6 +94,10 @@ export function CostDefaultsTab() {
   const [tax, setTax] = useState('');
   const [insuranceRate, setInsuranceRate] = useState('');
   const [insuranceMargin, setInsuranceMargin] = useState('');
+  const [payrollTax, setPayrollTax] = useState('');
+  const [workersComp, setWorkersComp] = useState('');
+  const [generalLiability, setGeneralLiability] = useState('');
+  const [generalLiabilityRestoration, setGeneralLiabilityRestoration] = useState('');
   const [margins, setMargins] = useState<{ name: string; rate: string }[]>([]);
 
   const hydrate = useCallback((next: CostDefaults) => {
@@ -105,6 +109,10 @@ export function CostDefaultsTab() {
     setTax(toPercentInput(next.taxPct));
     setInsuranceRate(toMoneyInput(next.insuranceRatePerThousand));
     setInsuranceMargin(toPercentInput(next.insuranceMarginPct));
+    setPayrollTax(toPercentInput(next.payrollTaxPct));
+    setWorkersComp(toPercentInput(next.workersCompPct));
+    setGeneralLiability(toPercentInput(next.generalLiabilityPct));
+    setGeneralLiabilityRestoration(toPercentInput(next.generalLiabilityRestorationPct));
     setMargins(next.marginChain.map((m) => ({ name: m.name, rate: toPercentInput(m.rate) })));
   }, []);
 
@@ -145,6 +153,10 @@ export function CostDefaultsTab() {
         taxPct: fromPercentInput(tax),
         insuranceRatePerThousand: fromMoneyInput(insuranceRate),
         insuranceMarginPct: fromPercentInput(insuranceMargin),
+        payrollTaxPct: fromPercentInput(payrollTax),
+        workersCompPct: fromPercentInput(workersComp),
+        generalLiabilityPct: fromPercentInput(generalLiability),
+        generalLiabilityRestorationPct: fromPercentInput(generalLiabilityRestoration),
         marginChain: chain,
       });
       hydrate(data.defaults);
@@ -234,6 +246,47 @@ export function CostDefaultsTab() {
           overrideCount={overrides.insuranceMarginPct}
           onChange={setInsuranceMargin}
         />
+      </div>
+
+      <div className="space-y-3 max-w-3xl">
+        <div>
+          <Label className="text-sm">Accounting rates</Label>
+          <p className="text-xs text-muted-foreground">
+            These don’t change what a job is priced at. They split an already-priced total into the
+            buckets the assembly budget report posts against, with overhead and profit taking
+            whatever is left.
+          </p>
+        </div>
+        <div className="grid gap-5 sm:grid-cols-2">
+          <Field
+            label="Payroll tax"
+            suffix="%"
+            hint="Charged on regular pay."
+            value={payrollTax}
+            onChange={setPayrollTax}
+          />
+          <Field
+            label="Workers’ comp"
+            suffix="%"
+            hint="Charged on regular pay."
+            value={workersComp}
+            onChange={setWorkersComp}
+          />
+          <Field
+            label="General liability"
+            suffix="%"
+            hint="Charged on the job total, not on pay. Waterproofing work."
+            value={generalLiability}
+            onChange={setGeneralLiability}
+          />
+          <Field
+            label="General liability — restoration"
+            suffix="%"
+            hint="Used when a report is pulled on the restoration basis."
+            value={generalLiabilityRestoration}
+            onChange={setGeneralLiabilityRestoration}
+          />
+        </div>
       </div>
 
       <div className="space-y-2 max-w-3xl">

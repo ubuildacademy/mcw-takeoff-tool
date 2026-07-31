@@ -911,9 +911,16 @@ UI work until the engine matches real workbooks.
 4. Component prices are **either** a product-code reference **or** a fixed literal —
    19 workbooks are priced entirely by hand with no Pricing DB lookup (I0 finding 4).
 
-**Order:** ~~I0~~ → ~~I1~~ → ~~I3~~ → ~~I2~~ → ~~I4 (gate PASSED)~~ → I5 → I6 → I7 → I8,
-with **I9 (company-admin tier)** before any assembly-management UI reaches a second
-company. I1's migration is applied to Supabase and MCW's 1,151-product price list is
+**Order:** ~~I0~~ → ~~I1~~ → ~~I3~~ → ~~I2~~ → ~~I4 (gate PASSED)~~ → ~~I5~~ → ~~I6~~ → ~~I7~~ →
+~~I8~~. Stage 2's shippable bar (live cost + branded in-app report) is met; **I9
+(company-admin tier)** is what remains before any assembly-management UI reaches a second
+company.
+
+**All five Stage 2 migrations are applied to Supabase** — `create_organizations_and_assembly_engine_tables`
+(2026-07-27), then `add_assembly_engine_completeness`, `add_assembly_link_to_conditions`,
+`create_organization_cost_defaults` and `add_accounting_rates_to_cost_defaults` in that order
+(Jeff, 2026-07-31, no errors). The last one alters the table the one before it creates, so
+that order is required rather than incidental. I1's migration is applied to Supabase and MCW's 1,151-product price list is
 imported. C6
 (kill the free-text pattern box) folds into I8 and is not run separately.
 
@@ -1259,7 +1266,7 @@ save as native assemblies. The Stage 1 registry becomes the import source.
 total matches the workbook; flagged gaps are visibly unmissable; batch import reports
 per-file status. Help docs updated (execution rule 8).
 
-### Task I6 — Condition ↔ assembly + live Costs tab
+### Task I6 — Condition ↔ assembly + live Costs tab — DONE 2026-07-30
 
 **Do:** pick an assembly **and one of its named quantity inputs** on a condition (I0
 finding 2 — "Aquafin 2K → SF-Floor"); the Costs tab prices it live from takeoff
@@ -1273,7 +1280,39 @@ generated workbook for the same quantity; every org member sees the dollars (Jef
 2026-07-27: no no-pricing tier — only *editing* the library is gated, to company admins);
 tsc + tests; help docs updated.
 
-### Task I7 — Branded in-app assembly report
+**Landed:**
+- `add_assembly_link_to_conditions.sql` — `assembly_id` + `assembly_quantity_input_id`
+  on `takeoff_conditions`, both `ON DELETE SET NULL`, plus a trigger enforcing that the
+  input belongs to the assembly (no FK can express that across two tables).
+- `conditionAssemblyPricing.ts` — pure: binds production rates to the fed input, names
+  every unfed input, clamps a negative quantity, rolls conditions into a project total.
+  21 tests.
+- `POST /api/assemblies/price` — `requireAuth`, NOT `requireAdmin`. Batch-loads every
+  assembly in four queries regardless of how many conditions are priced.
+- `ConditionAssemblyPicker` in the condition dialog; `AssemblyCostsSection` on the
+  Costs tab, debounced 400 ms against the live measurement store.
+
+**Two defects this task fixed, both silent-mispricing class:**
+1. **Insurance was written on import but never read back.** `mapAssemblyRow` did not
+   map `insurance_rate_per_thousand` / `insurance_margin_pct`, so every assembly
+   inherited the company rate. The one workbook in the library carrying 35 against a
+   company 79 would have billed 79. Now on `Assembly`, with a regression test.
+2. **Production rates were never loaded at all.** `getAssemblyDetail` fetched inputs and
+   components only, so a live-priced condition would have shown $0 labor on an assembly
+   whose workbook prices labor. `AssemblyDetail` now carries `productionRates`.
+
+**Caught by the migration assertions, not by review:** `ON DELETE SET NULL` on
+`assembly_id` re-fires the validation trigger with the input id still set. The first
+version RAISEd there, which would have made deleting any linked assembly fail outright.
+The trigger now clears the orphaned input instead.
+
+**Decision — waste is the assembly's, not the condition's.** The quantity sent to the
+engine is measured value × condition multiplier, deliberately excluding the condition's
+own waste factor: the assembly already carries a waste % per quantity input from the
+source workbook, and applying both compounds two allowances into a silent over-order.
+Parked as open item 10 for Jeff to confirm against how he actually bids.
+
+### Task I7 — Branded in-app assembly report — DONE 2026-07-31
 
 **Do:** downloadable report mirroring the workbook's Material/Labor budget shapes
 (accounting cost codes, Davis-Bacon toggle where present), using the existing branding
@@ -1281,6 +1320,54 @@ settings. This is the deliverable that retires the workbook for bidding.
 
 **Success criteria:** side-by-side with the Excel budget sheets for the same assembly and
 quantity — same line items, same totals; branding applied; help docs updated.
+
+**Measured first (2026-07-31), because the rates were not where I0–I4 looked.** The
+accounting rates live on the `Labor budgets` sheet, not on `ASSEMBLY`, which is why they
+had not surfaced until now. Swept every workbook that has the sheet:
+
+| Rate | Value | Consistency |
+|---|---|---|
+| P/R Tax | 11.33% | **478/478** |
+| W/Comp | 7.72% | **478/478** |
+| G/Liability | 12.73% | **478/478** |
+
+No exceptions at all, so they are company defaults (`add_accounting_rates_to_cost_defaults.sql`),
+not per-assembly. The restoration variant (5.337%) is documented in the sheets but used by
+none of them; stored so the report can offer the basis without anyone re-deriving it.
+
+**Landed:**
+- `assemblyReport.ts` — pure. Material lines and the labor decomposition, with
+  `reconciliationError` as a self-check. 24 tests.
+- `buildAssemblyBudgetWorkbook.ts` — the branded .xlsx: Material Budgets, Labor budgets,
+  Notes. 12 tests that render the file and read it back, asserting the 7- and 14-column
+  orders literally, because this feeds an accounting import.
+- `POST /api/assemblies/report`, sharing `priceRequestedConditions` with `/price` so the
+  project-access check cannot drift between them.
+- Accounting rates editable in Admin → Cost Defaults, in their own section that says
+  plainly they do not change what a job is priced at.
+
+**Side-by-side result:** every column of the Labor budget reproduces
+`Neogard Auto Gard FC.xlsx` and `Aquafin-2K M.xlsx` **to the cent** — man-days, man-hours,
+regular pay, P/R tax, W/comp, labor, G/liability and the OH&P residual — and both
+reconcile to $0.00. (Verified in the scratchpad; the figures are real MCW job numbers and
+are deliberately not committed, same rule as the golden cases.)
+
+**Two deliberate departures from the workbook**, both stated on the report's Notes sheet:
+1. **Qty is filled in.** The workbooks leave that column empty to be completed from the
+   P.O.; the engine already knows the package count.
+2. **Material carries the material cost.** The source sheets read that column from an
+   empty cell (`ASSEMBLY!K59`), so material falls through into the OH&P residual and the
+   Material column reads $0 on *every* sheet in the library. The job total is identical
+   either way — OH&P is the plug — but the split is what accounting posts. Open item 12.
+
+**Davis-Bacon is a prompt, not a mechanism.** All 478 workbooks carry the literal text
+`*Enter DB Classification*` beside a day rate labelled "Standard Labor rate", and **not one
+of them fills it in** — a prevailing-wage job is handled by overriding the day rate by hand.
+Building a toggle that changes the maths would have been inventing behaviour, so the report
+records the labor basis and nothing more. Open item 13.
+
+**Caught by the migration assertions:** `NUMERIC(6,4)`, matching the older rate columns,
+silently rounds the restoration rate 0.05337 → 0.0534. The new columns are `NUMERIC(8,6)`.
 
 ### Task I10 — Company cost defaults (queued 2026-07-30, do before I5 persistence)
 
@@ -1357,7 +1444,7 @@ access on deploy; tsc + tests; help docs updated.
 **Blocks multi-tenant sale.** Also wanted by I6/I8, so do it before shipping any
 assembly-management UI to a second company.
 
-### Task I8 — Assembly as condition template (absorbs C6)
+### Task I8 — Assembly as condition template (absorbs C6) — DONE 2026-07-31
 
 **Do:** assemblies become openable as condition templates — pick "Aquafin 2K" from
 templates and the condition arrives pre-wired to its assembly (and, for Excel holdouts,
@@ -1368,6 +1455,36 @@ templates with costs.
 **Success criteria:** new condition from an assembly template prices immediately with no
 manual wiring; existing name-pattern mappings keep working (migrate, don't break); help
 docs updated.
+
+**Landed:**
+- `assemblyConditionTemplate.ts` — pure. Assembly detail → condition drafts: unit and
+  measurement type from the assembly's own unit strings, name de-duplication, distinct
+  colours, and the assembly link already set. 13 tests.
+- `assemblyMatching.ts` — `condition_ref` now holds **one entry per line**, matched as a
+  union. 16 tests, including that a legacy single pattern still parses as a one-entry list.
+- `ConditionMultiSelect.tsx`, wired into `AssemblyMappingForm` and the C5
+  `AssemblyProposalConfirmDialog`. The free-text pattern box is gone from both.
+- Assemblies listed at the top of `ConditionTemplatesDialog` with "Add condition".
+
+**One condition per quantity input, not one per assembly.** An assembly with SF-Floor,
+SF-Wall and LF-Cove prices $0 on whichever the estimator forgets to draw — I6 already
+reports that as a warning, and this is the task that can stop it happening at all. Names
+are suffixed with the input ("Aquafin 2K — LF-Cove") only when there is more than one.
+
+**Zero migration, and that was the design constraint.** The obvious C6 implementation
+stores concrete condition ids, but `assembly_workbooks` is **org-scoped** while conditions
+are **project-scoped**: a mapping keyed on ids would work on the job it was made for and
+silently match nothing on the next one. Storing the selected *names* keeps the registry
+reusable, keeps every existing row valid, and preserves the wildcards already in the DB —
+so nothing had to be backfilled or re-mapped. Newline is the separator because every
+condition name came from a single-line input and therefore cannot contain one.
+
+**Waste is 0 on a generated condition**, consistent with I6's decision and open item 10.
+If item 10 resolves the other way, this is the second place that changes.
+
+**Unrecognised units are surfaced, not guessed.** An input in GAL keeps its unit, is
+measured as an area, and the estimator gets a warning naming the condition to check —
+picking a measurement type silently would produce a plausible wrong number.
 
 ---
 

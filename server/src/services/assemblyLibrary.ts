@@ -50,6 +50,27 @@ export interface AssemblyComponent {
   isOptional: boolean;
 }
 
+/**
+ * One production-rate line: the pace at which a crew covers a quantity.
+ *
+ * Rates stay on the assembly rather than in company defaults because they ARE
+ * the pacing — 350 SF/day for detail work against 5,000 for pressure cleaning.
+ * A single workbook can carry ten of them, each pacing a different input.
+ */
+export interface AssemblyProductionRate {
+  id: string;
+  assemblyId: string;
+  seq: number;
+  description: string | null;
+  ratePerDay: number | null;
+  unit: string | null;
+  /** Which named input this line paces. NULL means it is not bound yet. */
+  quantityInputId: string | null;
+  /** Whether THIS line rounds to a whole day, or only the summed total does. */
+  roundsUp: boolean;
+  isOptional: boolean;
+}
+
 export interface Assembly {
   id: string;
   orgId: string;
@@ -61,16 +82,26 @@ export interface Assembly {
   surchargePct: number | null;
   taxPct: number | null;
   marginChain: Margin[];
+  /**
+   * Insurance is stored on the assembly by the importer whenever it differs
+   * from the company default, so it must be read back. Leaving it off the
+   * mapped shape would make every assembly inherit the company rate and
+   * silently misprice the ones that deliberately do not (one workbook in the
+   * library carries 35 against a company 79).
+   */
+  insuranceRatePerThousand: number | null;
+  insuranceMarginPct: number | null;
   sourceWorkbookId: string | null;
   notes: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
-/** An assembly with its inputs and components attached, ordered by `seq`. */
+/** An assembly with its inputs, components and rates attached, ordered by `seq`. */
 export interface AssemblyDetail extends Assembly {
   quantityInputs: AssemblyQuantityInput[];
   components: AssemblyComponent[];
+  productionRates: AssemblyProductionRate[];
 }
 
 /**
@@ -241,10 +272,24 @@ export interface AssemblyRow {
   surcharge_pct: number | string | null;
   tax_pct: number | string | null;
   margin_chain: unknown;
+  insurance_rate_per_thousand?: number | string | null;
+  insurance_margin_pct?: number | string | null;
   source_workbook_id: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface AssemblyProductionRateRow {
+  id: string;
+  assembly_id: string;
+  seq: number;
+  description: string | null;
+  rate_per_day: number | string | null;
+  unit: string | null;
+  quantity_input_id: string | null;
+  rounds_up: boolean | null;
+  is_optional: boolean | null;
 }
 
 export interface AssemblyQuantityInputRow {
@@ -303,6 +348,8 @@ export function mapAssemblyRow(row: AssemblyRow): Assembly {
     surchargePct: num(row.surcharge_pct),
     taxPct: num(row.tax_pct),
     marginChain: mapMarginChain(row.margin_chain),
+    insuranceRatePerThousand: num(row.insurance_rate_per_thousand),
+    insuranceMarginPct: num(row.insurance_margin_pct),
     sourceWorkbookId: row.source_workbook_id,
     notes: row.notes,
     createdAt: row.created_at,
@@ -338,8 +385,24 @@ export function mapComponentRow(row: AssemblyComponentRow): AssemblyComponent {
   };
 }
 
+export function mapProductionRateRow(row: AssemblyProductionRateRow): AssemblyProductionRate {
+  return {
+    id: row.id,
+    assemblyId: row.assembly_id,
+    seq: row.seq,
+    description: row.description,
+    ratePerDay: num(row.rate_per_day),
+    unit: row.unit,
+    quantityInputId: row.quantity_input_id,
+    // The column defaults to true, and true is the majority workbook layout;
+    // only an explicit false means "this line does not round on its own".
+    roundsUp: row.rounds_up !== false,
+    isOptional: row.is_optional ?? false,
+  };
+}
+
 /**
- * Attach inputs and components to an assembly, ordered by `seq`.
+ * Attach inputs, components and production rates to an assembly, ordered by `seq`.
  *
  * Components are kept as a flat, ordered list and are NEVER grouped or
  * de-duplicated by product code — two rows with the same code and different
@@ -348,7 +411,8 @@ export function mapComponentRow(row: AssemblyComponentRow): AssemblyComponent {
 export function buildAssemblyDetail(
   assemblyRow: AssemblyRow,
   inputRows: AssemblyQuantityInputRow[],
-  componentRows: AssemblyComponentRow[]
+  componentRows: AssemblyComponentRow[],
+  rateRows: AssemblyProductionRateRow[] = []
 ): AssemblyDetail {
   const bySeq = (a: { seq: number }, b: { seq: number }) => a.seq - b.seq;
   return {
@@ -360,6 +424,10 @@ export function buildAssemblyDetail(
     components: componentRows
       .filter((row) => row.assembly_id === assemblyRow.id)
       .map(mapComponentRow)
+      .sort(bySeq),
+    productionRates: rateRows
+      .filter((row) => row.assembly_id === assemblyRow.id)
+      .map(mapProductionRateRow)
       .sort(bySeq),
   };
 }

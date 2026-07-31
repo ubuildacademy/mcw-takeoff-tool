@@ -55,23 +55,24 @@ const handleUpload = async (
   next: express.NextFunction
 ) => {
   return new Promise<void>((resolve) => {
-    uploadHandler(req, res, (err: any) => {
+    uploadHandler(req, res, (err: unknown) => {
       if (err) {
+        const details = err instanceof Error ? err.message : String(err);
         if (err instanceof multer.MulterError) {
           if (err.code === 'LIMIT_FILE_SIZE') {
             return res
               .status(413)
               .json({ error: 'File too large', message: 'Price list exceeds the 25MB limit' });
           }
-          return res.status(400).json({ error: 'Upload error', details: err.message });
+          return res.status(400).json({ error: 'Upload error', details });
         }
-        if (err.message === 'Invalid file type') {
+        if (details === 'Invalid file type') {
           return res.status(400).json({
             error: 'Invalid file type',
             message: 'Only .xlsx, .xlsm and .csv price lists are allowed',
           });
         }
-        return res.status(400).json({ error: 'Upload error', details: err.message });
+        return res.status(400).json({ error: 'Upload error', details });
       }
       resolve();
       next();
@@ -85,7 +86,12 @@ const handleUpload = async (
  * an empty list — say so rather than silently showing nothing.
  */
 async function requireOrg(req: express.Request, res: express.Response) {
-  const org = await getOrganizationForUser(req.user!.id);
+  const user = req.user;
+  if (!user) {
+    res.status(401).json({ error: 'Authentication required' });
+    return null;
+  }
+  const org = await getOrganizationForUser(user.id);
   if (!org) {
     res.status(409).json({
       error: 'No organization',
@@ -157,9 +163,15 @@ router.put('/cost-defaults', requireAuth, requireAdmin, async (req, res) => {
       'taxPct',
       'insuranceRatePerThousand',
       'insuranceMarginPct',
+      // Accounting rates (task I7). They do not price anything — they split an
+      // already-priced total into the buckets the budget report posts against.
+      'payrollTaxPct',
+      'workersCompPct',
+      'generalLiabilityPct',
+      'generalLiabilityRestorationPct',
     ] as const;
 
-    const patch: Record<string, unknown> = { updatedBy: req.user!.id };
+    const patch: Record<string, unknown> = { updatedBy: req.user?.id };
     for (const field of numericFields) {
       if (!(field in body)) continue;
       const value = body[field];

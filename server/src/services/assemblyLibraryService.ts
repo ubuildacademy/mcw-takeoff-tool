@@ -22,6 +22,7 @@ import {
   AssemblyComponentRow,
   AssemblyDetail,
   AssemblyQuantityInput,
+  AssemblyProductionRateRow,
   AssemblyQuantityInputRow,
   AssemblyRow,
   Margin,
@@ -88,10 +89,27 @@ interface CostDefaultsRow {
   margin_chain: unknown;
   insurance_rate_per_thousand: number | string | null;
   insurance_margin_pct: number | string | null;
+  payroll_tax_pct?: number | string | null;
+  workers_comp_pct?: number | string | null;
+  general_liability_pct?: number | string | null;
+  general_liability_restoration_pct?: number | string | null;
   updated_at: string;
 }
 
-export interface CostDefaultsRecord extends CostDefaults {
+/**
+ * Rates the assembly REPORT posts against, kept apart from `CostDefaults`
+ * because they do not affect the price. They carve an already-computed job
+ * total into accounting buckets; changing one moves money between columns and
+ * never changes what the customer is quoted.
+ */
+export interface AccountingRateDefaults {
+  payrollTaxPct: number | null;
+  workersCompPct: number | null;
+  generalLiabilityPct: number | null;
+  generalLiabilityRestorationPct: number | null;
+}
+
+export interface CostDefaultsRecord extends CostDefaults, AccountingRateDefaults {
   orgId: string;
   updatedAt: string | null;
 }
@@ -113,9 +131,25 @@ function mapCostDefaultsRow(row: CostDefaultsRow): CostDefaultsRecord {
     marginChain: mapMarginChain(row.margin_chain),
     insuranceRatePerThousand: toNumber(row.insurance_rate_per_thousand),
     insuranceMarginPct: toNumber(row.insurance_margin_pct),
+    payrollTaxPct: toNumber(row.payroll_tax_pct ?? null),
+    workersCompPct: toNumber(row.workers_comp_pct ?? null),
+    generalLiabilityPct: toNumber(row.general_liability_pct ?? null),
+    generalLiabilityRestorationPct: toNumber(row.general_liability_restoration_pct ?? null),
     updatedAt: row.updated_at ?? null,
   };
 }
+
+/**
+ * What an org with no defaults row falls back to. Nulls, not zeros: a zero
+ * payroll-tax rate is a real (if unusual) setting, while null says the rate
+ * was never entered and the report should say so rather than post $0 of tax.
+ */
+export const EMPTY_ACCOUNTING_RATES: AccountingRateDefaults = {
+  payrollTaxPct: null,
+  workersCompPct: null,
+  generalLiabilityPct: null,
+  generalLiabilityRestorationPct: null,
+};
 
 /**
  * The company's costing rates. A company with no row yet inherits nothing —
@@ -130,12 +164,14 @@ export async function getCostDefaults(orgId: string): Promise<CostDefaultsRecord
     .maybeSingle();
   if (error) throw wrapDatabaseError('Get cost defaults', error, { orgId });
   if (!data) {
-    return { orgId, ...EMPTY_COST_DEFAULTS, updatedAt: null };
+    return { orgId, ...EMPTY_COST_DEFAULTS, ...EMPTY_ACCOUNTING_RATES, updatedAt: null };
   }
   return mapCostDefaultsRow(data as CostDefaultsRow);
 }
 
-export interface UpdateCostDefaultsParams extends Partial<CostDefaults> {
+export interface UpdateCostDefaultsParams
+  extends Partial<CostDefaults>,
+    Partial<AccountingRateDefaults> {
   updatedBy?: string | null;
 }
 
@@ -157,6 +193,14 @@ export async function updateCostDefaults(
     patch.insurance_rate_per_thousand = params.insuranceRatePerThousand;
   }
   if (params.insuranceMarginPct !== undefined) patch.insurance_margin_pct = params.insuranceMarginPct;
+  if (params.payrollTaxPct !== undefined) patch.payroll_tax_pct = params.payrollTaxPct;
+  if (params.workersCompPct !== undefined) patch.workers_comp_pct = params.workersCompPct;
+  if (params.generalLiabilityPct !== undefined) {
+    patch.general_liability_pct = params.generalLiabilityPct;
+  }
+  if (params.generalLiabilityRestorationPct !== undefined) {
+    patch.general_liability_restoration_pct = params.generalLiabilityRestorationPct;
+  }
 
   const { data, error } = await supabase
     .from('organization_cost_defaults')
@@ -290,19 +334,80 @@ export async function getAssemblyDetail(orgId: string, assemblyId: string): Prom
   }
   if (!assemblyRow) return null;
 
-  const [{ data: inputRows, error: inputError }, { data: componentRows, error: componentError }] =
-    await Promise.all([
-      supabase.from('assembly_quantity_inputs').select('*').eq('assembly_id', assemblyId),
-      supabase.from('assembly_components').select('*').eq('assembly_id', assemblyId),
-    ]);
+  const [
+    { data: inputRows, error: inputError },
+    { data: componentRows, error: componentError },
+    { data: rateRows, error: rateError },
+  ] = await Promise.all([
+    supabase.from('assembly_quantity_inputs').select('*').eq('assembly_id', assemblyId),
+    supabase.from('assembly_components').select('*').eq('assembly_id', assemblyId),
+    supabase.from('assembly_production_rates').select('*').eq('assembly_id', assemblyId),
+  ]);
   if (inputError) throw wrapDatabaseError('Get assembly quantity inputs', inputError, { assemblyId });
   if (componentError) throw wrapDatabaseError('Get assembly components', componentError, { assemblyId });
+  if (rateError) throw wrapDatabaseError('Get assembly production rates', rateError, { assemblyId });
 
   return buildAssemblyDetail(
     assemblyRow as AssemblyRow,
     (inputRows || []) as AssemblyQuantityInputRow[],
-    (componentRows || []) as AssemblyComponentRow[]
+    (componentRows || []) as AssemblyComponentRow[],
+    (rateRows || []) as AssemblyProductionRateRow[]
   );
+}
+
+/**
+ * Several assemblies with everything needed to price them, in as few round
+ * trips as the shape allows.
+ *
+ * The Costs tab prices every linked condition in a project at once, and a
+ * per-assembly `getAssemblyDetail` would be four queries per condition. This
+ * is four queries total, regardless of how many assemblies are asked for.
+ */
+export async function getAssemblyDetails(
+  orgId: string,
+  assemblyIds: string[]
+): Promise<Map<string, AssemblyDetail>> {
+  const unique = [...new Set(assemblyIds)].filter(Boolean);
+  if (unique.length === 0) return new Map();
+
+  const { data: assemblyRows, error: assemblyError } = await supabase
+    .from('assemblies')
+    .select('*')
+    .eq('org_id', orgId)
+    .in('id', unique);
+  if (assemblyError) throw wrapDatabaseError('Get assemblies', assemblyError, { orgId });
+
+  // Org filter above is what keeps this from leaking: the child queries are by
+  // assembly id, so they must only ever see ids this org actually owns.
+  const ownedIds = (assemblyRows || []).map((row: AssemblyRow) => row.id);
+  if (ownedIds.length === 0) return new Map();
+
+  const [
+    { data: inputRows, error: inputError },
+    { data: componentRows, error: componentError },
+    { data: rateRows, error: rateError },
+  ] = await Promise.all([
+    supabase.from('assembly_quantity_inputs').select('*').in('assembly_id', ownedIds),
+    supabase.from('assembly_components').select('*').in('assembly_id', ownedIds),
+    supabase.from('assembly_production_rates').select('*').in('assembly_id', ownedIds),
+  ]);
+  if (inputError) throw wrapDatabaseError('Get assembly quantity inputs', inputError, { orgId });
+  if (componentError) throw wrapDatabaseError('Get assembly components', componentError, { orgId });
+  if (rateError) throw wrapDatabaseError('Get assembly production rates', rateError, { orgId });
+
+  const details = new Map<string, AssemblyDetail>();
+  for (const row of (assemblyRows || []) as AssemblyRow[]) {
+    details.set(
+      row.id,
+      buildAssemblyDetail(
+        row,
+        (inputRows || []) as AssemblyQuantityInputRow[],
+        (componentRows || []) as AssemblyComponentRow[],
+        (rateRows || []) as AssemblyProductionRateRow[]
+      )
+    );
+  }
+  return details;
 }
 
 export interface CreateAssemblyParams {

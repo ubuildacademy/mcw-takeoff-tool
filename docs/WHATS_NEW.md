@@ -4,6 +4,42 @@ Every update to Meridian Takeoff since the beta program started, newest first. C
 
 ---
 
+## Start a condition from an assembly — 2026-07
+
+**New: your assemblies are condition templates.** Open **Templates** at the top of the Conditions tab and your imported assemblies are listed there. Pick "Aquafin 2K" and the conditions it needs arrive ready to draw — linked to the assembly, with the right measurement type and unit, and no cost fields to fill in. Draw anything and the Costs tab prices the whole assembly.
+
+An assembly that prices several quantities adds one condition per quantity, named after it, so nothing is left unmeasured by accident. Waste stays at zero on the condition because the assembly carries its own.
+
+**Mapping a workbook is now a tick-list.** The **Condition pattern** box under Assembly Workbooks is gone — you tick the conditions the workbook prices instead of typing a name and hoping it matches. On upload, the conditions matching the filename come pre-ticked. Mappings you already made keep working, wildcards and all.
+
+---
+
+## Assembly budgets you can hand to accounting — 2026-07
+
+**New: download the Material and Labor budgets straight from the Costs tab.** Under **Assembly Pricing**, click **Download budgets (.xlsx)** and you get the same two sheets your assembly workbooks produce — same columns, same order, in your report branding.
+
+**Material Budgets** lists every component as a purchase line: product, cost code, quantity, price with tax, packaging, cost type. Your workbooks leave the Qty column empty for someone to fill in from the P.O. — Meridian already knows the package count, so it fills it in.
+
+**Labor budgets** breaks the job total into the buckets accounting posts against: regular pay, payroll tax, workers' comp, material, equipment, misc, general liability, and overhead & profit as the remainder. It's a decomposition of the total, not a second estimate, so the buckets always add back up to it — and the sheet carries a live cell showing that, which stays at $0.00 unless someone edits a figure.
+
+A **Notes** sheet comes with every download: how to read the report, anything worth checking before filing it, and a plain statement of the two places Meridian's figures differ from the workbook's.
+
+Tick **Restoration liability rate** before downloading if the job is restoration rather than waterproofing. The three accounting rates now live under **Admin → Cost Defaults**, in their own section — changing them moves money between columns on this report and never changes what a job is priced at.
+
+---
+
+## Live assembly pricing on the Costs tab — 2026-07
+
+**New: a condition can be priced by an assembly, live.** Open any condition and pick one under **Price with assembly**. The **Costs** tab then prices it from your actual takeoff quantity — materials by coverage yield against your price list, labor from the assembly's production rates and crew, then its margin chain and insurance — and the number moves as you measure. Expand a condition to see every component line, package counts, and each margin step.
+
+If the assembly prices more than one quantity, you're asked which one the condition measures. If it prices only one, you're not asked at all.
+
+**It says what it doesn't know.** Link a condition to an assembly's floor quantity while nothing measures its wall quantity, and the wall components show as $0 with a note naming them — rather than a confident-looking total with a third of the assembly missing. The same goes for a component whose price is missing or a production rate that couldn't be matched to a quantity.
+
+Waste comes from the assembly rather than the condition: your workbook already carries a waste percentage for each quantity it prices, and applying the condition's on top would order extra without saying so.
+
+---
+
 ## Assemblies and cost defaults — 2026-07
 
 **New: import your priced workbooks into Meridian.** Under **Admin → Assemblies**, upload one of your assembly spreadsheets and Meridian reads it — components, coverage yields, the quantity inputs it prices against, production rates, crew and margins — and shows you everything it found *before* saving anything. Fix what it flags, name it, then import.
