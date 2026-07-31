@@ -10,7 +10,7 @@ import { useMeasurementStore } from '../../store/slices/measurementSlice';
 import type { TakeoffCondition } from '../../types';
 import { assemblyService, type AssemblyWorkbook, type AssemblyMapping, type AssemblyScanProposal } from '../../services/apiService';
 import { extractErrorMessage } from '../../utils/commonUtils';
-import { matchConditionsToMapping } from '../../utils/assemblyMatching';
+import { matchConditionsToMapping, parseConditionRefs } from '../../utils/assemblyMatching';
 import { AssemblyMappingForm } from './AssemblyMappingForm';
 import { AssemblyGenerateConfirmDialog, type AssemblyGenerateItem } from './AssemblyGenerateConfirmDialog';
 import { AssemblyProposalConfirmDialog } from './AssemblyProposalConfirmDialog';
@@ -284,7 +284,9 @@ export function AssemblyWorkbooksSection({ projectId }: AssemblyWorkbooksSection
                   return (
                     <div key={m.id} className="flex items-center justify-between text-sm border-t border-border pt-2">
                       <div>
-                        <span className="text-foreground">{m.conditionRef}</span>
+                        <span className="text-foreground">
+                          {parseConditionRefs(m.conditionRef).join(', ')}
+                        </span>
                         <span className="text-xs text-muted-foreground ml-2">
                           → {m.inputs.map((i) => i.cell).join(', ')}
                         </span>
@@ -320,6 +322,7 @@ export function AssemblyWorkbooksSection({ projectId }: AssemblyWorkbooksSection
                   (addMappingWorkbookId === wb.id ? (
                     <AssemblyMappingForm
                       workbookId={wb.id}
+                      conditions={conditions}
                       onCreated={(mapping) => {
                         setMappings((prev) => ({ ...prev, [wb.id]: [...(prev[wb.id] ?? []), mapping] }));
                         setAddMappingWorkbookId(null);
@@ -390,6 +393,7 @@ export function AssemblyWorkbooksSection({ projectId }: AssemblyWorkbooksSection
           workbookId={proposalTarget.workbookId}
           filename={proposalTarget.filename}
           proposal={proposalTarget.proposal}
+          conditions={conditions}
           onSaved={(mapping) => {
             setMappings((prev) => ({
               ...prev,

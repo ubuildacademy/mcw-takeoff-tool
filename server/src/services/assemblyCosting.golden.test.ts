@@ -238,10 +238,12 @@ describe.skipIf(cases.length === 0)('costing engine vs real workbook totals', ()
 
   for (const field of FIELDS) {
     it(`${field.name} matches the workbook to the cent`, () => {
-      const checked = results.filter(({ golden }) => golden.expected[field.name] !== null);
+      const checked = results.flatMap(({ golden, result }) => {
+        const expected = golden.expected[field.name];
+        return expected === null ? [] : [{ golden, result, expected }];
+      });
       const mismatches = checked.filter(
-        ({ golden, result }) =>
-          roundCents(field.actual(result)) !== roundCents(golden.expected[field.name]!)
+        ({ result, expected }) => roundCents(field.actual(result)) !== roundCents(expected)
       );
       const matched = checked.length - mismatches.length;
 
@@ -251,9 +253,9 @@ describe.skipIf(cases.length === 0)('costing engine vs real workbook totals', ()
         const detail = mismatches
           .slice(0, 10)
           .map(
-            ({ golden, result }) =>
+            ({ golden, result, expected }) =>
               `  ${golden.sourceFile}: got ${roundCents(field.actual(result))}, ` +
-              `workbook says ${roundCents(golden.expected[field.name]!)}`
+              `workbook says ${roundCents(expected)}`
           )
           .join('\n');
         console.warn(

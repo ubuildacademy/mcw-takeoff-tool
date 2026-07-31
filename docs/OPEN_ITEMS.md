@@ -91,6 +91,25 @@ supplies the column. The service still does not supply it.
 **To settle:** have the Stage 1 upload/mapping routes set `org_id`, backfill any nulls, then
 tighten to `NOT NULL`.
 
+### 6b. `server/src` sits just under its lint warning cap
+
+**Found:** 2026-07-31, at I8 — `npm run ci:local` was failing on `lint:server`, 157 warnings
+against `--max-warnings 150`. Not caused by I8: the count was **152 before Workstream I
+started** (measured back through twelve commits), so the ratchet had been broken for some
+time and the pre-push hook was evidently not stopping it.
+
+**Done meanwhile:** cleaned the twelve warnings in the three files Workstream I owns
+(`routes/assemblies.ts`, `routes/products.ts`, `assemblyCosting.golden.test.ts`) — explicit
+`req.user` guards instead of `!`, `unknown` instead of `any` on the multer callbacks, and
+narrowing instead of assertions in the golden test. 157 → 146, so CI passes with margin.
+
+**Not done:** the other ~146 warnings, almost all `any` and `req.user!` across the older
+routes (`ocr.ts` 22, `files.ts` 16, `conditions.ts` 12…). Four more warnings anywhere puts
+CI red again for a reason unrelated to whatever change trips it.
+
+**To settle:** one session paying the older routes down, or a deliberate decision on what
+the cap is for. Worth checking why the pre-push hook let 152 through in the first place.
+
 ### 7. Stage 1 writer hardcodes the sheet name `ASSEMBLY`
 
 Flagged at C2. Every MCW workbook uses that name; a non-MCW customer may not. Add an
@@ -123,7 +142,9 @@ Raised at I6. A condition carries a waste % and so does every assembly quantity 
 
 **Assumed for now:** the assembly wins. The quantity sent to the engine is measured value
 × the condition's multiplier, *without* the condition's waste factor. One source of waste,
-and it is the one the workbook has always used.
+and it is the one the workbook has always used. Confirmed by Jeff 2026-07-31, so I8's
+assembly-generated conditions are created with waste 0 — the second place that changes if
+this is ever revisited.
 
 **What would settle it:** how Jeff actually bids a job where the field allowance differs
 from the product's — is condition waste a second allowance on top (scaffold-dependent

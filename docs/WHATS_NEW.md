@@ -4,6 +4,16 @@ Every update to Meridian Takeoff since the beta program started, newest first. C
 
 ---
 
+## Start a condition from an assembly — 2026-07
+
+**New: your assemblies are condition templates.** Open **Templates** at the top of the Conditions tab and your imported assemblies are listed there. Pick "Aquafin 2K" and the conditions it needs arrive ready to draw — linked to the assembly, with the right measurement type and unit, and no cost fields to fill in. Draw anything and the Costs tab prices the whole assembly.
+
+An assembly that prices several quantities adds one condition per quantity, named after it, so nothing is left unmeasured by accident. Waste stays at zero on the condition because the assembly carries its own.
+
+**Mapping a workbook is now a tick-list.** The **Condition pattern** box under Assembly Workbooks is gone — you tick the conditions the workbook prices instead of typing a name and hoping it matches. On upload, the conditions matching the filename come pre-ticked. Mappings you already made keep working, wildcards and all.
+
+---
+
 ## Assembly budgets you can hand to accounting — 2026-07
 
 **New: download the Material and Labor budgets straight from the Costs tab.** Under **Assembly Pricing**, click **Download budgets (.xlsx)** and you get the same two sheets your assembly workbooks produce — same columns, same order, in your report branding.

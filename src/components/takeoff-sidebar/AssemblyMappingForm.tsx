@@ -6,6 +6,9 @@ import { Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { assemblyService, type AssemblyMapping } from '../../services/apiService';
 import { extractErrorMessage } from '../../utils/commonUtils';
+import { formatConditionRefs } from '../../utils/assemblyMatching';
+import { ConditionMultiSelect } from './ConditionMultiSelect';
+import type { TakeoffCondition } from '../../types';
 
 const CELL_ADDRESS_RE = /^[A-Za-z]+[0-9]+$/;
 
@@ -22,12 +25,19 @@ const JOB_INFO_FIELDS: Array<{ key: 'projectName' | 'client' | 'address'; label:
 
 export interface AssemblyMappingFormProps {
   workbookId: string;
+  /** The project's conditions — what the mapping is pointed at. */
+  conditions: TakeoffCondition[];
   onCreated: (mapping: AssemblyMapping) => void;
   onCancel: () => void;
 }
 
-export function AssemblyMappingForm({ workbookId, onCreated, onCancel }: AssemblyMappingFormProps) {
-  const [conditionRef, setConditionRef] = useState('');
+export function AssemblyMappingForm({
+  workbookId,
+  conditions,
+  onCreated,
+  onCancel,
+}: AssemblyMappingFormProps) {
+  const [selectedConditionIds, setSelectedConditionIds] = useState<string[]>([]);
   const [inputs, setInputs] = useState<InputRow[]>([{ label: 'Job Quantity', cell: '' }]);
   const [jobInfoCells, setJobInfoCells] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -41,7 +51,7 @@ export function AssemblyMappingForm({ workbookId, onCreated, onCancel }: Assembl
   const removeInputRow = (index: number) => setInputs((prev) => prev.filter((_, i) => i !== index));
 
   const validate = (): string | null => {
-    if (!conditionRef.trim()) return 'Condition pattern is required.';
+    if (selectedConditionIds.length === 0) return 'Pick at least one condition.';
     if (inputs.length === 0) return 'At least one quantity input is required.';
     for (const row of inputs) {
       if (!row.label.trim()) return 'Every input row needs a label.';
@@ -67,9 +77,12 @@ export function AssemblyMappingForm({ workbookId, onCreated, onCancel }: Assembl
       const cleanJobInfoCells = Object.fromEntries(
         Object.entries(jobInfoCells).filter(([, cell]) => cell.trim())
       );
+      const selectedNames = conditions
+        .filter((c) => selectedConditionIds.includes(c.id))
+        .map((c) => c.name);
       const mapping = await assemblyService.createMapping({
         workbookId,
-        conditionRef: conditionRef.trim(),
+        conditionRef: formatConditionRefs(selectedNames),
         inputs: inputs.map((row) => ({ label: row.label.trim(), cell: row.cell.trim().toUpperCase() })),
         jobInfoCells: Object.keys(cleanJobInfoCells).length > 0 ? cleanJobInfoCells : undefined,
       });
@@ -85,15 +98,15 @@ export function AssemblyMappingForm({ workbookId, onCreated, onCancel }: Assembl
   return (
     <div className="border rounded-lg p-3 bg-muted/30 space-y-3">
       <div>
-        <Label htmlFor="assembly-condition-ref">Condition pattern</Label>
-        <Input
-          id="assembly-condition-ref"
-          placeholder='e.g. "Aquafin 2K deck" or "Aquafin*"'
-          value={conditionRef}
-          onChange={(e) => setConditionRef(e.target.value)}
+        <Label>Conditions</Label>
+        <ConditionMultiSelect
+          conditions={conditions}
+          selectedIds={selectedConditionIds}
+          onChange={setSelectedConditionIds}
         />
         <p className="text-xs text-muted-foreground mt-1">
-          Matches condition names exactly (case-insensitive), or use a trailing * for a prefix wildcard.
+          Their quantities are summed into this workbook's input cells. Saved by name, so the
+          mapping works on any project using the same condition names.
         </p>
       </div>
 

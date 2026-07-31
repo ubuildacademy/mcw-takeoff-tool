@@ -911,8 +911,9 @@ UI work until the engine matches real workbooks.
 4. Component prices are **either** a product-code reference **or** a fixed literal —
    19 workbooks are priced entirely by hand with no Pricing DB lookup (I0 finding 4).
 
-**Order:** ~~I0~~ → ~~I1~~ → ~~I3~~ → ~~I2~~ → ~~I4 (gate PASSED)~~ → ~~I5~~ → ~~I6~~ → ~~I7~~ → I8,
-with **I9 (company-admin tier)** before any assembly-management UI reaches a second
+**Order:** ~~I0~~ → ~~I1~~ → ~~I3~~ → ~~I2~~ → ~~I4 (gate PASSED)~~ → ~~I5~~ → ~~I6~~ → ~~I7~~ →
+~~I8~~. Stage 2's shippable bar (live cost + branded in-app report) is met; **I9
+(company-admin tier)** is what remains before any assembly-management UI reaches a second
 company. I1's migration is applied to Supabase and MCW's 1,151-product price list is
 imported. C6
 (kill the free-text pattern box) folds into I8 and is not run separately.
@@ -1437,7 +1438,7 @@ access on deploy; tsc + tests; help docs updated.
 **Blocks multi-tenant sale.** Also wanted by I6/I8, so do it before shipping any
 assembly-management UI to a second company.
 
-### Task I8 — Assembly as condition template (absorbs C6)
+### Task I8 — Assembly as condition template (absorbs C6) — DONE 2026-07-31
 
 **Do:** assemblies become openable as condition templates — pick "Aquafin 2K" from
 templates and the condition arrives pre-wired to its assembly (and, for Excel holdouts,
@@ -1448,6 +1449,36 @@ templates with costs.
 **Success criteria:** new condition from an assembly template prices immediately with no
 manual wiring; existing name-pattern mappings keep working (migrate, don't break); help
 docs updated.
+
+**Landed:**
+- `assemblyConditionTemplate.ts` — pure. Assembly detail → condition drafts: unit and
+  measurement type from the assembly's own unit strings, name de-duplication, distinct
+  colours, and the assembly link already set. 13 tests.
+- `assemblyMatching.ts` — `condition_ref` now holds **one entry per line**, matched as a
+  union. 16 tests, including that a legacy single pattern still parses as a one-entry list.
+- `ConditionMultiSelect.tsx`, wired into `AssemblyMappingForm` and the C5
+  `AssemblyProposalConfirmDialog`. The free-text pattern box is gone from both.
+- Assemblies listed at the top of `ConditionTemplatesDialog` with "Add condition".
+
+**One condition per quantity input, not one per assembly.** An assembly with SF-Floor,
+SF-Wall and LF-Cove prices $0 on whichever the estimator forgets to draw — I6 already
+reports that as a warning, and this is the task that can stop it happening at all. Names
+are suffixed with the input ("Aquafin 2K — LF-Cove") only when there is more than one.
+
+**Zero migration, and that was the design constraint.** The obvious C6 implementation
+stores concrete condition ids, but `assembly_workbooks` is **org-scoped** while conditions
+are **project-scoped**: a mapping keyed on ids would work on the job it was made for and
+silently match nothing on the next one. Storing the selected *names* keeps the registry
+reusable, keeps every existing row valid, and preserves the wildcards already in the DB —
+so nothing had to be backfilled or re-mapped. Newline is the separator because every
+condition name came from a single-line input and therefore cannot contain one.
+
+**Waste is 0 on a generated condition**, consistent with I6's decision and open item 10.
+If item 10 resolves the other way, this is the second place that changes.
+
+**Unrecognised units are surfaced, not guessed.** An input in GAL keeps its unit, is
+measured as an area, and the estimator gets a warning naming the condition to check —
+picking a measurement type silently would produce a plausible wrong number.
 
 ---
 

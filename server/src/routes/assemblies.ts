@@ -94,18 +94,19 @@ const upload = multer({
 const uploadHandler = upload.single('file');
 const handleUpload = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   return new Promise<void>((resolve) => {
-    uploadHandler(req, res, (err: any) => {
+    uploadHandler(req, res, (err: unknown) => {
       if (err) {
+        const details = err instanceof Error ? err.message : String(err);
         if (err instanceof multer.MulterError) {
           if (err.code === 'LIMIT_FILE_SIZE') {
             return res.status(413).json({ error: 'File too large', message: 'Workbook exceeds the 25MB limit' });
           }
-          return res.status(400).json({ error: 'Upload error', details: err.message });
+          return res.status(400).json({ error: 'Upload error', details });
         }
-        if (err.message === 'Invalid file type') {
+        if (details === 'Invalid file type') {
           return res.status(400).json({ error: 'Invalid file type', message: 'Only .xlsx and .xlsm workbooks are allowed' });
         }
-        return res.status(400).json({ error: 'Upload error', details: err.message });
+        return res.status(400).json({ error: 'Upload error', details });
       }
       resolve();
       next();
@@ -119,6 +120,10 @@ router.post('/upload', requireAuth, requireAdmin, handleUpload, async (req, res)
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
+    }
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ error: 'Authentication required' });
     }
 
     const workbookId = uuidv4();
@@ -142,7 +147,7 @@ router.post('/upload', requireAuth, requireAdmin, handleUpload, async (req, res)
     const workbook = await createAssemblyWorkbook({
       filename: req.file.originalname,
       storagePath,
-      uploadedBy: req.user!.id,
+      uploadedBy: user.id,
     });
 
     // C5 auto-map: scan the ASSEMBLY sheet before the temp file is removed.
@@ -238,7 +243,7 @@ router.post('/mappings', requireAuth, requireAdmin, async (req, res) => {
       return res.status(404).json({ error: 'Assembly workbook not found' });
     }
     if (typeof conditionRef !== 'string' || !conditionRef.trim()) {
-      return res.status(400).json({ error: 'conditionRef is required (a condition name pattern or template id)' });
+      return res.status(400).json({ error: 'conditionRef is required (one condition name per line, or a name pattern)' });
     }
     const cleanInputs = sanitizeInputs(inputs);
     if (!cleanInputs) {
@@ -305,9 +310,11 @@ router.post('/generate', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'conditionIds must be a non-empty array of condition ids' });
   }
 
-  const userId = req.user!.id;
-  const userIsAdmin = req.user!.role === 'admin';
-  const hasAccess = await hasProjectAccess(userId, projectId, userIsAdmin);
+  const user = req.user;
+  if (!user) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  const hasAccess = await hasProjectAccess(user.id, projectId, user.role === 'admin');
   if (!hasAccess) {
     return res.status(404).json({ error: 'Project not found or access denied' });
   }
@@ -402,7 +409,12 @@ router.post('/generate', requireAuth, async (req, res) => {
 
 /** The org that owns the library. A user outside one is a setup problem, not an empty list. */
 async function requireLibraryOrg(req: express.Request, res: express.Response) {
-  const org = await getOrganizationForUser(req.user!.id);
+  const user = req.user;
+  if (!user) {
+    res.status(401).json({ error: 'Authentication required' });
+    return null;
+  }
+  const org = await getOrganizationForUser(user.id);
   if (!org) {
     res.status(409).json({
       error: 'No organization',
@@ -519,6 +531,10 @@ async function priceRequestedConditions(
 } | null> {
   const org = await requireLibraryOrg(req, res);
   if (!org) return null;
+  // requireLibraryOrg already answered an unauthenticated request; this re-reads
+  // the user as a value so the project check below needs no assertion.
+  const user = req.user;
+  if (!user) return null;
 
   const { projectId, items } = req.body ?? {};
   if (!Array.isArray(items)) {
@@ -534,7 +550,7 @@ async function priceRequestedConditions(
       res.status(400).json({ error: 'Invalid projectId' });
       return null;
     }
-    const allowed = await hasProjectAccess(req.user!.id, String(projectId), req.user?.role === 'admin');
+    const allowed = await hasProjectAccess(user.id, String(projectId), user.role === 'admin');
     if (!allowed) {
       res.status(404).json({ error: 'Project not found or access denied' });
       return null;
