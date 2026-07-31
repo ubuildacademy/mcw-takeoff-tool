@@ -4,6 +4,18 @@ Every update to Meridian Takeoff since the beta program started, newest first. C
 
 ---
 
+## Live assembly pricing on the Costs tab — 2026-07
+
+**New: a condition can be priced by an assembly, live.** Open any condition and pick one under **Price with assembly**. The **Costs** tab then prices it from your actual takeoff quantity — materials by coverage yield against your price list, labor from the assembly's production rates and crew, then its margin chain and insurance — and the number moves as you measure. Expand a condition to see every component line, package counts, and each margin step.
+
+If the assembly prices more than one quantity, you're asked which one the condition measures. If it prices only one, you're not asked at all.
+
+**It says what it doesn't know.** Link a condition to an assembly's floor quantity while nothing measures its wall quantity, and the wall components show as $0 with a note naming them — rather than a confident-looking total with a third of the assembly missing. The same goes for a component whose price is missing or a production rate that couldn't be matched to a quantity.
+
+Waste comes from the assembly rather than the condition: your workbook already carries a waste percentage for each quantity it prices, and applying the condition's on top would order extra without saying so.
+
+---
+
 ## Assemblies and cost defaults — 2026-07
 
 **New: import your priced workbooks into Meridian.** Under **Admin → Assemblies**, upload one of your assembly spreadsheets and Meridian reads it — components, coverage yields, the quantity inputs it prices against, production rates, crew and margins — and shows you everything it found *before* saving anything. Fix what it flags, name it, then import.

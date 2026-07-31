@@ -35,9 +35,17 @@ import { assemblyExtractor } from '../services/assemblyExtractor';
 import {
   deleteAssembly,
   getAssemblyDetail,
+  getAssemblyDetails,
+  getCostDefaults,
   getOrganizationForUser,
+  getProductsByCodes,
   listAssemblies,
 } from '../services/assemblyLibraryService';
+import {
+  priceCondition,
+  sumConditionPricing,
+  type ConditionPricingRequest,
+} from '../services/conditionAssemblyPricing';
 import { previewAssemblyImport, saveAssemblyFromProposal } from '../services/assemblyImportService';
 
 const router = express.Router();
@@ -466,6 +474,101 @@ router.get('/library/:id', requireAuth, validateUUIDParam('id'), async (req, res
   } catch (error) {
     console.error('Error loading assembly:', error);
     return res.status(500).json({ error: 'Failed to load assembly', details: String(error) });
+  }
+});
+
+/**
+ * Price linked conditions live from their takeoff quantities (task I6).
+ *
+ * `requireAuth`, deliberately not `requireAdmin`: every org member sees the
+ * dollars (Jeff, 2026-07-27). Only *editing* the library is gated.
+ *
+ * The client sends quantities because it already has them — the measurement
+ * store is the live source and re-deriving them server-side would put the
+ * number a step behind the drawing. The assembly, its prices and the company
+ * rates all come from the server, so a client cannot invent a price; the worst
+ * a bad quantity does is misprice that caller's own screen.
+ */
+router.post('/price', requireAuth, async (req, res) => {
+  try {
+    const org = await requireLibraryOrg(req, res);
+    if (!org) return;
+
+    const { projectId, items } = req.body ?? {};
+    if (!Array.isArray(items)) {
+      return res.status(400).json({ error: 'items must be an array' });
+    }
+    if (items.length > 500) {
+      return res.status(400).json({ error: 'Too many items in one request (max 500)' });
+    }
+    if (projectId !== undefined && projectId !== null) {
+      if (!isValidUUIDAnyVersion(String(projectId))) {
+        return res.status(400).json({ error: 'Invalid projectId' });
+      }
+      const allowed = await hasProjectAccess(req.user!.id, String(projectId), req.user?.role === 'admin');
+      if (!allowed) return res.status(404).json({ error: 'Project not found or access denied' });
+    }
+
+    const requests: (ConditionPricingRequest & { assemblyId: string })[] = [];
+    for (const item of items) {
+      const conditionId = String(item?.conditionId ?? '');
+      const assemblyId = String(item?.assemblyId ?? '');
+      const quantityInputId = String(item?.quantityInputId ?? '');
+      if (!isValidUUIDAnyVersion(assemblyId) || !isValidUUIDAnyVersion(quantityInputId)) {
+        return res.status(400).json({ error: 'Each item needs a valid assemblyId and quantityInputId' });
+      }
+      requests.push({
+        conditionId,
+        assemblyId,
+        quantityInputId,
+        quantity: Number(item?.quantity) || 0,
+      });
+    }
+
+    if (requests.length === 0) {
+      return res.json({ pricings: [], totals: sumConditionPricing([]), unknownAssemblyIds: [] });
+    }
+
+    const [assemblies, costDefaults] = await Promise.all([
+      getAssemblyDetails(org.id, requests.map((r) => r.assemblyId)),
+      getCostDefaults(org.id),
+    ]);
+
+    // One price lookup for every code across every assembly asked for.
+    const codes = new Set<string>();
+    for (const assembly of assemblies.values()) {
+      for (const component of assembly.components) {
+        if (component.productCode) codes.add(component.productCode);
+      }
+    }
+    const products = await getProductsByCodes(org.id, [...codes]);
+    const pricesByCode: Record<string, number> = {};
+    for (const [code, product] of products) {
+      if (product.netPrice !== null) pricesByCode[code] = product.netPrice;
+    }
+
+    const pricings = [];
+    const unknownAssemblyIds: string[] = [];
+    for (const request of requests) {
+      const assembly = assemblies.get(request.assemblyId);
+      // An assembly deleted from the library after a condition was linked to
+      // it. Reported rather than skipped, so the UI can say the link is stale
+      // instead of quietly showing no cost.
+      if (!assembly) {
+        unknownAssemblyIds.push(request.assemblyId);
+        continue;
+      }
+      pricings.push(priceCondition({ assembly, request, pricesByCode, costDefaults }));
+    }
+
+    return res.json({
+      pricings,
+      totals: sumConditionPricing(pricings),
+      unknownAssemblyIds,
+    });
+  } catch (error) {
+    console.error('Error pricing conditions:', error);
+    return res.status(500).json({ error: 'Failed to price conditions', details: String(error) });
   }
 });
 

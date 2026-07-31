@@ -11,6 +11,7 @@ import { useConditionStore } from '../store/slices/conditionSlice';
 import { useConditionFolderStore } from '../store/slices/conditionFolderSlice';
 import type { TakeoffCondition } from '../types';
 import { generateDistinctColor, parseDepthInput, formatDepthOutput } from '../utils/commonUtils';
+import { ConditionAssemblyPicker } from './ConditionAssemblyPicker';
 
 interface CreateConditionDialogProps {
   projectId: string;
@@ -75,6 +76,8 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
     subQuantityType: (editingCondition?.subQuantityType || '') as '' | 'linear' | 'area' | 'volume',
     subQuantityUnit: editingCondition?.subQuantityUnit || '',
     subQuantityPerCount: editingCondition?.subQuantityPerCount?.toString() || '',
+    assemblyId: editingCondition?.assemblyId ?? null,
+    assemblyQuantityInputId: editingCondition?.assemblyQuantityInputId ?? null,
   });
   const [loading, setLoading] = useState(false);
   const [depthError, setDepthError] = useState<string>('');
@@ -119,6 +122,8 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
       subQuantityType: (editingCondition.subQuantityType || '') as '' | 'linear' | 'area' | 'volume',
       subQuantityUnit: editingCondition.subQuantityUnit || '',
       subQuantityPerCount: editingCondition.subQuantityPerCount?.toString() || '',
+      assemblyId: editingCondition.assemblyId ?? null,
+      assemblyQuantityInputId: editingCondition.assemblyQuantityInputId ?? null,
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps -- Sync only when switching to edit a condition
   }, [editingCondition?.id]);
@@ -233,6 +238,10 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
           : editingCondition?.subQuantityType
             ? { subQuantityType: null as unknown as undefined, subQuantityUnit: null as unknown as undefined, subQuantityPerCount: null as unknown as undefined }
             : {}),
+        // Always sent, so clearing the link actually clears it. The server
+        // resolves a single-input assembly's input itself.
+        assemblyId: formData.assemblyId,
+        assemblyQuantityInputId: formData.assemblyId ? formData.assemblyQuantityInputId : null,
       };
       
       let result: TakeoffCondition;
@@ -783,6 +792,18 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
               )}
             </div>
           )}
+
+          <ConditionAssemblyPicker
+            assemblyId={formData.assemblyId}
+            quantityInputId={formData.assemblyQuantityInputId}
+            onChange={({ assemblyId, quantityInputId }) =>
+              setFormData((prev) => ({
+                ...prev,
+                assemblyId,
+                assemblyQuantityInputId: quantityInputId,
+              }))
+            }
+          />
 
           <div>
             <Label htmlFor="materialCost">

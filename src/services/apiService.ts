@@ -1444,10 +1444,117 @@ export const assemblyLibraryService = {
     return response.data.assemblies;
   },
 
+  /** One assembly with its quantity inputs — what the condition dialog picks from. */
+  async detail(id: string): Promise<AssemblyDetail> {
+    const response = await apiClient.get(`/assemblies/library/${id}`);
+    return response.data.assembly;
+  },
+
+  /**
+   * Price linked conditions from their live takeoff quantities (task I6).
+   * Quantities come from this client because the measurement store is the live
+   * source; prices and rates come from the server.
+   */
+  async price(
+    projectId: string | null,
+    items: AssemblyPriceRequestItem[]
+  ): Promise<AssemblyPriceResponse> {
+    const response = await apiClient.post('/assemblies/price', { projectId, items });
+    return response.data;
+  },
+
   async remove(id: string): Promise<void> {
     await apiClient.delete(`/assemblies/library/${id}`);
   },
 };
+
+export interface AssemblyQuantityInput {
+  id: string;
+  seq: number;
+  name: string;
+  unit: string | null;
+  wastePct: number;
+}
+
+export interface AssemblyDetail extends AssemblyListItem {
+  quantityInputs: AssemblyQuantityInput[];
+  components: { id: string; seq: number; description: string | null; productCode: string | null }[];
+}
+
+export interface AssemblyPriceRequestItem {
+  conditionId: string;
+  assemblyId: string;
+  quantityInputId: string;
+  quantity: number;
+}
+
+export interface AssemblyMarginStep {
+  name: string;
+  rate: number;
+  amount: number;
+  runningTotal: number;
+}
+
+export interface AssemblyCostBreakdown {
+  materialSubtotal: number;
+  escalation: number;
+  surcharge: number;
+  tax: number;
+  materialTotal: number;
+  laborManDays: number;
+  jobDurationDays: number;
+  laborBase: number;
+  laborBurden: number;
+  laborTotal: number;
+  equipmentCost: number;
+  miscCost: number;
+  costBeforeMargins: number;
+  marginSteps: AssemblyMarginStep[];
+  marginsTotal: number;
+  insuranceBase: number;
+  insuranceTotal: number;
+  total: number;
+  issues: string[];
+  components: {
+    componentId: string;
+    seq: number;
+    description: string | null;
+    productCode: string | null;
+    adjustedQuantity: number;
+    packages: number;
+    unitPrice: number | null;
+    extendedCost: number;
+    included: boolean;
+    issue: string | null;
+  }[];
+}
+
+export interface ConditionPricing {
+  conditionId: string;
+  assemblyId: string;
+  assemblyName: string;
+  quantityInputId: string;
+  quantityInputName: string | null;
+  quantity: number;
+  breakdown: AssemblyCostBreakdown;
+  unfedInputs: { id: string; name: string; unit: string | null; componentCount: number }[];
+  warnings: string[];
+}
+
+export interface AssemblyPriceResponse {
+  pricings: ConditionPricing[];
+  totals: {
+    total: number;
+    materialTotal: number;
+    laborTotal: number;
+    marginsTotal: number;
+    insuranceTotal: number;
+    conditionCount: number;
+    conditionsWithWarnings: number;
+  };
+  /** Conditions whose assembly has since been deleted from the library. */
+  unknownAssemblyIds: string[];
+}
 
 export interface CostDefaults {
   dayRatePerMan: number | null;

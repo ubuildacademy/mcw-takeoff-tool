@@ -60,6 +60,10 @@ export interface TakeoffCondition {
   subQuantityType?: 'linear' | 'area' | 'volume';
   subQuantityUnit?: string; // e.g. 'LF', 'SF', 'CY'
   subQuantityPerCount?: number; // quantity per marker; total = markerCount × subQuantityPerCount
+  // Assembly costing (task I6): price this condition through a library assembly
+  // instead of flat per-unit costs. Both are set together or neither is.
+  assemblyId?: string | null;
+  assemblyQuantityInputId?: string | null; // which of the assembly's named inputs this quantity feeds
 }
 
 export interface TakeoffMeasurement {

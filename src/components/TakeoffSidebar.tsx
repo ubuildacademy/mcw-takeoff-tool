@@ -24,7 +24,7 @@ import { CreateConditionDialog } from './CreateConditionDialog';
 import { SendReportModal } from './SendReportModal';
 import { formatFeetAndInches } from '../lib/utils';
 import { extractErrorMessage } from '../utils/commonUtils';
-import { useTakeoffExport, TakeoffSidebarConditionList, AssemblyWorkbooksSection } from './takeoff-sidebar';
+import { useTakeoffExport, TakeoffSidebarConditionList, AssemblyWorkbooksSection, AssemblyCostsSection } from './takeoff-sidebar';
 import { PDFExportOptionsDialog } from './takeoff-sidebar/PDFExportOptionsDialog';
 import { ConditionTemplatesDialog } from './takeoff-sidebar/ConditionTemplatesDialog';
 import { supabase } from '../lib/supabase';
@@ -597,11 +597,24 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
 
         {activeTab === 'costs' && (
           <div className="p-4">
+            {/* Assembly pricing sits above the flat per-unit summary: where a
+                condition is linked to an assembly, that is the real number.
+                Outside the block below because it renders even when no
+                condition carries flat costs. */}
+            <div className="mb-6 empty:mb-0">
+              <AssemblyCostsSection projectId={projectId} />
+            </div>
             {(() => {
               const costBreakdown = getProjectCostBreakdown(projectId);
               const { conditions: costConditions, summary } = costBreakdown;
               
+              // A project priced entirely through assemblies has no flat costs
+              // and must not be told it has no cost data — the numbers are
+              // right above this.
+              const hasAssemblyPricing = conditions.some((c) => c.assemblyId);
+
               if (costConditions.length === 0) {
+                if (hasAssemblyPricing) return null;
                 return (
                   <div className="text-center py-8 text-muted-foreground">
                     <DollarSign className="w-12 h-12 mx-auto mb-2 opacity-50" />

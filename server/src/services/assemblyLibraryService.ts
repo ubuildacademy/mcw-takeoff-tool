@@ -22,6 +22,7 @@ import {
   AssemblyComponentRow,
   AssemblyDetail,
   AssemblyQuantityInput,
+  AssemblyProductionRateRow,
   AssemblyQuantityInputRow,
   AssemblyRow,
   Margin,
@@ -290,19 +291,80 @@ export async function getAssemblyDetail(orgId: string, assemblyId: string): Prom
   }
   if (!assemblyRow) return null;
 
-  const [{ data: inputRows, error: inputError }, { data: componentRows, error: componentError }] =
-    await Promise.all([
-      supabase.from('assembly_quantity_inputs').select('*').eq('assembly_id', assemblyId),
-      supabase.from('assembly_components').select('*').eq('assembly_id', assemblyId),
-    ]);
+  const [
+    { data: inputRows, error: inputError },
+    { data: componentRows, error: componentError },
+    { data: rateRows, error: rateError },
+  ] = await Promise.all([
+    supabase.from('assembly_quantity_inputs').select('*').eq('assembly_id', assemblyId),
+    supabase.from('assembly_components').select('*').eq('assembly_id', assemblyId),
+    supabase.from('assembly_production_rates').select('*').eq('assembly_id', assemblyId),
+  ]);
   if (inputError) throw wrapDatabaseError('Get assembly quantity inputs', inputError, { assemblyId });
   if (componentError) throw wrapDatabaseError('Get assembly components', componentError, { assemblyId });
+  if (rateError) throw wrapDatabaseError('Get assembly production rates', rateError, { assemblyId });
 
   return buildAssemblyDetail(
     assemblyRow as AssemblyRow,
     (inputRows || []) as AssemblyQuantityInputRow[],
-    (componentRows || []) as AssemblyComponentRow[]
+    (componentRows || []) as AssemblyComponentRow[],
+    (rateRows || []) as AssemblyProductionRateRow[]
   );
+}
+
+/**
+ * Several assemblies with everything needed to price them, in as few round
+ * trips as the shape allows.
+ *
+ * The Costs tab prices every linked condition in a project at once, and a
+ * per-assembly `getAssemblyDetail` would be four queries per condition. This
+ * is four queries total, regardless of how many assemblies are asked for.
+ */
+export async function getAssemblyDetails(
+  orgId: string,
+  assemblyIds: string[]
+): Promise<Map<string, AssemblyDetail>> {
+  const unique = [...new Set(assemblyIds)].filter(Boolean);
+  if (unique.length === 0) return new Map();
+
+  const { data: assemblyRows, error: assemblyError } = await supabase
+    .from('assemblies')
+    .select('*')
+    .eq('org_id', orgId)
+    .in('id', unique);
+  if (assemblyError) throw wrapDatabaseError('Get assemblies', assemblyError, { orgId });
+
+  // Org filter above is what keeps this from leaking: the child queries are by
+  // assembly id, so they must only ever see ids this org actually owns.
+  const ownedIds = (assemblyRows || []).map((row: AssemblyRow) => row.id);
+  if (ownedIds.length === 0) return new Map();
+
+  const [
+    { data: inputRows, error: inputError },
+    { data: componentRows, error: componentError },
+    { data: rateRows, error: rateError },
+  ] = await Promise.all([
+    supabase.from('assembly_quantity_inputs').select('*').in('assembly_id', ownedIds),
+    supabase.from('assembly_components').select('*').in('assembly_id', ownedIds),
+    supabase.from('assembly_production_rates').select('*').in('assembly_id', ownedIds),
+  ]);
+  if (inputError) throw wrapDatabaseError('Get assembly quantity inputs', inputError, { orgId });
+  if (componentError) throw wrapDatabaseError('Get assembly components', componentError, { orgId });
+  if (rateError) throw wrapDatabaseError('Get assembly production rates', rateError, { orgId });
+
+  const details = new Map<string, AssemblyDetail>();
+  for (const row of (assemblyRows || []) as AssemblyRow[]) {
+    details.set(
+      row.id,
+      buildAssemblyDetail(
+        row,
+        (inputRows || []) as AssemblyQuantityInputRow[],
+        (componentRows || []) as AssemblyComponentRow[],
+        (rateRows || []) as AssemblyProductionRateRow[]
+      )
+    );
+  }
+  return details;
 }
 
 export interface CreateAssemblyParams {

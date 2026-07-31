@@ -9,10 +9,65 @@ import {
   validateUUIDParam,
   sanitizeBody,
   isAdmin as checkIsAdmin,
-  hasProjectAccess
+  hasProjectAccess,
+  isValidUUIDAnyVersion
 } from '../middleware';
+import { getAssemblyDetail, getOrganizationForUser } from '../services/assemblyLibraryService';
 
 const router = express.Router();
+
+/**
+ * Resolve and validate a condition's assembly link before it is saved (task I6).
+ *
+ * The database trigger enforces that the input belongs to the assembly, but it
+ * cannot know whose org the assembly is in — and an id from another company is
+ * exactly what must not be linkable. Checking here also turns a raw trigger
+ * exception into a message the UI can show.
+ *
+ * When the assembly has exactly ONE quantity input, it is chosen here rather
+ * than asked for. That is what keeps the dialog to "pick an assembly and go"
+ * for the common case.
+ */
+async function resolveAssemblyLink(
+  userId: string,
+  assemblyId: unknown,
+  quantityInputId: unknown
+): Promise<
+  | { error: string }
+  | { assemblyId: string | null; assemblyQuantityInputId: string | null }
+> {
+  if (assemblyId === undefined || assemblyId === null || assemblyId === '') {
+    // Clearing the link, or never setting one.
+    return { assemblyId: null, assemblyQuantityInputId: null };
+  }
+  if (typeof assemblyId !== 'string' || !isValidUUIDAnyVersion(assemblyId)) {
+    return { error: 'assemblyId must be a valid id' };
+  }
+  const org = await getOrganizationForUser(userId);
+  if (!org) {
+    return { error: 'You are not a member of an organization, so assemblies are unavailable' };
+  }
+
+  const assembly = await getAssemblyDetail(org.id, assemblyId);
+  if (!assembly) return { error: 'Assembly not found in your organization' };
+
+  if (quantityInputId === undefined || quantityInputId === null || quantityInputId === '') {
+    if (assembly.quantityInputs.length === 1) {
+      return { assemblyId, assemblyQuantityInputId: assembly.quantityInputs[0].id };
+    }
+    // Nothing to price against, and nothing to guess from.
+    return {
+      error:
+        assembly.quantityInputs.length === 0
+          ? 'That assembly has no quantity inputs, so it cannot price a condition'
+          : 'This assembly prices more than one quantity, so one must be chosen',
+    };
+  }
+  if (typeof quantityInputId !== 'string' || !assembly.quantityInputs.some((i) => i.id === quantityInputId)) {
+    return { error: 'That quantity input does not belong to the selected assembly' };
+  }
+  return { assemblyId, assemblyQuantityInputId: quantityInputId };
+}
 
 // Get all conditions - requires admin (dangerous endpoint that returns all data)
 router.get('/', requireAuth, async (req, res) => {
@@ -113,6 +168,8 @@ router.post('/', requireAuth, sanitizeBody('name', 'description'), async (req, r
       subQuantityType,
       subQuantityUnit,
       subQuantityPerCount,
+      assemblyId,
+      assemblyQuantityInputId,
     } = req.body;
 
     // Validation
@@ -222,9 +279,14 @@ router.post('/', requireAuth, sanitizeBody('name', 'description'), async (req, r
       }
     }
 
+    const link = await resolveAssemblyLink(userId!, assemblyId, assemblyQuantityInputId);
+    if ('error' in link) {
+      return res.status(400).json({ error: link.error });
+    }
+
     const id = uuidv4();
     const now = new Date().toISOString();
-    
+
     const newCondition = {
       id,
       projectId,
@@ -260,6 +322,8 @@ router.post('/', requireAuth, sanitizeBody('name', 'description'), async (req, r
         subQuantityUnit: subQuantityUnit || null,
         subQuantityPerCount: subQuantityPerCount != null ? Number(subQuantityPerCount) : null,
       } : {}),
+      assemblyId: link.assemblyId,
+      assemblyQuantityInputId: link.assemblyQuantityInputId,
       folderId: folderId ?? null,
       createdAt: now
     };
@@ -341,6 +405,8 @@ router.put('/:id', requireAuth, validateUUIDParam('id'), sanitizeBody('name', 'd
       subQuantityType,
       subQuantityUnit,
       subQuantityPerCount,
+      assemblyId,
+      assemblyQuantityInputId,
     } = req.body;
 
     // Validation
@@ -413,6 +479,19 @@ router.put('/:id', requireAuth, validateUUIDParam('id'), sanitizeBody('name', 'd
       }
     }
 
+    // The assembly link is only touched when the request mentions it — a PUT
+    // that says nothing about assemblies must leave an existing link alone.
+    // Sending only an input id re-checks it against the link already stored.
+    let link: { assemblyId: string | null; assemblyQuantityInputId: string | null } | null = null;
+    if (assemblyId !== undefined || assemblyQuantityInputId !== undefined) {
+      const targetAssemblyId = assemblyId !== undefined ? assemblyId : existingCondition.assemblyId;
+      const resolved = await resolveAssemblyLink(userId!, targetAssemblyId, assemblyQuantityInputId);
+      if ('error' in resolved) {
+        return res.status(400).json({ error: resolved.error });
+      }
+      link = resolved;
+    }
+
     // Update the condition
     const updatedCondition = {
       ...existingCondition,
@@ -450,6 +529,10 @@ router.put('/:id', requireAuth, validateUUIDParam('id'), sanitizeBody('name', 'd
       ...(subQuantityType !== undefined && { subQuantityType: subQuantityType || null }),
       ...(subQuantityUnit !== undefined && { subQuantityUnit: subQuantityUnit || null }),
       ...(subQuantityPerCount !== undefined && { subQuantityPerCount: subQuantityPerCount === null ? null : Number(subQuantityPerCount) }),
+      ...(link !== null && {
+        assemblyId: link.assemblyId,
+        assemblyQuantityInputId: link.assemblyQuantityInputId,
+      }),
     };
 
     const savedCondition = await storage.saveCondition(updatedCondition);

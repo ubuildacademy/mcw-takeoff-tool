@@ -114,3 +114,31 @@ no longer matches its own price list until someone opens it in Excel.
 
 Not a defect to fix — it is an argument for the native engine, and worth saying out loud in
 sales material. Recorded so it is not rediscovered as a bug.
+
+### 10. Does a condition's waste factor apply on top of the assembly's? — needs Jeff
+
+Raised at I6. A condition carries a waste % and so does every assembly quantity input
+(read from the source workbook). Applying both compounds them: 10% on the condition and
+10% in the workbook orders 21% extra, quietly.
+
+**Assumed for now:** the assembly wins. The quantity sent to the engine is measured value
+× the condition's multiplier, *without* the condition's waste factor. One source of waste,
+and it is the one the workbook has always used.
+
+**What would settle it:** how Jeff actually bids a job where the field allowance differs
+from the product's — is condition waste a second allowance on top (scaffold-dependent
+overage), or the same number entered in two places? If it is a genuine second allowance,
+the fix is to multiply it in and label both in the Costs panel.
+
+### 11. Assembly-linked conditions still show the flat cost fields
+
+Raised at I6. The condition dialog shows Material Cost and Equipment Cost below the
+assembly picker even once an assembly is chosen, and the Costs tab renders both the flat
+per-unit summary and the assembly total. Nothing double-counts — they are separate
+sections — but a condition could carry a stray $/SF that no longer means anything.
+
+**Assumed for now:** leave both visible. Hiding the flat fields would strand values
+already entered on existing conditions.
+
+**What would settle it:** watching a real bid. If the flat fields go unused on linked
+conditions, disable them with a note rather than hiding them.

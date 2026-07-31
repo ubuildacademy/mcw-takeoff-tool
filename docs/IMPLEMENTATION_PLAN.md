@@ -911,7 +911,7 @@ UI work until the engine matches real workbooks.
 4. Component prices are **either** a product-code reference **or** a fixed literal —
    19 workbooks are priced entirely by hand with no Pricing DB lookup (I0 finding 4).
 
-**Order:** ~~I0~~ → ~~I1~~ → ~~I3~~ → ~~I2~~ → ~~I4 (gate PASSED)~~ → I5 → I6 → I7 → I8,
+**Order:** ~~I0~~ → ~~I1~~ → ~~I3~~ → ~~I2~~ → ~~I4 (gate PASSED)~~ → ~~I5~~ → ~~I6~~ → I7 → I8,
 with **I9 (company-admin tier)** before any assembly-management UI reaches a second
 company. I1's migration is applied to Supabase and MCW's 1,151-product price list is
 imported. C6
@@ -1259,7 +1259,7 @@ save as native assemblies. The Stage 1 registry becomes the import source.
 total matches the workbook; flagged gaps are visibly unmissable; batch import reports
 per-file status. Help docs updated (execution rule 8).
 
-### Task I6 — Condition ↔ assembly + live Costs tab
+### Task I6 — Condition ↔ assembly + live Costs tab — DONE 2026-07-30
 
 **Do:** pick an assembly **and one of its named quantity inputs** on a condition (I0
 finding 2 — "Aquafin 2K → SF-Floor"); the Costs tab prices it live from takeoff
@@ -1272,6 +1272,38 @@ when an assembly has exactly one input, don't ask.
 generated workbook for the same quantity; every org member sees the dollars (Jeff
 2026-07-27: no no-pricing tier — only *editing* the library is gated, to company admins);
 tsc + tests; help docs updated.
+
+**Landed:**
+- `add_assembly_link_to_conditions.sql` — `assembly_id` + `assembly_quantity_input_id`
+  on `takeoff_conditions`, both `ON DELETE SET NULL`, plus a trigger enforcing that the
+  input belongs to the assembly (no FK can express that across two tables).
+- `conditionAssemblyPricing.ts` — pure: binds production rates to the fed input, names
+  every unfed input, clamps a negative quantity, rolls conditions into a project total.
+  21 tests.
+- `POST /api/assemblies/price` — `requireAuth`, NOT `requireAdmin`. Batch-loads every
+  assembly in four queries regardless of how many conditions are priced.
+- `ConditionAssemblyPicker` in the condition dialog; `AssemblyCostsSection` on the
+  Costs tab, debounced 400 ms against the live measurement store.
+
+**Two defects this task fixed, both silent-mispricing class:**
+1. **Insurance was written on import but never read back.** `mapAssemblyRow` did not
+   map `insurance_rate_per_thousand` / `insurance_margin_pct`, so every assembly
+   inherited the company rate. The one workbook in the library carrying 35 against a
+   company 79 would have billed 79. Now on `Assembly`, with a regression test.
+2. **Production rates were never loaded at all.** `getAssemblyDetail` fetched inputs and
+   components only, so a live-priced condition would have shown $0 labor on an assembly
+   whose workbook prices labor. `AssemblyDetail` now carries `productionRates`.
+
+**Caught by the migration assertions, not by review:** `ON DELETE SET NULL` on
+`assembly_id` re-fires the validation trigger with the input id still set. The first
+version RAISEd there, which would have made deleting any linked assembly fail outright.
+The trigger now clears the orphaned input instead.
+
+**Decision — waste is the assembly's, not the condition's.** The quantity sent to the
+engine is measured value × condition multiplier, deliberately excluding the condition's
+own waste factor: the assembly already carries a waste % per quantity input from the
+source workbook, and applying both compounds two allowances into a silent over-order.
+Parked as open item 10 for Jeff to confirm against how he actually bids.
 
 ### Task I7 — Branded in-app assembly report
 

@@ -231,9 +231,21 @@ Your choices are **saved per project** and reused automatically the next time yo
 
 ### Costs tab
 
+- **Assembly Pricing** — Live totals for every condition linked to an assembly (see below).
 - **Project cost summary** — Subtotals, margin, total (when data exists).
 - **Profit Margin** — Opens the project profit-margin flow.
 - **Per-condition** breakdown when conditions have **material / equipment / waste** cost fields.
+
+#### Assembly Pricing
+
+Price a condition through one of your imported assemblies instead of a flat per-unit cost. The number updates as you measure.
+
+- **Linking a condition:** In the condition dialog (create or edit), pick one under **Price with assembly**. If that assembly prices more than one quantity — "SF-Floor," "SF-Wall," "LF-Cove" — a second dropdown asks which one this condition measures. When it prices only one, nothing is asked.
+- **What you get:** Materials by coverage yield against your imported price list, labor from the assembly's production rates and crew size, then its margin chain and insurance. Expand a condition to see every component line, package counts, and each margin step.
+- **Waste** comes from the assembly, not the condition. The assembly already carries a waste percentage for each quantity it prices, taken from your workbook; the condition's own waste factor is not applied on top of it.
+- **Unmeasured quantities are called out.** Link a condition to "SF-Floor" on an assembly that also prices "SF-Wall," and the wall components price at $0 with a note saying so — until another condition measures them. A total that quietly omits part of an assembly is the thing this is built to prevent.
+- **Everyone on your team sees the dollars.** Only *importing and editing* the assembly library is limited to admins.
+- **If an assembly is deleted** from the library, conditions linked to it keep their measurements and simply stop pricing, with a note to re-link them.
 
 #### Assembly Workbooks
 
