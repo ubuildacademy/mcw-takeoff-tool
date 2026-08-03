@@ -702,30 +702,40 @@ When answering questions:
     }
   };
 
-  const handleUpdateUserRole = async (userId: string, newRole: 'admin' | 'user') => {
-    if (!confirm(`Are you sure you want to change this user's role to ${newRole}?`)) return;
-    
-    try {
-      await authHelpers.updateUserRole(userId, newRole);
-      await loadUsers();
-      toast.success(`User role updated to ${newRole} successfully!`);
-    } catch (error) {
-      console.error('Error updating user role:', error);
-      toast.error(extractErrorMessage(error, 'Failed to update user role'));
-    }
-  };
+  type UserTier = 'user' | 'company_admin' | 'system_admin';
 
-  const handleUpdateOrgRole = async (userId: string, newOrgRole: 'company_admin' | 'user') => {
-    const label = newOrgRole === 'company_admin' ? 'company admin' : 'regular member';
+  const tierOf = (u: UserMetadata): UserTier =>
+    u.role === 'admin' ? 'system_admin' : u.orgRole === 'company_admin' ? 'company_admin' : 'user';
+
+  /**
+   * One 3-way tier, backed by two independent fields under the hood
+   * (`user_metadata.role` = platform, `organization_members.org_role` = company —
+   * separate tables, separate RLS, from I1). Showing two dropdowns for that was
+   * the mistake, not the two fields themselves — collapsing the *data model* would
+   * mean touching RLS policies across the schema for a UI nicety. This computes
+   * which of the (up to) two underlying PATCH calls the change actually needs, so
+   * picking "System Admin" for a plain user makes exactly one call, not two.
+   */
+  const handleUpdateTier = async (userId: string, tier: UserTier) => {
+    const target = users.find((u) => u.id === userId);
+    if (!target) return;
+    const label = tier === 'system_admin' ? 'system admin' : tier === 'company_admin' ? 'company admin' : 'regular user';
     if (!confirm(`Make this user a ${label}?`)) return;
 
     try {
-      await authHelpers.updateOrgRole(userId, newOrgRole);
+      const wantPlatformAdmin = tier === 'system_admin';
+      if (wantPlatformAdmin !== (target.role === 'admin')) {
+        await authHelpers.updateUserRole(userId, wantPlatformAdmin ? 'admin' : 'user');
+      }
+      const wantOrgRole: 'company_admin' | 'user' = tier === 'company_admin' ? 'company_admin' : 'user';
+      if (target.orgId && wantOrgRole !== (target.orgRole ?? 'user')) {
+        await authHelpers.updateOrgRole(userId, wantOrgRole);
+      }
       await loadUsers();
       toast.success(`Updated to ${label}!`);
     } catch (error) {
-      console.error('Error updating org role:', error);
-      toast.error(extractErrorMessage(error, 'Failed to update company role'));
+      console.error('Error updating user tier:', error);
+      toast.error(extractErrorMessage(error, 'Failed to update user tier'));
     }
   };
 
@@ -1671,10 +1681,9 @@ When answering questions:
                                 <p className="font-medium">{user.full_name || 'No name'}</p>
                                 <p className={adminHelpText}>
                                   {user.email && <>{user.email} • </>}
-                                  Role: {user.role} •
+                                  Role: {tierOf(user) === 'system_admin' ? 'System Admin' : tierOf(user) === 'company_admin' ? 'Company Admin' : 'User'} •
                                   Joined: {new Date(user.created_at).toLocaleDateString()}
                                   {user.company && ` • ${user.company}`}
-                                  {user.orgRole && ` • Company tier: ${user.orgRole === 'company_admin' ? 'Company Admin' : 'User'}`}
                                 </p>
                               </div>
                               <div className="flex items-center gap-2">
@@ -1689,27 +1698,20 @@ When answering questions:
                                     ? <Loader2 className="w-4 h-4 animate-spin" />
                                     : <KeyRound className="w-4 h-4" />}
                                 </Button>
-                                {user.orgId && (
-                                  <select
-                                    value={user.orgRole ?? 'user'}
-                                    onChange={(e) => handleUpdateOrgRole(user.id, e.target.value as 'company_admin' | 'user')}
-                                    className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                    title="Company tier"
-                                  >
-                                    <option value="user" className="bg-background text-foreground">Company: User</option>
-                                    <option value="company_admin" className="bg-background text-foreground">Company: Admin</option>
-                                  </select>
-                                )}
-                                {isPlatformAdmin && (
-                                  <select
-                                    value={user.role}
-                                    onChange={(e) => handleUpdateUserRole(user.id, e.target.value as 'admin' | 'user')}
-                                    className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                  >
-                                    <option value="user" className="bg-background text-foreground">User</option>
-                                    <option value="admin" className="bg-background text-foreground">Admin</option>
-                                  </select>
-                                )}
+                                <select
+                                  value={tierOf(user)}
+                                  onChange={(e) => handleUpdateTier(user.id, e.target.value as 'user' | 'company_admin' | 'system_admin')}
+                                  className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                  title="Role"
+                                >
+                                  <option value="user" className="bg-background text-foreground">User</option>
+                                  {user.orgId && (
+                                    <option value="company_admin" className="bg-background text-foreground">Company Admin</option>
+                                  )}
+                                  {isPlatformAdmin && (
+                                    <option value="system_admin" className="bg-background text-foreground">System Admin</option>
+                                  )}
+                                </select>
                                 <Button
                                   variant="outline"
                                   size="sm"
