@@ -43,10 +43,25 @@ consolidated materials list as the P.O.; Equipment/Incidentals/Accessories/Suppl
 Days/Colors left blank to fill by hand, matching how the P.O. left Price blank. See I13
 in `IMPLEMENTATION_PLAN.md`.
 
-**Still open:** the assembly-vs-template distinction for non-MCW companies, the in-app
-template builder (create-from-scratch, since a non-MCW company has no workbook to
-import), and the one-time MCW workbook bulk-load (232 files, Jeff-paced, explicitly not a
-dedicated tool).
+**Assembly builder shipped 2026-08-10** — "Build from scratch" in the admin Assemblies
+tab produces the same `AssemblyProposal` shape a workbook extraction does, then runs
+through the exact same preview/review/save pipeline (`POST /assemblies/preview`, new,
+mirrors `/extract`'s preview without a file). Settles the assembly-vs-template question
+from the same conversation: there isn't a separate "template" concept — an assembly
+built by hand and one imported from a workbook are the same row, same pricing engine,
+just a different way of getting there.
+
+**MCW bulk workbook load done 2026-08-10** — all 232 files at
+`Business/MCW/Assembly Work/2026 Assemblies 7-30-26` walked (brand = top-level folder,
+recursing into product-line sub-folders; anything under a folder named "Hold" excluded
+per Jeff's own filing convention). 215 imported, 3 already in the library (skipped by
+name+brand), 3 failed — `Specialty/Composite clean up.xlsx`, `Off site parking.xlsx`,
+`Submittals.xlsx` have no ASSEMBLY sheet; they're admin/overhead line items, not product
+assemblies, and were never going to import. 136 components across the batch carry
+advisory blockers (unbound quantities, missing product codes) — expected, the same gaps
+as open items 3-5, not a regression. Done with a throwaway script reusing the existing
+extractor/import service functions directly (not a shipped tool, deleted after the run,
+matches Jeff's "no dedicated bulk-import tool" call).
 
 ---
 

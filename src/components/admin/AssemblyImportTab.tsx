@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from 'rea
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
-import { AlertTriangle, CheckCircle2, Loader2, Pencil, RefreshCw, Trash2, Upload } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Hammer, Loader2, Pencil, RefreshCw, Trash2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   assemblyLibraryService,
@@ -12,6 +12,7 @@ import {
 } from '../../services/apiService';
 import { extractErrorMessage } from '../../utils/commonUtils';
 import { filterAssemblies, groupAssembliesByBrand } from '../../utils/assemblyListFilter';
+import { AssemblyBuilderForm } from './AssemblyBuilderForm';
 
 /**
  * Assemblies tab — import a priced workbook into the native library.
@@ -257,6 +258,7 @@ export function AssemblyImportTab() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editBrand, setEditBrand] = useState('');
+  const [showBuilder, setShowBuilder] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const libraryGroups = useMemo(
@@ -381,6 +383,14 @@ export function AssemblyImportTab() {
           )}
           {extracting ? 'Reading…' : 'Read a workbook'}
         </Button>
+        <Button
+          variant="outline"
+          onClick={() => setShowBuilder(true)}
+          disabled={extracting || saving || showBuilder || !!proposal}
+        >
+          <Hammer className="w-4 h-4 mr-2" />
+          Build from scratch
+        </Button>
         <Button variant="outline" onClick={() => void load()} disabled={loading}>
           <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
           Refresh
@@ -389,6 +399,19 @@ export function AssemblyImportTab() {
           {assemblies.length} assembl{assemblies.length === 1 ? 'y' : 'ies'} in the library
         </span>
       </div>
+
+      {showBuilder && !proposal && (
+        <div className="rounded-md border border-border p-4">
+          <AssemblyBuilderForm
+            onReviewed={(result) => {
+              setProposal(result.proposal);
+              setPreview(result.preview);
+              setShowBuilder(false);
+            }}
+            onCancel={() => setShowBuilder(false)}
+          />
+        </div>
+      )}
 
       {proposal && preview && (
         <div className="rounded-md border border-border p-4 space-y-5">

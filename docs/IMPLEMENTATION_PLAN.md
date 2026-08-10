@@ -1718,6 +1718,38 @@ blob on the project, not a 25-column table — nothing in it is ever queried ind
 - "Download Work Order (.xlsx)" button in `AssemblyCostsSection.tsx`, next to the P.O.
   download.
 
+### Task I14 — Assembly builder (create from scratch) — DONE 2026-08-10
+
+**Why:** a non-MCW company has no workbook to import — the only way into the library
+was upload-and-extract (I1-I8b). Settles the assembly-vs-template question raised
+alongside item 16: there is no separate "template" concept, just a proposal built by
+hand instead of one an extractor produced. Same row, same pricing engine either way.
+
+**Landed:**
+- `POST /api/assemblies/preview` (`requireCompanyAdmin`) — blockers/flags for a
+  hand-built proposal, no file involved. Mirrors `/extract`'s call to
+  `previewAssemblyImport`, writes nothing.
+- `AssemblyBuilderForm.tsx` — name/brand/crew size, editable quantity-input rows
+  (name/unit/waste%), editable component rows (description, drives-off-which-input,
+  product code OR fixed price, coverage yield/yield unit/packaging, optional flag).
+  Rates (day rate, burden, margins, insurance, escalation/surcharge/tax) intentionally
+  not exposed — unset means the assembly inherits company Cost Defaults, same as an
+  import that didn't override anything.
+- "Build from scratch" button in `AssemblyImportTab.tsx`, next to "Read a workbook" —
+  its "Review" step calls the new preview route and hands the result into the exact
+  same `proposal`/`preview` state the workbook-import flow already renders
+  (`ProposalReview`, Import/Discard) — no parallel review UI needed.
+
+### Task — MCW bulk workbook load — DONE 2026-08-10
+
+232 workbooks at `Business/MCW/Assembly Work/2026 Assemblies 7-30-26` (brand = top-level
+folder, recursed into product-line sub-folders, `Hold` sub-folders excluded). 215
+imported, 3 already in the library, 3 failed (no ASSEMBLY sheet — not real assemblies).
+136 components carry advisory blockers, matching the known extraction gaps (open items
+3-5). Run with a throwaway script calling `assemblyExtractor`/`saveAssemblyFromProposal`
+directly — not committed, not a product feature, per Jeff's standing "no dedicated
+bulk-import tool" call.
+
 ---
 
 ## Final QA checklist (run before any production deploy)

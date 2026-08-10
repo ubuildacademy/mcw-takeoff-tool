@@ -1414,6 +1414,13 @@ export const assemblyLibraryService = {
     return response.data.assembly;
   },
 
+  /** Blockers/flags for a hand-built proposal (the assembly builder), same feedback
+   *  `extract()` gets for an uploaded workbook — writes nothing. */
+  async preview(proposal: AssemblyProposal): Promise<{ proposal: AssemblyProposal; preview: AssemblyImportPreview }> {
+    const response = await apiClient.post('/assemblies/preview', { proposal });
+    return { proposal: response.data.proposal, preview: response.data.preview };
+  },
+
   async list(): Promise<AssemblyListItem[]> {
     const response = await apiClient.get('/assemblies/library');
     return response.data.assemblies;

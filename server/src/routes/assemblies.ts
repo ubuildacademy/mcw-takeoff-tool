@@ -161,6 +161,33 @@ router.post('/extract', requireAuth, requireCompanyAdmin, handleUpload, async (r
   }
 });
 
+/**
+ * Preview a hand-built proposal without saving — the same blockers/flags feedback
+ * `/extract` gives an uploaded workbook, but for the from-scratch assembly builder
+ * (a company with no workbook to import; task: assembly builder, 2026-08-10). No file
+ * involved: the proposal is already JSON, built up in the browser.
+ */
+router.post('/preview', requireAuth, requireCompanyAdmin, async (req, res) => {
+  try {
+    const org = await requireLibraryOrg(req, res);
+    if (!org) return;
+
+    const proposal = req.body?.proposal;
+    if (!proposal || typeof proposal !== 'object') {
+      return res.status(400).json({ error: 'A proposal is required' });
+    }
+    if (!String(proposal.name ?? '').trim()) {
+      return res.status(400).json({ error: 'The assembly needs a name' });
+    }
+
+    const preview = await previewAssemblyImport(org.id, proposal as never);
+    return res.json({ proposal, preview });
+  } catch (error) {
+    console.error('Error previewing assembly proposal:', error);
+    return res.status(500).json({ error: 'Failed to preview assembly', details: String(error) });
+  }
+});
+
 /** Save a reviewed proposal as a native assembly. */
 router.post('/import', requireAuth, requireCompanyAdmin, async (req, res) => {
   try {
