@@ -20,6 +20,7 @@ import {
   type ConditionTemplate,
 } from '../../store/slices/conditionTemplatesSlice';
 import { useConditionStore } from '../../store/slices/conditionSlice';
+import { useConditionFolderStore } from '../../store/slices/conditionFolderSlice';
 import { authHelpers } from '../../lib/supabase';
 import type { TakeoffCondition } from '../../types';
 import { assemblyLibraryService, type AssemblyListItem } from '../../services/apiService';
@@ -139,10 +140,22 @@ export function ConditionTemplatesDialog({
         return;
       }
 
+      // Group the conditions this assembly needs under a folder named after it, rather
+      // than dropping them uncategorized into the list — otherwise a multi-input
+      // assembly (Jeff, 2026-08-10: 7 conditions from one "Add condition" click) reads
+      // as clutter instead of a set. Reuse the folder if applying this assembly again.
+      const { getFolders, ensureFoldersLoaded, createFolder } = useConditionFolderStore.getState();
+      await ensureFoldersLoaded(projectId);
+      const existingFolder = getFolders(projectId).find(
+        (f) => f.name.trim().toLowerCase() === assembly.name.trim().toLowerCase()
+      );
+      const folder = existingFolder ?? (await createFolder(projectId, assembly.name));
+
       const { drafts, unrecognizedUnits } = buildConditionsFromAssembly(detail, {
         existingNames: conditions.map((c) => c.name),
         existingColors: conditions.map((c) => c.color).filter(Boolean),
         pickColor: generateDistinctColor,
+        folderId: folder.id,
       });
 
       const addCondition = useConditionStore.getState().addCondition;

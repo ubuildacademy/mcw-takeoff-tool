@@ -789,6 +789,24 @@ When answering questions:
     }
   };
 
+  /**
+   * Users grouped by company (platform admin only — a company admin's list is already
+   * all one org). Jeff, 2026-08-10: the flat list stopped being readable once more than
+   * one company exists. Falls back to "No company" for the rare row with no org_id.
+   */
+  const userGroups = (() => {
+    if (!isPlatformAdmin) return [{ label: '', users }];
+    const orgNameById = new Map(organizations.map((o) => [o.id, o.name]));
+    const byOrg = new Map<string, UserMetadata[]>();
+    for (const user of users) {
+      const label = (user.orgId && orgNameById.get(user.orgId)) || 'No company';
+      byOrg.set(label, [...(byOrg.get(label) ?? []), user]);
+    }
+    return [...byOrg.entries()]
+      .sort(([a], [b]) => (a === 'No company' ? 1 : b === 'No company' ? -1 : a.localeCompare(b)))
+      .map(([label, groupUsers]) => ({ label, users: groupUsers }));
+  })();
+
   const allTabs = [
     { id: 'user-management', label: 'User Management', icon: Users },
     { id: 'companies', label: 'Companies', icon: Building2 },
@@ -1735,52 +1753,63 @@ When answering questions:
                       {users.length === 0 ? (
                         <p className={adminMutedText}>No users found</p>
                       ) : (
-                        <div className="space-y-2">
-                          {users.map((user) => (
-                            <div key={user.id} className={adminListRow}>
-                              <div>
-                                <p className="font-medium">{user.full_name || 'No name'}</p>
-                                <p className={adminHelpText}>
-                                  {user.email && <>{user.email} • </>}
-                                  Role: {tierOf(user) === 'system_admin' ? 'System Admin' : tierOf(user) === 'company_admin' ? 'Company Admin' : 'User'} •
-                                  Joined: {new Date(user.created_at).toLocaleDateString()}
-                                  {user.company && ` • ${user.company}`}
-                                </p>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => handleResetPassword(user.id, user.email)}
-                                  disabled={resettingPasswordId === user.id}
-                                  title="Send password reset email"
-                                >
-                                  {resettingPasswordId === user.id
-                                    ? <Loader2 className="w-4 h-4 animate-spin" />
-                                    : <KeyRound className="w-4 h-4" />}
-                                </Button>
-                                <select
-                                  value={tierOf(user)}
-                                  onChange={(e) => handleUpdateTier(user.id, e.target.value as 'user' | 'company_admin' | 'system_admin')}
-                                  className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                  title="Role"
-                                >
-                                  <option value="user" className="bg-background text-foreground">User</option>
-                                  {user.orgId && (
-                                    <option value="company_admin" className="bg-background text-foreground">Company Admin</option>
-                                  )}
-                                  {isPlatformAdmin && (
-                                    <option value="system_admin" className="bg-background text-foreground">System Admin</option>
-                                  )}
-                                </select>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => handleDeleteUser(user.id)}
-                                  className="text-red-600 hover:bg-red-500/10 dark:text-red-400"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </Button>
+                        <div className="space-y-5">
+                          {userGroups.map((group) => (
+                            <div key={group.label}>
+                              {isPlatformAdmin && (
+                                <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+                                  {group.label} ({group.users.length})
+                                </h4>
+                              )}
+                              <div className="space-y-2">
+                                {group.users.map((user) => (
+                                  <div key={user.id} className={adminListRow}>
+                                    <div>
+                                      <p className="font-medium">{user.full_name || 'No name'}</p>
+                                      <p className={adminHelpText}>
+                                        {user.email && <>{user.email} • </>}
+                                        Role: {tierOf(user) === 'system_admin' ? 'System Admin' : tierOf(user) === 'company_admin' ? 'Company Admin' : 'User'} •
+                                        Joined: {new Date(user.created_at).toLocaleDateString()}
+                                        {user.company && ` • ${user.company}`}
+                                      </p>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleResetPassword(user.id, user.email)}
+                                        disabled={resettingPasswordId === user.id}
+                                        title="Send password reset email"
+                                      >
+                                        {resettingPasswordId === user.id
+                                          ? <Loader2 className="w-4 h-4 animate-spin" />
+                                          : <KeyRound className="w-4 h-4" />}
+                                      </Button>
+                                      <select
+                                        value={tierOf(user)}
+                                        onChange={(e) => handleUpdateTier(user.id, e.target.value as 'user' | 'company_admin' | 'system_admin')}
+                                        className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                        title="Role"
+                                      >
+                                        <option value="user" className="bg-background text-foreground">User</option>
+                                        {user.orgId && (
+                                          <option value="company_admin" className="bg-background text-foreground">Company Admin</option>
+                                        )}
+                                        {isPlatformAdmin && (
+                                          <option value="system_admin" className="bg-background text-foreground">System Admin</option>
+                                        )}
+                                      </select>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleDeleteUser(user.id)}
+                                        className="text-red-600 hover:bg-red-500/10 dark:text-red-400"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                ))}
                               </div>
                             </div>
                           ))}
