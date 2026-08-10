@@ -13,12 +13,13 @@ import {
   Share2,
   User,
   Users,
+  Building2,
   ChevronDown,
   ChevronRight,
   Search
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { projectService, userService } from '../services/apiService';
+import { projectService, userService, organizationAdminService, type AdminOrganization } from '../services/apiService';
 import { ProjectCreationDialog } from './ProjectCreationDialog';
 import { ProjectSettingsDialog } from './ProjectSettingsDialog';
 import { BackupDialog } from './BackupDialog';
@@ -78,6 +79,30 @@ function groupProjectsByUser(
     return a.userName.localeCompare(b.userName, undefined, { sensitivity: 'base' });
   });
   return result;
+}
+
+/**
+ * Nest the per-user groups under their company (platform admin's dashboard, task:
+ * 2026-08-10 — "the header should be the company, then the list of users nested
+ * within it"). A flat user list stopped being readable once more than one company
+ * exists, same reasoning as the admin panel's user grouping. "No company" sorts last.
+ */
+function groupUsersByOrg(
+  userGroups: Array<{ userId: string; userName: string; projects: Project[] }>,
+  users: UserMetadata[],
+  organizations: AdminOrganization[]
+): Array<{ orgId: string; orgName: string; userGroups: typeof userGroups }> {
+  const orgIdByUserId = new Map(users.map((u) => [u.id, u.orgId ?? null]));
+  const orgNameById = new Map(organizations.map((o) => [o.id, o.name]));
+  const byOrg = new Map<string, typeof userGroups>();
+  for (const group of userGroups) {
+    const orgId = orgIdByUserId.get(group.userId) ?? null;
+    const label = (orgId && orgNameById.get(orgId)) || 'No company';
+    byOrg.set(label, [...(byOrg.get(label) ?? []), group]);
+  }
+  return [...byOrg.entries()]
+    .sort(([a], [b]) => (a === 'No company' ? 1 : b === 'No company' ? -1 : a.localeCompare(b)))
+    .map(([orgName, groups]) => ({ orgId: orgName, orgName, userGroups: groups }));
 }
 
 const CARD_BASE = 'bg-card border rounded-lg p-6 cursor-pointer hover:shadow-md transition-shadow';
@@ -244,9 +269,22 @@ export function ProjectList() {
   const [isCompanyAdmin, setIsCompanyAdmin] = useState(false);
   const [assembliesEnabled, setAssembliesEnabled] = useState(false);
   const [users, setUsers] = useState<UserMetadata[]>([]);
+  const [organizations, setOrganizations] = useState<AdminOrganization[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [collapsedUserIds, setCollapsedUserIds] = useState<Set<string>>(new Set());
+  const [collapsedOrgIds, setCollapsedOrgIds] = useState<Set<string>>(new Set());
   const [userSearchQuery, setUserSearchQuery] = useState('');
+
+  const toggleOrgSection = (orgId: string) =>
+    setCollapsedOrgIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(orgId)) {
+        next.delete(orgId);
+      } else {
+        next.add(orgId);
+      }
+      return next;
+    });
 
   const toggleUserSection = (userId: string) =>
     setCollapsedUserIds((prev) => {
@@ -289,10 +327,17 @@ export function ProjectList() {
           setIsCompanyAdmin(tier?.orgRole === 'company_admin');
           setAssembliesEnabled(tier?.assembliesEnabled ?? false);
           if (adminStatus) {
-            const userList = await authHelpers.getAllUsers();
-            if (mounted) setUsers(userList ?? []);
+            const [userList, orgList] = await Promise.all([
+              authHelpers.getAllUsers(),
+              organizationAdminService.list().catch(() => []),
+            ]);
+            if (mounted) {
+              setUsers(userList ?? []);
+              setOrganizations(orgList ?? []);
+            }
           } else {
             setUsers([]);
+            setOrganizations([]);
           }
         }
         if (!mounted) return;
@@ -336,6 +381,11 @@ export function ProjectList() {
         (g.userId !== '__unknown__' && g.userId.toLowerCase().includes(q))
     );
   }, [groupedByUser, userSearchQuery]);
+
+  const groupedByOrg = useMemo(
+    () => (filteredGroupedByUser ? groupUsersByOrg(filteredGroupedByUser, users, organizations) : null),
+    [filteredGroupedByUser, users, organizations]
+  );
 
   const handleProjectClick = (projectId: string) => {
     navigate(`/project/${projectId}`);
@@ -475,46 +525,89 @@ export function ProjectList() {
                 />
               </div>
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => groupedByUser && setCollapsedUserIds(new Set(groupedByUser.map((g) => g.userId)))}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (!groupedByOrg) return;
+                    setCollapsedOrgIds(new Set(groupedByOrg.map((g) => g.orgId)));
+                    setCollapsedUserIds(new Set(groupedByOrg.flatMap((g) => g.userGroups.map((u) => u.userId))));
+                  }}
+                >
                   Collapse all
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => setCollapsedUserIds(new Set())}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setCollapsedOrgIds(new Set());
+                    setCollapsedUserIds(new Set());
+                  }}
+                >
                   Expand all
                 </Button>
               </div>
             </div>
-            {filteredGroupedByUser && filteredGroupedByUser.length > 0 ? (
-              filteredGroupedByUser.map((group) => {
-                const isCollapsed = collapsedUserIds.has(group.userId);
+            {groupedByOrg && groupedByOrg.length > 0 ? (
+              groupedByOrg.map((orgGroup) => {
+                const isOrgCollapsed = collapsedOrgIds.has(orgGroup.orgId);
+                const orgProjectCount = orgGroup.userGroups.reduce((sum, g) => sum + g.projects.length, 0);
                 return (
-                  <div key={group.userId}>
+                  <div key={orgGroup.orgId}>
                     <button
                       type="button"
-                      onClick={() => toggleUserSection(group.userId)}
+                      onClick={() => toggleOrgSection(orgGroup.orgId)}
                       className="flex items-center gap-2 mb-4 w-full text-left hover:opacity-80 transition-opacity"
                     >
-                      {isCollapsed ? (
+                      {isOrgCollapsed ? (
                         <ChevronRight className="w-5 h-5 text-muted-foreground shrink-0" />
                       ) : (
                         <ChevronDown className="w-5 h-5 text-muted-foreground shrink-0" />
                       )}
-                      <Users className="w-5 h-5 text-muted-foreground" />
-                      <h2 className="text-lg font-semibold text-foreground">{group.userName}</h2>
+                      <Building2 className="w-5 h-5 text-muted-foreground" />
+                      <h2 className="text-xl font-bold text-foreground">{orgGroup.orgName}</h2>
                       <span className="text-sm text-muted-foreground">
-                        ({group.projects.length} project{group.projects.length !== 1 ? 's' : ''})
+                        ({orgProjectCount} project{orgProjectCount !== 1 ? 's' : ''})
                       </span>
                     </button>
-                    {!isCollapsed && (
-                      <ProjectCardsSection
-                        projects={group.projects}
-                        variant={viewMode}
-                        getProjectTotalCost={getProjectTotalCost}
-                        onShare={handleProjectShare}
-                        onBackup={handleProjectBackup}
-                        onEdit={handleEditProject}
-                        onDelete={handleDeleteProject}
-                        onClick={handleProjectClick}
-                      />
+                    {!isOrgCollapsed && (
+                      <div className="space-y-8 pl-7 border-l border-border ml-2.5">
+                        {orgGroup.userGroups.map((group) => {
+                          const isCollapsed = collapsedUserIds.has(group.userId);
+                          return (
+                            <div key={group.userId}>
+                              <button
+                                type="button"
+                                onClick={() => toggleUserSection(group.userId)}
+                                className="flex items-center gap-2 mb-4 w-full text-left hover:opacity-80 transition-opacity"
+                              >
+                                {isCollapsed ? (
+                                  <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+                                ) : (
+                                  <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
+                                )}
+                                <Users className="w-4 h-4 text-muted-foreground" />
+                                <h3 className="text-base font-semibold text-foreground">{group.userName}</h3>
+                                <span className="text-sm text-muted-foreground">
+                                  ({group.projects.length} project{group.projects.length !== 1 ? 's' : ''})
+                                </span>
+                              </button>
+                              {!isCollapsed && (
+                                <ProjectCardsSection
+                                  projects={group.projects}
+                                  variant={viewMode}
+                                  getProjectTotalCost={getProjectTotalCost}
+                                  onShare={handleProjectShare}
+                                  onBackup={handleProjectBackup}
+                                  onEdit={handleEditProject}
+                                  onDelete={handleDeleteProject}
+                                  onClick={handleProjectClick}
+                                />
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
                     )}
                   </div>
                 );
