@@ -8,6 +8,9 @@ export interface StoredProject {
   client?: string;
   location?: string;
   jobNumber?: string;
+  /** Work Order paperwork fields (GC, super, owner, architect…) — passed through as-is,
+   *  the shape lives in the frontend's `JobInfo` type (src/types/index.ts). */
+  jobInfo?: Record<string, string> | null;
   status?: 'active' | 'completed' | 'on-hold';
   description?: string;
   projectType?: string;
@@ -103,6 +106,7 @@ interface ProjectRow {
   client?: string;
   location?: string;
   job_number?: string;
+  job_info?: Record<string, string> | null;
   status?: string;
   description?: string;
   project_type?: string;
@@ -452,6 +456,7 @@ class SupabaseStorage {
       client: item.client,
       location: item.location,
       jobNumber: item.job_number,
+      jobInfo: item.job_info,
       status: (item.status as StoredProject['status']) ?? 'active',
       description: item.description,
       projectType: item.project_type,
@@ -489,6 +494,7 @@ class SupabaseStorage {
       client: data.client,
       location: data.location,
       jobNumber: data.job_number,
+      jobInfo: data.job_info,
       status: data.status,
       description: data.description,
       projectType: data.project_type,
@@ -532,6 +538,7 @@ class SupabaseStorage {
       client: project.client,
       location: project.location,
       job_number: project.jobNumber,
+      job_info: project.jobInfo,
       status: project.status,
       description: project.description,
       project_type: project.projectType,
@@ -564,6 +571,17 @@ class SupabaseStorage {
         .single());
     }
 
+    // Same fallback for add_job_info_to_projects.sql.
+    if (error && hasColumnNotFoundError(error) && dbProject.job_info !== undefined) {
+      console.warn('⚠️ job_info column not found. Run migration: server/migrations/add_job_info_to_projects.sql');
+      delete dbProject.job_info;
+      ({ data, error } = await supabase
+        .from(TABLES.PROJECTS)
+        .upsert(dbProject, { onConflict: 'id' })
+        .select()
+        .single());
+    }
+
     if (error) {
       console.error('Error saving project:', error);
       throw error;
@@ -576,6 +594,7 @@ class SupabaseStorage {
       client: data.client,
       location: data.location,
       jobNumber: data.job_number,
+      jobInfo: data.job_info,
       status: data.status,
       description: data.description,
       projectType: data.project_type,

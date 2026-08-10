@@ -7,6 +7,7 @@ import { Textarea } from './ui/textarea';
 import { toast } from 'sonner';
 import { BaseDialog } from './ui/base-dialog';
 import { useProjectStore } from '../store/slices/projectSlice';
+import { JobInfoDialog } from './JobInfoDialog';
 import type { Project } from '../types';
 
 interface ProjectSettingsDialogProps {
@@ -51,6 +52,7 @@ export function ProjectSettingsDialog({ open, onOpenChange, project, onUpdated }
     profitMarginPercent: project?.profitMarginPercent?.toString() || '15'
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showJobInfo, setShowJobInfo] = useState(false);
 
   const projectTypes = [
     'Commercial',
@@ -216,6 +218,12 @@ export function ProjectSettingsDialog({ open, onOpenChange, project, onUpdated }
                 placeholder="e.g. 24-1234"
               />
             </div>
+
+            <div className="flex items-end">
+              <Button type="button" variant="outline" onClick={() => setShowJobInfo(true)}>
+                Job Info…
+              </Button>
+            </div>
           </div>
 
           <div>
@@ -334,6 +342,10 @@ export function ProjectSettingsDialog({ open, onOpenChange, project, onUpdated }
           </div>
         </div>
       </form>
+
+      {showJobInfo && (
+        <JobInfoDialog open={showJobInfo} onOpenChange={setShowJobInfo} project={project} />
+      )}
     </BaseDialog>
   );
 }

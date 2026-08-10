@@ -24,6 +24,7 @@ function po(overrides: Partial<PurchaseOrder> = {}): PurchaseOrder {
       { product: 'Preprufe Tape', costCode: '2000', qty: 0, uom: '', issue: 'quantity copies the row above' },
     ],
     warnings: [],
+    jobInfo: null,
     ...overrides,
   };
 }

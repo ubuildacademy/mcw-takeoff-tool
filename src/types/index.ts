@@ -1,5 +1,46 @@
 // Shared type definitions for the Meridian Takeoff application
 
+/**
+ * The "Basic Job Info" a Work Order needs beyond what a project already tracks — pulled
+ * straight from a real MCW workbook's own BASIC JOB INFO sheet (task: Work Order
+ * generator, 2026-08-10). Every field free text, all optional: this is paperwork data
+ * entered once per job, not something the costing engine reads. Stored as one JSONB blob
+ * (`takeoff_projects.job_info`) rather than 25+ columns — nothing here is ever queried on
+ * its own, only read whole when generating a document.
+ */
+export interface JobInfo {
+  jobAddress?: string;
+  generalContractor?: string;
+  gcAddress?: string;
+  gcPhone?: string;
+  superintendent?: string;
+  superintendentCell?: string;
+  gcProjectManager?: string;
+  gcProjectManagerPhone?: string;
+  ownerName?: string;
+  ownerAddress?: string;
+  ownerPhone?: string;
+  architectName?: string;
+  architectAddress?: string;
+  architectPhone?: string;
+  numberOfStories?: string;
+  warrantyRequired?: string;
+  estStartDate?: string;
+  billingDueDate?: string;
+  contractAmount?: string;
+  contractReceived?: string;
+  contractReturned?: string;
+  executedOnFile?: string;
+  ntoRequired?: string;
+  insuranceCertificate?: string;
+  permitRequired?: string;
+  bondRequired?: string;
+  /** WORK ORDER's own "COMPANY" field — which MCW division is doing the work. */
+  company?: string;
+  /** WORK ORDER's free-text scope-of-work block. */
+  scopeOfWork?: string;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -7,6 +48,9 @@ export interface Project {
   location: string;
   /** Job/project number for paperwork (P.O., work order). Distinct from `id`. */
   jobNumber?: string;
+  /** Job-info paperwork fields (GC, super, owner, architect, warranty/permit/bond/NTO…)
+   *  the Work Order generator needs. Undefined until the estimator fills any of it in. */
+  jobInfo?: JobInfo;
   status: string;
   description?: string;
   projectType?: string;

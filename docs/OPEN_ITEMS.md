@@ -38,15 +38,15 @@ first: consolidated across the project (not one-per-assembly like the source wor
 price left blank matching the source sheet. See I11 in `IMPLEMENTATION_PLAN.md` for what
 landed.
 
-**Still open — the bigger half:** the Work Order document needs job-info data Meridian
-does not capture anywhere today (GC name/address/phone, superintendent, PM, owner,
-architect, warranty/permit/bond/NTO flags, contract dates) — real new data model, not a
-templating exercise like the P.O. turned out to be. Also still open: the assembly-vs-
-template distinction for non-MCW companies, the in-app template builder, and the one-time
-MCW workbook bulk-load.
+**Work Order MVP shipped 2026-08-10 (Task I13).** Job-info header fields + the same
+consolidated materials list as the P.O.; Equipment/Incidentals/Accessories/Supplier/Man
+Days/Colors left blank to fill by hand, matching how the P.O. left Price blank. See I13
+in `IMPLEMENTATION_PLAN.md`.
 
-**To settle:** whether/when to build the Work Order's job-info panel — a real feature
-with its own scope, not a detail to fold into another task.
+**Still open:** the assembly-vs-template distinction for non-MCW companies, the in-app
+template builder (create-from-scratch, since a non-MCW company has no workbook to
+import), and the one-time MCW workbook bulk-load (232 files, Jeff-paced, explicitly not a
+dedicated tool).
 
 ---
 
@@ -160,17 +160,19 @@ survives — it is just no longer this item's problem.
 Flagged at C2, confirmed by I0, and fixed the way it was always going to be: Stage 2's
 named quantity inputs price each input separately, and Stage 1 was removed at I8a.
 
-### 14. `assembly_workbooks` / `assembly_mappings` still exist in Supabase — needs Jeff
+### 14. `assembly_workbooks` / `assembly_mappings` still exist in Supabase — CLOSED 2026-08-10
 
 Stage 1's code was removed at I8a; its two tables and the workbook files under the
 `assembly-workbooks` storage prefix were left alone. Nothing reads or writes them.
 
-**Not dropped on purpose.** They hold MCW's real uploads and mappings, and a `DROP TABLE`
-is not a thing to run on a live database as the tail end of a refactor.
+Jeff confirmed 2026-08-10 the mappings are of no further interest.
+`drop_stage1_assembly_registry_tables.sql` drops both tables (`CASCADE`, which only drops
+the now-orphaned `assemblies.source_workbook_id` FK constraint — the column and its stored
+ids are untouched). Verified idempotent on local Postgres; needs Jeff to run it in Supabase.
 
-**To settle:** Jeff confirms the mappings are of no further interest, then one migration
-drops both tables and one cleanup removes the storage prefix. Until then they are inert
-rows costing nothing.
+**Still open, separate:** the workbook files themselves under the `assembly-workbooks`
+storage prefix in Supabase Storage — a file deletion, not a SQL migration, left for Jeff to
+clear from the dashboard whenever, no code depends on it either way.
 
 ### 15. The projects list total does not include assembly pricing
 
@@ -246,15 +248,12 @@ the workbook here.
 which case years of history are on that basis and changing it now creates a discontinuity)
 or has simply been receiving a $0 it ignores. One question to whoever posts these.
 
-### 13. Davis-Bacon is a prompt with no mechanism behind it
+### 13. Davis-Bacon is a prompt with no mechanism behind it — CLOSED 2026-08-10
 
 Raised at I7. All 478 workbooks contain the literal text `*Enter DB Classification*` beside
 a day rate labelled "Standard Labor rate", and not one has it filled in. A prevailing-wage
 job appears to be handled by overriding the day rate by hand.
 
-**Assumed for now:** no toggle. The report records the labor basis and nothing else, since
-a mechanism that changed the arithmetic would be invented rather than observed.
-
-**What would settle it:** how Jeff actually bids a Davis-Bacon job today. If there is a
-classification table behind it, that is a real feature — per-classification day rates on the
-assembly — and worth its own task rather than a checkbox.
+Jeff confirmed 2026-08-10: hand-overriding the day rate is fine, no classification table
+behind it in practice. No mechanism to build — the report continues to record the labor
+basis and nothing else.

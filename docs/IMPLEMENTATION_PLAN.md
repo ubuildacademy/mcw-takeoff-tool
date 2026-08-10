@@ -1665,6 +1665,59 @@ document to a vendor.
 sheets via the same pure-Python OOXML approach used for I0/I4 (scratch-only, nothing
 committed) to confirm the actual column shape and header fields before writing any code.
 
+### Task I12 — Per-company assemblies feature flag — DONE 2026-08-10
+
+**Why:** assemblies becomes a sellable add-on, not a given for every company on the
+platform (Jeff, 2026-08-10) — a system admin needs one switch per company to grant or
+revoke it, and a company without it should see no trace of it anywhere.
+
+**Landed:**
+- `organizations.assemblies_enabled` (`add_assemblies_enabled_to_organizations.sql`) —
+  `NOT NULL DEFAULT true`, grandfathers MCW/every existing org in.
+- `GET /api/organizations` + `PATCH /api/organizations/:id/assemblies-enabled`
+  (`requireAdmin` only) — the system-admin company roster and its one control.
+- New **Companies** tab in the admin panel (`CompaniesTab.tsx`), platform-admin only —
+  every org, one toggle per row.
+- `GET /api/users/me` now returns the caller's own `assembliesEnabled`; threaded down
+  `ProjectList` → `AdminPanel` (hides Assemblies/Product Pricing/Cost Defaults tabs) and
+  `TakeoffWorkspace` → `TakeoffSidebar` → `CreateConditionDialog`/`AssemblyCostsSection`
+  (hides the picker and the Costs tab's assembly section).
+- Backend gate: `requireLibraryOrg` (`routes/assemblies.ts`) and `requireOrg`
+  (`routes/products.ts`) both 403 with `Assemblies not enabled` when the caller's org has
+  the flag off — UI hide is not the only enforcement.
+
+### Task I13 — Work Order generator (MVP) — DONE 2026-08-10
+
+**Why:** the bigger half of open item 16 — an MCW assembly workbook is also the work
+order handed to the crew, and the app didn't produce one. Scoped by reading a real
+workbook's WORK ORDER + BASIC JOB INFO sheets directly (`Aquafin-2K M.xlsx`) rather than
+guessing the field list.
+
+**Scoped with Jeff, 2026-08-10:** automate the header (job-info fields) and the materials
+table (same consolidated list the P.O. already builds); leave Equipment, Incidentals,
+Accessories, Supplier, Man Days and the Materials table's Colors column blank — none of
+them are driven by any formula in the source template either, and nothing in Meridian's
+data model tracks per-component color/equipment/accessories. Job-info storage: one JSONB
+blob on the project, not a 25-column table — nothing in it is ever queried individually.
+
+**Landed:**
+- `takeoff_projects.job_info` (`add_job_info_to_projects.sql`) — nullable JSONB. Column-
+  not-found fallback in `storage.ts`, same pattern as `job_number`.
+- `JobInfo` interface (`src/types/index.ts`) — ~27 free-text fields: job address, GC
+  name/address/phone, superintendent + cell, GC PM + phone, owner, architect, # of
+  stories, warranty/NTO/insurance/permit/bond flags, contract dates/amount, MCW
+  division, scope of work.
+- `JobInfoDialog.tsx` — grouped form, opened via a "Job Info…" button in
+  `ProjectSettingsDialog`. Saves through the existing `updateProject` store action.
+- `POST /api/assemblies/purchase-order` response extended with `jobInfo` — the Work
+  Order reuses this same priced-materials call instead of a second round trip.
+- `buildWorkOrderWorkbook.ts` — header grid from job info (first row, JOB NAME/JOB #,
+  always renders; the rest skip blank pairs), scope-of-work block, then the same
+  per-product materials list as the P.O. rendered as Materials | Qty | Unit Type |
+  Colors (blank). 9 tests.
+- "Download Work Order (.xlsx)" button in `AssemblyCostsSection.tsx`, next to the P.O.
+  download.
+
 ---
 
 ## Final QA checklist (run before any production deploy)

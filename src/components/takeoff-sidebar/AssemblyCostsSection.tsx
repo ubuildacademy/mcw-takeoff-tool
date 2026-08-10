@@ -28,6 +28,7 @@ import {
 import { getReportBranding } from './export/branding';
 import { buildAssemblyBudgetWorkbook } from './export/buildAssemblyBudgetWorkbook';
 import { buildPurchaseOrderWorkbook } from './export/buildPurchaseOrderWorkbook';
+import { buildWorkOrderWorkbook } from './export/buildWorkOrderWorkbook';
 import { extractErrorMessage } from '../../utils/commonUtils';
 
 const money = (value: number) =>
@@ -44,6 +45,7 @@ export function AssemblyCostsSection({ projectId }: AssemblyCostsSectionProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [downloading, setDownloading] = useState(false);
   const [downloadingPO, setDownloadingPO] = useState(false);
+  const [downloadingWO, setDownloadingWO] = useState(false);
   const [restorationBasis, setRestorationBasis] = useState(false);
   const currentProject = useProjectStore((s) => s.getCurrentProject());
 
@@ -145,6 +147,46 @@ export function AssemblyCostsSection({ projectId }: AssemblyCostsSectionProps) {
     }
   }, [projectId]);
 
+  /**
+   * Build and download the Work Order — same priced-materials call and consolidated
+   * materials list as the P.O. (one line per product), plus the job-info header fields
+   * entered via Project Settings → Job Info. Equipment/Accessories/Colors/Supplier/Man
+   * Days are left blank, matching the source template — nothing in Meridian's data model
+   * drives them.
+   */
+  const downloadWorkOrder = useCallback(async () => {
+    setDownloadingWO(true);
+    try {
+      const [po, branding] = await Promise.all([
+        assemblyLibraryService.purchaseOrder(projectId, itemsRef.current),
+        getReportBranding(),
+      ]);
+      const { buffer, filename } = await buildWorkOrderWorkbook(po, branding);
+      const url = URL.createObjectURL(
+        new Blob([buffer], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        })
+      );
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+
+      if (po.warnings.length > 0) {
+        toast.warning(`Work order downloaded with ${po.warnings.length} thing(s) to check.`);
+      } else {
+        toast.success('Work order downloaded.');
+      }
+    } catch (err) {
+      toast.error(extractErrorMessage(err));
+    } finally {
+      setDownloadingWO(false);
+    }
+  }, [projectId]);
+
   if (items.length === 0) return null;
 
   const conditionName = (conditionId: string) =>
@@ -234,6 +276,16 @@ export function AssemblyCostsSection({ projectId }: AssemblyCostsSectionProps) {
               >
                 <FileSpreadsheet className="w-4 h-4" />
                 {downloadingPO ? 'Building…' : 'Download P.O. (.xlsx)'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full flex items-center gap-2"
+                disabled={downloadingWO}
+                onClick={downloadWorkOrder}
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                {downloadingWO ? 'Building…' : 'Download Work Order (.xlsx)'}
               </Button>
               {/* The one dial worth showing: it moves real money between the
                   liability and OH&P columns of what accounting posts. */}

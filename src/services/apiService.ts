@@ -2,7 +2,7 @@ import axios from 'axios';
 import { supabase, authHelpers } from '../lib/supabase';
 import { getApiBaseUrl } from '../lib/apiConfig';
 import { devLog } from '../lib/devLog';
-import type { Project, TakeoffCondition, TakeoffMeasurement } from '../types';
+import type { Project, TakeoffCondition, TakeoffMeasurement, JobInfo } from '../types';
 
 const API_BASE_URL = getApiBaseUrl();
 
@@ -1529,6 +1529,9 @@ export interface PurchaseOrder {
   jobNumber: string;
   lines: PurchaseOrderLine[];
   warnings: string[];
+  /** Job-info paperwork fields — carried on this response too so the Work Order document
+   *  can reuse the same priced-materials call instead of a second round trip. */
+  jobInfo: JobInfo | null;
 }
 
 export interface AssemblyQuantityInput {

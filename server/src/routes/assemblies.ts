@@ -443,6 +443,9 @@ router.post('/purchase-order', requireAuth, async (req, res) => {
       jobNumber: project?.jobNumber ?? '',
       lines,
       warnings,
+      // Carried through so the Work Order document can reuse this same call rather than
+      // a second round trip just for job-info fields.
+      jobInfo: project?.jobInfo ?? null,
     });
   } catch (error) {
     console.error('Error building purchase order:', error);
