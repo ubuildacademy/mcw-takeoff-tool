@@ -646,8 +646,15 @@ export interface MyTier {
 }
 
 export const userService = {
-  async createInvitation(email: string, role: 'admin' | 'user', orgRole?: 'company_admin' | 'user') {
-    const response = await apiClient.post('/users/invitations', { email, role, orgRole });
+  /** `orgId` is platform-admin-only — targets a company other than the caller's own
+   *  (needed to invite the first member into a company that has no company_admin yet). */
+  async createInvitation(
+    email: string,
+    role: 'admin' | 'user',
+    orgRole?: 'company_admin' | 'user',
+    orgId?: string
+  ) {
+    const response = await apiClient.post('/users/invitations', { email, role, orgRole, orgId });
     return response.data;
   },
 
@@ -718,6 +725,11 @@ export const organizationAdminService = {
   async list(): Promise<AdminOrganization[]> {
     const response = await apiClient.get('/organizations');
     return response.data.organizations;
+  },
+
+  async create(name: string): Promise<AdminOrganization> {
+    const response = await apiClient.post('/organizations', { name });
+    return response.data.organization;
   },
 
   async setAssembliesEnabled(orgId: string, enabled: boolean) {

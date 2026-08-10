@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { supabase, TABLES } from '../supabase';
 import { storage } from '../storage';
 import { emailService } from '../services/emailService';
-import { requireAuth, requireAdmin, requireCompanyAdmin, validateUUIDParam } from '../middleware';
+import { requireAuth, requireAdmin, requireCompanyAdmin, validateUUIDParam, isValidUUIDAnyVersion } from '../middleware';
 import {
   getOrganizationForUser,
   getOrgRole,
@@ -111,7 +111,7 @@ router.post('/invitations', requireAuth, requireCompanyAdmin, async (req, res) =
   try {
     const caller = req.user;
     if (!caller) return res.status(401).json({ error: 'Authentication required' });
-    const { email: rawEmail, role: rawRole, orgRole: rawOrgRole } = req.body;
+    const { email: rawEmail, role: rawRole, orgRole: rawOrgRole, orgId: rawOrgId } = req.body;
     const email = typeof rawEmail === 'string' ? rawEmail.trim().toLowerCase() : rawEmail;
     const platformAdmin = caller.role === 'admin';
 
@@ -128,9 +128,29 @@ router.post('/invitations', requireAuth, requireCompanyAdmin, async (req, res) =
     }
 
     const orgRole = rawOrgRole === 'company_admin' ? 'company_admin' : 'user';
-    const org = await getOrganizationForUser(caller.id);
-    // A platform admin with no org (rare — org creation is a separate, manual step
-    // today) still sends a platform-tier invite with no company attached.
+
+    // A company admin always invites into their own org (unchanged). A platform admin
+    // may target ANY company by id — needed to invite the FIRST member into a company
+    // that was just created and so has no company_admin of its own yet to send the
+    // invite (task: company creation, 2026-08-10). Falls back to the caller's own org
+    // (rare for a platform admin — org creation used to be SQL-only) when omitted.
+    let targetOrgId: string | null;
+    if (platformAdmin && rawOrgId !== undefined && rawOrgId !== null) {
+      if (!isValidUUIDAnyVersion(String(rawOrgId))) {
+        return res.status(400).json({ error: 'Invalid orgId' });
+      }
+      const { data: targetOrg, error: orgError } = await supabase
+        .from('organizations')
+        .select('id')
+        .eq('id', rawOrgId)
+        .maybeSingle();
+      if (orgError || !targetOrg) {
+        return res.status(404).json({ error: 'Company not found' });
+      }
+      targetOrgId = targetOrg.id;
+    } else {
+      targetOrgId = (await getOrganizationForUser(caller.id))?.id ?? null;
+    }
 
     // Check if user already exists — page through all users to avoid the
     // default 50-user page limit silently missing accounts.
@@ -195,7 +215,7 @@ router.post('/invitations', requireAuth, requireCompanyAdmin, async (req, res) =
         invite_token: inviteToken,
         invited_by: caller.id,
         expires_at: expiresAt.toISOString(),
-        org_id: org?.id ?? null,
+        org_id: targetOrgId,
         org_role: orgRole,
       })
       .select()

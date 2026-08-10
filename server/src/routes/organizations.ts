@@ -7,7 +7,7 @@
  */
 import express from 'express';
 import { requireAuth, requireAdmin, validateUUIDParam } from '../middleware';
-import { listOrganizations, setAssembliesEnabled } from '../services/assemblyLibraryService';
+import { createOrganization, listOrganizations, setAssembliesEnabled } from '../services/assemblyLibraryService';
 
 const router = express.Router();
 
@@ -17,6 +17,28 @@ router.get('/', requireAuth, requireAdmin, async (_req, res) => {
   } catch (error) {
     console.error('Error listing organizations:', error);
     res.status(500).json({ error: 'Failed to list organizations' });
+  }
+});
+
+/**
+ * Create a company. There was previously no way to do this outside a one-off SQL
+ * insert (how MCW's own org was seeded) — a system admin needs this before they can
+ * invite anyone into a company that isn't MCW (Jeff, 2026-08-10).
+ */
+router.post('/', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const name = String(req.body?.name ?? '').trim();
+    if (!name) {
+      return res.status(400).json({ error: 'A company name is required' });
+    }
+    if (name.length > 200) {
+      return res.status(400).json({ error: 'That name is too long (200 characters max)' });
+    }
+    const organization = await createOrganization(name);
+    res.json({ organization });
+  } catch (error) {
+    console.error('Error creating organization:', error);
+    res.status(500).json({ error: 'Failed to create company' });
   }
 });
 

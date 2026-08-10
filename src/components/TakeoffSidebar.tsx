@@ -876,6 +876,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
         onOpenChange={setShowTemplatesDialog}
         projectId={projectId}
         conditions={conditions}
+        assembliesEnabled={assembliesEnabled}
       />
 
       <PDFExportOptionsDialog

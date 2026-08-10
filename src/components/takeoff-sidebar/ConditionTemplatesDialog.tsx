@@ -33,6 +33,10 @@ interface ConditionTemplatesDialogProps {
   projectId: string;
   /** Current project's conditions (source for "Save as template"). */
   conditions: TakeoffCondition[];
+  /** Whether the caller's company has the assemblies feature (upsell switch, 2026-08-10)
+   *  — hides "Start from a priced assembly" and skips fetching the library entirely when
+   *  off, rather than relying on the fetch itself failing closed. */
+  assembliesEnabled?: boolean;
 }
 
 export function ConditionTemplatesDialog({
@@ -40,6 +44,7 @@ export function ConditionTemplatesDialog({
   onOpenChange,
   projectId,
   conditions,
+  assembliesEnabled = false,
 }: ConditionTemplatesDialogProps) {
   const templates = useConditionTemplatesStore((s) => s.templates);
   const loadConditionTemplates = useConditionTemplatesStore((s) => s.loadConditionTemplates);
@@ -62,13 +67,17 @@ export function ConditionTemplatesDialog({
     if (!open) return;
     loadConditionTemplates();
     authHelpers.getCurrentUser().then((user) => setCurrentUserId(user?.id ?? null));
+    if (!assembliesEnabled) {
+      setAssemblies([]);
+      return;
+    }
     // Having no library — or no org yet — is not an error worth a toast; the
     // section simply doesn't render.
     assemblyLibraryService
       .list()
       .then(setAssemblies)
       .catch(() => setAssemblies([]));
-  }, [open, loadConditionTemplates]);
+  }, [open, loadConditionTemplates, assembliesEnabled]);
 
   const handleSave = () => {
     const name = newName.trim();

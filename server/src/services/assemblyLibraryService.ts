@@ -85,6 +85,22 @@ export async function listOrganizations(): Promise<Organization[]> {
   }));
 }
 
+/** Create a company. System admin only — see routes/organizations.ts. */
+export async function createOrganization(name: string): Promise<Organization> {
+  const { data, error } = await supabase
+    .from('organizations')
+    .insert({ name })
+    .select('id, name, created_at, assemblies_enabled')
+    .single();
+  if (error) throw wrapDatabaseError('Create organization', error, { name });
+  return {
+    id: data.id,
+    name: data.name,
+    createdAt: data.created_at,
+    assembliesEnabled: data.assemblies_enabled ?? true,
+  };
+}
+
 /** Grant or revoke the assemblies feature for a company (system admin only). */
 export async function setAssembliesEnabled(orgId: string, enabled: boolean): Promise<void> {
   const { error } = await supabase

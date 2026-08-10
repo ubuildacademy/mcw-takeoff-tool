@@ -27,7 +27,13 @@ import {
 import { toast } from 'sonner';
 import { ollamaService, type OllamaModel } from '../services/ollamaService';
 import { authHelpers, supabase, UserMetadata, UserInvitation } from '../lib/supabase';
-import { settingsService, usageService, type AiTokenUsageSummary } from '../services/apiService';
+import {
+  settingsService,
+  usageService,
+  organizationAdminService,
+  type AiTokenUsageSummary,
+  type AdminOrganization,
+} from '../services/apiService';
 import { extractErrorMessage } from '../utils/commonUtils';
 import { AdminHelpFaqTab } from './help/AdminHelpFaqTab';
 import { ProductPricingTab } from './admin/ProductPricingTab';
@@ -135,6 +141,10 @@ export function AdminPanel({ isOpen, onClose, projectId: _projectId, isPlatformA
   const [invitations, setInvitations] = useState<UserInvitation[]>([]);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'admin' | 'user'>('user');
+  // Which company to invite into — platform admin only, so they can bootstrap the
+  // first member of a company that has no company_admin yet to send its own invites.
+  const [organizations, setOrganizations] = useState<AdminOrganization[]>([]);
+  const [inviteOrgId, setInviteOrgId] = useState<string>('');
   const [isInviting, setIsInviting] = useState(false);
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [resettingPasswordId, setResettingPasswordId] = useState<string | null>(null);
@@ -601,8 +611,19 @@ When answering questions:
     if (isOpen && activeTab === 'user-management') {
       loadUsers();
       loadInvitations();
+      if (isPlatformAdmin) loadOrganizations();
     }
-  }, [activeTab, isOpen]);
+  }, [activeTab, isOpen, isPlatformAdmin]);
+
+  const loadOrganizations = async () => {
+    try {
+      const orgs = await organizationAdminService.list();
+      setOrganizations(orgs);
+      setInviteOrgId((prev) => prev || orgs[0]?.id || '');
+    } catch (error) {
+      console.error('Error loading organizations:', error);
+    }
+  };
 
   const loadUsage = async (days: number) => {
     setUsageLoading(true);
@@ -645,7 +666,12 @@ When answering questions:
     
     setIsInviting(true);
     try {
-      const result = await authHelpers.createInvitation(inviteEmail, inviteRole);
+      const result = await authHelpers.createInvitation(
+        inviteEmail,
+        inviteRole,
+        undefined,
+        isPlatformAdmin ? inviteOrgId || undefined : undefined
+      );
       setInviteEmail('');
       setInviteRole('user');
       await loadInvitations();
@@ -1616,6 +1642,24 @@ When answering questions:
                             >
                               <option value="user" className="bg-background text-foreground">User</option>
                               <option value="admin" className="bg-background text-foreground">Admin</option>
+                            </select>
+                          </div>
+                        )}
+                        {isPlatformAdmin && organizations.length > 1 && (
+                          <div>
+                            <Label htmlFor="invite-org">Company</Label>
+                            <select
+                              id="invite-org"
+                              name="invite-org"
+                              className={adminSelect}
+                              value={inviteOrgId}
+                              onChange={(e) => setInviteOrgId(e.target.value)}
+                            >
+                              {organizations.map((org) => (
+                                <option key={org.id} value={org.id} className="bg-background text-foreground">
+                                  {org.name}
+                                </option>
+                              ))}
                             </select>
                           </div>
                         )}

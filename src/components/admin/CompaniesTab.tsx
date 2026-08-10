@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Loader2, Building2 } from 'lucide-react';
+import { Loader2, Building2, Plus } from 'lucide-react';
 import { toast } from 'sonner';
+import { Button } from '../ui/button';
+import { Input } from '../ui/input';
 import { organizationAdminService, type AdminOrganization } from '../../services/apiService';
 import { extractErrorMessage } from '../../utils/commonUtils';
 
@@ -14,6 +16,8 @@ export function CompaniesTab() {
   const [orgs, setOrgs] = useState<AdminOrganization[]>([]);
   const [loading, setLoading] = useState(true);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [newName, setNewName] = useState('');
+  const [creating, setCreating] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -29,6 +33,22 @@ export function CompaniesTab() {
   useEffect(() => {
     load();
   }, []);
+
+  const handleCreate = async () => {
+    const name = newName.trim();
+    if (!name) return;
+    setCreating(true);
+    try {
+      const created = await organizationAdminService.create(name);
+      setOrgs((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+      setNewName('');
+      toast.success(`Created "${created.name}" — invite its first user from User Management.`);
+    } catch (error) {
+      toast.error(extractErrorMessage(error, 'Failed to create company'));
+    } finally {
+      setCreating(false);
+    }
+  };
 
   const handleToggle = async (org: AdminOrganization) => {
     const next = !org.assembliesEnabled;
@@ -57,6 +77,26 @@ export function CompaniesTab() {
           company to grant or revoke it.
         </p>
       </div>
+
+      <div className="flex items-center gap-2 max-w-md">
+        <Input
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          placeholder="New company name…"
+          className="h-9"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void handleCreate();
+          }}
+        />
+        <Button size="sm" onClick={() => void handleCreate()} disabled={creating || !newName.trim()}>
+          <Plus className="w-4 h-4 mr-1" />
+          {creating ? 'Creating…' : 'New company'}
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground -mt-4">
+        After creating a company, invite its first user from User Management — a company
+        picker appears there once more than one company exists.
+      </p>
 
       {loading ? (
         <div className="flex items-center gap-2 text-muted-foreground text-sm">
