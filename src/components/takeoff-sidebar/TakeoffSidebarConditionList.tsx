@@ -119,7 +119,19 @@ interface ContextMenuState {
   y: number;
   conditionId: string;
   showFolderFlyout: boolean;
+  /** Which side the folder flyout opens on — flips to 'left' when there isn't room
+   *  on the right, so it never renders off-screen or overlapping the menu itself. */
+  flyoutSide: 'left' | 'right';
 }
+
+/** Matches the flyout's own w-52 (13rem). Kept as one constant so the clamp math below
+ *  and the Tailwind width class can't silently drift apart. */
+const FOLDER_FLYOUT_WIDTH = 208;
+/** Delay before the flyout opens on hover — long enough that passing over "Move to
+ *  folder" on the way to something else (e.g. Delete) doesn't pop it open (Jeff,
+ *  2026-08-10: "takes over the list immediately when I pass over it"). Shorter than
+ *  the close delay so it doesn't feel sluggish once the user actually pauses there. */
+const FOLDER_FLYOUT_OPEN_DELAY_MS = 200;
 
 // ─── props ──────────────────────────────────────────────────────────────────
 
@@ -244,11 +256,23 @@ export function TakeoffSidebarConditionList({
       const above = ctxMenu.y - rect.height;
       top = above >= margin ? above : Math.max(margin, window.innerHeight - rect.height - margin);
     }
+    const clampedLeft = Math.max(margin, left);
     setCtxMenuStyle({
-      left: Math.max(margin, left),
+      left: clampedLeft,
       top,
       maxHeight,
       overflowY: 'auto',
+    });
+
+    // The folder flyout opens to the right of the menu by default (left-full). If the
+    // menu itself is clamped near the right edge, that leaves no room — flip the
+    // flyout to open on the left instead so it stays on-screen and never overlaps the
+    // menu it came from (Jeff, 2026-08-10).
+    const fitsRight = clampedLeft + rect.width + FOLDER_FLYOUT_WIDTH + margin <= window.innerWidth;
+    setCtxMenu((prev) => {
+      if (!prev) return prev;
+      const nextSide = fitsRight ? 'right' : 'left';
+      return prev.flyoutSide === nextSide ? prev : { ...prev, flyoutSide: nextSide };
     });
   }, [ctxMenu]);
 
@@ -277,7 +301,7 @@ export function TakeoffSidebarConditionList({
   const handleContextMenu = useCallback((e: React.MouseEvent, conditionId: string) => {
     e.preventDefault();
     e.stopPropagation();
-    setCtxMenu({ x: e.clientX, y: e.clientY, conditionId, showFolderFlyout: false });
+    setCtxMenu({ x: e.clientX, y: e.clientY, conditionId, showFolderFlyout: false, flyoutSide: 'right' });
     setFolderSearch('');
     setCtxMenuStyle({});
   }, []);
@@ -613,9 +637,12 @@ export function TakeoffSidebarConditionList({
             className="relative"
             onMouseEnter={() => {
               if (folderFlyoutTimerRef.current) clearTimeout(folderFlyoutTimerRef.current);
-              setCtxMenu((prev) => prev ? { ...prev, showFolderFlyout: true } : null);
+              folderFlyoutTimerRef.current = setTimeout(() => {
+                setCtxMenu((prev) => prev ? { ...prev, showFolderFlyout: true } : null);
+              }, FOLDER_FLYOUT_OPEN_DELAY_MS);
             }}
             onMouseLeave={() => {
+              if (folderFlyoutTimerRef.current) clearTimeout(folderFlyoutTimerRef.current);
               folderFlyoutTimerRef.current = setTimeout(() => {
                 setCtxMenu((prev) => prev ? { ...prev, showFolderFlyout: false } : null);
               }, 150);
@@ -626,11 +653,17 @@ export function TakeoffSidebarConditionList({
               label="Move to folder"
               hasSubmenu
               active={ctxMenu.showFolderFlyout}
-              onClick={() => setCtxMenu((prev) => prev ? { ...prev, showFolderFlyout: !prev.showFolderFlyout } : null)}
+              onClick={() => {
+                if (folderFlyoutTimerRef.current) clearTimeout(folderFlyoutTimerRef.current);
+                setCtxMenu((prev) => prev ? { ...prev, showFolderFlyout: !prev.showFolderFlyout } : null);
+              }}
             />
             {ctxMenu.showFolderFlyout && (
               <div
-                className="absolute left-full top-0 z-[10000] w-52 bg-popover border border-border rounded-lg shadow-xl py-1.5 px-1.5"
+                className={cn(
+                  'absolute top-0 z-[10000] w-52 bg-popover border border-border rounded-lg shadow-xl py-1.5 px-1.5',
+                  ctxMenu.flyoutSide === 'left' ? 'right-full mr-1' : 'left-full ml-1'
+                )}
                 onMouseEnter={() => {
                   if (folderFlyoutTimerRef.current) clearTimeout(folderFlyoutTimerRef.current);
                 }}
