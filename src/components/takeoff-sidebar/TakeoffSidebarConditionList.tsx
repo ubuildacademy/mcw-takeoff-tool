@@ -119,14 +119,15 @@ interface ContextMenuState {
   y: number;
   conditionId: string;
   showFolderFlyout: boolean;
-  /** Which side the folder flyout opens on — flips to 'left' when there isn't room
-   *  on the right, so it never renders off-screen or overlapping the menu itself. */
-  flyoutSide: 'left' | 'right';
 }
 
-/** Matches the flyout's own w-52 (13rem). Kept as one constant so the clamp math below
- *  and the Tailwind width class can't silently drift apart. */
+/** Matches the flyout's own w-52 (13rem) — used to clamp its position before it has
+ *  rendered (avoids a flash at the wrong spot on first paint). */
 const FOLDER_FLYOUT_WIDTH = 208;
+/** Generous upper bound (search input + up to a handful of visible folder rows before
+ *  its own max-h-48 scrolls) — clamping against an over-estimate just means slightly
+ *  more margin than strictly needed, never an overflow. */
+const FOLDER_FLYOUT_MAX_HEIGHT = 260;
 /** Delay before the flyout opens on hover — long enough that passing over "Move to
  *  folder" on the way to something else (e.g. Delete) doesn't pop it open (Jeff,
  *  2026-08-10: "takes over the list immediately when I pass over it"). Shorter than
@@ -220,6 +221,12 @@ export function TakeoffSidebarConditionList({
   const ctxMenuRef = useRef<HTMLDivElement>(null);
   const folderFlyoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [ctxMenuStyle, setCtxMenuStyle] = useState<CSSProperties>({});
+  // The "Move to folder" row — the flyout's position is computed from THIS row's
+  // rect, not CSS `left-full` (which can't be clamped against the viewport before
+  // paint and was the actual bug: Jeff, 2026-08-10, "made it worse"). Fixed
+  // position, same measured-then-clamped pattern as the outer menu itself.
+  const folderRowRef = useRef<HTMLDivElement>(null);
+  const [folderFlyoutStyle, setFolderFlyoutStyle] = useState<CSSProperties>({});
 
   // ── scroll selected into view ──
   useLayoutEffect(() => {
@@ -256,25 +263,39 @@ export function TakeoffSidebarConditionList({
       const above = ctxMenu.y - rect.height;
       top = above >= margin ? above : Math.max(margin, window.innerHeight - rect.height - margin);
     }
-    const clampedLeft = Math.max(margin, left);
     setCtxMenuStyle({
-      left: clampedLeft,
+      left: Math.max(margin, left),
       top,
       maxHeight,
       overflowY: 'auto',
     });
-
-    // The folder flyout opens to the right of the menu by default (left-full). If the
-    // menu itself is clamped near the right edge, that leaves no room — flip the
-    // flyout to open on the left instead so it stays on-screen and never overlaps the
-    // menu it came from (Jeff, 2026-08-10).
-    const fitsRight = clampedLeft + rect.width + FOLDER_FLYOUT_WIDTH + margin <= window.innerWidth;
-    setCtxMenu((prev) => {
-      if (!prev) return prev;
-      const nextSide = fitsRight ? 'right' : 'left';
-      return prev.flyoutSide === nextSide ? prev : { ...prev, flyoutSide: nextSide };
-    });
   }, [ctxMenu]);
+
+  // ── position the folder flyout against its own row, clamped to the viewport ──
+  // Fixed position, computed in JS from the row's real rect (Jeff, 2026-08-10: the
+  // CSS `left-full`/`right-full` approach couldn't be clamped before paint and made
+  // things worse, not better). Runs after the outer menu's own clamp effect above so
+  // it reads the row's FINAL on-screen position, not its pre-clamp one.
+  useLayoutEffect(() => {
+    if (!ctxMenu?.showFolderFlyout || !folderRowRef.current) return;
+    const rowRect = folderRowRef.current.getBoundingClientRect();
+    const margin = 8;
+    const gap = 4;
+
+    const fitsRight = rowRect.right + gap + FOLDER_FLYOUT_WIDTH + margin <= window.innerWidth;
+    const left = fitsRight
+      ? rowRect.right + gap
+      : Math.max(margin, rowRect.left - gap - FOLDER_FLYOUT_WIDTH);
+
+    const maxHeight = Math.min(FOLDER_FLYOUT_MAX_HEIGHT, window.innerHeight - margin * 2);
+    const top = Math.min(rowRect.top, window.innerHeight - maxHeight - margin);
+
+    setFolderFlyoutStyle({
+      left,
+      top: Math.max(margin, top),
+      maxHeight,
+    });
+  }, [ctxMenu?.showFolderFlyout, ctxMenuStyle]);
 
   // ── focus new folder input ──
   useEffect(() => {
@@ -301,7 +322,7 @@ export function TakeoffSidebarConditionList({
   const handleContextMenu = useCallback((e: React.MouseEvent, conditionId: string) => {
     e.preventDefault();
     e.stopPropagation();
-    setCtxMenu({ x: e.clientX, y: e.clientY, conditionId, showFolderFlyout: false, flyoutSide: 'right' });
+    setCtxMenu({ x: e.clientX, y: e.clientY, conditionId, showFolderFlyout: false });
     setFolderSearch('');
     setCtxMenuStyle({});
   }, []);
@@ -632,9 +653,9 @@ export function TakeoffSidebarConditionList({
           <CtxItem icon={<Pencil />} label="Edit condition" onClick={() => { onEdit(ctxCondition); setCtxMenu(null); }} />
           <CtxItem icon={<Copy />} label="Duplicate" onClick={() => { onDuplicate(ctxCondition); setCtxMenu(null); }} />
           <CtxSep />
-          {/* Move to folder row — relative so flyout anchors to it */}
+          {/* Move to folder row — ref anchors the fixed-position flyout to it */}
           <div
-            className="relative"
+            ref={folderRowRef}
             onMouseEnter={() => {
               if (folderFlyoutTimerRef.current) clearTimeout(folderFlyoutTimerRef.current);
               folderFlyoutTimerRef.current = setTimeout(() => {
@@ -660,10 +681,12 @@ export function TakeoffSidebarConditionList({
             />
             {ctxMenu.showFolderFlyout && (
               <div
-                className={cn(
-                  'absolute top-0 z-[10000] w-52 bg-popover border border-border rounded-lg shadow-xl py-1.5 px-1.5',
-                  ctxMenu.flyoutSide === 'left' ? 'right-full mr-1' : 'left-full ml-1'
-                )}
+                className="fixed z-[10000] w-52 bg-popover border border-border rounded-lg shadow-xl py-1.5 px-1.5"
+                style={{
+                  left: folderFlyoutStyle.left ?? -9999,
+                  top: folderFlyoutStyle.top ?? -9999,
+                  visibility: folderFlyoutStyle.left != null ? 'visible' : 'hidden',
+                }}
                 onMouseEnter={() => {
                   if (folderFlyoutTimerRef.current) clearTimeout(folderFlyoutTimerRef.current);
                 }}
