@@ -640,6 +640,9 @@ export interface MyTier {
   platformAdmin: boolean;
   organization: { id: string; name: string } | null;
   orgRole: 'company_admin' | 'user' | null;
+  /** Whether the caller's own company has the assemblies feature — gates Conditions'
+   *  assembly picker, the admin library tab, and the Costs tab's assembly section. */
+  assembliesEnabled: boolean;
 }
 
 export const userService = {
@@ -698,6 +701,27 @@ export const userService = {
   /** Delete the current user's own account (self-service). Deletes all user projects, then the account. */
   async deleteOwnAccount() {
     const response = await apiClient.delete('/users/me');
+    return response.data;
+  },
+};
+
+export interface AdminOrganization {
+  id: string;
+  name: string;
+  createdAt: string;
+  assembliesEnabled: boolean;
+}
+
+/** System-admin-only company roster — the "Companies" panel that grants/revokes
+ *  the assemblies feature per company. */
+export const organizationAdminService = {
+  async list(): Promise<AdminOrganization[]> {
+    const response = await apiClient.get('/organizations');
+    return response.data.organizations;
+  },
+
+  async setAssembliesEnabled(orgId: string, enabled: boolean) {
+    const response = await apiClient.patch(`/organizations/${orgId}/assemblies-enabled`, { enabled });
     return response.data;
   },
 };

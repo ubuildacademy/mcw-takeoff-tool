@@ -19,6 +19,9 @@ interface CreateConditionDialogProps {
   onConditionCreated: (condition: TakeoffCondition) => void;
   onConditionSelect?: (condition: TakeoffCondition) => void;
   editingCondition?: TakeoffCondition | null;
+  /** Whether the caller's company has the assemblies feature (upsell switch, 2026-08-10)
+   *  — hides the assembly picker entirely when off. */
+  assembliesEnabled?: boolean;
 }
 
 type ConditionFormType = 'area' | 'volume' | 'linear' | 'count' | 'auto-count';
@@ -42,7 +45,7 @@ function getDefaultUnit(type: string, includeHeight?: boolean): string {
   }
 }
 
-export function CreateConditionDialog({ projectId, onClose, onConditionCreated, onConditionSelect, editingCondition }: CreateConditionDialogProps) {
+export function CreateConditionDialog({ projectId, onClose, onConditionCreated, onConditionSelect, editingCondition, assembliesEnabled = false }: CreateConditionDialogProps) {
   const addCondition = useConditionStore((s) => s.addCondition);
   const updateCondition = useConditionStore((s) => s.updateCondition);
   const conditions = useConditionStore(useShallow((s) => s.conditions));
@@ -793,17 +796,19 @@ export function CreateConditionDialog({ projectId, onClose, onConditionCreated, 
             </div>
           )}
 
-          <ConditionAssemblyPicker
-            assemblyId={formData.assemblyId}
-            quantityInputId={formData.assemblyQuantityInputId}
-            onChange={({ assemblyId, quantityInputId }) =>
-              setFormData((prev) => ({
-                ...prev,
-                assemblyId,
-                assemblyQuantityInputId: quantityInputId,
-              }))
-            }
-          />
+          {assembliesEnabled && (
+            <ConditionAssemblyPicker
+              assemblyId={formData.assemblyId}
+              quantityInputId={formData.assemblyQuantityInputId}
+              onChange={({ assemblyId, quantityInputId }) =>
+                setFormData((prev) => ({
+                  ...prev,
+                  assemblyId,
+                  assemblyQuantityInputId: quantityInputId,
+                }))
+              }
+            />
+          )}
 
           <div>
             <Label htmlFor="materialCost">

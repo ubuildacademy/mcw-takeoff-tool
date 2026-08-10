@@ -242,6 +242,7 @@ export function ProjectList() {
   const [showUserProfile, setShowUserProfile] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isCompanyAdmin, setIsCompanyAdmin] = useState(false);
+  const [assembliesEnabled, setAssembliesEnabled] = useState(false);
   const [users, setUsers] = useState<UserMetadata[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [collapsedUserIds, setCollapsedUserIds] = useState<Set<string>>(new Set());
@@ -286,6 +287,7 @@ export function ProjectList() {
         if (mounted) {
           setIsAdmin(adminStatus);
           setIsCompanyAdmin(tier?.orgRole === 'company_admin');
+          setAssembliesEnabled(tier?.assembliesEnabled ?? false);
           if (adminStatus) {
             const userList = await authHelpers.getAllUsers();
             if (mounted) setUsers(userList ?? []);
@@ -602,6 +604,7 @@ export function ProjectList() {
             projectId="global" // Global admin panel, not project-specific
             isPlatformAdmin={isAdmin}
             isCompanyAdmin={isCompanyAdmin}
+            assembliesEnabled={assembliesEnabled}
           />
         </Suspense>
       )}

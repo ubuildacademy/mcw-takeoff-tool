@@ -33,6 +33,7 @@ import feedbackRoutes from './routes/feedback';
 import helpRoutes from './routes/help';
 import assemblyRoutes from './routes/assemblies';
 import productRoutes from './routes/products';
+import organizationRoutes from './routes/organizations';
 import { logEmailConfigStatus } from './services/emailService';
 import { devLog } from './lib/devLog';
 import { cleanupExpiredReportDeliveries, cleanupExpiredProjectShares } from './services/reportDeliveryCleanup';
@@ -291,6 +292,7 @@ app.use('/api/feedback', feedbackRoutes);
 app.use('/api/help', helpRoutes);
 app.use('/api/assemblies', assemblyRoutes);
 app.use('/api/products', productRoutes);
+app.use('/api/organizations', organizationRoutes);
 
 // API 404 handler (keeps frontend SPA routing separate)
 app.use('/api', (req, res) => {

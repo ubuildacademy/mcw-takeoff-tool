@@ -103,7 +103,12 @@ const handleUpload = async (req: express.Request, res: express.Response, next: e
 // flagged; `/import` saves the reviewed proposal. Saving straight from a parse
 // would bake in every gap the extractor could not resolve.
 
-/** The org that owns the library. A user outside one is a setup problem, not an empty list. */
+/**
+ * The org that owns the library. A user outside one is a setup problem, not an empty
+ * list. Also the assemblies feature gate: a company without it enabled gets a 403 on
+ * every route below, platform admin included — the flag is per-org, and the platform
+ * admin's own org (MCW) is always on, so this never blocks Jeff in practice.
+ */
 async function requireLibraryOrg(req: express.Request, res: express.Response) {
   const user = req.user;
   if (!user) {
@@ -115,6 +120,13 @@ async function requireLibraryOrg(req: express.Request, res: express.Response) {
     res.status(409).json({
       error: 'No organization',
       message: 'This account is not a member of any company yet, so it has no assembly library.',
+    });
+    return null;
+  }
+  if (!org.assembliesEnabled) {
+    res.status(403).json({
+      error: 'Assemblies not enabled',
+      message: 'Your company does not have the assemblies feature. Contact your Meridian admin.',
     });
     return null;
   }

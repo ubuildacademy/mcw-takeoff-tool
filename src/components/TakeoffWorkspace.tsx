@@ -41,7 +41,7 @@ import {
   centerViewportOnPoint,
   getNormalizedViewportCenter,
 } from '../lib/windowBridge';
-import { fileService, ocrApiService } from '../services/apiService';
+import { fileService, ocrApiService, userService } from '../services/apiService';
 import type { AutoHyperlinkPhase, AutoHyperlinkRunProgress } from '../services/batchHyperlink/autoHyperlinkProgress';
 import { MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL_MB } from '../constants/deliveryLimits';
 import { SidebarEdgeToggle } from './takeoff-workspace/SidebarEdgeToggle';
@@ -156,6 +156,24 @@ export function TakeoffWorkspace() {
 
   // Below lg (1024 px) sidebars become fixed drawers that overlay the canvas.
   const isTablet = useMediaQuery('(max-width: 1023px)');
+  // Whether the caller's company has the assemblies feature (upsell switch, 2026-08-10)
+  // — gates the assembly picker in Conditions and the Costs tab's assembly section.
+  const [assembliesEnabled, setAssembliesEnabled] = useState(false);
+  useEffect(() => {
+    let mounted = true;
+    userService
+      .getMyTier()
+      .then((tier) => {
+        if (mounted) setAssembliesEnabled(tier.assembliesEnabled);
+      })
+      .catch(() => {
+        if (mounted) setAssembliesEnabled(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
 
@@ -1437,6 +1455,7 @@ export function TakeoffWorkspace() {
               cutoutTargetConditionId={cutoutTargetConditionId}
               viewerDocumentId={currentPdfFile?.id ?? null}
               currentPage={currentPage}
+              assembliesEnabled={assembliesEnabled}
             />
           )}
           <SidebarEdgeToggle
@@ -1463,6 +1482,7 @@ export function TakeoffWorkspace() {
               cutoutTargetConditionId={cutoutTargetConditionId}
               viewerDocumentId={currentPdfFile?.id ?? null}
               currentPage={currentPage}
+              assembliesEnabled={assembliesEnabled}
             />
           </div>
         )}

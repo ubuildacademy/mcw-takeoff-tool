@@ -29,6 +29,10 @@ router.get('/me', requireAuth, async (req, res) => {
       platformAdmin,
       organization: org ? { id: org.id, name: org.name } : null,
       orgRole,
+      // Whether the CALLER's own org has assemblies (I9-feature-flag follow-up). A
+      // platform admin with no org of their own reads false here, which is correct —
+      // this field is "can I use assemblies myself", not "does any company have it".
+      assembliesEnabled: org?.assembliesEnabled ?? false,
     });
   } catch (error) {
     console.error('Error in get current user tier:', error);

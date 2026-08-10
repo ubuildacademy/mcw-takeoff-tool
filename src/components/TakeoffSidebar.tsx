@@ -49,9 +49,12 @@ interface TakeoffSidebarProps {
   currentPage?: number | null;
   /** Extra classes merged onto the root element (e.g. `h-full` when rendered inside a drawer overlay). */
   className?: string;
+  /** Whether the caller's company has the assemblies feature (upsell switch, 2026-08-10)
+   *  — hides the Costs tab's assembly section and the picker in Create/Edit Condition. */
+  assembliesEnabled?: boolean;
 }
 
-export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _onToolSelect, documents = [], onPageSelect, onPageOpenInNewTab, onExportStatusUpdate, onCutoutMode, cutoutMode, cutoutTargetConditionId, viewerDocumentId, currentPage, className }: TakeoffSidebarProps) {
+export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _onToolSelect, documents = [], onPageSelect, onPageOpenInNewTab, onExportStatusUpdate, onCutoutMode, cutoutMode, cutoutTargetConditionId, viewerDocumentId, currentPage, className, assembliesEnabled = false }: TakeoffSidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -618,9 +621,11 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                 condition is linked to an assembly, that is the real number.
                 Outside the block below because it renders even when no
                 condition carries flat costs. */}
-            <div className="mb-6 empty:mb-0">
-              <AssemblyCostsSection projectId={projectId} />
-            </div>
+            {assembliesEnabled && (
+              <div className="mb-6 empty:mb-0">
+                <AssemblyCostsSection projectId={projectId} />
+              </div>
+            )}
             {(() => {
               const costBreakdown = getProjectCostBreakdown(projectId);
               const { conditions: costConditions, summary } = costBreakdown;
@@ -862,6 +867,7 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
           }}
           onConditionSelect={onConditionSelect} // Pass condition select handler for auto-selection
           editingCondition={editingCondition}
+          assembliesEnabled={assembliesEnabled}
         />
       )}
 

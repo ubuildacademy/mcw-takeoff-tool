@@ -41,6 +41,8 @@ export interface Organization {
   id: string;
   name: string;
   createdAt: string;
+  /** Assemblies feature gate (upsell switch, system-admin controlled). */
+  assembliesEnabled: boolean;
 }
 
 export type OrgRole = 'company_admin' | 'user';
@@ -59,11 +61,37 @@ export async function getOrganizationForUser(userId: string): Promise<Organizati
 
   const { data: org, error: orgError } = await supabase
     .from('organizations')
-    .select('id, name, created_at')
+    .select('id, name, created_at, assemblies_enabled')
     .eq('id', membership.org_id)
     .maybeSingle();
   if (orgError) throw wrapDatabaseError('Get organization', orgError, { orgId: membership.org_id });
-  return org ? { id: org.id, name: org.name, createdAt: org.created_at } : null;
+  return org
+    ? { id: org.id, name: org.name, createdAt: org.created_at, assembliesEnabled: org.assemblies_enabled ?? true }
+    : null;
+}
+
+/** Every company, for the system-admin "Companies" panel — not org-scoped, platform admin only. */
+export async function listOrganizations(): Promise<Organization[]> {
+  const { data, error } = await supabase
+    .from('organizations')
+    .select('id, name, created_at, assemblies_enabled')
+    .order('name');
+  if (error) throw wrapDatabaseError('List organizations', error, {});
+  return (data ?? []).map((org) => ({
+    id: org.id,
+    name: org.name,
+    createdAt: org.created_at,
+    assembliesEnabled: org.assemblies_enabled ?? true,
+  }));
+}
+
+/** Grant or revoke the assemblies feature for a company (system admin only). */
+export async function setAssembliesEnabled(orgId: string, enabled: boolean): Promise<void> {
+  const { error } = await supabase
+    .from('organizations')
+    .update({ assemblies_enabled: enabled })
+    .eq('id', orgId);
+  if (error) throw wrapDatabaseError('Set assemblies enabled', error, { orgId, enabled });
 }
 
 export async function getOrgRole(userId: string, orgId: string): Promise<OrgRole | null> {

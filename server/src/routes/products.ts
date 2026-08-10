@@ -84,6 +84,9 @@ const handleUpload = async (
  * The product list belongs to a company, so every route needs one. A user with
  * no membership is a setup problem (the org backfill did not reach them), not
  * an empty list — say so rather than silently showing nothing.
+ *
+ * Also the assemblies feature gate: the product price list exists to feed
+ * assembly component pricing, so it is gated the same as the library itself.
  */
 async function requireOrg(req: express.Request, res: express.Response) {
   const user = req.user;
@@ -96,6 +99,13 @@ async function requireOrg(req: express.Request, res: express.Response) {
     res.status(409).json({
       error: 'No organization',
       message: 'This account is not a member of any company yet, so it has no product list.',
+    });
+    return null;
+  }
+  if (!org.assembliesEnabled) {
+    res.status(403).json({
+      error: 'Assemblies not enabled',
+      message: 'Your company does not have the assemblies feature. Contact your Meridian admin.',
     });
     return null;
   }

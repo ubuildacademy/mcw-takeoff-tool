@@ -22,6 +22,7 @@ import {
   DollarSign,
   SlidersHorizontal,
   Layers,
+  Building2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ollamaService, type OllamaModel } from '../services/ollamaService';
@@ -32,6 +33,7 @@ import { AdminHelpFaqTab } from './help/AdminHelpFaqTab';
 import { ProductPricingTab } from './admin/ProductPricingTab';
 import { CostDefaultsTab } from './admin/CostDefaultsTab';
 import { AssemblyImportTab } from './admin/AssemblyImportTab';
+import { CompaniesTab } from './admin/CompaniesTab';
 import { CHAT_PRESET_CONFIGS, CHAT_PRESET_SETTING_KEY } from '../constants/chatPresets';
 import { knowledgeBaseService } from '../services/knowledgeBaseService';
 import { KB_CHAR_BUDGET } from '../constants/chatPresets';
@@ -72,13 +74,21 @@ interface AdminPanelProps {
   isPlatformAdmin: boolean;
   /** Company admin (I9) — sees only the company-scoped tabs, and never the platform-role controls. */
   isCompanyAdmin: boolean;
+  /** Whether the viewer's own company has the assemblies feature — hides the
+   *  Assemblies tab (and Product Pricing/Cost Defaults, which only feed it) when off. */
+  assembliesEnabled: boolean;
 }
 
 // Tabs that manage Meridian itself, not a single company's data. Never shown to a
 // company admin — those settings are Jeff's alone and must not be sellable (I9).
-const PLATFORM_ONLY_TAB_IDS = new Set(['knowledge-base', 'ai-prompt', 'ai-settings', 'usage']);
+const PLATFORM_ONLY_TAB_IDS = new Set(['knowledge-base', 'ai-prompt', 'ai-settings', 'usage', 'companies']);
 
-export function AdminPanel({ isOpen, onClose, projectId: _projectId, isPlatformAdmin, isCompanyAdmin: _isCompanyAdmin }: AdminPanelProps) {
+// Tabs that exist only to build/price assemblies — hidden company-wide when the
+// assemblies feature is off, for platform admin and company admin alike (a
+// platform admin manages THEIR OWN company's library here, same as anyone else).
+const ASSEMBLIES_FEATURE_TAB_IDS = new Set(['assemblies', 'product-pricing', 'cost-defaults']);
+
+export function AdminPanel({ isOpen, onClose, projectId: _projectId, isPlatformAdmin, isCompanyAdmin: _isCompanyAdmin, assembliesEnabled }: AdminPanelProps) {
   const [activeTab, setActiveTab] = useState<
     | 'ai-prompt'
     | 'ai-settings'
@@ -89,6 +99,7 @@ export function AdminPanel({ isOpen, onClose, projectId: _projectId, isPlatformA
     | 'product-pricing'
     | 'cost-defaults'
     | 'assemblies'
+    | 'companies'
   >('user-management');
   // AI token usage (provider-decision data)
   const [usage, setUsage] = useState<AiTokenUsageSummary | null>(null);
@@ -754,6 +765,7 @@ When answering questions:
 
   const allTabs = [
     { id: 'user-management', label: 'User Management', icon: Users },
+    { id: 'companies', label: 'Companies', icon: Building2 },
     { id: 'knowledge-base', label: 'Knowledge Base', icon: Database },
     { id: 'help-faq', label: 'Help & FAQ', icon: BookOpen },
     { id: 'ai-prompt', label: 'AI Prompt Editor', icon: Brain },
@@ -763,16 +775,19 @@ When answering questions:
     { id: 'cost-defaults', label: 'Cost Defaults', icon: SlidersHorizontal },
     { id: 'assemblies', label: 'Assemblies', icon: Layers },
   ];
-  const tabs = isPlatformAdmin ? allTabs : allTabs.filter((tab) => !PLATFORM_ONLY_TAB_IDS.has(tab.id));
+  const tabs = allTabs
+    .filter((tab) => isPlatformAdmin || !PLATFORM_ONLY_TAB_IDS.has(tab.id))
+    .filter((tab) => assembliesEnabled || !ASSEMBLIES_FEATURE_TAB_IDS.has(tab.id));
 
-  // A company admin landing on a tab they can no longer see (stale state, or the
-  // panel reopened at a platform-only default) falls back to the first tab they can.
+  // Landing on a tab that's no longer visible (stale state, the panel reopened at a
+  // platform-only default, or assemblies just got revoked) falls back to the first
+  // tab still shown.
   useEffect(() => {
     if (isOpen && !tabs.some((tab) => tab.id === activeTab)) {
       setActiveTab(tabs[0].id as typeof activeTab);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, isPlatformAdmin]);
+  }, [isOpen, isPlatformAdmin, assembliesEnabled]);
 
   if (!isOpen) return null;
 
@@ -829,6 +844,8 @@ When answering questions:
               {activeTab === 'cost-defaults' && <CostDefaultsTab />}
 
               {activeTab === 'assemblies' && <AssemblyImportTab />}
+
+              {activeTab === 'companies' && <CompaniesTab />}
 
               {activeTab === 'usage' && (
                 <div className="p-6 space-y-6">
