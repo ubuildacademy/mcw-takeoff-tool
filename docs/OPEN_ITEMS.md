@@ -312,21 +312,27 @@ MCW's group has no use for it and it was just confusing.
 renders the checkbox when the caller's org has it on. Every other company simply
 never sees the control; the report always builds on the waterproofing basis for them.
 
-### 19. Deleting an assembly-linked condition may leave a stale row in the Costs tab
+### 19. Deleting an assembly-linked condition may leave a stale row in the Costs tab — CLOSED 2026-08-11
 
 Jeff observed a deleted condition's assembly pricing row stay in the Costs tab instead
-of disappearing live. Traced the normal path: `useAssemblyPricing.ts` (mounted once in
-`TakeoffSidebar.tsx`) rebuilds its `items`/signature from the live conditions list on
-every render, so deleting a condition should drop it from the next debounced
-`priceProject` call within ~400ms. The one path that does NOT self-heal: if that
-re-price request errors, `assemblyPricingSlice.ts:101-118` deliberately keeps the
-**previous** `result` on screen ("last-known-good", by design, to avoid a summary
-blanking on a transient network blip) — so a delete that lands right before/during a
-failed re-price leaves the deleted condition's row visibly stuck until the next
-successful price. Could not reproduce further without driving the live app (Jeff
-tests the workspace UI himself, per established practice). Worth a look at whether
-the error case should special-case "the item that's gone is gone" even when the
-retry itself failed, rather than trusting the retry to also fix membership.
+of disappearing live. Root cause: `useAssemblyPricing.ts` only *re-prices* on a
+conditions change (debounced 400ms, then a network round trip), and the cache
+deliberately keeps the previous `result` on screen while that's in flight or if it
+errors ("last-known-good", by design, so a transient blip doesn't blank the summary —
+`assemblyPricingSlice.ts:101-118`). Nothing was cross-checking `result.pricings`
+against the conditions that currently exist, so a deleted (or unlinked) condition's
+row — and its dollars in the Assembly Total — stuck around for however long the next
+successful price took, indefinitely if it kept failing.
+
+**Fix:** `pruneRemovedConditions(projectId, liveConditionIds)` on the pricing store —
+filters `result.pricings` down to conditions still assembly-linked and resums `totals`
+from what's left (plain addition, mirrors `sumConditionPricing` server-side, so no
+business logic duplicated). `useAssemblyPricing.ts` calls it synchronously on every
+conditions change, ahead of the debounced re-price — so the row (and the total) drop
+immediately regardless of network state, and the debounced fetch afterward brings
+fresh authoritative numbers for whatever's left. `unknownAssemblyIds` deliberately left
+alone — it holds assembly ids, not condition ids, despite the name; filtering it by
+condition id would have silently emptied a real warning.
 
 ### 20. Project Cost Summary unreadable in dark mode — FIXED 2026-08-11
 

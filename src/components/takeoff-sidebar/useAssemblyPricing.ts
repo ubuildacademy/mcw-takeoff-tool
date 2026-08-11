@@ -25,6 +25,7 @@ export function useAssemblyPricing(projectId: string) {
   const conditions = useConditionStore(useShallow((s) => s.getProjectConditions(projectId)));
   const takeoffMeasurements = useMeasurementStore(useShallow((s) => s.takeoffMeasurements));
   const priceProject = useAssemblyPricingStore((s) => s.priceProject);
+  const pruneRemovedConditions = useAssemblyPricingStore((s) => s.pruneRemovedConditions);
   const entry = useAssemblyPricingStore((s) => s.byProject[projectId]);
   const getProjectCostBreakdown = useMeasurementStore((s) => s.getProjectCostBreakdown);
 
@@ -33,6 +34,18 @@ export function useAssemblyPricing(projectId: string) {
     [conditions, takeoffMeasurements]
   );
   const signature = useMemo(() => assemblyPricingSignature(items), [items]);
+  const liveConditionIds = useMemo(
+    () => new Set(items.map((item) => item.conditionId)),
+    [items]
+  );
+
+  // Deleting (or unlinking) an assembly condition must drop its row from the
+  // Costs tab immediately, not after the next successful re-price — see
+  // OPEN_ITEMS.md item 19. Runs synchronously, ahead of the debounced fetch
+  // below, which then brings fresh numbers for whatever is left.
+  useEffect(() => {
+    pruneRemovedConditions(projectId, liveConditionIds);
+  }, [projectId, liveConditionIds, pruneRemovedConditions]);
 
   useEffect(() => {
     const timer = setTimeout(() => {

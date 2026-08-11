@@ -15,7 +15,14 @@ const response = (total: number, conditionTotals: Record<string, number> = {}) =
   ({
     pricings: Object.entries(conditionTotals).map(([conditionId, conditionTotal]) => ({
       conditionId,
-      breakdown: { total: conditionTotal },
+      breakdown: {
+        total: conditionTotal,
+        materialTotal: conditionTotal,
+        laborTotal: 0,
+        marginsTotal: 0,
+        insuranceTotal: 0,
+      },
+      warnings: [],
     })),
     totals: { total },
     unknownAssemblyIds: [],
@@ -101,6 +108,35 @@ describe('assembly pricing store', () => {
     expect(useAssemblyPricingStore.getState().getConditionTotals('p1')).toEqual({
       c1: 500,
       c2: 300,
+    });
+  });
+
+  describe('pruneRemovedConditions', () => {
+    it('drops a deleted condition\'s row and resums the total immediately, without waiting on a re-price', async () => {
+      price.mockResolvedValue(response(800, { c1: 500, c2: 300 }));
+      await useAssemblyPricingStore.getState().priceProject('p1', items, 'sig-1');
+
+      useAssemblyPricingStore.getState().pruneRemovedConditions('p1', new Set(['c2']));
+
+      expect(useAssemblyPricingStore.getState().getConditionTotals('p1')).toEqual({ c2: 300 });
+      expect(useAssemblyPricingStore.getState().getAssemblyTotal('p1')).toBe(300);
+    });
+
+    it('is a no-op when nothing was removed', async () => {
+      price.mockResolvedValue(response(800, { c1: 500, c2: 300 }));
+      await useAssemblyPricingStore.getState().priceProject('p1', items, 'sig-1');
+      const before = useAssemblyPricingStore.getState().getEntry('p1');
+
+      useAssemblyPricingStore.getState().pruneRemovedConditions('p1', new Set(['c1', 'c2']));
+
+      expect(useAssemblyPricingStore.getState().getEntry('p1')).toBe(before);
+    });
+
+    it('does nothing for a project that has never priced', () => {
+      expect(() =>
+        useAssemblyPricingStore.getState().pruneRemovedConditions('never-priced', new Set())
+      ).not.toThrow();
+      expect(useAssemblyPricingStore.getState().getEntry('never-priced').result).toBeNull();
     });
   });
 });

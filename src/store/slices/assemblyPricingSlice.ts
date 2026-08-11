@@ -49,6 +49,17 @@ interface AssemblyPricingState {
   ) => Promise<void>;
   clearProject: (projectId: string) => void;
 
+  /**
+   * Drop cached pricings for conditions that are no longer assembly-linked
+   * (deleted, or unlinked from their assembly) and resum totals from what's
+   * left. Pure subtraction, not a repricing — safe to do synchronously,
+   * ahead of the debounced re-fetch that gets fresh numbers from the server.
+   * Without this, the Costs tab kept showing a deleted condition's row (and
+   * counting it in the total) until the next successful price came back —
+   * see OPEN_ITEMS.md item 19.
+   */
+  pruneRemovedConditions: (projectId: string, liveConditionIds: ReadonlySet<string>) => void;
+
   getEntry: (projectId: string) => AssemblyPricingEntry;
   /** Last known assembly total for the project, or 0 if it has never priced. */
   getAssemblyTotal: (projectId: string) => number;
@@ -123,6 +134,45 @@ export const useAssemblyPricingStore = create<AssemblyPricingState>()((set, get)
     set((state) => {
       const { [projectId]: _removed, ...rest } = state.byProject;
       return { byProject: rest };
+    }),
+
+  pruneRemovedConditions: (projectId, liveConditionIds) =>
+    set((state) => {
+      const entry = state.byProject[projectId];
+      if (!entry?.result) return state;
+
+      const keptPricings = entry.result.pricings.filter((p) => liveConditionIds.has(p.conditionId));
+      if (keptPricings.length === entry.result.pricings.length) return state;
+
+      // Mirrors sumConditionPricing (server/src/services/conditionAssemblyPricing.ts) —
+      // plain addition, no rounding or business logic to drift out of sync with.
+      const totals = {
+        total: 0,
+        materialTotal: 0,
+        laborTotal: 0,
+        marginsTotal: 0,
+        insuranceTotal: 0,
+        conditionCount: keptPricings.length,
+        conditionsWithWarnings: 0,
+      };
+      for (const pricing of keptPricings) {
+        totals.total += pricing.breakdown.total;
+        totals.materialTotal += pricing.breakdown.materialTotal;
+        totals.laborTotal += pricing.breakdown.laborTotal;
+        totals.marginsTotal += pricing.breakdown.marginsTotal;
+        totals.insuranceTotal += pricing.breakdown.insuranceTotal;
+        if (pricing.warnings.length > 0) totals.conditionsWithWarnings += 1;
+      }
+
+      return {
+        byProject: {
+          ...state.byProject,
+          [projectId]: {
+            ...entry,
+            result: { ...entry.result, pricings: keptPricings, totals },
+          },
+        },
+      };
     }),
 
   getEntry: (projectId) => get().byProject[projectId] ?? EMPTY_ENTRY,
