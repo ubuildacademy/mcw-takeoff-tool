@@ -14,10 +14,14 @@ import { requireAuth, hasProjectAccess, validateUUIDParam, isAdmin } from '../mi
 const router = express.Router();
 
 async function requireProjectAccess(
-  userId: string,
+  userId: string | undefined,
   projectId: string,
   res: express.Response
 ): Promise<boolean> {
+  if (!userId) {
+    res.status(401).json({ error: 'Authentication required' });
+    return false;
+  }
   const userIsAdmin = await isAdmin(userId);
   if (!userIsAdmin && !(await hasProjectAccess(userId, projectId, userIsAdmin))) {
     res.status(404).json({ error: 'Project not found or access denied' });
@@ -72,7 +76,7 @@ function sanitizeHyperlink(raw: unknown, projectId: string): StoredSheetHyperlin
 router.get('/project/:projectId', requireAuth, validateUUIDParam('projectId'), async (req, res) => {
   try {
     const { projectId } = req.params;
-    if (!(await requireProjectAccess(req.user!.id, projectId, res))) return;
+    if (!(await requireProjectAccess(req.user?.id, projectId, res))) return;
     const hyperlinks = await storage.getHyperlinksByProject(projectId);
     res.json({ hyperlinks });
   } catch (error) {
@@ -85,7 +89,7 @@ router.get('/project/:projectId', requireAuth, validateUUIDParam('projectId'), a
 router.post('/project/:projectId/bulk', requireAuth, validateUUIDParam('projectId'), async (req, res) => {
   try {
     const { projectId } = req.params;
-    if (!(await requireProjectAccess(req.user!.id, projectId, res))) return;
+    if (!(await requireProjectAccess(req.user?.id, projectId, res))) return;
     const rawList = Array.isArray(req.body?.hyperlinks) ? req.body.hyperlinks : [];
     const clean = rawList
       .map((raw: unknown) => sanitizeHyperlink(raw, projectId))
@@ -105,7 +109,7 @@ router.post('/project/:projectId/bulk', requireAuth, validateUUIDParam('projectI
 router.put('/project/:projectId/:id', requireAuth, validateUUIDParam('projectId'), async (req, res) => {
   try {
     const { projectId, id } = req.params;
-    if (!(await requireProjectAccess(req.user!.id, projectId, res))) return;
+    if (!(await requireProjectAccess(req.user?.id, projectId, res))) return;
     const { targetSheetId, targetPageNumber, targetUrl, sourceRect, targetViewport } = req.body ?? {};
     await storage.updateHyperlink(id, projectId, {
       ...(typeof targetSheetId === 'string' && { targetSheetId }),
@@ -130,7 +134,7 @@ router.put('/project/:projectId/:id', requireAuth, validateUUIDParam('projectId'
 router.delete('/project/:projectId/batch', requireAuth, validateUUIDParam('projectId'), async (req, res) => {
   try {
     const { projectId } = req.params;
-    if (!(await requireProjectAccess(req.user!.id, projectId, res))) return;
+    if (!(await requireProjectAccess(req.user?.id, projectId, res))) return;
     const removed = await storage.deleteBatchHyperlinksByProject(projectId);
     res.json({ success: true, removed });
   } catch (error) {
@@ -143,7 +147,7 @@ router.delete('/project/:projectId/batch', requireAuth, validateUUIDParam('proje
 router.delete('/project/:projectId/:id', requireAuth, validateUUIDParam('projectId'), async (req, res) => {
   try {
     const { projectId, id } = req.params;
-    if (!(await requireProjectAccess(req.user!.id, projectId, res))) return;
+    if (!(await requireProjectAccess(req.user?.id, projectId, res))) return;
     await storage.deleteHyperlink(id, projectId);
     res.json({ success: true });
   } catch (error) {
@@ -156,7 +160,7 @@ router.delete('/project/:projectId/:id', requireAuth, validateUUIDParam('project
 router.delete('/project/:projectId', requireAuth, validateUUIDParam('projectId'), async (req, res) => {
   try {
     const { projectId } = req.params;
-    if (!(await requireProjectAccess(req.user!.id, projectId, res))) return;
+    if (!(await requireProjectAccess(req.user?.id, projectId, res))) return;
     const removed = await storage.deleteAllHyperlinksByProject(projectId);
     res.json({ success: true, removed });
   } catch (error) {

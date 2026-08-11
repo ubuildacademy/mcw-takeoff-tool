@@ -114,6 +114,30 @@ export function mergeWordBoxesPreservingExisting(
   return merged;
 }
 
+// pdfjs-dist's legacy build ships no usable TS types for this entry point — every
+// access against these is duck-typed against its documented runtime shape rather
+// than faked with `any`.
+interface PdfJsTextContent {
+  items: Record<string, unknown>[];
+}
+interface PdfJsViewport {
+  transform: number[];
+  width: number;
+  height: number;
+}
+interface PdfJsPage {
+  getViewport(opts: { scale: number; rotation: number }): PdfJsViewport;
+  getTextContent(opts: { disableNormalization: boolean }): Promise<PdfJsTextContent>;
+}
+interface PdfJsDocument {
+  numPages: number;
+  getPage(pageNumber: number): Promise<PdfJsPage>;
+}
+interface PdfJsModule {
+  getDocument(opts: Record<string, unknown>): { promise: Promise<PdfJsDocument> };
+  Util?: { transform: (m1: number[], m2: number[]) => number[] };
+}
+
 class SimpleOCRService {
   private clamp01(value: number): number {
     if (!Number.isFinite(value)) return 0;
@@ -149,8 +173,8 @@ class SimpleOCRService {
     totalPages: number;
     pages: Array<{ pageNumber: number; text: string; wordBoxes: OCRWordBox[] }>;
   }> {
-    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-    const loadingTask = (pdfjs as any).getDocument({
+    const pdfjs = (await import('pdfjs-dist/legacy/build/pdf.mjs')) as unknown as PdfJsModule;
+    const loadingTask = pdfjs.getDocument({
       data: new Uint8Array(dataBuffer),
       disableWorker: true,
       useSystemFonts: true,
@@ -170,7 +194,7 @@ class SimpleOCRService {
       // therefore already in the app's "base" (unrotated) space. No further rotation
       // remap is required when `rotation: 0` is used here.
       const textContent = await page.getTextContent({ disableNormalization: false });
-      const items = Array.isArray((textContent as any).items) ? (textContent as any).items : [];
+      const items = Array.isArray(textContent.items) ? textContent.items : [];
 
       const textParts: string[] = [];
       const wordBoxes: OCRWordBox[] = [];
@@ -187,9 +211,9 @@ class SimpleOCRService {
         textParts.push(raw);
         textParts.push(hasEOL ? '\n' : ' ');
 
-        const transform = Array.isArray(item?.transform) ? item.transform : [1, 0, 0, 1, 0, 0];
-        const transformed = (pdfjs as any).Util?.transform
-          ? (pdfjs as any).Util.transform(viewport.transform, transform)
+        const transform = Array.isArray(item?.transform) ? (item.transform as number[]) : [1, 0, 0, 1, 0, 0];
+        const transformed = pdfjs.Util?.transform
+          ? pdfjs.Util.transform(viewport.transform, transform)
           : transform;
 
         // Per PDF.js source (legacy/build/pdf.worker.mjs):
@@ -566,7 +590,7 @@ class SimpleOCRService {
   }
 
   // Update OCR job status in database
-  async updateJobStatus(jobId: string, updates: any): Promise<void> {
+  async updateJobStatus(jobId: string, updates: Record<string, unknown>): Promise<void> {
     try {
       const { error } = await supabase
         .from('ocr_jobs')
@@ -677,7 +701,7 @@ class SimpleOCRService {
   }
 
   // Search OCR results from database
-  async searchOCRResults(projectId: string, documentId: string, query: string): Promise<any[]> {
+  async searchOCRResults(projectId: string, documentId: string, query: string): Promise<Record<string, unknown>[]> {
     try {
       const q = query.trim();
       if (!q) {

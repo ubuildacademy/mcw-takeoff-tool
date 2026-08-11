@@ -31,8 +31,10 @@ router.post('/extract', requireAuth, async (req, res) => {
         .json({ error: 'titleblockConfig with sheetNumberField and sheetNameField is required' });
     }
 
-    const userIsAdmin = await isAdmin(req.user!.id);
-    if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
+    const userIsAdmin = await isAdmin(caller.id);
+    if (!userIsAdmin && !(await hasProjectAccess(caller.id, projectId, userIsAdmin))) {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
 
@@ -69,6 +71,8 @@ router.post('/extract', requireAuth, async (req, res) => {
  */
 router.get('/extract/job/:jobId', requireAuth, async (req, res) => {
   try {
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
     const { jobId } = req.params;
     const job = await titleblockExtractionQueue.getJob(jobId);
 
@@ -78,8 +82,8 @@ router.get('/extract/job/:jobId', requireAuth, async (req, res) => {
 
     const { projectId } = job.data as { projectId: string };
 
-    const userIsAdmin = await isAdmin(req.user!.id);
-    if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+    const userIsAdmin = await isAdmin(caller.id);
+    if (!userIsAdmin && !(await hasProjectAccess(caller.id, projectId, userIsAdmin))) {
       return res.status(404).json({ error: 'Job not found' });
     }
 

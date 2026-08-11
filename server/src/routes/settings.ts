@@ -4,6 +4,11 @@ import { requireAuth, requireAdmin } from '../middleware';
 
 const router = express.Router();
 
+interface AppSettingRow {
+  key: string;
+  value: string;
+}
+
 // Get all app settings
 router.get('/', requireAuth, requireAdmin, async (req, res) => {
   try {
@@ -19,8 +24,8 @@ router.get('/', requireAuth, requireAdmin, async (req, res) => {
     }
     
     // Convert array to object
-    const settingsObject: Record<string, any> = {};
-    (data || []).forEach((setting: any) => {
+    const settingsObject: Record<string, unknown> = {};
+    ((data || []) as AppSettingRow[]).forEach((setting) => {
       try {
         settingsObject[setting.key] = JSON.parse(setting.value);
       } catch {
@@ -137,8 +142,8 @@ router.put('/', requireAuth, requireAdmin, async (req, res) => {
     }
     
     // Convert back to object
-    const settingsObject: Record<string, any> = {};
-    (data || []).forEach((setting: any) => {
+    const settingsObject: Record<string, unknown> = {};
+    ((data || []) as AppSettingRow[]).forEach((setting) => {
       try {
         settingsObject[setting.key] = JSON.parse(setting.value);
       } catch {

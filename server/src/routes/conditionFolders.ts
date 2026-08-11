@@ -15,9 +15,10 @@ router.get('/project/:projectId', requireAuth, validateUUIDParam('projectId'), a
   try {
     const { projectId } = req.params;
     const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
     const userIsAdmin = req.user?.role === 'admin';
 
-    const hasAccess = await hasProjectAccess(userId!, projectId, userIsAdmin);
+    const hasAccess = await hasProjectAccess(userId, projectId, userIsAdmin);
     if (!hasAccess) {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
@@ -35,13 +36,14 @@ router.post('/', requireAuth, sanitizeBody('name'), async (req, res) => {
   try {
     const { projectId, name } = req.body;
     const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
     const userIsAdmin = req.user?.role === 'admin';
 
     if (!projectId || !name?.trim()) {
       return res.status(400).json({ error: 'projectId and name are required' });
     }
 
-    const hasAccess = await hasProjectAccess(userId!, projectId, userIsAdmin);
+    const hasAccess = await hasProjectAccess(userId, projectId, userIsAdmin);
     if (!hasAccess) {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
@@ -70,6 +72,7 @@ router.put('/:id', requireAuth, validateUUIDParam('id'), sanitizeBody('name'), a
     const { id } = req.params;
     const { name, sortOrder } = req.body;
     const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
     const userIsAdmin = req.user?.role === 'admin';
 
     const { supabase, TABLES } = await import('../supabase');
@@ -83,7 +86,7 @@ router.put('/:id', requireAuth, validateUUIDParam('id'), sanitizeBody('name'), a
       return res.status(404).json({ error: 'Folder not found' });
     }
 
-    const hasAccess = await hasProjectAccess(userId!, data.project_id, userIsAdmin);
+    const hasAccess = await hasProjectAccess(userId, data.project_id, userIsAdmin);
     if (!hasAccess) {
       return res.status(404).json({ error: 'Folder not found or access denied' });
     }
@@ -108,6 +111,7 @@ router.delete('/:id', requireAuth, validateUUIDParam('id'), async (req, res) => 
   try {
     const { id } = req.params;
     const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
     const userIsAdmin = req.user?.role === 'admin';
 
     const { supabase, TABLES } = await import('../supabase');
@@ -121,7 +125,7 @@ router.delete('/:id', requireAuth, validateUUIDParam('id'), async (req, res) => 
       return res.status(404).json({ error: 'Folder not found' });
     }
 
-    const hasAccess = await hasProjectAccess(userId!, data.project_id, userIsAdmin);
+    const hasAccess = await hasProjectAccess(userId, data.project_id, userIsAdmin);
     if (!hasAccess) {
       return res.status(404).json({ error: 'Folder not found or access denied' });
     }
