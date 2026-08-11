@@ -532,7 +532,7 @@ class SupabaseStorage {
       throw new Error('Project must have an owner (user_id). New projects require userId.');
     }
 
-    const dbProject: Record<string, any> = {
+    const dbProject: Record<string, unknown> = {
       id: project.id,
       name: project.name,
       client: project.client,
@@ -1611,7 +1611,7 @@ class SupabaseStorage {
     }
 
     type StackRow = { id: string; stack_order: number };
-    const rows: StackRow[] = ids.map((id) => ({ id, stack_order: byId.get(id)! }));
+    const rows: StackRow[] = [...byId.entries()].map(([id, stackOrder]) => ({ id, stack_order: stackOrder }));
     const CHUNK = 120;
 
     for (let i = 0; i < rows.length; i += CHUNK) {

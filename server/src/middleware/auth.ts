@@ -287,7 +287,7 @@ export function optionalAuth(req: Request, res: Response, next: NextFunction) {
       }
       
       next();
-    } catch (error) {
+    } catch {
       // Don't fail on optional auth errors
       next();
     }

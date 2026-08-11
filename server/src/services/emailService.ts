@@ -192,7 +192,7 @@ export const emailService = {
     const useEdge =
       process.env.USE_SUPABASE_EDGE_EMAIL === 'true' && edgeConfig;
 
-    if (useEdge) {
+    if (useEdge && edgeConfig) {
       try {
         const body: Record<string, unknown> = {
           to: options.to,
@@ -207,11 +207,11 @@ export const emailService = {
             contentType: a.contentType,
           }));
         }
-        const res = await fetch(edgeConfig!.url, {
+        const res = await fetch(edgeConfig.url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${edgeConfig!.key}`,
+            Authorization: `Bearer ${edgeConfig.key}`,
           },
           body: JSON.stringify(body),
         });
@@ -305,10 +305,15 @@ Invited by: ${data.invitedBy}
         return ok;
       }
 
+      if (!transporter) {
+        logInvitationFallback(data);
+        return false;
+      }
+
       const smtpFrom =
         process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@meridiantakeoff.com';
 
-      const info = await transporter!.sendMail({
+      const info = await transporter.sendMail({
         from: `"Meridian Takeoff" <${smtpFrom}>`,
         to: data.email,
         subject,

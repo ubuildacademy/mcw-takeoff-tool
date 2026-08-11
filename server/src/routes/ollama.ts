@@ -87,7 +87,13 @@ router.post('/chat', requireAuth, (req, res, next) => {
 
     // Guardrails: restrict obvious off-domain usage before consuming upstream quota.
     const lastUser = Array.isArray(messages)
-      ? [...messages].reverse().find((m: any) => m && m.role === 'user' && typeof m.content === 'string')
+      ? [...messages].reverse().find(
+          (m): m is Record<string, unknown> =>
+            !!m &&
+            typeof m === 'object' &&
+            (m as Record<string, unknown>).role === 'user' &&
+            typeof (m as Record<string, unknown>).content === 'string'
+        )
       : null;
     const lastUserText = typeof lastUser?.content === 'string' ? lastUser.content : '';
     const guard = evaluateAiChatGuardrails(lastUserText);
@@ -96,7 +102,8 @@ router.post('/chat', requireAuth, (req, res, next) => {
     }
 
     // Daily quota (request-count). Admins bypass app-enforced limits entirely.
-    const user = req.user!;
+    const user = req.user;
+    if (!user) return res.status(401).json({ error: 'Authentication required' });
     const isAdmin = user.role === 'admin';
     if (!isAdmin) {
       const dailyLimit = 40;

@@ -51,7 +51,12 @@ async function buildProjectBackup(
 ): Promise<Record<string, unknown>> {
   let accessQuery = supabase.from(TABLES.PROJECTS).select('id').eq('id', id);
   if (!userIsAdmin) {
-    accessQuery = accessQuery.eq('user_id', userId!);
+    if (!userId) {
+      const err = new Error('Project not found or access denied') as Error & { statusCode?: number };
+      err.statusCode = 404;
+      throw err;
+    }
+    accessQuery = accessQuery.eq('user_id', userId);
   }
   const { data: accessCheck, error: accessError } = await accessQuery.single();
   if (accessError || !accessCheck) {
@@ -541,7 +546,7 @@ router.post('/', requireAuth, sanitizeBody('name', 'client', 'location', 'descri
       name: incoming.name || 'Untitled',
       client: incoming.client,
       location: incoming.location,
-      status: (incoming.status as any) || 'active',
+      status: (incoming.status as StoredProject['status']) || 'active',
       description: incoming.description,
       projectType: incoming.projectType,
       startDate: incoming.startDate,

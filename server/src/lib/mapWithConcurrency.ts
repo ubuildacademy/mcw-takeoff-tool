@@ -10,10 +10,11 @@ export async function mapWithConcurrency<T, R>(
   let nextIndex = 0;
 
   async function worker(): Promise<void> {
-    while (true) {
+    for (;;) {
       const i = nextIndex++;
       if (i >= items.length) return;
-      results[i] = await fn(items[i]!, i);
+      // Safe: i < items.length was just checked above.
+      results[i] = await fn(items[i] as T, i);
     }
   }
 

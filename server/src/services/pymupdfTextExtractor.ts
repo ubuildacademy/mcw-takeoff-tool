@@ -116,11 +116,12 @@ class PyMuPdfTextExtractor {
       });
       stdout = result.stdout;
       stderr = result.stderr;
-    } catch (execError: any) {
+    } catch (execError: unknown) {
+      const fields = execError && typeof execError === 'object' ? (execError as Record<string, unknown>) : {};
       console.error('❌ PyMuPDF text extraction failed:', {
         message: execError instanceof Error ? execError.message : 'Unknown error',
-        code: execError?.code,
-        stderr: (execError?.stderr || '').toString().slice(0, 2000),
+        code: fields.code,
+        stderr: (fields.stderr || '').toString().slice(0, 2000),
       });
       throw new Error(
         `PyMuPDF text extraction failed: ${

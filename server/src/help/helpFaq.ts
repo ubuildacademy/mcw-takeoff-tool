@@ -1,5 +1,3 @@
-import type { Request } from 'express';
-
 export const HELP_FAQ_SETTING_KEY = 'help-faq-v1';
 
 export type HelpFaqItem = {

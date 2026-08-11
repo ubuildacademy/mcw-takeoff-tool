@@ -38,13 +38,13 @@ async function createDemoUser() {
       process.exit(1);
     }
 
-    const existingUser = existingUsers?.users?.find((u: any) => u.email === email);
+    const existingUser = existingUsers?.users?.find((u) => u.email === email);
     
     if (existingUser) {
       console.log('⚠️  User already exists. Updating password...');
       
       // Update password for existing user
-      const { data: updateData, error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
+      const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
         existingUser.id,
         { password }
       );
@@ -144,8 +144,8 @@ async function createDemoUser() {
     console.log('\n📝 The demo user will only see projects they create.');
     console.log('   You can now log in as this user and set up a demo project.');
 
-  } catch (error: any) {
-    console.error('❌ Unexpected error:', error.message);
+  } catch (error) {
+    console.error('❌ Unexpected error:', error instanceof Error ? error.message : String(error));
     process.exit(1);
   }
 }

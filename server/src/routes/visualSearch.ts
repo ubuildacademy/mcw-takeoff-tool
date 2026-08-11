@@ -502,7 +502,7 @@ router.post('/complete-search', requireAuth, imageInferenceBurstRateLimit, requi
         // Connection might already be closed, try to end it gracefully
         try {
           res.end();
-        } catch (e) {
+        } catch {
           // Ignore - connection is already closed
         }
       }

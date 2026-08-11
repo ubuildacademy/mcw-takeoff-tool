@@ -164,7 +164,7 @@ router.post('/invitations', requireAuth, requireCompanyAdmin, async (req, res) =
         return res.status(500).json({ error: 'Failed to check existing users' });
       }
       const users = pageData?.users ?? [];
-      if (users.some((u: any) => u.email?.toLowerCase() === email)) {
+      if (users.some((u) => u.email?.toLowerCase() === email)) {
         userExists = true;
         break;
       }
@@ -566,7 +566,9 @@ async function deleteUserAndData(userId: string): Promise<{ error?: string }> {
 // Delete own account (self-service) - must be before /:id so "me" is not parsed as id
 router.delete('/me', requireAuth, async (req, res) => {
   try {
-    const result = await deleteUserAndData(req.user!.id);
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
+    const result = await deleteUserAndData(caller.id);
     if (result.error) {
       return res.status(500).json({ error: 'Failed to delete account' });
     }

@@ -83,7 +83,7 @@ class PythonPdfConverter {
           timeout: 5000,
           env: { ...process.env, PATH: enhancedPath }
         });
-      } catch (fitzError) {
+      } catch {
         return {
           available: false,
           pythonVersion: pythonVersion.trim(),
@@ -203,15 +203,16 @@ class PythonPdfConverter {
         });
         stdout = execResult.stdout;
         stderr = execResult.stderr;
-      } catch (execError: any) {
+      } catch (execError: unknown) {
+        const fields = execError && typeof execError === 'object' ? (execError as Record<string, unknown>) : {};
         const errorDetails = {
           command,
           pdfPath,
           pageNumber,
           error: execError instanceof Error ? execError.message : 'Unknown error',
-          code: execError?.code,
-          stdout: execError?.stdout || '',
-          stderr: execError?.stderr || ''
+          code: fields.code,
+          stdout: fields.stdout || '',
+          stderr: fields.stderr || ''
         };
         console.error('❌ Python script execution failed:', JSON.stringify(errorDetails, null, 2));
         throw new Error(`PDF conversion failed: ${execError instanceof Error ? execError.message : 'Unknown error'}`);
