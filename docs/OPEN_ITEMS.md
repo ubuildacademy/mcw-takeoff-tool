@@ -145,24 +145,23 @@ migration so inserts would not break before a service supplied the column. No se
 did, and at I8a the routes that would have were removed with the rest of Stage 1. Nothing
 writes these tables now; whether they are dropped is item 14.
 
-### 6b. `server/src` sits just under its lint warning cap
+### 6b. `server/src` sits just under its lint warning cap — CLOSED 2026-08-10
 
 **Found:** 2026-07-31, at I8 — `npm run ci:local` was failing on `lint:server`, 157 warnings
 against `--max-warnings 150`. Not caused by I8: the count was **152 before Workstream I
 started** (measured back through twelve commits), so the ratchet had been broken for some
 time and the pre-push hook was evidently not stopping it.
 
-**Done meanwhile:** cleaned the twelve warnings in the three files Workstream I owns
-(`routes/assemblies.ts`, `routes/products.ts`, `assemblyCosting.golden.test.ts`) — explicit
-`req.user` guards instead of `!`, `unknown` instead of `any` on the multer callbacks, and
-narrowing instead of assertions in the golden test. 157 → 146, so CI passes with margin.
+Paid down the rest 2026-08-10: `server/src` is now at **0 warnings** against the 150 cap.
+Same fix throughout — explicit `const caller = req.user; if (!caller) return 401` guards
+instead of `req.user!` (the pattern already established for the three files above),
+duck-typed interfaces or `Record<string, unknown>` instead of `any`, dropped genuinely-
+unused catch bindings/imports. One real find along the way: `pdfjs-dist`'s legacy build
+entry point has no usable TS types at all — gave it proper local interfaces
+(`simpleOcrService.ts`) instead of the `any` casts it had.
 
-**Not done:** the other ~146 warnings, almost all `any` and `req.user!` across the older
-routes (`ocr.ts` 22, `files.ts` 16, `conditions.ts` 12…). Four more warnings anywhere puts
-CI red again for a reason unrelated to whatever change trips it.
-
-**To settle:** one session paying the older routes down, or a deliberate decision on what
-the cap is for. Worth checking why the pre-push hook let 152 through in the first place.
+The client budget (`--max-warnings 500`) was not touched — separate, much larger cap,
+not part of this item.
 
 ### 7. Stage 1 writer hardcodes the sheet name `ASSEMBLY` — CLOSED 2026-07-31
 
