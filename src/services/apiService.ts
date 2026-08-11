@@ -738,6 +738,26 @@ export const organizationAdminService = {
   },
 };
 
+export interface OrgReportBranding {
+  companyName: string | null;
+  accentColor: string | null;
+  logoBase64: string | null;
+}
+
+/** The caller's own company's export branding (P.O./Work Order/Budget/takeoff export
+ *  headers) — read by any org member, written by a company admin. */
+export const reportBrandingService = {
+  async get(): Promise<OrgReportBranding> {
+    const response = await apiClient.get('/organizations/branding');
+    return response.data.branding;
+  },
+
+  async update(patch: Partial<OrgReportBranding>): Promise<OrgReportBranding> {
+    const response = await apiClient.put('/organizations/branding', patch);
+    return response.data.branding;
+  },
+};
+
 // Sheets service
 export const sheetService = {
   async getProjectSheets(projectId: string) {

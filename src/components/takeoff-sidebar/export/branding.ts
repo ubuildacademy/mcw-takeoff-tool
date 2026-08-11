@@ -1,16 +1,13 @@
 /**
  * Report branding (white-label) for exports: company name, accent color, and an
- * optional logo, stored as admin-managed settings. Every user's export applies
- * them; any fetch failure (missing key, no access, offline) falls back to the
+ * optional logo, per company (task: branding org-scoping, 2026-08-10 — this used to be
+ * one global setting shared by every company on the platform). Every export in the
+ * caller's org applies them; any fetch failure (no org yet, offline) falls back to the
  * stock Meridian branding so the export itself never breaks.
  */
-import { settingsService } from '../../../services/apiService';
+import { reportBrandingService } from '../../../services/apiService';
 
-export const REPORT_COMPANY_NAME_KEY = 'report-company-name';
-export const REPORT_ACCENT_COLOR_KEY = 'report-accent-color';
-export const REPORT_LOGO_KEY = 'report-logo';
-
-/** Client-side cap for the uploaded logo PNG (the setting stores its base64). */
+/** Client-side cap for the uploaded logo PNG (stored as its base64). */
 export const REPORT_LOGO_MAX_BYTES = 200 * 1024;
 
 export interface ReportBranding {
@@ -33,31 +30,15 @@ export function hexToARGB(hex: string): string | null {
   return null;
 }
 
-/**
- * Reads one branding setting; null means "unset, use the default". The server
- * JSON-parses stored values, so an all-digit string comes back as a number —
- * coerce it rather than dropping it.
- */
-async function fetchSettingValue(key: string): Promise<string | null> {
-  try {
-    const response = await settingsService.getSetting(key);
-    const value = response?.value;
-    const asString = typeof value === 'string' ? value : typeof value === 'number' ? String(value) : '';
-    return asString.trim() !== '' ? asString : null;
-  } catch {
-    return null;
-  }
-}
-
 export async function getReportBranding(): Promise<ReportBranding> {
-  const [name, accent, logo] = await Promise.all([
-    fetchSettingValue(REPORT_COMPANY_NAME_KEY),
-    fetchSettingValue(REPORT_ACCENT_COLOR_KEY),
-    fetchSettingValue(REPORT_LOGO_KEY),
-  ]);
-  return {
-    name: name ?? DEFAULT_REPORT_BRANDING.name,
-    accentARGB: (accent && hexToARGB(accent)) || DEFAULT_REPORT_BRANDING.accentARGB,
-    logoBase64: logo,
-  };
+  try {
+    const branding = await reportBrandingService.get();
+    return {
+      name: branding.companyName?.trim() || DEFAULT_REPORT_BRANDING.name,
+      accentARGB: (branding.accentColor && hexToARGB(branding.accentColor)) || DEFAULT_REPORT_BRANDING.accentARGB,
+      logoBase64: branding.logoBase64,
+    };
+  } catch {
+    return DEFAULT_REPORT_BRANDING;
+  }
 }

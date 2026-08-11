@@ -110,6 +110,56 @@ export async function setAssembliesEnabled(orgId: string, enabled: boolean): Pro
   if (error) throw wrapDatabaseError('Set assemblies enabled', error, { orgId, enabled });
 }
 
+// ── Report branding ────────────────────────────────────────────────────
+
+export interface ReportBrandingRecord {
+  companyName: string | null;
+  accentColor: string | null;
+  logoBase64: string | null;
+}
+
+/** White-label settings for this org's Excel exports. No row yet = stock branding. */
+export async function getReportBranding(orgId: string): Promise<ReportBrandingRecord> {
+  const { data, error } = await supabase
+    .from('organization_report_branding')
+    .select('company_name, accent_color, logo_base64')
+    .eq('org_id', orgId)
+    .maybeSingle();
+  if (error) throw wrapDatabaseError('Get report branding', error, { orgId });
+  return {
+    companyName: data?.company_name ?? null,
+    accentColor: data?.accent_color ?? null,
+    logoBase64: data?.logo_base64 ?? null,
+  };
+}
+
+export interface UpdateReportBrandingParams extends Partial<ReportBrandingRecord> {
+  updatedBy?: string | null;
+}
+
+export async function setReportBranding(
+  orgId: string,
+  params: UpdateReportBrandingParams
+): Promise<ReportBrandingRecord> {
+  const patch: Record<string, unknown> = { org_id: orgId, updated_at: new Date().toISOString() };
+  if (params.updatedBy !== undefined) patch.updated_by = params.updatedBy;
+  if (params.companyName !== undefined) patch.company_name = params.companyName;
+  if (params.accentColor !== undefined) patch.accent_color = params.accentColor;
+  if (params.logoBase64 !== undefined) patch.logo_base64 = params.logoBase64;
+
+  const { data, error } = await supabase
+    .from('organization_report_branding')
+    .upsert(patch, { onConflict: 'org_id' })
+    .select('company_name, accent_color, logo_base64')
+    .single();
+  if (error) throw wrapDatabaseError('Set report branding', error, { orgId });
+  return {
+    companyName: data.company_name,
+    accentColor: data.accent_color,
+    logoBase64: data.logo_base64,
+  };
+}
+
 export async function getOrgRole(userId: string, orgId: string): Promise<OrgRole | null> {
   const { data, error } = await supabase
     .from('organization_members')
