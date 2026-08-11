@@ -196,12 +196,19 @@ export const supabaseService = {
         const profitMarginAmount = subtotal * (profitMarginPercent / 100);
         const totalCost = Math.round((subtotal + profitMarginAmount) * 100) / 100;
 
+        // Assembly-priced conditions aren't reflected in the flat-cost calc
+        // above (that requires the costing engine, which the list doesn't
+        // run). Prefer the total the workspace last cached, if any — see
+        // OPEN_ITEMS.md item 15.
+        const cachedTotal = (project as { total_value_cache?: number | string | null }).total_value_cache;
+        const totalValue = cachedTotal != null ? Number(cachedTotal) : totalCost;
+
         return {
           ...project,
           takeoff_count: undefined,
           takeoffCount: takeoffCount || 0,
           conditionCount: conditionCount || 0,
-          totalValue: totalCost,
+          totalValue,
           profitMarginPercent: profitMarginPercent,
         } as ProjectWithCounts;
       } catch (e) {
@@ -264,6 +271,23 @@ export const supabaseService = {
     }
     
     return data
+  },
+
+  /**
+   * Best-effort cache write: the last full project total (flat + assembly)
+   * seen by the workspace, read back by the projects list so it doesn't have
+   * to reprice assemblies to know a project's worth. Deliberately does not
+   * touch last_modified — a background price refresh isn't a project edit.
+   */
+  async updateProjectTotalCache(id: string, total: number): Promise<void> {
+    const { error } = await supabase
+      .from('takeoff_projects')
+      .update({ total_value_cache: total })
+      .eq('id', id)
+
+    if (error) {
+      console.warn('Failed to cache project total for', id, error)
+    }
   },
 
   // Conditions

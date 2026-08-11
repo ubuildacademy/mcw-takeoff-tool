@@ -188,7 +188,7 @@ ids are untouched). Verified idempotent on local Postgres; needs Jeff to run it 
 storage prefix in Supabase Storage — a file deletion, not a SQL migration, left for Jeff to
 clear from the dashboard whenever, no code depends on it either way.
 
-### 15. The projects list total does not include assembly pricing
+### 15. The projects list total does not include assembly pricing — CLOSED 2026-08-11
 
 **Found:** 2026-07-31, at I8a. Two different things compute a project's worth. Inside a
 project, `getProjectCostBreakdown` now returns `projectTotal` (flat costs + assemblies).
@@ -196,13 +196,15 @@ The projects *list* computes its own total in `supabaseService.ts`, straight fro
 and measurement rows, and has no way to price an assembly — so a job priced through
 assemblies still shows its flat-cost total there until it is opened.
 
-**Why not fixed here:** the list would have to price every project it lists, which means
-the costing engine running server-side over N projects on a page load. That is a real
-endpoint with real caching, and it wants the org scoping I9 brings.
-
-**To settle:** either a server-side project-total endpoint (the honest fix) or persisting
-`projectTotal` on the project row whenever a project is priced and letting the list read
-the stored value.
+**Fix:** took the cheaper of the two settle options instead of a server-side pricing
+endpoint. `takeoff_projects.total_value_cache` (nullable numeric,
+`add_project_total_value_cache.sql`) holds the last full total the workspace computed.
+`useAssemblyPricing.ts` writes it (`supabaseService.updateProjectTotalCache`, no
+`last_modified` bump) once the assembly engine settles for a project. `getProjects()`
+prefers that cached value when present and falls back to the flat-only calc otherwise —
+so a project only shows its true total after it has been opened at least once since
+pricing last changed. Good enough for a single-digit-tenant tool; revisit with a real
+endpoint if staleness becomes a complaint.
 
 ---
 
@@ -271,3 +273,67 @@ job appears to be handled by overriding the day rate by hand.
 Jeff confirmed 2026-08-10: hand-overriding the day rate is fine, no classification table
 behind it in practice. No mechanism to build — the report continues to record the labor
 basis and nothing else.
+
+## Found during the 2026-08-11 UI review
+
+Jeff flagged four things while reviewing the workspace after I9/branding landed. One
+(dark-mode summary) was small enough to fix on the spot; the other three are logged here.
+
+### 17. Multi-input assemblies constantly warn "not measured by any condition"
+
+An assembly can define more than one `quantityInput` (e.g. SF of wall plus LF of
+perimeter, or SF plus a height-driven LF). A condition links to exactly **one** input
+(`condition.assemblyQuantityInputId`, see `assemblyPricingItems.ts`). Every other input
+on that assembly is therefore never fed by that condition, and `priceCondition` in
+`server/src/services/conditionAssemblyPricing.ts:157-163` emits a warning per unfed
+input, unconditionally, every time such an assembly prices — this is very likely what
+reads to Jeff as "errors on every assembly with unknown quantities."
+
+**What would settle it:** whether a condition should be able to carry more than one
+measurement/unit (so one condition feeds both the SF and LF inputs of the same
+assembly) — needs Jeff. That is a real change to the condition model, not a quick fix,
+so it is not attempted here. Worth checking first how many of MCW's assemblies actually
+have >1 quantity input; if it's rare, scoping down to "only warn when the unfed input
+carries a nonzero price" may be enough on its own.
+
+### 18. Restoration liability rate checkbox is visible to every company
+
+`AssemblyCostsSection.tsx:290-299` — the toggle that switches a downloaded budget
+report between "waterproofing" and "restoration liability" accounting bases is
+rendered unconditionally, with no org check. This is MCW-specific accounting language
+(see item 12's discussion of the same report's fixed bucket shape) — a company outside
+MCW's group has no use for it and it will just be confusing.
+
+**Fix direction:** gate this control behind the caller's org rather than removing it —
+either an org-level feature flag (`organization_cost_defaults` already carries
+per-org config; a boolean there is the natural home) or, more simply, key it off the
+same "MCW customizations" check already used elsewhere for MCW-only behavior, if one
+exists. Needs a decision on which; not done here since it touches the org-scoping work
+from I9 and deserves its own look rather than a rushed toggle.
+
+### 19. Deleting an assembly-linked condition may leave a stale row in the Costs tab
+
+Jeff observed a deleted condition's assembly pricing row stay in the Costs tab instead
+of disappearing live. Traced the normal path: `useAssemblyPricing.ts` (mounted once in
+`TakeoffSidebar.tsx`) rebuilds its `items`/signature from the live conditions list on
+every render, so deleting a condition should drop it from the next debounced
+`priceProject` call within ~400ms. The one path that does NOT self-heal: if that
+re-price request errors, `assemblyPricingSlice.ts:101-118` deliberately keeps the
+**previous** `result` on screen ("last-known-good", by design, to avoid a summary
+blanking on a transient network blip) — so a delete that lands right before/during a
+failed re-price leaves the deleted condition's row visibly stuck until the next
+successful price. Could not reproduce further without driving the live app (Jeff
+tests the workspace UI himself, per established practice). Worth a look at whether
+the error case should special-case "the item that's gone is gone" even when the
+retry itself failed, rather than trusting the retry to also fix membership.
+
+### 20. Project Cost Summary unreadable in dark mode — FIXED 2026-08-11
+
+The **Reports tab** copy of "Project Cost Summary" (`TakeoffSidebar.tsx`, around line
+474) used a hardcoded light gradient (`from-blue-50 to-indigo-100`, `border-blue-200`)
+and hardcoded light-only accent text (`text-blue-600`, `text-green-600`) with no
+`dark:` variants, while `text-foreground` inside it does flip to near-white in dark
+mode — white text on a light-blue card. The **Costs tab** copy of the same summary
+already had full `dark:` coverage and was fine. Brought the Reports-tab copy in line
+with the Costs-tab one (dark gradient, dark border, dark accent text, dark amber
+warning boxes). No product decision involved, so fixed directly rather than logged.

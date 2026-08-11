@@ -471,41 +471,41 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                 <div className="space-y-4">
                   {/* Cost Summary Section */}
                   {costBreakdown.summary.projectTotal > 0 && (
-                    <div className="bg-gradient-to-br from-blue-50 to-indigo-100 rounded-lg p-4 border border-blue-200">
+                    <div className="bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-blue-950/40 dark:to-indigo-950/30 rounded-lg p-4 border border-blue-200 dark:border-blue-900/60">
                       <h3 className="text-lg font-semibold text-foreground mb-3">Project Cost Summary</h3>
                       <div className="grid grid-cols-2 gap-4 text-sm">
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">Project Total:</span>
-                          <span className="font-semibold text-blue-600">${costBreakdown.summary.projectTotal.toFixed(2)}</span>
+                          <span className="font-semibold text-blue-600 dark:text-blue-400">${costBreakdown.summary.projectTotal.toFixed(2)}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">Profit Margin:</span>
-                          <span className="font-semibold text-green-600">{costBreakdown.summary.profitMarginPercent}%</span>
+                          <span className="font-semibold text-green-600 dark:text-green-400">{costBreakdown.summary.profitMarginPercent}%</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">Subtotal:</span>
-                          <span className="font-medium">${costBreakdown.summary.subtotal.toFixed(2)}</span>
+                          <span className="font-medium text-foreground">${costBreakdown.summary.subtotal.toFixed(2)}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">Conditions with Costs:</span>
-                          <span className="font-medium">{costBreakdown.summary.conditionsWithCosts}</span>
+                          <span className="font-medium text-foreground">{costBreakdown.summary.conditionsWithCosts}</span>
                         </div>
                         {costBreakdown.summary.assemblyTotal > 0 && (
                           <>
                             <div className="flex justify-between">
                               <span className="text-muted-foreground">Flat Cost Total:</span>
-                              <span className="font-medium">${costBreakdown.summary.totalCost.toFixed(2)}</span>
+                              <span className="font-medium text-foreground">${costBreakdown.summary.totalCost.toFixed(2)}</span>
                             </div>
                             <div className="flex justify-between">
                               <span className="text-muted-foreground">Assembly Pricing:</span>
-                              <span className="font-medium">${costBreakdown.summary.assemblyTotal.toFixed(2)}</span>
+                              <span className="font-medium text-foreground">${costBreakdown.summary.assemblyTotal.toFixed(2)}</span>
                             </div>
                           </>
                         )}
                       </div>
                       {costBreakdown.summary.excludedMeasurementsFromCost &&
                         costBreakdown.summary.excludedMeasurementsFromCost.count > 0 && (
-                          <p className="text-xs text-amber-900 mt-3 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                          <p className="text-xs text-amber-900 dark:text-amber-200 mt-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded px-2 py-1.5">
                             {costBreakdown.summary.excludedMeasurementsFromCost.count} measurement(s) are not
                             included in this summary (missing condition for this project). Totals may be
                             understated.
@@ -515,8 +515,8 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                   )}
                   {(costBreakdown.summary.excludedMeasurementsFromCost?.count ?? 0) > 0 &&
                     costBreakdown.summary.projectTotal <= 0 && (
-                      <div className="rounded-lg p-4 border border-amber-200 bg-amber-50">
-                        <p className="text-xs text-amber-900">
+                      <div className="rounded-lg p-4 border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30">
+                        <p className="text-xs text-amber-900 dark:text-amber-200">
                           {costBreakdown.summary.excludedMeasurementsFromCost?.count ?? 0} measurement(s) are not
                           included in cost summaries (missing condition for this project).
                         </p>

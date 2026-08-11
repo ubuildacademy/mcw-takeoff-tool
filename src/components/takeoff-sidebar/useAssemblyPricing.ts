@@ -12,6 +12,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useConditionStore } from '../../store/slices/conditionSlice';
 import { useMeasurementStore } from '../../store/slices/measurementSlice';
 import { useAssemblyPricingStore } from '../../store/slices/assemblyPricingSlice';
+import { supabaseService } from '../../services/supabaseService';
 import {
   assemblyPricingSignature,
   buildAssemblyPriceItems,
@@ -25,6 +26,7 @@ export function useAssemblyPricing(projectId: string) {
   const takeoffMeasurements = useMeasurementStore(useShallow((s) => s.takeoffMeasurements));
   const priceProject = useAssemblyPricingStore((s) => s.priceProject);
   const entry = useAssemblyPricingStore((s) => s.byProject[projectId]);
+  const getProjectCostBreakdown = useMeasurementStore((s) => s.getProjectCostBreakdown);
 
   const items = useMemo(
     () => buildAssemblyPriceItems(conditions, takeoffMeasurements),
@@ -38,6 +40,16 @@ export function useAssemblyPricing(projectId: string) {
     }, PRICING_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [projectId, items, signature, priceProject]);
+
+  // Cache the settled total (flat + assembly) so the projects list can show
+  // it without repricing every listed project — see OPEN_ITEMS.md item 15.
+  // Only projects with assembly-linked conditions produce a result here; pure
+  // flat-cost projects are already priced correctly by the list itself.
+  useEffect(() => {
+    if (!entry?.result || entry.pricing || entry.error) return;
+    const total = getProjectCostBreakdown(projectId).summary.projectTotal;
+    void supabaseService.updateProjectTotalCache(projectId, total);
+  }, [projectId, entry?.result, entry?.pricing, entry?.error, getProjectCostBreakdown]);
 
   return {
     items,
