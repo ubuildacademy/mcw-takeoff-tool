@@ -33,6 +33,7 @@ router.get('/me', requireAuth, async (req, res) => {
       // platform admin with no org of their own reads false here, which is correct —
       // this field is "can I use assemblies myself", not "does any company have it".
       assembliesEnabled: org?.assembliesEnabled ?? false,
+      restorationLiabilityEnabled: org?.restorationLiabilityEnabled ?? false,
     });
   } catch (error) {
     console.error('Error in get current user tier:', error);

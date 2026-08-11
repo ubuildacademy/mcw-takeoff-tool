@@ -296,20 +296,21 @@ so it is not attempted here. Worth checking first how many of MCW's assemblies a
 have >1 quantity input; if it's rare, scoping down to "only warn when the unfed input
 carries a nonzero price" may be enough on its own.
 
-### 18. Restoration liability rate checkbox is visible to every company
+### 18. Restoration liability rate checkbox is visible to every company — CLOSED 2026-08-11
 
 `AssemblyCostsSection.tsx:290-299` — the toggle that switches a downloaded budget
-report between "waterproofing" and "restoration liability" accounting bases is
+report between "waterproofing" and "restoration liability" accounting bases was
 rendered unconditionally, with no org check. This is MCW-specific accounting language
 (see item 12's discussion of the same report's fixed bucket shape) — a company outside
-MCW's group has no use for it and it will just be confusing.
+MCW's group has no use for it and it was just confusing.
 
-**Fix direction:** gate this control behind the caller's org rather than removing it —
-either an org-level feature flag (`organization_cost_defaults` already carries
-per-org config; a boolean there is the natural home) or, more simply, key it off the
-same "MCW customizations" check already used elsewhere for MCW-only behavior, if one
-exists. Needs a decision on which; not done here since it touches the org-scoping work
-from I9 and deserves its own look rather than a rushed toggle.
+**Fix:** `organizations.restoration_liability_enabled` (boolean, default false,
+`add_organization_restoration_liability_flag.sql`), same shape as the existing
+`assemblies_enabled` gate. Seeded true for MCW Companies only. Threaded through
+`getOrganizationForUser`/`GET /users/me` → `MyTier.restorationLiabilityEnabled` →
+`TakeoffWorkspace` → `TakeoffSidebar` → `AssemblyCostsSection`, which now only
+renders the checkbox when the caller's org has it on. Every other company simply
+never sees the control; the report always builds on the waterproofing basis for them.
 
 ### 19. Deleting an assembly-linked condition may leave a stale row in the Costs tab
 

@@ -36,9 +36,12 @@ const money = (value: number) =>
 
 interface AssemblyCostsSectionProps {
   projectId: string;
+  /** Whether the caller's company sees the waterproofing/restoration-liability
+   *  basis toggle — MCW-specific accounting language, off for every other company. */
+  restorationLiabilityEnabled?: boolean;
 }
 
-export function AssemblyCostsSection({ projectId }: AssemblyCostsSectionProps) {
+export function AssemblyCostsSection({ projectId, restorationLiabilityEnabled = false }: AssemblyCostsSectionProps) {
   const conditions = useConditionStore(useShallow((s) => s.getProjectConditions(projectId)));
   const takeoffMeasurements = useMeasurementStore(useShallow((s) => s.takeoffMeasurements));
 
@@ -288,15 +291,19 @@ export function AssemblyCostsSection({ projectId }: AssemblyCostsSectionProps) {
                 {downloadingWO ? 'Building…' : 'Download Work Order (.xlsx)'}
               </Button>
               {/* The one dial worth showing: it moves real money between the
-                  liability and OH&P columns of what accounting posts. */}
-              <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={restorationBasis}
-                  onChange={(event) => setRestorationBasis(event.target.checked)}
-                />
-                Restoration liability rate (default is waterproofing)
-              </label>
+                  liability and OH&P columns of what accounting posts. MCW-specific
+                  accounting language — see OPEN_ITEMS.md item 18 — so it's gated
+                  per-org rather than shown to every company. */}
+              {restorationLiabilityEnabled && (
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={restorationBasis}
+                    onChange={(event) => setRestorationBasis(event.target.checked)}
+                  />
+                  Restoration liability rate (default is waterproofing)
+                </label>
+              )}
             </div>
           </div>
 

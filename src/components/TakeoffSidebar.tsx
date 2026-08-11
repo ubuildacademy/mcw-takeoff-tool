@@ -52,9 +52,12 @@ interface TakeoffSidebarProps {
   /** Whether the caller's company has the assemblies feature (upsell switch, 2026-08-10)
    *  — hides the Costs tab's assembly section and the picker in Create/Edit Condition. */
   assembliesEnabled?: boolean;
+  /** Whether the Costs tab shows MCW's waterproofing/restoration-liability basis
+   *  toggle — MCW-specific accounting language, off for every other company. */
+  restorationLiabilityEnabled?: boolean;
 }
 
-export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _onToolSelect, documents = [], onPageSelect, onPageOpenInNewTab, onExportStatusUpdate, onCutoutMode, cutoutMode, cutoutTargetConditionId, viewerDocumentId, currentPage, className, assembliesEnabled = false }: TakeoffSidebarProps) {
+export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _onToolSelect, documents = [], onPageSelect, onPageOpenInNewTab, onExportStatusUpdate, onCutoutMode, cutoutMode, cutoutTargetConditionId, viewerDocumentId, currentPage, className, assembliesEnabled = false, restorationLiabilityEnabled = false }: TakeoffSidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -623,7 +626,10 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                 condition carries flat costs. */}
             {assembliesEnabled && (
               <div className="mb-6 empty:mb-0">
-                <AssemblyCostsSection projectId={projectId} />
+                <AssemblyCostsSection
+                  projectId={projectId}
+                  restorationLiabilityEnabled={restorationLiabilityEnabled}
+                />
               </div>
             )}
             {(() => {

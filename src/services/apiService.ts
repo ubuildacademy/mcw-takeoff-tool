@@ -643,6 +643,9 @@ export interface MyTier {
   /** Whether the caller's own company has the assemblies feature — gates Conditions'
    *  assembly picker, the admin library tab, and the Costs tab's assembly section. */
   assembliesEnabled: boolean;
+  /** Whether the Costs tab shows the waterproofing/restoration-liability basis
+   *  toggle — MCW-specific accounting language, off for every other company. */
+  restorationLiabilityEnabled: boolean;
 }
 
 export const userService = {

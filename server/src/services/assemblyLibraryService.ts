@@ -43,6 +43,9 @@ export interface Organization {
   createdAt: string;
   /** Assemblies feature gate (upsell switch, system-admin controlled). */
   assembliesEnabled: boolean;
+  /** Whether the Costs tab shows MCW's waterproofing/restoration-liability basis
+   *  toggle — MCW-specific accounting language, off for every other company. */
+  restorationLiabilityEnabled: boolean;
 }
 
 export type OrgRole = 'company_admin' | 'user';
@@ -61,12 +64,18 @@ export async function getOrganizationForUser(userId: string): Promise<Organizati
 
   const { data: org, error: orgError } = await supabase
     .from('organizations')
-    .select('id, name, created_at, assemblies_enabled')
+    .select('id, name, created_at, assemblies_enabled, restoration_liability_enabled')
     .eq('id', membership.org_id)
     .maybeSingle();
   if (orgError) throw wrapDatabaseError('Get organization', orgError, { orgId: membership.org_id });
   return org
-    ? { id: org.id, name: org.name, createdAt: org.created_at, assembliesEnabled: org.assemblies_enabled ?? true }
+    ? {
+        id: org.id,
+        name: org.name,
+        createdAt: org.created_at,
+        assembliesEnabled: org.assemblies_enabled ?? true,
+        restorationLiabilityEnabled: org.restoration_liability_enabled ?? false,
+      }
     : null;
 }
 
@@ -74,7 +83,7 @@ export async function getOrganizationForUser(userId: string): Promise<Organizati
 export async function listOrganizations(): Promise<Organization[]> {
   const { data, error } = await supabase
     .from('organizations')
-    .select('id, name, created_at, assemblies_enabled')
+    .select('id, name, created_at, assemblies_enabled, restoration_liability_enabled')
     .order('name');
   if (error) throw wrapDatabaseError('List organizations', error, {});
   return (data ?? []).map((org) => ({
@@ -82,6 +91,7 @@ export async function listOrganizations(): Promise<Organization[]> {
     name: org.name,
     createdAt: org.created_at,
     assembliesEnabled: org.assemblies_enabled ?? true,
+    restorationLiabilityEnabled: org.restoration_liability_enabled ?? false,
   }));
 }
 
@@ -90,7 +100,7 @@ export async function createOrganization(name: string): Promise<Organization> {
   const { data, error } = await supabase
     .from('organizations')
     .insert({ name })
-    .select('id, name, created_at, assemblies_enabled')
+    .select('id, name, created_at, assemblies_enabled, restoration_liability_enabled')
     .single();
   if (error) throw wrapDatabaseError('Create organization', error, { name });
   return {
@@ -98,6 +108,7 @@ export async function createOrganization(name: string): Promise<Organization> {
     name: data.name,
     createdAt: data.created_at,
     assembliesEnabled: data.assemblies_enabled ?? true,
+    restorationLiabilityEnabled: data.restoration_liability_enabled ?? false,
   };
 }
 

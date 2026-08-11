@@ -159,15 +159,24 @@ export function TakeoffWorkspace() {
   // Whether the caller's company has the assemblies feature (upsell switch, 2026-08-10)
   // — gates the assembly picker in Conditions and the Costs tab's assembly section.
   const [assembliesEnabled, setAssembliesEnabled] = useState(false);
+  // Whether the Costs tab shows MCW's waterproofing/restoration-liability basis
+  // toggle — MCW-specific accounting language, off for every other company.
+  const [restorationLiabilityEnabled, setRestorationLiabilityEnabled] = useState(false);
   useEffect(() => {
     let mounted = true;
     userService
       .getMyTier()
       .then((tier) => {
-        if (mounted) setAssembliesEnabled(tier.assembliesEnabled);
+        if (mounted) {
+          setAssembliesEnabled(tier.assembliesEnabled);
+          setRestorationLiabilityEnabled(tier.restorationLiabilityEnabled);
+        }
       })
       .catch(() => {
-        if (mounted) setAssembliesEnabled(false);
+        if (mounted) {
+          setAssembliesEnabled(false);
+          setRestorationLiabilityEnabled(false);
+        }
       });
     return () => {
       mounted = false;
@@ -1456,6 +1465,7 @@ export function TakeoffWorkspace() {
               viewerDocumentId={currentPdfFile?.id ?? null}
               currentPage={currentPage}
               assembliesEnabled={assembliesEnabled}
+              restorationLiabilityEnabled={restorationLiabilityEnabled}
             />
           )}
           <SidebarEdgeToggle
@@ -1483,6 +1493,7 @@ export function TakeoffWorkspace() {
               viewerDocumentId={currentPdfFile?.id ?? null}
               currentPage={currentPage}
               assembliesEnabled={assembliesEnabled}
+              restorationLiabilityEnabled={restorationLiabilityEnabled}
             />
           </div>
         )}
