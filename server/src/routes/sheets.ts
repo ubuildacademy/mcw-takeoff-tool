@@ -13,14 +13,16 @@ router.get('/project/:projectId', requireAuth, validateUUIDParam('projectId'), a
     const { projectId } = req.params;
     
     // Verify user has access to this project
-    const userIsAdmin = await isAdmin(req.user!.id);
-    if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
+    const userIsAdmin = await isAdmin(caller.id);
+    if (!userIsAdmin && !(await hasProjectAccess(caller.id, projectId, userIsAdmin))) {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
     
     // Get all files for the project
     const files = await storage.getFilesByProject(projectId);
-    const pdfFiles = files.filter((f: any) => f.mimetype === 'application/pdf');
+    const pdfFiles = files.filter((f) => f.mimetype === 'application/pdf');
     
     // For now, return basic sheet information
     // In a real implementation, you'd load this from a database
@@ -66,8 +68,10 @@ router.post('/batch-metadata', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'sheetIds must be an array' });
     }
 
-    const userIsAdmin = await isAdmin(req.user!.id);
-    if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
+    const userIsAdmin = await isAdmin(caller.id);
+    if (!userIsAdmin && !(await hasProjectAccess(caller.id, projectId, userIsAdmin))) {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
 
@@ -110,8 +114,10 @@ router.post('/batch-metadata', requireAuth, async (req, res) => {
 // Get specific sheet metadata
 router.get('/:sheetId', requireAuth, async (req, res) => {
   try {
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
     const { sheetId } = req.params;
-    const access = await assertSheetAccess(req.user!.id, sheetId);
+    const access = await assertSheetAccess(caller.id, sheetId);
     if (!access.ok) {
       return res.status(404).json({ error: 'Sheet not found or access denied' });
     }
@@ -147,6 +153,8 @@ router.get('/:sheetId', requireAuth, async (req, res) => {
 // Update sheet metadata
 router.put('/:sheetId', requireAuth, async (req, res) => {
   try {
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
     const { sheetId } = req.params;
     const updates = req.body as Record<string, unknown>;
 
@@ -154,7 +162,7 @@ router.put('/:sheetId', requireAuth, async (req, res) => {
       console.log(`Updating sheet ${sheetId}:`, updates);
     }
 
-    const access = await assertSheetAccess(req.user!.id, sheetId);
+    const access = await assertSheetAccess(caller.id, sheetId);
     if (!access.ok) {
       return res.status(404).json({ error: 'Sheet not found or access denied' });
     }
@@ -199,10 +207,12 @@ router.put('/:sheetId', requireAuth, async (req, res) => {
 // Process OCR for a sheet
 router.post('/:sheetId/ocr', requireAuth, async (req, res) => {
   try {
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
     const { sheetId } = req.params;
     const { pageNumbers } = req.body;
 
-    const access = await assertSheetAccess(req.user!.id, sheetId);
+    const access = await assertSheetAccess(caller.id, sheetId);
     if (!access.ok) {
       return res.status(404).json({ error: 'Sheet not found or access denied' });
     }

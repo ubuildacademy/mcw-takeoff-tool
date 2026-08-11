@@ -39,10 +39,11 @@ router.get('/project/:projectId', requireAuth, validateUUIDParam('projectId'), a
   try {
     const { projectId } = req.params;
     const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
     const userIsAdmin = req.user?.role === 'admin';
     
     // Verify access to project
-    const hasAccess = await hasProjectAccess(userId!, projectId, userIsAdmin);
+    const hasAccess = await hasProjectAccess(userId, projectId, userIsAdmin);
     if (!hasAccess) {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
@@ -63,6 +64,7 @@ router.get('/sheet/:sheetId', requireAuth, async (req, res) => {
   try {
     const { sheetId } = req.params;
     const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
     const userIsAdmin = req.user?.role === 'admin';
     
     // sheetId is actually documentId - look up the file directly for access control
@@ -72,7 +74,7 @@ router.get('/sheet/:sheetId', requireAuth, async (req, res) => {
     }
     
     // Verify access to project
-    const hasAccess = await hasProjectAccess(userId!, file.projectId, userIsAdmin);
+    const hasAccess = await hasProjectAccess(userId, file.projectId, userIsAdmin);
     if (!hasAccess) {
       return res.status(404).json({ error: 'Document not found or access denied' });
     }
@@ -91,6 +93,7 @@ router.get('/sheet/:sheetId/page/:pageNumber', requireAuth, async (req, res) => 
   try {
     const { sheetId, pageNumber } = req.params;
     const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
     const userIsAdmin = req.user?.role === 'admin';
     const pageNum = parseInt(pageNumber, 10);
     
@@ -105,7 +108,7 @@ router.get('/sheet/:sheetId/page/:pageNumber', requireAuth, async (req, res) => 
     }
     
     // Verify access to project
-    const hasAccess = await hasProjectAccess(userId!, file.projectId, userIsAdmin);
+    const hasAccess = await hasProjectAccess(userId, file.projectId, userIsAdmin);
     if (!hasAccess) {
       return res.status(404).json({ error: 'Document not found or access denied' });
     }
@@ -140,6 +143,7 @@ function sanitizeArcs(value: unknown): Array<{ segmentIndex: number; bulge: numb
 router.post('/', requireAuth, async (req, res) => {
   try {
     const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
     const userIsAdmin = req.user?.role === 'admin';
     
     const {
@@ -178,7 +182,7 @@ router.post('/', requireAuth, async (req, res) => {
     }
     
     // Verify access to project
-    const hasAccess = await hasProjectAccess(userId!, projectId, userIsAdmin);
+    const hasAccess = await hasProjectAccess(userId, projectId, userIsAdmin);
     if (!hasAccess) {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
@@ -254,6 +258,7 @@ router.post('/', requireAuth, async (req, res) => {
 router.post('/batch/stack-order', requireAuth, async (req, res) => {
   try {
     const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
     const userIsAdmin = req.user?.role === 'admin';
     const { updates } = req.body as { updates?: unknown };
 
@@ -288,7 +293,7 @@ router.post('/batch/stack-order', requireAuth, async (req, res) => {
       if (!existing) {
         return res.status(404).json({ error: `Takeoff measurement not found: ${u.id}` });
       }
-      const hasAccess = await hasProjectAccess(userId!, existing.projectId, userIsAdmin);
+      const hasAccess = await hasProjectAccess(userId, existing.projectId, userIsAdmin);
       if (!hasAccess) {
         return res.status(404).json({ error: 'Measurement not found or access denied' });
       }
@@ -312,6 +317,7 @@ router.put('/:id', requireAuth, validateUUIDParam('id'), async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
     const userIsAdmin = req.user?.role === 'admin';
     const updates = req.body;
     
@@ -322,7 +328,7 @@ router.put('/:id', requireAuth, validateUUIDParam('id'), async (req, res) => {
     }
     
     // Verify access to project
-    const hasAccess = await hasProjectAccess(userId!, existingMeasurement.projectId, userIsAdmin);
+    const hasAccess = await hasProjectAccess(userId, existingMeasurement.projectId, userIsAdmin);
     if (!hasAccess) {
       return res.status(404).json({ error: 'Measurement not found or access denied' });
     }
@@ -361,6 +367,7 @@ router.delete('/:id', requireAuth, validateUUIDParam('id'), async (req, res) => 
   try {
     const { id } = req.params;
     const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
     const userIsAdmin = req.user?.role === 'admin';
     
     const measurement = await storage.getTakeoffMeasurementById(id);
@@ -370,7 +377,7 @@ router.delete('/:id', requireAuth, validateUUIDParam('id'), async (req, res) => 
     }
     
     // Verify access to project
-    const hasAccess = await hasProjectAccess(userId!, measurement.projectId, userIsAdmin);
+    const hasAccess = await hasProjectAccess(userId, measurement.projectId, userIsAdmin);
     if (!hasAccess) {
       return res.status(404).json({ error: 'Measurement not found or access denied' });
     }

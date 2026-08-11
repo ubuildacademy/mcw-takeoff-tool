@@ -84,8 +84,10 @@ router.post('/process-document/:documentId', requireAuth, validateUUIDParam('doc
     return res.status(400).json({ error: 'Project ID is required' });
   }
 
-  const userIsAdmin = await isAdmin(req.user!.id);
-  if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+  const caller = req.user;
+  if (!caller) return res.status(401).json({ error: 'Authentication required' });
+  const userIsAdmin = await isAdmin(caller.id);
+  if (!userIsAdmin && !(await hasProjectAccess(caller.id, projectId, userIsAdmin))) {
     return res.status(404).json({ error: 'Project not found or access denied' });
   }
 
@@ -104,6 +106,8 @@ router.post('/process-document/:documentId', requireAuth, validateUUIDParam('doc
 // Get OCR job status
 router.get('/status/:jobId', requireAuth, validateUUIDParam('jobId'), async (req, res) => {
   const { jobId } = req.params;
+  const caller = req.user;
+  if (!caller) return res.status(401).json({ error: 'Authentication required' });
 
   try {
     const { data: job, error } = await supabase
@@ -116,12 +120,12 @@ router.get('/status/:jobId', requireAuth, validateUUIDParam('jobId'), async (req
       return res.status(404).json({ error: 'Job not found' });
     }
 
-    const userIsAdmin = await isAdmin(req.user!.id);
+    const userIsAdmin = await isAdmin(caller.id);
     const projectId = job.project_id as string;
     if (
       projectId &&
       !userIsAdmin &&
-      !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))
+      !(await hasProjectAccess(caller.id, projectId, userIsAdmin))
     ) {
       return res.status(404).json({ error: 'Job not found' });
     }
@@ -152,8 +156,10 @@ router.get('/documents-with-ocr', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Invalid project ID format' });
   }
 
-  const userIsAdmin = await isAdmin(req.user!.id);
-  if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+  const caller = req.user;
+  if (!caller) return res.status(401).json({ error: 'Authentication required' });
+  const userIsAdmin = await isAdmin(caller.id);
+  if (!userIsAdmin && !(await hasProjectAccess(caller.id, projectId, userIsAdmin))) {
     return res.status(404).json({ error: 'Project not found or access denied' });
   }
 
@@ -180,8 +186,10 @@ router.get('/search/:documentId', requireAuth, validateUUIDParam('documentId'), 
     return res.status(400).json({ error: 'Project ID is required' });
   }
 
-  const userIsAdmin = await isAdmin(req.user!.id);
-  if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+  const caller = req.user;
+  if (!caller) return res.status(401).json({ error: 'Authentication required' });
+  const userIsAdmin = await isAdmin(caller.id);
+  if (!userIsAdmin && !(await hasProjectAccess(caller.id, projectId, userIsAdmin))) {
     return res.status(404).json({ error: 'Project not found or access denied' });
   }
 
@@ -268,8 +276,10 @@ router.get('/word-boxes/:documentId', requireAuth, validateUUIDParam('documentId
     return res.status(400).json({ error: 'Page number must be a positive integer' });
   }
 
-  const userIsAdmin = await isAdmin(req.user!.id);
-  if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+  const caller = req.user;
+  if (!caller) return res.status(401).json({ error: 'Authentication required' });
+  const userIsAdmin = await isAdmin(caller.id);
+  if (!userIsAdmin && !(await hasProjectAccess(caller.id, projectId, userIsAdmin))) {
     return res.status(404).json({ error: 'Project not found or access denied' });
   }
 
@@ -299,8 +309,10 @@ router.get('/results/:documentId', requireAuth, validateUUIDParam('documentId'),
   }
 
   // Verify user has access to this project
-  const userIsAdmin = await isAdmin(req.user!.id);
-  if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+  const caller = req.user;
+  if (!caller) return res.status(401).json({ error: 'Authentication required' });
+  const userIsAdmin = await isAdmin(caller.id);
+  if (!userIsAdmin && !(await hasProjectAccess(caller.id, projectId, userIsAdmin))) {
     return res.status(404).json({ error: 'Project not found or access denied' });
   }
 
@@ -358,8 +370,10 @@ router.delete('/results/:documentId', requireAuth, validateUUIDParam('documentId
   }
 
   // Verify user has access to this project
-  const userIsAdmin = await isAdmin(req.user!.id);
-  if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+  const caller = req.user;
+  if (!caller) return res.status(401).json({ error: 'Authentication required' });
+  const userIsAdmin = await isAdmin(caller.id);
+  if (!userIsAdmin && !(await hasProjectAccess(caller.id, projectId, userIsAdmin))) {
     return res.status(404).json({ error: 'Project not found or access denied' });
   }
 
@@ -391,8 +405,10 @@ router.post('/client-results/:documentId', requireAuth, validateUUIDParam('docum
   }
 
   // Verify user has access to this project
-  const userIsAdmin = await isAdmin(req.user!.id);
-  if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+  const caller = req.user;
+  if (!caller) return res.status(401).json({ error: 'Authentication required' });
+  const userIsAdmin = await isAdmin(caller.id);
+  if (!userIsAdmin && !(await hasProjectAccess(caller.id, projectId, userIsAdmin))) {
     return res.status(404).json({ error: 'Project not found or access denied' });
   }
 
@@ -500,8 +516,10 @@ router.post(
       return res.status(400).json({ error: 'Project ID is required' });
     }
 
-    const userIsAdmin = await isAdmin(req.user!.id);
-    if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
+    const userIsAdmin = await isAdmin(caller.id);
+    if (!userIsAdmin && !(await hasProjectAccess(caller.id, projectId, userIsAdmin))) {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
 
@@ -627,8 +645,10 @@ router.post(
       return res.status(400).json({ error: 'Project ID is required' });
     }
 
-    const userIsAdmin = await isAdmin(req.user!.id);
-    if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
+    const userIsAdmin = await isAdmin(caller.id);
+    if (!userIsAdmin && !(await hasProjectAccess(caller.id, projectId, userIsAdmin))) {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
 
@@ -792,8 +812,10 @@ router.post(
       return res.status(400).json({ error: 'Project ID is required' });
     }
 
-    const userIsAdmin = await isAdmin(req.user!.id);
-    if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
+    const userIsAdmin = await isAdmin(caller.id);
+    if (!userIsAdmin && !(await hasProjectAccess(caller.id, projectId, userIsAdmin))) {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
 

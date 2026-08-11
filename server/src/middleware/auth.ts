@@ -12,6 +12,8 @@ declare global {
         email?: string;
         role: 'admin' | 'user';
       };
+      /** Set once per request in index.ts, for correlating logs across a request's lifetime. */
+      requestId?: string;
     }
   }
 }

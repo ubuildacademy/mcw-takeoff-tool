@@ -21,7 +21,7 @@ function getAuthClient() {
   return createClient(supabaseUrl, supabaseAnonKey, {
     auth: { autoRefreshToken: false, persistSession: false },
     global: {
-      fetch: (url: any, init?: any) => {
+      fetch: (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
         // Add a 10-second timeout to prevent hanging when Supabase is paused/unreachable
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 10000);
@@ -141,13 +141,15 @@ router.get('/validate-invite/:token', async (req: Request, res: Response) => {
  */
 router.post('/accept-invitation', requireAuth, async (req: Request, res: Response) => {
   try {
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
     const { token, full_name, company } = req.body;
     if (!token || typeof token !== 'string') {
       return res.status(400).json({ error: 'Invitation token is required' });
     }
 
-    const userId = req.user!.id;
-    const userEmail = req.user!.email?.toLowerCase();
+    const userId = caller.id;
+    const userEmail = caller.email?.toLowerCase();
 
     const { data: invitation, error: invError } = await supabase
       .from('user_invitations')
@@ -219,8 +221,11 @@ router.post('/accept-invitation', requireAuth, async (req: Request, res: Respons
  */
 router.post('/complete-shared-signup', requireAuth, async (req: Request, res: Response) => {
   try {
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
+    if (!caller.email) return res.status(400).json({ error: 'Account has no email on file' });
     const { full_name, company } = req.body;
-    const userId = req.user!.id;
+    const userId = caller.id;
 
     const { error: metadataError } = await supabase
       .from('user_metadata')
@@ -237,14 +242,14 @@ router.post('/complete-shared-signup', requireAuth, async (req: Request, res: Re
         metadataError.code === '23505' ||
         (typeof metadataError.message === 'string' && metadataError.message.includes('duplicate key'));
       if (isDuplicate) {
-        await markProjectShareInvitationsAccepted(req.user!.email!);
+        await markProjectShareInvitationsAccepted(caller.email);
         return res.json({ success: true });
       }
       console.error('[Auth] Error creating user metadata (shared signup):', metadataError);
       return res.status(500).json({ error: 'Failed to complete account setup' });
     }
 
-    await markProjectShareInvitationsAccepted(req.user!.email!);
+    await markProjectShareInvitationsAccepted(caller.email);
     res.json({ success: true });
   } catch (err) {
     console.error('[Auth] Complete shared signup error:', err);

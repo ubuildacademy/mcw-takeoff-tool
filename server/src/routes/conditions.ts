@@ -1,14 +1,11 @@
 import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { storage } from '../storage';
-import { supabase, TABLES } from '../supabase';
 import { devLog } from '../lib/devLog';
-import { 
-  requireAuth, 
-  requireProjectAccess,
+import {
+  requireAuth,
   validateUUIDParam,
   sanitizeBody,
-  isAdmin as checkIsAdmin,
   hasProjectAccess,
   isValidUUIDAnyVersion
 } from '../middleware';
@@ -90,10 +87,11 @@ router.get('/project/:projectId', requireAuth, validateUUIDParam('projectId'), a
   try {
     const { projectId } = req.params;
     const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
     const userIsAdmin = req.user?.role === 'admin';
     
     // Verify access to project
-    const hasAccess = await hasProjectAccess(userId!, projectId, userIsAdmin);
+    const hasAccess = await hasProjectAccess(userId, projectId, userIsAdmin);
     if (!hasAccess) {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
@@ -113,6 +111,7 @@ router.get('/:id', requireAuth, validateUUIDParam('id'), async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
     const userIsAdmin = req.user?.role === 'admin';
     
     const condition = await storage.getConditionById(id);
@@ -122,7 +121,7 @@ router.get('/:id', requireAuth, validateUUIDParam('id'), async (req, res) => {
     }
 
     // Verify user has access to the project this condition belongs to
-    const hasAccess = await hasProjectAccess(userId!, condition.projectId, userIsAdmin);
+    const hasAccess = await hasProjectAccess(userId, condition.projectId, userIsAdmin);
     if (!hasAccess) {
       return res.status(404).json({ error: 'Condition not found or access denied' });
     }
@@ -138,6 +137,7 @@ router.get('/:id', requireAuth, validateUUIDParam('id'), async (req, res) => {
 router.post('/', requireAuth, sanitizeBody('name', 'description'), async (req, res) => {
   try {
     const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
     const userIsAdmin = req.user?.role === 'admin';
 
     const {
@@ -180,7 +180,7 @@ router.post('/', requireAuth, sanitizeBody('name', 'description'), async (req, r
     }
 
     // Verify the user has access to this project
-    const hasAccess = await hasProjectAccess(userId!, projectId, userIsAdmin);
+    const hasAccess = await hasProjectAccess(userId, projectId, userIsAdmin);
     if (!hasAccess) {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
@@ -279,7 +279,7 @@ router.post('/', requireAuth, sanitizeBody('name', 'description'), async (req, r
       }
     }
 
-    const link = await resolveAssemblyLink(userId!, assemblyId, assemblyQuantityInputId);
+    const link = await resolveAssemblyLink(userId, assemblyId, assemblyQuantityInputId);
     if ('error' in link) {
       return res.status(400).json({ error: link.error });
     }
@@ -377,6 +377,7 @@ router.put('/:id', requireAuth, validateUUIDParam('id'), sanitizeBody('name', 'd
   try {
     const { id } = req.params;
     const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
     const userIsAdmin = req.user?.role === 'admin';
     const {
       name,
@@ -423,7 +424,7 @@ router.put('/:id', requireAuth, validateUUIDParam('id'), sanitizeBody('name', 'd
     }
     
     // Verify user has access to the project this condition belongs to
-    const hasAccess = await hasProjectAccess(userId!, existingCondition.projectId, userIsAdmin);
+    const hasAccess = await hasProjectAccess(userId, existingCondition.projectId, userIsAdmin);
     if (!hasAccess) {
       return res.status(404).json({ error: 'Condition not found or access denied' });
     }
@@ -485,7 +486,7 @@ router.put('/:id', requireAuth, validateUUIDParam('id'), sanitizeBody('name', 'd
     let link: { assemblyId: string | null; assemblyQuantityInputId: string | null } | null = null;
     if (assemblyId !== undefined || assemblyQuantityInputId !== undefined) {
       const targetAssemblyId = assemblyId !== undefined ? assemblyId : existingCondition.assemblyId;
-      const resolved = await resolveAssemblyLink(userId!, targetAssemblyId, assemblyQuantityInputId);
+      const resolved = await resolveAssemblyLink(userId, targetAssemblyId, assemblyQuantityInputId);
       if ('error' in resolved) {
         return res.status(400).json({ error: resolved.error });
       }
@@ -559,6 +560,7 @@ router.delete('/:id', requireAuth, validateUUIDParam('id'), async (req, res) => 
   try {
     const { id } = req.params;
     const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
     const userIsAdmin = req.user?.role === 'admin';
     
     const condition = await storage.getConditionById(id);
@@ -568,7 +570,7 @@ router.delete('/:id', requireAuth, validateUUIDParam('id'), async (req, res) => 
     }
     
     // Verify user has access to the project
-    const hasAccess = await hasProjectAccess(userId!, condition.projectId, userIsAdmin);
+    const hasAccess = await hasProjectAccess(userId, condition.projectId, userIsAdmin);
     if (!hasAccess) {
       return res.status(404).json({ error: 'Condition not found or access denied' });
     }
@@ -586,6 +588,7 @@ router.post('/:id/duplicate', requireAuth, validateUUIDParam('id'), async (req, 
   try {
     const { id } = req.params;
     const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
     const userIsAdmin = req.user?.role === 'admin';
     
     const originalCondition = await storage.getConditionById(id);
@@ -595,7 +598,7 @@ router.post('/:id/duplicate', requireAuth, validateUUIDParam('id'), async (req, 
     }
     
     // Verify user has access to the project
-    const hasAccess = await hasProjectAccess(userId!, originalCondition.projectId, userIsAdmin);
+    const hasAccess = await hasProjectAccess(userId, originalCondition.projectId, userIsAdmin);
     if (!hasAccess) {
       return res.status(404).json({ error: 'Condition not found or access denied' });
     }

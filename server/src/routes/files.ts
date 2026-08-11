@@ -50,25 +50,26 @@ const upload = multer({
 const uploadHandler = upload.single('file');
 const handleUpload = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   return new Promise<void>((resolve) => {
-    uploadHandler(req, res, (err: any) => {
+    uploadHandler(req, res, (err: unknown) => {
       if (err) {
+        const details = err instanceof Error ? err.message : String(err);
         if (err instanceof multer.MulterError) {
           if (err.code === 'LIMIT_FILE_SIZE') {
-            return res.status(413).json({ 
-              error: 'File too large', 
+            return res.status(413).json({
+              error: 'File too large',
               message: `File size exceeds the maximum allowed size of ${SUPABASE_MAX_FILE_SIZE / (1024 * 1024)}MB for Supabase Storage`,
               maxSize: SUPABASE_MAX_FILE_SIZE
             });
           }
-          return res.status(400).json({ error: 'Upload error', details: err.message });
+          return res.status(400).json({ error: 'Upload error', details });
         }
-        
+
         // Handle fileFilter errors
-        if (err.message === 'Invalid file type') {
+        if (details === 'Invalid file type') {
           return res.status(400).json({ error: 'Invalid file type', message: 'Only PDF, DWG, JPG, JPEG, and PNG files are allowed' });
         }
-        
-        return res.status(400).json({ error: 'Upload error', details: err.message });
+
+        return res.status(400).json({ error: 'Upload error', details });
       }
       
       // No error, continue to route handler
@@ -81,7 +82,7 @@ const handleUpload = async (req: express.Request, res: express.Response, next: e
 router.post('/upload', requireAuth, handleUpload, async (req, res) => {
   try {
     const isProd = process.env.NODE_ENV === 'production';
-    const requestId = (req as any).requestId as string | undefined;
+    const requestId = req.requestId;
     if (!isProd) {
       console.log('[Upload] start', {
         requestId,
@@ -120,7 +121,9 @@ router.post('/upload', requireAuth, handleUpload, async (req, res) => {
       });
     }
 
-    const userId = req.user!.id;
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
+    const userId = caller.id;
     const userIsAdmin = await isAdmin(userId);
     if (!userIsAdmin && !(await hasProjectAccess(userId, projectId, userIsAdmin))) {
       fs.removeSync(req.file.path);
@@ -157,7 +160,7 @@ router.post('/upload', requireAuth, handleUpload, async (req, res) => {
     if (!isProd) console.log('[Upload] storage upload', { requestId, storagePath });
     
     // Upload to Supabase Storage bucket (assuming bucket name is 'project-files')
-    const { data: uploadData, error: uploadError } = await supabase.storage
+    const { error: uploadError } = await supabase.storage
       .from('project-files')
       .upload(storagePath, fileBuffer, {
         contentType: req.file.mimetype,
@@ -171,7 +174,8 @@ router.post('/upload', requireAuth, handleUpload, async (req, res) => {
       console.error('Supabase Storage upload error:', uploadError);
       
       // Handle specific error cases - check both status and statusCode properties
-      const errorStatus = (uploadError as any).statusCode || (uploadError as any).status;
+      const uploadErrorFields = uploadError as unknown as { statusCode?: unknown; status?: unknown };
+      const errorStatus = uploadErrorFields.statusCode ?? uploadErrorFields.status;
       if (errorStatus === 413 || errorStatus === '413' || uploadError.message?.includes('maximum allowed size')) {
         return res.status(413).json({ 
           error: 'File too large', 
@@ -233,8 +237,10 @@ router.post('/upload', requireAuth, handleUpload, async (req, res) => {
 // Get all files (admin only)
 router.get('/', requireAuth, async (req, res) => {
   try {
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
     // Only admins can see all files
-    const userIsAdmin = await isAdmin(req.user!.id);
+    const userIsAdmin = await isAdmin(caller.id);
     if (!userIsAdmin) {
       return res.status(403).json({ error: 'Admin access required' });
     }
@@ -250,19 +256,20 @@ router.get('/:fileId', requireAuth, validateUUIDParam('fileId'), async (req, res
   const startTime = Date.now();
   const { fileId } = req.params;
   const isProdFiles = process.env.NODE_ENV === 'production';
+  const user = req.user;
+  if (!user) return res.status(401).json({ error: 'Authentication required' });
 
   if (!isProdFiles) {
     console.log('[FILE REQUEST] start', {
       fileId,
       method: req.method,
       path: req.path,
-      userId: req.user!.id,
+      userId: user.id,
     });
   }
 
   try {
-    const user = req.user!;
-    
+
     // Query file directly by ID instead of getting all files
     const { data: fileData, error: fileError } = await supabase
       .from(TABLES.FILES)
@@ -364,10 +371,10 @@ router.get('/:fileId', requireAuth, validateUUIDParam('fileId'), async (req, res
         console.log(`[FILE REQUEST] ok fileId=${fileId} ${Date.now() - startTime}ms`);
       }
       return;
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Enhanced error handling for Railway free tier issues
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      const errorCode = (error as any)?.code;
+      const errorCode = error && typeof error === 'object' ? (error as Record<string, unknown>).code : undefined;
       const elapsedMs = Date.now() - startTime;
       
       console.error('❌ [FILE REQUEST] Error fetching file from storage:', {
@@ -424,19 +431,21 @@ router.get('/:fileId', requireAuth, validateUUIDParam('fileId'), async (req, res
 
 router.get('/project/:projectId', requireAuth, validateUUIDParam('projectId'), async (req, res) => {
   try {
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
     const { projectId } = req.params;
-    
+
     // Check if user is admin
-    const userIsAdmin = await isAdmin(req.user!.id);
-    
+    const userIsAdmin = await isAdmin(caller.id);
+
     // First, verify the user has access to this project
     let projectQuery = supabase
       .from(TABLES.PROJECTS)
       .select('id, user_id')
       .eq('id', projectId);
-    
+
     if (!userIsAdmin) {
-      projectQuery = projectQuery.eq('user_id', req.user!.id);
+      projectQuery = projectQuery.eq('user_id', caller.id);
     }
     
     const { data: project, error: projectError } = await projectQuery.single();
@@ -469,9 +478,11 @@ router.get('/project/:projectId', requireAuth, validateUUIDParam('projectId'), a
 
 router.delete('/:fileId', requireAuth, validateUUIDParam('fileId'), async (req, res) => {
   try {
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
     const { fileId } = req.params;
-    console.log('🗑️ DELETE FILE REQUEST:', { fileId, userId: req.user!.id });
-    
+    console.log('🗑️ DELETE FILE REQUEST:', { fileId, userId: caller.id });
+
     // Query file directly by ID
     const { data: fileData, error: fileError } = await supabase
       .from(TABLES.FILES)
@@ -485,14 +496,14 @@ router.delete('/:fileId', requireAuth, validateUUIDParam('fileId'), async (req, 
     }
     
     // Check if user has access to this file's project
-    const userIsAdmin = await isAdmin(req.user!.id);
+    const userIsAdmin = await isAdmin(caller.id);
     let projectQuery = supabase
       .from(TABLES.PROJECTS)
       .select('id, user_id')
       .eq('id', fileData.project_id);
-    
+
     if (!userIsAdmin) {
-      projectQuery = projectQuery.eq('user_id', req.user!.id);
+      projectQuery = projectQuery.eq('user_id', caller.id);
     }
     
     const { data: project, error: projectError } = await projectQuery.single();

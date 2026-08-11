@@ -1,6 +1,5 @@
 import express from 'express';
 import { storage } from '../storage';
-import { supabase } from '../supabase';
 import { requireAuth, hasProjectAccess, validateUUIDParam, isAdmin } from '../middleware';
 
 const router = express.Router();
@@ -13,8 +12,10 @@ router.get('/project/:projectId/sheet/:sheetId', requireAuth, validateUUIDParam(
     const pageNumber = req.query.pageNumber ? parseInt(req.query.pageNumber as string) : undefined;
     
     // Verify user has access to this project
-    const userIsAdmin = await isAdmin(req.user!.id);
-    if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
+    const userIsAdmin = await isAdmin(caller.id);
+    if (!userIsAdmin && !(await hasProjectAccess(caller.id, projectId, userIsAdmin))) {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
 
@@ -38,8 +39,10 @@ router.get('/project/:projectId', requireAuth, validateUUIDParam('projectId'), a
     const { projectId } = req.params;
     
     // Verify user has access to this project
-    const userIsAdmin = await isAdmin(req.user!.id);
-    if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
+    const userIsAdmin = await isAdmin(caller.id);
+    if (!userIsAdmin && !(await hasProjectAccess(caller.id, projectId, userIsAdmin))) {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
 
@@ -61,8 +64,10 @@ router.post('/', requireAuth, async (req, res) => {
     }
 
     // Verify user has access to this project
-    const userIsAdmin = await isAdmin(req.user!.id);
-    if (!userIsAdmin && !(await hasProjectAccess(req.user!.id, projectId, userIsAdmin))) {
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
+    const userIsAdmin = await isAdmin(caller.id);
+    if (!userIsAdmin && !(await hasProjectAccess(caller.id, projectId, userIsAdmin))) {
       return res.status(404).json({ error: 'Project not found or access denied' });
     }
 

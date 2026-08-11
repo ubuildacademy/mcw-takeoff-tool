@@ -33,7 +33,9 @@ function sanitizeTemplate(raw: unknown, userId: string): StoredConditionTemplate
 // Own templates + templates shared by other users
 router.get('/', requireAuth, async (req, res) => {
   try {
-    const templates = await storage.getConditionTemplatesForUser(req.user!.id);
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
+    const templates = await storage.getConditionTemplatesForUser(caller.id);
     res.json({ templates });
   } catch (error) {
     console.error('Error fetching condition templates:', error);
@@ -44,14 +46,16 @@ router.get('/', requireAuth, async (req, res) => {
 // Create (always owned by the requesting user)
 router.post('/', requireAuth, async (req, res) => {
   try {
-    const clean = sanitizeTemplate(req.body, req.user!.id);
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
+    const clean = sanitizeTemplate(req.body, caller.id);
     if (!clean) {
       return res.status(400).json({ error: 'Invalid condition template payload' });
     }
     // Save is an upsert on a client-supplied id: refuse to overwrite a row
     // someone else owns (shared template ids are visible to every user).
     const existing = await storage.getConditionTemplateById(clean.id);
-    if (existing && existing.userId !== req.user!.id && req.user!.role !== 'admin') {
+    if (existing && existing.userId !== caller.id && caller.role !== 'admin') {
       return res.status(403).json({ error: 'A template with this id belongs to another user' });
     }
     if (existing) {
@@ -69,12 +73,14 @@ router.post('/', requireAuth, async (req, res) => {
 // Update (owner or admin only; non-owners can't reassign ownership)
 router.put('/:id', requireAuth, async (req, res) => {
   try {
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
     const { id } = req.params;
     const existing = await storage.getConditionTemplateById(id);
     if (!existing) {
       return res.status(404).json({ error: 'Condition template not found' });
     }
-    if (existing.userId !== req.user!.id && req.user!.role !== 'admin') {
+    if (existing.userId !== caller.id && caller.role !== 'admin') {
       return res.status(403).json({ error: 'Not authorized to update this template' });
     }
     const { name, shared, conditions } = req.body ?? {};
@@ -93,12 +99,14 @@ router.put('/:id', requireAuth, async (req, res) => {
 // Delete (owner or admin only)
 router.delete('/:id', requireAuth, async (req, res) => {
   try {
+    const caller = req.user;
+    if (!caller) return res.status(401).json({ error: 'Authentication required' });
     const { id } = req.params;
     const existing = await storage.getConditionTemplateById(id);
     if (!existing) {
       return res.status(404).json({ error: 'Condition template not found' });
     }
-    if (existing.userId !== req.user!.id && req.user!.role !== 'admin') {
+    if (existing.userId !== caller.id && caller.role !== 'admin') {
       return res.status(403).json({ error: 'Not authorized to delete this template' });
     }
     await storage.deleteConditionTemplate(id);

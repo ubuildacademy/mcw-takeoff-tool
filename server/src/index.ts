@@ -6,7 +6,7 @@ import crypto from 'crypto';
 // Load .env from server directory so the key is always found (not dependent on process.cwd())
 dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
@@ -145,7 +145,7 @@ app.use((req, res, next) => {
       ? existing.trim()
       : crypto.randomUUID();
 
-  (req as any).requestId = requestId;
+  req.requestId = requestId;
   res.setHeader('X-Request-Id', requestId);
   next();
 });
@@ -300,21 +300,29 @@ app.use('/api', (req, res) => {
     error: {
       code: 'NOT_FOUND',
       message: `Unknown API route: ${req.method} ${req.path}`,
-      requestId: (req as any).requestId,
+      requestId: req.requestId,
     },
   });
 });
 
-// Centralized error handler (must be last)
-app.use((err: any, req: any, res: any, _next: any) => {
-  const requestId = req?.requestId;
-  const status = typeof err?.status === 'number' ? err.status : typeof err?.statusCode === 'number' ? err.statusCode : 500;
-  const code = typeof err?.code === 'string' ? err.code : status >= 500 ? 'INTERNAL_SERVER_ERROR' : 'REQUEST_FAILED';
+// Centralized error handler (must be last). `err` is genuinely unknown — Express
+// passes through whatever was thrown or passed to next(), not just Error instances.
+function errorField(err: unknown, field: string): unknown {
+  return err && typeof err === 'object' ? (err as Record<string, unknown>)[field] : undefined;
+}
+
+app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
+  const requestId = req.requestId;
+  const rawStatus = errorField(err, 'status') ?? errorField(err, 'statusCode');
+  const status = typeof rawStatus === 'number' ? rawStatus : 500;
+  const rawCode = errorField(err, 'code');
+  const code = typeof rawCode === 'string' ? rawCode : status >= 500 ? 'INTERNAL_SERVER_ERROR' : 'REQUEST_FAILED';
+  const rawMessage = errorField(err, 'message');
   const message =
     status >= 500
       ? 'An unexpected error occurred.'
-      : typeof err?.message === 'string'
-        ? err.message
+      : typeof rawMessage === 'string'
+        ? rawMessage
         : 'Request failed.';
 
   // Keep logs minimal; never include Authorization header / raw tokens.
@@ -323,17 +331,17 @@ app.use((err: any, req: any, res: any, _next: any) => {
       requestId,
       status,
       code,
-      path: req?.path,
-      method: req?.method,
-      message: typeof err?.message === 'string' ? err.message : String(err),
+      path: req.path,
+      method: req.method,
+      message: typeof rawMessage === 'string' ? rawMessage : String(err),
     });
   } else if (!isProduction) {
     console.warn('API request error:', {
       requestId,
       status,
       code,
-      path: req?.path,
-      method: req?.method,
+      path: req.path,
+      method: req.method,
       message,
     });
   }
