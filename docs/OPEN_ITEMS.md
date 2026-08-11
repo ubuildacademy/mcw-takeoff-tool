@@ -279,7 +279,7 @@ basis and nothing else.
 Jeff flagged four things while reviewing the workspace after I9/branding landed. One
 (dark-mode summary) was small enough to fix on the spot; the other three are logged here.
 
-### 17. Multi-input assemblies constantly warn "not measured by any condition"
+### 17. Multi-input assemblies constantly warn "not measured by any condition" — WON'T FIX, Jeff 2026-08-11
 
 An assembly can define more than one `quantityInput` (e.g. SF of wall plus LF of
 perimeter, or SF plus a height-driven LF). A condition links to exactly **one** input
@@ -289,12 +289,11 @@ on that assembly is therefore never fed by that condition, and `priceCondition` 
 input, unconditionally, every time such an assembly prices — this is very likely what
 reads to Jeff as "errors on every assembly with unknown quantities."
 
-**What would settle it:** whether a condition should be able to carry more than one
-measurement/unit (so one condition feeds both the SF and LF inputs of the same
-assembly) — needs Jeff. That is a real change to the condition model, not a quick fix,
-so it is not attempted here. Worth checking first how many of MCW's assemblies actually
-have >1 quantity input; if it's rare, scoping down to "only warn when the unfed input
-carries a nonzero price" may be enough on its own.
+**Decision:** it's specific to the one assembly using that particular quantity
+combination. Letting a condition carry more than one measurement/unit is a real
+rewrite of the condition model for a narrow case — not worth it. Leaving as-is; the
+warning is cosmetic noise on that assembly, not a pricing error (unfed inputs price at
+$0, which is correct if nothing measures them).
 
 ### 18. Restoration liability rate checkbox is visible to every company — CLOSED 2026-08-11
 
