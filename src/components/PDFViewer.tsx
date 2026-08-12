@@ -628,6 +628,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setMeasurementContextMenu(null);
   }, [currentPage, file.id]);
 
+  /** Right-click on blank canvas (no markup under the cursor) — paste-only menu. */
+  const [blankPasteMenu, setBlankPasteMenu] = useState<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    setBlankPasteMenu(null);
+  }, [currentPage, file.id]);
+
   // Vertex edit mode: explicit per-markup editing (context menu "Edit vertices").
   // Ref mirror lets renderTakeoffAnnotations read it without dep-array churn.
   const [editingMarkupId, setEditingMarkupId] = useState<string | null>(null);
@@ -757,6 +764,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         const id = hyperlinkTarget.getAttribute('data-hyperlink-id');
         if (id) {
           setMeasurementContextMenu(null);
+          setBlankPasteMenu(null);
           onHyperlinkContextMenu(id, e.clientX, e.clientY);
         }
         return;
@@ -782,16 +790,50 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           if (!selectedMarkupIds.includes(markupId)) {
             setSelectedMarkupIds([markupId]);
           }
+          setBlankPasteMenu(null);
           setMeasurementContextMenu({
             measurementId: markupId,
             kind: measurementId ? 'measurement' : 'annotation',
             x: e.clientX,
             y: e.clientY,
           });
+          return;
         }
       }
+
+      // Blank canvas (no markup under the cursor, or not in selection mode at
+      // all): offer Paste, same as ⌘V, which isn't gated on selection mode
+      // either — see usePDFViewerInteractions. Read copiedMarkups fresh via
+      // getState() rather than subscribing, since this callback is defined
+      // above that hook's call site in this component.
+      const isMidDraw =
+        isMeasuring ||
+        isCalibrating ||
+        isAnnotating ||
+        !!annotationTool ||
+        cutoutMode ||
+        hyperlinkMode ||
+        ((visualSearchMode || !!titleblockSelectionMode) && isSelectingSymbol);
+      if (!isMidDraw && useMeasurementStore.getState().copiedMarkups.length > 0) {
+        setMeasurementContextMenu(null);
+        setBlankPasteMenu({ x: e.clientX, y: e.clientY });
+      }
     },
-    [isSelectionMode, onHyperlinkContextMenu, selectedMarkupIds, setSelectedMarkupIds]
+    [
+      isSelectionMode,
+      onHyperlinkContextMenu,
+      selectedMarkupIds,
+      setSelectedMarkupIds,
+      isMeasuring,
+      isCalibrating,
+      isAnnotating,
+      annotationTool,
+      cutoutMode,
+      hyperlinkMode,
+      visualSearchMode,
+      titleblockSelectionMode,
+      isSelectingSymbol,
+    ]
   );
 
   // Keep ref in sync with state (runs synchronously during render)
@@ -848,6 +890,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const handlePasteFromContextMenu = useCallback(() => {
     if (!copiedMarkups.length || !effectiveProjectId || !file.id) return;
     setMeasurementContextMenu(null);
+    setBlankPasteMenu(null);
     const offsetPoint = (p: { x: number; y: number }) => ({ x: p.x + 0.02, y: p.y + 0.02 });
     for (const m of copiedMarkups) {
       const payload = {
@@ -885,6 +928,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const handlePasteAsNewConditionFromContextMenu = useCallback(async () => {
     if (!copiedMarkups.length || !effectiveProjectId || !file.id) return;
     setMeasurementContextMenu(null);
+    setBlankPasteMenu(null);
     const firstMarkup = copiedMarkups[0];
     const sourceCondition = conditions.find((c) => c.id === firstMarkup.conditionId);
     if (!sourceCondition) return;
@@ -4172,6 +4216,17 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           />
         );
       })()}
+
+      {blankPasteMenu && (
+        <MeasurementContextMenu
+          x={blankPasteMenu.x}
+          y={blankPasteMenu.y}
+          onPaste={handlePasteFromContextMenu}
+          onPasteAsNewCondition={handlePasteAsNewConditionFromContextMenu}
+          canPaste={copiedMarkups.length > 0}
+          onClose={() => setBlankPasteMenu(null)}
+        />
+      )}
 
       <PDFViewerMagnifier
         pdfCanvasRef={pdfCanvasRef}
