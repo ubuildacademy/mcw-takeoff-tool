@@ -376,6 +376,26 @@ rows each, all in the two Sika Roof Pro workbooks) are blank name-cells picked u
 bare column letters — worth checking whether these are real quantity inputs at all
 before assigning them a unit.
 
+### 22. Bond had no mechanism — FIXED 2026-08-13
+
+Jeff asked how bond is handled. It wasn't: `JobInfo.bondRequired` is a free-text
+paperwork flag exported on the Work Order, with no $ or % attached anywhere in
+the pricing chain.
+
+Checked all 232 real 2026 workbooks — none carry a "Bond" row in their margin
+chain (only Safety, Over Head, Profit ever appear), confirming bond is priced
+on the whole contract by a surety company, not per material vendor like
+insurance is. So it's a project-aggregate rate, not something that flows
+through `resolveAssemblyCostSettings`/`CostDefaults`.
+
+**Fix:** org-wide default (`organization_cost_defaults.bond_pct`, edited in
+the admin Cost Defaults tab) with an optional per-project override
+(`takeoff_projects.bond_pct_override`, mirrors `profitMarginPercent`'s shape —
+blank inherits the company rate, 0 means no bond on this job). Applied once in
+`getProjectCostBreakdown` against the combined flat-cost + assembly total,
+shown as its own line in both copies of Project Cost Summary (Costs and
+Reports tabs). Not wired into the budget/work-order exports.
+
 ### 20. Project Cost Summary unreadable in dark mode — FIXED 2026-08-11
 
 The **Reports tab** copy of "Project Cost Summary" (`TakeoffSidebar.tsx`, around line
