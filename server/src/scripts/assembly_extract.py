@@ -70,6 +70,106 @@ UOM_RE = re.compile(r"unit\s*of\s*measurement", re.I)
 WASTE_RE = re.compile(r"^waste", re.I)
 BLOCK_TOTAL_RE = re.compile(r"^total$", re.I)
 
+# The "Unit of Measurement" cell often carries the component's name instead of
+# a bare unit ("SF-Floor", "LF - Cove bead & Term Bar"), so a quantity input's
+# unit is inferred from that text rather than left None. Mirrors
+# inferUnitFromText in src/utils/assemblyConditionTemplate.ts — keep both in
+# sync. Bare "FT" is deliberately excluded: inside a longer phrase it's as
+# likely to be the tail of "SQ FT" as a real linear-feet token.
+UNIT_PHRASE_RE = [
+    (re.compile(r"\bSQ\.?\s*FT\.?\b|\bSQUARE\s+FEET\b|\bSQUARE\s+FOOT\b", re.I), "SF"),
+    (re.compile(r"\bCUBIC\s+YARDS?\b", re.I), "CY"),
+    (re.compile(r"\bCUBIC\s+FEET\b|\bCUBIC\s+FOOT\b", re.I), "CF"),
+    (re.compile(r"\bLINEAR\s+FEET\b|\bLINEAR\s+FOOT\b|\bLINEAL\s+FEET\b|\bLINEAL\s+FOOT\b", re.I), "LF"),
+]
+UNIT_TOKEN_MAP = {
+    "SF": "SF",
+    "SQFT": "SF",
+    "AREA": "SF",
+    "SY": "SY",
+    "LF": "LF",
+    "LNFT": "LF",
+    "LINEAR": "LF",
+    "CY": "CY",
+    "CF": "CF",
+    "EA": "EA",
+    "EACH": "EA",
+    "EACHES": "EA",
+    "PC": "EA",
+    "COUNT": "EA",
+}
+UNIT_TOKEN_SPLIT_RE = re.compile(r"[^A-Z0-9]+")
+
+
+def infer_unit(name: str) -> str | None:
+    upper = name.upper()
+    for pattern, unit in UNIT_PHRASE_RE:
+        if pattern.search(upper):
+            return unit
+    for token in UNIT_TOKEN_SPLIT_RE.split(upper):
+        if token in UNIT_TOKEN_MAP:
+            return UNIT_TOKEN_MAP[token]
+    return None
+
+
+# Names with no unit token of their own AND no yield-unit signal in most of
+# the workbooks they appear in — but consistent (n>=3, zero disagreement)
+# everywhere a signal WAS available. Spot-checked against the 2026 workbook
+# set (docs/OPEN_ITEMS item 19 unit-defaulting bug); re-verify before adding
+# to this list, a wrong global fact is worse than leaving it blank.
+KNOWN_MATERIAL_UNITS = {
+    "WATERSTOP": "LF",
+    "WALL CAP": "SF",
+    "TIE-IN": "SF",
+    "ADCOR ES WATERSTOP": "LF",
+    "SEALANT COVE BEAD": "LF",
+}
+
+
+def _unit_from_yield_text(text: str | None) -> str | None:
+    """'SF/roll', 'LF/pail' -> the unit the workbook author actually typed."""
+    if not text:
+        return None
+    return infer_unit(text.split("/", 1)[0])
+
+
+def backfill_units_from_components(quantity_inputs: list[dict], components: list[dict], flags: list[str]) -> None:
+    """A quantity input whose 'Unit of Measurement' cell named the material
+    instead of a unit ("Flashing", "Term Bar") often still has its unit
+    written down elsewhere: the yield-unit cell of whichever component's
+    quantity it drives (e.g. "SF/roll" on the Bituthene row means the
+    Bituthene input is SF). Resolved only when every bound component agrees;
+    a real disagreement is flagged, never silently picked — same rule this
+    whole extractor holds everywhere else.
+    """
+    units_by_seq: dict[int, list[str]] = defaultdict(list)
+    for component in components:
+        seqs = {component["quantityInputSeq"], *component.get("additionalQuantityInputSeqs", [])}
+        unit = _unit_from_yield_text(component.get("yieldUnit"))
+        if not unit:
+            continue
+        for seq in seqs:
+            if seq is not None:
+                units_by_seq[seq].append(unit)
+
+    for entry in quantity_inputs:
+        if entry["unit"] is not None:
+            continue
+        candidates = units_by_seq.get(entry["seq"])
+        if candidates:
+            distinct = set(candidates)
+            if len(distinct) == 1:
+                entry["unit"] = distinct.pop()
+            else:
+                flags.append(
+                    f"Quantity input '{entry['name']}' has components with disagreeing "
+                    f"yield units ({', '.join(sorted(distinct))}) — unit left blank for review"
+                )
+            continue
+        fact = KNOWN_MATERIAL_UNITS.get(entry["name"].strip().upper())
+        if fact:
+            entry["unit"] = fact
+
 # Header roles inside the materials block. Order matters: the first pattern
 # that matches a header cell wins, so "Total" must not swallow "Material Total".
 HEADER_ROLES = [
@@ -456,7 +556,7 @@ def extract_quantity_inputs(sheet: Sheet, flags: list):
             entry = {
                 "seq": len(inputs) + 1,
                 "name": name,
-                "unit": None,
+                "unit": infer_unit(name),
                 "wastePct": as_rate(waste, flags, f"waste for input '{name}'") or 0.0,
                 "quantityCell": cell["addr"],
                 "totalCell": f"{col}{total_row}",
@@ -1020,6 +1120,7 @@ def extract_assembly(path: Path) -> dict:
     quantity_inputs, col_to_input = extract_quantity_inputs(sheet, flags)
     block = find_materials_block(sheet, flags)
     components = extract_components(sheet, block, col_to_input, flags) if block else []
+    backfill_units_from_components(quantity_inputs, components, flags)
     labor = extract_labor(sheet, col_to_input, flags)
     margin_chain, insurance_pct, insurance_per_thousand = extract_margin_chain(sheet, flags)
     adjustments = extract_material_adjustments(sheet, block, flags)

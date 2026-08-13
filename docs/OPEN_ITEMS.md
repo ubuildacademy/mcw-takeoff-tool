@@ -333,6 +333,49 @@ fresh authoritative numbers for whatever's left. `unknownAssemblyIds` deliberate
 alone — it holds assembly ids, not condition ids, despite the name; filtering it by
 condition id would have silently emptied a real warning.
 
+## Found during 2026-08-13 assembly-template testing
+
+Jeff noticed every condition created via "start from a priced assembly" came in as an
+SF/area condition, even ones that obviously measure linear or count items.
+
+### 21. Assembly-derived conditions always defaulted to SF/area — CLOSED 2026-08-13
+
+Root cause was two-layered, both in the workbook→condition pipeline:
+
+1. `assembly_extract.py`'s `extract_quantity_inputs` hard-coded `"unit": None` for
+   every quantity input — the "Unit of Measurement" cell's text was captured into
+   `name` (e.g. "SF-Floor", "Flashing") but never parsed into `unit`. Confirmed via
+   direct query: 644/644 `assembly_quantity_inputs.unit` values were `NULL`.
+2. `resolveConditionUnit` in `src/utils/assemblyConditionTemplate.ts` silently
+   defaulted anything it couldn't map to `type: 'area'` — so a null/unrecognized unit
+   became a confident-looking wrong SF condition instead of failing loudly.
+
+**Fix:**
+- `inferUnitFromText` (assemblyConditionTemplate.ts) and its Python mirror
+  `infer_unit` (assembly_extract.py) scan a name/unit string for a known unit
+  token/phrase (SF, LF, SY, CY, CF, EA and common synonyms) instead of requiring an
+  exact whole-string match. Used as a fallback layer, never a replacement for an
+  exact match.
+- `backfill_units_from_components` (assembly_extract.py) resolves the rest by
+  reading the *yield-unit* cell of whichever component a quantity input's formula
+  divides (e.g. "SF/roll" on a Bituthene row means that input is SF) — real
+  same-file signal the workbook author actually typed, not a guess. When bound
+  components disagree on unit, it's flagged for review rather than picked.
+- `KNOWN_MATERIAL_UNITS` — a short, evidence-gated table (n≥3 occurrences, zero
+  disagreement) for the handful of material names with no in-file signal at all
+  (Waterstop, Wall Cap, Tie-in, Adcor ES Waterstop, Sealant cove bead).
+
+Re-ran the fixed extractor against all 232 real 2026 workbooks
+(`.../Business/MCW/Assembly Work/2026 Assemblies 7-30-26/`) and backfilled the live
+`assembly_quantity_inputs.unit` column by matching (assembly name, input name):
+573/644 rows (89%) now have a real unit. **71 rows across 24 distinct names have no
+unit signal anywhere in their workbook and need Jeff to assign one by hand** in the
+Assembly Builder admin form — largest is "Flashing" (20 rows, genuinely
+context-dependent: edge flashing vs. area flashing membrane). "AN"/"AO"/"AP"/"AQ" (6
+rows each, all in the two Sika Roof Pro workbooks) are blank name-cells picked up as
+bare column letters — worth checking whether these are real quantity inputs at all
+before assigning them a unit.
+
 ### 20. Project Cost Summary unreadable in dark mode — FIXED 2026-08-11
 
 The **Reports tab** copy of "Project Cost Summary" (`TakeoffSidebar.tsx`, around line

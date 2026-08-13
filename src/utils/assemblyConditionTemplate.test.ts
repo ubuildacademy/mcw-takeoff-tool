@@ -120,6 +120,24 @@ describe('buildConditionsFromAssembly', () => {
     expect(drafts.map((d) => d.color)).toEqual(['#000001', '#000002']);
   });
 
+  it('infers the unit from the name when the assembly recorded none, instead of guessing area', () => {
+    const { drafts, unrecognizedUnits } = buildConditionsFromAssembly(
+      assembly({
+        quantityInputs: [
+          input({ id: 'in-1', name: 'SF-Floor', unit: null }),
+          input({ id: 'in-2', name: 'LF - Cove bead & Term Bar', unit: null }),
+          input({ id: 'in-3', name: 'Inside corner (Each)', unit: null }),
+          input({ id: 'in-4', name: 'Flashing', unit: null }),
+        ],
+      }),
+      options
+    );
+
+    expect(drafts.map((d) => d.type)).toEqual(['area', 'linear', 'count', 'area']);
+    expect(drafts.map((d) => d.unit)).toEqual(['SF', 'LF', 'EA', 'SF']);
+    expect(unrecognizedUnits).toEqual(['Flashing']);
+  });
+
   it('reports the inputs whose unit it could not map', () => {
     const { drafts, unrecognizedUnits } = buildConditionsFromAssembly(
       assembly({
