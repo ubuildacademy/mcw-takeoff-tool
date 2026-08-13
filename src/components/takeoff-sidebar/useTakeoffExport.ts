@@ -70,6 +70,11 @@ function filterCostBreakdownForExport(
   const profitMarginPercent = breakdown.summary.profitMarginPercent;
   const profitMarginAmount = subtotal * (profitMarginPercent / 100);
   const totalCost = subtotal + profitMarginAmount;
+  // Bond is a project-wide rate, not per-condition, so hiding a condition
+  // doesn't change the rate — only the base it's applied to shrinks along
+  // with the rest of this filtered total.
+  const bondPct = breakdown.summary.bondPct;
+  const bondAmount = bondPct ? (totalCost + assemblyTotal) * (bondPct / 100) : 0;
   return {
     conditions,
     summary: {
@@ -84,7 +89,9 @@ function filterCostBreakdownForExport(
       totalConditions: conditions.length,
       assemblyTotal,
       assemblyConditionCount,
-      projectTotal: totalCost + assemblyTotal,
+      bondPct,
+      bondAmount,
+      projectTotal: totalCost + assemblyTotal + bondAmount,
       ...(breakdown.summary.excludedMeasurementsFromCost != null && {
         excludedMeasurementsFromCost: breakdown.summary.excludedMeasurementsFromCost,
       }),

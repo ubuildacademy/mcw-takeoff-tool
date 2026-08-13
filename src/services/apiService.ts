@@ -1679,6 +1679,10 @@ export interface CostDefaults {
   workersCompPct: number | null;
   generalLiabilityPct: number | null;
   generalLiabilityRestorationPct: number | null;
+  // Project-aggregate rate (task: bond, OPEN_ITEMS item 22). Does not reprice
+  // an assembly — applied once to a project's combined total. A project can
+  // override it with its own bondPctOverride.
+  bondPct: number | null;
   updatedAt?: string | null;
 }
 

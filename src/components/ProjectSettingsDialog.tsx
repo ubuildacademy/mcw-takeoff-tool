@@ -31,6 +31,8 @@ interface ProjectFormData {
   contactPhone: string;
   status: string;
   profitMarginPercent: string;
+  /** Empty means "inherit the company's bond default" — never defaults to a number. */
+  bondPctOverride: string;
 }
 
 export function ProjectSettingsDialog({ open, onOpenChange, project, onUpdated }: ProjectSettingsDialogProps) {
@@ -49,7 +51,8 @@ export function ProjectSettingsDialog({ open, onOpenChange, project, onUpdated }
     contactEmail: project?.contactEmail || '',
     contactPhone: project?.contactPhone || '',
     status: project?.status || 'active',
-    profitMarginPercent: project?.profitMarginPercent?.toString() || '15'
+    profitMarginPercent: project?.profitMarginPercent?.toString() || '15',
+    bondPctOverride: project?.bondPctOverride != null ? project.bondPctOverride.toString() : ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showJobInfo, setShowJobInfo] = useState(false);
@@ -105,7 +108,10 @@ export function ProjectSettingsDialog({ open, onOpenChange, project, onUpdated }
         contactEmail: formData.contactEmail.trim(),
         contactPhone: formData.contactPhone.trim(),
         status: formData.status,
-        profitMarginPercent: formData.profitMarginPercent ? parseFloat(formData.profitMarginPercent) : 15
+        profitMarginPercent: formData.profitMarginPercent ? parseFloat(formData.profitMarginPercent) : 15,
+        // Empty means inherit the company default, not zero — a project with
+        // genuinely no bond sets this to 0 explicitly.
+        bondPctOverride: formData.bondPctOverride.trim() === '' ? null : parseFloat(formData.bondPctOverride)
       };
 
       await updateProject(project.id, projectData);
@@ -298,6 +304,25 @@ export function ProjectSettingsDialog({ open, onOpenChange, project, onUpdated }
               />
               <p className="text-xs text-muted-foreground mt-1">
                 Default profit margin applied to all cost calculations
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="bondPctOverride">Bond (%)</Label>
+              <Input
+                id="bondPctOverride"
+                type="number"
+                step="0.1"
+                min="0"
+                max="100"
+                value={formData.bondPctOverride}
+                onChange={(e) => handleInputChange('bondPctOverride', e.target.value)}
+                placeholder="Company default"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Leave blank to use the company's bond rate. Enter 0 if this job has no bond.
               </p>
             </div>
           </div>

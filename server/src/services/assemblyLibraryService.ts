@@ -242,6 +242,7 @@ interface CostDefaultsRow {
   workers_comp_pct?: number | string | null;
   general_liability_pct?: number | string | null;
   general_liability_restoration_pct?: number | string | null;
+  bond_pct?: number | string | null;
   updated_at: string;
 }
 
@@ -258,7 +259,24 @@ export interface AccountingRateDefaults {
   generalLiabilityRestorationPct: number | null;
 }
 
-export interface CostDefaultsRecord extends CostDefaults, AccountingRateDefaults {
+/**
+ * Bond, kept apart from `CostDefaults` for the same reason as the assembly
+ * README explains for insurance not living there wholesale: this rate never
+ * reprices an assembly. Unlike insurance, it doesn't even flow through
+ * `resolveAssemblyCostSettings` at all — none of MCW's 232 workbooks carry a
+ * bond line, so there is no per-assembly value to merge against. It is a
+ * project-aggregate rate, applied once in `getProjectCostBreakdown`
+ * (measurementSlice.ts) against a project's combined total.
+ */
+export interface ProjectRateDefaults {
+  bondPct: number | null;
+}
+
+export const EMPTY_PROJECT_RATE_DEFAULTS: ProjectRateDefaults = {
+  bondPct: null,
+};
+
+export interface CostDefaultsRecord extends CostDefaults, AccountingRateDefaults, ProjectRateDefaults {
   orgId: string;
   updatedAt: string | null;
 }
@@ -284,6 +302,7 @@ function mapCostDefaultsRow(row: CostDefaultsRow): CostDefaultsRecord {
     workersCompPct: toNumber(row.workers_comp_pct ?? null),
     generalLiabilityPct: toNumber(row.general_liability_pct ?? null),
     generalLiabilityRestorationPct: toNumber(row.general_liability_restoration_pct ?? null),
+    bondPct: toNumber(row.bond_pct ?? null),
     updatedAt: row.updated_at ?? null,
   };
 }
@@ -313,14 +332,21 @@ export async function getCostDefaults(orgId: string): Promise<CostDefaultsRecord
     .maybeSingle();
   if (error) throw wrapDatabaseError('Get cost defaults', error, { orgId });
   if (!data) {
-    return { orgId, ...EMPTY_COST_DEFAULTS, ...EMPTY_ACCOUNTING_RATES, updatedAt: null };
+    return {
+      orgId,
+      ...EMPTY_COST_DEFAULTS,
+      ...EMPTY_ACCOUNTING_RATES,
+      ...EMPTY_PROJECT_RATE_DEFAULTS,
+      updatedAt: null,
+    };
   }
   return mapCostDefaultsRow(data as CostDefaultsRow);
 }
 
 export interface UpdateCostDefaultsParams
   extends Partial<CostDefaults>,
-    Partial<AccountingRateDefaults> {
+    Partial<AccountingRateDefaults>,
+    Partial<ProjectRateDefaults> {
   updatedBy?: string | null;
 }
 
@@ -350,6 +376,7 @@ export async function updateCostDefaults(
   if (params.generalLiabilityRestorationPct !== undefined) {
     patch.general_liability_restoration_pct = params.generalLiabilityRestorationPct;
   }
+  if (params.bondPct !== undefined) patch.bond_pct = params.bondPct;
 
   const { data, error } = await supabase
     .from('organization_cost_defaults')

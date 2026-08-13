@@ -493,17 +493,23 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                           <span className="text-muted-foreground">Conditions with Costs:</span>
                           <span className="font-medium text-foreground">{costBreakdown.summary.conditionsWithCosts}</span>
                         </div>
+                        {(costBreakdown.summary.assemblyTotal > 0 || costBreakdown.summary.bondAmount > 0) && (
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Flat Cost Total:</span>
+                            <span className="font-medium text-foreground">${costBreakdown.summary.totalCost.toFixed(2)}</span>
+                          </div>
+                        )}
                         {costBreakdown.summary.assemblyTotal > 0 && (
-                          <>
-                            <div className="flex justify-between">
-                              <span className="text-muted-foreground">Flat Cost Total:</span>
-                              <span className="font-medium text-foreground">${costBreakdown.summary.totalCost.toFixed(2)}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-muted-foreground">Assembly Pricing:</span>
-                              <span className="font-medium text-foreground">${costBreakdown.summary.assemblyTotal.toFixed(2)}</span>
-                            </div>
-                          </>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Assembly Pricing:</span>
+                            <span className="font-medium text-foreground">${costBreakdown.summary.assemblyTotal.toFixed(2)}</span>
+                          </div>
+                        )}
+                        {costBreakdown.summary.bondAmount > 0 && (
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Bond ({costBreakdown.summary.bondPct}%):</span>
+                            <span className="font-medium text-foreground">${costBreakdown.summary.bondAmount.toFixed(2)}</span>
+                          </div>
                         )}
                       </div>
                       {costBreakdown.summary.excludedMeasurementsFromCost &&
@@ -694,32 +700,52 @@ export function TakeoffSidebar({ projectId, onConditionSelect, onToolSelect: _on
                           <span className="text-sm text-muted-foreground">Profit Margin ({summary.profitMarginPercent}%)</span>
                           <span className="text-sm text-green-600 dark:text-green-400 font-medium">${summary.profitMarginAmount.toFixed(2)}</span>
                         </div>
-                        <div className="flex justify-between items-center pt-2 border-t border-border">
-                          <span className={summary.assemblyTotal > 0 ? 'text-sm text-muted-foreground' : 'text-lg font-bold text-foreground'}>
-                            {summary.assemblyTotal > 0 ? 'Flat Cost Total' : 'Total Cost'}
-                          </span>
-                          <span className={summary.assemblyTotal > 0 ? 'text-sm font-medium text-foreground' : 'text-lg font-bold text-blue-600 dark:text-blue-400'}>
-                            ${summary.totalCost.toFixed(2)}
-                          </span>
-                        </div>
+                        {(() => {
+                          // Once bond or assembly pricing adds anything on top,
+                          // "Total Cost" is no longer the final number — it steps
+                          // down to a plain line and Project Total takes the bold.
+                          const hasExtra = summary.assemblyTotal > 0 || summary.bondAmount > 0;
+                          return (
+                            <div className="flex justify-between items-center pt-2 border-t border-border">
+                              <span className={hasExtra ? 'text-sm text-muted-foreground' : 'text-lg font-bold text-foreground'}>
+                                {hasExtra ? 'Flat Cost Total' : 'Total Cost'}
+                              </span>
+                              <span className={hasExtra ? 'text-sm font-medium text-foreground' : 'text-lg font-bold text-blue-600 dark:text-blue-400'}>
+                                ${summary.totalCost.toFixed(2)}
+                              </span>
+                            </div>
+                          );
+                        })()}
                         {/* Assembly pricing lands after the project margin, on its
                             own line: the assembly already applied the margin chain
                             from its workbook, so the project margin must not compound
                             on top of it. */}
                         {summary.assemblyTotal > 0 && (
-                          <>
-                            <div className="flex justify-between items-center">
-                              <span className="text-sm text-muted-foreground">
-                                Assembly Pricing ({summary.assemblyConditionCount} condition
-                                {summary.assemblyConditionCount === 1 ? '' : 's'})
-                              </span>
-                              <span className="text-sm font-medium text-foreground">${summary.assemblyTotal.toFixed(2)}</span>
-                            </div>
-                            <div className="flex justify-between items-center pt-2 border-t border-border">
-                              <span className="text-lg font-bold text-foreground">Project Total</span>
-                              <span className="text-lg font-bold text-blue-600 dark:text-blue-400">${summary.projectTotal.toFixed(2)}</span>
-                            </div>
-                          </>
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-muted-foreground">
+                              Assembly Pricing ({summary.assemblyConditionCount} condition
+                              {summary.assemblyConditionCount === 1 ? '' : 's'})
+                            </span>
+                            <span className="text-sm font-medium text-foreground">${summary.assemblyTotal.toFixed(2)}</span>
+                          </div>
+                        )}
+                        {/* Bond, like the project margin, is applied once to the
+                            combined total — no source workbook carries a bond
+                            line, so it can't be folded into an assembly's own
+                            margin chain (OPEN_ITEMS item 22). */}
+                        {summary.bondAmount > 0 && (
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-muted-foreground">
+                              Bond ({summary.bondPct}%)
+                            </span>
+                            <span className="text-sm font-medium text-foreground">${summary.bondAmount.toFixed(2)}</span>
+                          </div>
+                        )}
+                        {(summary.assemblyTotal > 0 || summary.bondAmount > 0) && (
+                          <div className="flex justify-between items-center pt-2 border-t border-border">
+                            <span className="text-lg font-bold text-foreground">Project Total</span>
+                            <span className="text-lg font-bold text-blue-600 dark:text-blue-400">${summary.projectTotal.toFixed(2)}</span>
+                          </div>
                         )}
                       </div>
                     </div>

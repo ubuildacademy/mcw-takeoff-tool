@@ -6,6 +6,7 @@ import { samePdfPageKey } from '../../utils/takeoffMeasurementLookup';
 import { useConditionStore } from './conditionSlice';
 import { useProjectStore } from './projectSlice';
 import { useAssemblyPricingStore } from './assemblyPricingSlice';
+import { useOrgCostDefaultsStore } from './orgCostDefaultsSlice';
 import { devLog, devWarn } from '../../lib/devLog';
 
 export function compareMeasurementsByStackOrder(a: TakeoffMeasurement, b: TakeoffMeasurement): number {
@@ -770,6 +771,14 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
         (condition) => assemblyConditionTotals[condition.id] != null
       ).length;
 
+      // Bond, like the project margin, applies once to the job's combined
+      // total (flat-cost + assembly-priced) — never per assembly, since no
+      // source workbook carries a bond line (OPEN_ITEMS item 22). A project's
+      // own override always wins over the company default.
+      const preBondTotal = totalCost + assemblyTotal;
+      const bondPct = currentProject?.bondPctOverride ?? useOrgCostDefaultsStore.getState().bondPct;
+      const bondAmount = bondPct ? preBondTotal * (bondPct / 100) : 0;
+
       return {
         conditions: conditionBreakdowns,
         summary: {
@@ -784,7 +793,9 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
           totalConditions: conditions.length,
           assemblyTotal,
           assemblyConditionCount,
-          projectTotal: totalCost + assemblyTotal,
+          bondPct: bondPct ?? null,
+          bondAmount,
+          projectTotal: preBondTotal + bondAmount,
           ...(excludedMeasurementsFromCost.count > 0 && { excludedMeasurementsFromCost }),
         }
       };

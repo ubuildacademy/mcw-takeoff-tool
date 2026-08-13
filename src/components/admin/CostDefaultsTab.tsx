@@ -98,6 +98,7 @@ export function CostDefaultsTab() {
   const [workersComp, setWorkersComp] = useState('');
   const [generalLiability, setGeneralLiability] = useState('');
   const [generalLiabilityRestoration, setGeneralLiabilityRestoration] = useState('');
+  const [bondPct, setBondPct] = useState('');
   const [margins, setMargins] = useState<{ name: string; rate: string }[]>([]);
 
   const hydrate = useCallback((next: CostDefaults) => {
@@ -113,6 +114,7 @@ export function CostDefaultsTab() {
     setWorkersComp(toPercentInput(next.workersCompPct));
     setGeneralLiability(toPercentInput(next.generalLiabilityPct));
     setGeneralLiabilityRestoration(toPercentInput(next.generalLiabilityRestorationPct));
+    setBondPct(toPercentInput(next.bondPct));
     setMargins(next.marginChain.map((m) => ({ name: m.name, rate: toPercentInput(m.rate) })));
   }, []);
 
@@ -157,6 +159,7 @@ export function CostDefaultsTab() {
         workersCompPct: fromPercentInput(workersComp),
         generalLiabilityPct: fromPercentInput(generalLiability),
         generalLiabilityRestorationPct: fromPercentInput(generalLiabilityRestoration),
+        bondPct: fromPercentInput(bondPct),
         marginChain: chain,
       });
       hydrate(data.defaults);
@@ -246,6 +249,20 @@ export function CostDefaultsTab() {
           overrideCount={overrides.insuranceMarginPct}
           onChange={setInsuranceMargin}
         />
+      </div>
+
+      <div className="space-y-3 max-w-3xl">
+        <div>
+          <Label className="text-sm">Bond</Label>
+          <p className="text-xs text-muted-foreground">
+            No source workbook carries a bond line — it's priced on the whole contract, not per
+            material vendor. Applied once to a project's combined total, not to individual
+            assemblies. A project can override this rate in its own settings.
+          </p>
+        </div>
+        <div className="grid gap-5 sm:grid-cols-2">
+          <Field label="Bond" suffix="%" value={bondPct} onChange={setBondPct} />
+        </div>
       </div>
 
       <div className="space-y-3 max-w-3xl">

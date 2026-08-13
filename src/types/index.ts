@@ -65,6 +65,8 @@ export interface Project {
   conditionCount?: number;
   totalValue?: number;
   profitMarginPercent?: number; // Global profit margin percentage (default 15%)
+  /** This project's own bond %, overriding the company's default. Undefined/null inherits it. */
+  bondPctOverride?: number | null;
   userId?: string; // Owner user ID (for admin grouping)
 }
 
@@ -324,7 +326,16 @@ export interface ProjectCostBreakdown {
      */
     assemblyTotal: number;
     assemblyConditionCount: number;
-    /** What the job is worth: `totalCost` + `assemblyTotal`. */
+    /**
+     * The effective bond % (project override, else the company default), or
+     * null when neither is set. Applied once to the combined total — not per
+     * assembly, since no source workbook carries a bond line (OPEN_ITEMS
+     * item 22).
+     */
+    bondPct: number | null;
+    /** What the bond percentage adds. Zero when `bondPct` is null. */
+    bondAmount: number;
+    /** What the job is worth: `totalCost` + `assemblyTotal` + `bondAmount`. */
     projectTotal: number;
     /** Measurements whose condition is missing locally (not included in dollar totals). */
     excludedMeasurementsFromCost?: { count: number };

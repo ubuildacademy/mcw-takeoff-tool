@@ -25,6 +25,7 @@ export interface ProjectWithCounts extends ProjectWithUser {
   conditionCount: number;
   totalValue: number;
   profitMarginPercent?: number;
+  bondPctOverride?: number | null;
 }
 
 // Row shape from takeoff_files table (snake_case)
@@ -68,6 +69,7 @@ function projectToDbFormat(project: Record<string, unknown>): Record<string, unk
   if (project.contactEmail !== undefined) dbProject.contact_email = toNullIfEmpty(project.contactEmail);
   if (project.contactPhone !== undefined) dbProject.contact_phone = toNullIfEmpty(project.contactPhone);
   if (project.profitMarginPercent !== undefined) dbProject.profit_margin_percent = project.profitMarginPercent ?? null;
+  if (project.bondPctOverride !== undefined) dbProject.bond_pct_override = project.bondPctOverride ?? null;
   if (project.createdAt !== undefined) dbProject.created_at = project.createdAt;
   if (project.lastModified !== undefined) dbProject.last_modified = project.lastModified;
 
@@ -210,6 +212,7 @@ export const supabaseService = {
           conditionCount: conditionCount || 0,
           totalValue,
           profitMarginPercent: profitMarginPercent,
+          bondPctOverride: (project as { bond_pct_override?: number | null }).bond_pct_override ?? null,
         } as ProjectWithCounts;
       } catch (e) {
         console.warn('Failed to compute counts/total for project', project.id, e);
@@ -219,6 +222,7 @@ export const supabaseService = {
           conditionCount: 0,
           totalValue: 0,
           profitMarginPercent: (project as { profit_margin_percent?: number }).profit_margin_percent ?? 15,
+          bondPctOverride: (project as { bond_pct_override?: number | null }).bond_pct_override ?? null,
         } as ProjectWithCounts;
       }
     });

@@ -20,6 +20,8 @@ export interface StoredProject {
   contactEmail?: string;
   contactPhone?: string;
   profitMarginPercent?: number;
+  /** This project's own bond %, overriding the company default. Null/undefined inherits it. */
+  bondPctOverride?: number | null;
   lastModified?: string;
   createdAt?: string;
   userId?: string; // Owner of the project
@@ -115,6 +117,7 @@ interface ProjectRow {
   contact_email?: string;
   contact_phone?: string;
   profit_margin_percent?: number;
+  bond_pct_override?: number | null;
   created_at?: string;
   last_modified?: string;
   user_id?: string;
@@ -465,6 +468,7 @@ class SupabaseStorage {
       contactEmail: item.contact_email,
       contactPhone: item.contact_phone,
       profitMarginPercent: item.profit_margin_percent,
+      bondPctOverride: item.bond_pct_override ?? null,
       createdAt: item.created_at,
       lastModified: item.last_modified,
       userId: item.user_id,
@@ -547,6 +551,7 @@ class SupabaseStorage {
       contact_email: project.contactEmail,
       contact_phone: project.contactPhone,
       profit_margin_percent: project.profitMarginPercent,
+      bond_pct_override: project.bondPctOverride,
       created_at: project.createdAt,
       last_modified: project.lastModified,
       user_id: resolvedUserId,
@@ -582,6 +587,17 @@ class SupabaseStorage {
         .single());
     }
 
+    // Same fallback for add_bond_pct_override_to_takeoff_projects.sql.
+    if (error && hasColumnNotFoundError(error) && dbProject.bond_pct_override !== undefined) {
+      console.warn('⚠️ bond_pct_override column not found. Run migration: server/migrations/add_bond_pct_override_to_takeoff_projects.sql');
+      delete dbProject.bond_pct_override;
+      ({ data, error } = await supabase
+        .from(TABLES.PROJECTS)
+        .upsert(dbProject, { onConflict: 'id' })
+        .select()
+        .single());
+    }
+
     if (error) {
       console.error('Error saving project:', error);
       throw error;
@@ -603,6 +619,7 @@ class SupabaseStorage {
       contactEmail: data.contact_email,
       contactPhone: data.contact_phone,
       profitMarginPercent: data.profit_margin_percent,
+      bondPctOverride: data.bond_pct_override ?? null,
       createdAt: data.created_at,
       lastModified: data.last_modified,
       userId: data.user_id

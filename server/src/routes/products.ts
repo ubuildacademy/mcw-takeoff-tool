@@ -179,6 +179,9 @@ router.put('/cost-defaults', requireAuth, requireCompanyAdmin, async (req, res) 
       'workersCompPct',
       'generalLiabilityPct',
       'generalLiabilityRestorationPct',
+      // Project-aggregate rate (OPEN_ITEMS item 22): applied once to a
+      // project's total, never per assembly — see ProjectRateDefaults.
+      'bondPct',
     ] as const;
 
     const patch: Record<string, unknown> = { updatedBy: req.user?.id };

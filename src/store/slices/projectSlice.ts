@@ -157,6 +157,7 @@ export const useProjectStore = create<ProjectState>()(
             conditionCount: (p.conditionCount as number) ?? 0,
             totalValue: (p.totalValue as number | undefined),
             profitMarginPercent: (p.profitMarginPercent as number | undefined),
+            bondPctOverride: (p.bondPctOverride as number | null | undefined) ?? null,
             userId: (p.user_id as string) || undefined,
           }));
           

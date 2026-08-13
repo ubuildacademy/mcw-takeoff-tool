@@ -18,6 +18,7 @@ import { useHyperlinkStore } from '../store/slices/hyperlinkSlice';
 import { useDocumentViewStore } from '../store/slices/documentViewSlice';
 import { useViewStoresHydrated } from '../store/useViewStoresHydrated';
 import { useUndoStore } from '../store';
+import { useOrgCostDefaultsStore } from '../store/slices/orgCostDefaultsSlice';
 import type { TakeoffCondition, Sheet, ProjectFile, PDFDocument, SearchResult, SheetHyperlink } from '../types';
 import type { DocumentOCRData } from '../services/serverOcrService';
 import { toast } from 'sonner';
@@ -181,6 +182,12 @@ export function TakeoffWorkspace() {
     return () => {
       mounted = false;
     };
+  }, []);
+  // Bond's company default (task: bond, OPEN_ITEMS item 22) — fetched once per
+  // session so getProjectCostBreakdown can read it synchronously; see
+  // orgCostDefaultsSlice.ts.
+  useEffect(() => {
+    void useOrgCostDefaultsStore.getState().load();
   }, []);
 
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
