@@ -125,35 +125,43 @@ export const useConditionStore = create<ConditionState>()(
       },
       
       deleteCondition: async (id) => {
+        // Local state drops the condition (and its measurements) before the
+        // server confirms — the Costs tab reads this store directly, so an
+        // await-then-remove order left assembly rows on screen for a full
+        // round trip, worse with several conditions deleted back to back.
+        // Rolled back below if the API call fails.
+        const prevConditionsState = get();
+        const { useMeasurementStore } = await import('./measurementSlice');
+        const prevMeasurementsState = useMeasurementStore.getState();
+
+        set((state) => {
+          const removed = state.conditions.find((c) => c.id === id);
+          const pid = removed?.projectId;
+          let hiddenMarkupConditionIdsByProject = state.hiddenMarkupConditionIdsByProject ?? {};
+          if (pid) {
+            const prev = hiddenMarkupConditionIdsByProject[pid] ?? [];
+            if (prev.includes(id)) {
+              hiddenMarkupConditionIdsByProject = {
+                ...hiddenMarkupConditionIdsByProject,
+                [pid]: prev.filter((x) => x !== id),
+              };
+            }
+          }
+          return {
+            conditions: state.conditions.filter((condition) => condition.id !== id),
+            selectedConditionId: state.selectedConditionId === id ? null : state.selectedConditionId,
+            hiddenMarkupConditionIdsByProject,
+          };
+        });
+        useMeasurementStore.setState(state => ({
+          takeoffMeasurements: state.takeoffMeasurements.filter(m => m.conditionId !== id)
+        }));
+        useMeasurementStore.getState().updateMarkupsByPage();
+
         try {
           const { conditionService } = await import('../../services/apiService');
           await conditionService.deleteCondition(id);
 
-          set((state) => {
-            const removed = state.conditions.find((c) => c.id === id);
-            const pid = removed?.projectId;
-            let hiddenMarkupConditionIdsByProject = state.hiddenMarkupConditionIdsByProject ?? {};
-            if (pid) {
-              const prev = hiddenMarkupConditionIdsByProject[pid] ?? [];
-              if (prev.includes(id)) {
-                hiddenMarkupConditionIdsByProject = {
-                  ...hiddenMarkupConditionIdsByProject,
-                  [pid]: prev.filter((x) => x !== id),
-                };
-              }
-            }
-            return {
-              conditions: state.conditions.filter((condition) => condition.id !== id),
-              selectedConditionId: state.selectedConditionId === id ? null : state.selectedConditionId,
-              hiddenMarkupConditionIdsByProject,
-            };
-          });
-
-          const { useMeasurementStore } = await import('./measurementSlice');
-          useMeasurementStore.setState(state => ({
-            takeoffMeasurements: state.takeoffMeasurements.filter(m => m.conditionId !== id)
-          }));
-          useMeasurementStore.getState().updateMarkupsByPage();
           const currentProjectId = useProjectStore.getState().currentProjectId;
           if (currentProjectId) {
             await useMeasurementStore.getState().loadProjectTakeoffMeasurements(currentProjectId);
@@ -161,6 +169,9 @@ export const useConditionStore = create<ConditionState>()(
           devLog(`✅ DELETE_CONDITION: Deleted condition ${id}`);
         } catch (error) {
           console.error('Failed to delete condition:', error);
+          set(prevConditionsState);
+          useMeasurementStore.setState(prevMeasurementsState);
+          useMeasurementStore.getState().updateMarkupsByPage();
           throw error;
         }
       },
