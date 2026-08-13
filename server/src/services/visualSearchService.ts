@@ -390,34 +390,40 @@ import cv2
 import sys
 import json
 
-image_path = sys.argv[1]
-output_path = sys.argv[2]
-x = float(sys.argv[3])
-y = float(sys.argv[4])
-width = float(sys.argv[5])
-height = float(sys.argv[6])
+try:
+    image_path = sys.argv[1]
+    output_path = sys.argv[2]
+    x = float(sys.argv[3])
+    y = float(sys.argv[4])
+    width = float(sys.argv[5])
+    height = float(sys.argv[6])
 
-img = cv2.imread(image_path)
-if img is None:
-    print(json.dumps({"success": False, "error": f"Failed to load image: {image_path}"}))
-    sys.exit(1)
+    img = cv2.imread(image_path)
+    if img is None:
+        print(json.dumps({"success": False, "error": f"Failed to load image: {image_path}"}))
+        sys.exit(0)
 
-img_height, img_width = img.shape[:2]
+    img_height, img_width = img.shape[:2]
 
-x_px = int(x * img_width)
-y_px = int(y * img_height)
-w_px = int(width * img_width)
-h_px = int(height * img_height)
+    x_px = int(x * img_width)
+    y_px = int(y * img_height)
+    w_px = max(1, int(width * img_width))
+    h_px = max(1, int(height * img_height))
 
-x_px = max(0, min(x_px, img_width - 1))
-y_px = max(0, min(y_px, img_height - 1))
-w_px = min(w_px, img_width - x_px)
-h_px = min(h_px, img_height - y_px)
+    x_px = max(0, min(x_px, img_width - 1))
+    y_px = max(0, min(y_px, img_height - 1))
+    w_px = min(w_px, img_width - x_px)
+    h_px = min(h_px, img_height - y_px)
 
-cropped = img[y_px:y_px+h_px, x_px:x_px+w_px]
+    cropped = img[y_px:y_px+h_px, x_px:x_px+w_px]
+    if cropped.size == 0:
+        print(json.dumps({"success": False, "error": "Selection box produced an empty crop region"}))
+        sys.exit(0)
 
-cv2.imwrite(output_path, cropped)
-print(json.dumps({"success": True, "output": output_path}))
+    cv2.imwrite(output_path, cropped)
+    print(json.dumps({"success": True, "output": output_path}))
+except Exception as e:
+    print(json.dumps({"success": False, "error": str(e)}))
 `;
 
       await fs.ensureDir(this.tempDir);

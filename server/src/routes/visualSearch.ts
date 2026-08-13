@@ -13,8 +13,11 @@ import { requireAuth, requireProjectAccess, hasProjectAccess, isAdmin, validateU
 
 const router = Router();
 
-// Client sends selection box in normalized 0–1 coordinates (fraction of page width/height)
-const MIN_SELECTION_SIZE_NORMALIZED = 0.005;
+// Client sends selection box in normalized 0–1 coordinates (fraction of page width/height).
+// Kept small: on large-format sheets (site/civil plans) a repeating symbol like a pile cap
+// can legitimately be well under 0.5% of the full page — that fraction is scale-invariant
+// (same at any zoom level), so a stricter floor here rejects real, tightly-drawn boxes.
+const MIN_SELECTION_SIZE_NORMALIZED = 0.001;
 
 function validateSelectionBox(selectionBox: { x: number; y: number; width: number; height: number } | undefined): string | null {
   if (!selectionBox || typeof selectionBox.width !== 'number' || typeof selectionBox.height !== 'number') {
