@@ -144,7 +144,7 @@ Dialogs with a lot to show — like the auto-hyperlink review table — now stre
 
 **Condition templates.** Save a project's conditions as a reusable template and apply it to any new project in one click.
 
-**Revision compare.** Compare two issues of the same sheet side by side, see exactly what changed, and carry your existing takeoffs onto the new revision automatically.
+**Revision compare.** Overlay two issues of the same sheet with changes highlighted — removed lines in red, added lines in blue — and carry your existing takeoffs onto the new revision with one click; anything sitting on a changed area gets flagged for review.
 
 **PDF export options.** Choose whether reports show a legend, where it sits on the page, and what your markup labels display.
 
