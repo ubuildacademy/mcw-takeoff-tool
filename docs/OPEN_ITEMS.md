@@ -407,7 +407,7 @@ already had full `dark:` coverage and was fine. Brought the Reports-tab copy in 
 with the Costs-tab one (dark gradient, dark border, dark accent text, dark amber
 warning boxes). No product decision involved, so fixed directly rather than logged.
 
-### 23. Codebase-wide simplification sweep — queued, not started
+### 23. Codebase-wide simplification sweep — queued, not started (also tracked in `ROADMAP.md` → Quality & maintainability)
 
 **Raised:** 2026-08-20, by Jeff. Concern: fast iterative ("vibe-coded") feature work
 tends to accrete more code than the problem needs — duplicated logic, dead

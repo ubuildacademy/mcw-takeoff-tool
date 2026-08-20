@@ -64,6 +64,7 @@ Round 1 shipped 2026-07 (see Recently shipped). Remaining ideas for later:
 
 | Item | Notes |
 |------|--------|
+| **Codebase-wide simplification sweep** | Audit for vibe-coding accretion — duplicated logic, dead abstractions, over-parameterized helpers, stale comments — across the whole app, now that it's grown to a lot of LOC. Queued, not started (`docs/OPEN_ITEMS.md` item 23). A clean bill of health is a fine outcome. Candidate for a larger model given the scope. |
 | **Server TypeScript strictness** | Enable `noImplicitAny`, `strictNullChecks`, `strictFunctionTypes` incrementally in `server/tsconfig.json`. |
 | **Accessibility** | Optional focus trap in custom modals; keyboard navigation in critical takeoff flows. |
 | **Large-file refactors** *(optional)* | Split by concern only when touching that area: `usePDFViewerInteractions.ts`, `SheetSidebar.tsx`, `AdminPanel.tsx`. |
