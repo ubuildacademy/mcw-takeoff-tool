@@ -2,14 +2,14 @@ import pdfParse from 'pdf-parse';
 import fs from 'fs-extra';
 import { supabase } from '../supabase';
 
-export interface OCRBoundingBox {
+interface OCRBoundingBox {
   x: number;
   y: number;
   width: number;
   height: number;
 }
 
-export type OCRWordBoxSource = 'pdfjs' | 'tesseract' | 'pymupdf' | 'bubble_ocr' | 'vector_callout';
+type OCRWordBoxSource = 'pdfjs' | 'tesseract' | 'pymupdf' | 'bubble_ocr' | 'vector_callout';
 
 export interface OCRWordBox {
   index: number;
@@ -28,7 +28,7 @@ export interface SimpleOCRResult {
   wordBoxes?: OCRWordBox[];
 }
 
-export interface SimpleDocumentOCRData {
+interface SimpleDocumentOCRData {
   documentId: string;
   projectId: string;
   totalPages: number;

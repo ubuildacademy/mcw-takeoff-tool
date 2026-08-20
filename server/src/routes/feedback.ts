@@ -6,6 +6,7 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { emailService } from '../services/emailService';
+import { escapeHtml } from '../lib/escapeHtml';
 
 const router = Router();
 
@@ -137,14 +138,5 @@ router.post('/', upload.single('screenshot'), async (req: Request, res: Response
     res.status(500).json({ error: 'Something went wrong. Please try again later.' });
   }
 });
-
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
 
 export default router;

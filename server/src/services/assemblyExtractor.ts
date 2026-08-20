@@ -16,7 +16,7 @@ import * as path from 'path';
 import { devLog } from '../lib/devLog';
 
 /** One named quantity input of the assembly (SF-Floor, Joint LF, ...). */
-export interface ExtractedQuantityInput {
+interface ExtractedQuantityInput {
   seq: number;
   name: string;
   unit: string | null;
@@ -31,7 +31,7 @@ export interface ExtractedQuantityInput {
   derived: boolean;
 }
 
-export interface ExtractedComponent {
+interface ExtractedComponent {
   seq: number;
   sourceRow: number;
   /** The `seq` of the quantity input this component divides; null if unresolved. */
@@ -50,7 +50,7 @@ export interface ExtractedComponent {
   flags: string[];
 }
 
-export interface ExtractedProductionRate {
+interface ExtractedProductionRate {
   description: string | null;
   ratePerDay: number;
   unit: string | null;

@@ -10,10 +10,7 @@
  * Access follows the I1 model: any org member may read, company admins write.
  */
 import express from 'express';
-import multer from 'multer';
-import path from 'path';
 import fs from 'fs-extra';
-import { v4 as uuidv4 } from 'uuid';
 import { requireAuth, requireCompanyAdmin } from '../middleware';
 import {
   countAssembliesOverriding,
@@ -23,62 +20,19 @@ import {
   updateCostDefaults,
 } from '../services/assemblyLibraryService';
 import { getProductListSummary, importPriceList } from '../services/productsImportService';
+import { createUploadMiddleware } from '../lib/uploadMiddleware';
 
 const router = express.Router();
 
-const uploadRoot = path.join(__dirname, '../../uploads');
-fs.ensureDirSync(uploadRoot);
-
-const storageEngine = multer.diskStorage({
-  destination: (_req, _file, cb) => {
-    const tempDir = path.join(uploadRoot, 'temp');
-    fs.ensureDirSync(tempDir);
-    cb(null, tempDir);
-  },
-  filename: (_req, file, cb) => cb(null, `${uuidv4()}-${file.originalname}`),
-});
-
-const upload = multer({
-  storage: storageEngine,
-  limits: { fileSize: 25 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (ext === '.xlsx' || ext === '.xlsm' || ext === '.csv') return cb(null, true);
-    return cb(new Error('Invalid file type'));
+const handleUpload = createUploadMiddleware({
+  maxBytes: 25 * 1024 * 1024,
+  allowedExtensions: ['.xlsx', '.xlsm', '.csv'],
+  tooLargeBody: { error: 'File too large', message: 'Price list exceeds the 25MB limit' },
+  invalidTypeBody: {
+    error: 'Invalid file type',
+    message: 'Only .xlsx, .xlsm and .csv price lists are allowed',
   },
 });
-
-const uploadHandler = upload.single('file');
-const handleUpload = async (
-  req: express.Request,
-  res: express.Response,
-  next: express.NextFunction
-) => {
-  return new Promise<void>((resolve) => {
-    uploadHandler(req, res, (err: unknown) => {
-      if (err) {
-        const details = err instanceof Error ? err.message : String(err);
-        if (err instanceof multer.MulterError) {
-          if (err.code === 'LIMIT_FILE_SIZE') {
-            return res
-              .status(413)
-              .json({ error: 'File too large', message: 'Price list exceeds the 25MB limit' });
-          }
-          return res.status(400).json({ error: 'Upload error', details });
-        }
-        if (details === 'Invalid file type') {
-          return res.status(400).json({
-            error: 'Invalid file type',
-            message: 'Only .xlsx, .xlsm and .csv price lists are allowed',
-          });
-        }
-        return res.status(400).json({ error: 'Upload error', details });
-      }
-      resolve();
-      next();
-    });
-  });
-};
 
 /**
  * The product list belongs to a company, so every route needs one. A user with

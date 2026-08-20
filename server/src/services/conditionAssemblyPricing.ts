@@ -24,7 +24,7 @@ import {
 import type { AssemblyDetail, CostDefaults } from './assemblyLibrary';
 
 /** An input the assembly prices against that no condition is feeding. */
-export interface UnfedInput {
+interface UnfedInput {
   id: string;
   name: string;
   unit: string | null;
@@ -113,7 +113,7 @@ export function findUnfedInputs(
   return unfed;
 }
 
-export interface PriceConditionParams {
+interface PriceConditionParams {
   assembly: AssemblyDetail;
   request: ConditionPricingRequest;
   /** Unit price per product code, from the org's imported price list. */
@@ -181,7 +181,7 @@ export function priceCondition({
   };
 }
 
-export interface ProjectAssemblyTotals {
+interface ProjectAssemblyTotals {
   /** Sum of every priced condition's quotable total. */
   total: number;
   materialTotal: number;

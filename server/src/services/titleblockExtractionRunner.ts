@@ -22,20 +22,20 @@ export interface TitleblockConfig {
   templatePageNumber?: number;
 }
 
-export interface TitleblockExtractionResultRow {
+interface TitleblockExtractionResultRow {
   documentId: string;
   totalPages: number;
   sheets: Array<{ pageNumber: number; sheetNumber: string; sheetName: string }>;
   diagnostics?: { validCount: number; unknownCount: number; error?: string };
 }
 
-export type TitleblockExtractionProgress = {
+type TitleblockExtractionProgress = {
   percent: number;
   processedPages: number;
   totalPages: number;
 };
 
-export interface RunTitleblockExtractionParams {
+interface RunTitleblockExtractionParams {
   projectId: string;
   documentIds: string[];
   titleblockConfig: TitleblockConfig;

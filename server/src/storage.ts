@@ -57,7 +57,7 @@ export interface StoredSheet {
   updatedAt: string;
 }
 
-export interface StoredConditionFolder {
+interface StoredConditionFolder {
   id: string;
   projectId: string;
   name: string;
@@ -425,7 +425,7 @@ function mapConditionTemplateToDbRow(t: StoredConditionTemplate): Record<string,
   };
 }
 
-export interface StoredCalibration {
+interface StoredCalibration {
   id?: string;
   projectId: string;
   sheetId: string;

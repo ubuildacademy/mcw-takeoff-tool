@@ -13,12 +13,12 @@
  * Same spawn/stream pattern as bubbleOcrExtractor: stderr progress lines are
  * piped into the server log live.
  */
-import { spawn } from 'child_process';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import { devLog } from '../lib/devLog';
+import { runPythonScript } from '../lib/runPythonScript';
 
-export interface VectorCalloutWord {
+interface VectorCalloutWord {
   text: string;
   x: number;
   y: number;
@@ -26,7 +26,7 @@ export interface VectorCalloutWord {
   height: number;
 }
 
-export interface VectorCallout {
+interface VectorCallout {
   /** Normalized 0..1 bbox of the callout shape on the unrotated page. */
   bbox: { x: number; y: number; width: number; height: number };
   shape: 'circle' | 'hexagon';
@@ -44,7 +44,7 @@ export interface VectorCallout {
   words: VectorCalloutWord[];
 }
 
-export interface VectorCalloutPage {
+interface VectorCalloutPage {
   pageNumber: number;
   width: number;
   height: number;
@@ -53,7 +53,7 @@ export interface VectorCalloutPage {
   error?: string;
 }
 
-export interface VectorCalloutExtractionResult {
+interface VectorCalloutExtractionResult {
   totalPages: number;
   calloutsFound: number;
   pages: VectorCalloutPage[];
@@ -124,12 +124,16 @@ class VectorCalloutExtractor {
     );
     const start = Date.now();
 
-    const { stdout, stderrTail } = await this.runScript(
-      pythonCommand,
-      [this.pythonScriptPath, pdfPath],
+    const { stdout, stderrTail } = await runPythonScript({
+      command: pythonCommand,
+      args: [this.pythonScriptPath, pdfPath],
       enhancedPath,
-      onPage
-    );
+      timeoutMs: VECTOR_CALLOUT_TIMEOUT_MS,
+      maxStdoutBytes: VECTOR_CALLOUT_MAX_STDOUT_BYTES,
+      logPrefix: '📐',
+      label: 'vector callout',
+      onPage,
+    });
 
     let parsed: VectorCalloutScriptOutput;
     try {
@@ -164,118 +168,6 @@ class VectorCalloutExtractor {
     );
 
     return { totalPages, calloutsFound, pages };
-  }
-
-  /** Same spawn/stream contract as bubbleOcrExtractor.runScript. */
-  private runScript(
-    command: string,
-    args: string[],
-    enhancedPath: string,
-    onPage?: (page: number, totalPages: number) => void
-  ): Promise<{ stdout: string; stderrTail: string }> {
-    return new Promise((resolve, reject) => {
-      const child = spawn(command, args, {
-        env: { ...process.env, PATH: enhancedPath, PYTHONUNBUFFERED: '1' },
-      });
-
-      const stdoutChunks: Buffer[] = [];
-      let stdoutBytes = 0;
-      let stdoutOverflow = false;
-      const STDERR_TAIL_LINES = 40;
-      const stderrTail: string[] = [];
-      let stderrLineBuf = '';
-      let timedOut = false;
-
-      const timer = setTimeout(() => {
-        timedOut = true;
-        try {
-          child.kill('SIGTERM');
-        } catch {
-          // best effort -- the promise still rejects below via 'close'
-        }
-      }, VECTOR_CALLOUT_TIMEOUT_MS);
-
-      child.stdout?.on('data', (chunk: Buffer) => {
-        if (stdoutOverflow) return;
-        if (stdoutBytes + chunk.length > VECTOR_CALLOUT_MAX_STDOUT_BYTES) {
-          stdoutOverflow = true;
-          return;
-        }
-        stdoutChunks.push(chunk);
-        stdoutBytes += chunk.length;
-      });
-
-      child.stderr?.on('data', (chunk: Buffer) => {
-        stderrLineBuf += chunk.toString('utf8');
-        let nlIdx: number;
-        while ((nlIdx = stderrLineBuf.indexOf('\n')) !== -1) {
-          const line = stderrLineBuf.slice(0, nlIdx).trimEnd();
-          stderrLineBuf = stderrLineBuf.slice(nlIdx + 1);
-          if (!line) continue;
-          devLog(`📐 ${line}`);
-          // Surface per-page progress. Format: `[vector-callout] page N/M: ...`.
-          if (onPage) {
-            const m = line.match(/\bpage (\d+)\/(\d+)\b/);
-            if (m) onPage(parseInt(m[1], 10), parseInt(m[2], 10));
-          }
-          stderrTail.push(line);
-          if (stderrTail.length > STDERR_TAIL_LINES) stderrTail.shift();
-        }
-      });
-
-      child.on('error', (err) => {
-        clearTimeout(timer);
-        reject(
-          new Error(
-            `Failed to start vector callout script: ${
-              err instanceof Error ? err.message : String(err)
-            }`
-          )
-        );
-      });
-
-      child.on('close', (code, signal) => {
-        clearTimeout(timer);
-        const trailing = stderrLineBuf.trim();
-        if (trailing) {
-          devLog(`📐 ${trailing}`);
-          stderrTail.push(trailing);
-          if (stderrTail.length > STDERR_TAIL_LINES) stderrTail.shift();
-        }
-
-        if (stdoutOverflow) {
-          return reject(
-            new Error(
-              `Vector callout stdout exceeded ${VECTOR_CALLOUT_MAX_STDOUT_BYTES} bytes`
-            )
-          );
-        }
-
-        if (timedOut) {
-          return reject(
-            new Error(
-              `Vector callout pass timed out after ${VECTOR_CALLOUT_TIMEOUT_MS / 1000}s`
-            )
-          );
-        }
-
-        if (code !== 0) {
-          const sigSuffix = signal ? ` (signal: ${signal})` : '';
-          const tail = stderrTail.slice(-5).join('\n  ');
-          return reject(
-            new Error(
-              `Vector callout script exited with code ${code}${sigSuffix}` +
-                (tail ? `\n  ${tail}` : '')
-            )
-          );
-        }
-
-        resolve({
-          stdout: Buffer.concat(stdoutChunks).toString('utf8'),
-          stderrTail: stderrTail.slice(-10).join('\n  '),
-        });
-      });
-    });
   }
 }
 

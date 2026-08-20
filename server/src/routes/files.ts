@@ -1,5 +1,4 @@
 import express from 'express';
-import multer from 'multer';
 import path from 'path';
 import fs from 'fs-extra';
 import { v4 as uuidv4 } from 'uuid';
@@ -8,24 +7,9 @@ import { supabase, TABLES } from '../supabase';
 import { requireAuth, isAdmin, hasProjectAccess, validateUUIDParam, isValidUUIDAnyVersion } from '../middleware';
 import { triggerOCRForDocument } from './ocr';
 import { DEFAULT_MAX_UPLOAD_BYTES } from '../config/deliveryLimits';
+import { createUploadMiddleware } from '../lib/uploadMiddleware';
 
 const router = express.Router();
-
-const uploadRoot = path.join(__dirname, '../../uploads');
-fs.ensureDirSync(uploadRoot);
-
-const storageEngine = multer.diskStorage({
-  destination: (req, file, cb) => {
-    // Use a temporary location first, we'll move the file later
-    const tempDir = path.join(uploadRoot, 'temp');
-    fs.ensureDirSync(tempDir);
-    cb(null, tempDir);
-  },
-  filename: (req, file, cb) => {
-    const unique = `${uuidv4()}-${file.originalname}`;
-    cb(null, unique);
-  }
-});
 
 // Supabase Storage file size limits - Currently set to 1GB in Supabase dashboard
 // Note: Can be increased by admin in Supabase Storage Settings
@@ -35,49 +19,19 @@ const SUPABASE_MAX_FILE_SIZE = parseInt(
   10
 );
 
-const upload = multer({
-  storage: storageEngine,
-  limits: { fileSize: SUPABASE_MAX_FILE_SIZE },
-  fileFilter: (req, file, cb) => {
-    const allowed = ['.pdf', '.dwg', '.jpg', '.jpeg', '.png'];
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (allowed.includes(ext)) return cb(null, true);
-    return cb(new Error('Invalid file type'));
-  }
+const handleUpload = createUploadMiddleware({
+  maxBytes: SUPABASE_MAX_FILE_SIZE,
+  allowedExtensions: ['.pdf', '.dwg', '.jpg', '.jpeg', '.png'],
+  tooLargeBody: {
+    error: 'File too large',
+    message: `File size exceeds the maximum allowed size of ${SUPABASE_MAX_FILE_SIZE / (1024 * 1024)}MB for Supabase Storage`,
+    maxSize: SUPABASE_MAX_FILE_SIZE,
+  },
+  invalidTypeBody: {
+    error: 'Invalid file type',
+    message: 'Only PDF, DWG, JPG, JPEG, and PNG files are allowed',
+  },
 });
-
-// Wrapper to handle multer errors
-const uploadHandler = upload.single('file');
-const handleUpload = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  return new Promise<void>((resolve) => {
-    uploadHandler(req, res, (err: unknown) => {
-      if (err) {
-        const details = err instanceof Error ? err.message : String(err);
-        if (err instanceof multer.MulterError) {
-          if (err.code === 'LIMIT_FILE_SIZE') {
-            return res.status(413).json({
-              error: 'File too large',
-              message: `File size exceeds the maximum allowed size of ${SUPABASE_MAX_FILE_SIZE / (1024 * 1024)}MB for Supabase Storage`,
-              maxSize: SUPABASE_MAX_FILE_SIZE
-            });
-          }
-          return res.status(400).json({ error: 'Upload error', details });
-        }
-
-        // Handle fileFilter errors
-        if (details === 'Invalid file type') {
-          return res.status(400).json({ error: 'Invalid file type', message: 'Only PDF, DWG, JPG, JPEG, and PNG files are allowed' });
-        }
-
-        return res.status(400).json({ error: 'Upload error', details });
-      }
-      
-      // No error, continue to route handler
-      resolve();
-      next();
-    });
-  });
-};
 
 router.post('/upload', requireAuth, handleUpload, async (req, res) => {
   try {

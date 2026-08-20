@@ -57,7 +57,7 @@ export interface AssemblyComponent {
  * the pacing — 350 SF/day for detail work against 5,000 for pressure cleaning.
  * A single workbook can carry ten of them, each pacing a different input.
  */
-export interface AssemblyProductionRate {
+interface AssemblyProductionRate {
   id: string;
   assemblyId: string;
   seq: number;
@@ -137,9 +137,9 @@ export const EMPTY_COST_DEFAULTS: CostDefaults = {
 };
 
 /** Where each effective value came from — what the UI shows as "inherited". */
-export type SettingSource = 'assembly' | 'company' | 'unset';
+type SettingSource = 'assembly' | 'company' | 'unset';
 
-export interface ResolvedCostSettings extends CostDefaults {
+interface ResolvedCostSettings extends CostDefaults {
   sources: Record<keyof CostDefaults, SettingSource>;
 }
 
@@ -246,7 +246,7 @@ export function overridesAgainstDefaults(
   return overrides;
 }
 
-export type IntegrityIssueCode =
+type IntegrityIssueCode =
   | 'component_without_quantity_input'
   | 'component_without_price_source'
   | 'component_with_conflicting_price_source'
@@ -254,7 +254,7 @@ export type IntegrityIssueCode =
   | 'assembly_without_quantity_inputs'
   | 'quantity_input_unused';
 
-export interface IntegrityIssue {
+interface IntegrityIssue {
   code: IntegrityIssueCode;
   /** Component `seq`, or quantity-input `seq`, whichever the issue is about. */
   seq?: number;
@@ -389,7 +389,7 @@ export function mapComponentRow(row: AssemblyComponentRow): AssemblyComponent {
   };
 }
 
-export function mapProductionRateRow(row: AssemblyProductionRateRow): AssemblyProductionRate {
+function mapProductionRateRow(row: AssemblyProductionRateRow): AssemblyProductionRate {
   return {
     id: row.id,
     assemblyId: row.assembly_id,

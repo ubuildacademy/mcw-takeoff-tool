@@ -5,7 +5,7 @@
 /**
  * Base application error with context
  */
-export class AppError extends Error {
+class AppError extends Error {
   public readonly context?: Record<string, unknown>;
   public readonly timestamp: string;
 
@@ -38,44 +38,6 @@ export class DatabaseError extends AppError {
     if (originalError && typeof originalError === 'object' && 'code' in originalError) {
       this.code = String((originalError as { code: unknown }).code);
     }
-  }
-}
-
-/**
- * Resource not found errors
- */
-export class NotFoundError extends AppError {
-  public readonly resourceType: string;
-  public readonly resourceId?: string;
-
-  constructor(resourceType: string, resourceId?: string) {
-    super(`${resourceType} not found${resourceId ? `: ${resourceId}` : ''}`);
-    this.name = 'NotFoundError';
-    this.resourceType = resourceType;
-    this.resourceId = resourceId;
-  }
-}
-
-/**
- * Validation errors for invalid input
- */
-export class ValidationError extends AppError {
-  public readonly field?: string;
-
-  constructor(message: string, field?: string) {
-    super(message, field ? { field } : undefined);
-    this.name = 'ValidationError';
-    this.field = field;
-  }
-}
-
-/**
- * Authorization errors
- */
-export class AuthorizationError extends AppError {
-  constructor(message: string = 'Access denied') {
-    super(message);
-    this.name = 'AuthorizationError';
   }
 }
 

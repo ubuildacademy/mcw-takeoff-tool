@@ -78,9 +78,9 @@ export interface AssemblyProposalInput {
 
 // ── insert-ready records, keyed by seq until the DB assigns ids ────────
 
-export type QuantityRule = 'coverage_yield' | 'same_as_component' | 'fixed' | 'manual';
+type QuantityRule = 'coverage_yield' | 'same_as_component' | 'fixed' | 'manual';
 
-export interface AssemblyRecord {
+interface AssemblyRecord {
   name: string;
   brand: string | null;
   /** Crew size is per-assembly, never a company default. */
@@ -90,14 +90,14 @@ export interface AssemblyRecord {
   importFlags: string[];
 }
 
-export interface QuantityInputRecord {
+interface QuantityInputRecord {
   seq: number;
   name: string;
   unit: string | null;
   wastePct: number;
 }
 
-export interface ComponentRecord {
+interface ComponentRecord {
   seq: number;
   quantityInputSeq: number | null;
   additionalQuantityInputSeqs: number[];
@@ -112,7 +112,7 @@ export interface ComponentRecord {
   importFlags: string[];
 }
 
-export interface ProductionRateRecord {
+interface ProductionRateRecord {
   seq: number;
   description: string | null;
   ratePerDay: number | null;
@@ -149,7 +149,7 @@ export function inferQuantityRule(component: ProposalComponent): QuantityRule {
  * Reasons this assembly will not price correctly. Surfaced by the review screen
  * before saving, and stored with the assembly afterwards.
  */
-export function importBlockers(records: Omit<AssemblyRecords, 'blockers'>): string[] {
+function importBlockers(records: Omit<AssemblyRecords, 'blockers'>): string[] {
   const blockers: string[] = [];
   const inputSeqs = new Set(records.quantityInputs.map((input) => input.seq));
 

@@ -11,10 +11,7 @@
  * been superseded by the native library it was built to bootstrap.
  */
 import express from 'express';
-import multer from 'multer';
-import path from 'path';
 import fs from 'fs-extra';
-import { v4 as uuidv4 } from 'uuid';
 import { requireAuth, requireCompanyAdmin, hasProjectAccess, isValidUUIDAnyVersion, validateUUIDParam } from '../middleware';
 import { assemblyExtractor } from '../services/assemblyExtractor';
 import {
@@ -47,55 +44,19 @@ import {
   type CostDefaultsRecord,
 } from '../services/assemblyLibraryService';
 import { previewAssemblyImport, saveAssemblyFromProposal } from '../services/assemblyImportService';
+import { createUploadMiddleware } from '../lib/uploadMiddleware';
 
 const router = express.Router();
 
-// ── Upload storage plumbing (mirrors routes/files.ts) ───────────────────
-
-const uploadRoot = path.join(__dirname, '../../uploads');
-fs.ensureDirSync(uploadRoot);
-
-const storageEngine = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const tempDir = path.join(uploadRoot, 'temp');
-    fs.ensureDirSync(tempDir);
-    cb(null, tempDir);
-  },
-  filename: (req, file, cb) => cb(null, `${uuidv4()}-${file.originalname}`),
-});
-
-const upload = multer({
-  storage: storageEngine,
-  limits: { fileSize: 25 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (ext === '.xlsx' || ext === '.xlsm') return cb(null, true);
-    return cb(new Error('Invalid file type'));
+const handleUpload = createUploadMiddleware({
+  maxBytes: 25 * 1024 * 1024,
+  allowedExtensions: ['.xlsx', '.xlsm'],
+  tooLargeBody: { error: 'File too large', message: 'Workbook exceeds the 25MB limit' },
+  invalidTypeBody: {
+    error: 'Invalid file type',
+    message: 'Only .xlsx and .xlsm workbooks are allowed',
   },
 });
-
-const uploadHandler = upload.single('file');
-const handleUpload = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  return new Promise<void>((resolve) => {
-    uploadHandler(req, res, (err: unknown) => {
-      if (err) {
-        const details = err instanceof Error ? err.message : String(err);
-        if (err instanceof multer.MulterError) {
-          if (err.code === 'LIMIT_FILE_SIZE') {
-            return res.status(413).json({ error: 'File too large', message: 'Workbook exceeds the 25MB limit' });
-          }
-          return res.status(400).json({ error: 'Upload error', details });
-        }
-        if (details === 'Invalid file type') {
-          return res.status(400).json({ error: 'Invalid file type', message: 'Only .xlsx and .xlsm workbooks are allowed' });
-        }
-        return res.status(400).json({ error: 'Upload error', details });
-      }
-      resolve();
-      next();
-    });
-  });
-};
 
 // ── Stage 2: native assembly library ───────────────────────────────────
 // Import is deliberately TWO steps. `/extract` parses a workbook and returns a

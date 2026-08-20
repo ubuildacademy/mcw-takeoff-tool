@@ -4,7 +4,7 @@
 import nodemailer from 'nodemailer';
 import { devLog } from '../lib/devLog';
 
-export interface InvitationEmailData {
+interface InvitationEmailData {
   email: string;
   role: 'admin' | 'user';
   inviteUrl: string;
@@ -35,7 +35,7 @@ const getEdgeFunctionConfig = () => {
   };
 };
 
-export interface EmailAttachment {
+interface EmailAttachment {
   filename: string;
   content: Buffer | string;
   contentType?: string;

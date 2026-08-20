@@ -1,6 +1,6 @@
 export const HELP_FAQ_SETTING_KEY = 'help-faq-v1';
 
-export type HelpFaqItem = {
+type HelpFaqItem = {
   id: string;
   question: string;
   answer: string;

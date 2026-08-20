@@ -41,7 +41,7 @@ export const titleblockExtractionQueue = new Queue('titleblock-extraction', {
   },
 });
 
-export const titleblockExtractionWorker = new Worker(
+const titleblockExtractionWorker = new Worker(
   'titleblock-extraction',
   async (job: Job) => {
     const { projectId, documentIds, titleblockConfig } = job.data as {

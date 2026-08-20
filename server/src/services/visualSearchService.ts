@@ -121,13 +121,13 @@ export interface AutoCountResult {
 }
 
 /** Normalized word box from bundled callout template pass + ROI Tesseract. */
-export interface CalloutPassWordBox {
+interface CalloutPassWordBox {
   text: string;
   bbox: { x: number; y: number; width: number; height: number };
   confidence?: number;
 }
 
-export interface CalloutPassPageYield {
+interface CalloutPassPageYield {
   wordBoxes: CalloutPassWordBox[];
   templateRegionsMatched: number;
 }

@@ -312,7 +312,7 @@ export function sumLaborRows(rows: LaborBudgetRow[]): LaborBudgetRow {
   return total;
 }
 
-export interface BuildReportParams {
+interface BuildReportParams {
   pricings: ConditionPricing[];
   /** Crew size and day rate per assembly id, already resolved against defaults. */
   laborByAssemblyId: Map<string, { crewSize: number; dayRatePerMan: number }>;

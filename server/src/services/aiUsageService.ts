@@ -1,6 +1,6 @@
 import { supabase } from '../supabase';
 
-export type AiDailyQuotaResult =
+type AiDailyQuotaResult =
   | { allowed: true; limit: number; remaining: number; resetAtEpochSeconds: number }
   | { allowed: false; limit: number; remaining: 0; resetAtEpochSeconds: number; retryAfterSeconds: number };
 

@@ -45,7 +45,7 @@ export function roundCents(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
-export interface CostingInputs {
+interface CostingInputs {
   /** Quantity entered per quantity-input id. Missing ids count as zero. */
   quantitiesByInputId: Record<string, number>;
   /** Unit price per product code, from the org's price list. */
@@ -68,7 +68,7 @@ export interface CostingInputs {
   costDefaults?: CostDefaults;
 }
 
-export interface ComponentCost {
+interface ComponentCost {
   componentId: string;
   seq: number;
   description: string | null;
@@ -85,7 +85,7 @@ export interface ComponentCost {
   issue: string | null;
 }
 
-export interface MarginStep {
+interface MarginStep {
   name: string;
   rate: number;
   /** Running total after this margin is divided through. */
@@ -309,7 +309,7 @@ export interface LaborInputs {
  * insurance takes its own divide-through margin and is then added to the job
  * total alongside the margin chain — `F77 = ROUNDUP(F59 + F71 + F66)`.
  */
-export interface InsuranceInputs {
+interface InsuranceInputs {
   /** Dollars of insurance per $1,000 of cost (the sheet's "Dollars per Thousand"). */
   ratePerThousand: number | null;
   /** Insurance's own margin, as a fraction. */

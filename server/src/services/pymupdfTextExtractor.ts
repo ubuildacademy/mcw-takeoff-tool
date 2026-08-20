@@ -16,7 +16,7 @@ import { devLog, devWarn } from '../lib/devLog';
 
 const execAsync = promisify(exec);
 
-export interface PyMuPdfWord {
+interface PyMuPdfWord {
   text: string;
   /** Normalized 0..1 left edge relative to unrotated page width. */
   x: number;
@@ -28,7 +28,7 @@ export interface PyMuPdfWord {
   height: number;
 }
 
-export interface PyMuPdfPage {
+interface PyMuPdfPage {
   pageNumber: number;
   /** Unrotated page width in PDF points. */
   width: number;
@@ -42,7 +42,7 @@ export interface PyMuPdfPage {
   error?: string;
 }
 
-export interface PyMuPdfExtractionResult {
+interface PyMuPdfExtractionResult {
   totalPages: number;
   pages: PyMuPdfPage[];
 }

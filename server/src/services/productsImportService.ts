@@ -17,7 +17,7 @@ import { wrapDatabaseError } from '../errors';
 import { devLog } from '../lib/devLog';
 import { ExistingProduct, ImportedProduct, diffProducts } from './productsImport';
 
-export interface ParsedPriceListStats {
+interface ParsedPriceListStats {
   sourceFile: string;
   headerRow: number;
   /** field name -> spreadsheet column the alias matcher chose. */
@@ -32,7 +32,7 @@ export interface ParsedPriceListStats {
   missingPrice: number;
 }
 
-export interface ParsedPriceList {
+interface ParsedPriceList {
   rows: ImportedProduct[];
   stats: ParsedPriceListStats;
 }

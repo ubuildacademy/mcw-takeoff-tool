@@ -37,7 +37,7 @@ export * from './assemblyLibrary';
 
 // ── Organizations ──────────────────────────────────────────────────────
 
-export interface Organization {
+interface Organization {
   id: string;
   name: string;
   createdAt: string;
@@ -48,7 +48,7 @@ export interface Organization {
   restorationLiabilityEnabled: boolean;
 }
 
-export type OrgRole = 'company_admin' | 'user';
+type OrgRole = 'company_admin' | 'user';
 
 export async function getOrganizationForUser(userId: string): Promise<Organization | null> {
   const { data: membership, error: membershipError } = await supabase
@@ -123,7 +123,7 @@ export async function setAssembliesEnabled(orgId: string, enabled: boolean): Pro
 
 // ── Report branding ────────────────────────────────────────────────────
 
-export interface ReportBrandingRecord {
+interface ReportBrandingRecord {
   companyName: string | null;
   accentColor: string | null;
   logoBase64: string | null;
@@ -144,7 +144,7 @@ export async function getReportBranding(orgId: string): Promise<ReportBrandingRe
   };
 }
 
-export interface UpdateReportBrandingParams extends Partial<ReportBrandingRecord> {
+interface UpdateReportBrandingParams extends Partial<ReportBrandingRecord> {
   updatedBy?: string | null;
 }
 
@@ -252,7 +252,7 @@ interface CostDefaultsRow {
  * total into accounting buckets; changing one moves money between columns and
  * never changes what the customer is quoted.
  */
-export interface AccountingRateDefaults {
+interface AccountingRateDefaults {
   payrollTaxPct: number | null;
   workersCompPct: number | null;
   generalLiabilityPct: number | null;
@@ -272,7 +272,7 @@ export interface ProjectRateDefaults {
   bondPct: number | null;
 }
 
-export const EMPTY_PROJECT_RATE_DEFAULTS: ProjectRateDefaults = {
+const EMPTY_PROJECT_RATE_DEFAULTS: ProjectRateDefaults = {
   bondPct: null,
 };
 
@@ -312,7 +312,7 @@ function mapCostDefaultsRow(row: CostDefaultsRow): CostDefaultsRecord {
  * payroll-tax rate is a real (if unusual) setting, while null says the rate
  * was never entered and the report should say so rather than post $0 of tax.
  */
-export const EMPTY_ACCOUNTING_RATES: AccountingRateDefaults = {
+const EMPTY_ACCOUNTING_RATES: AccountingRateDefaults = {
   payrollTaxPct: null,
   workersCompPct: null,
   generalLiabilityPct: null,
@@ -343,7 +343,7 @@ export async function getCostDefaults(orgId: string): Promise<CostDefaultsRecord
   return mapCostDefaultsRow(data as CostDefaultsRow);
 }
 
-export interface UpdateCostDefaultsParams
+interface UpdateCostDefaultsParams
   extends Partial<CostDefaults>,
     Partial<AccountingRateDefaults>,
     Partial<ProjectRateDefaults> {
@@ -571,22 +571,41 @@ export async function getAssemblyDetails(
   if (componentError) throw wrapDatabaseError('Get assembly components', componentError, { orgId });
   if (rateError) throw wrapDatabaseError('Get assembly production rates', rateError, { orgId });
 
+  // Group the child rows by assembly once. buildAssemblyDetail filters by assembly_id
+  // itself, so handing it the whole result set per assembly re-scanned every input,
+  // component and rate row N times over — for a company with a few hundred assemblies
+  // that is the bulk of the work in loading the library. Pre-filtered input is
+  // identical from its point of view.
+  const groupByAssembly = <T extends { assembly_id: string }>(rows: T[]): Map<string, T[]> => {
+    const grouped = new Map<string, T[]>();
+    for (const row of rows) {
+      const existing = grouped.get(row.assembly_id);
+      if (existing) existing.push(row);
+      else grouped.set(row.assembly_id, [row]);
+    }
+    return grouped;
+  };
+
+  const inputsByAssembly = groupByAssembly((inputRows || []) as AssemblyQuantityInputRow[]);
+  const componentsByAssembly = groupByAssembly((componentRows || []) as AssemblyComponentRow[]);
+  const ratesByAssembly = groupByAssembly((rateRows || []) as AssemblyProductionRateRow[]);
+
   const details = new Map<string, AssemblyDetail>();
   for (const row of (assemblyRows || []) as AssemblyRow[]) {
     details.set(
       row.id,
       buildAssemblyDetail(
         row,
-        (inputRows || []) as AssemblyQuantityInputRow[],
-        (componentRows || []) as AssemblyComponentRow[],
-        (rateRows || []) as AssemblyProductionRateRow[]
+        inputsByAssembly.get(row.id) || [],
+        componentsByAssembly.get(row.id) || [],
+        ratesByAssembly.get(row.id) || []
       )
     );
   }
   return details;
 }
 
-export interface CreateAssemblyParams {
+interface CreateAssemblyParams {
   orgId: string;
   name: string;
   brand?: string | null;
@@ -667,7 +686,7 @@ export async function deleteAssembly(orgId: string, assemblyId: string): Promise
 
 // ── Quantity inputs ────────────────────────────────────────────────────
 
-export interface CreateQuantityInputParams {
+interface CreateQuantityInputParams {
   assemblyId: string;
   seq: number;
   name: string;
@@ -699,7 +718,7 @@ export async function createQuantityInputs(
 
 // ── Components ─────────────────────────────────────────────────────────
 
-export interface CreateComponentParams {
+interface CreateComponentParams {
   assemblyId: string;
   seq: number;
   quantityInputId?: string | null;

@@ -4,6 +4,7 @@
  */
 import { Router, Request, Response } from 'express';
 import { emailService } from '../services/emailService';
+import { escapeHtml } from '../lib/escapeHtml';
 
 const router = Router();
 
@@ -69,14 +70,5 @@ router.post('/', async (req: Request, res: Response) => {
     });
   }
 });
-
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
 
 export default router;

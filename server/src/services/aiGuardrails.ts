@@ -1,4 +1,4 @@
-export type AiGuardrailDecision =
+type AiGuardrailDecision =
   | { allowed: true }
   | { allowed: false; reason: string };
 

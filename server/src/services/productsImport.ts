@@ -29,7 +29,7 @@ export interface ExistingProduct {
   priceDate: string | null;
 }
 
-export interface ProductsDiff {
+interface ProductsDiff {
   toInsert: ImportedProduct[];
   toUpdate: ImportedProduct[];
   unchangedCount: number;

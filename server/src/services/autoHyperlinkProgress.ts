@@ -16,10 +16,11 @@
  * pages across the whole run) and divides.
  *
  * Deliberately in-memory: progress is ephemeral and worthless after the run,
- * and a single server process handles a given run's requests. Entries self-expire.
+ * and a single server process handles a given run's requests. Entries self-expire
+ * on the TTL sweep, so runs need no explicit start or teardown call.
  */
 
-export interface AutoHyperlinkProgress {
+interface AutoHyperlinkProgress {
   runId: string;
   /** Cumulative pages finished across every instrumented pass (monotonic). */
   pagesDone: number;
@@ -63,24 +64,10 @@ function ensureRun(runId: string): AutoHyperlinkProgress {
   return state;
 }
 
-/** Begin (or reset) tracking for a run. Idempotent. */
-export function startRun(runId: string): void {
-  const now = Date.now();
-  sweep(now);
-  runs.set(runId, {
-    runId,
-    pagesDone: 0,
-    currentDoc: '',
-    currentDocPage: 0,
-    currentDocTotal: 0,
-    updatedAt: now,
-  });
-}
-
 /**
  * Record that one page finished. Increments the monotonic page counter and
- * updates the "current document" label. Safe to call before `startRun`
- * (auto-initializes) so a late-arriving progress line is never dropped.
+ * updates the "current document" label. Auto-initializes the run, so a
+ * progress line that arrives before any other is never dropped.
  */
 export function reportPage(
   runId: string,
@@ -110,9 +97,4 @@ export function addPages(runId: string, count: number, docLabel: string): void {
 
 export function getProgress(runId: string): AutoHyperlinkProgress | null {
   return runs.get(runId) ?? null;
-}
-
-/** Drop a finished run so the map doesn't grow unbounded. */
-export function endRun(runId: string): void {
-  runs.delete(runId);
 }

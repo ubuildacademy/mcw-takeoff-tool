@@ -13,7 +13,7 @@ import { devLog, devWarn } from '../lib/devLog';
 
 const execAsync = promisify(exec);
 
-export interface PDFToImageOptions {
+interface PDFToImageOptions {
   format?: 'png' | 'jpeg';
   quality?: number; // 1-100, only used for JPEG
   scale?: number; // Scale factor (default: 2.0 for higher resolution)
