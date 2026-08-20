@@ -103,31 +103,6 @@ export interface RenderSVGMeasurementOptions {
   pixelHeight?: number;
 }
 
-/** Ray-casting point-in-polygon test */
-export function isPointInPolygon(
-  point: { x: number; y: number },
-  polygon: { x: number; y: number }[]
-): boolean {
-  if (polygon.length < 3) return false;
-
-  let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const xi = polygon[i].x;
-    const yi = polygon[i].y;
-    const xj = polygon[j].x;
-    const yj = polygon[j].y;
-
-    const condition1 = (yi > point.y) !== (yj > point.y);
-    const condition2 = point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi;
-
-    if (condition1 && condition2) {
-      inside = !inside;
-    }
-  }
-
-  return inside;
-}
-
 /** Renders the visual search / titleblock selection box as an SVG rect */
 export function renderSVGSelectionBox(
   svg: SVGSVGElement,
@@ -304,17 +279,6 @@ export function renderSVGCurrentCutoutEphemeral(
   polyline.setAttribute('vector-effect', 'non-scaling-stroke');
   polyline.setAttribute('pointer-events', 'none');
   parent.appendChild(polyline);
-}
-
-export function renderSVGCurrentCutout(
-  svg: SVGSVGElement,
-  viewport: { width: number; height: number },
-  currentCutout: Point[],
-  mousePosition: Point | null
-): void {
-  const parent = svg as unknown as SVGGElement;
-  renderSVGCurrentCutoutCommitted(parent, viewport, currentCutout);
-  renderSVGCurrentCutoutEphemeral(parent, viewport, currentCutout, mousePosition);
 }
 
 /** Converts hex color to rgba string. */
@@ -1064,13 +1028,6 @@ export function renderSVGCalibrationPointsEphemeral(
     distanceText.textContent = `${distance.toFixed(1)} px`;
     parent.appendChild(distanceText);
   }
-}
-
-/** Renders calibration points and preview line/distance. */
-export function renderSVGCalibrationPoints(svg: SVGSVGElement, options: RenderSVGCalibrationPointsOptions): void {
-  const parent = svg as unknown as SVGGElement;
-  renderSVGCalibrationPointsCommitted(parent, options);
-  renderSVGCalibrationPointsEphemeral(parent, options);
 }
 
 export interface RenderRunningLengthDisplayOptions {

@@ -9,7 +9,7 @@ import { useAssemblyPricingStore } from './assemblyPricingSlice';
 import { useOrgCostDefaultsStore } from './orgCostDefaultsSlice';
 import { devLog, devWarn } from '../../lib/devLog';
 
-export function compareMeasurementsByStackOrder(a: TakeoffMeasurement, b: TakeoffMeasurement): number {
+function compareMeasurementsByStackOrder(a: TakeoffMeasurement, b: TakeoffMeasurement): number {
   const oa = a.stackOrder ?? 0;
   const ob = b.stackOrder ?? 0;
   if (oa !== ob) return oa - ob;
@@ -23,7 +23,7 @@ function supportsWasteFactor(type: string): boolean {
 const PENDING_MEASUREMENT_PREFIX = 'pending-measurement:';
 
 /** True while a measurement is shown optimistically before the create API returns. */
-export function isPendingMeasurementId(id: string): boolean {
+function isPendingMeasurementId(id: string): boolean {
   return id.startsWith(PENDING_MEASUREMENT_PREFIX);
 }
 
@@ -177,10 +177,13 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
       }
       const { takeoffMeasurements } = get();
       const conditions = useConditionStore.getState().conditions;
+      const idSet = new Set(ids);
+      // First entry wins, matching the Array.find this replaced.
+      const conditionTypeById = new Map<string, string | undefined>();
+      for (const c of conditions) if (!conditionTypeById.has(c.id)) conditionTypeById.set(c.id, c.type);
       const copied = takeoffMeasurements.filter((m) => {
-        if (!ids.includes(m.id)) return false;
-        const cond = conditions.find((c) => c.id === m.conditionId);
-        return cond?.type !== 'auto-count';
+        if (!idSet.has(m.id)) return false;
+        return conditionTypeById.get(m.conditionId) !== 'auto-count';
       });
       set({ copiedMarkups: copied });
     },
@@ -189,7 +192,8 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
       const targetCondition = useConditionStore.getState().getConditionById(targetConditionId);
       if (!targetCondition) return;
       const { takeoffMeasurements } = get();
-      const targets = takeoffMeasurements.filter((m) => markupIds.includes(m.id));
+      const markupIdSet = new Set(markupIds);
+      const targets = takeoffMeasurements.filter((m) => markupIdSet.has(m.id));
       const updates: Partial<TakeoffMeasurement> = {
         conditionId: targetConditionId,
         conditionColor: targetCondition.color,
@@ -641,6 +645,10 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
     getProjectTakeoffSummary: (projectId) => {
       const { takeoffMeasurements } = get();
       const conditions = useConditionStore.getState().conditions;
+      // Indexed once rather than a linear find per measurement; first entry wins, as
+      // Array.find did, so duplicate condition ids resolve identically.
+      const conditionById = new Map<string, (typeof conditions)[number]>();
+      for (const c of conditions) if (!conditionById.has(c.id)) conditionById.set(c.id, c);
       
       const summary: {
         totalMeasurements: number;
@@ -655,7 +663,7 @@ export const useMeasurementStore = create<MeasurementState>()((set, get) => {
       takeoffMeasurements.forEach(measurement => {
         if (measurement.projectId === projectId) {
           summary.totalMeasurements++;
-          const condition = conditions.find(c => c.id === measurement.conditionId);
+          const condition = conditionById.get(measurement.conditionId);
           if (condition) {
             if (!summary.byCondition[condition.id]) {
               summary.byCondition[condition.id] = { count: 0, value: 0, unit: condition.unit };

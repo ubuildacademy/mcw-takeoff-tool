@@ -7,6 +7,7 @@
  */
 import type ExcelJS from 'exceljs';
 import type { TakeoffCondition } from '../../../types';
+import { QTY_FMT } from './sheetStyles';
 
 export interface BySheetPageData {
   pageNumber: number;
@@ -21,7 +22,6 @@ export interface BySheetConditionData {
   pages: Record<string, BySheetPageData>;
 }
 
-const QTY_FMT = '#,##0.00';
 
 /**
  * Natural-sort comparator for sheet numbers: digit runs compare numerically so

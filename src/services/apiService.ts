@@ -1272,13 +1272,6 @@ export const titleblockService = {
 };
 
 // Health check
-export const healthService = {
-  async checkHealth() {
-    const response = await apiClient.get('/health');
-    return response.data;
-  },
-};
-
 // Feedback service
 export const feedbackService = {
   async submit(params: {

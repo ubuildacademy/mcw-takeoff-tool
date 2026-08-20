@@ -66,7 +66,7 @@ function lineCenterX(w: BatchOcrWordBox): number {
 }
 
 /** Group words into reading-order lines using center-y clustering. */
-export function groupWordsIntoLines(words: BatchOcrWordBox[]): BatchOcrWordBox[][] {
+function groupWordsIntoLines(words: BatchOcrWordBox[]): BatchOcrWordBox[][] {
   if (words.length === 0) return [];
   const sorted = [...words].sort((a, b) => {
     const dy = lineCenterY(a) - lineCenterY(b);
@@ -102,7 +102,7 @@ export function groupWordsIntoLines(words: BatchOcrWordBox[]): BatchOcrWordBox[]
  * Group words into vertical strips (match lines, vertical sheet IDs). Uses center-x clustering;
  * each column is sorted top-to-bottom for tight text join.
  */
-export function groupWordsIntoColumns(words: BatchOcrWordBox[]): BatchOcrWordBox[][] {
+function groupWordsIntoColumns(words: BatchOcrWordBox[]): BatchOcrWordBox[][] {
   if (words.length === 0) return [];
   const sorted = [...words].sort((a, b) => {
     const dx = lineCenterX(a) - lineCenterX(b);

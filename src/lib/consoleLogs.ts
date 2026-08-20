@@ -64,7 +64,3 @@ export function initConsoleCapture(): void {
 export function getCapturedLogs(): CapturedLog[] {
   return [..._logs];
 }
-
-export function clearCapturedLogs(): void {
-  _logs.length = 0;
-}

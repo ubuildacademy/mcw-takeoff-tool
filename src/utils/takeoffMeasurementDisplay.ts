@@ -2,7 +2,7 @@ import type { TakeoffMeasurement } from '../types';
 import type { Measurement } from '../components/PDFViewer.types';
 
 /** Safely convert API timestamp to ISO string; avoids RangeError for invalid dates */
-export function safeTimestampToISO(ts: string | number | undefined | null): string {
+function safeTimestampToISO(ts: string | number | undefined | null): string {
   if (ts == null || ts === '') return new Date().toISOString();
   const d = new Date(ts);
   return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();

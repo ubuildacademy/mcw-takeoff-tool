@@ -148,7 +148,7 @@ export function cssDragRectToBasePdfAabb(
 }
 
 /** Shift normalized PDF points by a delta (e.g. when dragging a measurement). */
-export function shiftPdfPoints(
+function shiftPdfPoints(
   points: Array<{ x: number; y: number }>,
   delta: { x: number; y: number }
 ): Array<{ x: number; y: number }> {

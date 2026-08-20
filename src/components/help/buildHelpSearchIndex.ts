@@ -92,7 +92,3 @@ export function loadHelpSearchIndex(): Promise<HelpSearchEntry[]> {
   }
   return indexPromise;
 }
-
-export function clearHelpSearchIndexCache(): void {
-  indexPromise = null;
-}

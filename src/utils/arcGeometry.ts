@@ -27,7 +27,7 @@ export interface XY {
 }
 
 /** Below this |bulge| a drag is treated as "snap back to straight" (~2° arc). */
-export const BULGE_STRAIGHT_SNAP = 0.02;
+const BULGE_STRAIGHT_SNAP = 0.02;
 /** Semicircle-and-a-bit; beyond this the arc math gets needle-thin circles. */
 export const BULGE_MAX = 4;
 

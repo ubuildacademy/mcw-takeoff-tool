@@ -14,17 +14,8 @@ import ExcelJS from 'exceljs';
 import type { ReportBranding } from './branding';
 import type { PurchaseOrder } from '../../../services/apiService';
 import type { JobInfo } from '../../../types';
+import { QTY_FMT, headerStyle } from './sheetStyles';
 
-const QTY_FMT = '#,##0.00';
-
-function headerStyle(branding: ReportBranding): Partial<ExcelJS.Style> {
-  return {
-    font: { bold: true, size: 11, color: { argb: 'FFFFFFFF' } },
-    fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: branding.accentARGB } },
-    alignment: { horizontal: 'center', vertical: 'middle', wrapText: true },
-    border: { bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } } },
-  };
-}
 
 /**
  * Label/value pairs, two per row (A/B and D/E), skipping pairs where both sides are

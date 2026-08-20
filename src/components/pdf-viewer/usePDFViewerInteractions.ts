@@ -1433,6 +1433,16 @@ function parseTargetViewportAttr(
               if (commitMirrorGuard) commitMirrorGuard.current = true;
 
               if (saveOps.length > 0) {
+                /** Both the save-failure and undo paths resync the moved ids from the store. */
+                const resyncMovedFromStore = () => {
+                  const storeMs = useMeasurementStore.getState().takeoffMeasurements;
+                  const movedIds = new Set(idsToMove);
+                  const storeById = new Map(storeMs.map((x) => [x.id, x]));
+                  setLocalTakeoffMeasurements((prev) =>
+                    prev.map((meas) => (movedIds.has(meas.id) ? storeById.get(meas.id) ?? meas : meas))
+                  );
+                };
+
                 /** Sequential saves avoid Zustand lost updates when parallel set() merges race. */
                 let firstReject: unknown;
                 for (const { id, next } of saveOps) {
@@ -1448,23 +1458,9 @@ function parseTargetViewportAttr(
                   toast.error('Could not save moved measurement(s). Positions were restored from last saved.', {
                     description: formatMeasurementMoveSaveError(firstReject),
                   });
-                  const storeMs = useMeasurementStore.getState().takeoffMeasurements;
-                  setLocalTakeoffMeasurements((prev) =>
-                    prev.map((meas) => {
-                      if (!idsToMove.includes(meas.id)) return meas;
-                      const fromStore = storeMs.find((x) => x.id === meas.id);
-                      return fromStore ?? meas;
-                    })
-                  );
+                  resyncMovedFromStore();
                 } else if (undoEntries.length > 0) {
-                  const storeMs = useMeasurementStore.getState().takeoffMeasurements;
-                  setLocalTakeoffMeasurements((prev) =>
-                    prev.map((meas) => {
-                      if (!idsToMove.includes(meas.id)) return meas;
-                      const fromStore = storeMs.find((x) => x.id === meas.id);
-                      return fromStore ?? meas;
-                    })
-                  );
+                  resyncMovedFromStore();
                   useUndoStore.getState().push({
                     type: 'measurement_update_batch',
                     entries: undoEntries.map((e) => ({

@@ -31,12 +31,18 @@ export function buildAssemblyPriceItems(
   conditions: ConditionLike[],
   measurements: MeasurementLike[]
 ): AssemblyPriceRequestItem[] {
+  // One pass over measurements instead of a re-scan per condition: this runs on every
+  // vertex drag, and the per-condition filter made it conditions x measurements.
+  const quantityByCondition = new Map<string, number>();
+  for (const m of measurements) {
+    const value = m.netCalculatedValue ?? m.calculatedValue ?? 0;
+    quantityByCondition.set(m.conditionId, (quantityByCondition.get(m.conditionId) ?? 0) + value);
+  }
+
   return conditions
     .filter((condition) => condition.assemblyId && condition.assemblyQuantityInputId)
     .map((condition) => {
-      const quantity = measurements
-        .filter((m) => m.conditionId === condition.id)
-        .reduce((sum, m) => sum + (m.netCalculatedValue ?? m.calculatedValue ?? 0), 0);
+      const quantity = quantityByCondition.get(condition.id) ?? 0;
       return {
         conditionId: condition.id,
         assemblyId: condition.assemblyId as string,

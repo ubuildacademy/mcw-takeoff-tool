@@ -80,13 +80,6 @@ const getMinHueDistance = (hue: number, existingHues: number[]): number => {
 };
 
 /**
- * Generate a random color from a predefined palette (legacy function for backward compatibility)
- */
-export const generateRandomColor = (): string => {
-  return COLOR_PALETTE[Math.floor(Math.random() * COLOR_PALETTE.length)];
-};
-
-/**
  * Generate a color that is maximally different from existing colors
  * Uses HSL color space to find the most visually distinct color
  */
@@ -208,13 +201,6 @@ export const calculateDistance = (point1: { x: number; y: number }, point2: { x:
 };
 
 /**
- * Generate a unique ID based on timestamp
- */
-export const generateId = (): string => {
-  return Date.now().toString();
-};
-
-/**
  * Format date for display
  */
 export const formatDate = (date: string | Date): string => {
@@ -223,20 +209,6 @@ export const formatDate = (date: string | Date): string => {
     year: 'numeric',
     month: 'short',
     day: 'numeric'
-  });
-};
-
-/**
- * Format date and time for display
- */
-export const formatDateTime = (date: string | Date): string => {
-  const d = new Date(date);
-  return d.toLocaleString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
   });
 };
 
@@ -339,25 +311,6 @@ export const isEmpty = (value: unknown): boolean => {
 };
 
 /**
- * Deep clone an object
- */
-export const deepClone = <T>(obj: T): T => {
-  if (obj === null || typeof obj !== 'object') return obj;
-  if (obj instanceof Date) return new Date(obj.getTime()) as T;
-  if (obj instanceof Array) return obj.map(item => deepClone(item)) as T;
-  if (typeof obj === 'object') {
-    const clonedObj: Record<string, unknown> = {};
-    for (const key in obj) {
-      if (Object.prototype.hasOwnProperty.call(obj, key)) {
-        clonedObj[key] = deepClone((obj as Record<string, unknown>)[key]);
-      }
-    }
-    return clonedObj as T;
-  }
-  return obj;
-};
-
-/**
  * Parse feet and inches format (e.g., "1'2"", "1'2½"", "2'", "1'") to decimal feet
  * Also handles decimal feet format (e.g., "1.5", "1")
  * Very accepting - handles: "1", "1'", "1.5", "1'6"", "2'", etc.
@@ -427,29 +380,5 @@ export const formatDepthOutput = (decimalFeet: number): string => {
     return `${feet}'`;
   } else {
     return `${feet}'${inches}"`;
-  }
-};
-
-/**
- * Format a timestamp as relative time (e.g., "1 minute ago", "2 hours ago")
- */
-export const formatRelativeTime = (date: string | Date): string => {
-  const now = new Date();
-  const targetDate = new Date(date);
-  const diffInSeconds = Math.floor((now.getTime() - targetDate.getTime()) / 1000);
-  
-  if (diffInSeconds < 60) {
-    return 'Just now';
-  } else if (diffInSeconds < 3600) {
-    const minutes = Math.floor(diffInSeconds / 60);
-    return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
-  } else if (diffInSeconds < 86400) {
-    const hours = Math.floor(diffInSeconds / 3600);
-    return `${hours} hour${hours === 1 ? '' : 's'} ago`;
-  } else if (diffInSeconds < 2592000) {
-    const days = Math.floor(diffInSeconds / 86400);
-    return `${days} day${days === 1 ? '' : 's'} ago`;
-  } else {
-    return formatDate(targetDate);
   }
 };

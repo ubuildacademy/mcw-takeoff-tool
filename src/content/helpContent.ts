@@ -356,8 +356,7 @@ export const HELP_GUIDE_TITLES: Record<HelpGuideSlug, string> = {
 };
 
 /** Focused help shown on mode banners and calibration UI */
-export const HELP_TOPIC_IDS = ['auto-count', 'titleblock', 'calibrate'] as const;
-export type HelpTopicId = (typeof HELP_TOPIC_IDS)[number];
+export type HelpTopicId = 'auto-count' | 'titleblock' | 'calibrate';
 
 const HELP_TOPICS: Record<HelpTopicId, HelpItem & { guideHref: string }> = {
   'auto-count': {

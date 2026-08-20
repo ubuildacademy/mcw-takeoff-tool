@@ -51,7 +51,7 @@ interface ConditionTemplatesState {
   setTemplateShared: (id: string, shared: boolean) => void;
 }
 
-export function toTemplateCondition(c: TakeoffCondition): TemplateCondition {
+function toTemplateCondition(c: TakeoffCondition): TemplateCondition {
   const {
     id: _id,
     projectId: _projectId,

@@ -3,7 +3,7 @@ import type { MultiPolygon, Pair, Polygon } from 'polygon-clipping';
 import type { ScaleInfo } from './measurementCalculation';
 
 /** Ignore intersections smaller than this (sq ft) after scale conversion */
-export const MIN_CUTOUT_AREA_SQFT = 0.001;
+const MIN_CUTOUT_AREA_SQFT = 0.001;
 
 function closeRing(pairs: Pair[]): Pair[] {
   if (pairs.length < 3) return pairs;

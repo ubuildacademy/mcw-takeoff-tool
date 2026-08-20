@@ -18,19 +18,9 @@
 import ExcelJS from 'exceljs';
 import type { ReportBranding } from './branding';
 import type { AssemblyReport } from '../../../services/apiService';
+import { MONEY_FMT, QTY_FMT, headerStyle } from './sheetStyles';
 
-const MONEY_FMT = '"$"#,##0.00';
-const QTY_FMT = '#,##0.00';
 const PCT_FMT = '0.000%';
-
-function headerStyle(branding: ReportBranding): Partial<ExcelJS.Style> {
-  return {
-    font: { bold: true, size: 11, color: { argb: 'FFFFFFFF' } },
-    fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: branding.accentARGB } },
-    alignment: { horizontal: 'center', vertical: 'middle', wrapText: true },
-    border: { bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } } },
-  };
-}
 
 function writeHeaderRow(
   sheet: ExcelJS.Worksheet,

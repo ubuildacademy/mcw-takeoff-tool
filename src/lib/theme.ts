@@ -2,12 +2,12 @@ export type ThemeMode = 'light' | 'dark' | 'system';
 
 const THEME_STORAGE_KEY = 'user-preferences-store';
 
-export function getSystemTheme(): 'light' | 'dark' {
+function getSystemTheme(): 'light' | 'dark' {
   if (typeof window === 'undefined') return 'light';
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
-export function resolveThemeMode(mode: ThemeMode): 'light' | 'dark' {
+function resolveThemeMode(mode: ThemeMode): 'light' | 'dark' {
   return mode === 'system' ? getSystemTheme() : mode;
 }
 

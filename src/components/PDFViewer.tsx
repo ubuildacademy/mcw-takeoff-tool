@@ -1886,7 +1886,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     // Paint order matches store: usePDFViewerData mirrors getPageTakeoffMeasurements(), which sorts by stackOrder.
     
     const hasLocalMeasurements = pageMeasurements.length > 0;
-    const hasAnnotations = localAnnotations.filter(a => a.pageNumber === pageNum).length > 0;
+    const hasAnnotations = localAnnotations.some(a => a.pageNumber === pageNum);
     const pageHyperlinks = useHyperlinkStore.getState().getPageHyperlinks(effectiveProjectId || '', file.id || '', pageNum);
     const hasHyperlinks = pageHyperlinks.length > 0;
     const hasOcrHighlights = ocrHighlightBoxes.length > 0;
@@ -2178,8 +2178,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     const svg =
       (svgOverlayRef.current.querySelector(`#${SVG_COMMITTED_GROUP_ID}`) as SVGSVGElement | null) ??
       svgOverlayRef.current;
-    const idsToDeselect = previousSelectedIds.filter((id) => !newSelectedIds.includes(id));
-    const idsToSelect = newSelectedIds.filter((id) => !previousSelectedIds.includes(id));
+    // Set membership rather than Array.includes per id: selection diffing ran on every
+    // marquee drag and was previous x new.
+    const newIdSet = new Set(newSelectedIds);
+    const previousIdSet = new Set(previousSelectedIds);
+    const idsToDeselect = previousSelectedIds.filter((id) => !newIdSet.has(id));
+    const idsToSelect = newSelectedIds.filter((id) => !previousIdSet.has(id));
 
     const deselectId = (previousSelectedId: string) => {
       const prevMeasurementElements = svg.querySelectorAll(`[data-measurement-id="${previousSelectedId}"]`);
@@ -2507,7 +2511,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         m.sheetId === file.id &&
         samePdfPageKey(m.pdfPage, pageNum)
     );
-    const hasAnnotationsOnPage = localAnnotations.filter((a) => a.pageNumber === pageNum).length > 0;
+    const hasAnnotationsOnPage = localAnnotations.some((a) => a.pageNumber === pageNum);
     const pageHyperlinks = useHyperlinkStore.getState().getPageHyperlinks(effectiveProjectId || '', file.id || '', pageNum);
     const hasMarkups =
       currentMeasurements.length > 0 ||

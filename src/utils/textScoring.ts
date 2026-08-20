@@ -6,7 +6,7 @@
  * corpus), sum per-chunk.
  */
 
-export const STOPWORDS = new Set([
+const STOPWORDS = new Set([
   'the', 'and', 'for', 'are', 'with', 'that', 'this', 'from', 'have', 'has',
   'had', 'will', 'would', 'could', 'should', 'what', 'which', 'where', 'when',
   'how', 'why', 'who', 'whom', 'can', 'does', 'did', 'not', 'you', 'your',
@@ -19,7 +19,7 @@ export const STOPWORDS = new Set([
 ]);
 
 /** Occurrence count of a question token within a chunk is capped at this before weighting. */
-export const MAX_TOKEN_OCCURRENCE_WEIGHT = 5;
+const MAX_TOKEN_OCCURRENCE_WEIGHT = 5;
 
 export function tokenize(text: string): string[] {
   return text
@@ -28,11 +28,11 @@ export function tokenize(text: string): string[] {
     .filter((token) => token.length >= 3 && !STOPWORDS.has(token));
 }
 
-export function escapeRegExp(value: string): string {
+function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-export function countOccurrences(token: string, text: string): number {
+function countOccurrences(token: string, text: string): number {
   const re = new RegExp(`\\b${escapeRegExp(token)}\\b`, 'gi');
   const matches = text.match(re);
   return matches ? matches.length : 0;
@@ -52,7 +52,7 @@ export function computeDocFrequency(tokens: string[], corpusTexts: string[]): Ma
 }
 
 /** Inverse document frequency: rarer tokens (lower df) score higher. */
-export function idf(token: string, docFrequency: Map<string, number>, corpusSize: number): number {
+function idf(token: string, docFrequency: Map<string, number>, corpusSize: number): number {
   const df = docFrequency.get(token) ?? 0;
   return Math.log((corpusSize + 1) / (df + 1)) + 1;
 }

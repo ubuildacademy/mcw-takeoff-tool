@@ -1,5 +1,5 @@
 /** Basic email shape check for recipient lists in share/report modals. */
-export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Must match server `MAX_EMAIL_RECIPIENTS` in `server/src/config/deliveryLimits.ts`. */
 export const MAX_EMAIL_RECIPIENTS = 10;

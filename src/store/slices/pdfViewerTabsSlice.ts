@@ -7,7 +7,7 @@ import { persist } from 'zustand/middleware';
 import { getSheetId } from '../../lib/sheetUtils';
 import { markPdfViewerTabsStoreHydrated } from '../persistHydration';
 
-export const PDF_VIEWER_MAX_TABS = 15;
+const PDF_VIEWER_MAX_TABS = 15;
 
 export interface PDFViewerTab {
   id: string;

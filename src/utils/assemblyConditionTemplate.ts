@@ -91,7 +91,7 @@ const TOKEN_UNIT_MAP: Record<string, UnitMapping> = {
   COUNT: { type: 'count', unit: 'EA' },
 };
 
-export function inferUnitFromText(text: string | null | undefined): UnitMapping | null {
+function inferUnitFromText(text: string | null | undefined): UnitMapping | null {
   const upper = (text ?? '').toUpperCase();
   if (!upper.trim()) return null;
   for (const { re, mapping } of PHRASE_UNIT_MAP) {

@@ -6,6 +6,7 @@
  */
 import type ExcelJS from 'exceljs';
 import type { ConditionFolder, TakeoffCondition } from '../../../types';
+import { MONEY_FMT, QTY_FMT } from './sheetStyles';
 
 export interface DataSheetEntry {
   condition: TakeoffCondition;
@@ -19,8 +20,6 @@ export interface DataSheetEntry {
   };
 }
 
-const QTY_FMT = '#,##0.00';
-const MONEY_FMT = '"$"#,##0.00';
 
 /** Timestamps are stored as epoch-millis strings; fall back to Date parsing. */
 function toIsoDate(timestamp: string | undefined): string {
