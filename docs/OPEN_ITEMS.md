@@ -406,3 +406,19 @@ mode — white text on a light-blue card. The **Costs tab** copy of the same sum
 already had full `dark:` coverage and was fine. Brought the Reports-tab copy in line
 with the Costs-tab one (dark gradient, dark border, dark accent text, dark amber
 warning boxes). No product decision involved, so fixed directly rather than logged.
+
+### 23. Codebase-wide simplification sweep — queued, not started
+
+**Raised:** 2026-08-20, by Jeff. Concern: fast iterative ("vibe-coded") feature work
+tends to accrete more code than the problem needs — duplicated logic, dead
+abstractions, over-parameterized helpers, stale comments — and this app has grown to
+a lot of lines of code and real complexity. Worth an audit pass to see whether that's
+actually true here, or whether it's already reasonably tight. A clean bill of health
+is a fine outcome, not a failure to find something.
+
+**Not now** — do this once the current work (Workstream A/D, item 21 unit backfill,
+etc.) is wrapped up, not interleaved with it.
+
+**Tooling:** Jeff has a "karpathy" skill scoped for exactly this (simplification/
+condensing audits) — use that when available; otherwise `/simplify` (this repo's own
+review-and-condense skill) covers similar ground.

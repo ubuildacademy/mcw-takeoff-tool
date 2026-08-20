@@ -524,6 +524,13 @@ stays as the authoring signal).
 
 ## Workstream D — AI provider fallback (data-gated)
 
+**Checked 2026-08-20:** pulled the live 90-day summary from production
+(`getAiTokenUsageSummary`, throwaway script, deleted after). Total usage since logging
+went live 2026-07-13: **1 request, 23,619 tokens, one user, one day** — nothing since.
+No real chat traffic exists to base a provider decision on, and no cost pressure to
+justify one yet. Leaving this parked; re-check when there's actual beta usage, not on
+a calendar trigger.
+
 **Trigger:** ≥2 weeks of AI Usage data in the admin tab (merged to main 2026-07-13;
 migration `create_ai_token_usage_table.sql` must be applied in Supabase first).
 
