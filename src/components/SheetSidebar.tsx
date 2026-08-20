@@ -27,6 +27,7 @@ import { fileService, sheetService } from '../services/apiService';
 import { useMeasurementStore } from '../store/slices/measurementSlice';
 import { parseDocumentIdFromSheetId } from '../lib/sheetUtils';
 import type { PDFDocument, SearchResult } from '../types';
+import { useConfirm } from '../hooks/useConfirm';
 
 // PDFPage and PDFDocument interfaces imported from shared types
 
@@ -68,6 +69,7 @@ export function SheetSidebar({
   onBulkExtractTitleblock,
   onRotateAllSheetsInDocument,
 }: SheetSidebarProps) {
+  const { confirm, confirmDialog } = useConfirm();
   const {
     filterBy,
     setFilterBy,
@@ -279,9 +281,12 @@ export function SheetSidebar({
       return;
     }
 
-    const confirmed = window.confirm(
-      `Are you sure you want to delete all ${documents.length} document(s)? This action cannot be undone.`
-    );
+    const confirmed = await confirm({
+      title: `Delete all ${documents.length} document(s)?`,
+      description: 'This removes every document in this project, along with their sheets. This cannot be undone.',
+      confirmText: 'Delete all',
+      variant: 'destructive',
+    });
 
     if (!confirmed) {
       return;
@@ -350,7 +355,13 @@ export function SheetSidebar({
 
   // Handle delete page (for single-page documents)
   const handleDeletePage = async (documentId: string) => {
-    if (!confirm('Are you sure you want to delete this document? This action cannot be undone.')) {
+    const confirmed = await confirm({
+      title: 'Delete this document?',
+      description: 'The document and its sheets are removed from the project. This cannot be undone.',
+      confirmText: 'Delete',
+      variant: 'destructive',
+    });
+    if (!confirmed) {
       return;
     }
     
@@ -1009,6 +1020,8 @@ export function SheetSidebar({
         onRenameSave={handleRenamePage}
         isRenameSaveDisabled={!renameInput.trim()}
       />
+
+      {confirmDialog}
     </div>
   );
 }

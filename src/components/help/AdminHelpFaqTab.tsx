@@ -8,6 +8,7 @@ import { DEFAULT_HELP_FAQ_CONFIG, type HelpSurface } from '../../content/helpCon
 import type { HelpFaqConfig, HelpItem } from '../../content/helpFaqTypes';
 import { helpService, fetchHelpFaq } from '../../services/helpService';
 import { extractErrorMessage } from '../../utils/commonUtils';
+import { useConfirm } from '../../hooks/useConfirm';
 
 function cloneConfig(config: HelpFaqConfig): HelpFaqConfig {
   return {
@@ -144,6 +145,7 @@ function FaqEditorSection({
 }
 
 export function AdminHelpFaqTab() {
+  const { confirm, confirmDialog } = useConfirm();
   const [config, setConfig] = useState<HelpFaqConfig>(() => cloneConfig(DEFAULT_HELP_FAQ_CONFIG));
   const [customized, setCustomized] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -198,11 +200,13 @@ export function AdminHelpFaqTab() {
   };
 
   const resetToDefaults = async () => {
-    if (
-      !window.confirm(
-        'Clear the saved FAQ on the server and revert all users to bundled defaults?'
-      )
-    ) {
+    const confirmed = await confirm({
+      title: 'Revert the FAQ to bundled defaults?',
+      description: 'The saved FAQ is cleared on the server and every user sees the bundled content again. Custom edits are lost.',
+      confirmText: 'Revert',
+      variant: 'destructive',
+    });
+    if (!confirmed) {
       return;
     }
     setSaving(true);
@@ -287,6 +291,8 @@ export function AdminHelpFaqTab() {
         items={config.workspace}
         onChange={(workspace) => setConfig((c) => ({ ...c, workspace }))}
       />
+
+      {confirmDialog}
     </div>
   );
 }

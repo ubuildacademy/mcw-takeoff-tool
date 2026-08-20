@@ -5,6 +5,7 @@ import { Input } from '../ui/input';
 import { Upload, Settings, Filter, Search, Tag, Trash2 } from 'lucide-react';
 import type { SheetSidebarHeaderProps } from './SheetSidebarHeader.types';
 import type { SheetSidebarFilterBy } from './useSheetSidebarFilter';
+import { useConfirm } from '../../hooks/useConfirm';
 
 export function SheetSidebarHeader({
   filterBy,
@@ -19,10 +20,13 @@ export function SheetSidebarHeader({
   onPdfUpload,
   uploading,
 }: SheetSidebarHeaderProps) {
-  const handleBulkExtractOrLabel = () => {
-    const confirmed = window.confirm(
-      `Extract titleblock information for all ${documentsCount} document(s)? This will process all pages.`
-    );
+  const { confirm, confirmDialog } = useConfirm();
+  const handleBulkExtractOrLabel = async () => {
+    const confirmed = await confirm({
+      title: `Extract titleblocks for all ${documentsCount} document(s)?`,
+      description: 'Every page of every document is processed. This can take a while on a large set.',
+      confirmText: 'Extract',
+    });
     if (!confirmed) return;
     if (onBulkExtractTitleblock) {
       onBulkExtractTitleblock();
@@ -138,6 +142,8 @@ export function SheetSidebarHeader({
           </select>
         </div>
       </div>
+
+      {confirmDialog}
     </div>
   );
 }

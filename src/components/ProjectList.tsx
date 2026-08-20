@@ -33,6 +33,7 @@ import { useMeasurementStore } from '../store/slices/measurementSlice';
 import { authHelpers } from '../lib/supabase';
 import type { UserMetadata } from '../lib/supabase';
 import type { Project } from '../types';
+import { useConfirm } from '../hooks/useConfirm';
 
 const AdminPanel = lazy(() => import('./AdminPanel').then((m) => ({ default: m.AdminPanel })));
 
@@ -249,6 +250,7 @@ function ProjectCard({ project, getTotalCost, onShare, onBackup, onEdit, onDelet
 
 export function ProjectList() {
   const navigate = useNavigate();
+  const { confirm, confirmDialog } = useConfirm();
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
@@ -419,7 +421,13 @@ export function ProjectList() {
 
   const handleDeleteProject = async (projectId: string, e: React.MouseEvent) => {
     e.stopPropagation(); // Prevent opening the project
-    if (window.confirm('Are you sure you want to delete this project? This action cannot be undone.')) {
+    const confirmed = await confirm({
+      title: 'Delete this project?',
+      description: 'The project and everything in it — documents, conditions and takeoffs — are permanently removed. This cannot be undone.',
+      confirmText: 'Delete project',
+      variant: 'destructive',
+    });
+    if (confirmed) {
       try {
         await projectService.deleteProject(projectId);
         // The store will be updated when we reload the data
@@ -707,6 +715,8 @@ export function ProjectList() {
           onClose={() => setShowUserProfile(false)}
         />
       )}
+
+      {confirmDialog}
     </div>
   );
 }

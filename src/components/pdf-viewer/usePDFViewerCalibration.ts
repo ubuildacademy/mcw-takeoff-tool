@@ -6,6 +6,7 @@ import { useState, useCallback, useEffect, useRef, type RefObject } from 'react'
 import { toast } from 'sonner';
 import { formatFeetAndInches } from '../../lib/utils';
 import type { CalibrationCompleteHandler } from '../PDFViewer.types';
+import { useConfirm } from '../../hooks/useConfirm';
 
 export interface UsePDFViewerCalibrationOptions {
   externalScaleFactor?: number | null;
@@ -62,6 +63,8 @@ export interface UsePDFViewerCalibrationResult {
   startDetectedScaleVerification: (scaleFactor: number, unit: string, label: string) => void;
   /** Non-null while verifying a detected scale (drives viewer hint copy). */
   detectedScaleVerification: { scaleFactor: number; unit: string; label: string } | null;
+  /** The calibration prompts. The consuming component must render this. */
+  confirmDialog: React.ReactNode;
 }
 
 export function usePDFViewerCalibration({
@@ -135,8 +138,10 @@ export function usePDFViewerCalibration({
     externalCalibrationRotation,
   ]);
 
+  const { confirm, confirmDialog } = useConfirm();
+
   const completeCalibration = useCallback(
-    (points: { x: number; y: number }[]) => {
+    async (points: { x: number; y: number }[]) => {
       // Detected-scale verify mode: measure the clicked line at the proposed
       // scale and ask the user to confirm it matches the printed dimension.
       if (detectedScaleVerification && points.length === 2) {
@@ -157,12 +162,15 @@ export function usePDFViewerCalibration({
         const measured = pixelDistance * proposedFactor;
         const display =
           proposedUnit === 'ft' ? formatFeetAndInches(measured) : `${measured.toFixed(2)} ${proposedUnit}`;
-        const confirmed = confirm(
-          `At ${label}, the line you drew measures ${display}.\n\n` +
-            `Does that match the printed dimension on the drawing?\n\n` +
-            `If it doesn't match, the sheet was likely replotted at a different size — ` +
-            `cancel and calibrate manually from a known dimension.`
-        );
+        const confirmed = await confirm({
+          title: `Does ${display} match the drawing?`,
+          description:
+            `At ${label}, the line you drew measures ${display}. If that does not match the printed ` +
+            `dimension, the sheet was likely replotted at a different size — cancel and calibrate ` +
+            `manually from a known dimension.`,
+          confirmText: 'It matches',
+          cancelText: 'Cancel',
+        });
         if (!confirmed) {
           toast.info('Detected scale discarded. Calibrate manually from a known dimension.');
           return;
@@ -235,7 +243,12 @@ export function usePDFViewerCalibration({
       }
       if (warnings.length > 0) {
         const warningMessage = warnings.join('\n');
-        if (!confirm(`Calibration warnings:\n\n${warningMessage}\n\nDo you want to proceed with this calibration?`)) {
+        const proceed = await confirm({
+          title: 'Proceed with this calibration?',
+          description: `Calibration warnings:\n\n${warningMessage}`,
+          confirmText: 'Proceed',
+        });
+        if (!proceed) {
           setCalibrationPoints([]);
           setCalibrationData(null);
           setIsCalibrating(false);
@@ -272,6 +285,7 @@ export function usePDFViewerCalibration({
       setCalibrationData(null);
     },
     [
+      confirm,
       calibrationData,
       detectedScaleVerification,
       onCalibrationComplete,
@@ -359,5 +373,7 @@ export function usePDFViewerCalibration({
     applyScale,
     startDetectedScaleVerification,
     detectedScaleVerification,
+    /** Render this in the consuming component so the calibration prompts can appear. */
+    confirmDialog,
   };
 }

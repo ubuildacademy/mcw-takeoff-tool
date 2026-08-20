@@ -46,6 +46,7 @@ import { CHAT_PRESET_CONFIGS, CHAT_PRESET_SETTING_KEY } from '../constants/chatP
 import { knowledgeBaseService } from '../services/knowledgeBaseService';
 import { KB_CHAR_BUDGET } from '../constants/chatPresets';
 import { cn } from '@/lib/utils';
+import { useConfirm } from '../hooks/useConfirm';
 
 // Fallback when /api/ollama/models fails (https://ollama.com/search?c=cloud)
 const FALLBACK_OLLAMA_MODELS: OllamaModel[] = [
@@ -89,6 +90,7 @@ const PLATFORM_ONLY_TAB_IDS = new Set(['knowledge-base', 'ai-prompt', 'ai-settin
 const ASSEMBLIES_FEATURE_TAB_IDS = new Set(['assemblies', 'product-pricing', 'cost-defaults']);
 
 export function AdminPanel({ isOpen, onClose, projectId: _projectId, isPlatformAdmin, isCompanyAdmin: _isCompanyAdmin, assembliesEnabled }: AdminPanelProps) {
+  const { confirm, confirmDialog } = useConfirm();
   const [activeTab, setActiveTab] = useState<
     | 'ai-prompt'
     | 'ai-settings'
@@ -444,8 +446,14 @@ When answering questions:
     }
   };
 
-  const handleKbResetToDefault = () => {
-    if (!confirm('Reset to built-in default content? Any custom edits will be lost.')) return;
+  const handleKbResetToDefault = async () => {
+    const confirmed = await confirm({
+      title: 'Reset to built-in default content?',
+      description: 'The bundled knowledge base content replaces the draft. Any custom edits are lost.',
+      confirmText: 'Reset',
+      variant: 'destructive',
+    });
+    if (!confirmed) return;
     const defaultContent = knowledgeBaseService.getDefaultContent(kbPresetId);
     setKbDraft(defaultContent);
   };
@@ -622,7 +630,13 @@ When answering questions:
   };
 
   const handleDeleteInvitation = async (invitationId: string) => {
-    if (!confirm('Are you sure you want to delete this invitation?')) return;
+    const confirmed = await confirm({
+      title: 'Delete this invitation?',
+      description: 'The invite link stops working. You can always send a new invitation.',
+      confirmText: 'Delete',
+      variant: 'destructive',
+    });
+    if (!confirmed) return;
     
     try {
       await authHelpers.deleteInvitation(invitationId);
@@ -653,7 +667,12 @@ When answering questions:
 
   const handleResetPassword = async (userId: string, userEmail?: string) => {
     const label = userEmail || 'this user';
-    if (!confirm(`Send a password reset email to ${label}?`)) return;
+    const confirmed = await confirm({
+      title: `Send a password reset email to ${label}?`,
+      description: 'They receive a link to choose a new password. Their current password keeps working until they use it.',
+      confirmText: 'Send email',
+    });
+    if (!confirmed) return;
     setResettingPasswordId(userId);
     try {
       const result = await authHelpers.resetUserPassword(userId);
@@ -688,7 +707,12 @@ When answering questions:
     const target = users.find((u) => u.id === userId);
     if (!target) return;
     const label = tier === 'system_admin' ? 'system admin' : tier === 'company_admin' ? 'company admin' : 'regular user';
-    if (!confirm(`Make this user a ${label}?`)) return;
+    const confirmed = await confirm({
+      title: `Make this user a ${label}?`,
+      description: 'This changes what they can see and do across the platform, effective immediately.',
+      confirmText: 'Change role',
+    });
+    if (!confirmed) return;
 
     try {
       const wantPlatformAdmin = tier === 'system_admin';
@@ -708,7 +732,13 @@ When answering questions:
   };
 
   const handleDeleteUser = async (userId: string) => {
-    if (!confirm('Are you sure you want to delete this user? This will permanently delete all their projects and data.')) return;
+    const confirmed = await confirm({
+      title: 'Delete this user?',
+      description: 'Every project, document and takeoff belonging to them is permanently deleted along with the account. This cannot be undone.',
+      confirmText: 'Delete user',
+      variant: 'destructive',
+    });
+    if (!confirmed) return;
     
     try {
       await authHelpers.deleteUser(userId);
@@ -1695,6 +1725,8 @@ When answering questions:
             Close
           </Button>
         </DialogFooter>
+
+        {confirmDialog}
       </DialogContent>
 
     </Dialog>

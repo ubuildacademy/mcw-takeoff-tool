@@ -5,6 +5,7 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { organizationAdminService, type AdminOrganization } from '../../services/apiService';
 import { extractErrorMessage } from '../../utils/commonUtils';
+import { useConfirm } from '../../hooks/useConfirm';
 
 /**
  * Platform-admin-only company roster. The one control here today is the assemblies
@@ -13,6 +14,7 @@ import { extractErrorMessage } from '../../utils/commonUtils';
  * Assemblies/Product Pricing/Cost Defaults tabs — the moment it's toggled off.
  */
 export function CompaniesTab() {
+  const { confirm, confirmDialog } = useConfirm();
   const [orgs, setOrgs] = useState<AdminOrganization[]>([]);
   const [loading, setLoading] = useState(true);
   const [togglingId, setTogglingId] = useState<string | null>(null);
@@ -52,7 +54,15 @@ export function CompaniesTab() {
 
   const handleToggle = async (org: AdminOrganization) => {
     const next = !org.assembliesEnabled;
-    if (!confirm(`${next ? 'Grant' : 'Revoke'} the assemblies feature for ${org.name}?`)) return;
+    const confirmed = await confirm({
+      title: `${next ? 'Grant' : 'Revoke'} assemblies for ${org.name}?`,
+      description: next
+        ? 'Everyone at this company gets the assemblies feature and its admin tabs.'
+        : 'The assemblies feature and its admin tabs are hidden for everyone at this company. Their library is not deleted.',
+      confirmText: next ? 'Grant' : 'Revoke',
+      variant: next ? 'default' : 'destructive',
+    });
+    if (!confirmed) return;
     setTogglingId(org.id);
     try {
       await organizationAdminService.setAssembliesEnabled(org.id, next);
@@ -141,6 +151,8 @@ export function CompaniesTab() {
           ))}
         </div>
       )}
+
+      {confirmDialog}
     </div>
   );
 }

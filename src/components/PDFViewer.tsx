@@ -442,6 +442,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     startCalibration,
     applyScale,
     startDetectedScaleVerification,
+    confirmDialog: calibrationConfirmDialog,
   } = calibration;
 
   // Auto-scale detection: when the calibration dialog opens, scan the page's
@@ -4225,6 +4226,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           startDetectedScaleVerification(scale.scaleFactor, 'ft', scale.label)
         }
       />
+
+      {calibrationConfirmDialog}
     </div>
   );
 };
