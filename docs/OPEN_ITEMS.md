@@ -407,7 +407,7 @@ already had full `dark:` coverage and was fine. Brought the Reports-tab copy in 
 with the Costs-tab one (dark gradient, dark border, dark accent text, dark amber
 warning boxes). No product decision involved, so fixed directly rather than logged.
 
-### 23. Codebase-wide simplification sweep — queued, not started (also tracked in `ROADMAP.md` → Quality & maintainability)
+### 23. Codebase-wide simplification sweep — slices A/B/C done 2026-08-20, slice D open
 
 **Raised:** 2026-08-20, by Jeff. Concern: fast iterative ("vibe-coded") feature work
 tends to accrete more code than the problem needs — duplicated logic, dead
@@ -416,9 +416,53 @@ a lot of lines of code and real complexity. Worth an audit pass to see whether t
 actually true here, or whether it's already reasonably tight. A clean bill of health
 is a fine outcome, not a failure to find something.
 
-**Not now** — do this once the current work (Workstream A/D, item 21 unit backfill,
-etc.) is wrapped up, not interleaved with it.
+**Scope agreed with Jeff:** three mechanical slices (frontend utils/services, server
+services/routes, Python scripts), delete-only depth plus efficiency wins where they
+are semantics-preserving, honouring the existing "split large files only when touching
+that area" rule, one branch per slice with `ci:local` green on each.
 
-**Tooling:** Jeff has a "karpathy" skill scoped for exactly this (simplification/
-condensing audits) — use that when available; otherwise `/simplify` (this repo's own
-review-and-condense skill) covers similar ground.
+**Baseline and gate:** `ci:local` at `9b8c07a4` — 446 tests passed / 8 skipped,
+frontend lint 70 warnings, server lint 0. Every slice was required to end on exactly
+those numbers, and did.
+
+**Slice A — frontend utils/services (`chore/simplify-slice-a-frontend-utils`).**
+12 dead exports deleted, 20 internal-only symbols unexported, `headerStyle`/`QTY_FMT`/
+`MONEY_FMT` de-duplicated into `export/sheetStyles.ts`, and five quadratic scans made
+linear (assembly price items, three in `measurementSlice`, selection diffing in
+`PDFViewer`). 212 lines out, 92 in.
+
+**Slice B — server services/routes (`chore/simplify-slice-b-server`).**
+765 lines out, 143 in. Found one real defect: `titleblockExtractionService.extractSheets`
+mapped a failed batch to `concurrentBatches[0]` unconditionally (both arms of its
+ternary were the same expression), so the wrong pages got "Unknown" placeholders.
+Nothing called `extractSheets`, so it and its private `processBatch` were deleted
+rather than fixed. Three unused error classes and the unused `startRun`/`endRun` pair
+went too. `escapeHtml` (2 copies), the multer upload plumbing (3 copies, ~45 lines
+each) and the Python subprocess runner (2 copies, ~125 lines each) were consolidated
+into `lib/`. `getAssemblyDetailsForOrg` no longer re-scans every child row once per
+assembly.
+
+**Slice C — Python scripts: clean bill of health, no changes.** 7,866 lines across 19
+scripts; one uncalled function (`col_letters` in a scoping script) and three clone
+sites, of which the two real ones are a deliberate documented mirror of
+`vector_callout_pass.py` geometry so scoping counts stay apples-to-apples. Scripts that
+look dead say why in their own docstrings (`scope_*.py` are labelled "NOT wired into
+the app"; `assembly_write.py` explains its write CLI outlived Stage 1 but its OOXML
+primitives are imported by five other scripts). This layer is in good shape.
+
+**Open — slice D (frontend components), not started.** Clone detection found
+PDFViewer.tsx duplicating long stretches of the hooks that were extracted out of it:
+~120 lines matching `usePDFViewerInteractions.ts` (312-432), ~70 more at 692-761, and
+~50 matching `usePDFViewerMeasurements.ts` (379-427). That reads like an extraction
+that copied rather than moved. Establishing which copy is live needs care and there is
+no component test coverage behind it, so it was deliberately left out of the
+mechanical slices. Also parked for a decision: `ConfirmDialog` in `ui/base-dialog.tsx`
+is unused while five call sites still use native `window.confirm`, and
+`TitleblockExtractionService.checkAvailability` is a dead Python-availability
+diagnostic that may be worth keeping precisely because it is a diagnostic.
+
+**Tooling note (corrected):** the `karpathy-guidelines` skill is *not* a simplification
+auditor — it is preventive guidance for writing code (don't overcomplicate, make
+surgical changes). `/simplify` is diff-scoped. Neither does a retrospective whole-repo
+sweep, so this ran as a hand-rolled pass: grep-based dead-export detection, a
+sliding-window clone detector, and a nested-scan detector for quadratic loops.
