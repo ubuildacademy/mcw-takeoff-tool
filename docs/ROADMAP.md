@@ -74,6 +74,7 @@ Round 1 shipped 2026-07 (see Recently shipped). Remaining ideas for later:
 
 | Item | Notes |
 |------|--------|
+| **Codebase-wide security hardening pass** | Broader than the Supabase-dashboard checklist below — full app audit (endpoint auth, input validation, injection surface, secrets handling, dependency vulns). Use the `/security-review` skill. **Sequenced after the item-23 simplification sweep** (Jeff, 2026-08-20): review settled/condensed code once, not code about to be restructured. |
 | **Supabase Auth hardening** | See `docs/SUPABASE_SECURITY_CHECKLIST.md` and `server/migrations/supabase_security_advisor_fixes.sql` (leaked-password protection, MFA, etc.). |
 
 ---
