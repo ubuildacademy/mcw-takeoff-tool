@@ -865,18 +865,19 @@ summary. No fake/indeterminate animation posing as progress.
 **Success criteria:** full-project run on the beta set shows a bar that moves page-by-
 page and a live link count; cancel (if it exists today) still works; tsc both sides.
 
-### Task G3 — Adaptive dialog sizing
+### Task G3 — Adaptive dialog sizing — PARKED 2026-08-20
 
-**Infra landed, application incomplete.** `ui/dialog.tsx` has the `size` variant
-including `fit` (content-driven width, capped `min(90vw,72rem)`) — but only
-`ToolsDialog.tsx` uses it. The originally-named crowded dialogs (schedule review,
-preflight) no longer exist under those names (schedule tool cut, see Workstream B).
-Remaining candidates with no `size=` prop, still at fixed `max-w-lg` regardless of
-content: `BackupDialog`, `HyperlinkSheetPickerDialog`, `SendReportModal`,
-`ShareProjectModal`, `ProjectCreationDialog`, `OCRProcessingDialog`,
-`FeedbackDialog`, `UserProfile`, `AutoCountProgressDialog` — worth a real audit
-(open each, judge if content is actually crowded) before applying `fit`, not a
-blind pass.
+**Infra landed** (`ui/dialog.tsx` `size` variant incl. `fit`, content-driven width
+capped `min(90vw,72rem)`), **application audited, nothing to do right now.** Originally
+suspected 9 dialogs (`BackupDialog`, `HyperlinkSheetPickerDialog`, `SendReportModal`,
+`ShareProjectModal`, `ProjectCreationDialog`, `OCRProcessingDialog`, `FeedbackDialog`,
+`UserProfile`, `AutoCountProgressDialog`) of being stuck at an unstyled default —
+wrong: every one already sets an explicit width via `className` (`sm:max-w-md`,
+`sm:max-w-lg`, `max-w-2xl`, or a literal px value), just not through the `size` prop.
+None are the blind-default bug this task was scoped to fix. Whether any specific one
+still *feels* cramped is a visual call only Jeff can make — parked until he flags one,
+rather than guessing from source. The originally-named crowded dialogs (schedule
+review, preflight) no longer exist under those names (schedule tool cut, Workstream B).
 
 **Problem (Jeff):** "pop up dialog windows are sometimes a bit small/crowded. If there's
 room on the screen they should take advantage — not the whole space, but if they only
