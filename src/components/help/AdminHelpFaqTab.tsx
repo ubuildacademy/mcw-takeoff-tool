@@ -8,7 +8,7 @@ import { DEFAULT_HELP_FAQ_CONFIG, type HelpSurface } from '../../content/helpCon
 import type { HelpFaqConfig, HelpItem } from '../../content/helpFaqTypes';
 import { helpService, fetchHelpFaq } from '../../services/helpService';
 import { extractErrorMessage } from '../../utils/commonUtils';
-import { useConfirm } from '../../hooks/useConfirm';
+import { ConfirmInline } from '../ui/confirm-inline';
 
 function cloneConfig(config: HelpFaqConfig): HelpFaqConfig {
   return {
@@ -145,7 +145,6 @@ function FaqEditorSection({
 }
 
 export function AdminHelpFaqTab() {
-  const { confirm, confirmDialog } = useConfirm();
   const [config, setConfig] = useState<HelpFaqConfig>(() => cloneConfig(DEFAULT_HELP_FAQ_CONFIG));
   const [customized, setCustomized] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -200,15 +199,6 @@ export function AdminHelpFaqTab() {
   };
 
   const resetToDefaults = async () => {
-    const confirmed = await confirm({
-      title: 'Revert the FAQ to bundled defaults?',
-      description: 'The saved FAQ is cleared on the server and every user sees the bundled content again. Custom edits are lost.',
-      confirmText: 'Revert',
-      variant: 'destructive',
-    });
-    if (!confirmed) {
-      return;
-    }
     setSaving(true);
     try {
       await helpService.resetHelpFaq();
@@ -267,10 +257,17 @@ export function AdminHelpFaqTab() {
           <RefreshCw className="w-4 h-4 mr-2" />
           Load bundled defaults
         </Button>
-        <Button variant="outline" onClick={resetToDefaults} disabled={saving}>
-          <Trash2 className="w-4 h-4 mr-2" />
-          Clear server copy
-        </Button>
+        <ConfirmInline
+          confirmLabel="Clear?"
+          destructive
+          onConfirm={() => void resetToDefaults()}
+          trigger={(arm) => (
+            <Button variant="outline" onClick={arm} disabled={saving}>
+              <Trash2 className="w-4 h-4 mr-2" />
+              Clear server copy
+            </Button>
+          )}
+        />
         <Button variant="ghost" asChild>
           <a href="/help" target="_blank" rel="noopener noreferrer">
             Preview help site
@@ -291,8 +288,6 @@ export function AdminHelpFaqTab() {
         items={config.workspace}
         onChange={(workspace) => setConfig((c) => ({ ...c, workspace }))}
       />
-
-      {confirmDialog}
     </div>
   );
 }

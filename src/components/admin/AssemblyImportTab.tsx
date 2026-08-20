@@ -13,7 +13,7 @@ import {
 import { extractErrorMessage } from '../../utils/commonUtils';
 import { filterAssemblies, groupAssembliesByBrand } from '../../utils/assemblyListFilter';
 import { AssemblyBuilderForm } from './AssemblyBuilderForm';
-import { useConfirm } from '../../hooks/useConfirm';
+import { ConfirmInline } from '../ui/confirm-inline';
 
 /**
  * Assemblies tab — import a priced workbook into the native library.
@@ -249,7 +249,6 @@ function ProposalReview({
 }
 
 export function AssemblyImportTab() {
-  const { confirm, confirmDialog } = useConfirm();
   const [assemblies, setAssemblies] = useState<AssemblyListItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [extracting, setExtracting] = useState(false);
@@ -319,13 +318,6 @@ export function AssemblyImportTab() {
   };
 
   const remove = async (assembly: AssemblyListItem) => {
-    const confirmed = await confirm({
-      title: `Delete “${assembly.name}”?`,
-      description: 'The assembly and its components, quantity inputs and production rates are removed from the company library. This cannot be undone.',
-      confirmText: 'Delete assembly',
-      variant: 'destructive',
-    });
-    if (!confirmed) return;
     try {
       await assemblyLibraryService.remove(assembly.id);
       toast.success('Assembly deleted');
@@ -550,9 +542,21 @@ export function AssemblyImportTab() {
                               >
                                 <Pencil className="w-4 h-4" />
                               </Button>
-                              <Button variant="ghost" size="sm" onClick={() => void remove(assembly)}>
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
+                              <ConfirmInline
+                                confirmLabel="Delete?"
+                                destructive
+                                onConfirm={() => void remove(assembly)}
+                                trigger={(arm) => (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={arm}
+                                    title={`Delete ${assembly.name}`}
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                )}
+                              />
                             </>
                           )}
                         </div>
@@ -565,8 +569,6 @@ export function AssemblyImportTab() {
           </table>
         </div>
       </div>
-
-      {confirmDialog}
     </div>
   );
 }

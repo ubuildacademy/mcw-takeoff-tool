@@ -483,7 +483,14 @@ boxes are gone. The count was **14, not the 5 first reported** — that figure c
 grepping `window.confirm`, and nine sites called the global bare as `confirm(...)`;
 the compiler surfaced the first the moment a local `confirm` shadowed the global.
 `hooks/useConfirm.tsx` gives a promise-based `await confirm({...})` so no handler had
-to be split around the user's answer. `TitleblockExtractionService.checkAvailability`
+to be split around the user's answer. The eight admin-panel confirmations then moved
+to `ui/confirm-inline.tsx` instead, per Jeff: the admin panel is itself a dialog, so a
+`ConfirmDialog` there stacked a modal on a modal, and these actions live in tight row
+clusters where the answer belongs next to the question. The control arms in place —
+the icon button, or the assemblies switch, is replaced by a short confirm and a
+cancel — and disarms on escape, a click away, or four seconds. The role dropdown keeps
+its pending choice visible next to a Change?/cancel pair. `ConfirmDialog` stays for the
+six confirmations outside the admin panel, where there is no host modal to stack on. `TitleblockExtractionService.checkAvailability`
 stays, per Jeff — a diagnostic is worth having precisely when the thing it diagnoses
 breaks.
 

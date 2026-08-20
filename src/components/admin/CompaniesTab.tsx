@@ -5,7 +5,7 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { organizationAdminService, type AdminOrganization } from '../../services/apiService';
 import { extractErrorMessage } from '../../utils/commonUtils';
-import { useConfirm } from '../../hooks/useConfirm';
+import { ConfirmInline } from '../ui/confirm-inline';
 
 /**
  * Platform-admin-only company roster. The one control here today is the assemblies
@@ -14,7 +14,6 @@ import { useConfirm } from '../../hooks/useConfirm';
  * Assemblies/Product Pricing/Cost Defaults tabs — the moment it's toggled off.
  */
 export function CompaniesTab() {
-  const { confirm, confirmDialog } = useConfirm();
   const [orgs, setOrgs] = useState<AdminOrganization[]>([]);
   const [loading, setLoading] = useState(true);
   const [togglingId, setTogglingId] = useState<string | null>(null);
@@ -54,15 +53,6 @@ export function CompaniesTab() {
 
   const handleToggle = async (org: AdminOrganization) => {
     const next = !org.assembliesEnabled;
-    const confirmed = await confirm({
-      title: `${next ? 'Grant' : 'Revoke'} assemblies for ${org.name}?`,
-      description: next
-        ? 'Everyone at this company gets the assemblies feature and its admin tabs.'
-        : 'The assemblies feature and its admin tabs are hidden for everyone at this company. Their library is not deleted.',
-      confirmText: next ? 'Grant' : 'Revoke',
-      variant: next ? 'default' : 'destructive',
-    });
-    if (!confirmed) return;
     setTogglingId(org.id);
     try {
       await organizationAdminService.setAssembliesEnabled(org.id, next);
@@ -126,33 +116,39 @@ export function CompaniesTab() {
                   Created {new Date(org.createdAt).toLocaleDateString()}
                 </div>
               </div>
-              <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+              <div className="flex items-center gap-2 text-sm select-none">
                 <span className={org.assembliesEnabled ? 'text-foreground' : 'text-muted-foreground'}>
                   Assemblies
                 </span>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={org.assembliesEnabled}
-                  disabled={togglingId === org.id}
-                  onClick={() => handleToggle(org)}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors disabled:opacity-50 ${
-                    org.assembliesEnabled ? 'bg-primary' : 'bg-muted'
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-background transition-transform ${
-                      org.assembliesEnabled ? 'translate-x-6' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </label>
+                <ConfirmInline
+                  confirmLabel={org.assembliesEnabled ? 'Revoke?' : 'Grant?'}
+                  destructive={org.assembliesEnabled}
+                  onConfirm={() => void handleToggle(org)}
+                  trigger={(arm) => (
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={org.assembliesEnabled}
+                      aria-label={`${org.assembliesEnabled ? 'Revoke' : 'Grant'} assemblies for ${org.name}`}
+                      disabled={togglingId === org.id}
+                      onClick={arm}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors disabled:opacity-50 ${
+                        org.assembliesEnabled ? 'bg-primary' : 'bg-muted'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-background transition-transform ${
+                          org.assembliesEnabled ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  )}
+                />
+              </div>
             </div>
           ))}
         </div>
       )}
-
-      {confirmDialog}
     </div>
   );
 }

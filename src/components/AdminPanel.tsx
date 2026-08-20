@@ -23,6 +23,7 @@ import {
   SlidersHorizontal,
   Layers,
   Building2,
+  X,
   Palette,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -46,7 +47,7 @@ import { CHAT_PRESET_CONFIGS, CHAT_PRESET_SETTING_KEY } from '../constants/chatP
 import { knowledgeBaseService } from '../services/knowledgeBaseService';
 import { KB_CHAR_BUDGET } from '../constants/chatPresets';
 import { cn } from '@/lib/utils';
-import { useConfirm } from '../hooks/useConfirm';
+import { ConfirmInline } from './ui/confirm-inline';
 
 // Fallback when /api/ollama/models fails (https://ollama.com/search?c=cloud)
 const FALLBACK_OLLAMA_MODELS: OllamaModel[] = [
@@ -90,7 +91,9 @@ const PLATFORM_ONLY_TAB_IDS = new Set(['knowledge-base', 'ai-prompt', 'ai-settin
 const ASSEMBLIES_FEATURE_TAB_IDS = new Set(['assemblies', 'product-pricing', 'cost-defaults']);
 
 export function AdminPanel({ isOpen, onClose, projectId: _projectId, isPlatformAdmin, isCompanyAdmin: _isCompanyAdmin, assembliesEnabled }: AdminPanelProps) {
-  const { confirm, confirmDialog } = useConfirm();
+  // A role change is confirmed next to the dropdown that started it, rather than in a
+  // dialog over the admin panel. The select shows the pending choice while it waits.
+  const [pendingTier, setPendingTier] = useState<{ userId: string; tier: UserTier } | null>(null);
   const [activeTab, setActiveTab] = useState<
     | 'ai-prompt'
     | 'ai-settings'
@@ -446,14 +449,7 @@ When answering questions:
     }
   };
 
-  const handleKbResetToDefault = async () => {
-    const confirmed = await confirm({
-      title: 'Reset to built-in default content?',
-      description: 'The bundled knowledge base content replaces the draft. Any custom edits are lost.',
-      confirmText: 'Reset',
-      variant: 'destructive',
-    });
-    if (!confirmed) return;
+  const handleKbResetToDefault = () => {
     const defaultContent = knowledgeBaseService.getDefaultContent(kbPresetId);
     setKbDraft(defaultContent);
   };
@@ -630,14 +626,6 @@ When answering questions:
   };
 
   const handleDeleteInvitation = async (invitationId: string) => {
-    const confirmed = await confirm({
-      title: 'Delete this invitation?',
-      description: 'The invite link stops working. You can always send a new invitation.',
-      confirmText: 'Delete',
-      variant: 'destructive',
-    });
-    if (!confirmed) return;
-    
     try {
       await authHelpers.deleteInvitation(invitationId);
       await loadInvitations();
@@ -667,12 +655,6 @@ When answering questions:
 
   const handleResetPassword = async (userId: string, userEmail?: string) => {
     const label = userEmail || 'this user';
-    const confirmed = await confirm({
-      title: `Send a password reset email to ${label}?`,
-      description: 'They receive a link to choose a new password. Their current password keeps working until they use it.',
-      confirmText: 'Send email',
-    });
-    if (!confirmed) return;
     setResettingPasswordId(userId);
     try {
       const result = await authHelpers.resetUserPassword(userId);
@@ -707,12 +689,6 @@ When answering questions:
     const target = users.find((u) => u.id === userId);
     if (!target) return;
     const label = tier === 'system_admin' ? 'system admin' : tier === 'company_admin' ? 'company admin' : 'regular user';
-    const confirmed = await confirm({
-      title: `Make this user a ${label}?`,
-      description: 'This changes what they can see and do across the platform, effective immediately.',
-      confirmText: 'Change role',
-    });
-    if (!confirmed) return;
 
     try {
       const wantPlatformAdmin = tier === 'system_admin';
@@ -732,14 +708,6 @@ When answering questions:
   };
 
   const handleDeleteUser = async (userId: string) => {
-    const confirmed = await confirm({
-      title: 'Delete this user?',
-      description: 'Every project, document and takeoff belonging to them is permanently deleted along with the account. This cannot be undone.',
-      confirmText: 'Delete user',
-      variant: 'destructive',
-    });
-    if (!confirmed) return;
-    
     try {
       await authHelpers.deleteUser(userId);
       await loadUsers();
@@ -998,15 +966,22 @@ When answering questions:
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleKbResetToDefault}
-                          disabled={kbLoading || kbSaving}
-                        >
-                          <RotateCcw className="w-4 h-4 mr-2" />
-                          Reset to Default
-                        </Button>
+                        <ConfirmInline
+                          confirmLabel="Reset?"
+                          destructive
+                          onConfirm={handleKbResetToDefault}
+                          trigger={(arm) => (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={arm}
+                              disabled={kbLoading || kbSaving}
+                            >
+                              <RotateCcw className="w-4 h-4 mr-2" />
+                              Reset to Default
+                            </Button>
+                          )}
+                        />
                         <Button
                           size="sm"
                           onClick={handleKbSave}
@@ -1627,14 +1602,22 @@ When answering questions:
                                     ? <Loader2 className="w-4 h-4 animate-spin" />
                                     : <Send className="w-4 h-4" />}
                                 </Button>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => handleDeleteInvitation(invitation.id)}
-                                  className="text-red-600 hover:bg-red-500/10 dark:text-red-400"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </Button>
+                                <ConfirmInline
+                                  confirmLabel="Delete?"
+                                  destructive
+                                  onConfirm={() => handleDeleteInvitation(invitation.id)}
+                                  trigger={(arm) => (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={arm}
+                                      className="text-red-600 hover:bg-red-500/10 dark:text-red-400"
+                                      title="Delete invitation"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </Button>
+                                  )}
+                                />
                               </div>
                             ))}
                         </div>
@@ -1671,20 +1654,29 @@ When answering questions:
                                       </p>
                                     </div>
                                     <div className="flex items-center gap-2">
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => handleResetPassword(user.id, user.email)}
-                                        disabled={resettingPasswordId === user.id}
-                                        title="Send password reset email"
-                                      >
-                                        {resettingPasswordId === user.id
-                                          ? <Loader2 className="w-4 h-4 animate-spin" />
-                                          : <KeyRound className="w-4 h-4" />}
-                                      </Button>
+                                      <ConfirmInline
+                                        confirmLabel="Send?"
+                                        onConfirm={() => handleResetPassword(user.id, user.email)}
+                                        trigger={(arm) => (
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={arm}
+                                            disabled={resettingPasswordId === user.id}
+                                            title="Send password reset email"
+                                          >
+                                            {resettingPasswordId === user.id
+                                              ? <Loader2 className="w-4 h-4 animate-spin" />
+                                              : <KeyRound className="w-4 h-4" />}
+                                          </Button>
+                                        )}
+                                      />
                                       <select
-                                        value={tierOf(user)}
-                                        onChange={(e) => handleUpdateTier(user.id, e.target.value as 'user' | 'company_admin' | 'system_admin')}
+                                        value={pendingTier?.userId === user.id ? pendingTier.tier : tierOf(user)}
+                                        onChange={(e) => {
+                                          const tier = e.target.value as UserTier;
+                                          setPendingTier(tier === tierOf(user) ? null : { userId: user.id, tier });
+                                        }}
                                         className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                         title="Role"
                                       >
@@ -1696,14 +1688,45 @@ When answering questions:
                                           <option value="system_admin" className="bg-background text-foreground">System Admin</option>
                                         )}
                                       </select>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => handleDeleteUser(user.id)}
-                                        className="text-red-600 hover:bg-red-500/10 dark:text-red-400"
-                                      >
-                                        <Trash2 className="w-4 h-4" />
-                                      </Button>
+                                      {pendingTier?.userId === user.id && (
+                                        <span className="inline-flex items-center gap-1">
+                                          <Button
+                                            size="sm"
+                                            onClick={() => {
+                                              const { tier } = pendingTier;
+                                              setPendingTier(null);
+                                              void handleUpdateTier(user.id, tier);
+                                            }}
+                                            autoFocus
+                                          >
+                                            Change?
+                                          </Button>
+                                          <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            onClick={() => setPendingTier(null)}
+                                            aria-label="Cancel role change"
+                                          >
+                                            <X className="w-4 h-4" />
+                                          </Button>
+                                        </span>
+                                      )}
+                                      <ConfirmInline
+                                        confirmLabel="Delete?"
+                                        destructive
+                                        onConfirm={() => handleDeleteUser(user.id)}
+                                        trigger={(arm) => (
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={arm}
+                                            className="text-red-600 hover:bg-red-500/10 dark:text-red-400"
+                                            title="Delete user"
+                                          >
+                                            <Trash2 className="w-4 h-4" />
+                                          </Button>
+                                        )}
+                                      />
                                     </div>
                                   </div>
                                 ))}
@@ -1725,8 +1748,6 @@ When answering questions:
             Close
           </Button>
         </DialogFooter>
-
-        {confirmDialog}
       </DialogContent>
 
     </Dialog>
