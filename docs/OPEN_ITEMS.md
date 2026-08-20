@@ -407,7 +407,7 @@ already had full `dark:` coverage and was fine. Brought the Reports-tab copy in 
 with the Costs-tab one (dark gradient, dark border, dark accent text, dark amber
 warning boxes). No product decision involved, so fixed directly rather than logged.
 
-### 23. Codebase-wide simplification sweep — slices A/B/C done 2026-08-20, slice D open
+### 23. Codebase-wide simplification sweep — DONE 2026-08-20 (slices A-D)
 
 **Raised:** 2026-08-20, by Jeff. Concern: fast iterative ("vibe-coded") feature work
 tends to accrete more code than the problem needs — duplicated logic, dead
@@ -450,19 +450,53 @@ look dead say why in their own docstrings (`scope_*.py` are labelled "NOT wired 
 the app"; `assembly_write.py` explains its write CLI outlived Stage 1 but its OOXML
 primitives are imported by five other scripts). This layer is in good shape.
 
-**Open — slice D (frontend components), not started.** Clone detection found
-PDFViewer.tsx duplicating long stretches of the hooks that were extracted out of it:
-~120 lines matching `usePDFViewerInteractions.ts` (312-432), ~70 more at 692-761, and
-~50 matching `usePDFViewerMeasurements.ts` (379-427). That reads like an extraction
-that copied rather than moved. Establishing which copy is live needs care and there is
-no component test coverage behind it, so it was deliberately left out of the
-mechanical slices. Also parked for a decision: `ConfirmDialog` in `ui/base-dialog.tsx`
-is unused while five call sites still use native `window.confirm`, and
-`TitleblockExtractionService.checkAvailability` is a dead Python-availability
-diagnostic that may be worth keeping precisely because it is a diagnostic.
+**Slice D — frontend components (`chore/simplify-slice-d-components`).**
+209 lines out, 94 in.
+
+*Correction to the slice C writeup.* Of the three PDFViewer.tsx regions reported as
+duplicating its extracted hooks, only one was real. The other two — PDFViewer
+1153-1275 against `usePDFViewerInteractions` 312-432, and PDFViewer 502-550 against
+`usePDFViewerMeasurements` 379-427 — are a hook's call site against its own
+destructuring, and a hook's return list against the component's destructuring. A
+120-parameter hook produces identical identifier lists at both ends and the clone
+detector matched them. That is a wide interface, not copied logic. Re-running the
+detector with bare identifier-list windows filtered dropped `src/` from 55 candidate
+clone sites to 15.
+
+The real one: the pasted-measurement payload was built inline four times (context-menu
+paste and "paste as new condition" in PDFViewer.tsx, ⌘V and ⌘⇧V in
+usePDFViewerInteractions.ts), ~25 identical lines each. Now
+`buildPastedMeasurementPayload` in `utils/measurementPaste.ts`. The offset constant had
+already started to decay — the hook used a named `PASTE_OFFSET` while PDFViewer.tsx
+hardcoded `0.02` twice with an unused `_PASTE_OFFSET` above them.
+
+Also deleted `usePDFViewerInteractions.types.ts`: 107 lines, no importers, sketching a
+grouped-props refactor that never landed and has since drifted (its result interface
+predates iPad pinch-to-zoom). It read like the hook's type contract, which made it
+worse than absent. And `onCalibrationComplete`'s eight positional parameters — five
+nullable numbers, where a transposed pair would still type-check — are now named once
+as `CalibrationCompleteHandler`.
+
+**Follow-on, shipped the same day (`feat/themed-confirm-dialogs`).** The parked
+`ConfirmDialog` question resolved as keep-and-wire-up, per Jeff. All native confirm
+boxes are gone. The count was **14, not the 5 first reported** — that figure came from
+grepping `window.confirm`, and nine sites called the global bare as `confirm(...)`;
+the compiler surfaced the first the moment a local `confirm` shadowed the global.
+`hooks/useConfirm.tsx` gives a promise-based `await confirm({...})` so no handler had
+to be split around the user's answer. `TitleblockExtractionService.checkAvailability`
+stays, per Jeff — a diagnostic is worth having precisely when the thing it diagnoses
+breaks.
+
+**Not done, deliberately.** Splitting the large components (`PDFViewer.tsx` at 4,200
+lines, `usePDFViewerInteractions.ts` at 2,800) stays under the existing "split by
+concern only when touching that area" rule in ROADMAP. There is no component test
+coverage to refactor against, and this sweep's whole guarantee was that the test and
+lint numbers never moved.
 
 **Tooling note (corrected):** the `karpathy-guidelines` skill is *not* a simplification
 auditor — it is preventive guidance for writing code (don't overcomplicate, make
 surgical changes). `/simplify` is diff-scoped. Neither does a retrospective whole-repo
 sweep, so this ran as a hand-rolled pass: grep-based dead-export detection, a
-sliding-window clone detector, and a nested-scan detector for quadratic loops.
+sliding-window clone detector (with an identifier-list filter, added after the first
+run produced the false positives above), and a nested-scan detector for quadratic
+loops.
