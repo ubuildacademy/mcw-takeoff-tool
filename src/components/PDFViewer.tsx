@@ -89,9 +89,9 @@ import {
 } from '../utils/scaleDetection';
 import { ocrApiService } from '../services/apiService';
 import { generateDistinctColor } from '../utils/commonUtils';
+import { buildPastedMeasurementPayload } from '../utils/measurementPaste';
 
 /** Normalized offset for pasted markups (~2% of page) so pasted markup is visible next to original */
-const _PASTE_OFFSET = 0.02;
 
 /** Debounce (ms) for saving scroll position so we persist final position on reload */
 const SCROLL_SAVE_DEBOUNCE_MS = 150;
@@ -891,33 +891,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     if (!copiedMarkups.length || !effectiveProjectId || !file.id) return;
     setMeasurementContextMenu(null);
     setBlankPasteMenu(null);
-    const offsetPoint = (p: { x: number; y: number }) => ({ x: p.x + 0.02, y: p.y + 0.02 });
     for (const m of copiedMarkups) {
-      const payload = {
+      const payload = buildPastedMeasurementPayload(m, {
         projectId: effectiveProjectId,
         sheetId: file.id,
         pdfPage: currentPage,
         conditionId: m.conditionId,
-        type: m.type,
-        points: m.points.map(offsetPoint),
-        pdfCoordinates: m.pdfCoordinates.map(offsetPoint),
-        calculatedValue: m.calculatedValue,
-        unit: m.unit,
         conditionColor: m.conditionColor,
         conditionName: m.conditionName,
-        ...(m.conditionMarkerShape && { conditionMarkerShape: m.conditionMarkerShape }),
-        ...(m.perimeterValue != null && { perimeterValue: m.perimeterValue }),
-        ...(m.areaValue != null && { areaValue: m.areaValue }),
-        ...(m.cutouts && m.cutouts.length > 0 && {
-          cutouts: m.cutouts.map((c) => ({
-            ...c,
-            points: c.points.map(offsetPoint),
-            pdfCoordinates: c.pdfCoordinates.map(offsetPoint),
-          })),
-        }),
-        ...(m.netCalculatedValue != null && { netCalculatedValue: m.netCalculatedValue }),
-        ...(m.description != null && { description: m.description }),
-      };
+      });
       addTakeoffMeasurementForPaste(payload).catch((err) => {
         if (isTakeoffMeasurementCreateAborted(err)) return;
         console.error('Paste from context menu failed:', err);
@@ -945,33 +927,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         color: newColor,
         projectId: effectiveProjectId,
       });
-      const offsetPoint = (p: { x: number; y: number }) => ({ x: p.x + 0.02, y: p.y + 0.02 });
       for (const m of copiedMarkups) {
-        const payload = {
+        const payload = buildPastedMeasurementPayload(m, {
           projectId: effectiveProjectId,
           sheetId: file.id,
           pdfPage: currentPage,
           conditionId: newConditionId,
-          type: m.type,
-          points: m.points.map(offsetPoint),
-          pdfCoordinates: m.pdfCoordinates.map(offsetPoint),
-          calculatedValue: m.calculatedValue,
-          unit: m.unit,
           conditionColor: newColor,
           conditionName: newName,
-          ...(m.conditionMarkerShape && { conditionMarkerShape: m.conditionMarkerShape }),
-          ...(m.perimeterValue != null && { perimeterValue: m.perimeterValue }),
-          ...(m.areaValue != null && { areaValue: m.areaValue }),
-          ...(m.cutouts && m.cutouts.length > 0 && {
-            cutouts: m.cutouts.map((c) => ({
-              ...c,
-              points: c.points.map(offsetPoint),
-              pdfCoordinates: c.pdfCoordinates.map(offsetPoint),
-            })),
-          }),
-          ...(m.netCalculatedValue != null && { netCalculatedValue: m.netCalculatedValue }),
-          ...(m.description != null && { description: m.description }),
-        };
+        });
         addTakeoffMeasurementForPaste(payload).catch((err) => {
           if (isTakeoffMeasurementCreateAborted(err)) return;
           console.error('Paste as new condition markup failed:', err);

@@ -5,6 +5,7 @@
 import { useState, useCallback, useEffect, useRef, type RefObject } from 'react';
 import { toast } from 'sonner';
 import { formatFeetAndInches } from '../../lib/utils';
+import type { CalibrationCompleteHandler } from '../PDFViewer.types';
 
 export interface UsePDFViewerCalibrationOptions {
   externalScaleFactor?: number | null;
@@ -13,16 +14,7 @@ export interface UsePDFViewerCalibrationOptions {
   externalCalibrationViewportWidth?: number | null;
   externalCalibrationViewportHeight?: number | null;
   externalCalibrationRotation?: number | null;
-  onCalibrationComplete?: (
-    isCalibrated: boolean,
-    scaleFactor: number,
-    unit: string,
-    scope?: 'page' | 'document',
-    pageNumber?: number | null,
-    viewportWidth?: number | null,
-    viewportHeight?: number | null,
-    rotation?: number | null
-  ) => void;
+  onCalibrationComplete?: CalibrationCompleteHandler;
   currentPage: number;
   currentViewport: { width: number; height: number; rotation?: number } | null;
   viewStateRotation: number;

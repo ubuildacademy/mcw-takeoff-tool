@@ -5,6 +5,23 @@
 import type { SearchResult, ProjectFile } from '../types';
 
 /** Rectangular selection box (CSS/viewport coords). Used for visual search and titleblock selection. */
+/**
+ * Reported when a page or document finishes calibrating. Eight positional
+ * parameters, five of them nullable numbers, were written out by hand in each
+ * place that referenced this — one transposed pair would have type-checked
+ * cleanly, so it is named once here.
+ */
+export type CalibrationCompleteHandler = (
+  isCalibrated: boolean,
+  scaleFactor: number,
+  unit: string,
+  scope?: 'page' | 'document',
+  pageNumber?: number | null,
+  viewportWidth?: number | null,
+  viewportHeight?: number | null,
+  rotation?: number | null
+) => void;
+
 export interface SelectionBox {
   x: number;
   y: number;
@@ -38,16 +55,7 @@ export interface PDFViewerProps {
   calibrationRotation?: number | null;
   onPDFLoaded?: (totalPages: number) => void;
   onCalibrationRequest?: () => void;
-  onCalibrationComplete?: (
-    isCalibrated: boolean,
-    scaleFactor: number,
-    unit: string,
-    scope?: 'page' | 'document',
-    pageNumber?: number | null,
-    viewportWidth?: number | null,
-    viewportHeight?: number | null,
-    rotation?: number | null
-  ) => void;
+  onCalibrationComplete?: CalibrationCompleteHandler;
   searchResults?: SearchResult[];
   currentSearchQuery?: string;
   ocrHighlightRequest?: {

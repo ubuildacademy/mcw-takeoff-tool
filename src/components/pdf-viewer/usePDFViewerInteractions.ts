@@ -29,8 +29,8 @@ import {
   measurementDrawModeForCondition,
   syncStoreConditionFromMeasurementId,
 } from '../../utils/takeoffMeasurementLookup';
+import { buildPastedMeasurementPayload } from '../../utils/measurementPaste';
 
-const PASTE_OFFSET = 0.02;
 
 function formatMeasurementMoveSaveError(reason: unknown): string {
   if (axios.isAxiosError(reason)) {
@@ -701,33 +701,15 @@ function parseTargetViewportAttr(
               color: newColor,
               projectId: currentProjectId,
             });
-            const offsetPoint = (p: { x: number; y: number }) => ({ x: p.x + PASTE_OFFSET, y: p.y + PASTE_OFFSET });
             for (const m of copiedMarkups) {
-              const payload = {
+              const payload = buildPastedMeasurementPayload(m, {
                 projectId: currentProjectId,
                 sheetId: file.id,
                 pdfPage: currentPage,
                 conditionId: newConditionId,
-                type: m.type,
-                points: m.points.map(offsetPoint),
-                pdfCoordinates: m.pdfCoordinates.map(offsetPoint),
-                calculatedValue: m.calculatedValue,
-                unit: m.unit,
                 conditionColor: newColor,
                 conditionName: newName,
-                ...(m.conditionMarkerShape && { conditionMarkerShape: m.conditionMarkerShape }),
-                ...(m.perimeterValue != null && { perimeterValue: m.perimeterValue }),
-                ...(m.areaValue != null && { areaValue: m.areaValue }),
-                ...(m.cutouts && m.cutouts.length > 0 && {
-                  cutouts: m.cutouts.map((c) => ({
-                    ...c,
-                    points: c.points.map(offsetPoint),
-                    pdfCoordinates: c.pdfCoordinates.map(offsetPoint),
-                  })),
-                }),
-                ...(m.netCalculatedValue != null && { netCalculatedValue: m.netCalculatedValue }),
-                ...(m.description != null && { description: m.description }),
-              };
+              });
               addTakeoffMeasurement(payload).catch((err) => {
                 if (isTakeoffMeasurementCreateAborted(err)) return;
                 console.error('Paste as new condition markup failed:', err);
@@ -744,33 +726,15 @@ function parseTargetViewportAttr(
 
       if (isPaste && copiedMarkups.length > 0 && currentProjectId && file.id) {
         event.preventDefault();
-        const offsetPoint = (p: { x: number; y: number }) => ({ x: p.x + PASTE_OFFSET, y: p.y + PASTE_OFFSET });
         for (const m of copiedMarkups) {
-          const payload = {
+          const payload = buildPastedMeasurementPayload(m, {
             projectId: currentProjectId,
             sheetId: file.id,
             pdfPage: currentPage,
             conditionId: m.conditionId,
-            type: m.type,
-            points: m.points.map(offsetPoint),
-            pdfCoordinates: m.pdfCoordinates.map(offsetPoint),
-            calculatedValue: m.calculatedValue,
-            unit: m.unit,
             conditionColor: m.conditionColor,
             conditionName: m.conditionName,
-            ...(m.conditionMarkerShape && { conditionMarkerShape: m.conditionMarkerShape }),
-            ...(m.perimeterValue != null && { perimeterValue: m.perimeterValue }),
-            ...(m.areaValue != null && { areaValue: m.areaValue }),
-            ...(m.cutouts && m.cutouts.length > 0 && {
-              cutouts: m.cutouts.map((c) => ({
-                ...c,
-                points: c.points.map(offsetPoint),
-                pdfCoordinates: c.pdfCoordinates.map(offsetPoint),
-              })),
-            }),
-            ...(m.netCalculatedValue != null && { netCalculatedValue: m.netCalculatedValue }),
-            ...(m.description != null && { description: m.description }),
-          };
+          });
           addTakeoffMeasurement(payload)
             .then((id) => {
               useUndoStore.getState().push({ type: 'measurement_add', id, createPayload: payload });
