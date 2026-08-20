@@ -79,6 +79,12 @@ Recommended order: **A1 → A2 → A3 → A4 → B1 → B2 → C (review session
 
 ## Workstream A — Excel export polish
 
+**A1-A4 all DONE** (found already-shipped during a 2026-08-20 status check, doc left
+stale — no code changed): `export/buildDataSheet.ts` (A1), `export/buildBySheetSheet.ts`
+(A2), `export/branding.ts` wired into `useTakeoffExport.ts` + `AssemblyCostsSection.tsx`
+(A3), folder header rows with `isTotalRow=2` sentinel in the Quantities loop (A4). Only
+A5 (PDF autotable) remains, see below.
+
 Current state (read these files first):
 - `src/components/takeoff-sidebar/useTakeoffExport.ts` — all export logic. Workbook has
   `Executive Summary` (protected, branded text-only), `Quantities` (grouped by condition,
@@ -187,7 +193,22 @@ headers and correct subtotals; Exec Summary Material/Equipment/Waste totals unch
 from pre-task export of the same project (the SUMPRODUCT filters must not pick up the
 new sentinel rows); outline collapse still works.
 
-### Task A5 — PDF summary report upgrade (do last, optional)
+### Task A5 — PDF summary report upgrade (do last, optional) — DONE 2026-08-20
+
+**Landed:** `jspdf-autotable` (MIT, lazy-imported inside the two table builders — its
+own ~10KB gzip chunk, not the main bundle, verified via `npm run build`) — new
+`export/buildPdfSummaryTables.ts`: `buildConditionsSummaryTable` (Condition, Category,
+Qty, Unit, Material $, Equipment $ — Category from the same folder lookup A4 uses,
+Material/Equipment $ from the same `costBreakdown.conditions` Excel reads) and
+`buildPageBreakdownTable` (Sheet #, Sheet Name, Condition, Qty, Unit, one row per
+(sheet, condition) pair via `buildSheetBreakdownRows`, reusing `compareSheetNumbers`
+from A2's `buildBySheetSheet.ts` rather than re-sorting). Both replace the old manual
+`pdf.text()` legend/breakdown loops in `exportToPDF`; the `pageBreakdown` Map they used
+to render is kept (unrendered) because `pagesForExport`'s `pageLegendItems` still needs
+it for the per-page markup images that follow. Cover block now pulls branding (A3):
+title in the org's accent color, company name prefixed, logo top-right if configured.
+6 tests (`buildPdfSummaryTables.test.ts`) — natural-sort ordering, ARGB→RGB, and actual
+jsPDF rendering (finalY advances, 60-row table triggers real pagination).
 
 **Goal:** PDF report tables instead of text runs.
 
@@ -473,7 +494,13 @@ Tasks (execute in order, one per session):
 
 ---
 
-### Task D0 — Knowledge-base section-aware packing (queued from beta feedback 2026-07-13)
+### Task D0 — Knowledge-base section-aware packing (queued from beta feedback 2026-07-13) — DONE
+
+**Landed:** `src/utils/kbPacking.ts` (`splitIntoSections` + `packKnowledgeBase`), wired
+into `ChatTab.tsx`. Tested (`kbPacking.test.ts`): under-budget KB byte-identical,
+over-budget KB keeps the question-relevant section even at the tail. Doc left stale
+after this shipped; found already-done during a 2026-08-20 status check, no code
+changed.
 
 **Problem:** a trade KB over the 25,000-char context budget is tail-truncated at chat time
 (observed: 29,191-char waterproofing KB — the ASTM standards section never reaches the
@@ -766,7 +793,7 @@ further investment if the hand-labeled true-positive count is in the single digi
 
 ## Workstream G — Navigation & dialog polish (queued from beta feedback 2026-07-16)
 
-### Task G1 — Hyperlink landing: zoom-to-detail + fit-to-window regression
+### Task G1 — Hyperlink landing: zoom-to-detail + fit-to-window regression — DONE 2026-07-16 (75773f4a, 1ec50fa8)
 
 **Problem (Jeff):** clicking a link to "detail 26 on A9.8" should land on that detail
 blown up; if not feasible, at least fit the target page to the window. Currently BROKEN:
@@ -832,6 +859,17 @@ summary. No fake/indeterminate animation posing as progress.
 page and a live link count; cancel (if it exists today) still works; tsc both sides.
 
 ### Task G3 — Adaptive dialog sizing
+
+**Infra landed, application incomplete.** `ui/dialog.tsx` has the `size` variant
+including `fit` (content-driven width, capped `min(90vw,72rem)`) — but only
+`ToolsDialog.tsx` uses it. The originally-named crowded dialogs (schedule review,
+preflight) no longer exist under those names (schedule tool cut, see Workstream B).
+Remaining candidates with no `size=` prop, still at fixed `max-w-lg` regardless of
+content: `BackupDialog`, `HyperlinkSheetPickerDialog`, `SendReportModal`,
+`ShareProjectModal`, `ProjectCreationDialog`, `OCRProcessingDialog`,
+`FeedbackDialog`, `UserProfile`, `AutoCountProgressDialog` — worth a real audit
+(open each, judge if content is actually crowded) before applying `fit`, not a
+blind pass.
 
 **Problem (Jeff):** "pop up dialog windows are sometimes a bit small/crowded. If there's
 room on the screen they should take advantage — not the whole space, but if they only

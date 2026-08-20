@@ -13,6 +13,13 @@ import { toast } from 'sonner';
 import { sheetService } from '../../services/apiService';
 import { buildDataSheet } from './export/buildDataSheet';
 import { buildBySheetSheet } from './export/buildBySheetSheet';
+import {
+  buildConditionsSummaryTable,
+  buildPageBreakdownTable,
+  buildSheetBreakdownRows,
+  argbToRgb,
+  type AutoTableDoc,
+} from './export/buildPdfSummaryTables';
 import { getReportBranding } from './export/branding';
 import type { TakeoffCondition, TakeoffMeasurement, PDFDocument, ProjectCostBreakdown, Sheet, ConditionFolder } from '../../types';
 
@@ -1321,14 +1328,25 @@ export function useTakeoffExport({
         useAssemblyPricingStore.getState().getConditionTotals(projectId)
       );
       const costSummary = costBreakdown.summary;
+      const branding = await getReportBranding();
+      const accentRgb = argbToRgb(branding.accentARGB);
       // Cost lines are laid out with a running cursor rather than fixed
       // offsets — the assembly rows are conditional, so the legend below has to
       // start wherever they left off.
       let costY = 105;
 
+      if (branding.logoBase64) {
+        try {
+          pdf.addImage(branding.logoBase64, 'PNG', 160, 12, 30, 15, undefined, 'FAST');
+        } catch {
+          // Corrupt/unsupported logo data must never break the export.
+        }
+      }
       pdf.setFontSize(20);
       pdf.setFont('helvetica', 'bold');
-      pdf.text('Takeoff Summary Report', 20, 30);
+      pdf.setTextColor(...accentRgb);
+      pdf.text(`${branding.name} — Takeoff Summary Report`, 20, 30);
+      pdf.setTextColor(0, 0, 0);
       if (currentProject) {
         pdf.setFontSize(12);
         pdf.setFont('helvetica', 'normal');
@@ -1373,43 +1391,46 @@ export function useTakeoffExport({
         }
       }
 
+      // Folder (category) lookup — same lazy-load pattern as the Excel export's Data
+      // tab; a failed load just means every condition renders as "Uncategorized".
+      let conditionFolders: ConditionFolder[] = [];
+      try {
+        const { useConditionFolderStore } = await import('../../store/slices/conditionFolderSlice');
+        await useConditionFolderStore.getState().ensureFoldersLoaded(projectId);
+        conditionFolders = useConditionFolderStore.getState().getFolders(projectId);
+      } catch {
+        // fall through with empty folder list
+      }
+      const folderNameById = new Map(conditionFolders.map((f) => [f.id, f.name]));
+      const folderNameFor = (condition: TakeoffCondition): string =>
+        condition.folderId ? folderNameById.get(condition.folderId) ?? 'Uncategorized' : 'Uncategorized';
+      const costByConditionId = new Map(costBreakdown.conditions.map((c) => [c.condition.id, c]));
+
       let legendY = costSummary.projectTotal > 0 ? costY + 7 : 90;
       pdf.setFontSize(14);
       pdf.setFont('helvetica', 'bold');
-      pdf.text('Conditions Legend', 20, legendY);
-      legendY += 10;
-      pdf.setFontSize(9);
-      pdf.setFont('helvetica', 'normal');
-      conditionIds.forEach((conditionId) => {
-        if (legendY > 270) {
-          pdf.addPage();
-          legendY = 20;
-        }
-        const conditionData = reportData[conditionId];
-        const color = conditionData.condition.color;
-        const r = parseInt(color.slice(1, 3), 16) / 255;
-        const g = parseInt(color.slice(3, 5), 16) / 255;
-        const b = parseInt(color.slice(5, 7), 16) / 255;
-        pdf.setFillColor(r * 255, g * 255, b * 255);
-        pdf.rect(20, legendY - 3, 5, 4, 'F');
-        const conditionName = conditionData.condition.name.length > 35 ? conditionData.condition.name.substring(0, 32) + '...' : conditionData.condition.name;
-        pdf.setTextColor(0, 0, 0);
-        pdf.text(`${conditionName} - ${conditionData.condition.type.toUpperCase()} (${conditionData.grandTotal.toFixed(2)} ${conditionData.condition.unit})`, 28, legendY);
-        legendY += 6;
-      });
+      pdf.setTextColor(0, 0, 0);
+      pdf.text('Conditions Summary', 20, legendY);
+      legendY += 6;
+      legendY = await buildConditionsSummaryTable(
+        pdf as unknown as AutoTableDoc,
+        conditionIds.map((conditionId) => {
+          const conditionData = reportData[conditionId];
+          const conditionCost = costByConditionId.get(conditionId);
+          return {
+            condition: conditionData.condition,
+            category: folderNameFor(conditionData.condition),
+            qty: conditionData.grandTotal,
+            materialCost: conditionCost?.materialCost ?? 0,
+            equipmentCost: conditionCost?.equipmentCost ?? 0,
+          };
+        }),
+        legendY,
+        accentRgb
+      );
 
-      legendY += 10;
-      if (legendY > 250) {
-        pdf.addPage();
-        legendY = 20;
-      }
-      pdf.setFontSize(14);
-      pdf.setFont('helvetica', 'bold');
-      pdf.text('Page Breakdown', 20, legendY);
-      legendY += 10;
-      pdf.setFontSize(9);
-      pdf.setFont('helvetica', 'normal');
-
+      // Per-(sheet, condition) rows for the pageBreakdown table below (needed by
+      // pagesForExport's pageLegendItems on the per-page markup pages that follow).
       const pageBreakdown = new Map<string, Array<{ condition: TakeoffCondition; total: number }>>();
       conditionIds.forEach((conditionId) => {
         const conditionData = reportData[conditionId];
@@ -1419,40 +1440,17 @@ export function useTakeoffExport({
           if (arr) arr.push({ condition: conditionData.condition, total: pageData.total });
         });
       });
-      const sortedPageKeys = Array.from(pageBreakdown.keys()).sort((a, b) => {
-        const pageA = pagesWithMeasurements.get(a);
-        const pageB = pagesWithMeasurements.get(b);
-        if (!pageA || !pageB) return 0;
-        return pageA.pageNumber - pageB.pageNumber;
-      });
-      sortedPageKeys.forEach((pageKey) => {
-        const pageInfo = pagesWithMeasurements.get(pageKey);
-        const conditionsOnPage = pageBreakdown.get(pageKey) ?? [];
-        if (!pageInfo) return;
-        if (legendY > 260) {
-          pdf.addPage();
-          legendY = 20;
-        }
-        pdf.setFont('helvetica', 'bold');
-        const hasCustomName = pageInfo.sheetName && pageInfo.sheetName !== `Page ${pageInfo.pageNumber}`;
-        const pageLabel = hasCustomName ? `${pageInfo.sheetName} (P.${pageInfo.pageNumber})` : `Page ${pageInfo.pageNumber}`;
-        pdf.text(pageLabel, 20, legendY);
-        legendY += 5;
-        pdf.setFont('helvetica', 'normal');
-        conditionsOnPage.forEach((item) => {
-          const color = item.condition.color;
-          const r = parseInt(color.slice(1, 3), 16) / 255;
-          const g = parseInt(color.slice(3, 5), 16) / 255;
-          const b = parseInt(color.slice(5, 7), 16) / 255;
-          pdf.setFillColor(r * 255, g * 255, b * 255);
-          pdf.rect(25, legendY - 2.5, 3, 3, 'F');
-          pdf.setTextColor(0, 0, 0);
-          const condName = item.condition.name.length > 30 ? item.condition.name.substring(0, 27) + '...' : item.condition.name;
-          pdf.text(`  ${condName}: ${item.total.toFixed(2)} ${item.condition.unit}`, 28, legendY);
-          legendY += 5;
-        });
-        legendY += 3;
-      });
+
+      legendY += 12;
+      if (legendY > 250) {
+        pdf.addPage();
+        legendY = 20;
+      }
+      pdf.setFontSize(14);
+      pdf.setFont('helvetica', 'bold');
+      pdf.text('Page Breakdown', 20, legendY);
+      legendY += 6;
+      await buildPageBreakdownTable(pdf as unknown as AutoTableDoc, buildSheetBreakdownRows(reportData), legendY, accentRgb);
 
       onExportStatusUpdate?.('pdf', 25);
       const summaryPdfBytes = new Uint8Array(pdf.output('arraybuffer'));
