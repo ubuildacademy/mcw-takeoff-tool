@@ -26,7 +26,17 @@ export interface RateLimitHit {
   count: number;
   /** Epoch milliseconds when the window expires. */
   resetTime: number;
+  /** Which store actually answered — surfaced on the response for diagnosis. */
+  source?: 'redis' | 'memory';
 }
+
+/**
+ * Identifies this process in responses. Two replicas answering the same client show
+ * two different values, which is the only way from outside to tell "several instances
+ * that are not sharing counters" from "one instance counting oddly" — a distinction
+ * that cost most of the 2026-08-21 investigation.
+ */
+export const INSTANCE_ID = Math.random().toString(36).slice(2, 8);
 
 export interface RateLimitStore {
   hit(key: string, windowMs: number): Promise<RateLimitHit>;
@@ -72,11 +82,11 @@ export class MemoryRateLimitStore implements RateLimitStore {
     if (!existing || existing.resetTime < now) {
       const fresh = { count: 1, resetTime: now + windowMs };
       this.entries.set(key, fresh);
-      return { ...fresh };
+      return { ...fresh, source: 'memory' };
     }
 
     existing.count += 1;
-    return { ...existing };
+    return { ...existing, source: 'memory' };
   }
 
   /** Tests only — drops the sweep timer. */
@@ -117,7 +127,7 @@ export class RedisRateLimitStore implements RateLimitStore {
     )) as [number, number];
 
     const [count, ttl] = result;
-    return { count, resetTime: Date.now() + ttl };
+    return { count, resetTime: Date.now() + ttl, source: 'redis' };
   }
 }
 
@@ -266,11 +276,17 @@ export function getRateLimitStore(): RateLimitStore {
       // report 1, 2, 3… — and a report of 1 from every instance is proof they are NOT
       // sharing, which is the exact question a PING cannot answer.
       try {
-        const probe = await new RedisRateLimitStore(client).hit('__boot_probe__', 60_000);
+        // One hour, not one minute. At sixty seconds a single instance always saw 1,
+        // so the number could not tell "the instances are not sharing" apart from
+        // "there is only one instance" — which is exactly the ambiguity it was added
+        // to resolve. Over an hour the count climbs across boots, so a value that
+        // stays at 1 forever means Redis is not holding state at all.
+        const probe = await new RedisRateLimitStore(client).hit('__boot_probe__', 60 * 60 * 1000);
         console.log(
           `🪣 Rate limiting: Redis OK at ${safeUrl} — shared-counter probe returned ` +
-            `${probe.count} (each instance booting in the same minute should see a ` +
-            'different number; every instance seeing 1 means they are not sharing)'
+            `${probe.count} over the last hour, from instance ${INSTANCE_ID} ` +
+            '(this climbs with each instance boot; stuck at 1 means Redis is not ' +
+            'retaining the counter)'
         );
       } catch (err) {
         console.error(

@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { getRateLimitStore, type RateLimitStore } from '../lib/rateLimitStore';
+import { getRateLimitStore, INSTANCE_ID, type RateLimitStore } from '../lib/rateLimitStore';
 
 interface RateLimitOptions {
   windowMs?: number;      // Time window in milliseconds
@@ -44,6 +44,12 @@ export function rateLimit(options: RateLimitOptions = {}) {
 
       const retryAfterSec = Math.max(0, Math.ceil((entry.resetTime - Date.now()) / 1000));
 
+      // Diagnostics: which process answered, and whether its count came from the
+      // shared Redis counter or a per-process fallback. Neither is sensitive, and
+      // without them the only way to reason about a multi-instance limiter from
+      // outside is to infer it from counter arithmetic.
+      res.setHeader('X-Instance-Id', INSTANCE_ID);
+      res.setHeader('X-RateLimit-Store', entry.source ?? 'unknown');
       res.setHeader('X-RateLimit-Limit', maxRequests);
       res.setHeader('X-RateLimit-Remaining', Math.max(0, maxRequests - entry.count));
       res.setHeader('X-RateLimit-Reset', Math.ceil(entry.resetTime / 1000));
