@@ -67,7 +67,7 @@ Round 1 shipped 2026-07 (see Recently shipped). Remaining ideas for later:
 
 | Item | Notes |
 |------|--------|
-| **Codebase-wide security hardening pass** | Broader than the Supabase-dashboard checklist below — full app audit (endpoint auth, input validation, injection surface, secrets handling, dependency vulns). Use the `/security-review` skill. **Was sequenced after the item-23 simplification sweep** (Jeff, 2026-08-20): review settled/condensed code once, not code about to be restructured. That sweep finished 2026-08-20, so this is now unblocked — run it once the sweep branches are merged. |
+| **Codebase-wide security hardening pass** | **Slices A–C done 2026-08-21** — see item 24 in `docs/OPEN_ITEMS.md`. Authorization audited clean across all 120 endpoints; one real defect found and fixed (the rate limiter bucketed on a client-supplied `X-Forwarded-For`, so the login limiter did nothing); dependency vulnerabilities cut 17 → 5 on the frontend and 11 → 3 on the server. Outstanding: set `TRUST_PROXY_HOPS` to match the real proxy chain, and decide on the four breaking dependency majors (jspdf is the one critical). |
 | **Supabase Auth hardening** | See `docs/SUPABASE_SECURITY_CHECKLIST.md` and `server/migrations/supabase_security_advisor_fixes.sql` (leaked-password protection, MFA, etc.). |
 
 ---

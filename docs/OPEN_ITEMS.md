@@ -507,3 +507,94 @@ sweep, so this ran as a hand-rolled pass: grep-based dead-export detection, a
 sliding-window clone detector (with an identifier-list filter, added after the first
 run produced the false positives above), and a nested-scan detector for quadratic
 loops.
+
+### 24. Codebase-wide security hardening pass — slices A–C done 2026-08-21
+
+**Raised:** 2026-08-21, by Jeff. The `Ops & security` row in `ROADMAP.md` had already
+sequenced this after the item-23 simplification sweep — review settled code once, not
+code about to be restructured — and that sweep finished 2026-08-20, so this was the
+next thing due.
+
+**Scope agreed with Jeff:** four slices, one branch each, `ci:local` green on every
+one. A = authorization/IDOR, B = input validation and injection surface, C = secrets
+and dependencies, D = the Supabase dashboard items, which need Jeff's login and are
+not mine to do. On slice C he chose fix-the-safe-half and report the breaking half.
+
+**Baseline and gate:** `ci:local` at `9e4263f7` — 446 tests passed / 8 skipped,
+frontend lint 70 warnings, server lint 0. Same numbers item 23 ended on.
+
+**Tooling note.** `/security-review` reviews the *pending diff on the current branch*.
+With the sweep merged and the tree clean there was no diff, so it would have reviewed
+nothing. Same shape as the item-23 finding about `/simplify`: the repo's review tools
+are all diff-scoped, and a retrospective whole-repo audit is not what they do. This ran
+hand-rolled — a script that walks every `router.<verb>` block and checks the handler
+for an ownership signal, then manual triage of what it flagged.
+
+**Slice A — authorization: clean bill of health, no changes.** 120 endpoints across 22
+route files. Only five are unauthenticated and all five are meant to be: `POST /auth/login`,
+`GET /auth/validate-invite/:token`, `POST /contact`, `POST /feedback`, `GET /help/faq`.
+The rest reach `requireAuth` or `requireCompanyAdmin`. Because the backend holds the
+`SUPABASE_SERVICE_ROLE_KEY` and so bypasses RLS entirely, every one of those 120 has to
+carry its own scoping in application code — that is the whole risk surface here, and it
+held up. The one query shape that could leak across tenants, `getAssemblyDetails`, filters
+on `org_id` before it touches child rows and says why in a comment.
+
+*Two findings I raised and then withdrew.* Both are recorded because the reasoning is
+the part worth keeping.
+
+- `POST /assemblies/purchase-order` looked like an IDOR: it takes `projectId` from the
+  body, validates only that it is a well-formed UUID, and then calls
+  `storage.getProject`, which is id-only on the service-role key. The response carries
+  `jobInfo` — GC, superintendent, owner and architect names, addresses and phone
+  numbers. But the access check is one call frame deeper: `priceRequestedConditions`
+  reads the same `req.body.projectId` and runs `hasProjectAccess` before the route gets
+  that far, and its doc comment says it exists precisely so that check cannot drift. A
+  per-handler scan cannot see a guard inside a helper the handler calls.
+- The upload middleware builds its on-disk name as `${uuidv4()}-${file.originalname}`,
+  and `path.join` collapses `<uuid>-../../x.pdf` clean out of the temp directory — the
+  uuid prefix stops nothing. It is still safe, because multer 1.4.5-lts.2 reduces
+  `originalname` to its basename before the filename callback ever sees it. Verified
+  rather than reasoned about: a hand-built multipart body with
+  `filename="../../uploads/VICTIM.pdf"` arrives as `originalname: "VICTIM.pdf"` and the
+  target file is untouched. Worth knowing that the safety belongs to multer's version,
+  not to our code, so a multer major is a thing to re-check.
+
+**Slice B — one real finding, fixed (`fix/security-slice-b-ratelimit-key`).**
+`defaultKeyGenerator` bucketed on the first entry of `X-Forwarded-For`, which is
+client-supplied. Rotating that header per request minted a fresh bucket every time, so
+`strictRateLimit` — 10 attempts per 15 minutes on `/auth/login`, `/users/login`,
+`/users/signup`, `/auth/accept-invitation` — provided no brute-force protection at all,
+and every other write under `/api` was equally bypassable. Now keyed on `req.ip`, with
+Express's `trust proxy` set from a new `TRUST_PROXY_HOPS` env var so that address is
+derived by skipping exactly the proxies actually in front of the app. Regression test
+asserts a rotating header buys no extra attempts, and fails against the old generator.
+
+The user id came out of the key at the same time. Every limiter is mounted ahead of the
+routes that call `requireAuth`, so `req.user` was always undefined there and the id was
+a constant `anonymous` suffix — the per-user limits the comment described did not exist.
+
+*Clean in slice B:* no `shell: true` anywhere and all three subprocess sites pass
+argument arrays, so there is no command injection; `escapeHtml` covers every
+public-input path into an outbound email; every `axios` target is an env-derived base
+URL with no request input in it, so no SSRF.
+
+**Slice C — dependencies (`chore/security-slice-c-deps`).** Lockfiles only, no range
+changed. Frontend production vulnerabilities 17 → 5 (all nine highs gone), server 11 → 3.
+Left as breaking, for a separate decision: jspdf 3.x → 4.x, which is the one critical;
+exceljs, where npm's only offer is a *downgrade* to 3.4.0 and so is not a fix at all;
+react-router-dom 6 → 7; and the dev-only vite and vitest majors, which are build and
+test tooling rather than shipped code.
+
+*Secrets are in good shape:* no `.env` tracked, `.gitignore` covers both the root and
+`server/`, and nothing logs a credential.
+
+**Needs Jeff — `TRUST_PROXY_HOPS`.** The default of 1 is right if the browser calls the
+Railway host directly, which is the case when `VITE_API_BASE_URL` is set in Vercel. If
+instead traffic goes through the `/api/:path*` rewrite in `vercel.json`, Vercel is a
+second proxy and the value must be 2. Too high re-opens the spoof this slice closed;
+too low puts every user in one bucket, so one busy client rate-limits everyone. I could
+not settle it from the repo — both paths are configured and which one is live depends
+on a Vercel env var. See section 6 of `DEPLOY_CHECKLIST.md`.
+
+**Slice D — Supabase dashboard, still open, Jeff's to do.** Leaked-password protection
+and MFA, per `docs/SUPABASE_SECURITY_CHECKLIST.md`. Dashboard-only, no code.
