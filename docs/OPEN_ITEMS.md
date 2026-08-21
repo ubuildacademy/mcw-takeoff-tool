@@ -876,8 +876,28 @@ without a TTL came back with both its count preserved and a fresh expiry. Nine t
 `rateLimit.test.ts` cover the middleware, the namespacing, the fallback, and — as a
 contrast that keeps the point legible — the old double-counting behaviour.
 
-No configuration needed: Railway already supplies `REDIS_URL` to this service for the
-queue. Without it, as on a dev machine, the limiter says so at startup and uses memory.
+**`REDIS_URL` has to be set on the API service, and may not be — verify it.** The first
+version of this note claimed Railway supplies it automatically "for the queue". That was
+an assumption stated as fact and it is wrong: Railway does not inject one service's
+variables into another, you add a reference such as `REDIS_URL=${{Redis.REDIS_URL}}` on
+the API service. `queueService.ts` hides the question by defaulting to
+`redis://localhost:6379`, so a missing variable shows up there as a queue that never
+runs rather than as an error.
+
+Re-running the production check after this shipped still showed split counters, which is
+consistent with the variable being absent. Confirm from the Railway deploy log, which now
+prints one of two lines at startup:
+
+```
+🪣 Rate limiting: Redis at redis://***@… (counters shared across instances)
+⚠️  Rate limiting: no REDIS_URL, falling back to per-process counters.
+```
+
+That second line is new. The first cut used `devLog` for the degraded branch and
+`console.log` for the healthy one, so in production the *only* observable state was the
+good one — the same defect this session had already flagged in `logEmailConfigStatus`,
+reproduced here within the hour. The degraded branch now warns in production, and the
+first Redis connection failure warns once too.
 
 **How to re-check the instance count** without any dashboard access: send a handful of
 requests to `/api/help/faq` and watch `x-ratelimit-remaining`. One descending sequence

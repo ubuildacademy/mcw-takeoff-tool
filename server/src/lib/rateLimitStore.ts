@@ -171,7 +171,20 @@ export function getRateLimitStore(): RateLimitStore {
   const memory = new MemoryRateLimitStore();
 
   if (!url) {
-    devLog('🪣 Rate limiting: in-memory (no REDIS_URL). Counters are per process.');
+    // In development this is the normal, quiet case. In production it means every
+    // instance is counting alone, so the configured limits are silently multiplied by
+    // the instance count — the exact defect item 27 set out to fix. Say so where an
+    // operator can see it: devLog is a no-op in production, so using it here would
+    // hide the degraded state and leave only the healthy path visible in the logs.
+    if (process.env.NODE_ENV === 'production') {
+      console.warn(
+        '⚠️  Rate limiting: no REDIS_URL, falling back to per-process counters. ' +
+          'With more than one instance every configured limit is multiplied by the ' +
+          'instance count. Set REDIS_URL on this service to share them.'
+      );
+    } else {
+      devLog('🪣 Rate limiting: in-memory (no REDIS_URL). Counters are per process.');
+    }
     sharedStore = memory;
     return sharedStore;
   }
@@ -186,12 +199,20 @@ export function getRateLimitStore(): RateLimitStore {
   });
 
   // ioredis emits 'error' on every reconnect attempt. Without a listener those
-  // become unhandled exceptions and take the process down.
+  // become unhandled exceptions and take the process down. The first one is worth
+  // seeing in production — a limiter that cannot reach Redis is counting alone —
+  // while the rest are reconnect noise and stay at devLog.
+  let reportedConnectionFailure = false;
   client.on('error', (err) => {
+    if (!reportedConnectionFailure) {
+      reportedConnectionFailure = true;
+      console.warn('⚠️  Rate-limit Redis connection failed:', err.message);
+      return;
+    }
     devLog('🪣 Rate-limit Redis error:', err.message);
   });
 
-  console.log('🪣 Rate limiting: Redis (counters shared across instances)');
+  console.log(`🪣 Rate limiting: Redis at ${url.replace(/:\/\/.*@/, '://***@')} (counters shared across instances)`);
   sharedStore = new FallbackRateLimitStore(new RedisRateLimitStore(client), memory);
   return sharedStore;
 }
