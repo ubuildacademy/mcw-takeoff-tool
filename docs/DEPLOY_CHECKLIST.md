@@ -61,10 +61,24 @@ Set it **too high** and a client can forge the address the limiter counts, which
 bug this replaced. Set it **too low** and every request appears to come from the proxy's
 own IP, so one busy client exhausts the limit for everyone.
 
-To check which applies, hit any API route in production and look at the request's
-`X-Forwarded-For`: the hop count is the number of addresses appended *after* the
-client's own. Confirm it after any change to `vercel.json`'s rewrites or to
-`VITE_API_BASE_URL`.
+**Settled 2026-08-21: the value is 1, and the default is already correct.**
+`VITE_API_BASE_URL` is set in Vercel, so Vite constant-folded `getApiBaseUrl` in the
+deployed bundle down to a single `return "https://mcw-takeoff-tool-production-28fb.up.railway.app/api"`
+— the `/api` fallback branch is dead code and Vercel is not in the API path at all. The
+live API confirms one hop in front: `server: railway-hikari` with a single
+`x-railway-edge`, no `via:` chain.
+
+Re-check this only if `VITE_API_BASE_URL` is ever removed from Vercel or the
+`vercel.json` rewrite starts carrying API traffic — either flips the answer to 2. The
+quickest check needs no dashboard access: fetch the deployed bundle and look at what
+`getApiBaseUrl` returns.
+
+```bash
+curl -s https://mcw-takeoff-tool.vercel.app/assets/$(curl -s https://mcw-takeoff-tool.vercel.app/ | grep -oE 'index-[A-Za-z0-9_-]+\.js') | grep -o 'up\.railway\.app'
+```
+
+A hit means the Railway URL is baked in — direct, 1 hop. No hit means the bundle falls
+back to a relative `/api` and goes through Vercel's rewrite — 2 hops.
 
 ---
 

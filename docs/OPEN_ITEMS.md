@@ -588,13 +588,18 @@ test tooling rather than shipped code.
 *Secrets are in good shape:* no `.env` tracked, `.gitignore` covers both the root and
 `server/`, and nothing logs a credential.
 
-**Needs Jeff — `TRUST_PROXY_HOPS`.** The default of 1 is right if the browser calls the
-Railway host directly, which is the case when `VITE_API_BASE_URL` is set in Vercel. If
-instead traffic goes through the `/api/:path*` rewrite in `vercel.json`, Vercel is a
-second proxy and the value must be 2. Too high re-opens the spoof this slice closed;
-too low puts every user in one bucket, so one busy client rate-limits everyone. I could
-not settle it from the repo — both paths are configured and which one is live depends
-on a Vercel env var. See section 6 of `DEPLOY_CHECKLIST.md`.
+**`TRUST_PROXY_HOPS` — settled 2026-08-21, the default of 1 is correct, no change
+needed.** Both paths are configured in the repo, so this could not be answered from the
+source; it was answered from the deployed artifact instead. Vite inlines
+`import.meta.env.VITE_API_BASE_URL` at build time, so whether that variable is set in
+Vercel is visible in the shipped bundle. In the live `index-Bg0bRxae.js` the whole of
+`getApiBaseUrl` has been constant-folded to
+`return "https://mcw-takeoff-tool-production-28fb.up.railway.app/api"` — the variable is
+set, the relative-`/api` fallback is dead code, and Vercel is not in the API path at
+all. The live API agrees: `server: railway-hikari` and one `x-railway-edge`, no `via:`
+chain, so a single proxy hop. Method and the re-check command are in section 6 of
+`DEPLOY_CHECKLIST.md`; the answer flips to 2 only if `VITE_API_BASE_URL` is removed from
+Vercel.
 
 **Slice D — Supabase dashboard, still open, Jeff's to do.** Leaked-password protection
 and MFA, per `docs/SUPABASE_SECURITY_CHECKLIST.md`. Dashboard-only, no code.
