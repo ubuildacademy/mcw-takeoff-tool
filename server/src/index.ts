@@ -35,6 +35,7 @@ import assemblyRoutes from './routes/assemblies';
 import productRoutes from './routes/products';
 import organizationRoutes from './routes/organizations';
 import { logEmailConfigStatus } from './services/emailService';
+import { getRateLimitStore } from './lib/rateLimitStore';
 import { devLog } from './lib/devLog';
 import { cleanupExpiredReportDeliveries, cleanupExpiredProjectShares } from './services/reportDeliveryCleanup';
 // Initialize queue service (starts worker)
@@ -377,6 +378,11 @@ if (isProduction && !process.env.CONTACT_EMAIL?.trim()) {
 
 const server = app.listen(PORT, '0.0.0.0', () => {
   logEmailConfigStatus();
+  // Build the rate-limit store now rather than on the first request that happens to
+  // hit a limiter. It reports whether counters are shared through Redis or per
+  // process, and a diagnostic that only appears once traffic arrives is one you go
+  // looking for and cannot find.
+  getRateLimitStore();
   devLog(`🚀 Takeoff API server running on port ${PORT}`);
   devLog(`🌐 Server accessible at http://0.0.0.0:${PORT}`);
   devLog(`📝 NODE_ENV: ${process.env.NODE_ENV || 'development'}`);
