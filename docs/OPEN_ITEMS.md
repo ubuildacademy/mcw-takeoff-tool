@@ -604,7 +604,7 @@ Vercel.
 and MFA, per `docs/SUPABASE_SECURITY_CHECKLIST.md`. Dashboard-only, no code.
 
 
-### 25. Six dependency majors left over from item 24 — Jeff to decide, none urgent
+### 25. Dependency majors left over from item 24 — one done, five to decide, none urgent
 
 **Raised:** 2026-08-21, out of item 24 slice C. `npm audit fix` cleared everything that
 fitted inside the version ranges already in `package.json` (17 → 5 frontend, 11 → 3
@@ -617,21 +617,39 @@ reasoning does not have to be redone.
 
 | Package | Sev | Used for | Reachable? |
 |---|---|---|---|
-| `sharp` 0.34 → 0.35 (server) | high | nothing — **no importer left** | No. Dead dependency |
+| ~~`sharp`~~ (server) | high | nothing | **DONE 2026-08-21 — removed, not upgraded** |
 | `nodemailer` 7 → 9 (server) | high | outbound email over SMTP | No |
 | `jspdf` 3 → 4 (frontend) | **critical** | PDF report export | No |
 | `react-router-dom` 6 → 7 (frontend) | moderate | page routing | Unassessed |
 | `exceljs` (frontend) | moderate | every Excel export | No — and the "fix" is bogus |
 | `uuid` 9 → 14 (server) | moderate | generating ids | No |
 
-**`sharp` — do this one, it needs no decision.** Two high-severity libvips CVEs, and
-nothing imports it. `server/src` has no reference at all; the only hits are in
-`server/dist`, which is untracked local build output dated Nov 2025 from three source
-files that no longer exist (`utils/pdfToImage.ts`, `services/cvTitleBlockService.ts`,
-`services/qwenVisionService.ts`). `npm ls sharp` shows it as a top-level dependency with
-nothing depending on it. Deleting the line from `server/package.json` clears both highs
-with no upgrade and no code change. The only thing to confirm is that Railway's build
-does not want it for a native step.
+**`sharp` — DONE 2026-08-21, removed rather than upgraded.** Two high-severity libvips
+CVEs and nothing imported it: `server/src` had no reference at all, and the only hits
+were in `server/dist`, untracked local build output dated Nov 2025 compiled from three
+source files that no longer exist (`utils/pdfToImage.ts`, `services/cvTitleBlockService.ts`,
+`services/qwenVisionService.ts`). Deleting the dependency took the server from 3
+production vulnerabilities to 2 and cleared both highs, with no version jump and no code
+change.
+
+**Three more dead frontend dependencies went at the same time**, found by walking every
+runtime dependency in both manifests and checking whether anything imports it. None
+carried an advisory — this is weight, not risk.
+
+- `canvg` — a second, unused copy. jspdf already carries its own `canvg@3.0.11` as an
+  optional dependency, and nothing in `src/` references canvg, `addSvgAsImage` or
+  `svg2pdf`. Removing ours leaves jspdf's untouched.
+- `@radix-ui/react-context` and `react-remove-scroll-bar` — both still arrive
+  transitively through the Radix packages that actually use them, so the direct entries
+  bought nothing.
+
+Runtime dependencies: frontend 36 → 33, server 16 → 15. `ci:local` unchanged at 448
+passed / 8 skipped, 70 frontend and 0 server lint warnings.
+
+*Deliberately kept*, despite not being imported from `src/`: `postcss`, `autoprefixer`,
+`tailwindcss` and `tailwindcss-animate`. These are referenced by the build config rather
+than by application code, which is what a dead-import scan cannot see — worth stating so
+nobody "cleans them up" on the strength of the same grep.
 
 **`nodemailer` — safe to defer.** The two high advisories are SMTP command injection via
 an `envelope.size` parameter and CRLF injection via a transport `name` option. We set
