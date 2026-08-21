@@ -242,7 +242,27 @@ export function getRateLimitStore(): RateLimitStore {
     devLog('🪣 Rate-limit Redis error:', err.message);
   });
 
-  console.log(`🪣 Rate limiting: Redis at ${url.replace(/:\/\/.*@/, '://***@')} (counters shared across instances)`);
+  const safeUrl = url.replace(/:\/\/.*@/, '://***@');
+
+  // Report the OUTCOME, not the intention. The line this replaced was printed here,
+  // at construction, before a single byte had been sent — so it said "counters shared
+  // across instances" whether or not Redis was reachable, and a production
+  // investigation spent several rounds treating it as proof of a working connection.
+  // A PING costs nothing and is the difference between announcing a plan and
+  // reporting a fact.
+  client
+    .ping()
+    .then(() => {
+      console.log(`🪣 Rate limiting: Redis OK at ${safeUrl} — counters shared across instances`);
+    })
+    .catch((err: unknown) => {
+      console.error(
+        `⚠️  Rate limiting: Redis at ${safeUrl} did NOT answer a startup PING, so counters ` +
+          'are per process and every configured limit is multiplied by the instance count:',
+        err instanceof Error ? err.message : err
+      );
+    });
+
   sharedStore = new FallbackRateLimitStore(new RedisRateLimitStore(client), memory);
   return sharedStore;
 }
