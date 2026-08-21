@@ -102,3 +102,11 @@ __pycache__/
 
 # Git worktrees created by tooling
 .claude/worktrees/
+
+# iCloud Drive sync conflicts. This repo lives under ~/Library/Mobile Documents,
+# where a conflicted copy is saved as "name 2.ts" alongside the original. One of
+# those was committed on 2026-08-21 and broke the Railway build: " 2.ts" does not
+# match the "**/*.test.ts" exclude in server/tsconfig.json, so tsc compiled a test
+# file and failed on its vitest import, which is absent from a production install.
+# Use `git add -f` if a file legitimately ends in a space and a digit.
+* [0-9].*

@@ -80,6 +80,35 @@ curl -s https://mcw-takeoff-tool.vercel.app/assets/$(curl -s https://mcw-takeoff
 A hit means the Railway URL is baked in — direct, 1 hop. No hit means the bundle falls
 back to a relative `/api` and goes through Vercel's rewrite — 2 hops.
 
+## 7. iCloud sync conflicts can break the Railway build while CI stays green
+
+This repo lives under `~/Library/Mobile Documents`. When iCloud hits a sync conflict it
+saves a second copy beside the original as `name 2.ts`. On 2026-08-21 one of those —
+`server/src/middleware/rateLimit.test 2.ts` — was swept up by `git add -A`, committed,
+and failed two Railway deploys with:
+
+```
+error TS2307: Cannot find module 'vitest' or its corresponding type declarations
+```
+
+Three things had to line up, and all three are worth knowing:
+
+1. `" 2.ts"` does not match `"**/*.test.ts"`, the exclude in `server/tsconfig.json`, so
+   tsc compiled a test file it was meant to skip.
+2. `vitest` is a dev dependency of the **root** package, not of `server/`.
+3. Railway installs production dependencies only, so the import that resolves fine on a
+   dev machine is unresolvable there.
+
+**That last point is the general trap: `ci:local` cannot catch this class of failure.**
+Locally, `vitest` resolves through the hoisted root `node_modules`, so `npm run
+build:server` passes on exactly the tree that fails on Railway. A green `ci:local` is not
+by itself evidence that the server will build in production.
+
+Both specific holes are now plugged — `.gitignore` refuses `* [0-9].*`, and the tsconfig
+exclude has `"**/* [0-9].ts"` — but if a server build ever fails on Railway with a module
+it can find locally, check whether the import is reachable from `server/package.json`
+alone rather than from the root.
+
 ---
 
 **Summary:** Rely on the pre-push hook so typecheck, build, lint, and test run before every push. Commit new imported files, and don’t remove exports that are still used. That keeps CI, Vercel, and Railway from failing on bad commits.

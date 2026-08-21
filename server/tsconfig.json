@@ -35,6 +35,10 @@
   "exclude": [
     "node_modules",
     "dist",
-    "**/*.test.ts"
+    "**/*.test.ts",
+    // iCloud Drive writes sync conflicts as "name 2.ts", which does not match the
+    // pattern above. A duplicated test file therefore reached tsc, imported vitest,
+    // and broke the Railway build, where only production dependencies are installed.
+    "**/* [0-9].ts"
   ]
 }
