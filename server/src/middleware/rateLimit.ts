@@ -50,14 +50,6 @@ export function rateLimit(options: RateLimitOptions = {}) {
       // outside is to infer it from counter arithmetic.
       res.setHeader('X-Instance-Id', INSTANCE_ID);
       res.setHeader('X-RateLimit-Store', entry.source ?? 'unknown');
-      // The bucket this request landed in. One instance serving one Redis was still
-      // producing two counters, which can only happen if the key itself varies — so
-      // the key is the thing to look at, not the counter it produced.
-      res.setHeader('X-RateLimit-Key', key);
-      // What Express derived the key from. `req.ips` is the X-Forwarded-For chain
-      // minus the hops `trust proxy` says to skip; if its length varies between
-      // requests then TRUST_PROXY_HOPS is picking a different address each time.
-      res.setHeader('X-Forwarded-Chain', JSON.stringify(req.ips ?? []));
       res.setHeader('X-RateLimit-Limit', maxRequests);
       res.setHeader('X-RateLimit-Remaining', Math.max(0, maxRequests - entry.count));
       res.setHeader('X-RateLimit-Reset', Math.ceil(entry.resetTime / 1000));

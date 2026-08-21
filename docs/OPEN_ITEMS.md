@@ -19,7 +19,7 @@ MCW's workbooks. Updated 2026-08-21.
 | 16 | WORK ORDER / P.O. parity — the standing non-goal | Jeff | Needs a scoping pass before it is a task |
 | 25 | Five dependency majors left after the security pass | Jeff | Decisions, none urgent — none are reachable |
 | 26 | Supabase Auth hardening — leaked-password protection, MFA | Jeff | Dashboard clicks, no code |
-| — | *(item 27, distributed rate limiting, was closed 2026-08-21)* | — | — |
+| — | *(item 27 closed 2026-08-21 — shared counters shipped; its "two instances" premise was a misdiagnosis, see the entry)* | — | — |
 | 10, 12 | Waste-factor stacking; what the Material column should show | Jeff | Product questions, both blocked on assemblies being switched on |
 | 11, 21, 22 | Assembly-linked condition UI, defaults, bond | On hold | Parked 2026-08-20 until MCW confirms assemblies are wanted |
 | 1–5, 9 | Source-data defects in MCW's own workbooks | MCW | Errors in the Excel files, not in Meridian |
@@ -814,7 +814,38 @@ RLS on `ocr_training_data` — should be confirmed as already applied while in t
 nothing in the repo records whether it was run.
 
 
-### 27. Rate limits were per-process while production ran two instances — DONE 2026-08-21
+### 27. Shared rate-limit counters — shipped, but the premise was wrong. CLOSED 2026-08-21
+
+**Correction, written after the fact and placed first on purpose.** The premise of this
+item — "production runs two Railway instances" — was **wrong**, and it was wrong from the
+first measurement. Production runs **one** instance. The interleaved counters that started
+this were two *client* addresses, not two servers: requests from this machine to Railway
+arrive from a NAT pool that alternates between `152.233.23.193` and `152.233.23.194`, so a
+correctly-working per-IP limiter put them in two buckets, exactly as it should.
+
+What settled it was making the state observable instead of inferring it. Twelve requests
+returned `X-Instance-Id: rs9xa4` every time, with `X-RateLimit-Store: redis` every time,
+and `X-RateLimit-Key` alternating between those two addresses while the forwarded chain
+stayed a consistent length of one. One process, one shared store, two keys.
+
+**So the limiter was never broken, and `TRUST_PROXY_HOPS=1` is correct after all.** The
+Redis work below is real, tested and live — `X-RateLimit-Store: redis` proves it is
+serving production traffic — and it is genuinely required the moment a second replica is
+added. It was not required for the reason this item gave.
+
+**The mistake worth not repeating:** replica count was *inferred from counter arithmetic*
+rather than measured. One header at the outset would have answered it and saved the whole
+detour. Interleaved sequences are consistent with several servers, but equally with
+several client keys, and nothing in the original measurement distinguished them.
+
+A related lesson from the same afternoon: four diagnostics in a row were wrong in the
+same way — one hid the degraded case in `devLog`, one was built lazily so it only existed
+after traffic, one printed at construction and so described an intention rather than an
+outcome, and one used a sixty-second window that made a lone instance indistinguishable
+from a broken one. Each looked reasonable in isolation. A diagnostic has to report what
+happened, on the path that matters, where it can be read.
+
+---
 
 **Found 2026-08-21**, verifying that item 24's rate-limit fix had actually deployed.
 Twelve requests to the public `/api/help/faq`, each carrying a different forged
