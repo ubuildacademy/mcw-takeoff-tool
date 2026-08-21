@@ -130,6 +130,8 @@ export class RedisRateLimitStore implements RateLimitStore {
  */
 export class FallbackRateLimitStore implements RateLimitStore {
   private warned = false;
+  /** Epoch ms of the last warning, so a persistent outage keeps saying so. */
+  private lastWarnedAt = 0;
   /** While set and in the future, skip the primary entirely. */
   private skipPrimaryUntil = 0;
 
@@ -159,13 +161,18 @@ export class FallbackRateLimitStore implements RateLimitStore {
       }
       return result;
     } catch (error) {
-      this.skipPrimaryUntil = Date.now() + this.cooldownMs;
-      if (!this.warned) {
+      const now = Date.now();
+      this.skipPrimaryUntil = now + this.cooldownMs;
+      // console.error, not devLog: losing the shared counter is something an operator
+      // needs to see, and devLog is a no-op in production. Repeat at most once a
+      // minute rather than once per process — warning a single time meant a permanent
+      // outage produced one line at boot and then looked exactly like health, which
+      // is how this stayed invisible during the 2026-08-21 investigation.
+      if (!this.warned || now - this.lastWarnedAt > 60_000) {
         this.warned = true;
-        // console.error, not devLog: losing the shared counter is something an
-        // operator needs to see, and devLog is a no-op in production.
+        this.lastWarnedAt = now;
         console.error(
-          '⚠️  Rate limiting fell back to per-process counters — Redis is not answering:',
+          '⚠️  Rate limiting is using per-process counters — Redis is not answering:',
           error instanceof Error ? error.message : error
         );
       }
@@ -252,8 +259,26 @@ export function getRateLimitStore(): RateLimitStore {
   // reporting a fact.
   client
     .ping()
-    .then(() => {
-      console.log(`🪣 Rate limiting: Redis OK at ${safeUrl} — counters shared across instances`);
+    .then(async () => {
+      // PING only proves the socket works. Run the real counter path once, through
+      // the same store the middleware uses, and print what came back. Every instance
+      // increments the same key at boot, so on a healthy shared setup the replicas
+      // report 1, 2, 3… — and a report of 1 from every instance is proof they are NOT
+      // sharing, which is the exact question a PING cannot answer.
+      try {
+        const probe = await new RedisRateLimitStore(client).hit('__boot_probe__', 60_000);
+        console.log(
+          `🪣 Rate limiting: Redis OK at ${safeUrl} — shared-counter probe returned ` +
+            `${probe.count} (each instance booting in the same minute should see a ` +
+            'different number; every instance seeing 1 means they are not sharing)'
+        );
+      } catch (err) {
+        console.error(
+          `⚠️  Rate limiting: Redis at ${safeUrl} answered PING but the counter command ` +
+            'failed, so counters are per process:',
+          err instanceof Error ? err.message : err
+        );
+      }
     })
     .catch((err: unknown) => {
       console.error(
