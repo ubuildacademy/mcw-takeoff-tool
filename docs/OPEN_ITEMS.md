@@ -9,6 +9,26 @@ Each item says what is known, what was assumed in the meantime, and what would s
 
 ---
 
+## What is actually open — read this first
+
+Everything else in this file is closed, won't-fix, or a record of source-data defects in
+MCW's workbooks. Updated 2026-08-21.
+
+| # | Item | Waiting on | Shape |
+|---|---|---|---|
+| 16 | WORK ORDER / P.O. parity — the standing non-goal | Jeff | Needs a scoping pass before it is a task |
+| 25 | Five dependency majors left after the security pass | Jeff | Decisions, none urgent — none are reachable |
+| 26 | Supabase Auth hardening — leaked-password protection, MFA | Jeff | Dashboard clicks, no code |
+| 10, 12 | Waste-factor stacking; what the Material column should show | Jeff | Product questions, both blocked on assemblies being switched on |
+| 11, 21, 22 | Assembly-linked condition UI, defaults, bond | On hold | Parked 2026-08-20 until MCW confirms assemblies are wanted |
+| 1–5, 9 | Source-data defects in MCW's own workbooks | MCW | Errors in the Excel files, not in Meridian |
+
+Nothing here is blocking a release. Items 25 and 26 are the security pass's leftovers and
+are the only ones with a security dimension; both are recorded in full below rather than
+carried in anyone's head.
+
+---
+
 ### 16. Reconsidering the WORK ORDER / P.O. standing non-goal — needs Jeff, big if yes
 
 **Raised:** 2026-07-31, by Jeff, after testing the I7 budget export against a real assembly
@@ -685,15 +705,40 @@ risk class from anything above.
 
 **Recommended order, if these get picked up (Claude's read, 2026-08-21).**
 
-1. **`nodemailer` — settle what it is for before upgrading it.** `sendEmail` tries
-   Microsoft Graph first and only falls through to SMTP if no Graph config is present,
-   and Graph is what production uses. So nodemailer may be running no traffic at all. If
-   the SMTP fallback is wanted, take the 7 → 9 upgrade: we use a very small part of the
-   API (`createTransport` with host/port/auth/tls, then `sendMail`), so the blast radius
-   is small and the test is one email. If the fallback is *not* wanted, deleting it
-   clears the last server high for free, the way `sharp` did. Confirm which path is live
-   from the Railway startup log — `logEmailConfigStatus` prints
-   `📧 Email: Microsoft Graph (direct)` or the SMTP equivalent on boot.
+1. **`nodemailer` — likely delete it rather than upgrade it.** Jeff confirmed
+   (2026-08-21) that production sends over **Microsoft Graph**; SMTP was an early
+   attempt that was abandoned once Graph worked. `sendEmail` tries Graph first and
+   `return`s on its result, so it only reaches the SMTP branch when `getGraphConfig()`
+   comes back null — meaning nodemailer almost certainly carries no traffic at all.
+   Deleting the SMTP fallback and the dependency would clear the last server high for
+   free, exactly the way removing `sharp` did. That is a product call, not a mechanical
+   one: it drops a fallback that would otherwise cover a Graph outage. If the fallback
+   is wanted after all, take the 7 → 9 upgrade instead — we touch a very small part of
+   the API (`createTransport` with host/port/auth/tls, then `sendMail`), so the blast
+   radius is small and the test is one email.
+
+   **How to confirm which path is live.** Send any email from the app — an emailed
+   report is easiest — then read the Railway deploy logs for:
+
+   ```
+   ✅ Email sent via Microsoft Graph: <recipient>
+   ```
+
+   That line is a plain `console.log`, so it prints in production, and it is only
+   reachable from the Graph branch. Seeing it proves Graph handled the send and that the
+   SMTP path was never entered.
+
+   *Do not look for the startup banner.* `logEmailConfigStatus` prints
+   `📧 Email: Microsoft Graph (direct)` through `devLog`, which is a no-op whenever
+   `NODE_ENV === 'production'` — so the one line that states the configuration outright
+   is invisible in the only environment where the question matters. Worth fixing on its
+   own merits: it is the same argument that kept
+   `TitleblockExtractionService.checkAvailability` in item 23 — a diagnostic earns its
+   keep precisely when the thing it diagnoses is misbehaving. Changing that one call to
+   `console.log` is a one-line change and would make this question answerable from a
+   deploy log without sending anything. The SMTP and Edge branches log nothing on
+   success either, so a failed Graph send that silently fell through would currently be
+   hard to spot.
 2. **`jspdf` 3 → 4.** The only `critical` left, one major, and we use a narrow slice of
    the library. Worth doing purely to get the audit quiet, since the advisories
    themselves are unreachable here. Test by exporting a PDF report with a company logo

@@ -67,7 +67,7 @@ Round 1 shipped 2026-07 (see Recently shipped). Remaining ideas for later:
 
 | Item | Notes |
 |------|--------|
-| **Codebase-wide security hardening pass** | **Slices A–C done 2026-08-21** — see item 24 in `docs/OPEN_ITEMS.md`. Authorization audited clean across all 120 endpoints; one real defect found and fixed (the rate limiter bucketed on a client-supplied `X-Forwarded-For`, so the login limiter did nothing); dependency vulnerabilities cut 17 → 5 on the frontend and 11 → 3 on the server. `TRUST_PROXY_HOPS` settled at 1 (verified against the deployed bundle and the live API), so the default needs no change. Outstanding: six dependency majors (item 25 — none reachable in the app today; `sharp` is a dead dependency that can just be deleted) and the Supabase Auth items (item 26). |
+| **Codebase-wide security hardening pass** | **Slices A–C done 2026-08-21** — see item 24 in `docs/OPEN_ITEMS.md`. Authorization audited clean across all 120 endpoints; one real defect found and fixed (the rate limiter bucketed on a client-supplied `X-Forwarded-For`, so the login limiter did nothing); dependency vulnerabilities cut 17 → 5 on the frontend and 11 → 3 on the server. `TRUST_PROXY_HOPS` settled at 1 (verified against the deployed bundle and the live API), so the default needs no change. Outstanding and parked with Jeff: five dependency majors (item 25 — none reachable in the app today) and the Supabase Auth items (item 26). `sharp` was removed outright rather than upgraded, clearing two high libvips CVEs from a dependency nothing imported. |
 | **Supabase Auth hardening** | Item 26 in `docs/OPEN_ITEMS.md`. See `docs/SUPABASE_SECURITY_CHECKLIST.md` and `server/migrations/supabase_security_advisor_fixes.sql` (leaked-password protection, MFA, etc.). |
 
 ---
@@ -76,7 +76,8 @@ Round 1 shipped 2026-07 (see Recently shipped). Remaining ideas for later:
 
 | Item | Notes |
 |------|--------|
-| **Lower ESLint `--max-warnings`** | Reduce gradually in `package.json` as warnings are fixed. Measured 2026-08-20: frontend 70 against a cap of 500, server **0** against a cap of 150 — the server cap can drop to 0 now. |
+| **Lower ESLint `--max-warnings`** | Reduce gradually in `package.json` as warnings are fixed. Measured 2026-08-20 and unchanged 2026-08-21: frontend 70 against a cap of 500, server **0** against a cap of 150 — the server cap can drop to 0 now. |
+| **`logEmailConfigStatus` is silent in production** | It reports which email transport is configured through `devLog`, which is a no-op when `NODE_ENV === 'production'` — so the line that answers "is this sending over Graph or SMTP?" is invisible in the only environment where it matters. One-line fix to `console.log`. Detail under item 25 in `docs/OPEN_ITEMS.md`. |
 | **More production log gating** | Visual search / PDF conversion / PyMuPDF paths gated; email startup logs still verbose. |
 
 ---
