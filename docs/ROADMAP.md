@@ -67,8 +67,8 @@ Round 1 shipped 2026-07 (see Recently shipped). Remaining ideas for later:
 
 | Item | Notes |
 |------|--------|
-| **Codebase-wide security hardening pass** | **Slices A–C done 2026-08-21** — see item 24 in `docs/OPEN_ITEMS.md`. Authorization audited clean across all 120 endpoints; one real defect found and fixed (the rate limiter bucketed on a client-supplied `X-Forwarded-For`, so the login limiter did nothing); dependency vulnerabilities cut 17 → 5 on the frontend and 11 → 3 on the server. `TRUST_PROXY_HOPS` settled at 1 (verified against the deployed bundle and the live API), so the default needs no change. Outstanding: the four breaking dependency majors (jspdf is the one critical), and the Supabase dashboard items below. |
-| **Supabase Auth hardening** | See `docs/SUPABASE_SECURITY_CHECKLIST.md` and `server/migrations/supabase_security_advisor_fixes.sql` (leaked-password protection, MFA, etc.). |
+| **Codebase-wide security hardening pass** | **Slices A–C done 2026-08-21** — see item 24 in `docs/OPEN_ITEMS.md`. Authorization audited clean across all 120 endpoints; one real defect found and fixed (the rate limiter bucketed on a client-supplied `X-Forwarded-For`, so the login limiter did nothing); dependency vulnerabilities cut 17 → 5 on the frontend and 11 → 3 on the server. `TRUST_PROXY_HOPS` settled at 1 (verified against the deployed bundle and the live API), so the default needs no change. Outstanding: six dependency majors (item 25 — none reachable in the app today; `sharp` is a dead dependency that can just be deleted) and the Supabase Auth items (item 26). |
+| **Supabase Auth hardening** | Item 26 in `docs/OPEN_ITEMS.md`. See `docs/SUPABASE_SECURITY_CHECKLIST.md` and `server/migrations/supabase_security_advisor_fixes.sql` (leaked-password protection, MFA, etc.). |
 
 ---
 

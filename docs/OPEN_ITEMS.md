@@ -580,10 +580,9 @@ URL with no request input in it, so no SSRF.
 
 **Slice C — dependencies (`chore/security-slice-c-deps`).** Lockfiles only, no range
 changed. Frontend production vulnerabilities 17 → 5 (all nine highs gone), server 11 → 3.
-Left as breaking, for a separate decision: jspdf 3.x → 4.x, which is the one critical;
-exceljs, where npm's only offer is a *downgrade* to 3.4.0 and so is not a fix at all;
-react-router-dom 6 → 7; and the dev-only vite and vitest majors, which are build and
-test tooling rather than shipped code.
+Left as breaking, for a separate decision — now written up as **item 25**. The count
+in the first draft of this entry said "four"; it is six, because the server's three were
+folded into a footnote rather than counted.
 
 *Secrets are in good shape:* no `.env` tracked, `.gitignore` covers both the root and
 `server/`, and nothing logs a credential.
@@ -603,3 +602,89 @@ Vercel.
 
 **Slice D — Supabase dashboard, still open, Jeff's to do.** Leaked-password protection
 and MFA, per `docs/SUPABASE_SECURITY_CHECKLIST.md`. Dashboard-only, no code.
+
+
+### 25. Six dependency majors left over from item 24 — Jeff to decide, none urgent
+
+**Raised:** 2026-08-21, out of item 24 slice C. `npm audit fix` cleared everything that
+fitted inside the version ranges already in `package.json` (17 → 5 frontend, 11 → 3
+server). What is left needs a deliberate major-version jump, which can break our own
+code, so each is a decision rather than a command to run.
+
+**Reachability was checked for all six, and none of them are exploitable in this app
+today.** That is the headline: this is hygiene, not a fire. Recorded per package so the
+reasoning does not have to be redone.
+
+| Package | Sev | Used for | Reachable? |
+|---|---|---|---|
+| `sharp` 0.34 → 0.35 (server) | high | nothing — **no importer left** | No. Dead dependency |
+| `nodemailer` 7 → 9 (server) | high | outbound email over SMTP | No |
+| `jspdf` 3 → 4 (frontend) | **critical** | PDF report export | No |
+| `react-router-dom` 6 → 7 (frontend) | moderate | page routing | Unassessed |
+| `exceljs` (frontend) | moderate | every Excel export | No — and the "fix" is bogus |
+| `uuid` 9 → 14 (server) | moderate | generating ids | No |
+
+**`sharp` — do this one, it needs no decision.** Two high-severity libvips CVEs, and
+nothing imports it. `server/src` has no reference at all; the only hits are in
+`server/dist`, which is untracked local build output dated Nov 2025 from three source
+files that no longer exist (`utils/pdfToImage.ts`, `services/cvTitleBlockService.ts`,
+`services/qwenVisionService.ts`). `npm ls sharp` shows it as a top-level dependency with
+nothing depending on it. Deleting the line from `server/package.json` clears both highs
+with no upgrade and no code change. The only thing to confirm is that Railway's build
+does not want it for a native step.
+
+**`nodemailer` — safe to defer.** The two high advisories are SMTP command injection via
+an `envelope.size` parameter and CRLF injection via a transport `name` option. We set
+neither: `getTransporter` in `emailService.ts` builds a transport from `SMTP_HOST` /
+`SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` env vars and passes no `name` and no
+`envelope`. Nothing user-controlled reaches either sink.
+
+**`jspdf` — the scary-looking one, and the least urgent.** It carries ten advisories and
+the only `critical` in the tree, but they cluster on features we do not use: PDF
+injection through `AcroForm` and `addJS` (no occurrence of either in `src/`), a Local
+File Inclusion that applies to server-side jsPDF (ours runs in the browser), and DoS via
+malformed BMP and GIF dimensions (our single `addImage` call passes a PNG company logo
+supplied by a company admin, not by an arbitrary user). Worth taking eventually so the
+audit goes quiet; not worth an emergency.
+
+**`exceljs` — recommend doing nothing.** npm's only offer is a *downgrade*, 4.4.0 →
+3.4.0, because 3.4.0 predates the transitive `uuid` that got flagged. That is not a fix,
+it is npm finding an older tree without the flagged package, and it would drag every
+Excel export back three majors. The underlying `uuid` advisory is a missing bounds check
+in v3/v5/v6 when a `buf` argument is passed; exceljs does not pass one. Wait for exceljs
+to bump its own dependency.
+
+**`uuid` on the server — same advisory, same reasoning.** We call v4 without `buf`.
+
+**`react-router-dom` 6 → 7 — the only one needing real work.** A routing major touches
+every route in the app, and unlike the others I have not assessed the advisory or the
+migration. If any of these turns into a project, it is this one.
+
+**Also outstanding, dev-only and deliberately excluded from the table:** `vite` (high)
+and `vitest` (critical) both want majors. These are the build tool and the test runner —
+they never ship to a user and only run on our machines and in CI. Real, but a different
+risk class from anything above.
+
+**How to re-check any of this:** `npm audit --omit=dev` in the repo root for what ships
+to browsers, and in `server/` for what runs the API. Dropping `--omit=dev` folds in the
+build and test tooling, which is what makes the raw totals look worse than they are.
+
+---
+
+### 26. Supabase Auth hardening — dashboard only, needs Jeff's login
+
+**Raised:** carried out of item 24 as slice D, which was always Jeff's to do rather than
+mine — these are Supabase Dashboard settings with no code behind them. Full steps are in
+`docs/SUPABASE_SECURITY_CHECKLIST.md`.
+
+- **Leaked-password protection** — Authentication → Providers → Email. Rejects passwords
+  that appear in known breach corpora.
+- **MFA** — enable at least TOTP.
+
+The checklist notes both depend on the email/SMTP setup being in place. That is no longer
+a blocker: Jeff confirmed on 2026-08-21 that an emailed report sends from production.
+
+The same checklist's third item — running
+`server/migrations/supabase_security_advisor_fixes.sql` for function `search_path` and
+RLS on `ocr_training_data` — should be confirmed as already applied while in there, since
+nothing in the repo records whether it was run.
