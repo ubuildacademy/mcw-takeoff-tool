@@ -711,11 +711,27 @@ risk class from anything above.
    `return`s on its result, so it only reaches the SMTP branch when `getGraphConfig()`
    comes back null — meaning nodemailer almost certainly carries no traffic at all.
    Deleting the SMTP fallback and the dependency would clear the last server high for
-   free, exactly the way removing `sharp` did. That is a product call, not a mechanical
-   one: it drops a fallback that would otherwise cover a Graph outage. If the fallback
-   is wanted after all, take the 7 → 9 upgrade instead — we touch a very small part of
-   the API (`createTransport` with host/port/auth/tls, then `sendMail`), so the blast
-   radius is small and the test is one email.
+   free, exactly the way removing `sharp` did.
+
+   **The fallback argument does not survive contact with the repo.** Jeff's recollection
+   was that SMTP "was never fully connected", and the repo corroborates it:
+   `server/README.md` documents email setup as Microsoft Graph only — its env template
+   lists `GRAPH_CLIENT_ID`, `GRAPH_TENANT_ID`, `GRAPH_CLIENT_SECRET`,
+   `GRAPH_SENDER_EMAIL` and `CONTACT_EMAIL`, and **no `SMTP_*` variable appears there or
+   in `.env.example`**. Git history matches: `ebb7a2d5` shipped Graph *with* docs and
+   Railway config, while the SMTP branch predates it and never got either. Anyone
+   following this project's own setup instructions would never configure SMTP, so
+   `getTransporter()` returns null and the branch is unreachable.
+
+   So this is not a live fallback being traded away — it is untested code that would
+   fail at the moment it was finally needed, carrying the last high-severity advisory on
+   the server. **Recommendation firmed up 2026-08-21: delete the SMTP branch and the
+   nodemailer dependency.** Server production vulnerabilities would go 2 → 1, and the
+   remaining one is the unreachable `uuid` moderate.
+
+   If a real fallback is wanted later, the honest version is a second configured
+   transport that gets exercised, not a dormant branch — and that is a feature to design,
+   not a dependency to keep alive.
 
    **How to confirm which path is live.** Send any email from the app — an emailed
    report is easiest — then read the Railway deploy logs for:
