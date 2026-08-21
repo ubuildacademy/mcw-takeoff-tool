@@ -899,6 +899,40 @@ good one — the same defect this session had already flagged in `logEmailConfig
 reproduced here within the hour. The degraded branch now warns in production, and the
 first Redis connection failure warns once too.
 
+**What the log actually said, once it could be read.** `REDIS_URL` was set all along —
+the guess above about a missing variable reference was wrong. Both lines appeared
+together:
+
+```
+🪣 Rate limiting: Redis at redis://***@redis.railway.internal:6379 (counters shared…)
+⚠️  Rate limiting fell back to per-process counters — Redis is not answering:
+    Stream isn't writeable and enableOfflineQueue options is false
+```
+
+The cause was an option chosen on this side. `enableOfflineQueue: false` reads like the
+careful setting for a limiter — never queue commands behind a dead Redis — but it also
+rejects every command issued between `connect()` and `'ready'`, which is precisely the
+window the server boots into, and doubly so once the store was made to initialise at
+boot. Reproduced in one script against a healthy local Redis, so it was never a Railway
+problem at all.
+
+`commandTimeout` is the control that actually expresses the intent: a command waits out
+a normal handshake, and an unreachable Redis rejects quickly and falls through to
+memory. With the offline queue back on, the first requests after boot count through
+Redis (`1 2`) instead of landing in per-process memory.
+
+A dead Redis then cost every request its full 500 ms timeout before falling back, which
+turns a degraded counter into latency across the whole API, so `FallbackRateLimitStore`
+gained a five-second cooldown: one request pays the timeout, the rest go straight to
+memory, and a single probe re-tests afterwards. Measured 205 ms, then 0 ms, then 0 ms.
+Recovery logs a line too, so the shared counter coming back is visible rather than
+inferred.
+
+**The lesson worth keeping:** all three of these bugs — the `devLog` on the degraded
+branch, the lazy initialisation of a diagnostic, and `enableOfflineQueue: false` — were
+the *cautious-looking* choice failing in the case it was meant to protect. Fail-fast
+options need testing against the healthy path, not only the broken one.
+
 **How to re-check the instance count** without any dashboard access: send a handful of
 requests to `/api/help/faq` and watch `x-ratelimit-remaining`. One descending sequence
 means one instance; interleaved sequences mean that many.

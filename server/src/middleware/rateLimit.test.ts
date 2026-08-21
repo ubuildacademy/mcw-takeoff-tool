@@ -188,6 +188,37 @@ describe('FallbackRateLimitStore', () => {
     expect((await store.hit('k', 60_000)).count).toBe(2);
   });
 
+  it('stops retrying a failed primary for a cooldown, then probes it again', async () => {
+    // Without the cooldown every request during a Redis outage waits out its own
+    // commandTimeout before falling back, turning a degraded counter into latency
+    // across the whole API.
+    let primaryCalls = 0;
+    let healthy = false;
+    const flaky: RateLimitStore = {
+      hit: async (key, windowMs) => {
+        primaryCalls += 1;
+        if (!healthy) throw new Error('ECONNREFUSED');
+        return { count: 99, resetTime: Date.now() + windowMs };
+      },
+    };
+    const store = new FallbackRateLimitStore(flaky, memoryStore(), 30);
+
+    await store.hit('k', 60_000);
+    expect(primaryCalls).toBe(1);
+
+    // Inside the cooldown the primary is not touched at all.
+    await store.hit('k', 60_000);
+    await store.hit('k', 60_000);
+    expect(primaryCalls).toBe(1);
+
+    // Once it lapses, one request probes the primary again and finds it back.
+    healthy = true;
+    await new Promise((r) => setTimeout(r, 40));
+    const recovered = await store.hit('k', 60_000);
+    expect(primaryCalls).toBe(2);
+    expect(recovered.count).toBe(99);
+  });
+
   it('prefers the primary while it is healthy', async () => {
     const backup = memoryStore();
     const store = new FallbackRateLimitStore(new RedisRateLimitStore(

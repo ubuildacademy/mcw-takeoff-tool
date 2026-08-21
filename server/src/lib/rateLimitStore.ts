@@ -130,16 +130,36 @@ export class RedisRateLimitStore implements RateLimitStore {
  */
 export class FallbackRateLimitStore implements RateLimitStore {
   private warned = false;
+  /** While set and in the future, skip the primary entirely. */
+  private skipPrimaryUntil = 0;
 
+  /**
+   * @param cooldownMs How long to stop trying the primary after it fails. Without
+   *   this, every request during a Redis outage waits out its own `commandTimeout`
+   *   before falling back — turning a degraded counter into latency on the whole API.
+   *   One request pays the timeout, the rest go straight to memory until the cooldown
+   *   lapses and one probe re-tests the connection.
+   */
   constructor(
     private primary: RateLimitStore,
-    private backup: RateLimitStore
+    private backup: RateLimitStore,
+    private cooldownMs = 5000
   ) {}
 
   async hit(key: string, windowMs: number): Promise<RateLimitHit> {
+    if (Date.now() < this.skipPrimaryUntil) {
+      return this.backup.hit(key, windowMs);
+    }
+
     try {
-      return await this.primary.hit(key, windowMs);
+      const result = await this.primary.hit(key, windowMs);
+      if (this.warned) {
+        this.warned = false;
+        console.log('🪣 Rate limiting: Redis is answering again, counters are shared once more.');
+      }
+      return result;
     } catch (error) {
+      this.skipPrimaryUntil = Date.now() + this.cooldownMs;
       if (!this.warned) {
         this.warned = true;
         // console.error, not devLog: losing the shared counter is something an
@@ -190,11 +210,21 @@ export function getRateLimitStore(): RateLimitStore {
   }
 
   const client = new Redis(url, {
-    // A limiter must not queue requests behind a dead Redis; fail fast to the
-    // memory fallback instead of holding the request open.
+    // The offline queue stays ON. Turning it off looks like the careful choice for a
+    // limiter — never queue behind a dead Redis — but it also rejects every command
+    // issued between connect() and 'ready', which is exactly the window the server
+    // boots into. In production that surfaced as
+    // "Stream isn't writeable and enableOfflineQueue options is false" against a
+    // perfectly healthy Redis, dropping the first requests of every deploy onto the
+    // per-process fallback.
+    //
+    // `commandTimeout` is the right control instead: a command waits out a normal
+    // handshake but a genuinely unreachable Redis rejects quickly and we fall back,
+    // so no request is ever held open waiting for a counter.
+    enableOfflineQueue: true,
+    commandTimeout: 500,
     maxRetriesPerRequest: 1,
-    enableOfflineQueue: false,
-    connectTimeout: 2000,
+    connectTimeout: 5000,
     retryStrategy: (times) => Math.min(times * 200, 5000),
   });
 
