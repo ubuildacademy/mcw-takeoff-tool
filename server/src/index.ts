@@ -44,6 +44,26 @@ import { standardRateLimit, strictRateLimit } from './middleware';
 const app = express();
 const PORT = parseInt(process.env.PORT || '4000', 10);
 
+/**
+ * How many reverse proxies sit in front of this process.
+ *
+ * Express uses this to derive `req.ip`: it walks `X-Forwarded-For` right-to-left
+ * and skips exactly this many hops, so the value it lands on is one a client
+ * cannot forge. The rate limiter buckets on `req.ip`, so this number is what
+ * makes the login limiter real rather than decorative.
+ *
+ * Default 1 = the Railway edge, which is the chain when the browser calls the
+ * Railway host directly (VITE_API_BASE_URL set in Vercel). If instead the app is
+ * reached through the `/api/:path*` rewrite in vercel.json, Vercel is a second
+ * proxy and this must be 2.
+ *
+ * Getting it too HIGH re-opens the spoof; too LOW buckets every user behind the
+ * proxy's own IP, so one noisy client rate-limits everyone. Verify against
+ * production rather than assuming — see docs/DEPLOY_CHECKLIST.md.
+ */
+const TRUST_PROXY_HOPS = parseInt(process.env.TRUST_PROXY_HOPS || '1', 10);
+app.set('trust proxy', Number.isFinite(TRUST_PROXY_HOPS) ? TRUST_PROXY_HOPS : 1);
+
 // CORS configuration - define before middleware
 const isProduction = process.env.NODE_ENV === 'production';
 

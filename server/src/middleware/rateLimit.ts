@@ -73,19 +73,23 @@ export function rateLimit(options: RateLimitOptions = {}) {
 }
 
 /**
- * Default key generator - uses IP address and user ID if available
+ * Default key generator - buckets by client IP.
+ *
+ * The IP comes from `req.ip`, which Express derives by walking `X-Forwarded-For`
+ * right-to-left past exactly the number of hops named by the app's `trust proxy`
+ * setting (see `TRUST_PROXY_HOPS` in index.ts). It must NOT be read from the
+ * header directly: `X-Forwarded-For` is client-supplied, so taking its first
+ * entry — as this did until 2026-08-21 — let any caller mint a fresh bucket per
+ * request by rotating the header, which disabled `strictRateLimit` on the login
+ * and signup routes entirely.
+ *
+ * There is deliberately no user id in the key. Every limiter is mounted before
+ * the routes that call `requireAuth`, so `req.user` is always undefined here;
+ * including it only ever appended a constant. The endpoints that most need a
+ * limit are the unauthenticated ones, where IP is all there is.
  */
 function defaultKeyGenerator(req: Request): string {
-  // Try to get real IP behind proxies
-  const forwarded = req.headers['x-forwarded-for'];
-  const ip = forwarded 
-    ? (Array.isArray(forwarded) ? forwarded[0] : forwarded.split(',')[0])
-    : req.ip || req.socket.remoteAddress || 'unknown';
-  
-  // Include user ID if authenticated for per-user limits
-  const userId = req.user?.id || 'anonymous';
-  
-  return `${ip}:${userId}`;
+  return req.ip || req.socket.remoteAddress || 'unknown';
 }
 
 /**

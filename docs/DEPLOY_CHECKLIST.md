@@ -45,6 +45,27 @@ If you remove or rename an **export** (e.g. `SelectionBox` from `PDFViewer.types
 
 - **Install command:** Keep `NODE_ENV=development npm install` in `vercel.json`. Changing it to `npm ci` or changing Node version (e.g. `engines` / `.nvmrc`) has broken deploys in the past. See `docs/VERCEL_DEPLOYMENT.md`.
 
+## 6. `TRUST_PROXY_HOPS` must match the real proxy chain
+
+The API sets Express's `trust proxy` from `TRUST_PROXY_HOPS` (default `1`). Express
+walks `X-Forwarded-For` right-to-left, skips that many hops, and the address it lands
+on becomes `req.ip` — which is the rate limiter's bucket key. So this number decides
+whether the login limiter works.
+
+- **1** — the browser calls Railway directly, i.e. `VITE_API_BASE_URL` is set in Vercel
+  to the Railway host. Railway's edge is the only proxy.
+- **2** — the browser calls `/api/...` on the Vercel domain and the `rewrites` rule in
+  `vercel.json` proxies to Railway. Vercel is a second proxy.
+
+Set it **too high** and a client can forge the address the limiter counts, which is the
+bug this replaced. Set it **too low** and every request appears to come from the proxy's
+own IP, so one busy client exhausts the limit for everyone.
+
+To check which applies, hit any API route in production and look at the request's
+`X-Forwarded-For`: the hop count is the number of addresses appended *after* the
+client's own. Confirm it after any change to `vercel.json`'s rewrites or to
+`VITE_API_BASE_URL`.
+
 ---
 
 **Summary:** Rely on the pre-push hook so typecheck, build, lint, and test run before every push. Commit new imported files, and don’t remove exports that are still used. That keeps CI, Vercel, and Railway from failing on bad commits.
