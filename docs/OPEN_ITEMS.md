@@ -19,6 +19,7 @@ MCW's workbooks. Updated 2026-08-21.
 | 16 | WORK ORDER / P.O. parity — the standing non-goal | Jeff | Needs a scoping pass before it is a task |
 | 25 | Five dependency majors left after the security pass | Jeff | Decisions, none urgent — none are reachable |
 | 26 | Supabase Auth hardening — leaked-password protection, MFA | Jeff | Dashboard clicks, no code |
+| 27 | Rate limits are per-process, and production runs two instances | Nobody yet | Small task — move the store to the Redis already running |
 | 10, 12 | Waste-factor stacking; what the Material column should show | Jeff | Product questions, both blocked on assemblies being switched on |
 | 11, 21, 22 | Assembly-linked condition UI, defaults, bond | On hold | Parked 2026-08-20 until MCW confirms assemblies are wanted |
 | 1–5, 9 | Source-data defects in MCW's own workbooks | MCW | Errors in the Excel files, not in Meridian |
@@ -811,3 +812,45 @@ The same checklist's third item — running
 `server/migrations/supabase_security_advisor_fixes.sql` for function `search_path` and
 RLS on `ocr_training_data` — should be confirmed as already applied while in there, since
 nothing in the repo records whether it was run.
+
+
+### 27. The rate-limit store is per-process, and production runs two instances
+
+**Found 2026-08-21**, verifying that item 24's rate-limit fix had actually deployed.
+Twelve requests to the public `/api/help/faq`, each carrying a different forged
+`X-Forwarded-For`, came back with two interleaved counters rather than one:
+
+```
+instance A:  299 298 297 296 295 294 293 292
+instance B:  299 298 297 296
+```
+
+The fix itself is confirmed working — the counter decrements despite a rotating header,
+so a client can no longer mint a fresh bucket per request. What the test also showed is
+that Railway is load-balancing across **two** instances, and `rateLimitStore` in
+`server/src/middleware/rateLimit.ts` is a plain in-memory `Map` scoped to one process.
+
+**So every configured limit is effectively multiplied by the instance count**, and which
+bucket a request lands in is luck. `strictRateLimit` says 10 login attempts per 15
+minutes; against two instances an attacker gets about 20, and that number grows with
+every instance added. Item 24 closed the hole that made the login limiter worthless. This
+one caps how much the limiter is worth, which is a smaller problem, but it means the
+configured numbers do not mean what they say.
+
+The file already knows: *"For production, consider using Redis for distributed rate
+limiting."*
+
+**Why this is a small task rather than a project:** Redis is already running in the same
+Railway project and already wired up. `server/src/services/queueService.ts` connects with
+`ioredis` on `process.env.REDIS_URL`, so the connection, the dependency and the
+infrastructure all exist. The work is swapping the `Map` for an atomic Redis
+`INCR` + `EXPIRE` against the same key the generator already produces, keeping the
+in-memory path as the fallback for local development where `REDIS_URL` is absent.
+
+**Worth doing before, not after, the Supabase Auth work in item 26** — leaked-password
+protection and MFA both harden the same login surface this limiter is supposed to be
+protecting.
+
+**How to re-check the instance count** without any dashboard access: send a handful of
+requests to `/api/help/faq` and watch `x-ratelimit-remaining`. One descending sequence
+means one instance; interleaved sequences mean that many.
