@@ -683,6 +683,33 @@ and `vitest` (critical) both want majors. These are the build tool and the test 
 they never ship to a user and only run on our machines and in CI. Real, but a different
 risk class from anything above.
 
+**Recommended order, if these get picked up (Claude's read, 2026-08-21).**
+
+1. **`nodemailer` — settle what it is for before upgrading it.** `sendEmail` tries
+   Microsoft Graph first and only falls through to SMTP if no Graph config is present,
+   and Graph is what production uses. So nodemailer may be running no traffic at all. If
+   the SMTP fallback is wanted, take the 7 → 9 upgrade: we use a very small part of the
+   API (`createTransport` with host/port/auth/tls, then `sendMail`), so the blast radius
+   is small and the test is one email. If the fallback is *not* wanted, deleting it
+   clears the last server high for free, the way `sharp` did. Confirm which path is live
+   from the Railway startup log — `logEmailConfigStatus` prints
+   `📧 Email: Microsoft Graph (direct)` or the SMTP equivalent on boot.
+2. **`jspdf` 3 → 4.** The only `critical` left, one major, and we use a narrow slice of
+   the library. Worth doing purely to get the audit quiet, since the advisories
+   themselves are unreachable here. Test by exporting a PDF report with a company logo
+   and checking it renders.
+3. **`vite` / `vitest` majors (dev-only).** Never shipped to a user, and CI proves them
+   the moment they are wrong — the risk is a broken build, not a breached app. Do them
+   when there is appetite, not on a security schedule.
+4. **`exceljs` + both `uuid` advisories — recommend closing as won't-fix rather than
+   leaving them open.** The advisory needs a `buf` argument that neither we nor exceljs
+   pass, and npm's only offer is a downgrade. If the noise in `npm audit` is the actual
+   annoyance, an `overrides` entry pinning a patched `uuid` silences it honestly, which
+   is better than carrying three permanently-open moderates that describe nothing.
+5. **`react-router-dom` 6 → 7 — defer deliberately.** A routing major touches every
+   route in the app and v7 is a large change, for a moderate advisory. Fold it into
+   routing work whenever that next happens rather than doing it for its own sake.
+
 **How to re-check any of this:** `npm audit --omit=dev` in the repo root for what ships
 to browsers, and in `server/` for what runs the API. Dropping `--omit=dev` folds in the
 build and test tooling, which is what makes the raw totals look worse than they are.
