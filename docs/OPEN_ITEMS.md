@@ -624,7 +624,7 @@ Vercel.
 and MFA, per `docs/SUPABASE_SECURITY_CHECKLIST.md`. Dashboard-only, no code.
 
 
-### 25. Dependency majors left over from item 24 — one done, five to decide, none urgent
+### 25. Dependency majors left over from item 24 — two done, four to decide, none urgent
 
 **Raised:** 2026-08-21, out of item 24 slice C. `npm audit fix` cleared everything that
 fitted inside the version ranges already in `package.json` (17 → 5 frontend, 11 → 3
@@ -638,7 +638,7 @@ reasoning does not have to be redone.
 | Package | Sev | Used for | Reachable? |
 |---|---|---|---|
 | ~~`sharp`~~ (server) | high | nothing | **DONE 2026-08-21 — removed, not upgraded** |
-| `nodemailer` 7 → 9 (server) | high | outbound email over SMTP | No |
+| ~~`nodemailer`~~ (server) | high | an SMTP path never configured | **DONE 2026-08-21 — removed with the SMTP branch** |
 | `jspdf` 3 → 4 (frontend) | **critical** | PDF report export | No |
 | `react-router-dom` 6 → 7 (frontend) | moderate | page routing | Unassessed |
 | `exceljs` (frontend) | moderate | every Excel export | No — and the "fix" is bogus |
@@ -705,7 +705,14 @@ risk class from anything above.
 
 **Recommended order, if these get picked up (Claude's read, 2026-08-21).**
 
-1. **`nodemailer` — likely delete it rather than upgrade it.** Jeff confirmed
+1. ~~**`nodemailer`**~~ — **DONE 2026-08-21.** Removed along with the whole direct-SMTP
+   branch. **The server is now at 1 production vulnerability, the unreachable `uuid`
+   moderate: no highs, no criticals.** `emailService.ts` went 392 → 337 lines and the
+   server from 16 runtime dependencies to 14 (`@types/nodemailer` went too). What
+   follows is the reasoning that led there, kept because it is the argument, not just
+   the outcome.
+
+   **`nodemailer` — likely delete it rather than upgrade it.** Jeff confirmed
    (2026-08-21) that production sends over **Microsoft Graph**; SMTP was an early
    attempt that was abandoned once Graph worked. `sendEmail` tries Graph first and
    `return`s on its result, so it only reaches the SMTP branch when `getGraphConfig()`
@@ -732,6 +739,16 @@ risk class from anything above.
    If a real fallback is wanted later, the honest version is a second configured
    transport that gets exercised, not a dormant branch — and that is a feature to design,
    not a dependency to keep alive.
+
+   **What changed behaviourally.** `sendEmail` still tries Microsoft Graph first and then
+   the Supabase Edge Function. What used to happen after both declined was a silent
+   attempt at an unconfigured SMTP transport, which returned `false` without saying
+   anything; it now returns `false` after a `console.error` naming the variables to set.
+   That is deliberately `console.error` and not `devLog` — a misconfigured mailer is
+   exactly the thing an operator needs to see in production, which is the same gap the
+   `logEmailConfigStatus` row in ROADMAP still describes. Note the Edge Function's own
+   `send-email-smtp` variant is untouched: that is SMTP performed by Supabase, not by
+   this process.
 
    **How to confirm which path is live.** Send any email from the app — an emailed
    report is easiest — then read the Railway deploy logs for:

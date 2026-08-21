@@ -1,7 +1,12 @@
-// Email service for sending invitations and transactional emails
-// Supports: (1) Supabase Edge Function SMTP, (2) Direct SMTP via nodemailer
+// Email service for sending invitations and transactional emails.
+//
+// Two transports, tried in this order: (1) Microsoft Graph directly, which is what
+// production uses, and (2) a Supabase Edge Function. A third path — direct SMTP via
+// nodemailer — was removed 2026-08-21: it was never configured in any environment (no
+// SMTP_* variable appears in server/README.md or .env.example, so following this
+// project's own setup instructions could not switch it on), and it carried the last
+// high-severity advisory on the server. See item 25 in docs/OPEN_ITEMS.md.
 
-import nodemailer from 'nodemailer';
 import { devLog } from '../lib/devLog';
 
 interface InvitationEmailData {
@@ -100,37 +105,16 @@ async function sendViaGraph(config: { clientId: string; tenantId: string; client
   return true;
 }
 
-/** Create nodemailer transport for direct SMTP (used when not using Edge Function). */
-const getTransporter = () => {
-  const smtpHost = process.env.SMTP_HOST;
-  const smtpPort = process.env.SMTP_PORT;
-  const smtpUser = process.env.SMTP_USER;
-  const smtpPassword = process.env.SMTP_PASSWORD;
-
-  if (!smtpHost || !smtpUser || !smtpPassword) return null;
-
-  return nodemailer.createTransport({
-    host: smtpHost,
-    port: parseInt(smtpPort || '587'),
-    secure: smtpPort === '465',
-    auth: { user: smtpUser, pass: smtpPassword },
-    tls: { rejectUnauthorized: process.env.SMTP_REJECT_UNAUTHORIZED !== 'false' },
-  });
-};
-
 /** Log which email method is configured at startup (call from server index). */
 export function logEmailConfigStatus(): void {
   const graph = getGraphConfig();
   const edge = getEdgeFunctionConfig();
   const useEdge = process.env.USE_SUPABASE_EDGE_EMAIL === 'true' && edge;
-  const smtp = getTransporter();
 
   if (graph) {
     devLog('📧 Email: Microsoft Graph (direct) – sender:', process.env.GRAPH_SENDER_EMAIL);
   } else if (useEdge) {
     devLog('📧 Email: Supabase Edge Function –', process.env.USE_GRAPH_EMAIL === 'true' ? 'Graph' : 'SMTP');
-  } else if (smtp) {
-    devLog('📧 Email: Direct SMTP –', process.env.SMTP_HOST);
   } else {
     devLog('📧 Email: Not configured – invitations will not be sent');
     devLog('   Graph vars present:', {
@@ -164,11 +148,10 @@ const logInvitationFallback = (data: InvitationEmailData) => {
   devLog('⚠️  Configure either:');
   devLog('   (A) Direct Graph: GRAPH_CLIENT_ID, GRAPH_TENANT_ID, GRAPH_CLIENT_SECRET, GRAPH_SENDER_EMAIL in server .env');
   devLog('   (B) Edge Function: deploy send-email-graph, set secrets, USE_SUPABASE_EDGE_EMAIL=true, USE_GRAPH_EMAIL=true');
-  devLog('   (C) Direct SMTP: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD');
 };
 
 export const emailService = {
-  /** Send email via Direct Graph, Edge Function, or direct SMTP. Returns true if sent successfully. */
+  /** Send email via Microsoft Graph, falling back to the Edge Function. True if sent. */
   async sendEmail(options: {
     to: string | string[];
     subject: string;
@@ -226,44 +209,22 @@ export const emailService = {
       }
     }
 
-    const transporter = getTransporter();
-    if (!transporter) return false;
-
-    const smtpFrom =
-      process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@meridiantakeoff.com';
-
-    const mailOptions: Record<string, unknown> = {
-      from: `"Meridian Takeoff" <${smtpFrom}>`,
-      to: Array.isArray(options.to) ? options.to.join(', ') : options.to,
-      subject: options.subject,
-      text: options.text,
-      html: options.html,
-    };
-    if (options.attachments?.length) {
-      mailOptions.attachments = options.attachments.map((a) => ({
-        filename: a.filename,
-        content: a.content,
-        contentType: a.contentType,
-      }));
-    }
-    try {
-      await transporter.sendMail(mailOptions);
-      return true;
-    } catch (e) {
-      console.error('❌ Direct SMTP send failed:', e);
-      return false;
-    }
+    // No transport configured. console.error rather than devLog: this is the one
+    // outcome an operator needs to see, and devLog is a no-op in production.
+    console.error(
+      '❌ Email not sent — no transport configured. Set the GRAPH_* variables, or enable the Edge Function with USE_SUPABASE_EDGE_EMAIL=true.'
+    );
+    return false;
   },
 
   async sendInvitation(data: InvitationEmailData): Promise<boolean> {
     try {
       const graphConfig = getGraphConfig();
       const edgeConfig = getEdgeFunctionConfig();
-      const transporter = getTransporter();
       const useEdge =
         process.env.USE_SUPABASE_EDGE_EMAIL === 'true' && edgeConfig;
 
-      if (!graphConfig && !useEdge && !transporter) {
+      if (!graphConfig && !useEdge) {
         logInvitationFallback(data);
         return false;
       }
@@ -305,27 +266,11 @@ Invited by: ${data.invitedBy}
         return ok;
       }
 
-      if (!transporter) {
-        logInvitationFallback(data);
-        return false;
-      }
-
-      const smtpFrom =
-        process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@meridiantakeoff.com';
-
-      const info = await transporter.sendMail({
-        from: `"Meridian Takeoff" <${smtpFrom}>`,
-        to: data.email,
-        subject,
-        text: textContent,
-        html: htmlContent,
-      });
-
-      console.log('✅ Invitation email sent successfully:', {
-        to: data.email,
-        messageId: info.messageId,
-      });
-      return true;
+      // Unreachable: the guard above returns early unless one of the two transports
+      // is configured, and both are handled. Kept explicit so a future third transport
+      // cannot fall off the end of this function returning undefined.
+      logInvitationFallback(data);
+      return false;
     } catch (error) {
       console.error('❌ Error sending invitation email:', error);
       if (error instanceof Error) {
