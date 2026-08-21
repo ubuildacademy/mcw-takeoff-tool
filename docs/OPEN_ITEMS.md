@@ -19,7 +19,7 @@ MCW's workbooks. Updated 2026-08-21.
 | 16 | WORK ORDER / P.O. parity — the standing non-goal | Jeff | Needs a scoping pass before it is a task |
 | 25 | Five dependency majors left after the security pass | Jeff | Decisions, none urgent — none are reachable |
 | 26 | Supabase Auth hardening — leaked-password protection, MFA | Jeff | Dashboard clicks, no code |
-| 27 | Rate limits are per-process, and production runs two instances | Nobody yet | Small task — move the store to the Redis already running |
+| — | *(item 27, distributed rate limiting, was closed 2026-08-21)* | — | — |
 | 10, 12 | Waste-factor stacking; what the Material column should show | Jeff | Product questions, both blocked on assemblies being switched on |
 | 11, 21, 22 | Assembly-linked condition UI, defaults, bond | On hold | Parked 2026-08-20 until MCW confirms assemblies are wanted |
 | 1–5, 9 | Source-data defects in MCW's own workbooks | MCW | Errors in the Excel files, not in Meridian |
@@ -814,7 +814,7 @@ RLS on `ocr_training_data` — should be confirmed as already applied while in t
 nothing in the repo records whether it was run.
 
 
-### 27. The rate-limit store is per-process, and production runs two instances
+### 27. Rate limits were per-process while production ran two instances — DONE 2026-08-21
 
 **Found 2026-08-21**, verifying that item 24's rate-limit fix had actually deployed.
 Twelve requests to the public `/api/help/faq`, each carrying a different forged
@@ -850,6 +850,34 @@ in-memory path as the fallback for local development where `REDIS_URL` is absent
 **Worth doing before, not after, the Supabase Auth work in item 26** — leaked-password
 protection and MFA both harden the same login surface this limiter is supposed to be
 protecting.
+
+**Shipped 2026-08-21.** Counters moved to Redis in `server/src/lib/rateLimitStore.ts`,
+behind a `RateLimitStore` interface with three implementations: the Redis one, the
+in-memory one kept for local development, and a fallback that wraps them so a Redis
+outage degrades the limiter to per-process counting rather than taking the API down.
+The middleware keeps Express's synchronous signature and drives the now-async count in
+a floating promise, the same shape `requireAuth` uses.
+
+Two details that would have been bugs:
+
+- **The increment and the expiry have to be one atomic step.** Done as a Lua script:
+  between a separate `INCR` and `PEXPIRE`, another instance can observe the key with no
+  TTL, and a counter with no TTL never resets — one burst would lock a client out
+  permanently. The script also re-reads `PTTL` rather than assuming the full window, so
+  the `X-RateLimit-Reset` header is honest on every request after the first, and it
+  repairs a key it finds without an expiry.
+- **Keys are namespaced `rl:`**, because this Redis is the same one BullMQ uses for the
+  titleblock queue.
+
+Verified against a real Redis rather than only the test double: two separate clients
+standing in for two instances counted `1 2 3 4 5 6` against one budget, the reported
+window matched Redis's own `PTTL`, an expired window reset to 1, and a key planted
+without a TTL came back with both its count preserved and a fresh expiry. Nine tests in
+`rateLimit.test.ts` cover the middleware, the namespacing, the fallback, and — as a
+contrast that keeps the point legible — the old double-counting behaviour.
+
+No configuration needed: Railway already supplies `REDIS_URL` to this service for the
+queue. Without it, as on a dev machine, the limiter says so at startup and uses memory.
 
 **How to re-check the instance count** without any dashboard access: send a handful of
 requests to `/api/help/faq` and watch `x-ratelimit-remaining`. One descending sequence

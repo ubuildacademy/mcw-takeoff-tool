@@ -1,74 +1,64 @@
 import { Request, Response, NextFunction } from 'express';
-
-interface RateLimitEntry {
-  count: number;
-  resetTime: number;
-}
-
-// In-memory store for rate limiting
-// For production, consider using Redis for distributed rate limiting
-const rateLimitStore = new Map<string, RateLimitEntry>();
-
-// Clean up old entries periodically (every 5 minutes)
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, entry] of rateLimitStore.entries()) {
-    if (entry.resetTime < now) {
-      rateLimitStore.delete(key);
-    }
-  }
-}, 5 * 60 * 1000);
+import { getRateLimitStore, type RateLimitStore } from '../lib/rateLimitStore';
 
 interface RateLimitOptions {
   windowMs?: number;      // Time window in milliseconds
   maxRequests?: number;   // Max requests per window
   message?: string;       // Error message
   keyGenerator?: (req: Request) => string;  // Custom key generator
+  /** Tests only — inject a store instead of the shared one. */
+  store?: RateLimitStore;
 }
 
 /**
- * Creates a rate limiter middleware
+ * Creates a rate limiter middleware.
+ *
+ * Counting is asynchronous because the counters are shared through Redis (see
+ * `lib/rateLimitStore.ts`). The middleware keeps Express's synchronous signature and
+ * drives the work in a floating promise, the same shape `requireAuth` uses — the
+ * response is only ever produced inside that promise, so nothing races.
  */
 export function rateLimit(options: RateLimitOptions = {}) {
   const {
     windowMs = 60 * 1000,  // Default: 1 minute
     maxRequests = 100,      // Default: 100 requests per minute
     message = 'Too many requests, please try again later',
-    keyGenerator = defaultKeyGenerator
+    keyGenerator = defaultKeyGenerator,
+    store,
   } = options;
 
   return (req: Request, res: Response, next: NextFunction) => {
-    const key = keyGenerator(req);
-    const now = Date.now();
-    
-    let entry = rateLimitStore.get(key);
-    
-    if (!entry || entry.resetTime < now) {
-      // Create new entry or reset expired one
-      entry = {
-        count: 1,
-        resetTime: now + windowMs
-      };
-      rateLimitStore.set(key, entry);
-    } else {
-      // Increment existing entry
-      entry.count++;
-    }
-    
-    // Set rate limit headers
-    res.setHeader('X-RateLimit-Limit', maxRequests);
-    res.setHeader('X-RateLimit-Remaining', Math.max(0, maxRequests - entry.count));
-    res.setHeader('X-RateLimit-Reset', Math.ceil(entry.resetTime / 1000));
-    
-    if (entry.count > maxRequests) {
-      res.setHeader('Retry-After', Math.ceil((entry.resetTime - now) / 1000));
-      return res.status(429).json({ 
-        error: message,
-        retryAfter: Math.ceil((entry.resetTime - now) / 1000)
-      });
-    }
-    
-    next();
+    void (async () => {
+      const key = keyGenerator(req);
+
+      let entry;
+      try {
+        entry = await (store ?? getRateLimitStore()).hit(key, windowMs);
+      } catch (error) {
+        // The store already falls back to memory on a Redis fault, so reaching here
+        // means both paths failed. Let the request through rather than 500 it: a
+        // broken limiter should not be an outage.
+        console.error('Rate limit check failed, allowing request:', error);
+        return next();
+      }
+
+      const retryAfterSec = Math.max(0, Math.ceil((entry.resetTime - Date.now()) / 1000));
+
+      res.setHeader('X-RateLimit-Limit', maxRequests);
+      res.setHeader('X-RateLimit-Remaining', Math.max(0, maxRequests - entry.count));
+      res.setHeader('X-RateLimit-Reset', Math.ceil(entry.resetTime / 1000));
+
+      if (entry.count > maxRequests) {
+        res.setHeader('Retry-After', retryAfterSec);
+        res.status(429).json({
+          error: message,
+          retryAfter: retryAfterSec,
+        });
+        return;
+      }
+
+      next();
+    })();
   };
 }
 
